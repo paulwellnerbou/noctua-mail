@@ -129,10 +129,6 @@ export async function POST(request: Request) {
   if (uid) {
     const message = await syncImapMessage(account, draftsMailbox, uid);
     if (message) {
-      // Preserve existing draft id so the frontend keeps editing the same draft entry
-      if (payload.draftId) {
-        message.id = payload.draftId;
-      }
       await upsertMessages(account.id, null, [message], false);
       messageId = message.id;
     }

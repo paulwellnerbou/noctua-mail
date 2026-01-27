@@ -312,6 +312,10 @@ export default function MailClient() {
   const [discardingDraft, setDiscardingDraft] = useState(false);
   const draftSaveTimerRef = useRef<number | null>(null);
   const lastDraftHashRef = useRef<string>("");
+  const composeBaselineHashRef = useRef<string | null>(null);
+  const composeDirtyRef = useRef(false);
+  const composeEditorInitRef = useRef(false);
+  const composeLastEditedRef = useRef<"html" | "text">("html");
   const listIsNarrow = listWidth < 360;
   const [searchFieldsOpen, setSearchFieldsOpen] = useState(false);
   const [searchFields, setSearchFields] = useState({
@@ -371,6 +375,7 @@ export default function MailClient() {
         .join(",")}`,
     [activeAccountId, activeFolderId, groupBy, query, searchBadges, searchFields, searchScope]
   );
+  currentKeyRef.current = messagesKey;
 
   const accountFolders = useMemo(
     () => folders.filter((folder) => folder.accountId === activeAccountId),
@@ -727,6 +732,16 @@ export default function MailClient() {
 
   const threadsAllowed = ["date", "week", "year"].includes(groupBy) && !isDraftsFolder(activeFolderId);
   const supportsThreads = threadsEnabled && threadsAllowed;
+  const draftsFolder = useMemo(
+    () =>
+      folders.find(
+        (folder) => folder.accountId === activeAccountId && isDraftsFolder(folder.id)
+      ) ?? null,
+    [folders, activeAccountId]
+  );
+  const draftsCount = draftsFolder
+    ? draftsFolder.count ?? messageCountByFolder.get(draftsFolder.id) ?? 0
+    : 0;
 
   const extractEmails = (value: string) => {
     if (!value) return [];
@@ -856,15 +871,18 @@ export default function MailClient() {
     const attachments = await Promise.all(
       files.map((file) => createComposeAttachment(file, inline, dataUrlOverride))
     );
+    composeDirtyRef.current = true;
     setComposeAttachments((prev) => [...prev, ...attachments]);
   };
 
   const removeComposeAttachment = (attachmentId: string) => {
+    composeDirtyRef.current = true;
     setComposeAttachments((prev) => prev.filter((item) => item.id !== attachmentId));
   };
 
   const handleInlineImage = useCallback(async (file: File, dataUrl: string) => {
     const attachment = await createComposeAttachment(file, true, dataUrl);
+    composeDirtyRef.current = true;
     setComposeAttachments((prev) => [...prev, attachment]);
   }, []);
 
@@ -1094,6 +1112,8 @@ export default function MailClient() {
   const currentAccount = accounts.find((account) => account.id === activeAccountId) ?? null;
   const includeThreadAcrossFolders =
     currentAccount?.settings?.threading?.includeAcrossFolders ?? true;
+  const includeThreadAcrossFoldersForList =
+    includeThreadAcrossFolders && !isDraftsFolder(activeFolderId);
   const [threadRelatedMessages, setThreadRelatedMessages] = useState<Message[]>([]);
   const [threadContentById, setThreadContentById] = useState<Record<string, Message[]>>({});
   const [threadContentLoading, setThreadContentLoading] = useState<string | null>(null);
@@ -1113,7 +1133,7 @@ export default function MailClient() {
     });
   }, []);
   const threadScopeMessages = useMemo(() => {
-    if (!includeThreadAcrossFolders) return sortedMessages;
+    if (!includeThreadAcrossFoldersForList) return sortedMessages;
     const base = [...sortedMessages, ...threadRelatedMessages];
     const accountMessages = base;
     const threadIds = new Set<string>();
@@ -1149,7 +1169,7 @@ export default function MailClient() {
     }
 
     return selected;
-  }, [includeThreadAcrossFolders, threadRelatedMessages, sortedMessages]);
+  }, [includeThreadAcrossFoldersForList, threadRelatedMessages, sortedMessages]);
 
   const groupedMessages = useMemo(() => {
     const base = [...threadScopeMessages].sort((a, b) => b.dateValue - a.dateValue);
@@ -1306,6 +1326,9 @@ export default function MailClient() {
   const threadMessages = useMemo(() => activeThread, [activeThread]);
   const openCompose = (mode: typeof composeMode, message?: Message, asNew = false) => {
     lastDraftHashRef.current = "";
+    composeBaselineHashRef.current = null;
+    composeDirtyRef.current = false;
+    composeEditorInitRef.current = false;
     setDraftSavedAt(null);
     setDraftSaveError(null);
     setComposeEditorReset((prev) => prev + 1);
@@ -1616,9 +1639,16 @@ export default function MailClient() {
       }
       const data = (await res.json()) as { draftId?: string | null };
       if (data?.draftId) {
+        if (composeDraftId && composeDraftId !== data.draftId) {
+          setMessages((prev) => prev.filter((msg) => msg.id !== composeDraftId));
+          if (activeMessageId === composeDraftId) {
+            setActiveMessageId(data.draftId);
+          }
+        }
         setComposeDraftId(data.draftId);
       }
       lastDraftHashRef.current = hash;
+      composeDirtyRef.current = false;
       setDraftSavedAt(Date.now());
       setDraftSaveError(null);
       await refreshFolders();
@@ -1675,6 +1705,7 @@ export default function MailClient() {
       }
     }
     lastDraftHashRef.current = "";
+    composeBaselineHashRef.current = null;
     setDraftSavedAt(null);
     setDraftSaveError(null);
     setComposeDraftId(null);
@@ -1704,14 +1735,31 @@ export default function MailClient() {
         <div className="compose-tabs">
           <button
             className={`icon-button small ${composeTab === "html" ? "active" : ""}`}
-            onClick={() => setComposeTab("html")}
+            onClick={() => {
+              if (composeTab === "html") return;
+              if (composeLastEditedRef.current === "text") {
+                const nextHtml = composeBody
+                  ? `<p>${escapeHtml(composeBody).replace(/\n/g, "<br>")}</p>`
+                  : "";
+                setComposeHtml(nextHtml);
+                setComposeHtmlText(stripHtml(nextHtml));
+              }
+              setComposeTab("html");
+            }}
             type="button"
           >
             HTML
           </button>
           <button
             className={`icon-button small ${composeTab === "text" ? "active" : ""}`}
-            onClick={() => setComposeTab("text")}
+            onClick={() => {
+              if (composeTab === "text") return;
+              if (composeLastEditedRef.current === "html") {
+                const nextText = composeHtmlText || stripHtml(composeHtml);
+                setComposeBody(nextText);
+              }
+              setComposeTab("text");
+            }}
             type="button"
           >
             Text
@@ -1738,7 +1786,7 @@ export default function MailClient() {
       </div>
       {composeTab === "text" && (
         <>
-          {composeMode !== "new" && (
+          {composeMode !== "new" && composeQuotedText && (
             <div className="compose-quoted-toolbar">
               <button
                 type="button"
@@ -1754,24 +1802,23 @@ export default function MailClient() {
             <textarea
               ref={composeTextRef}
               value={
-                `${composeBody || (composeIncludeOriginal && composeQuotedText) ? "\n\n" : ""}${
-                  composeBody
-                }${composeIncludeOriginal && composeQuotedText ? `\n\n${composeQuotedText}` : ""}`
+                `${composeBody}${
+                  composeIncludeOriginal && composeQuotedText ? `\n\n${composeQuotedText}` : ""
+                }`
               }
               onChange={(event) => {
-                const prefix = "\n\n";
+                composeDirtyRef.current = true;
                 let nextValue = event.target.value;
-                if (nextValue.startsWith(prefix)) {
-                  nextValue = nextValue.slice(prefix.length);
-                }
                 if (composeIncludeOriginal && composeQuotedText) {
                   const suffix = `\n\n${composeQuotedText}`;
                   if (nextValue.endsWith(suffix)) {
                     setComposeBody(nextValue.slice(0, -suffix.length));
+                    composeLastEditedRef.current = "text";
                     return;
                   }
                 }
                 setComposeBody(nextValue);
+                composeLastEditedRef.current = "text";
               }}
             />
           </div>
@@ -1786,6 +1833,12 @@ export default function MailClient() {
             onChange={(nextHtml, nextText) => {
               setComposeHtml(nextHtml);
               setComposeHtmlText(nextText);
+              if (composeMode === "edit" && !composeEditorInitRef.current) {
+                composeEditorInitRef.current = true;
+                return;
+              }
+              composeDirtyRef.current = true;
+              composeLastEditedRef.current = "html";
             }}
           />
         </div>
@@ -1918,6 +1971,7 @@ export default function MailClient() {
         setComposeDraftId(null);
         setComposeAttachments([]);
         lastDraftHashRef.current = "";
+        composeBaselineHashRef.current = null;
         setComposeView("inline");
         if (
           (composeMode === "reply" || composeMode === "replyAll") &&
@@ -3193,7 +3247,11 @@ export default function MailClient() {
         setThreadRelatedMessages([]);
         return;
       }
-      if (!includeThreadAcrossFolders) {
+      if (!includeThreadAcrossFoldersForList) {
+        setThreadRelatedMessages([]);
+        return;
+      }
+      if (isDraftsFolder(activeFolderId)) {
         setThreadRelatedMessages([]);
         return;
       }
@@ -3235,7 +3293,7 @@ export default function MailClient() {
     activeAccountId,
     activeFolderId,
     groupBy,
-    includeThreadAcrossFolders,
+    includeThreadAcrossFoldersForList,
     searchScope,
     sortedMessages
   ]);
@@ -3306,7 +3364,23 @@ export default function MailClient() {
       html: normalizedHtml,
       attachments: attachmentsHash
     });
-    if (hash === lastDraftHashRef.current) return;
+    if (composeBaselineHashRef.current === null) {
+      composeBaselineHashRef.current = hash;
+      if (composeDraftId && !composeDirtyRef.current) {
+        lastDraftHashRef.current = hash;
+      }
+      return;
+    }
+    if (hash === lastDraftHashRef.current) {
+      composeDirtyRef.current = false;
+      return;
+    }
+    if (!composeDirtyRef.current) {
+      if (composeDraftId) {
+        lastDraftHashRef.current = hash;
+      }
+      return;
+    }
     if (draftSaveTimerRef.current) {
       window.clearTimeout(draftSaveTimerRef.current);
     }
@@ -3349,7 +3423,8 @@ export default function MailClient() {
     composeStripImages,
     composeTab,
     composeDraftId,
-    composeReplyHeaders
+    composeReplyHeaders,
+    composeAttachments
   ]);
 
   useEffect(() => {
@@ -3862,6 +3937,7 @@ export default function MailClient() {
 
   const syncAccount = async (folderId?: string, mode: "new" | "full" = "full") => {
     setErrorMessage(null);
+    const selectionKey = currentKeyRef.current;
     if (folderId) {
       await syncFolderWithBackground(
         folderId,
@@ -3885,7 +3961,9 @@ export default function MailClient() {
           reportError(await readErrorMessage(syncRes));
           return;
         }
-        await refreshMailboxData();
+        if (currentKeyRef.current === selectionKey) {
+          await refreshMailboxData();
+        }
       } catch {
         reportError("Sync failed due to a network error.");
       } finally {
@@ -3909,7 +3987,11 @@ export default function MailClient() {
           );
         }
         await refreshFolders();
-        if (searchScope === "folder" && activeFolderId) {
+        if (
+          currentKeyRef.current === selectionKey &&
+          searchScope === "folder" &&
+          activeFolderId
+        ) {
           await refreshMailboxData();
         }
         setIsSyncing(false);
@@ -4744,6 +4826,21 @@ export default function MailClient() {
             <Edit3 size={14} />
             New Mail
           </button>
+          {draftsFolder && draftsCount > 0 && (
+            <button
+              className="icon-button drafts-button"
+              onClick={() => {
+                setSearchScope("folder");
+                setActiveFolderId(draftsFolder.id);
+                setActiveMessageId("");
+              }}
+              title="Open drafts folder"
+              aria-label="Open drafts folder"
+            >
+              <FileText size={14} />
+              {`${draftsCount} Draft${draftsCount === 1 ? "" : "s"}`}
+            </button>
+          )}
           <button
             className="icon-button"
             onClick={() => {
@@ -5789,7 +5886,10 @@ export default function MailClient() {
                         <span className="label">Subject:</span>
                         <input
                           value={composeSubject}
-                          onChange={(event) => setComposeSubject(event.target.value)}
+                          onChange={(event) => {
+                            composeDirtyRef.current = true;
+                            setComposeSubject(event.target.value);
+                          }}
                           placeholder="Subject"
                         />
                       </div>
@@ -5802,7 +5902,10 @@ export default function MailClient() {
                         <div className="compose-row">
                           <input
                             value={composeTo}
-                            onChange={(event) => setComposeTo(event.target.value)}
+                            onChange={(event) => {
+                              composeDirtyRef.current = true;
+                              setComposeTo(event.target.value);
+                            }}
                             placeholder="recipient@example.com"
                           />
                           <button
@@ -5820,7 +5923,10 @@ export default function MailClient() {
                           <span className="label">Cc:</span>
                           <input
                             value={composeCc}
-                            onChange={(event) => setComposeCc(event.target.value)}
+                            onChange={(event) => {
+                              composeDirtyRef.current = true;
+                              setComposeCc(event.target.value);
+                            }}
                             placeholder="cc@example.com"
                           />
                         </div>
@@ -5830,7 +5936,10 @@ export default function MailClient() {
                           <span className="label">Bcc:</span>
                           <input
                             value={composeBcc}
-                            onChange={(event) => setComposeBcc(event.target.value)}
+                            onChange={(event) => {
+                              composeDirtyRef.current = true;
+                              setComposeBcc(event.target.value);
+                            }}
                             placeholder="bcc@example.com"
                           />
                         </div>
@@ -6833,7 +6942,10 @@ export default function MailClient() {
                       <div className="compose-row">
                         <input
                           value={composeTo}
-                          onChange={(event) => setComposeTo(event.target.value)}
+                          onChange={(event) => {
+                            composeDirtyRef.current = true;
+                            setComposeTo(event.target.value);
+                          }}
                           placeholder="recipient@example.com"
                         />
                         <button
@@ -6851,7 +6963,10 @@ export default function MailClient() {
                         <span className="label">Cc:</span>
                         <input
                           value={composeCc}
-                          onChange={(event) => setComposeCc(event.target.value)}
+                          onChange={(event) => {
+                            composeDirtyRef.current = true;
+                            setComposeCc(event.target.value);
+                          }}
                           placeholder="cc@example.com"
                         />
                       </div>
@@ -6861,7 +6976,10 @@ export default function MailClient() {
                         <span className="label">Bcc:</span>
                         <input
                           value={composeBcc}
-                          onChange={(event) => setComposeBcc(event.target.value)}
+                          onChange={(event) => {
+                            composeDirtyRef.current = true;
+                            setComposeBcc(event.target.value);
+                          }}
                           placeholder="bcc@example.com"
                         />
                       </div>
@@ -6870,7 +6988,10 @@ export default function MailClient() {
                       <span className="label">Subject:</span>
                       <input
                         value={composeSubject}
-                        onChange={(event) => setComposeSubject(event.target.value)}
+                        onChange={(event) => {
+                          composeDirtyRef.current = true;
+                          setComposeSubject(event.target.value);
+                        }}
                         placeholder="Subject"
                       />
                     </div>

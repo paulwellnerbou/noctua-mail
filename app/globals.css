@@ -453,6 +453,12 @@ a {
   padding: 8px 14px;
 }
 
+.drafts-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .dark .new-mail-button {
   color: #0b0b0b;
 }
@@ -528,6 +534,7 @@ a {
   overflow: visible;
   cursor: pointer;
   font-size: 12px;
+  align-items: center;
 }
 
 .table-header {

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import tls from "tls";
 
 import { getAccounts, getLatestMessageUid } from "@/lib/db";
+import { getImapLogger, logImapOp } from "@/lib/mail/imapLogger";
 
 type EnvelopeAddress = { name?: string | null; mailbox?: string | null; host?: string | null };
 type Envelope = { subject?: string | null; from?: EnvelopeAddress[] | null; date?: Date | null; messageId?: string | null };
@@ -46,6 +47,7 @@ export async function GET(request: Request) {
     host: account.imap.host,
     port: account.imap.port,
     secure: account.imap.secure,
+    logger: getImapLogger(),
     auth: { user: account.imap.user, pass: account.imap.password },
     tls: {
       servername: account.imap.host,
@@ -57,8 +59,12 @@ export async function GET(request: Request) {
   });
 
   try {
-    await client.connect();
-    const mailboxInfo = await client.mailboxOpen(mailbox, { readOnly: true });
+    await logImapOp("connect", { host: account.imap.host }, () => client.connect());
+    const mailboxInfo = await logImapOp(
+      "mailboxOpen",
+      { mailbox },
+      () => client.mailboxOpen(mailbox, { readOnly: true })
+    );
     const uidNext = mailboxInfo?.uidNext ?? 0;
     if (sinceUidNext !== null && !Number.isNaN(sinceUidNext) && uidNext <= sinceUidNext) {
       return NextResponse.json({ ok: true, uidNext, messages: [] });
@@ -84,6 +90,8 @@ export async function GET(request: Request) {
     if (uidNext >= startUid) {
       const rangeStart = Math.max(1, startUid);
       const range = { uid: `${rangeStart}:*` };
+      const start = Date.now();
+      let count = 0;
       for await (const message of client.fetch(range, { envelope: true, uid: true })) {
         const env = message.envelope as Envelope | undefined;
         messages.push({
@@ -92,6 +100,17 @@ export async function GET(request: Request) {
           from: formatAddress(env?.from),
           date: env?.date ? env.date.toISOString() : null,
           messageId: env?.messageId ?? null
+        });
+        count += 1;
+      }
+      const logger = getImapLogger();
+      if (logger !== false) {
+        logger.info?.({
+          op: "fetch",
+          mailbox,
+          range: range.uid,
+          count,
+          ms: Date.now() - start
         });
       }
     }
@@ -104,7 +123,7 @@ export async function GET(request: Request) {
     );
   } finally {
     try {
-      await client.logout();
+      await logImapOp("logout", {}, () => client.logout());
     } catch {
       // ignore
     }

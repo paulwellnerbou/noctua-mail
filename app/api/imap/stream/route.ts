@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import tls from "tls";
 
 import { getAccounts, getFolders, getMailboxState, saveMailboxState } from "@/lib/db";
+import { getImapLogger, logImapOp } from "@/lib/mail/imapLogger";
 
 type EnvelopeAddress = { name?: string | null; mailbox?: string | null; host?: string | null };
 type Envelope = { subject?: string | null; from?: EnvelopeAddress[] | null; date?: Date | null; messageId?: string | null };
@@ -81,7 +82,9 @@ export async function GET(request: Request) {
       const stopAll = async () => {
         for (const item of sessions.values()) {
           try {
-            await item.client.logout();
+            await logImapOp("imap.logout", { accountId, mailbox: item.mailbox }, async () => {
+              await item.client.logout();
+            });
           } catch {
             // ignore
           }
@@ -98,7 +101,9 @@ export async function GET(request: Request) {
         if (!sess) return;
         sessions.delete(folderId);
         try {
-          await sess.client.logout();
+          await logImapOp("imap.logout", { accountId, mailbox: sess.mailbox }, async () => {
+            await sess.client.logout();
+          });
         } catch {
           // ignore
         }
@@ -137,6 +142,7 @@ export async function GET(request: Request) {
           host: account.imap.host,
           port: account.imap.port,
           secure: account.imap.secure,
+          logger: getImapLogger(),
           auth: { user: account.imap.user, pass: account.imap.password },
           tls: {
             servername: account.imap.host,
@@ -149,7 +155,9 @@ export async function GET(request: Request) {
           qresync: true
         });
 
-        await client.connect();
+        await logImapOp("imap.connect", { accountId, mailbox }, async () => {
+          await client.connect();
+        });
         const caps: any =
           (client as any).enabledCapabilities ||
           (client as any).serverCapabilities ||
@@ -174,7 +182,11 @@ export async function GET(request: Request) {
           }
         }
 
-        const mailboxInfo = await client.mailboxOpen(mailbox, mailboxOptions);
+        const mailboxInfo = await logImapOp(
+          "imap.mailboxOpen",
+          { accountId, mailbox, readOnly: true },
+          async () => await client.mailboxOpen(mailbox, mailboxOptions)
+        );
         const lastUidNext = mailboxInfo?.uidNext ?? 0;
         await saveMailboxState({
           accountId,
@@ -206,29 +218,40 @@ export async function GET(request: Request) {
         ]);
 
         const fetchNew = async () => {
-          const status = await client.status(mailbox, { uidNext: true });
+          const status = await logImapOp(
+            "imap.status",
+            { accountId, mailbox },
+            async () => await client.status(mailbox, { uidNext: true })
+          );
           const uidNext = status?.uidNext ?? lastUidNext;
           if (uidNext <= lastUidNext) return;
           const range = { uid: `${lastUidNext}:${uidNext - 1}` };
-          const items: Array<{
-            uid: number;
-            subject: string;
-            from: string;
-            date?: string | null;
-            messageId?: string | null;
-            folderId: string;
-          }> = [];
-          for await (const message of client.fetch(range, { uid: true, envelope: true })) {
-            const env = message.envelope as Envelope | undefined;
-            items.push({
-              uid: message.uid,
-              subject: env?.subject ?? "(no subject)",
-              from: formatAddress(env?.from),
-              date: env?.date ? env.date.toISOString() : null,
-              messageId: env?.messageId ?? null,
-              folderId: folder.id
-            });
-          }
+          const items = await logImapOp(
+            "imap.fetch",
+            { accountId, mailbox, range: range.uid },
+            async () => {
+              const list: Array<{
+                uid: number;
+                subject: string;
+                from: string;
+                date?: string | null;
+                messageId?: string | null;
+                folderId: string;
+              }> = [];
+              for await (const message of client.fetch(range, { uid: true, envelope: true })) {
+                const env = message.envelope as Envelope | undefined;
+                list.push({
+                  uid: message.uid,
+                  subject: env?.subject ?? "(no subject)",
+                  from: formatAddress(env?.from),
+                  date: env?.date ? env.date.toISOString() : null,
+                  messageId: env?.messageId ?? null,
+                  folderId: folder.id
+                });
+              }
+              return list;
+            }
+          );
           if (items.length) {
             send("new", { uidNext, messages: items });
           }
@@ -297,6 +320,7 @@ export async function GET(request: Request) {
             host: account.imap.host,
             port: account.imap.port,
             secure: account.imap.secure,
+            logger: getImapLogger(),
             auth: { user: account.imap.user, pass: account.imap.password },
             tls: {
               servername: account.imap.host,
@@ -307,7 +331,9 @@ export async function GET(request: Request) {
             }
           });
           try {
-            await pollClient.connect();
+            await logImapOp("imap.connect", { accountId, mailbox: "poll" }, async () => {
+              await pollClient.connect();
+            });
             const updates: Array<{ id: string; uidNext?: number; unseen?: number; exists?: number }>
               = [];
             for (const folder of toPoll) {
@@ -315,11 +341,16 @@ export async function GET(request: Request) {
                 ? folder.id.slice(accountId.length + 1)
                 : folder.name;
               try {
-                const status = await pollClient.status(mailbox, {
-                  uidNext: true,
-                  messages: true,
-                  unseen: true
-                });
+                const status = await logImapOp(
+                  "imap.status",
+                  { accountId, mailbox },
+                  async () =>
+                    await pollClient.status(mailbox, {
+                      uidNext: true,
+                      messages: true,
+                      unseen: true
+                    })
+                );
                 updates.push({
                   id: folder.id,
                   uidNext: status.uidNext,
@@ -337,7 +368,9 @@ export async function GET(request: Request) {
             send("error", { message: (error as Error).message ?? "Poll failed" });
           } finally {
             try {
-              await pollClient.logout();
+              await logImapOp("imap.logout", { accountId, mailbox: "poll" }, async () => {
+                await pollClient.logout();
+              });
             } catch {
               // ignore
             }
