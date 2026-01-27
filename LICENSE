@@ -1,0 +1,34 @@
+ELASTIC LICENSE 2.0
+
+I. SHARING YOUR WORK
+
+1.  Standard Source Code License. Subject to your strict compliance with this
+    License, you may copy and distribute the software and its documentation
+    (see "II. LIMITATIONS" below), and you may modifying the software, provided
+    that you include this License with any copies.
+
+II. LIMITATIONS
+
+1.  Cloud Service. You may not provide the software to third parties as a
+    managed service, where the managed service provides users with access to
+    any substantial set of the features or functionality of this software.
+
+2.  License Keys. You may not move, change, disable, or circumvent the license
+    key functionality in the software, and you may not remove or obscure any
+    functionality in the software that is protected by the license key.
+
+3.  Notices. You may not remove or obscure any copyright, patent, trademark,
+    or other proprietary notices in the software.
+
+4.  No Warranty. THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY
+    KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+    MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN
+    NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
+    DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR
+    OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
+    USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+III. DEFINITIONS
+
+"managed service" means a service that manages the installation, administration,
+and operation of the software.
