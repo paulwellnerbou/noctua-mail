@@ -37,7 +37,9 @@ import {
   MoreVertical,
   Download,
   Mail,
-  MailOpen
+  MailOpen,
+  Pin,
+  Search
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkBreaks from "remark-breaks";
@@ -271,6 +273,13 @@ export default function MailClient() {
     headerHtml: string;
     bodyHtml: string;
   } | null>(null);
+  const [recipientOptions, setRecipientOptions] = useState<string[]>([]);
+  const recipientCacheRef = useRef<Record<string, string[]>>({});
+  const [recipientQuery, setRecipientQuery] = useState("");
+  const [recipientLoading, setRecipientLoading] = useState(false);
+  const [recipientFocus, setRecipientFocus] = useState<"to" | "cc" | "bcc" | null>(null);
+  const [recipientActiveIndex, setRecipientActiveIndex] = useState(0);
+  const recipientFetchRef = useRef<AbortController | null>(null);
   const [composeSize, setComposeSize] = useState<{ width: number; height: number | null }>({
     width: 980,
     height: null
@@ -329,6 +338,7 @@ export default function MailClient() {
   const [searchBadgesOpen, setSearchBadgesOpen] = useState(false);
   const [searchBadges, setSearchBadges] = useState({
     unread: false,
+    flagged: false,
     todo: false,
     pinned: false,
     attachments: false
@@ -538,9 +548,10 @@ export default function MailClient() {
     return `Fields: ${effective.map((key) => labels[key]).join(", ")}`;
   }, [searchFields]);
   const searchBadgesLabel = useMemo(() => {
-    const order = ["unread", "todo", "pinned", "attachments"] as const;
+    const order = ["unread", "flagged", "todo", "pinned", "attachments"] as const;
     const labels: Record<string, string> = {
       unread: "Unread",
+      flagged: "Flagged",
       todo: "To-Do",
       pinned: "Pinned",
       attachments: "Attachments"
@@ -549,6 +560,45 @@ export default function MailClient() {
     if (selected.length === 0) return "Filter: Any";
     return `Filter: ${selected.map((key) => labels[key]).join(", ")}`;
   }, [searchBadges]);
+  const searchActive = useMemo(() => {
+    const hasQuery = query.trim().length > 0;
+    const hasBadges = Object.values(searchBadges).some(Boolean);
+    const allEnabled = (["sender", "participants", "subject", "body", "attachments"] as const).every(
+      (key) => searchFields[key]
+    );
+    return hasQuery || hasBadges || !allEnabled;
+  }, [query, searchBadges, searchFields]);
+  const searchCriteriaLabel = useMemo(() => {
+    const parts: string[] = [];
+    if (query.trim().length > 0) {
+      parts.push(`"${query.trim()}"`);
+    }
+    const fields = selectedSearchFields;
+    if (fields.length > 0) {
+      parts.push(`in ${fields.join(", ")}`);
+    }
+    if (selectedSearchBadges.length > 0) {
+      parts.push(`filter ${selectedSearchBadges.join(", ")}`);
+    }
+    return parts.join(" · ");
+  }, [query, selectedSearchBadges, selectedSearchFields]);
+  const clearSearch = () => {
+    setQuery("");
+    setSearchBadges({
+      unread: false,
+      flagged: false,
+      todo: false,
+      pinned: false,
+      attachments: false
+    });
+    setSearchFields({
+      sender: true,
+      participants: true,
+      subject: true,
+      body: true,
+      attachments: true
+    });
+  };
   const reportError = (message: string) => {
     setErrorMessage(message);
     setErrorTimestamp(Date.now());
@@ -707,6 +757,25 @@ export default function MailClient() {
 
   const isPinnedMessage = (message: Message) =>
     message.flags?.some((flag) => flag.toLowerCase() === "pinned") ?? false;
+  const renderSelectIndicators = (message: Message) => {
+    const isPinned = isPinnedMessage(message);
+    const isDraft = message.draft;
+    if (!isPinned && !isDraft) return null;
+    return (
+      <span className="message-select-icons" aria-hidden="true">
+        {isPinned && (
+          <span className="message-select-icon pinned" title="Pinned">
+            <Pin size={12} />
+          </span>
+        )}
+        {isDraft && (
+          <span className="message-select-icon draft" title="Draft">
+            <Edit3 size={12} />
+          </span>
+        )}
+      </span>
+    );
+  };
 
   const getWeekGroup = (value: number) => {
     const date = new Date(value);
@@ -730,7 +799,31 @@ export default function MailClient() {
     );
   };
 
-  const threadsAllowed = ["date", "week", "year"].includes(groupBy) && !isDraftsFolder(activeFolderId);
+  const isTrashFolder = (folderId?: string | null) => {
+    if (!folderId) return false;
+    const folder = folders.find((item) => item.id === folderId);
+    if (!folder) return false;
+    const special = (folder.specialUse ?? "").toLowerCase();
+    if (special === "\\trash") return true;
+    return ["trash", "deleted", "bin", "papierkorb"].includes(folder.name.toLowerCase());
+  };
+
+  const isSpamFolder = (folderId?: string | null) => {
+    if (!folderId) return false;
+    const folder = folders.find((item) => item.id === folderId);
+    if (!folder) return false;
+    const special = (folder.specialUse ?? "").toLowerCase();
+    if (special === "\\junk" || special === "\\spam") return true;
+    return ["junk", "spam", "spam mail", "junk mail"].includes(folder.name.toLowerCase());
+  };
+
+  const isThreadExcludedFolder = (folderId?: string | null) =>
+    Boolean(folderId && (isTrashFolder(folderId) || isSpamFolder(folderId)));
+
+  const threadsAllowed =
+    ["date", "week", "year"].includes(groupBy) &&
+    !isDraftsFolder(activeFolderId) &&
+    !isThreadExcludedFolder(activeFolderId);
   const supportsThreads = threadsEnabled && threadsAllowed;
   const draftsFolder = useMemo(
     () =>
@@ -747,6 +840,23 @@ export default function MailClient() {
     if (!value) return [];
     const matches = value.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi);
     return matches ? matches.map((entry) => entry.trim()) : [];
+  };
+  const getPrimaryEmail = (value: string) => extractEmails(value)[0] ?? "";
+  const getComposeToken = (value: string) => {
+    const parts = value.split(/[;,]/);
+    return parts[parts.length - 1]?.trim() ?? "";
+  };
+  const applyRecipientSelection = (
+    value: string,
+    suggestion: string,
+    setValue: (next: string) => void
+  ) => {
+    const parts = value.split(/[;,]/);
+    parts[parts.length - 1] = ` ${suggestion}`.trim();
+    const joined = parts.map((part) => part.trim()).filter(Boolean).join(", ");
+    setValue(joined ? `${joined}, ` : `${suggestion}, `);
+    setRecipientQuery("");
+    setRecipientFocus(null);
   };
 
   const uniqueEmails = (entries: string[]) => {
@@ -1113,7 +1223,9 @@ export default function MailClient() {
   const includeThreadAcrossFolders =
     currentAccount?.settings?.threading?.includeAcrossFolders ?? true;
   const includeThreadAcrossFoldersForList =
-    includeThreadAcrossFolders && !isDraftsFolder(activeFolderId);
+    includeThreadAcrossFolders &&
+    !isDraftsFolder(activeFolderId) &&
+    !isThreadExcludedFolder(activeFolderId);
   const [threadRelatedMessages, setThreadRelatedMessages] = useState<Message[]>([]);
   const [threadContentById, setThreadContentById] = useState<Record<string, Message[]>>({});
   const [threadContentLoading, setThreadContentLoading] = useState<string | null>(null);
@@ -1133,9 +1245,13 @@ export default function MailClient() {
     });
   }, []);
   const threadScopeMessages = useMemo(() => {
-    if (!includeThreadAcrossFoldersForList) return sortedMessages;
-    const base = [...sortedMessages, ...threadRelatedMessages];
-    const accountMessages = base;
+    if (!includeThreadAcrossFoldersForList) {
+      return sortedMessages;
+    }
+    const baseMessages = [...sortedMessages, ...threadRelatedMessages].filter(
+      (message) => !isThreadExcludedFolder(message.folderId)
+    );
+    const accountMessages = baseMessages;
     const threadIds = new Set<string>();
     const messageIds = new Set<string>();
     const selected: Message[] = [];
@@ -1150,7 +1266,7 @@ export default function MailClient() {
       return true;
     };
 
-    base.forEach(addMessage);
+    baseMessages.forEach(addMessage);
 
     let changed = true;
     while (changed) {
@@ -1280,11 +1396,17 @@ export default function MailClient() {
 
   const activeThread = useMemo(() => {
     if (!activeMessage) return [];
+    if (isThreadExcludedFolder(activeMessage.folderId)) {
+      return [activeMessage];
+    }
     const activeThreadId =
       activeMessage.threadId ?? activeMessage.messageId ?? activeMessage.id;
     const fullThread = activeThreadId ? threadContentById[activeThreadId] : undefined;
     if (fullThread && fullThread.length > 0) {
-      const fullForest = buildThreadTree(fullThread);
+      const filteredFull = fullThread.filter(
+        (item) => !isThreadExcludedFolder(item.folderId)
+      );
+      const fullForest = buildThreadTree(filteredFull);
       let fullRoot: ThreadNode | null = null;
       const findFullRoot = (nodes: ThreadNode[], currentRoot: ThreadNode | null = null) => {
         for (const node of nodes) {
@@ -1301,7 +1423,7 @@ export default function MailClient() {
       if (fullRoot) {
         return flattenThread(fullRoot).map((item) => item.message);
       }
-      return fullThread;
+      return filteredFull;
     }
     let root: ThreadNode | null = null;
     const findRoot = (nodes: ThreadNode[], currentRoot: ThreadNode | null = null) => {
@@ -1320,7 +1442,9 @@ export default function MailClient() {
       return flattenThread(root).map((item) => item.message);
     }
     // fallback to threadId match
-    return getThreadMessages(threadScopeMessages, activeMessage.threadId, activeAccountId);
+    return getThreadMessages(threadScopeMessages, activeMessage.threadId, activeAccountId).filter(
+      (item) => !isThreadExcludedFolder(item.folderId)
+    );
   }, [activeAccountId, activeMessage, threadContentById, threadScopeMessages, threadForest]);
 
   const threadMessages = useMemo(() => activeThread, [activeThread]);
@@ -2022,7 +2146,9 @@ export default function MailClient() {
         if (data.action === "moved") {
           if (searchScope === "all" && data.trashFolderId) {
             return prev.map((item) =>
-              item.id === target.id ? { ...item, folderId: data.trashFolderId! } : item
+              item.id === target.id
+                ? { ...item, folderId: data.trashFolderId!, recent: false }
+                : item
             );
           }
           return prev.filter((item) => item.id !== target.id);
@@ -2236,8 +2362,25 @@ export default function MailClient() {
   ) => {
     const menuKey = `${origin}:${message.id}`;
     const isDraft = isDraftItem(message);
-    const includeQuickActionsInMenu =
-      (origin === "table" || (origin === "list" && listIsNarrow)) && !isDraft;
+    const buildItem = (
+      label: string,
+      icon: React.ReactNode,
+      onClick: () => void,
+      disabled?: boolean
+    ) => (
+      <button
+        key={label}
+        className="message-menu-item"
+        onClick={() => {
+          setOpenMessageMenuId(null);
+          onClick();
+        }}
+        disabled={disabled}
+      >
+        <span className="menu-icon">{icon}</span>
+        <span className="menu-label">{label}</span>
+      </button>
+    );
     return (
       <div
         className="message-menu"
@@ -2259,151 +2402,76 @@ export default function MailClient() {
       </button>
       {openMessageMenuId === menuKey && (
         <div className="message-menu-panel">
-          {isDraft && (
-            <button
-              className="message-menu-item"
-              onClick={() => {
-                setOpenMessageMenuId(null);
-                openCompose("edit", message);
-              }}
-            >
-              Edit draft
-            </button>
-          )}
-          {includeQuickActionsInMenu && (
-            <>
-              <button
-                className="message-menu-item"
-                onClick={() => {
-                  setOpenMessageMenuId(null);
-                  openCompose("reply", message);
-                }}
-              >
-                Reply
-              </button>
-              <button
-                className="message-menu-item"
-                onClick={() => {
-                  setOpenMessageMenuId(null);
-                  openCompose("replyAll", message);
-                }}
-              >
-                Reply all
-              </button>
-              <button
-                className="message-menu-item"
-                onClick={() => {
-                  setOpenMessageMenuId(null);
-                  openCompose("forward", message);
-                }}
-              >
-                Forward
-              </button>
-              <button
-                className="message-menu-item"
-                onClick={() => {
-                  setOpenMessageMenuId(null);
-                  updateFlagState(message, "seen", !message.seen);
-                }}
-              >
-                {message.seen ? "Mark as unread" : "Mark as read"}
-              </button>
-            </>
-          )}
-          <button
-            className="message-menu-item"
-            onClick={() => {
-              setOpenMessageMenuId(null);
-              openCompose("editAsNew", message, true);
-            }}
-          >
-            Edit as New
-          </button>
-          <button
-            className="message-menu-item"
-            onClick={() => {
-              setOpenMessageMenuId(null);
-              handleResyncMessage(message);
-            }}
-          >
-            Re-Sync
-          </button>
-          <button
-            className="message-menu-item"
-            onClick={() => {
-              setOpenMessageMenuId(null);
-              updateFlagState(message, "flagged", !message.flagged);
-            }}
-          >
-            {message.flagged ? "Unflag" : "Flag"}
-          </button>
-          <button
-            className="message-menu-item"
-            onClick={() => {
-              setOpenMessageMenuId(null);
-              togglePinnedFlag(message);
-            }}
-          >
-            {message.flags?.some((flag) => flag.toLowerCase() === "pinned")
-              ? "Unpin"
-              : "Pin"}
-          </button>
-          <button
-            className="message-menu-item"
-            onClick={() => {
-              setOpenMessageMenuId(null);
-              toggleTodoFlag(message);
-            }}
-          >
-            {message.flags?.some((flag) => flag.toLowerCase() === "to-do")
-              ? "Clear To-Do"
-              : "Mark To-Do"}
-          </button>
-          <button
-            className="message-menu-item"
-            onClick={() => {
-              setOpenMessageMenuId(null);
-              updateFlagState(message, "answered", !message.answered);
-            }}
-          >
-            {message.answered ? "Unmark answered" : "Mark answered"}
-          </button>
-          <button
-            className="message-menu-item"
-            onClick={() => {
-              setOpenMessageMenuId(null);
-              handleArchiveMessage(message);
-            }}
-          >
-            Archive
-          </button>
-          <button
-            className="message-menu-item"
-            onClick={() => {
-              setOpenMessageMenuId(null);
-              handleMarkSpam(message);
-            }}
-          >
-            Mark as Spam
-          </button>
-          <button
-            className="message-menu-item"
-            onClick={() => {
-              setOpenMessageMenuId(null);
-              handleDeleteMessage(message);
-            }}
-          >
-            {isTrashFolder(message.folderId) ? "Delete permanently" : "Move to Trash"}
-          </button>
-          <button
-            className="message-menu-item"
-            onClick={() => {
-              setOpenMessageMenuId(null);
-              handleDownloadEml(message);
-            }}
-          >
-            Download eml
-          </button>
+          {[
+            [
+              isDraft
+                ? buildItem("Edit draft", <Edit3 size={14} />, () => openCompose("edit", message))
+                : null,
+              buildItem("Reply", <Reply size={14} />, () => openCompose("reply", message)),
+              buildItem("Reply all", <ReplyAll size={14} />, () => openCompose("replyAll", message)),
+              buildItem("Forward", <Forward size={14} />, () => openCompose("forward", message)),
+              buildItem("Edit as New", <FileText size={14} />, () =>
+                openCompose("editAsNew", message, true)
+              )
+            ].filter(Boolean),
+            [
+              buildItem(
+                message.seen ? "Mark as unread" : "Mark as read",
+                message.seen ? <MailOpen size={14} /> : <Mail size={14} />,
+                () => updateFlagState(message, "seen", !message.seen)
+              ),
+              buildItem(
+                message.flagged ? "Unflag" : "Flag",
+                <Flag size={14} />,
+                () => updateFlagState(message, "flagged", !message.flagged)
+              ),
+              buildItem(
+                message.flags?.some((flag) => flag.toLowerCase() === "pinned") ? "Unpin" : "Pin",
+                <Pin size={14} />,
+                () => togglePinnedFlag(message)
+              ),
+              buildItem(
+                message.flags?.some((flag) => flag.toLowerCase() === "to-do")
+                  ? "Mark as Done"
+                  : "Mark as To-Do",
+                <Check size={14} />,
+                () => toggleTodoFlag(message)
+              ),
+              buildItem(
+                message.answered ? "Unmark answered" : "Mark answered",
+                <Check size={14} />,
+                () => updateFlagState(message, "answered", !message.answered)
+              )
+            ],
+            [
+              buildItem("Mark as Spam", <ShieldOff size={14} />, () =>
+                handleMarkSpam(message)
+              ),
+              buildItem("Archive", <Archive size={14} />, () =>
+                handleArchiveMessage(message)
+              ),
+              buildItem(
+                isTrashFolder(message.folderId) ? "Delete permanently" : "Move to Trash",
+                <Trash2 size={14} />,
+                () => handleDeleteMessage(message)
+              )
+            ],
+            [
+              buildItem("Download EML", <Download size={14} />, () =>
+                handleDownloadEml(message)
+              ),
+              buildItem("Re-Sync", <RefreshCw size={14} />, () =>
+                handleResyncMessage(message)
+              )
+            ]
+          ]
+            .filter((group) => group.length > 0)
+            .map((group, idx, all) => (
+            <div key={`group-${idx}`} className="message-menu-group">
+              {group}
+              {idx < all.length - 1 && <div className="message-menu-separator" />}
+            </div>
+          ))}
         </div>
       )}
       </div>
@@ -3282,7 +3350,9 @@ export default function MailClient() {
         }
         const data = (await res.json()) as { items?: Message[] };
         const items = Array.isArray(data?.items) ? data.items : [];
-        const filtered = items.filter((item) => item.folderId !== activeFolderId);
+        const filtered = items.filter(
+          (item) => item.folderId !== activeFolderId && !isThreadExcludedFolder(item.folderId)
+        );
         setThreadRelatedMessages(filtered);
       } catch {
         setThreadRelatedMessages([]);
@@ -3322,7 +3392,8 @@ export default function MailClient() {
         }
         const data = (await res.json()) as { items?: Message[] };
         const items = Array.isArray(data?.items) ? data.items : [];
-        upsertThreadCache(threadId, items);
+        const filtered = items.filter((item) => !isThreadExcludedFolder(item.folderId));
+        upsertThreadCache(threadId, filtered);
       } catch {
         // ignore
       } finally {
@@ -3500,6 +3571,27 @@ export default function MailClient() {
   const folderNameById = (id: string) =>
     folders.find((folder) => folder.id === id)?.name ?? id;
   const threadPathById = (id: string) => id.replace(`${activeAccountId}:`, "");
+  const renderFolderBadges = (folderIds: string[]) => {
+    if (folderIds.length === 0) return null;
+    return (
+      <span className="folder-badges">
+        {folderIds.map((folderId) => (
+          <button
+            key={folderId}
+            className="folder-badge"
+            title={threadPathById(folderId)}
+            onClick={(event) => {
+              event.stopPropagation();
+              setSearchScope("folder");
+              setActiveFolderId(folderId);
+            }}
+          >
+            {folderNameById(folderId)}
+          </button>
+        ))}
+      </span>
+    );
+  };
   const getGroupLabel = (group: { key: string; label?: string }) => {
     if (groupBy === "folder") {
       return threadPathById(group.key);
@@ -3515,6 +3607,52 @@ export default function MailClient() {
       firstField?.focus();
     }, 0);
   }, [composeOpen, composeView]);
+
+  useEffect(() => {
+    if (!composeOpen || !activeAccountId) return;
+    let active = true;
+    const loadRecipients = async () => {
+      try {
+        recipientFetchRef.current?.abort();
+        const controller = new AbortController();
+        recipientFetchRef.current = controller;
+        setRecipientLoading(true);
+        const params = new URLSearchParams({
+          accountId: activeAccountId,
+          limit: "20"
+        });
+        if (recipientQuery.trim()) {
+          params.set("q", recipientQuery.trim());
+        }
+        const res = await fetch(`/api/compose/recipients?${params.toString()}`, {
+          signal: controller.signal
+        });
+        if (!res.ok) return;
+        const data = (await res.json()) as { recipients?: string[] };
+        if (!active) return;
+        const list = data.recipients ?? [];
+        if (!recipientQuery.trim() && list.length) {
+          recipientCacheRef.current[activeAccountId] = list;
+        }
+        setRecipientOptions(list);
+        setRecipientActiveIndex(0);
+      } catch {
+        // ignore autocomplete failures
+      } finally {
+        if (active) setRecipientLoading(false);
+      }
+    };
+    const cached = recipientCacheRef.current[activeAccountId];
+    if (!recipientQuery.trim() && cached) {
+      setRecipientOptions(cached);
+      return;
+    }
+    const timer = window.setTimeout(loadRecipients, 180);
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, [composeOpen, activeAccountId, recipientQuery]);
 
   useEffect(() => {
     if (!composeResizing || composeView !== "modal") return;
@@ -4485,14 +4623,6 @@ export default function MailClient() {
     return systemFolderNames.has(folder.name);
   };
 
-  const isTrashFolder = (folderId: string) => {
-    const folder = folders.find((item) => item.id === folderId);
-    if (!folder) return false;
-    const special = (folder.specialUse ?? "").toLowerCase();
-    if (special === "\\trash") return true;
-    return ["trash", "deleted", "bin", "papierkorb"].includes(folder.name.toLowerCase());
-  };
-
   const folderPathLabel = (folder: Folder) => {
     const parts = [folder.name];
     let parentId = folder.parentId ?? null;
@@ -4791,6 +4921,7 @@ export default function MailClient() {
                     {(
                       [
                         ["unread", "Unread"],
+                        ["flagged", "Flagged"],
                         ["todo", "To-Do"],
                         ["pinned", "Pinned"],
                         ["attachments", "Attachments"]
@@ -5059,6 +5190,22 @@ export default function MailClient() {
                     ? `Messages in ${activeFolderName}`
                     : "Messages"}
                 </strong>
+                {searchActive && (
+                  <div className="list-search-indicator">
+                    <Search size={12} />
+                    <span className="search-text">
+                      Searching {searchCriteriaLabel || "all messages"}
+                    </span>
+                    <button
+                      className="icon-button ghost small"
+                      onClick={clearSearch}
+                      title="Clear search"
+                      aria-label="Clear search"
+                    >
+                      <X size={12} />
+                    </button>
+                  </div>
+                )}
                 <span className="muted-inline load-more-inline">
                   {(() => {
                     const countLabel =
@@ -5255,11 +5402,22 @@ export default function MailClient() {
                                 const threadSize = fullFlat.length;
                                 const isCollapsed = collapsedThreads[threadGroupId] ?? true;
                                 const flat = isCollapsed ? [fullFlat[0]] : fullFlat;
+                                const threadFolderIds = Array.from(
+                                  new Set(fullFlat.map((item) => item.message.folderId))
+                                );
                                 return (
                                   <div key={`${threadGroupId}-${root.message.id}`}>
                                     {flat.map(({ message, depth }, index) => {
                                       const isSelected = selectedMessageIds.has(message.id);
                                       const isDragging = draggingMessageIds.has(message.id);
+                                      const folderIds =
+                                        index === 0 && isCollapsed && threadSize > 1
+                                          ? threadFolderIds
+                                          : searchScope === "all" ||
+                                              (includeThreadAcrossFolders &&
+                                                message.folderId !== activeFolderId)
+                                            ? [message.folderId]
+                                            : [];
                                       return (
                                         <div
                                           key={message.id}
@@ -5317,6 +5475,7 @@ export default function MailClient() {
                                           }}
                                         >
                                           <span className="cell-select">
+                                            {renderSelectIndicators(message)}
                                             <input
                                               type="checkbox"
                                               checked={isSelected}
@@ -5379,25 +5538,13 @@ export default function MailClient() {
                                             }
                                           }}
                                           >
-                                            {message.subject}
+                                            {renderFolderBadges(folderIds)}
+                                            <span className="cell-subject-text">
+                                              {message.subject}
+                                            </span>
                                           </span>
                                           <span className="cell-date">
                                             <span className="date-text">{message.date}</span>
-                                            {(searchScope === "all" ||
-                                              (includeThreadAcrossFolders &&
-                                                message.folderId !== activeFolderId)) && (
-                                              <button
-                                                className="folder-badge"
-                                                title={threadPathById(message.folderId)}
-                                                onClick={(event) => {
-                                                  event.stopPropagation();
-                                                  setSearchScope("folder");
-                                                  setActiveFolderId(message.folderId);
-                                                }}
-                                              >
-                                                {folderNameById(message.folderId)}
-                                              </button>
-                                            )}
                                           </span>
                                           <div className="cell-actions">
                                             {renderMessageMenu(message, "table")}
@@ -5415,6 +5562,12 @@ export default function MailClient() {
                                 activeMessage?.threadId ??
                                 activeMessage?.messageId ??
                                 activeMessage?.id;
+                              const folderIds =
+                                searchScope === "all" ||
+                                (includeThreadAcrossFolders &&
+                                  message.folderId !== activeFolderId)
+                                  ? [message.folderId]
+                                  : [];
                               return (
                                 <div
                                   key={message.id}
@@ -5443,6 +5596,7 @@ export default function MailClient() {
                                   }}
                                 >
                                   <span className="cell-select">
+                                    {renderSelectIndicators(message)}
                                     <input
                                       type="checkbox"
                                       checked={selectedMessageIds.has(message.id)}
@@ -5454,24 +5608,12 @@ export default function MailClient() {
                                     />
                                   </span>
                                   <span className="cell-from">{message.from}</span>
-                                  <span className="cell-subject">{message.subject}</span>
+                                  <span className="cell-subject">
+                                    {renderFolderBadges(folderIds)}
+                                    <span className="cell-subject-text">{message.subject}</span>
+                                  </span>
                                   <span className="cell-date">
                                     <span className="date-text">{message.date}</span>
-                                          {(searchScope === "all" ||
-                                            (includeThreadAcrossFolders &&
-                                              message.folderId !== activeFolderId)) && (
-                                            <button
-                                              className="folder-badge"
-                                              title={threadPathById(message.folderId)}
-                                        onClick={(event) => {
-                                          event.stopPropagation();
-                                          setSearchScope("folder");
-                                          setActiveFolderId(message.folderId);
-                                        }}
-                                      >
-                                        {folderNameById(message.folderId)}
-                                      </button>
-                                    )}
                                   </span>
                                   <div className="cell-actions">
                                     {renderMessageMenu(message, "table")}
@@ -5533,11 +5675,22 @@ export default function MailClient() {
                         const threadSize = fullFlat.length;
                         const isCollapsed = collapsedThreads[threadGroupId] ?? true;
                         const flat = isCollapsed ? [fullFlat[0]] : fullFlat;
+                        const threadFolderIds = Array.from(
+                          new Set(fullFlat.map((item) => item.message.folderId))
+                        );
                         return (
                             <div key={`${threadGroupId}-${root.message.id}`} className="thread-group">
                             {flat.map(({ message, depth }, index) => {
                               const isSelected = selectedMessageIds.has(message.id);
                               const isDragging = draggingMessageIds.has(message.id);
+                              const folderIds =
+                                index === 0 && isCollapsed && threadSize > 1
+                                  ? threadFolderIds
+                                  : searchScope === "all" ||
+                                      (includeThreadAcrossFolders &&
+                                        message.folderId !== activeFolderId)
+                                    ? [message.folderId]
+                                    : [];
                               return (
                                 <div
                                   key={message.id}
@@ -5597,6 +5750,7 @@ export default function MailClient() {
                                 >
                                   <div className="message-card-header">
                                     <span className="message-select">
+                                      {renderSelectIndicators(message)}
                                       <input
                                         type="checkbox"
                                         checked={isSelected}
@@ -5690,21 +5844,7 @@ export default function MailClient() {
                                 </div>
                                 <div className="message-preview">{message.preview}</div>
                                 <div className="message-meta">
-                                    {(searchScope === "all" ||
-                                      (includeThreadAcrossFolders &&
-                                        message.folderId !== activeFolderId)) && (
-                                      <button
-                                        className="folder-badge"
-                                        title={threadPathById(message.folderId)}
-                                      onClick={(event) => {
-                                        event.stopPropagation();
-                                        setSearchScope("folder");
-                                        setActiveFolderId(message.folderId);
-                                      }}
-                                    >
-                                      {folderNameById(message.folderId)}
-                                    </button>
-                                  )}
+                                  {renderFolderBadges(folderIds)}
                                 </div>
                               </div>
                               );
@@ -5719,6 +5859,12 @@ export default function MailClient() {
                               activeMessage?.threadId ??
                               activeMessage?.messageId ??
                               activeMessage?.id;
+                            const folderIds =
+                              searchScope === "all" ||
+                              (includeThreadAcrossFolders &&
+                                message.folderId !== activeFolderId)
+                                ? [message.folderId]
+                                : [];
                             return (
                               <div
                                 key={message.id}
@@ -5748,6 +5894,7 @@ export default function MailClient() {
                               >
                                 <div className="message-card-header">
                                   <span className="message-select">
+                                    {renderSelectIndicators(message)}
                                     <input
                                       type="checkbox"
                                       checked={selectedMessageIds.has(message.id)}
@@ -5789,21 +5936,7 @@ export default function MailClient() {
                                 </div>
                                 <div className="message-preview">{message.preview}</div>
                                 <div className="message-meta">
-                                    {(searchScope === "all" ||
-                                      (includeThreadAcrossFolders &&
-                                        message.folderId !== activeFolderId)) && (
-                                      <button
-                                        className="folder-badge"
-                                        title={threadPathById(message.folderId)}
-                                      onClick={(event) => {
-                                        event.stopPropagation();
-                                        setSearchScope("folder");
-                                        setActiveFolderId(message.folderId);
-                                      }}
-                                    >
-                                      {folderNameById(message.folderId)}
-                                    </button>
-                                  )}
+                                  {renderFolderBadges(folderIds)}
                                 </div>
                               </div>
                             );
@@ -5836,7 +5969,7 @@ export default function MailClient() {
 
         <section className="message-view-pane">
           <div className="message-view-toolbar">
-            <button className="icon-button" onClick={() => setShowJson(true)}>
+            <button className="icon-button small" onClick={() => setShowJson(true)}>
               Show JSON
             </button>
           </div>
@@ -5900,14 +6033,70 @@ export default function MailClient() {
                       <div className="compose-grid-row">
                         <span className="label">To:</span>
                         <div className="compose-row">
+                        <div className="compose-input-wrap">
                           <input
                             value={composeTo}
                             onChange={(event) => {
                               composeDirtyRef.current = true;
                               setComposeTo(event.target.value);
+                              setRecipientQuery(getComposeToken(event.target.value));
+                            }}
+                            onFocus={() => {
+                              setRecipientFocus("to");
+                              setRecipientQuery(getComposeToken(composeTo));
+                            }}
+                            onBlur={() => {
+                              setTimeout(() => {
+                                setRecipientFocus((current) =>
+                                  current === "to" ? null : current
+                                );
+                              }, 150);
+                            }}
+                            onKeyDown={(event) => {
+                              if (!recipientOptions.length) return;
+                              if (event.key === "ArrowDown") {
+                                event.preventDefault();
+                                setRecipientActiveIndex((prev) =>
+                                  Math.min(prev + 1, recipientOptions.length - 1)
+                                );
+                              }
+                              if (event.key === "ArrowUp") {
+                                event.preventDefault();
+                                setRecipientActiveIndex((prev) => Math.max(prev - 1, 0));
+                              }
+                              if (event.key === "Enter" && recipientFocus === "to") {
+                                event.preventDefault();
+                                const pick = recipientOptions[recipientActiveIndex];
+                                if (pick) {
+                                  applyRecipientSelection(composeTo, pick, setComposeTo);
+                                }
+                              }
                             }}
                             placeholder="recipient@example.com"
                           />
+                          {recipientFocus === "to" && recipientOptions.length > 0 && (
+                            <div className="compose-suggestions">
+                              {recipientOptions.map((option, index) => (
+                                <button
+                                  key={`${option}-${index}`}
+                                  type="button"
+                                  className={`compose-suggestion ${
+                                    index === recipientActiveIndex ? "active" : ""
+                                  }`}
+                                  onMouseDown={(event) => {
+                                    event.preventDefault();
+                                    applyRecipientSelection(composeTo, option, setComposeTo);
+                                  }}
+                                >
+                                  {option}
+                                </button>
+                              ))}
+                              {recipientLoading && (
+                                <span className="compose-suggestion muted">Loading…</span>
+                              )}
+                            </div>
+                          )}
+                        </div>
                           <button
                             type="button"
                             className="icon-button small"
@@ -5928,6 +6117,7 @@ export default function MailClient() {
                               setComposeCc(event.target.value);
                             }}
                             placeholder="cc@example.com"
+                            list="recipient-options"
                           />
                         </div>
                       )}
@@ -5941,6 +6131,7 @@ export default function MailClient() {
                               setComposeBcc(event.target.value);
                             }}
                             placeholder="bcc@example.com"
+                            list="recipient-options"
                           />
                         </div>
                       )}
@@ -6039,6 +6230,7 @@ export default function MailClient() {
                               key={`${badge.kind}-${badge.label}`}
                               className={`thread-badge flag ${badge.kind}`}
                             >
+                              {badge.kind === "pinned" && <Pin size={12} />}
                               {badge.label}
                             </span>
                           ))}
@@ -6110,10 +6302,38 @@ export default function MailClient() {
                         <span className="thread-card-subject-text">{message.subject}</span>
                       </button>
                       <div className="thread-card-line">
-                        <span className="label">From:</span> {message.from}
+                        <span className="label">From:</span>
+                        <span className="thread-card-value">{message.from}</span>
+                        {getPrimaryEmail(message.from) && (
+                          <button
+                            className="icon-button ghost small copy-email"
+                            title="Copy email"
+                            aria-label="Copy email"
+                            onClick={() =>
+                              navigator.clipboard.writeText(getPrimaryEmail(message.from))
+                            }
+                          >
+                            <Copy size={12} />
+                          </button>
+                        )}
                       </div>
                       <div className="thread-card-line">
-                        <span className="label">To:</span> {message.to}
+                        <span className="label">To:</span>
+                        <span className="thread-card-value">{message.to}</span>
+                        {extractEmails(message.to).length > 0 && (
+                          <button
+                            className="icon-button ghost small copy-email"
+                            title="Copy emails"
+                            aria-label="Copy emails"
+                            onClick={() =>
+                              navigator.clipboard.writeText(
+                                extractEmails(message.to).join(", ")
+                              )
+                            }
+                          >
+                            <Copy size={12} />
+                          </button>
+                        )}
                       </div>
                       <div className="thread-card-line">
                         <span className="label">Date:</span> {message.date}
@@ -6196,57 +6416,58 @@ export default function MailClient() {
                             </button>
                             {(messageTabs[message.id] ?? "html") !== "source" && (
                               <div className="message-zoom">
-                                <button
-                                  className="icon-button small"
-                                  title="Decrease text size"
-                                  aria-label="Decrease text size"
-                                  onClick={() =>
-                                    setMessageFontScale((prev) => {
-                                      const current = prev[message.id] ?? 1;
-                                      const next = Math.max(
-                                        0.8,
-                                        Number((current - 0.1).toFixed(2))
-                                      );
-                                      return { ...prev, [message.id]: next };
-                                    })
-                                  }
-                                >
-                                  A-
-                                </button>
-                                <button
-                                  className="icon-button small"
-                                  title="Reset text size"
-                                  aria-label="Reset text size"
-                                  onClick={() =>
-                                    setMessageFontScale((prev) => {
-                                      if (!(message.id in prev)) return prev;
-                                      const { [message.id]: _omit, ...rest } = prev;
-                                      return rest;
-                                    })
-                                  }
-                                >
-                                  A
-                                </button>
-                                <button
-                                  className="icon-button small"
-                                  title="Increase text size"
-                                  aria-label="Increase text size"
-                                  onClick={() =>
-                                    setMessageFontScale((prev) => {
-                                      const current = prev[message.id] ?? 1;
-                                      const next = Math.min(
-                                        1.6,
-                                        Number((current + 0.1).toFixed(2))
-                                      );
-                                      return { ...prev, [message.id]: next };
-                                    })
-                                  }
-                                >
-                                  A+
-                                </button>
+                                <div className="button-group">
+                                  <button
+                                    className="icon-button small"
+                                    title="Decrease text size"
+                                    aria-label="Decrease text size"
+                                    onClick={() =>
+                                      setMessageFontScale((prev) => {
+                                        const current = prev[message.id] ?? 1;
+                                        const next = Math.max(
+                                          0.8,
+                                          Number((current - 0.1).toFixed(2))
+                                        );
+                                        return { ...prev, [message.id]: next };
+                                      })
+                                    }
+                                  >
+                                    A-
+                                  </button>
+                                  <button
+                                    className="icon-button small"
+                                    title="Reset text size"
+                                    aria-label="Reset text size"
+                                    onClick={() =>
+                                      setMessageFontScale((prev) => {
+                                        if (!(message.id in prev)) return prev;
+                                        const { [message.id]: _omit, ...rest } = prev;
+                                        return rest;
+                                      })
+                                    }
+                                  >
+                                    A
+                                  </button>
+                                  <button
+                                    className="icon-button small"
+                                    title="Increase text size"
+                                    aria-label="Increase text size"
+                                    onClick={() =>
+                                      setMessageFontScale((prev) => {
+                                        const current = prev[message.id] ?? 1;
+                                        const next = Math.min(
+                                          1.6,
+                                          Number((current + 0.1).toFixed(2))
+                                        );
+                                        return { ...prev, [message.id]: next };
+                                      })
+                                    }
+                                  >
+                                    A+
+                                  </button>
+                                </div>
                                 {(messageTabs[message.id] ?? "html") === "html" && (
-                                  <>
-                                    <span className="zoom-divider" />
+                                  <div className="button-group">
                                     <button
                                       className="icon-button small"
                                       title="Zoom out"
@@ -6271,7 +6492,7 @@ export default function MailClient() {
                                     >
                                       <ZoomIn size={12} />
                                     </button>
-                                  </>
+                                  </div>
                                 )}
                               </div>
                             )}
@@ -6327,57 +6548,58 @@ export default function MailClient() {
                               </button>
                               {(messageTabs[message.id] ?? "html") !== "source" && (
                                 <div className="message-zoom">
-                                  <button
-                                    className="icon-button small"
-                                    title="Decrease text size"
-                                    aria-label="Decrease text size"
-                                    onClick={() =>
-                                      setMessageFontScale((prev) => {
-                                        const current = prev[message.id] ?? 1;
-                                        const next = Math.max(
-                                          0.8,
-                                          Number((current - 0.1).toFixed(2))
-                                        );
-                                        return { ...prev, [message.id]: next };
-                                      })
-                                    }
-                                  >
-                                    A-
-                                  </button>
-                                  <button
-                                    className="icon-button small"
-                                    title="Reset text size"
-                                    aria-label="Reset text size"
-                                    onClick={() =>
-                                      setMessageFontScale((prev) => {
-                                        if (!(message.id in prev)) return prev;
-                                        const { [message.id]: _omit, ...rest } = prev;
-                                        return rest;
-                                      })
-                                    }
-                                  >
-                                    A
-                                  </button>
-                                  <button
-                                    className="icon-button small"
-                                    title="Increase text size"
-                                    aria-label="Increase text size"
-                                    onClick={() =>
-                                      setMessageFontScale((prev) => {
-                                        const current = prev[message.id] ?? 1;
-                                        const next = Math.min(
-                                          1.6,
-                                          Number((current + 0.1).toFixed(2))
-                                        );
-                                        return { ...prev, [message.id]: next };
-                                      })
-                                    }
-                                  >
-                                    A+
-                                  </button>
+                                  <div className="button-group">
+                                    <button
+                                      className="icon-button small"
+                                      title="Decrease text size"
+                                      aria-label="Decrease text size"
+                                      onClick={() =>
+                                        setMessageFontScale((prev) => {
+                                          const current = prev[message.id] ?? 1;
+                                          const next = Math.max(
+                                            0.8,
+                                            Number((current - 0.1).toFixed(2))
+                                          );
+                                          return { ...prev, [message.id]: next };
+                                        })
+                                      }
+                                    >
+                                      A-
+                                    </button>
+                                    <button
+                                      className="icon-button small"
+                                      title="Reset text size"
+                                      aria-label="Reset text size"
+                                      onClick={() =>
+                                        setMessageFontScale((prev) => {
+                                          if (!(message.id in prev)) return prev;
+                                          const { [message.id]: _omit, ...rest } = prev;
+                                          return rest;
+                                        })
+                                      }
+                                    >
+                                      A
+                                    </button>
+                                    <button
+                                      className="icon-button small"
+                                      title="Increase text size"
+                                      aria-label="Increase text size"
+                                      onClick={() =>
+                                        setMessageFontScale((prev) => {
+                                          const current = prev[message.id] ?? 1;
+                                          const next = Math.min(
+                                            1.6,
+                                            Number((current + 0.1).toFixed(2))
+                                          );
+                                          return { ...prev, [message.id]: next };
+                                        })
+                                      }
+                                    >
+                                      A+
+                                    </button>
+                                  </div>
                                   {(messageTabs[message.id] ?? "html") === "html" && (
-                                    <>
-                                      <span className="zoom-divider" />
+                                    <div className="button-group">
                                       <button
                                         className="icon-button small"
                                         title="Zoom out"
@@ -6402,7 +6624,7 @@ export default function MailClient() {
                                       >
                                         <ZoomIn size={12} />
                                       </button>
-                                    </>
+                                    </div>
                                   )}
                                 </div>
                               )}
@@ -6940,14 +7162,70 @@ export default function MailClient() {
                     <div className="compose-grid-row">
                       <span className="label">To:</span>
                       <div className="compose-row">
-                        <input
-                          value={composeTo}
-                          onChange={(event) => {
-                            composeDirtyRef.current = true;
-                            setComposeTo(event.target.value);
-                          }}
-                          placeholder="recipient@example.com"
-                        />
+                        <div className="compose-input-wrap">
+                          <input
+                            value={composeTo}
+                            onChange={(event) => {
+                              composeDirtyRef.current = true;
+                              setComposeTo(event.target.value);
+                              setRecipientQuery(getComposeToken(event.target.value));
+                            }}
+                            onFocus={() => {
+                              setRecipientFocus("to");
+                              setRecipientQuery(getComposeToken(composeTo));
+                            }}
+                            onBlur={() => {
+                              setTimeout(() => {
+                                setRecipientFocus((current) =>
+                                  current === "to" ? null : current
+                                );
+                              }, 150);
+                            }}
+                            onKeyDown={(event) => {
+                              if (!recipientOptions.length) return;
+                              if (event.key === "ArrowDown") {
+                                event.preventDefault();
+                                setRecipientActiveIndex((prev) =>
+                                  Math.min(prev + 1, recipientOptions.length - 1)
+                                );
+                              }
+                              if (event.key === "ArrowUp") {
+                                event.preventDefault();
+                                setRecipientActiveIndex((prev) => Math.max(prev - 1, 0));
+                              }
+                              if (event.key === "Enter" && recipientFocus === "to") {
+                                event.preventDefault();
+                                const pick = recipientOptions[recipientActiveIndex];
+                                if (pick) {
+                                  applyRecipientSelection(composeTo, pick, setComposeTo);
+                                }
+                              }
+                            }}
+                            placeholder="recipient@example.com"
+                          />
+                          {recipientFocus === "to" && recipientOptions.length > 0 && (
+                            <div className="compose-suggestions">
+                              {recipientOptions.map((option, index) => (
+                                <button
+                                  key={`${option}-${index}`}
+                                  type="button"
+                                  className={`compose-suggestion ${
+                                    index === recipientActiveIndex ? "active" : ""
+                                  }`}
+                                  onMouseDown={(event) => {
+                                    event.preventDefault();
+                                    applyRecipientSelection(composeTo, option, setComposeTo);
+                                  }}
+                                >
+                                  {option}
+                                </button>
+                              ))}
+                              {recipientLoading && (
+                                <span className="compose-suggestion muted">Loading…</span>
+                              )}
+                            </div>
+                          )}
+                        </div>
                         <button
                           type="button"
                           className="icon-button small"
@@ -6961,27 +7239,139 @@ export default function MailClient() {
                     {composeShowBcc && (
                       <div className="compose-grid-row">
                         <span className="label">Cc:</span>
-                        <input
-                          value={composeCc}
-                          onChange={(event) => {
-                            composeDirtyRef.current = true;
-                            setComposeCc(event.target.value);
-                          }}
-                          placeholder="cc@example.com"
-                        />
+                        <div className="compose-input-wrap">
+                          <input
+                            value={composeCc}
+                            onChange={(event) => {
+                              composeDirtyRef.current = true;
+                              setComposeCc(event.target.value);
+                              setRecipientQuery(getComposeToken(event.target.value));
+                            }}
+                            onFocus={() => {
+                              setRecipientFocus("cc");
+                              setRecipientQuery(getComposeToken(composeCc));
+                            }}
+                            onBlur={() => {
+                              setTimeout(() => {
+                                setRecipientFocus((current) =>
+                                  current === "cc" ? null : current
+                                );
+                              }, 150);
+                            }}
+                            onKeyDown={(event) => {
+                              if (!recipientOptions.length) return;
+                              if (event.key === "ArrowDown") {
+                                event.preventDefault();
+                                setRecipientActiveIndex((prev) =>
+                                  Math.min(prev + 1, recipientOptions.length - 1)
+                                );
+                              }
+                              if (event.key === "ArrowUp") {
+                                event.preventDefault();
+                                setRecipientActiveIndex((prev) => Math.max(prev - 1, 0));
+                              }
+                              if (event.key === "Enter" && recipientFocus === "cc") {
+                                event.preventDefault();
+                                const pick = recipientOptions[recipientActiveIndex];
+                                if (pick) {
+                                  applyRecipientSelection(composeCc, pick, setComposeCc);
+                                }
+                              }
+                            }}
+                            placeholder="cc@example.com"
+                          />
+                          {recipientFocus === "cc" && recipientOptions.length > 0 && (
+                            <div className="compose-suggestions">
+                              {recipientOptions.map((option, index) => (
+                                <button
+                                  key={`${option}-${index}`}
+                                  type="button"
+                                  className={`compose-suggestion ${
+                                    index === recipientActiveIndex ? "active" : ""
+                                  }`}
+                                  onMouseDown={(event) => {
+                                    event.preventDefault();
+                                    applyRecipientSelection(composeCc, option, setComposeCc);
+                                  }}
+                                >
+                                  {option}
+                                </button>
+                              ))}
+                              {recipientLoading && (
+                                <span className="compose-suggestion muted">Loading…</span>
+                              )}
+                            </div>
+                          )}
+                        </div>
                       </div>
                     )}
                     {composeShowBcc && (
                       <div className="compose-grid-row">
                         <span className="label">Bcc:</span>
-                        <input
-                          value={composeBcc}
-                          onChange={(event) => {
-                            composeDirtyRef.current = true;
-                            setComposeBcc(event.target.value);
-                          }}
-                          placeholder="bcc@example.com"
-                        />
+                        <div className="compose-input-wrap">
+                          <input
+                            value={composeBcc}
+                            onChange={(event) => {
+                              composeDirtyRef.current = true;
+                              setComposeBcc(event.target.value);
+                              setRecipientQuery(getComposeToken(event.target.value));
+                            }}
+                            onFocus={() => {
+                              setRecipientFocus("bcc");
+                              setRecipientQuery(getComposeToken(composeBcc));
+                            }}
+                            onBlur={() => {
+                              setTimeout(() => {
+                                setRecipientFocus((current) =>
+                                  current === "bcc" ? null : current
+                                );
+                              }, 150);
+                            }}
+                            onKeyDown={(event) => {
+                              if (!recipientOptions.length) return;
+                              if (event.key === "ArrowDown") {
+                                event.preventDefault();
+                                setRecipientActiveIndex((prev) =>
+                                  Math.min(prev + 1, recipientOptions.length - 1)
+                                );
+                              }
+                              if (event.key === "ArrowUp") {
+                                event.preventDefault();
+                                setRecipientActiveIndex((prev) => Math.max(prev - 1, 0));
+                              }
+                              if (event.key === "Enter" && recipientFocus === "bcc") {
+                                event.preventDefault();
+                                const pick = recipientOptions[recipientActiveIndex];
+                                if (pick) {
+                                  applyRecipientSelection(composeBcc, pick, setComposeBcc);
+                                }
+                              }
+                            }}
+                            placeholder="bcc@example.com"
+                          />
+                          {recipientFocus === "bcc" && recipientOptions.length > 0 && (
+                            <div className="compose-suggestions">
+                              {recipientOptions.map((option, index) => (
+                                <button
+                                  key={`${option}-${index}`}
+                                  type="button"
+                                  className={`compose-suggestion ${
+                                    index === recipientActiveIndex ? "active" : ""
+                                  }`}
+                                  onMouseDown={(event) => {
+                                    event.preventDefault();
+                                    applyRecipientSelection(composeBcc, option, setComposeBcc);
+                                  }}
+                                >
+                                  {option}
+                                </button>
+                              ))}
+                              {recipientLoading && (
+                                <span className="compose-suggestion muted">Loading…</span>
+                              )}
+                            </div>
+                          )}
+                        </div>
                       </div>
                     )}
                     <div className="compose-grid-row">

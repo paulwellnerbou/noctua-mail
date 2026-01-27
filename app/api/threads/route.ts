@@ -32,6 +32,7 @@ export async function GET(request: Request) {
     items: data.items,
     groups: data.groups,
     total: data.total,
+    baseCount: data.baseCount,
     hasMore: data.hasMore
   });
 }

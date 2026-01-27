@@ -681,6 +681,9 @@ function applyBadgeFilters(where: string, args: any[], badges?: string[] | null)
   if (normalized.includes("unread")) {
     where += " AND m.unread = 1";
   }
+  if (normalized.includes("flagged")) {
+    where += " AND m.flagged = 1";
+  }
   if (normalized.includes("todo")) {
     where += " AND m.flags IS NOT NULL AND lower(m.flags) LIKE ?";
     args.push('%"to-do"%');
@@ -1629,6 +1632,84 @@ export async function deleteMessagesByFolderPrefix(accountId: string, folderPref
     `${prefix}%`
   );
   await recomputeThreadsForAccount(accountId);
+}
+
+export async function listRecipientSuggestions(
+  accountId: string,
+  limit = 200,
+  query?: string | null
+) {
+  const db = await getDb();
+  const rows = db
+    .prepare(
+      `SELECT toAddr, ccAddr, bccAddr
+       FROM messages
+       WHERE accountId = ?
+       ORDER BY dateValue DESC
+       LIMIT 2000`
+    )
+    .all(accountId) as Array<{
+      toAddr?: string | null;
+      ccAddr?: string | null;
+      bccAddr?: string | null;
+    }>;
+  const counts = new Map<string, number>();
+  const names = new Map<string, string>();
+  const normalizeName = (name: string) =>
+    name.replace(/^"|"$/g, "").replace(/\s+/g, " ").trim();
+  const addAddress = (emailRaw: string, nameRaw?: string) => {
+    const email = emailRaw.trim().toLowerCase();
+    if (!email) return;
+    counts.set(email, (counts.get(email) ?? 0) + 1);
+    if (nameRaw) {
+      const cleaned = normalizeName(nameRaw);
+      if (cleaned && !names.get(email)) {
+        names.set(email, cleaned);
+      }
+    }
+  };
+  const addEmails = (value?: string | null) => {
+    if (!value) return;
+    const seen = new Set<string>();
+    const pattern = /(?:"?([^"<]*)"?\s*)?<([^>]+)>/g;
+    let match = pattern.exec(value);
+    while (match) {
+      const name = match[1];
+      const email = match[2];
+      if (email) {
+        const key = email.trim().toLowerCase();
+        if (!seen.has(key)) {
+          seen.add(key);
+          addAddress(email, name);
+        }
+      }
+      match = pattern.exec(value);
+    }
+    const standalone = value.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi) ?? [];
+    standalone.forEach((entry) => {
+      const key = entry.trim().toLowerCase();
+      if (seen.has(key)) return;
+      seen.add(key);
+      addAddress(entry);
+    });
+  };
+  rows.forEach((row) => {
+    addEmails(row.toAddr);
+    addEmails(row.ccAddr);
+    addEmails(row.bccAddr);
+  });
+  const normalizedQuery = query?.trim().toLowerCase() ?? "";
+  return [...counts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([email]) => {
+      const name = names.get(email);
+      return name ? `${name} <${email}>` : email;
+    })
+    .filter((value) => {
+      if (!normalizedQuery) return true;
+      return value.toLowerCase().includes(normalizedQuery);
+    })
+    .slice(0, limit);
 }
 
 export async function updateMessagesFolderPrefix(

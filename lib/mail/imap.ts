@@ -129,7 +129,7 @@ async function parseImapMessage(
   };
   const subject = parsed.subject ?? "(no subject)";
   const from = parsed.from?.text ?? account.email;
-  const to = parsed.to?.text ?? account.email;
+  const to = parsed.to?.text ?? "";
   const cc = parsed.cc?.text ?? "";
   const bcc = parsed.bcc?.text ?? "";
   const body = parsed.text ?? "";

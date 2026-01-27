@@ -1,3 +1,4 @@
+import type React from "react";
 import { groupQuoteBlocks, parseQuotedLines } from "@/lib/quote";
 
 export default function QuoteRenderer({ body }: { body: string }) {
@@ -36,15 +37,27 @@ export default function QuoteRenderer({ body }: { body: string }) {
           );
         }
 
-        const levelClass = block.level >= 3 ? "quote-level-3" : block.level === 2 ? "quote-level-2" : "";
-
-        return (
-          <div key={index} className={`quote-block ${levelClass}`}>
+        const content = (
+          <div key={`content-${index}`}>
             {block.lines.map((line, lineIndex) =>
               renderLine(line, `${index}-${lineIndex}`)
             )}
           </div>
         );
+        const wrapped = Array.from({ length: block.level }).reduceRight(
+          (child, _, depthIndex) => {
+            const level = block.level - depthIndex;
+            const levelClass =
+              level >= 3 ? "quote-level-3" : level === 2 ? "quote-level-2" : "";
+            return (
+              <div key={`quote-${index}-${level}`} className={`quote-block ${levelClass}`}>
+                {child}
+              </div>
+            );
+          },
+          content as React.ReactNode
+        );
+        return <div key={`block-${index}`}>{wrapped}</div>;
       })}
     </div>
   );

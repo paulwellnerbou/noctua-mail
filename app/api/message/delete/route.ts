@@ -1,5 +1,13 @@
 import { NextResponse } from "next/server";
-import { getAccounts, getAttachmentIds, getFolders, getMessageById, updateMessageFolder, deleteMessageById } from "@/lib/db";
+import {
+  getAccounts,
+  getAttachmentIds,
+  getFolders,
+  getMessageById,
+  updateMessageFolder,
+  updateMessageFlags,
+  deleteMessageById
+} from "@/lib/db";
 import { deleteMessageFiles } from "@/lib/storage";
 import { deleteImapMessage, moveImapMessage } from "@/lib/mail/imap";
 import type { Folder } from "@/lib/data";
@@ -85,6 +93,14 @@ export async function POST(request: Request) {
   await moveImapMessage(account, currentMailbox, message.imapUid, trashMailbox);
   if (trashFolder) {
     await updateMessageFolder(payload.accountId, message.id, trashFolder.id, trashMailbox);
+  }
+  if (message.flags && message.flags.length > 0) {
+    const cleaned = message.flags.filter(
+      (flag) => flag.toLowerCase() !== "\\recent"
+    );
+    if (cleaned.length !== message.flags.length) {
+      await updateMessageFlags(payload.accountId, message.id, cleaned);
+    }
   }
   return NextResponse.json({
     ok: true,

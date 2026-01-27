@@ -17,6 +17,7 @@ const body = Sora({
 export const metadata: Metadata = {
   title: "Noctua Mail",
   description: "Modern webmail client prototype",
+  manifest: "/manifest.webmanifest",
   icons: {
     icon: [
       { url: "/icon.png", type: "image/png", sizes: "512x512" },
