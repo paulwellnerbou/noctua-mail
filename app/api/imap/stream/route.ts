@@ -3,6 +3,7 @@ import tls from "tls";
 
 import { getAccounts, getFolders, getMailboxState, saveMailboxState } from "@/lib/db";
 import { getImapLogger, logImapOp } from "@/lib/mail/imapLogger";
+import { registerStream } from "@/lib/mail/imapStreamRegistry";
 
 type EnvelopeAddress = { name?: string | null; mailbox?: string | null; host?: string | null };
 type Envelope = { subject?: string | null; from?: EnvelopeAddress[] | null; date?: Date | null; messageId?: string | null };
@@ -78,6 +79,13 @@ export async function GET(request: Request) {
       };
 
       const sessions = new Map<string, Session>(); // key: folderId
+      const removedFolderIds = new Set<string>();
+      const unregister = registerStream(accountId, {
+        removeFolder: async (folderId: string) => {
+          removedFolderIds.add(folderId);
+          await closeSession(folderId);
+        }
+      });
 
       const stopAll = async () => {
         for (const item of sessions.values()) {
@@ -90,6 +98,7 @@ export async function GET(request: Request) {
           }
         }
         controller.close();
+        unregister();
       };
 
       request.signal.addEventListener("abort", () => {
@@ -127,6 +136,7 @@ export async function GET(request: Request) {
 
       const openWatcher = async (folderId: string | undefined | null, markUsed = true) => {
         if (!folderId) return;
+        if (removedFolderIds.has(folderId)) return;
         const folder = folders.find((f) => f.id === folderId);
         if (!folder) return;
         if (sessions.has(folder.id)) {
@@ -311,10 +321,12 @@ export async function GET(request: Request) {
         }
 
         // Polling loop for remaining folders
-        const pollFolders = async () => {
-          const watchIds = new Set(Array.from(sessions.keys()));
-          const toPoll = folders.filter((f) => !watchIds.has(f.id));
-          if (toPoll.length === 0) return;
+          const pollFolders = async () => {
+            const watchIds = new Set(Array.from(sessions.keys()));
+            const toPoll = folders.filter(
+              (f) => !watchIds.has(f.id) && !removedFolderIds.has(f.id)
+            );
+            if (toPoll.length === 0) return;
 
           const pollClient = new ImapFlow({
             host: account.imap.host,

@@ -6,38 +6,42 @@ const TIMEOUT_MS = 3500;
 
 async function probeImplicitTLS(host: string, port: number) {
   return new Promise<boolean>((resolve) => {
+    let finished = false;
+    const done = (result: boolean) => {
+      if (finished) return;
+      finished = true;
+      socket.destroy();
+      resolve(result);
+    };
     const socket = tls.connect(
       {
         host,
         port,
         servername: host,
-        rejectUnauthorized: false,
-        timeout: TIMEOUT_MS
+        rejectUnauthorized: false
       },
-      () => {
-        socket.end();
-        resolve(true);
-      }
+      () => done(true)
     );
-    socket.on("error", () => resolve(false));
-    socket.on("timeout", () => {
-      socket.destroy();
-      resolve(false);
-    });
+    socket.setTimeout(TIMEOUT_MS, () => done(false));
+    socket.on("error", () => done(false));
+    socket.on("end", () => done(finished ? finished : false));
   });
 }
 
 async function probeImapStartTLS(host: string, port: number) {
   return new Promise<boolean>((resolve) => {
+    let finished = false;
+    const done = (result: boolean) => {
+      if (finished) return;
+      finished = true;
+      socket.end();
+      resolve(result);
+    };
     const socket = net.connect({ host, port }, () => {
       socket.write("a1 CAPABILITY\r\n");
     });
     socket.setTimeout(TIMEOUT_MS);
     let data = "";
-    const done = (result: boolean) => {
-      socket.end();
-      resolve(result);
-    };
     socket.on("data", (chunk) => {
       data += chunk.toString();
       if (data.includes("CAPABILITY")) {
@@ -46,20 +50,24 @@ async function probeImapStartTLS(host: string, port: number) {
     });
     socket.on("timeout", () => done(false));
     socket.on("error", () => done(false));
+    socket.on("end", () => done(finished ? finished : false));
   });
 }
 
 async function probeSmtpStartTLS(host: string, port: number) {
   return new Promise<boolean>((resolve) => {
+    let finished = false;
+    const done = (result: boolean) => {
+      if (finished) return;
+      finished = true;
+      socket.end();
+      resolve(result);
+    };
     const socket = net.connect({ host, port }, () => {
       socket.write("EHLO noctua.local\r\n");
     });
     socket.setTimeout(TIMEOUT_MS);
     let data = "";
-    const done = (result: boolean) => {
-      socket.end();
-      resolve(result);
-    };
     socket.on("data", (chunk) => {
       data += chunk.toString();
       if (data.includes("\r\n")) {
@@ -73,6 +81,7 @@ async function probeSmtpStartTLS(host: string, port: number) {
     });
     socket.on("timeout", () => done(false));
     socket.on("error", () => done(false));
+    socket.on("end", () => done(finished ? finished : false));
   });
 }
 

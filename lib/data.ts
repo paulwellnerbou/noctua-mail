@@ -28,6 +28,15 @@ export type AccountSettings = {
   threading?: {
     includeAcrossFolders?: boolean;
   };
+  layout?: {
+    defaultView?: "card" | "table";
+  };
+  signatures?: {
+    id: string;
+    name: string;
+    body: string;
+  }[];
+  defaultSignatureId?: string;
 };
 
 export type MailboxState = {

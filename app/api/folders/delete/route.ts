@@ -7,6 +7,7 @@ import {
   updateMessagesFolderPrefix
 } from "@/lib/db";
 import { deleteImapFolder, listImapFolders, renameImapFolder } from "@/lib/mail/imap";
+import { notifyFolderDeleted } from "@/lib/mail/imapStreamRegistry";
 import type { Folder } from "@/lib/data";
 
 const TRASH_NAMES = [
@@ -50,6 +51,7 @@ function findTrashFolder(folders: Folder[], accountId: string) {
 }
 
 export async function POST(request: Request) {
+  const startedAt = Date.now();
   const payload = (await request.json()) as { accountId: string; folderId: string };
   const accounts = await getAccounts();
   const account = accounts.find((item) => item.id === payload.accountId);
@@ -77,23 +79,49 @@ export async function POST(request: Request) {
     mailboxPath.startsWith(`${trashMailbox}${delimiter}`);
 
   if (isInTrash) {
+    const t0 = Date.now();
     await deleteImapFolder(account, mailboxPath);
+    console.info(`[imap] delete folder mailbox=${mailboxPath} ${Date.now() - t0}ms`);
+    await notifyFolderDeleted(payload.accountId, folder.id);
+    const t1 = Date.now();
     await deleteMessagesByFolderPrefix(payload.accountId, mailboxPath);
+    console.info(
+      `[db] delete messages folderPrefix=${mailboxPath} ${Date.now() - t1}ms`
+    );
+    const t2 = Date.now();
     const updated = await listImapFolders(account);
+    console.info(`[imap] list folders ${Date.now() - t2}ms`);
+    const t3 = Date.now();
     const existing = await getFolders();
     const next = [...existing.filter((item) => item.accountId !== account.id), ...updated];
     await saveFolders(next);
+    console.info(`[db] save folders ${Date.now() - t3}ms`);
+    console.info(`[folders] delete finished in ${Date.now() - startedAt}ms`);
     return NextResponse.json({ ok: true, action: "deleted", folders: updated });
   }
 
   const parts = mailboxPath.split(delimiter);
   const leafName = parts[parts.length - 1] || folder.name;
   const newPath = `${trashMailbox}${delimiter}${leafName}`;
+  const t0 = Date.now();
   await renameImapFolder(account, mailboxPath, newPath);
+  console.info(
+    `[imap] move folder mailbox=${mailboxPath} newMailbox=${newPath} ${Date.now() - t0}ms`
+  );
+  await notifyFolderDeleted(payload.accountId, folder.id);
+  const t1 = Date.now();
   await updateMessagesFolderPrefix(payload.accountId, mailboxPath, newPath);
+  console.info(
+    `[db] update messages folderPrefix=${mailboxPath} -> ${newPath} ${Date.now() - t1}ms`
+  );
+  const t2 = Date.now();
   const updated = await listImapFolders(account);
+  console.info(`[imap] list folders ${Date.now() - t2}ms`);
+  const t3 = Date.now();
   const existing = await getFolders();
   const next = [...existing.filter((item) => item.accountId !== account.id), ...updated];
   await saveFolders(next);
+  console.info(`[db] save folders ${Date.now() - t3}ms`);
+  console.info(`[folders] move finished in ${Date.now() - startedAt}ms`);
   return NextResponse.json({ ok: true, action: "moved", folders: updated });
 }

@@ -69,6 +69,7 @@ function initSchema(db: any) {
       threadId TEXT NOT NULL,
       messageId TEXT,
       inReplyTo TEXT,
+      "references" TEXT,
       subject TEXT NOT NULL,
       fromAddr TEXT NOT NULL,
       fromEmail TEXT,
@@ -145,7 +146,7 @@ function initSchema(db: any) {
         (row) => row.name
       );
       if (!columns.includes(column)) {
-        db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
+        db.exec(`ALTER TABLE ${table} ADD COLUMN "${column}" ${type}`);
       }
     } catch {
       // ignore
@@ -154,6 +155,7 @@ function initSchema(db: any) {
 
   ensureColumn("messages", "ccAddr", "TEXT");
   ensureColumn("messages", "bccAddr", "TEXT");
+  ensureColumn("messages", "references", "TEXT");
   ensureColumn("messages", "mailboxPath", "TEXT");
   ensureColumn("messages", "imapUid", "INTEGER");
   ensureColumn("messages", "flags", "TEXT");
@@ -332,6 +334,14 @@ function normalizeAccountSettings(settings?: AccountSettings) {
   if (next.threading.includeAcrossFolders === undefined) {
     next.threading.includeAcrossFolders = true;
   }
+  if (!next.layout) next.layout = {};
+  if (!next.layout.defaultView) {
+    next.layout.defaultView = "card";
+  }
+  if (!next.signatures) next.signatures = [];
+  if (next.defaultSignatureId === undefined) {
+    next.defaultSignatureId = "";
+  }
   return next;
 }
 
@@ -474,7 +484,7 @@ export async function recomputeThreadIdsForAccount(accountId: string) {
   const db = await getDb();
   const rows = db
     .prepare(
-      `SELECT id, messageId, inReplyTo, threadId
+      `SELECT id, messageId, inReplyTo, "references", threadId
        FROM messages
        WHERE accountId = ?`
     )
@@ -482,6 +492,7 @@ export async function recomputeThreadIdsForAccount(accountId: string) {
     id: string;
     messageId: string | null;
     inReplyTo: string | null;
+    references: string | null;
     threadId: string;
   }>;
   if (rows.length === 0) return;
@@ -499,11 +510,18 @@ export async function recomputeThreadIdsForAccount(accountId: string) {
     }
     stack.add(msg.id);
     let resolved: string | undefined;
-    if (msg.inReplyTo && byMessageId.has(msg.inReplyTo)) {
+    const refs = parseReferences(msg.references) ?? [];
+    const firstKnownRef = refs.find((ref) => byMessageId.has(ref));
+    if (firstKnownRef) {
+      const parent = byMessageId.get(firstKnownRef)!;
+      resolved = resolveThreadId(parent, stack);
+    } else if (msg.inReplyTo && byMessageId.has(msg.inReplyTo)) {
       const parent = byMessageId.get(msg.inReplyTo)!;
       resolved = resolveThreadId(parent, stack);
     } else if (msg.inReplyTo) {
       resolved = msg.inReplyTo;
+    } else if (refs.length > 0) {
+      resolved = refs[0];
     } else if (msg.messageId) {
       resolved = msg.messageId;
     } else if (msg.threadId) {
@@ -674,6 +692,20 @@ function parseSearchInput(raw: string | null | undefined, fields?: string[] | nu
     return orParts.length > 1 ? `(${orParts.join(" OR ")})` : orParts[0];
   });
   return { ftsQuery: scoped.join(" AND "), fromTerms };
+}
+
+function parseReferences(value?: string | null) {
+  if (!value) return undefined;
+  try {
+    const parsed = JSON.parse(value);
+    if (Array.isArray(parsed)) {
+      return parsed.map(String).filter(Boolean);
+    }
+  } catch {
+    const parts = value.split(/\s+/).filter(Boolean);
+    return parts.length > 0 ? parts : undefined;
+  }
+  return undefined;
 }
 
 function applyBadgeFilters(where: string, args: any[], badges?: string[] | null) {
@@ -998,6 +1030,7 @@ export async function listMessages(params: {
       threadId: row.threadId,
       messageId: row.messageId ?? undefined,
       inReplyTo: row.inReplyTo ?? undefined,
+      references: parseReferences(row.references),
       subject: row.subject,
       from: row.fromAddr,
       to: row.toAddr,
@@ -1189,6 +1222,7 @@ export async function listThreads(params: {
       threadId: row.threadId,
       messageId: row.messageId ?? undefined,
       inReplyTo: row.inReplyTo ?? undefined,
+      references: parseReferences(row.references),
       subject: row.subject,
       from: row.fromAddr,
       to: row.toAddr,
@@ -1232,22 +1266,35 @@ export async function listThreads(params: {
 export async function listThreadMessages(params: {
   accountId: string;
   threadIds: string[];
+  messageIds?: string[];
   groupBy?: string;
 }) {
-  const { accountId, threadIds, groupBy = "date" } = params;
-  if (threadIds.length === 0) {
+  const { accountId, threadIds, messageIds = [], groupBy = "date" } = params;
+  const uniqueThreads = Array.from(new Set(threadIds.filter(Boolean)));
+  const uniqueMessages = Array.from(new Set(messageIds.filter(Boolean)));
+  if (uniqueThreads.length === 0 && uniqueMessages.length === 0) {
     return { items: [] as Message[] };
   }
   const db = await getDb();
+  const clauses: string[] = [];
+  const args: any[] = [accountId];
+  if (uniqueThreads.length > 0) {
+    clauses.push(`m.threadId IN (${uniqueThreads.map(() => "?").join(",")})`);
+    args.push(...uniqueThreads);
+  }
+  if (uniqueMessages.length > 0) {
+    clauses.push(`m.id IN (${uniqueMessages.map(() => "?").join(",")})`);
+    args.push(...uniqueMessages);
+  }
   const rows = db
     .prepare(
       `
-      SELECT m.*
+      SELECT DISTINCT m.*
       FROM messages m
-      WHERE m.accountId = ? AND m.threadId IN (${threadIds.map(() => "?").join(",")})
+      WHERE m.accountId = ? AND (${clauses.join(" OR ")})
     `
     )
-    .all(accountId, ...threadIds) as any[];
+    .all(...args) as any[];
 
   const ids = rows.map((row) => row.id);
   const attachmentRows =
@@ -1284,6 +1331,7 @@ export async function listThreadMessages(params: {
       threadId: row.threadId,
       messageId: row.messageId ?? undefined,
       inReplyTo: row.inReplyTo ?? undefined,
+      references: parseReferences(row.references),
       subject: row.subject,
       from: row.fromAddr,
       to: row.toAddr,
@@ -1367,10 +1415,10 @@ export async function upsertMessages(
 
   const insertMessage = db.prepare(`
     INSERT OR REPLACE INTO messages (
-      id, accountId, folderId, threadId, messageId, inReplyTo,
+      id, accountId, folderId, threadId, messageId, inReplyTo, "references",
       subject, fromAddr, fromEmail, toAddr, ccAddr, bccAddr, mailboxPath, imapUid, preview, date, dateValue,
       body, htmlBody, priority, hasSource, unread, flags, seen, answered, flagged, deleted, draft, recent
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   const insertFts = db.prepare(`
     INSERT INTO message_fts (messageId, subject, fromAddr, toAddr, ccAddr, bccAddr, body, preview)
@@ -1398,6 +1446,7 @@ export async function upsertMessages(
         message.threadId,
         message.messageId ?? null,
         message.inReplyTo ?? null,
+        message.references ? JSON.stringify(message.references) : null,
         message.subject,
         message.from,
         fromEmail,
@@ -1478,6 +1527,7 @@ export async function getMessageById(accountId: string, messageId: string) {
     threadId: row.threadId,
     messageId: row.messageId ?? undefined,
     inReplyTo: row.inReplyTo ?? undefined,
+    references: parseReferences(row.references),
     subject: row.subject,
     from: row.fromAddr,
     to: row.toAddr,
@@ -1621,6 +1671,17 @@ export async function updateMessageFlags(
 export async function deleteMessagesByFolderPrefix(accountId: string, folderPrefix: string) {
   const db = await getDb();
   const prefix = `${accountId}:${folderPrefix}`;
+  const threadRows = db
+    .prepare(
+      `SELECT DISTINCT threadId
+       FROM messages
+       WHERE accountId = ? AND folderId LIKE ? AND threadId IS NOT NULL`
+    )
+    .all(accountId, `${prefix}%`) as Array<{ threadId: string }>;
+  if (threadRows.length === 0) {
+    return;
+  }
+  const threadIds = threadRows.map((row) => row.threadId).filter(Boolean);
   db.prepare(
     `DELETE FROM attachments WHERE messageId IN (SELECT id FROM messages WHERE accountId = ? AND folderId LIKE ?)`
   ).run(accountId, `${prefix}%`);
@@ -1631,7 +1692,9 @@ export async function deleteMessagesByFolderPrefix(accountId: string, folderPref
     accountId,
     `${prefix}%`
   );
-  await recomputeThreadsForAccount(accountId);
+  if (threadIds.length > 0) {
+    await recomputeThreadsForAccount(accountId, threadIds);
+  }
 }
 
 export async function listRecipientSuggestions(

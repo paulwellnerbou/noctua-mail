@@ -4,6 +4,7 @@ import Image from "next/image";
 
 import type React from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import TurndownService from "turndown";
 import {
   Check,
   ChevronsDown,
@@ -46,9 +47,10 @@ import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
 import ComposeEditor from "./ComposeEditor";
 import HtmlMessage from "./HtmlMessage";
-import type { Account, Folder, Message } from "@/lib/data";
+import type { Account, AccountSettings, Folder, Message } from "@/lib/data";
 import { accounts as seedAccounts, folders as seedFolders, messages as seedMessages } from "@/lib/data";
 import QuoteRenderer from "./QuoteRenderer";
+import AccountSettingsModal from "./AccountSettingsModal";
 import AttachmentsList from "./AttachmentsList";
 
 function getThreadMessages(items: Message[], threadId: string, accountId: string) {
@@ -66,6 +68,7 @@ function SourcePanel({
 }) {
   const [source, setSource] = useState("");
   const [status, setStatus] = useState<"idle" | "loading" | "loaded" | "error">("idle");
+  const [copyOk, setCopyOk] = useState(false);
   useEffect(() => {
     let active = true;
     setStatus("loading");
@@ -85,13 +88,32 @@ function SourcePanel({
     };
   }, [messageId, fetchSource]);
   return (
-    <pre className="source-view">
-      {status === "loading"
-        ? "Loading source…"
-        : status === "error"
-          ? "Failed to load source."
-          : scrubSource(source)}
-    </pre>
+    <div className="source-block">
+      <pre className="source-view">
+        {status === "loading"
+          ? "Loading source…"
+          : status === "error"
+            ? "Failed to load source."
+            : scrubSource(source)}
+      </pre>
+      <button
+        className={`json-copy ${copyOk ? "ok" : ""}`}
+        onClick={async () => {
+          if (!source) return;
+          try {
+            await navigator.clipboard.writeText(source);
+            setCopyOk(true);
+            setTimeout(() => setCopyOk(false), 1200);
+          } catch {
+            // ignore
+          }
+        }}
+        aria-label="Copy source"
+        title="Copy source"
+      >
+        {copyOk ? <Check size={14} /> : <Copy size={14} />}
+      </button>
+    </div>
   );
 }
 
@@ -180,6 +202,9 @@ export default function MailClient() {
   const [folderHeaderMenuOpen, setFolderHeaderMenuOpen] = useState(false);
   const [darkMode, setDarkMode] = useState(false);
   const [manageOpen, setManageOpen] = useState(false);
+  const [manageTab, setManageTab] = useState<"account" | "signatures" | "preferences">(
+    "account"
+  );
   const [editingAccount, setEditingAccount] = useState<Account | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
   const [isRecomputingThreads, setIsRecomputingThreads] = useState(false);
@@ -222,6 +247,7 @@ export default function MailClient() {
   const [showJson, setShowJson] = useState(false);
   const [omitBody, setOmitBody] = useState(true);
   const [copyOk, setCopyOk] = useState(false);
+  const [copyStatus, setCopyStatus] = useState<Record<string, boolean>>({});
   const [collapsedMessages, setCollapsedMessages] = useState<Record<string, boolean>>({});
   const [messageFontScale, setMessageFontScale] = useState<Record<string, number>>({});
   const [openMessageMenuId, setOpenMessageMenuId] = useState<string | null>(null);
@@ -252,6 +278,9 @@ export default function MailClient() {
   const [composeHtml, setComposeHtml] = useState("");
   const [composeHtmlText, setComposeHtmlText] = useState("");
   const [composeOpenedAt, setComposeOpenedAt] = useState("");
+  const [composeSignatureId, setComposeSignatureId] = useState<string>("");
+  const [signatureMenuOpen, setSignatureMenuOpen] = useState(false);
+  const composeSignatureRef = useRef<{ id: string; text: string; html: string } | null>(null);
   const [composeReplyMessage, setComposeReplyMessage] = useState<Message | null>(null);
   const [composeTab, setComposeTab] = useState<"text" | "html">("html");
   const [composeShowBcc, setComposeShowBcc] = useState(false);
@@ -268,6 +297,7 @@ export default function MailClient() {
   const [composeAttachments, setComposeAttachments] = useState<Attachment[]>([]);
   const [composeDragActive, setComposeDragActive] = useState(false);
   const [composeEditorReset, setComposeEditorReset] = useState(0);
+  const signatureMenuRef = useRef<HTMLDivElement | null>(null);
   const [composeQuotedParts, setComposeQuotedParts] = useState<{
     styles: string;
     headerHtml: string;
@@ -347,6 +377,7 @@ export default function MailClient() {
   const searchBadgesRef = useRef<HTMLDivElement | null>(null);
   const [openFolderMenuId, setOpenFolderMenuId] = useState<string | null>(null);
   const folderMenuRef = useRef<HTMLDivElement | null>(null);
+  const [deletingFolderIds, setDeletingFolderIds] = useState<Set<string>>(new Set());
   const messageMenuRef = useRef<HTMLDivElement | null>(null);
   const streamSourceRef = useRef<EventSource | null>(null);
   const pollTimerRef = useRef<number | null>(null);
@@ -790,13 +821,7 @@ export default function MailClient() {
     const folder = folders.find((item) => item.id === folderId);
     if (!folder) return false;
     const special = (folder.specialUse ?? "").toLowerCase();
-    if (special === "\\drafts") return true;
-    const name = folder.name.toLowerCase();
-    return (
-      ["drafts", "draft", "entwürfe", "entwuerfe", "entwurf", "brouillons", "borradores"].includes(
-        name
-      ) || name.includes("draft")
-    );
+    return special === "\\drafts";
   };
 
   const isTrashFolder = (folderId?: string | null) => {
@@ -804,8 +829,7 @@ export default function MailClient() {
     const folder = folders.find((item) => item.id === folderId);
     if (!folder) return false;
     const special = (folder.specialUse ?? "").toLowerCase();
-    if (special === "\\trash") return true;
-    return ["trash", "deleted", "bin", "papierkorb"].includes(folder.name.toLowerCase());
+    return special === "\\trash";
   };
 
   const isSpamFolder = (folderId?: string | null) => {
@@ -813,9 +837,22 @@ export default function MailClient() {
     const folder = folders.find((item) => item.id === folderId);
     if (!folder) return false;
     const special = (folder.specialUse ?? "").toLowerCase();
-    if (special === "\\junk" || special === "\\spam") return true;
-    return ["junk", "spam", "spam mail", "junk mail"].includes(folder.name.toLowerCase());
+    return special === "\\junk" || special === "\\spam";
   };
+
+  const isSentFolder = (folderId?: string | null) => {
+    if (!folderId) return false;
+    const folder = folders.find((item) => item.id === folderId);
+    if (!folder) return false;
+    const special = (folder.specialUse ?? "").toLowerCase();
+    return special === "\\sent";
+  };
+
+  const isNotificationSuppressedFolder = (folderId?: string | null) =>
+    isDraftsFolder(folderId) ||
+    isTrashFolder(folderId) ||
+    isSpamFolder(folderId) ||
+    isSentFolder(folderId);
 
   const isThreadExcludedFolder = (folderId?: string | null) =>
     Boolean(folderId && (isTrashFolder(folderId) || isSpamFolder(folderId)));
@@ -842,6 +879,22 @@ export default function MailClient() {
     return matches ? matches.map((entry) => entry.trim()) : [];
   };
   const getPrimaryEmail = (value: string) => extractEmails(value)[0] ?? "";
+  const getAccountFromValue = (account?: Account | null) => {
+    if (!account?.email) return "";
+    const name = (account.name ?? "").trim();
+    return name ? `${name} <${account.email}>` : account.email;
+  };
+  const getDisplayRecipient = (value: string) => {
+    if (!value) return "";
+    const match = value.match(/(.+)<([^>]+)>/);
+    if (match) {
+      const name = match[1].trim().replace(/^"|"$/g, "").trim();
+      const email = match[2].trim();
+      return name ? `${name} <${email}>` : email;
+    }
+    const email = getPrimaryEmail(value);
+    return email || value.trim();
+  };
   const getComposeToken = (value: string) => {
     const parts = value.split(/[;,]/);
     return parts[parts.length - 1]?.trim() ?? "";
@@ -859,10 +912,32 @@ export default function MailClient() {
     setRecipientFocus(null);
   };
 
+  const triggerCopy = async (key: string, value: string) => {
+    try {
+      await navigator.clipboard.writeText(value);
+      setCopyStatus((prev) => ({ ...prev, [key]: true }));
+      window.setTimeout(() => {
+        setCopyStatus((prev) => ({ ...prev, [key]: false }));
+      }, 1200);
+    } catch {
+      // ignore
+    }
+  };
+
   const uniqueEmails = (entries: string[]) => {
     const seen = new Set<string>();
     return entries.filter((entry) => {
       const key = entry.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  };
+  const uniqueRecipients = (entries: string[]) => {
+    const seen = new Set<string>();
+    return entries.filter((entry) => {
+      const email = getPrimaryEmail(entry) || entry;
+      const key = email.toLowerCase();
       if (seen.has(key)) return false;
       seen.add(key);
       return true;
@@ -1034,12 +1109,69 @@ export default function MailClient() {
     event.target.value = "";
   };
 
+  const getSignatureBlocks = (body: string) => {
+    const text = body.trim();
+    if (!text) return { text: "", html: "" };
+    return {
+      text,
+      html: `<p>${escapeHtml(text).replace(/\n/g, "<br>")}</p>`
+    };
+  };
+
+  const applySignatureToCompose = (signature: { id: string; body: string } | null) => {
+    const next = signature ? getSignatureBlocks(signature.body) : { text: "", html: "" };
+    const previous = composeSignatureRef.current;
+    if (composeTab === "text") {
+      setComposeBody((prev) => {
+        let base = prev;
+        if (previous?.text && base.trimEnd().endsWith(previous.text)) {
+          base = base.trimEnd().slice(0, -previous.text.length).trimEnd();
+        }
+        if (!signature || !next.text) {
+          return base;
+        }
+        const glue = base ? "\n\n" : "";
+        return `${base}${glue}${next.text}`;
+      });
+    } else {
+      setComposeHtml((prev) => {
+        let base = prev;
+        if (previous?.html && base.trimEnd().endsWith(previous.html)) {
+          base = base.trimEnd().slice(0, -previous.html.length).trimEnd();
+        }
+        if (!signature || !next.html) {
+          return base;
+        }
+        return `${base}${next.html}`;
+      });
+      setComposeHtmlText((prev) => {
+        let base = prev;
+        if (previous?.text && base.trimEnd().endsWith(previous.text)) {
+          base = base.trimEnd().slice(0, -previous.text.length).trimEnd();
+        }
+        if (!signature || !next.text) {
+          return base;
+        }
+        const glue = base ? "\n\n" : "";
+        return `${base}${glue}${next.text}`;
+      });
+      setComposeEditorReset((prev) => prev + 1);
+    }
+    composeDirtyRef.current = true;
+    composeSignatureRef.current = signature
+      ? { id: signature.id, text: next.text, html: next.html }
+      : null;
+  };
+
   const buildComposePayload = () => {
     let html: string | undefined;
     if (composeTab === "html") {
       const baseHtml = composeHtml.trim();
       const quoted = composeIncludeOriginal ? composeQuotedHtml.trim() : "";
-      html = baseHtml || quoted ? `${baseHtml}${quoted}` : undefined;
+      html =
+        baseHtml || quoted
+          ? `${baseHtml}${quoted}`
+          : undefined;
       if (composeStripImages && html) {
         html = html.replace(/<img[\s\S]*?>/gi, "");
       }
@@ -1053,13 +1185,22 @@ export default function MailClient() {
         html = html?.split(attachment.dataUrl).join(`cid:${attachment.cid}`);
       });
     }
-    const textFallback =
-      `${composeBody}${composeIncludeOriginal ? composeQuotedText : ""}`.trim() ||
-      (composeTab === "html"
-        ? `${composeHtmlText}${composeIncludeOriginal ? stripHtml(composeQuotedHtml) : ""}`.trim()
-        : "") ||
-      (composeTab === "html" ? stripHtml(composeHtml) : "");
-    return { text: textFallback, html, attachments: composeAttachments };
+    if (composeTab === "html") {
+      let textFromHtml = "";
+      if (html) {
+        try {
+          textFromHtml = turndownService.turndown(html);
+        } catch {
+          textFromHtml = stripHtml(html);
+        }
+      }
+      return { text: textFromHtml, html, attachments: composeAttachments };
+    }
+    let textBody = composeBody.trim();
+    if (composeIncludeOriginal && composeQuotedText) {
+      textBody = `${textBody}${textBody ? "\n\n" : ""}${composeQuotedText}`.trim();
+    }
+    return { text: textBody, html: undefined, attachments: composeAttachments };
   };
 
   useEffect(() => {
@@ -1091,111 +1232,76 @@ export default function MailClient() {
   };
 
   const stripHtml = (value: string) =>
-    value.replace(/<style[\s\S]*?<\/style>/gi, " ")
+    value
+      .replace(/<style[\s\S]*?<\/style>/gi, " ")
       .replace(/<script[\s\S]*?<\/script>/gi, " ")
-      .replace(/<br\s*\/?>/gi, "\n")
-      .replace(/<\/p>/gi, "\n")
+      .replace(/<a\s+[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi, (_, href, text) => {
+        const label = stripHtml(text || "").trim();
+        if (!label) return href;
+        return label === href ? label : `${label} (${href})`;
+      })
+      .replace(/<(br|hr)\s*\/?>/gi, "\n")
+      .replace(/<\/(p|div|section|article|header|footer|blockquote|pre|table|tr|h[1-6])>/gi, "\n")
+      .replace(/<li[^>]*>/gi, "\n- ")
+      .replace(/<\/li>/gi, "\n")
       .replace(/<[^>]+>/g, " ")
-      .replace(/\s+/g, " ")
+      .replace(/\r\n/g, "\n")
+      .replace(/[ \t]+\n/g, "\n")
+      .replace(/\n{3,}/g, "\n\n")
+      .replace(/[ \t]{2,}/g, " ")
       .trim();
+
+  const turndownService = useMemo(() => new TurndownService(), []);
 
   type ThreadNode = { message: Message; children: ThreadNode[]; threadSize: number };
 
   const buildThreadTree = (items: Message[]) => {
-    const nodes = new Map<string, ThreadNode>();
-    const roots: ThreadNode[] = [];
-    const threadBuckets = new Map<string, Message[]>();
-    const byMessageId = new Map<string, Message>();
-
+    const buckets = new Map<string, Message[]>();
     items.forEach((message) => {
-      nodes.set(message.id, { message, children: [], threadSize: 1 });
-      const bucketKey = message.threadId ?? message.id;
-      if (!threadBuckets.has(bucketKey)) threadBuckets.set(bucketKey, []);
-      threadBuckets.get(bucketKey)!.push(message);
-      if (message.messageId && !byMessageId.has(message.messageId)) {
-        byMessageId.set(message.messageId, message);
-      }
+      const key = message.threadId ?? message.id;
+      if (!buckets.has(key)) buckets.set(key, []);
+      buckets.get(key)!.push(message);
     });
-
-    items.forEach((message) => {
-      const node = nodes.get(message.id);
-      if (!node) return;
-      const parentKey = message.inReplyTo;
-      if (parentKey) {
-        const parent = byMessageId.get(parentKey);
-        if (parent && parent.id !== message.id && nodes.has(parent.id)) {
-          nodes.get(parent.id)!.children.push(node);
-          return;
-        }
-      }
-      roots.push(node);
-    });
-
+    const allRoots: ThreadNode[] = [];
     const sortNodes = (list: ThreadNode[]) => {
       list.sort((a, b) => a.message.dateValue - b.message.dateValue);
       list.forEach((child) => sortNodes(child.children));
     };
-
-    // Group by shared inReplyTo when the parent message is outside the current items.
-    const missingParentGroups = new Map<string, ThreadNode[]>();
-    roots.forEach((root) => {
-      const parentKey = root.message.inReplyTo;
-      if (parentKey && !byMessageId.has(parentKey)) {
-        if (!missingParentGroups.has(parentKey)) missingParentGroups.set(parentKey, []);
-        missingParentGroups.get(parentKey)!.push(root);
-      }
-    });
-    roots.forEach((root) => {
-      if (root.message.inReplyTo) return;
-      const refs = root.message.references ?? [];
-      if (refs.length === 0) return;
-      const lastRef = refs[refs.length - 1];
-      if (!lastRef || byMessageId.has(lastRef)) return;
-      if (!missingParentGroups.has(lastRef)) missingParentGroups.set(lastRef, []);
-      missingParentGroups.get(lastRef)!.push(root);
-    });
-    const groupedIds = new Set<string>();
-    const groupedRoots: ThreadNode[] = [];
-    missingParentGroups.forEach((group) => {
-      if (group.length <= 1) return;
-      group.sort((a, b) => a.message.dateValue - b.message.dateValue);
-      const root = group[0];
-      const children = group.slice(1);
-      root.children.push(...children);
-      groupedRoots.push(root);
-      group.forEach((node) => groupedIds.add(node.message.id));
-    });
-    const adjustedRoots = roots.filter((root) => !groupedIds.has(root.message.id));
-    const baseRoots = adjustedRoots.concat(groupedRoots);
-    sortNodes(baseRoots);
-
-    // Fallback for missing inReplyTo/messageId: group by threadId and make the earliest message the root.
-    const threaded = new Map<string, ThreadNode>();
-    baseRoots.forEach((root) => {
-      const key = root.message.threadId ?? root.message.id;
-      const bucket = threadBuckets.get(key);
-      if (!bucket || bucket.length <= 1) {
-        root.threadSize = bucket?.length ?? 1;
-        threaded.set(root.message.id, root);
-        return;
-      }
+    buckets.forEach((bucket) => {
+      const nodes = new Map<string, ThreadNode>();
+      const byMessageId = new Map<string, Message>();
+      bucket.forEach((message) => {
+        nodes.set(message.id, { message, children: [], threadSize: bucket.length });
+        if (message.messageId) byMessageId.set(message.messageId, message);
+      });
+      const roots: ThreadNode[] = [];
+      bucket.forEach((message) => {
+        const node = nodes.get(message.id);
+        if (!node) return;
+        const parentKey = message.inReplyTo;
+        if (parentKey && byMessageId.has(parentKey)) {
+          const parent = byMessageId.get(parentKey)!;
+          if (parent.id !== message.id) {
+            nodes.get(parent.id)!.children.push(node);
+            return;
+          }
+        }
+        roots.push(node);
+      });
       const hasLinks = bucket.some(
-        (msg) => msg.inReplyTo && bucket.some((parent) => parent.messageId === msg.inReplyTo)
+        (msg) => msg.inReplyTo && byMessageId.has(msg.inReplyTo)
       );
-      if (hasLinks) {
-        root.threadSize = bucket.length;
-        threaded.set(root.message.id, root);
-        return;
+      if (!hasLinks && roots.length > 1) {
+        const sorted = [...roots].sort((a, b) => a.message.dateValue - b.message.dateValue);
+        const root = sorted[0];
+        root.children = sorted.slice(1);
+        roots.length = 0;
+        roots.push(root);
       }
-      const sorted = [...bucket].sort((a, b) => a.dateValue - b.dateValue);
-      const rootNode = nodes.get(sorted[0].id);
-      if (!rootNode) return;
-      rootNode.children = sorted.slice(1).map((msg) => nodes.get(msg.id)!).filter(Boolean);
-      rootNode.threadSize = sorted.length;
-      threaded.set(rootNode.message.id, rootNode);
+      sortNodes(roots);
+      roots.forEach((root) => allRoots.push(root));
     });
-
-    return Array.from(threaded.values());
+    return allRoots;
   };
 
   const getThreadLatestDate = (node: ThreadNode) => {
@@ -1220,8 +1326,18 @@ export default function MailClient() {
   };
 
   const currentAccount = accounts.find((account) => account.id === activeAccountId) ?? null;
+  const accountSignatures = currentAccount?.settings?.signatures ?? [];
+  const defaultSignatureId = currentAccount?.settings?.defaultSignatureId ?? "";
+  const selectedSignature =
+    accountSignatures.find((signature) => signature.id === composeSignatureId) ?? null;
   const includeThreadAcrossFolders =
     currentAccount?.settings?.threading?.includeAcrossFolders ?? true;
+  useEffect(() => {
+    const preferred = currentAccount?.settings?.layout?.defaultView;
+    if (preferred === "card" || preferred === "table") {
+      setMessageView(preferred);
+    }
+  }, [currentAccount?.settings?.layout?.defaultView]);
   const includeThreadAcrossFoldersForList =
     includeThreadAcrossFolders &&
     !isDraftsFolder(activeFolderId) &&
@@ -1251,39 +1367,13 @@ export default function MailClient() {
     const baseMessages = [...sortedMessages, ...threadRelatedMessages].filter(
       (message) => !isThreadExcludedFolder(message.folderId)
     );
-    const accountMessages = baseMessages;
-    const threadIds = new Set<string>();
-    const messageIds = new Set<string>();
-    const selected: Message[] = [];
     const seen = new Set<string>();
-
-    const addMessage = (message: Message) => {
-      if (seen.has(message.id)) return false;
+    const selected: Message[] = [];
+    baseMessages.forEach((message) => {
+      if (seen.has(message.id)) return;
       seen.add(message.id);
       selected.push(message);
-      if (message.threadId) threadIds.add(message.threadId);
-      if (message.messageId) messageIds.add(message.messageId);
-      return true;
-    };
-
-    baseMessages.forEach(addMessage);
-
-    let changed = true;
-    while (changed) {
-      changed = false;
-      accountMessages.forEach((message) => {
-        if (seen.has(message.id)) return;
-        const inThread = message.threadId && threadIds.has(message.threadId);
-        const replyToKnown =
-          (message.inReplyTo && messageIds.has(message.inReplyTo)) ||
-          (message.references &&
-            message.references.some((ref) => messageIds.has(ref)));
-        if (inThread || replyToKnown) {
-          if (addMessage(message)) changed = true;
-        }
-      });
-    }
-
+    });
     return selected;
   }, [includeThreadAcrossFoldersForList, threadRelatedMessages, sortedMessages]);
 
@@ -1402,11 +1492,38 @@ export default function MailClient() {
     const activeThreadId =
       activeMessage.threadId ?? activeMessage.messageId ?? activeMessage.id;
     const fullThread = activeThreadId ? threadContentById[activeThreadId] : undefined;
+    let localFlat: Message[] = [];
+    const findRoot = (nodes: ThreadNode[], currentRoot: ThreadNode | null = null) => {
+      for (const node of nodes) {
+        const nextRoot = currentRoot ?? node;
+        if (node.message.id === activeMessage.id) {
+          return nextRoot;
+        }
+        const childRoot = findRoot(node.children, nextRoot);
+        if (childRoot) return childRoot;
+      }
+      return null;
+    };
+    const localRoot = findRoot(threadForest, null);
+    if (localRoot) {
+      localFlat = flattenThread(localRoot).map((item) => item.message);
+    }
+    const mergeThreadItems = (primary: Message[], secondary: Message[]) => {
+      if (primary.length === 0) return secondary;
+      if (secondary.length === 0) return primary;
+      const map = new Map<string, Message>();
+      primary.forEach((item) => map.set(item.id, item));
+      secondary.forEach((item) => {
+        if (!map.has(item.id)) map.set(item.id, item);
+      });
+      return Array.from(map.values());
+    };
     if (fullThread && fullThread.length > 0) {
       const filteredFull = fullThread.filter(
         (item) => !isThreadExcludedFolder(item.folderId)
       );
-      const fullForest = buildThreadTree(filteredFull);
+      const merged = mergeThreadItems(filteredFull, localFlat);
+      const fullForest = buildThreadTree(merged);
       let fullRoot: ThreadNode | null = null;
       const findFullRoot = (nodes: ThreadNode[], currentRoot: ThreadNode | null = null) => {
         for (const node of nodes) {
@@ -1423,23 +1540,27 @@ export default function MailClient() {
       if (fullRoot) {
         return flattenThread(fullRoot).map((item) => item.message);
       }
-      return filteredFull;
+      return merged;
     }
-    let root: ThreadNode | null = null;
-    const findRoot = (nodes: ThreadNode[], currentRoot: ThreadNode | null = null) => {
-      for (const node of nodes) {
-        const nextRoot = currentRoot ?? node;
-        if (node.message.id === activeMessage.id) {
-          root = nextRoot;
-          return true;
+    if (localFlat.length > 0) {
+      const localForest = buildThreadTree(localFlat);
+      let localRoot: ThreadNode | null = null;
+      const findLocalRoot = (nodes: ThreadNode[], currentRoot: ThreadNode | null = null) => {
+        for (const node of nodes) {
+          const nextRoot = currentRoot ?? node;
+          if (node.message.id === activeMessage.id) {
+            localRoot = nextRoot;
+            return true;
+          }
+          if (findLocalRoot(node.children, nextRoot)) return true;
         }
-        if (findRoot(node.children, nextRoot)) return true;
+        return false;
+      };
+      findLocalRoot(localForest, null);
+      if (localRoot) {
+        return flattenThread(localRoot).map((item) => item.message);
       }
-      return false;
-    };
-    findRoot(threadForest, null);
-    if (root) {
-      return flattenThread(root).map((item) => item.message);
+      return localFlat;
     }
     // fallback to threadId match
     return getThreadMessages(threadScopeMessages, activeMessage.threadId, activeAccountId).filter(
@@ -1462,6 +1583,8 @@ export default function MailClient() {
     setComposeOpenedAt(new Date().toLocaleString());
     setComposeReplyMessage(null);
     setComposeReplyHeaders(null);
+    setComposeSignatureId(defaultSignatureId ?? "");
+    composeSignatureRef.current = null;
     if (mode === "edit" && message && !asNew) {
       setComposeDraftId(message.id);
       setComposeReplyHeaders({
@@ -1496,6 +1619,7 @@ export default function MailClient() {
 
     const accountEmail = currentAccount?.email ?? "";
     const fromEmails = extractEmails(message.from);
+    const fromRecipient = getDisplayRecipient(message.from);
     const toEmails = extractEmails(message.to);
     const ccEmails = extractEmails(message.cc ?? "");
     const bccEmails = extractEmails(message.bcc ?? "");
@@ -1520,7 +1644,9 @@ export default function MailClient() {
       setComposeStripImages(stripImages);
       setComposeIncludeOriginal(true);
       setComposeQuoteHtml(true);
-      setComposeTo(uniqueEmails(fromEmails).join(", "));
+      setComposeTo(
+        fromRecipient ? fromRecipient : uniqueEmails(fromEmails).join(", ")
+      );
       setComposeCc("");
       setComposeBcc("");
       setComposeSubject(prefixSubject("Re", message.subject));
@@ -1566,7 +1692,9 @@ export default function MailClient() {
       setComposeStripImages(stripImages);
       setComposeIncludeOriginal(true);
       setComposeQuoteHtml(true);
-      const toList = uniqueEmails(fromEmails);
+      const toList = uniqueRecipients(
+        fromRecipient ? [fromRecipient] : fromEmails
+      );
       const ccList = uniqueEmails(
         [...toEmails, ...ccEmails, ...bccEmails].filter(
           (email) => email.toLowerCase() !== accountEmail.toLowerCase()
@@ -1890,6 +2018,51 @@ export default function MailClient() {
           </button>
         </div>
         <div className="compose-attach">
+          <div className="compose-signature" ref={signatureMenuRef}>
+            <button
+              type="button"
+              className="icon-button small"
+              title="Choose signature"
+              onClick={() => setSignatureMenuOpen((open) => !open)}
+            >
+              {selectedSignature ? selectedSignature.name : "Signature"}
+            </button>
+            {signatureMenuOpen && (
+              <div className="compose-signature-menu">
+                <button
+                  type="button"
+                  className={`compose-suggestion ${
+                    !composeSignatureId ? "active" : ""
+                  }`}
+                  onMouseDown={(event) => {
+                    event.preventDefault();
+                    setComposeSignatureId("");
+                    applySignatureToCompose(null);
+                    setSignatureMenuOpen(false);
+                  }}
+                >
+                  No signature
+                </button>
+                {accountSignatures.map((signature) => (
+                  <button
+                    key={signature.id}
+                    type="button"
+                    className={`compose-suggestion ${
+                      composeSignatureId === signature.id ? "active" : ""
+                    }`}
+                    onMouseDown={(event) => {
+                      event.preventDefault();
+                      setComposeSignatureId(signature.id);
+                      applySignatureToCompose(signature);
+                      setSignatureMenuOpen(false);
+                    }}
+                  >
+                    {signature.name}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
           <button
             type="button"
             className="icon-button small"
@@ -1951,7 +2124,7 @@ export default function MailClient() {
       {composeTab === "html" && (
         <div className="compose-writing html">
           <ComposeEditor
-            initialHtml={composeQuotedHtml ? "" : composeHtml}
+            initialHtml={composeHtml}
             resetKey={composeEditorReset}
             onInlineImage={handleInlineImage}
             onChange={(nextHtml, nextText) => {
@@ -2054,8 +2227,17 @@ export default function MailClient() {
                 replyMessageId
               ]
             : undefined;
+          const replyFromValue = getAccountFromValue(currentAccount);
           const replyToHeader =
-            composeMode === "reply" || composeMode === "replyAll" ? currentAccount?.email ?? "" : "";
+            composeMode === "reply" || composeMode === "replyAll"
+              ? replyFromValue
+              : "";
+          const normalizedReplyTo =
+            replyToHeader &&
+            replyFromValue &&
+            replyToHeader.trim().toLowerCase() === replyFromValue.trim().toLowerCase()
+              ? ""
+              : replyToHeader;
           const res = await fetch("/api/smtp", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -2072,7 +2254,7 @@ export default function MailClient() {
                 composeMode === "reply" || composeMode === "replyAll" ? replyMessageId : undefined,
               references:
                 composeMode === "reply" || composeMode === "replyAll" ? replyReferences : undefined,
-              replyTo: replyToHeader,
+              replyTo: normalizedReplyTo,
               xForwardedMessageId: composeMode === "forward" ? composeReplyMessage?.messageId : undefined
             })
           });
@@ -2124,7 +2306,11 @@ export default function MailClient() {
     }
   };
 
-  const handleDeleteMessage = async (message: Message) => {
+  const handleDeleteMessage = async (
+    message: Message,
+    options?: { allowThreadDeletion?: boolean }
+  ) => {
+    const allowThreadDeletion = options?.allowThreadDeletion ?? true;
     const deleteSingle = async (target: Message) => {
       const res = await fetch("/api/message/delete", {
         method: "POST",
@@ -2166,10 +2352,42 @@ export default function MailClient() {
         )
       : [];
     const isCollapsedThread =
+      allowThreadDeletion &&
       supportsThreads &&
       collapsedThreads[threadId] &&
       threadItems.length > 1;
     const targets = isCollapsedThread ? threadItems : [message];
+    const targetIds = new Set(targets.map((item) => item.id));
+    const activeWasDeleted = activeMessageId && targetIds.has(activeMessageId);
+    let nextActiveId = activeWasDeleted
+      ? (() => {
+          const indices = visibleMessages
+            .map((item, index) => (targetIds.has(item.message.id) ? index : -1))
+            .filter((idx) => idx >= 0);
+          if (indices.length === 0) return "";
+          const maxIndex = Math.max(...indices);
+          const minIndex = Math.min(...indices);
+          for (let i = maxIndex + 1; i < visibleMessages.length; i += 1) {
+            const candidate = visibleMessages[i]?.message?.id;
+            if (candidate && !targetIds.has(candidate)) return candidate;
+          }
+          for (let i = minIndex - 1; i >= 0; i -= 1) {
+            const candidate = visibleMessages[i]?.message?.id;
+            if (candidate && !targetIds.has(candidate)) return candidate;
+          }
+          return "";
+        })()
+      : "";
+    if (activeWasDeleted && !nextActiveId) {
+      const threadRoot = visibleMessages.find((item) => item.threadId === threadId)?.message.id;
+      if (threadRoot && !targetIds.has(threadRoot)) {
+        nextActiveId = threadRoot;
+      }
+    }
+    if (activeWasDeleted && !nextActiveId) {
+      const fallback = sortedMessages.find((msg) => !targetIds.has(msg.id));
+      if (fallback) nextActiveId = fallback.id;
+    }
     if (isCollapsedThread) {
       const confirmed = window.confirm("Delete entire thread?");
       if (!confirmed) return;
@@ -2178,6 +2396,15 @@ export default function MailClient() {
       setPendingMessageActions((prev) => new Set([...prev, ...targets.map((t) => t.id)]));
       for (const target of targets) {
         await deleteSingle(target);
+      }
+      if (activeWasDeleted) {
+        if (nextActiveId) {
+          setActiveMessageId(nextActiveId);
+          setSelectedMessageIds(new Set([nextActiveId]));
+        } else {
+          setActiveMessageId("");
+          setSelectedMessageIds(new Set());
+        }
       }
       await refreshFolders();
     } catch {
@@ -2255,7 +2482,12 @@ export default function MailClient() {
 
   const isDraftItem = (message: Message) => isDraftMessage(message) || message.draft;
 
-  const renderQuickActions = (message: Message, iconSize = 12) => {
+  const renderQuickActions = (
+    message: Message,
+    iconSize = 12,
+    origin: "list" | "thread" | "table" = "list"
+  ) => {
+    const allowThreadDeletion = origin !== "thread";
     if (isDraftItem(message)) {
       return (
         <>
@@ -2280,7 +2512,7 @@ export default function MailClient() {
             disabled={pendingMessageActions.has(message.id)}
             onClick={(event) => {
               event.stopPropagation();
-              handleDeleteMessage(message);
+              handleDeleteMessage(message, { allowThreadDeletion });
             }}
           >
             <Trash2 size={iconSize} />
@@ -2347,7 +2579,7 @@ export default function MailClient() {
           disabled={pendingMessageActions.has(message.id)}
           onClick={(event) => {
             event.stopPropagation();
-            handleDeleteMessage(message);
+            handleDeleteMessage(message, { allowThreadDeletion });
           }}
         >
           <Trash2 size={iconSize} />
@@ -2362,6 +2594,8 @@ export default function MailClient() {
   ) => {
     const menuKey = `${origin}:${message.id}`;
     const isDraft = isDraftItem(message);
+    const showDeleteInMenu = origin !== "table";
+    const allowThreadDeletion = origin !== "thread";
     const buildItem = (
       label: string,
       icon: React.ReactNode,
@@ -2450,12 +2684,16 @@ export default function MailClient() {
               buildItem("Archive", <Archive size={14} />, () =>
                 handleArchiveMessage(message)
               ),
-              buildItem(
-                isTrashFolder(message.folderId) ? "Delete permanently" : "Move to Trash",
-                <Trash2 size={14} />,
-                () => handleDeleteMessage(message)
-              )
-            ],
+              showDeleteInMenu
+                ? buildItem(
+                    isTrashFolder(message.folderId)
+                      ? "Delete permanently"
+                      : "Move to Trash",
+                    <Trash2 size={14} />,
+                    () => handleDeleteMessage(message, { allowThreadDeletion })
+                  )
+                : null
+            ].filter(Boolean),
             [
               buildItem("Download EML", <Download size={14} />, () =>
                 handleDownloadEml(message)
@@ -2930,6 +3168,37 @@ export default function MailClient() {
       return next;
     });
   };
+
+  useEffect(() => {
+    const isTypingTarget = (target: EventTarget | null) => {
+      if (!(target instanceof HTMLElement)) return false;
+      if (target.isContentEditable) return true;
+      return Boolean(target.closest("input, textarea, select"));
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Delete") return;
+      if (isTypingTarget(event.target)) return;
+      const ids =
+        selectedMessageIds.size > 0
+          ? Array.from(selectedMessageIds)
+          : activeMessageId
+            ? [activeMessageId]
+            : [];
+      if (ids.length === 0) return;
+      event.preventDefault();
+      void (async () => {
+        for (const id of ids) {
+          const message =
+            threadScopeMessages.find((item) => item.id === id) ??
+            messages.find((item) => item.id === id);
+          if (!message) continue;
+          await handleDeleteMessage(message);
+        }
+      })();
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [activeMessageId, handleDeleteMessage, messages, selectedMessageIds, threadScopeMessages]);
   const scrubSource = (source?: string) => {
     if (!source) return source;
     return source.replace(/([A-Za-z0-9+/=]{200,})/g, "[base64 omitted]");
@@ -3375,6 +3644,25 @@ export default function MailClient() {
         activeMessage.threadId ?? activeMessage.messageId ?? activeMessage.id;
       if (!threadId) return;
       if (threadContentById[threadId]) return;
+      const findRoot = (nodes: ThreadNode[], currentRoot: ThreadNode | null = null) => {
+        for (const node of nodes) {
+          const nextRoot = currentRoot ?? node;
+          if (node.message.id === activeMessage.id) {
+            return nextRoot;
+          }
+          const childRoot = findRoot(node.children, nextRoot);
+          if (childRoot) return childRoot;
+        }
+        return null;
+      };
+      const localRoot = findRoot(threadForest, null);
+      const localFlat = localRoot
+        ? flattenThread(localRoot).map((item) => item.message)
+        : [];
+      const messageIds = localFlat.map((item) => item.id);
+      const threadIds = Array.from(
+        new Set(localFlat.map((item) => item.threadId).filter(Boolean))
+      );
       setThreadContentLoading(threadId);
       try {
         const res = await fetch(`/api/thread/related`, {
@@ -3382,7 +3670,8 @@ export default function MailClient() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             accountId: activeAccountId,
-            threadIds: [threadId],
+            threadIds: threadIds.length > 0 ? threadIds : [threadId],
+            messageIds,
             groupBy
           })
         });
@@ -3497,6 +3786,19 @@ export default function MailClient() {
     composeReplyHeaders,
     composeAttachments
   ]);
+
+  useEffect(() => {
+    if (!signatureMenuOpen) return;
+    const handleClick = (event: MouseEvent) => {
+      if (!signatureMenuRef.current) return;
+      if (signatureMenuRef.current.contains(event.target as Node)) return;
+      setSignatureMenuOpen(false);
+    };
+    document.addEventListener("mousedown", handleClick);
+    return () => {
+      document.removeEventListener("mousedown", handleClick);
+    };
+  }, [signatureMenuOpen]);
 
   useEffect(() => {
     if (composeOpen && composeMode === "new") return;
@@ -3715,6 +4017,7 @@ export default function MailClient() {
       });
     }
     setManageOpen(true);
+    setManageTab("account");
     setImapProbe(null);
     setSmtpProbe(null);
     setImapDetecting(false);
@@ -3726,6 +4029,7 @@ export default function MailClient() {
   const saveAccount = async () => {
     if (!editingAccount) return;
     const exists = accounts.find((account) => account.id === editingAccount.id);
+    const isNew = !exists;
     const endpoint = exists ? `/api/accounts/${editingAccount.id}` : "/api/accounts";
     const method = exists ? "PUT" : "POST";
     await fetch(endpoint, {
@@ -3737,9 +4041,44 @@ export default function MailClient() {
     if (refreshed.ok) {
       const nextAccounts = (await refreshed.json()) as Account[];
       setAccounts(nextAccounts);
+      if (isNew) {
+        setActiveAccountId(editingAccount.id);
+        await refreshFolders();
+        await syncAccount(undefined, "full");
+      }
     }
     setManageOpen(false);
     setEditingAccount(null);
+  };
+
+  const saveAccountSettings = async () => {
+    if (!editingAccount) return;
+    const exists = accounts.find((account) => account.id === editingAccount.id);
+    if (!exists) return;
+    const res = await fetch(`/api/accounts/${editingAccount.id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ settings: editingAccount.settings ?? {} })
+    });
+    if (!res.ok) {
+      reportError(await readErrorMessage(res));
+      return;
+    }
+    const refreshed = await fetch("/api/accounts");
+    if (refreshed.ok) {
+      const nextAccounts = (await refreshed.json()) as Account[];
+      setAccounts(nextAccounts);
+      const updated = nextAccounts.find((item) => item.id === editingAccount.id) ?? null;
+      if (updated) setEditingAccount(updated);
+    }
+  };
+
+  const updateEditingSettings = (next: AccountSettings) => {
+    if (!editingAccount) return;
+    setEditingAccount({
+      ...editingAccount,
+      settings: { ...(editingAccount.settings ?? {}), ...next }
+    });
   };
 
   const deleteAccount = async (accountId: string) => {
@@ -3765,11 +4104,14 @@ export default function MailClient() {
     if (protocol === "imap") setImapDetecting(true);
     if (protocol === "smtp") setSmtpDetecting(true);
     const config = protocol === "imap" ? editingAccount.imap : editingAccount.smtp;
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => controller.abort(), 6000);
     try {
       const response = await fetch("/api/probe", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ protocol, host: config.host, port: config.port })
+        body: JSON.stringify({ protocol, host: config.host, port: config.port }),
+        signal: controller.signal
       });
       if (!response.ok) return;
       const data = (await response.json()) as { supportsTLS: boolean; supportsStartTLS: boolean };
@@ -3819,6 +4161,7 @@ export default function MailClient() {
     } finally {
       if (protocol === "imap") setImapDetecting(false);
       if (protocol === "smtp") setSmtpDetecting(false);
+      window.clearTimeout(timer);
     }
   };
 
@@ -4093,11 +4436,27 @@ export default function MailClient() {
         const syncRes = await fetch("/api/sync", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ accountId: activeAccountId })
+          body: JSON.stringify({ accountId: activeAccountId, fullSync: true, mode: "full" })
         });
         if (!syncRes.ok) {
           reportError(await readErrorMessage(syncRes));
           return;
+        }
+        const nextFolders = await refreshFolders();
+        const accountList = (nextFolders ?? folders).filter(
+          (folder) => folder.accountId === activeAccountId
+        );
+        const findInboxInList = (list: Folder[]) => {
+          const bySpecial = list.find(
+            (folder) => (folder.specialUse ?? "").toLowerCase() === "\\inbox"
+          );
+          if (bySpecial) return bySpecial;
+          const byName = list.find((folder) => folder.name.toLowerCase() === "inbox");
+          return byName ?? list[0];
+        };
+        const nextInbox = findInboxInList(accountList);
+        if (nextInbox) {
+          setActiveFolderId((prev) => prev || nextInbox.id);
         }
         if (currentKeyRef.current === selectionKey) {
           await refreshMailboxData();
@@ -4165,18 +4524,20 @@ export default function MailClient() {
     }
   };
 
-  const refreshFolders = async () => {
+  const refreshFolders = async (): Promise<Folder[] | null> => {
     try {
       const foldersRes = await fetch("/api/folders");
       if (foldersRes.ok) {
         const nextFolders = (await foldersRes.json()) as Folder[];
         setFolders(nextFolders);
+        return nextFolders;
       } else {
         reportError(await readErrorMessage(foldersRes));
       }
     } catch {
       reportError("Failed to refresh folders.");
     }
+    return null;
   };
 
   useEffect(() => {
@@ -4197,13 +4558,23 @@ export default function MailClient() {
         subject?: string;
         from?: string;
         messageId?: string | null;
+        folderId?: string;
       }> | null | undefined
     ) => {
       if (!items || items.length === 0) return;
       const normalized = items.filter(
-        (item): item is { uid: number; subject?: string; from?: string; messageId?: string | null } =>
-          Boolean(item) && typeof item.uid === "number"
+        (item): item is {
+          uid: number;
+          subject?: string;
+          from?: string;
+          messageId?: string | null;
+          folderId?: string;
+        } => Boolean(item) && typeof item.uid === "number"
       );
+      const eligible = normalized.filter(
+        (item) => !item.folderId || !isNotificationSuppressedFolder(item.folderId)
+      );
+      if (eligible.length === 0) return;
       if (normalized.length === 0) return;
       const lastNotified = lastNotifiedUidRef.current[activeAccountId] ?? null;
       const maxUid = Math.max(...normalized.map((item) => item.uid));
@@ -4212,7 +4583,7 @@ export default function MailClient() {
         localStorage.setItem(`noctua:lastNotifiedUid:${activeAccountId}`, String(maxUid));
         return;
       }
-      const eligibleByUid = normalized.filter((item) => item.uid > lastNotified);
+      const eligibleByUid = eligible.filter((item) => item.uid > lastNotified);
       if (eligibleByUid.length === 0) {
         if (maxUid > lastNotified) {
           lastNotifiedUidRef.current[activeAccountId] = maxUid;
@@ -4579,8 +4950,14 @@ export default function MailClient() {
 
   const handleDeleteFolderItem = async (folder: Folder) => {
     if (!activeAccountId) return;
+    if (deletingFolderIds.has(folder.id)) return;
     const confirmed = window.confirm(`Delete folder "${folder.name}" and its messages?`);
     if (!confirmed) return;
+    setDeletingFolderIds((prev) => {
+      const next = new Set(prev);
+      next.add(folder.id);
+      return next;
+    });
     try {
       const res = await fetch("/api/folders/delete", {
         method: "POST",
@@ -4600,6 +4977,12 @@ export default function MailClient() {
       }
     } catch {
       reportError("Failed to delete folder.");
+    } finally {
+      setDeletingFolderIds((prev) => {
+        const next = new Set(prev);
+        next.delete(folder.id);
+        return next;
+      });
     }
   };
 
@@ -4650,26 +5033,34 @@ export default function MailClient() {
     const totalCount = messageCountByFolder.get(folder.id) ?? folder.count ?? 0;
     const unreadCount = folder.unreadCount ?? 0;
     const folderTitle = `${fullPath} (${totalCount} Messages, ${unreadCount} Unread)`;
+    const isDeleting = deletingFolderIds.has(folder.id);
     return (
       <div
         key={folder.id}
         className={`tree-node ${dragOverFolderId === folder.id ? "drop-target" : ""}`}
       >
         <div
-          className={`tree-row ${folder.id === activeFolderId ? "active" : ""}`}
+          className={`tree-row ${folder.id === activeFolderId ? "active" : ""}${
+            isDeleting ? " disabled" : ""
+          }`}
           data-syncing={syncingFolders.has(folder.id) ? "true" : "false"}
           data-menu-open={openFolderMenuId === folder.id ? "true" : "false"}
           title={folderTitle}
           role="button"
           tabIndex={0}
-          onClick={() => setActiveFolderId(folder.id)}
+          onClick={() => {
+            if (isDeleting) return;
+            setActiveFolderId(folder.id);
+          }}
           onKeyDown={(event) => {
             if (event.key === "Enter" || event.key === " ") {
               event.preventDefault();
+              if (isDeleting) return;
               setActiveFolderId(folder.id);
             }
           }}
           onDragOver={(event) => {
+            if (isDeleting) return;
             if (!draggingMessageIds.size && !event.dataTransfer.types.includes("application/json")) {
               return;
             }
@@ -4684,6 +5075,7 @@ export default function MailClient() {
           }}
           onDrop={(event) => {
             event.preventDefault();
+            if (isDeleting) return;
             setDragOverFolderId(null);
             let ids =
               draggingMessageIds.size > 0 ? Array.from(draggingMessageIds) : [];
@@ -4707,6 +5099,7 @@ export default function MailClient() {
             onClick={(event) => {
               if (!hasChildren) return;
               event.stopPropagation();
+              if (isDeleting) return;
               setCollapsedFolders((prev) => ({ ...prev, [folder.id]: !isCollapsed }));
             }}
           >
@@ -4737,8 +5130,10 @@ export default function MailClient() {
                 className="tree-action"
                 title="Folder actions"
                 aria-label="Folder actions"
+                disabled={isDeleting}
                 onClick={(event) => {
                   event.stopPropagation();
+                  if (isDeleting) return;
                   setOpenFolderMenuId((prev) => (prev === folder.id ? null : folder.id));
                 }}
               >
@@ -4748,6 +5143,7 @@ export default function MailClient() {
                 <div className="message-menu-panel">
                   <button
                     className="message-menu-item"
+                    disabled={isDeleting}
                     onClick={() => {
                       setOpenFolderMenuId(null);
                       syncAccount(folder.id);
@@ -4757,6 +5153,7 @@ export default function MailClient() {
                   </button>
                   <button
                     className="message-menu-item"
+                    disabled={isDeleting}
                     onClick={() => {
                       setOpenFolderMenuId(null);
                       handleCreateSubfolder(folder);
@@ -4766,6 +5163,7 @@ export default function MailClient() {
                   </button>
                   <button
                     className="message-menu-item"
+                    disabled={isDeleting}
                     onClick={() => {
                       setOpenFolderMenuId(null);
                       handleRenameFolderItem(folder);
@@ -4775,6 +5173,7 @@ export default function MailClient() {
                   </button>
                   <button
                     className="message-menu-item"
+                    disabled={isDeleting}
                     onClick={() => {
                       setOpenFolderMenuId(null);
                       handleDeleteFolderItem(folder);
@@ -4808,6 +5207,9 @@ export default function MailClient() {
     "Spam"
   ]);
   const rootFolders = accountFolders.filter((folder) => !folder.parentId);
+  const isExistingAccount = Boolean(
+    editingAccount && accounts.some((account) => account.id === editingAccount.id)
+  );
 
   return (
     <div className="app-shell">
@@ -5405,6 +5807,9 @@ export default function MailClient() {
                                 const threadFolderIds = Array.from(
                                   new Set(fullFlat.map((item) => item.message.folderId))
                                 );
+                                const showThreadFolderBadges =
+                                  searchScope === "all" ||
+                                  (includeThreadAcrossFolders && threadFolderIds.length > 1);
                                 return (
                                   <div key={`${threadGroupId}-${root.message.id}`}>
                                     {flat.map(({ message, depth }, index) => {
@@ -5412,7 +5817,9 @@ export default function MailClient() {
                                       const isDragging = draggingMessageIds.has(message.id);
                                       const folderIds =
                                         index === 0 && isCollapsed && threadSize > 1
-                                          ? threadFolderIds
+                                          ? showThreadFolderBadges
+                                            ? threadFolderIds
+                                            : []
                                           : searchScope === "all" ||
                                               (includeThreadAcrossFolders &&
                                                 message.folderId !== activeFolderId)
@@ -5431,6 +5838,8 @@ export default function MailClient() {
                                               : ""
                                           } ${!message.seen ? "unread" : ""} ${isSelected ? "selected" : ""} ${
                                             isDragging ? "dragging" : ""
+                                          } ${
+                                            pendingMessageActions.has(message.id) ? "disabled" : ""
                                           }`}
                                           role="button"
                                           tabIndex={0}
@@ -5488,22 +5897,28 @@ export default function MailClient() {
                                           </span>
                                           <span className="cell-from" style={{ paddingLeft: `${depth * 14}px` }}>
                                             {index === 0 && threadSize > 1 ? (
-                                              <span
-                                                className={`thread-caret ${isCollapsed ? "" : "open"}`}
-                                                title={isCollapsed ? "Expand thread" : "Collapse thread"}
-                                                onClick={(event) => {
-                                                  event.stopPropagation();
-                                                  setCollapsedThreads((prev) => ({
-                                                    ...prev,
-                                                    [threadGroupId]: !isCollapsed
-                                                  }));
-                                                }}
-                                              >
-                                                ▸
-                                              </span>
+                                              <>
+                                                <span
+                                                  className={`thread-caret ${isCollapsed ? "" : "open"}`}
+                                                  title={isCollapsed ? "Expand thread" : "Collapse thread"}
+                                                  onClick={(event) => {
+                                                    event.stopPropagation();
+                                                    setCollapsedThreads((prev) => ({
+                                                      ...prev,
+                                                      [threadGroupId]: !isCollapsed
+                                                    }));
+                                                  }}
+                                                >
+                                                  ▸
+                                                </span>
+                                                <span className="thread-indicator thread-indicator-inline">
+                                                  <GitBranch size={12} />
+                                                  <span>{threadSize}</span>
+                                                </span>
+                                              </>
                                             ) : (
                                               <span className="thread-caret spacer">▸</span>
-                                          )}
+                                            )}
                                           {message.from}
                                         </span>
                                           <span
@@ -5547,6 +5962,22 @@ export default function MailClient() {
                                             <span className="date-text">{message.date}</span>
                                           </span>
                                           <div className="cell-actions">
+                                            <button
+                                              className="icon-button ghost message-delete"
+                                              title={
+                                                isTrashFolder(message.folderId)
+                                                  ? "Delete permanently"
+                                                  : "Move to Trash"
+                                              }
+                                              aria-label="Delete"
+                                              disabled={pendingMessageActions.has(message.id)}
+                                              onClick={(event) => {
+                                                event.stopPropagation();
+                                                handleDeleteMessage(message);
+                                              }}
+                                            >
+                                              <Trash2 size={14} />
+                                            </button>
                                             {renderMessageMenu(message, "table")}
                                           </div>
                                         </div>
@@ -5579,7 +6010,9 @@ export default function MailClient() {
                                       : ""
                                   } ${!message.seen ? "unread" : ""} ${
                                     selectedMessageIds.has(message.id) ? "selected" : ""
-                                  } ${draggingMessageIds.has(message.id) ? "dragging" : ""}`}
+                                  } ${draggingMessageIds.has(message.id) ? "dragging" : ""} ${
+                                    pendingMessageActions.has(message.id) ? "disabled" : ""
+                                  }`}
                                   role="button"
                                   tabIndex={0}
                                   draggable
@@ -5616,6 +6049,22 @@ export default function MailClient() {
                                     <span className="date-text">{message.date}</span>
                                   </span>
                                   <div className="cell-actions">
+                                    <button
+                                      className="icon-button ghost message-delete"
+                                      title={
+                                        isTrashFolder(message.folderId)
+                                          ? "Delete permanently"
+                                          : "Move to Trash"
+                                      }
+                                      aria-label="Delete"
+                                      disabled={pendingMessageActions.has(message.id)}
+                                      onClick={(event) => {
+                                        event.stopPropagation();
+                                        handleDeleteMessage(message);
+                                      }}
+                                    >
+                                      <Trash2 size={14} />
+                                    </button>
                                     {renderMessageMenu(message, "table")}
                                   </div>
                                 </div>
@@ -5678,6 +6127,9 @@ export default function MailClient() {
                         const threadFolderIds = Array.from(
                           new Set(fullFlat.map((item) => item.message.folderId))
                         );
+                        const showThreadFolderBadges =
+                          searchScope === "all" ||
+                          (includeThreadAcrossFolders && threadFolderIds.length > 1);
                         return (
                             <div key={`${threadGroupId}-${root.message.id}`} className="thread-group">
                             {flat.map(({ message, depth }, index) => {
@@ -5685,7 +6137,9 @@ export default function MailClient() {
                               const isDragging = draggingMessageIds.has(message.id);
                               const folderIds =
                                 index === 0 && isCollapsed && threadSize > 1
-                                  ? threadFolderIds
+                                  ? showThreadFolderBadges
+                                    ? threadFolderIds
+                                    : []
                                   : searchScope === "all" ||
                                       (includeThreadAcrossFolders &&
                                         message.folderId !== activeFolderId)
@@ -5972,6 +6426,19 @@ export default function MailClient() {
             <button className="icon-button small" onClick={() => setShowJson(true)}>
               Show JSON
             </button>
+            <button
+              className="icon-button small"
+              onClick={() => {
+                console.info("[noctua] evict thread cache");
+                setThreadContentById({});
+                threadCacheOrderRef.current = [];
+                setThreadContentLoading(null);
+              }}
+              title="Evict cached thread data"
+              aria-label="Evict thread cache"
+            >
+              Evict Thread Cache
+            </button>
           </div>
 
           <div className="thread-view">
@@ -6028,7 +6495,7 @@ export default function MailClient() {
                       </div>
                       <div className="compose-grid-row">
                         <span className="label">From:</span>
-                        <input value={currentAccount?.email ?? ""} readOnly />
+                        <input value={getAccountFromValue(currentAccount)} readOnly />
                       </div>
                       <div className="compose-grid-row">
                         <span className="label">To:</span>
@@ -6110,29 +6577,139 @@ export default function MailClient() {
                       {composeShowBcc && (
                         <div className="compose-grid-row">
                           <span className="label">Cc:</span>
-                          <input
-                            value={composeCc}
-                            onChange={(event) => {
-                              composeDirtyRef.current = true;
-                              setComposeCc(event.target.value);
-                            }}
-                            placeholder="cc@example.com"
-                            list="recipient-options"
-                          />
+                          <div className="compose-input-wrap">
+                            <input
+                              value={composeCc}
+                              onChange={(event) => {
+                                composeDirtyRef.current = true;
+                                setComposeCc(event.target.value);
+                                setRecipientQuery(getComposeToken(event.target.value));
+                              }}
+                              onFocus={() => {
+                                setRecipientFocus("cc");
+                                setRecipientQuery(getComposeToken(composeCc));
+                              }}
+                              onBlur={() => {
+                                setTimeout(() => {
+                                  setRecipientFocus((current) =>
+                                    current === "cc" ? null : current
+                                  );
+                                }, 150);
+                              }}
+                              onKeyDown={(event) => {
+                                if (!recipientOptions.length) return;
+                                if (event.key === "ArrowDown") {
+                                  event.preventDefault();
+                                  setRecipientActiveIndex((prev) =>
+                                    Math.min(prev + 1, recipientOptions.length - 1)
+                                  );
+                                }
+                                if (event.key === "ArrowUp") {
+                                  event.preventDefault();
+                                  setRecipientActiveIndex((prev) => Math.max(prev - 1, 0));
+                                }
+                                if (event.key === "Enter" && recipientFocus === "cc") {
+                                  event.preventDefault();
+                                  const pick = recipientOptions[recipientActiveIndex];
+                                  if (pick) {
+                                    applyRecipientSelection(composeCc, pick, setComposeCc);
+                                  }
+                                }
+                              }}
+                              placeholder="cc@example.com"
+                            />
+                            {recipientFocus === "cc" && recipientOptions.length > 0 && (
+                              <div className="compose-suggestions">
+                                {recipientOptions.map((option, index) => (
+                                  <button
+                                    key={`${option}-${index}`}
+                                    type="button"
+                                    className={`compose-suggestion ${
+                                      index === recipientActiveIndex ? "active" : ""
+                                    }`}
+                                    onMouseDown={(event) => {
+                                      event.preventDefault();
+                                      applyRecipientSelection(composeCc, option, setComposeCc);
+                                    }}
+                                  >
+                                    {option}
+                                  </button>
+                                ))}
+                                {recipientLoading && (
+                                  <span className="compose-suggestion muted">Loading…</span>
+                                )}
+                              </div>
+                            )}
+                          </div>
                         </div>
                       )}
                       {composeShowBcc && (
                         <div className="compose-grid-row">
                           <span className="label">Bcc:</span>
-                          <input
-                            value={composeBcc}
-                            onChange={(event) => {
-                              composeDirtyRef.current = true;
-                              setComposeBcc(event.target.value);
-                            }}
-                            placeholder="bcc@example.com"
-                            list="recipient-options"
-                          />
+                          <div className="compose-input-wrap">
+                            <input
+                              value={composeBcc}
+                              onChange={(event) => {
+                                composeDirtyRef.current = true;
+                                setComposeBcc(event.target.value);
+                                setRecipientQuery(getComposeToken(event.target.value));
+                              }}
+                              onFocus={() => {
+                                setRecipientFocus("bcc");
+                                setRecipientQuery(getComposeToken(composeBcc));
+                              }}
+                              onBlur={() => {
+                                setTimeout(() => {
+                                  setRecipientFocus((current) =>
+                                    current === "bcc" ? null : current
+                                  );
+                                }, 150);
+                              }}
+                              onKeyDown={(event) => {
+                                if (!recipientOptions.length) return;
+                                if (event.key === "ArrowDown") {
+                                  event.preventDefault();
+                                  setRecipientActiveIndex((prev) =>
+                                    Math.min(prev + 1, recipientOptions.length - 1)
+                                  );
+                                }
+                                if (event.key === "ArrowUp") {
+                                  event.preventDefault();
+                                  setRecipientActiveIndex((prev) => Math.max(prev - 1, 0));
+                                }
+                                if (event.key === "Enter" && recipientFocus === "bcc") {
+                                  event.preventDefault();
+                                  const pick = recipientOptions[recipientActiveIndex];
+                                  if (pick) {
+                                    applyRecipientSelection(composeBcc, pick, setComposeBcc);
+                                  }
+                                }
+                              }}
+                              placeholder="bcc@example.com"
+                            />
+                            {recipientFocus === "bcc" && recipientOptions.length > 0 && (
+                              <div className="compose-suggestions">
+                                {recipientOptions.map((option, index) => (
+                                  <button
+                                    key={`${option}-${index}`}
+                                    type="button"
+                                    className={`compose-suggestion ${
+                                      index === recipientActiveIndex ? "active" : ""
+                                    }`}
+                                    onMouseDown={(event) => {
+                                      event.preventDefault();
+                                      applyRecipientSelection(composeBcc, option, setComposeBcc);
+                                    }}
+                                  >
+                                    {option}
+                                  </button>
+                                ))}
+                                {recipientLoading && (
+                                  <span className="compose-suggestion muted">Loading…</span>
+                                )}
+                              </div>
+                            )}
+                          </div>
                         </div>
                       )}
                     </div>
@@ -6220,10 +6797,6 @@ export default function MailClient() {
                     }`}
                   >
                     <div className="thread-card-top">
-                        {(getImapFlagBadges(message).length > 0 ||
-                        (message.attachments?.length ?? 0) > 0 ||
-                        (includeThreadAcrossFolders &&
-                          message.folderId !== activeFolderId)) && (
                         <div className="thread-card-badges">
                           {getImapFlagBadges(message).map((badge) => (
                             <span
@@ -6266,7 +6839,6 @@ export default function MailClient() {
                             </span>
                           )}
                         </div>
-                      )}
                       <div className="thread-card-actions">
                         <div className="message-actions">
                           {isDraftMessage(message) ? (
@@ -6279,7 +6851,7 @@ export default function MailClient() {
                               <Edit3 size={14} />
                             </button>
                           ) : (
-                            renderQuickActions(message, 14)
+                            renderQuickActions(message, 14, "thread")
                           )}
                         </div>
                         {renderMessageMenu(message, "thread")}
@@ -6306,14 +6878,19 @@ export default function MailClient() {
                         <span className="thread-card-value">{message.from}</span>
                         {getPrimaryEmail(message.from) && (
                           <button
-                            className="icon-button ghost small copy-email"
+                            className={`icon-button ghost small copy-email ${
+                              copyStatus[`from-${message.id}`] ? "ok" : ""
+                            }`}
                             title="Copy email"
                             aria-label="Copy email"
                             onClick={() =>
-                              navigator.clipboard.writeText(getPrimaryEmail(message.from))
+                              triggerCopy(
+                                `from-${message.id}`,
+                                getPrimaryEmail(message.from)
+                              )
                             }
                           >
-                            <Copy size={12} />
+                            {copyStatus[`from-${message.id}`] ? <Check size={12} /> : <Copy size={12} />}
                           </button>
                         )}
                       </div>
@@ -6322,16 +6899,19 @@ export default function MailClient() {
                         <span className="thread-card-value">{message.to}</span>
                         {extractEmails(message.to).length > 0 && (
                           <button
-                            className="icon-button ghost small copy-email"
+                            className={`icon-button ghost small copy-email ${
+                              copyStatus[`to-${message.id}`] ? "ok" : ""
+                            }`}
                             title="Copy emails"
                             aria-label="Copy emails"
                             onClick={() =>
-                              navigator.clipboard.writeText(
+                              triggerCopy(
+                                `to-${message.id}`,
                                 extractEmails(message.to).join(", ")
                               )
                             }
                           >
-                            <Copy size={12} />
+                            {copyStatus[`to-${message.id}`] ? <Check size={12} /> : <Copy size={12} />}
                           </button>
                         )}
                       </div>
@@ -6349,7 +6929,7 @@ export default function MailClient() {
                             ? messageByMessageId.get(refId)
                             : null;
                         return refId && target ? (
-                        <div className="thread-card-line">
+                        <div className="thread-card-line thread-card-line-link">
                           <span className="label">
                             {message.xForwardedMessageId ? "Forwarded mail:" : "In Reply To:"}
                           </span>
@@ -6373,47 +6953,49 @@ export default function MailClient() {
                       {hasHtmlContent(message.htmlBody) && message.body?.trim() ? (
                         <>
                           <div className="message-tabs">
-                            <button
-                              className={`icon-button small ${(
-                                messageTabs[message.id] ?? "html"
-                              ) === "html" ? "active" : ""}`}
-                              onClick={() =>
-                                setMessageTabs((prev) => ({ ...prev, [message.id]: "html" }))
-                              }
-                            >
-                              HTML
-                            </button>
-                            <button
-                              className={`icon-button small ${(
-                                messageTabs[message.id] ?? "html"
-                              ) === "text" ? "active" : ""}`}
-                              onClick={() =>
-                                setMessageTabs((prev) => ({ ...prev, [message.id]: "text" }))
-                              }
-                            >
-                              Text
-                            </button>
-                            <button
-                              className={`icon-button small ${(
-                                messageTabs[message.id] ?? "html"
-                              ) === "markdown" ? "active" : ""}`}
-                              onClick={() =>
-                                setMessageTabs((prev) => ({ ...prev, [message.id]: "markdown" }))
-                              }
-                            >
-                              Markdown
-                            </button>
-                            <button
-                              className={`icon-button small ${(
-                                messageTabs[message.id] ?? "html"
-                              ) === "source" ? "active" : ""}`}
-                              onClick={() =>
-                                setMessageTabs((prev) => ({ ...prev, [message.id]: "source" }))
-                              }
-                              onMouseDown={() => fetchSource(message.id)}
-                            >
-                              Source
-                            </button>
+                            <div className="button-group">
+                              <button
+                                className={`icon-button small ${(
+                                  messageTabs[message.id] ?? "html"
+                                ) === "html" ? "active" : ""}`}
+                                onClick={() =>
+                                  setMessageTabs((prev) => ({ ...prev, [message.id]: "html" }))
+                                }
+                              >
+                                HTML
+                              </button>
+                              <button
+                                className={`icon-button small ${(
+                                  messageTabs[message.id] ?? "html"
+                                ) === "text" ? "active" : ""}`}
+                                onClick={() =>
+                                  setMessageTabs((prev) => ({ ...prev, [message.id]: "text" }))
+                                }
+                              >
+                                Text
+                              </button>
+                              <button
+                                className={`icon-button small ${(
+                                  messageTabs[message.id] ?? "html"
+                                ) === "markdown" ? "active" : ""}`}
+                                onClick={() =>
+                                  setMessageTabs((prev) => ({ ...prev, [message.id]: "markdown" }))
+                                }
+                              >
+                                Markdown
+                              </button>
+                              <button
+                                className={`icon-button small ${(
+                                  messageTabs[message.id] ?? "html"
+                                ) === "source" ? "active" : ""}`}
+                                onClick={() =>
+                                  setMessageTabs((prev) => ({ ...prev, [message.id]: "source" }))
+                                }
+                                onMouseDown={() => fetchSource(message.id)}
+                              >
+                                Source
+                              </button>
+                            </div>
                             {(messageTabs[message.id] ?? "html") !== "source" && (
                               <div className="message-zoom">
                                 <div className="button-group">
@@ -6525,27 +7107,29 @@ export default function MailClient() {
                         message.hasSource ? (
                           <>
                             <div className="message-tabs">
-                              <button
-                                className={`icon-button small ${(
-                                  messageTabs[message.id] ?? "html"
-                                ) === "html" ? "active" : ""}`}
-                                onClick={() =>
-                                  setMessageTabs((prev) => ({ ...prev, [message.id]: "html" }))
-                                }
-                              >
-                                HTML
-                              </button>
-                              <button
-                                className={`icon-button small ${(
-                                  messageTabs[message.id] ?? "html"
-                                ) === "source" ? "active" : ""}`}
-                                onClick={() =>
-                                  setMessageTabs((prev) => ({ ...prev, [message.id]: "source" }))
-                                }
-                                onMouseDown={() => fetchSource(message.id)}
-                              >
-                                Source
-                              </button>
+                              <div className="button-group">
+                                <button
+                                  className={`icon-button small ${(
+                                    messageTabs[message.id] ?? "html"
+                                  ) === "html" ? "active" : ""}`}
+                                  onClick={() =>
+                                    setMessageTabs((prev) => ({ ...prev, [message.id]: "html" }))
+                                  }
+                                >
+                                  HTML
+                                </button>
+                                <button
+                                  className={`icon-button small ${(
+                                    messageTabs[message.id] ?? "html"
+                                  ) === "source" ? "active" : ""}`}
+                                  onClick={() =>
+                                    setMessageTabs((prev) => ({ ...prev, [message.id]: "source" }))
+                                  }
+                                  onMouseDown={() => fetchSource(message.id)}
+                                >
+                                  Source
+                                </button>
+                              </div>
                               {(messageTabs[message.id] ?? "html") !== "source" && (
                                 <div className="message-zoom">
                                   <div className="button-group">
@@ -6655,37 +7239,39 @@ export default function MailClient() {
                       ) : message.hasSource ? (
                         <>
                           <div className="message-tabs">
-                            <button
-                              className={`icon-button small ${(
-                                messageTabs[message.id] ?? "text"
-                              ) === "text" ? "active" : ""}`}
-                              onClick={() =>
-                                setMessageTabs((prev) => ({ ...prev, [message.id]: "text" }))
-                              }
-                            >
-                              Text
-                            </button>
-                            <button
-                              className={`icon-button small ${(
-                                messageTabs[message.id] ?? "text"
-                              ) === "markdown" ? "active" : ""}`}
-                              onClick={() =>
-                                setMessageTabs((prev) => ({ ...prev, [message.id]: "markdown" }))
-                              }
-                            >
-                              Markdown
-                            </button>
-                            <button
-                              className={`icon-button small ${(
-                                messageTabs[message.id] ?? "text"
-                              ) === "source" ? "active" : ""}`}
-                              onClick={() =>
-                                setMessageTabs((prev) => ({ ...prev, [message.id]: "source" }))
-                              }
-                              onMouseDown={() => fetchSource(message.id)}
-                            >
-                              Source
-                            </button>
+                            <div className="button-group">
+                              <button
+                                className={`icon-button small ${(
+                                  messageTabs[message.id] ?? "text"
+                                ) === "text" ? "active" : ""}`}
+                                onClick={() =>
+                                  setMessageTabs((prev) => ({ ...prev, [message.id]: "text" }))
+                                }
+                              >
+                                Text
+                              </button>
+                              <button
+                                className={`icon-button small ${(
+                                  messageTabs[message.id] ?? "text"
+                                ) === "markdown" ? "active" : ""}`}
+                                onClick={() =>
+                                  setMessageTabs((prev) => ({ ...prev, [message.id]: "markdown" }))
+                                }
+                              >
+                                Markdown
+                              </button>
+                              <button
+                                className={`icon-button small ${(
+                                  messageTabs[message.id] ?? "text"
+                                ) === "source" ? "active" : ""}`}
+                                onClick={() =>
+                                  setMessageTabs((prev) => ({ ...prev, [message.id]: "source" }))
+                                }
+                                onMouseDown={() => fetchSource(message.id)}
+                              >
+                                Source
+                              </button>
+                            </div>
                             {(messageTabs[message.id] ?? "text") !== "source" && (
                               <div className="message-zoom">
                                 <button
@@ -6757,26 +7343,28 @@ export default function MailClient() {
                     ) : (
                       <>
                         <div className="message-tabs">
-                          <button
-                            className={`icon-button small ${(
-                              messageTabs[message.id] ?? "text"
-                            ) === "text" ? "active" : ""}`}
-                            onClick={() =>
-                              setMessageTabs((prev) => ({ ...prev, [message.id]: "text" }))
-                            }
-                          >
-                            Text
-                          </button>
-                          <button
-                            className={`icon-button small ${(
-                              messageTabs[message.id] ?? "text"
-                            ) === "markdown" ? "active" : ""}`}
-                            onClick={() =>
-                              setMessageTabs((prev) => ({ ...prev, [message.id]: "markdown" }))
-                            }
-                          >
-                            Markdown
-                          </button>
+                          <div className="button-group">
+                            <button
+                              className={`icon-button small ${(
+                                messageTabs[message.id] ?? "text"
+                              ) === "text" ? "active" : ""}`}
+                              onClick={() =>
+                                setMessageTabs((prev) => ({ ...prev, [message.id]: "text" }))
+                              }
+                            >
+                              Text
+                            </button>
+                            <button
+                              className={`icon-button small ${(
+                                messageTabs[message.id] ?? "text"
+                              ) === "markdown" ? "active" : ""}`}
+                              onClick={() =>
+                                setMessageTabs((prev) => ({ ...prev, [message.id]: "markdown" }))
+                              }
+                            >
+                              Markdown
+                            </button>
+                          </div>
                           <div className="message-zoom">
                             <button
                               className="icon-button small"
@@ -6850,239 +7438,25 @@ export default function MailClient() {
       </section>
 
       {manageOpen && editingAccount && (
-        <div className="modal-backdrop" onClick={() => setManageOpen(false)}>
-          <div className="modal" onClick={(event) => event.stopPropagation()}>
-            <h3>Account settings</h3>
-            <p>Manage IMAP/SMTP credentials for syncing and sending.</p>
-            <div className="form-section">
-              <h4>Personal Information</h4>
-              <div className="form-grid">
-                <label className="form-field">
-                  Name
-                  <input
-                    value={editingAccount.name}
-                    onChange={(event) =>
-                      setEditingAccount({ ...editingAccount, name: event.target.value })
-                    }
-                  />
-                </label>
-                <label className="form-field">
-                  Email
-                  <input
-                    value={editingAccount.email}
-                    onChange={(event) =>
-                      setEditingAccount({ ...editingAccount, email: event.target.value })
-                    }
-                  />
-                </label>
-                <label className="form-field">
-                  Avatar
-                  <input
-                    value={editingAccount.avatar}
-                    onChange={(event) =>
-                      setEditingAccount({ ...editingAccount, avatar: event.target.value })
-                    }
-                  />
-                </label>
-              </div>
-            </div>
-
-            <div className="form-section">
-              <div className="section-header">
-                <h4>IMAP (Incoming Server)</h4>
-                <button
-                  className="icon-button"
-                  onClick={() => runProbe("imap")}
-                  disabled={imapDetecting}
-                >
-                  {imapDetecting ? "Detecting..." : "Detect security"}
-                </button>
-              </div>
-              {imapProbe && (
-                <p className="section-note">
-                  TLS: {imapProbe.tls ? "Yes" : "No"} · STARTTLS: {imapProbe.starttls ? "Yes" : "No"}
-                </p>
-              )}
-              <div className="form-grid">
-                <label className="form-field">
-                  Security
-                  <select
-                    value={imapSecurity}
-                    onChange={(event) => {
-                      const next = event.target.value as "tls" | "starttls" | "none";
-                      setImapSecurity(next);
-                      const port = next === "tls" ? 993 : 143;
-                      setEditingAccount({
-                        ...editingAccount,
-                        imap: { ...editingAccount.imap, secure: next === "tls", port }
-                      });
-                    }}
-                  >
-                    {(imapProbe?.tls ?? true) && <option value="tls">TLS (implicit)</option>}
-                    {(imapProbe?.starttls ?? true) && <option value="starttls">STARTTLS</option>}
-                    <option value="none">None</option>
-                  </select>
-                </label>
-                <label className="form-field">
-                  IMAP host
-                  <input
-                    value={editingAccount.imap.host}
-                    onChange={(event) =>
-                      setEditingAccount({
-                        ...editingAccount,
-                        imap: { ...editingAccount.imap, host: event.target.value }
-                      })
-                    }
-                  />
-                </label>
-                <label className="form-field">
-                  IMAP port
-                  <input
-                    type="number"
-                    value={editingAccount.imap.port}
-                    onChange={(event) =>
-                      setEditingAccount({
-                        ...editingAccount,
-                        imap: { ...editingAccount.imap, port: Number(event.target.value) }
-                      })
-                    }
-                  />
-                </label>
-                <label className="form-field">
-                  IMAP user
-                  <input
-                    value={editingAccount.imap.user}
-                    onChange={(event) =>
-                      setEditingAccount({
-                        ...editingAccount,
-                        imap: { ...editingAccount.imap, user: event.target.value }
-                      })
-                    }
-                  />
-                </label>
-                <label className="form-field">
-                  IMAP password
-                  <input
-                    type="password"
-                    value={editingAccount.imap.password}
-                    onChange={(event) =>
-                      setEditingAccount({
-                        ...editingAccount,
-                        imap: { ...editingAccount.imap, password: event.target.value }
-                      })
-                    }
-                  />
-                </label>
-              </div>
-            </div>
-
-            <div className="form-section">
-              <div className="section-header">
-                <h4>SMTP (Outgoing Server)</h4>
-                <button
-                  className="icon-button"
-                  onClick={() => runProbe("smtp")}
-                  disabled={smtpDetecting}
-                >
-                  {smtpDetecting ? "Detecting..." : "Detect security"}
-                </button>
-              </div>
-              <p className="section-note">
-                Detection reads server capabilities only — it does not require authentication.
-              </p>
-              {smtpProbe && (
-                <p className="section-note">
-                  TLS: {smtpProbe.tls ? "Yes" : "No"} · STARTTLS: {smtpProbe.starttls ? "Yes" : "No"}
-                </p>
-              )}
-              <div className="form-grid">
-                <label className="form-field">
-                  Security
-                  <select
-                    value={smtpSecurity}
-                    onChange={(event) => {
-                      const next = event.target.value as "tls" | "starttls" | "none";
-                      setSmtpSecurity(next);
-                      const port = next === "tls" ? 465 : next === "starttls" ? 587 : 25;
-                      setEditingAccount({
-                        ...editingAccount,
-                        smtp: { ...editingAccount.smtp, secure: next === "tls", port }
-                      });
-                    }}
-                  >
-                    {(smtpProbe?.tls ?? true) && <option value="tls">TLS (implicit)</option>}
-                    {(smtpProbe?.starttls ?? true) && <option value="starttls">STARTTLS</option>}
-                    <option value="none">None</option>
-                  </select>
-                </label>
-                <label className="form-field">
-                  SMTP host
-                  <input
-                    value={editingAccount.smtp.host}
-                    onChange={(event) =>
-                      setEditingAccount({
-                        ...editingAccount,
-                        smtp: { ...editingAccount.smtp, host: event.target.value }
-                      })
-                    }
-                  />
-                </label>
-                <label className="form-field">
-                  SMTP port
-                  <input
-                    type="number"
-                    value={editingAccount.smtp.port}
-                    onChange={(event) =>
-                      setEditingAccount({
-                        ...editingAccount,
-                        smtp: { ...editingAccount.smtp, port: Number(event.target.value) }
-                      })
-                    }
-                  />
-                </label>
-                <label className="form-field">
-                  SMTP user
-                  <input
-                    value={editingAccount.smtp.user}
-                    onChange={(event) =>
-                      setEditingAccount({
-                        ...editingAccount,
-                        smtp: { ...editingAccount.smtp, user: event.target.value }
-                      })
-                    }
-                  />
-                </label>
-                <label className="form-field">
-                  SMTP password
-                  <input
-                    type="password"
-                    value={editingAccount.smtp.password}
-                    onChange={(event) =>
-                      setEditingAccount({
-                        ...editingAccount,
-                        smtp: { ...editingAccount.smtp, password: event.target.value }
-                      })
-                    }
-                  />
-                </label>
-              </div>
-            </div>
-            <div className="form-actions">
-              <button className="icon-button" onClick={() => setManageOpen(false)}>
-                Cancel
-              </button>
-              <button className="icon-button" onClick={saveAccount}>
-                Save
-              </button>
-              <button
-                className="icon-button"
-                onClick={() => deleteAccount(editingAccount.id)}
-              >
-                Delete
-              </button>
-            </div>
-          </div>
-        </div>
+        <AccountSettingsModal
+          editingAccount={editingAccount}
+          isOpen={manageOpen}
+          manageTab={manageTab}
+          isExistingAccount={isExistingAccount}
+          imapDetecting={imapDetecting}
+          smtpDetecting={smtpDetecting}
+          imapProbe={imapProbe}
+          smtpProbe={smtpProbe}
+          imapSecurity={imapSecurity}
+          smtpSecurity={smtpSecurity}
+          onClose={() => setManageOpen(false)}
+          onTabChange={setManageTab}
+          onSave={manageTab === "account" ? saveAccount : saveAccountSettings}
+          onDelete={() => deleteAccount(editingAccount.id)}
+          onUpdateAccount={setEditingAccount}
+          onUpdateSettings={updateEditingSettings}
+          onRunProbe={runProbe}
+        />
       )}
 
       {showComposeModal && (
@@ -7125,7 +7499,9 @@ export default function MailClient() {
                             ? "Forward"
                             : "New message"}
                 </h3>
-                <p className="compose-subtitle">From {currentAccount?.email}</p>
+                <p className="compose-subtitle">
+                  From {getAccountFromValue(currentAccount)}
+                </p>
               </div>
               <div className="compose-header-actions">
                 <button
