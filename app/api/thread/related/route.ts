@@ -1,7 +1,10 @@
 import { NextResponse } from "next/server";
 import { listThreadMessages } from "@/lib/db";
+import { requireSessionOr401 } from "@/lib/auth";
 
 export async function POST(request: Request) {
+  const session = requireSessionOr401(request);
+  if (session instanceof NextResponse) return session;
   const payload = (await request.json()) as {
     accountId?: string;
     threadIds?: string[];

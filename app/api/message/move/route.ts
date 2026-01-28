@@ -8,6 +8,7 @@ import {
 } from "@/lib/db";
 import { moveImapMessage } from "@/lib/mail/imap";
 import type { Folder } from "@/lib/data";
+import { requireSessionOr401 } from "@/lib/auth";
 
 type MovePayload = {
   accountId: string;
@@ -23,6 +24,8 @@ function mailboxPathFromFolder(folder: Folder, accountId: string) {
 }
 
 export async function POST(request: Request) {
+  const session = requireSessionOr401(request);
+  if (session instanceof NextResponse) return session;
   const payload = (await request.json()) as MovePayload;
   const { accountId, messageIds, destinationFolderId } = payload;
 

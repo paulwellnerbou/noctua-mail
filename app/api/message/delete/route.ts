@@ -11,6 +11,7 @@ import {
 import { deleteMessageFiles } from "@/lib/storage";
 import { deleteImapMessage, moveImapMessage } from "@/lib/mail/imap";
 import type { Folder } from "@/lib/data";
+import { requireSessionOr401 } from "@/lib/auth";
 
 const TRASH_NAMES = [
   "trash",
@@ -56,6 +57,8 @@ function mailboxPathFromFolderId(folderId: string, accountId: string) {
 }
 
 export async function POST(request: Request) {
+  const session = requireSessionOr401(request);
+  if (session instanceof NextResponse) return session;
   const payload = (await request.json()) as { accountId: string; messageId: string };
   const accounts = await getAccounts();
   const account = accounts.find((item) => item.id === payload.accountId);

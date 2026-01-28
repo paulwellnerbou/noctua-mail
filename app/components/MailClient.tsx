@@ -47,7 +47,8 @@ import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
 import ComposeEditor from "./ComposeEditor";
 import HtmlMessage from "./HtmlMessage";
-import type { Account, AccountSettings, Folder, Message } from "@/lib/data";
+import LoginOverlay from "./auth/LoginOverlay";
+import type { Account, AccountSettings, Attachment, Folder, Message } from "@/lib/data";
 import { accounts as seedAccounts, folders as seedFolders, messages as seedMessages } from "@/lib/data";
 import QuoteRenderer from "./QuoteRenderer";
 import AccountSettingsModal from "./AccountSettingsModal";
@@ -250,6 +251,7 @@ export default function MailClient() {
   const [copyStatus, setCopyStatus] = useState<Record<string, boolean>>({});
   const [collapsedMessages, setCollapsedMessages] = useState<Record<string, boolean>>({});
   const [messageFontScale, setMessageFontScale] = useState<Record<string, number>>({});
+  const [authState, setAuthState] = useState<"loading" | "ok" | "unauth">("loading");
   const [openMessageMenuId, setOpenMessageMenuId] = useState<string | null>(null);
   const [pendingMessageActions, setPendingMessageActions] = useState<Set<string>>(new Set());
   const [inAppNotices, setInAppNotices] = useState<
@@ -1231,7 +1233,7 @@ export default function MailClient() {
     return name.toLowerCase().includes("draft");
   };
 
-  const stripHtml = (value: string) =>
+  const stripHtml = (value: string): string =>
     value
       .replace(/<style[\s\S]*?<\/style>/gi, " ")
       .replace(/<script[\s\S]*?<\/script>/gi, " ")
@@ -1493,7 +1495,10 @@ export default function MailClient() {
       activeMessage.threadId ?? activeMessage.messageId ?? activeMessage.id;
     const fullThread = activeThreadId ? threadContentById[activeThreadId] : undefined;
     let localFlat: Message[] = [];
-    const findRoot = (nodes: ThreadNode[], currentRoot: ThreadNode | null = null) => {
+    const findRoot = (
+      nodes: ThreadNode[],
+      currentRoot: ThreadNode | null = null
+    ): ThreadNode | null => {
       for (const node of nodes) {
         const nextRoot = currentRoot ?? node;
         if (node.message.id === activeMessage.id) {
@@ -3423,6 +3428,12 @@ export default function MailClient() {
   useEffect(() => {
     const loadData = async () => {
       try {
+        const me = await fetch("/api/auth/me", { credentials: "include" });
+        if (!me.ok) {
+          setAuthState("unauth");
+          return;
+        }
+        setAuthState("ok");
         const [accountsRes, foldersRes] = await Promise.all([
           fetch("/api/accounts"),
           fetch("/api/folders")
@@ -3443,7 +3454,7 @@ export default function MailClient() {
           reportError(await readErrorMessage(foldersRes));
         }
       } catch {
-        // keep seed data
+        setAuthState("unauth");
         reportError("Failed to load mailbox data.");
       }
     };
@@ -3576,7 +3587,7 @@ export default function MailClient() {
     };
 
     loadMessages();
-  }, [activeAccountId, hasMoreMessages, loadingMessages, messagesKey, messagesPage]);
+  }, [activeAccountId, hasMoreMessages, loadingMessages, messagesKey, messagesPage, authState]);
 
   useEffect(() => {
     const loadThreadRelated = async () => {
@@ -3644,7 +3655,10 @@ export default function MailClient() {
         activeMessage.threadId ?? activeMessage.messageId ?? activeMessage.id;
       if (!threadId) return;
       if (threadContentById[threadId]) return;
-      const findRoot = (nodes: ThreadNode[], currentRoot: ThreadNode | null = null) => {
+      const findRoot = (
+        nodes: ThreadNode[],
+        currentRoot: ThreadNode | null = null
+      ): ThreadNode | null => {
         for (const node of nodes) {
           const nextRoot = currentRoot ?? node;
           if (node.message.id === activeMessage.id) {
@@ -4541,6 +4555,7 @@ export default function MailClient() {
   };
 
   useEffect(() => {
+    if (authState !== "ok") return;
     if (!activeAccountId || !inboxMailboxPath) return;
     let disposed = false;
     let streamReconnectTimer: number | null = null;
@@ -5210,6 +5225,29 @@ export default function MailClient() {
   const isExistingAccount = Boolean(
     editingAccount && accounts.some((account) => account.id === editingAccount.id)
   );
+
+  if (authState === "unauth") {
+    return (
+      <LoginOverlay
+        onAuthenticated={async () => {
+          setAuthState("loading");
+          setMessages([]);
+          setFolders([]);
+          setAccounts([]);
+          setMessagesPage(1);
+          setHasMoreMessages(true);
+          setTotalMessages(null);
+          setLoadedMessageCount(0);
+          try {
+            const res = await fetch("/api/auth/me", { credentials: "include" });
+            setAuthState(res.ok ? "ok" : "unauth");
+          } catch {
+            setAuthState("unauth");
+          }
+        }}
+      />
+    );
+  }
 
   return (
     <div className="app-shell">

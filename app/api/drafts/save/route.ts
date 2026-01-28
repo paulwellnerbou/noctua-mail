@@ -9,6 +9,7 @@ import {
 import { appendImapMessage, deleteImapMessage, syncImapMessage } from "@/lib/mail/imap";
 import { buildRawMessage } from "@/lib/mail/smtp";
 import type { Folder } from "@/lib/data";
+import { requireSessionOr401 } from "@/lib/auth";
 
 const DRAFT_NAMES = [
   "drafts",
@@ -45,6 +46,8 @@ function findDraftsFolder(folders: Folder[], accountId: string) {
 }
 
 export async function POST(request: Request) {
+  const auth = await requireSessionOr401(request);
+  if (auth instanceof NextResponse) return auth;
   const payload = (await request.json()) as {
     accountId: string;
     draftId?: string | null;
@@ -94,12 +97,18 @@ export async function POST(request: Request) {
         return {
           filename: attachment.filename,
           contentType: attachment.contentType || parsed.contentType,
-          content: parsed.buffer,
-          inline: attachment.inline ?? false,
+          content: parsed.buffer as Buffer<ArrayBufferLike>,
+          inline: Boolean(attachment.inline),
           cid: attachment.cid
         };
       })
-      .filter(Boolean) ?? [];
+      .filter(Boolean) as {
+        filename: string;
+        contentType: string;
+        content: Buffer<ArrayBufferLike>;
+        inline?: boolean;
+        cid?: string;
+      }[] ?? [];
 
   const raw = await buildRawMessage(account, {
     to: payload.to,

@@ -9,6 +9,7 @@ import {
 import { deleteImapFolder, listImapFolders, renameImapFolder } from "@/lib/mail/imap";
 import { notifyFolderDeleted } from "@/lib/mail/imapStreamRegistry";
 import type { Folder } from "@/lib/data";
+import { requireSessionOr401 } from "@/lib/auth";
 
 const TRASH_NAMES = [
   "trash",
@@ -51,6 +52,8 @@ function findTrashFolder(folders: Folder[], accountId: string) {
 }
 
 export async function POST(request: Request) {
+  const auth = await requireSessionOr401(request);
+  if (auth instanceof NextResponse) return auth;
   const startedAt = Date.now();
   const payload = (await request.json()) as { accountId: string; folderId: string };
   const accounts = await getAccounts();

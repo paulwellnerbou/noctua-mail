@@ -3,6 +3,7 @@ export type Account = {
   name: string;
   email: string;
   avatar: string;
+  ownerUserId?: string;
   settings?: AccountSettings;
   imap: {
     host: string;
@@ -113,3 +114,18 @@ export const accounts: Account[] = [];
 export const folders: Folder[] = [];
 
 export const messages: Message[] = [];
+
+export type User = {
+  id: string;
+  email: string;
+  role: "admin" | "user";
+  createdAt: number;
+};
+
+export type InviteCode = {
+  code: string;
+  role: "admin" | "user";
+  maxUses: number | null;
+  uses: number;
+  expiresAt: number | null;
+};

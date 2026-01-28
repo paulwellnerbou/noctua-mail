@@ -2,8 +2,11 @@ import { NextResponse } from "next/server";
 import { getAccounts, getMessageById, getThreadIdsByMessageIds, upsertMessages } from "@/lib/db";
 import { saveAttachmentData, saveMessageSource } from "@/lib/storage";
 import { syncImapMessage } from "@/lib/mail/imap";
+import { requireSessionOr401 } from "@/lib/auth";
 
 export async function POST(request: Request) {
+  const session = requireSessionOr401(request);
+  if (session instanceof NextResponse) return session;
   const payload = (await request.json()) as { accountId: string; messageId: string };
   if (!payload?.accountId || !payload?.messageId) {
     return NextResponse.json({ ok: false, message: "Missing accountId/messageId" }, { status: 400 });

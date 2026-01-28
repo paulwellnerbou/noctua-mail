@@ -1,8 +1,11 @@
 import { NextResponse } from "next/server";
 import { getAccounts, getFolders, saveFolders, updateMessagesFolderPrefix } from "@/lib/db";
 import { listImapFolders, renameImapFolder } from "@/lib/mail/imap";
+import { requireSessionOr401 } from "@/lib/auth";
 
 export async function POST(request: Request) {
+  const auth = await requireSessionOr401(request);
+  if (auth instanceof NextResponse) return auth;
   const payload = (await request.json()) as {
     accountId: string;
     folderId: string;

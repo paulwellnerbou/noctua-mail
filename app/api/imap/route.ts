@@ -2,8 +2,11 @@ import { NextResponse } from "next/server";
 import { getAccounts, getFolders, saveFolders, upsertMessages } from "@/lib/db";
 import { saveAttachmentData, saveMessageSource } from "@/lib/storage";
 import { syncImapAccount } from "@/lib/mail/imap";
+import { requireSessionOr401 } from "@/lib/auth";
 
 export async function POST(request: Request) {
+  const session = requireSessionOr401(request);
+  if (session instanceof NextResponse) return session;
   const payload = (await request.json()) as { accountId: string; folderId?: string };
   const accounts = await getAccounts();
   const account = accounts.find((item) => item.id === payload.accountId);

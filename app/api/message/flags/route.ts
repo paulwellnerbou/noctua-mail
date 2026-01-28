@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getAccounts, getMessageById, updateMessageFlags } from "@/lib/db";
 import { updateImapFlags } from "@/lib/mail/imap";
+import { requireSessionOr401 } from "@/lib/auth";
 
 const flagMap: Record<string, string> = {
   seen: "\\Seen",
@@ -11,6 +12,8 @@ const flagMap: Record<string, string> = {
 };
 
 export async function POST(request: Request) {
+  const session = requireSessionOr401(request);
+  if (session instanceof NextResponse) return session;
   const payload = (await request.json()) as {
     accountId: string;
     messageId: string;

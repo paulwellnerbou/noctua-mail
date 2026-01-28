@@ -4,6 +4,7 @@ import tls from "tls";
 import { getAccounts, getFolders, getMailboxState, saveMailboxState } from "@/lib/db";
 import { getImapLogger, logImapOp } from "@/lib/mail/imapLogger";
 import { registerStream } from "@/lib/mail/imapStreamRegistry";
+import { requireSessionOr401 } from "@/lib/auth";
 
 type EnvelopeAddress = { name?: string | null; mailbox?: string | null; host?: string | null };
 type Envelope = { subject?: string | null; from?: EnvelopeAddress[] | null; date?: Date | null; messageId?: string | null };
@@ -22,6 +23,8 @@ function formatAddress(addresses?: EnvelopeAddress[] | null) {
 }
 
 export async function GET(request: Request) {
+  const session = requireSessionOr401(request);
+  if (session instanceof NextResponse) return session;
   const { searchParams } = new URL(request.url);
   const accountId = searchParams.get("accountId");
   const activeFolderId = searchParams.get("activeFolderId");

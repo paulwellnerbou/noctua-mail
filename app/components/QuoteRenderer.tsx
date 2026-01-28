@@ -44,7 +44,7 @@ export default function QuoteRenderer({ body }: { body: string }) {
             )}
           </div>
         );
-        const wrapped = Array.from({ length: block.level }).reduceRight(
+        const wrapped = Array.from({ length: block.level }).reduceRight<React.ReactNode>(
           (child, _, depthIndex) => {
             const level = block.level - depthIndex;
             const levelClass =

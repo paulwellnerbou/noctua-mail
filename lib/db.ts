@@ -1,8 +1,19 @@
 const sqliteModulePromise = () => import("bun:sqlite" /* webpackIgnore: true */);
 let DatabaseCtor: any | null = null;
 import path from "path";
-import type { Account, AccountSettings, Attachment, Folder, MailboxState, Message } from "./data";
+import type {
+  Account,
+  AccountSettings,
+  Attachment,
+  Folder,
+  InviteCode,
+  MailboxState,
+  Message,
+  User
+} from "./data";
 import { accounts as seedAccounts, folders as seedFolders } from "./data";
+import { decodeSecret, encodeSecret, shouldStorePasswordFallback } from "./secret";
+import { randomUUID } from "crypto";
 
 let dbInstance: any | null = null;
 let initialized = false;
@@ -38,6 +49,7 @@ function initSchema(db: any) {
       name TEXT NOT NULL,
       email TEXT NOT NULL,
       avatar TEXT NOT NULL,
+      ownerUserId TEXT,
       settings TEXT,
       imapHost TEXT NOT NULL,
       imapPort INTEGER NOT NULL,
@@ -127,6 +139,27 @@ function initSchema(db: any) {
       supportsQresync INTEGER
     );
 
+    CREATE TABLE IF NOT EXISTS users (
+      id TEXT PRIMARY KEY,
+      email TEXT NOT NULL UNIQUE,
+      role TEXT NOT NULL,
+      createdAt INTEGER NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS user_accounts (
+      userId TEXT NOT NULL,
+      accountId TEXT NOT NULL,
+      PRIMARY KEY (userId, accountId)
+    );
+
+    CREATE TABLE IF NOT EXISTS invite_codes (
+      code TEXT PRIMARY KEY,
+      role TEXT NOT NULL,
+      maxUses INTEGER,
+      uses INTEGER DEFAULT 0,
+      expiresAt INTEGER
+    );
+
     CREATE VIRTUAL TABLE IF NOT EXISTS message_fts
     USING fts5(messageId, subject, fromAddr, toAddr, ccAddr, bccAddr, body, preview);
 
@@ -170,6 +203,9 @@ function initSchema(db: any) {
   ensureColumn("folders", "flags", "TEXT");
   ensureColumn("folders", "delimiter", "TEXT");
   ensureColumn("accounts", "settings", "TEXT");
+  ensureColumn("accounts", "imapPassword", "TEXT");
+  ensureColumn("accounts", "smtpPassword", "TEXT");
+  ensureColumn("accounts", "ownerUserId", "TEXT");
   ensureColumn("mailbox_state", "uidValidity", "TEXT");
   ensureColumn("mailbox_state", "highestModSeq", "TEXT");
   ensureColumn("mailbox_state", "highestUid", "INTEGER");
@@ -211,13 +247,15 @@ function initSchema(db: any) {
   const accountCount = db.prepare(`SELECT COUNT(*) as count FROM accounts`).get() as {
     count: number;
   };
+  const userCount = db.prepare(`SELECT COUNT(*) as count FROM users`).get() as { count: number };
   if (accountCount.count === 0) {
     const insert = db.prepare(`
       INSERT INTO accounts (
         id, name, email, avatar,
+        ownerUserId,
         imapHost, imapPort, imapSecure, imapUser, imapPassword,
         smtpHost, smtpPort, smtpSecure, smtpUser, smtpPassword
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     db.transaction(() => {
       seedAccounts.forEach((account) => {
@@ -226,16 +264,17 @@ function initSchema(db: any) {
           account.name,
           account.email,
           account.avatar,
+          account.ownerUserId ?? null,
           account.imap.host,
           account.imap.port,
           account.imap.secure ? 1 : 0,
           account.imap.user,
-          account.imap.password,
+          shouldStorePasswordFallback() ? encodeSecret(account.imap.password) : "",
           account.smtp.host,
           account.smtp.port,
           account.smtp.secure ? 1 : 0,
           account.smtp.user,
-          account.smtp.password
+          shouldStorePasswordFallback() ? encodeSecret(account.smtp.password) : ""
         );
       });
     })();
@@ -263,6 +302,30 @@ function initSchema(db: any) {
       });
     })();
   }
+  if (userCount.count === 0) {
+    const inviteCount = db.prepare(`SELECT COUNT(*) as count FROM invite_codes`).get() as {
+      count: number;
+    };
+    if (inviteCount.count === 0) {
+      const adminInvite: InviteCode = {
+        code: randomUUID(),
+        role: "admin",
+        maxUses: 1,
+        uses: 0,
+        expiresAt: null
+      };
+      db.prepare(
+        `INSERT INTO invite_codes (code, role, maxUses, uses, expiresAt) VALUES (?, ?, ?, ?, ?)`
+      ).run(
+        adminInvite.code,
+        adminInvite.role,
+        adminInvite.maxUses,
+        adminInvite.uses,
+        adminInvite.expiresAt
+      );
+      console.info(`[noctua] Admin invite code: ${adminInvite.code}`);
+    }
+  }
 }
 
 export type GroupMeta = { key: string; label: string; count: number };
@@ -275,21 +338,22 @@ export async function getAccounts() {
     name: row.name,
     email: row.email,
     avatar: row.avatar,
-    settings: normalizeAccountSettings(row.settings ? (JSON.parse(row.settings) as any) : undefined),
-    imap: {
-      host: row.imapHost,
-      port: row.imapPort,
-      secure: Boolean(row.imapSecure),
-      user: row.imapUser,
-      password: row.imapPassword
+      settings: normalizeAccountSettings(row.settings ? (JSON.parse(row.settings) as any) : undefined),
+      imap: {
+        host: row.imapHost,
+        port: row.imapPort,
+        secure: Boolean(row.imapSecure),
+        user: row.imapUser,
+        password: decodeSecret(row.imapPassword)
+      },
+      smtp: {
+        host: row.smtpHost,
+        port: row.smtpPort,
+        secure: Boolean(row.smtpSecure),
+        user: row.smtpUser,
+        password: decodeSecret(row.smtpPassword)
     },
-    smtp: {
-      host: row.smtpHost,
-      port: row.smtpPort,
-      secure: Boolean(row.smtpSecure),
-      user: row.smtpUser,
-      password: row.smtpPassword
-    }
+    ownerUserId: row.ownerUserId ?? undefined
   })) as Account[];
 }
 
@@ -297,11 +361,11 @@ export async function saveAccounts(nextAccounts: Account[]) {
   const db = await getDb();
   const insert = db.prepare(`
     INSERT OR REPLACE INTO accounts (
-      id, name, email, avatar,
+      id, name, email, avatar, ownerUserId,
       settings,
       imapHost, imapPort, imapSecure, imapUser, imapPassword,
       smtpHost, smtpPort, smtpSecure, smtpUser, smtpPassword
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   db.transaction(() => {
     db.exec(`DELETE FROM accounts`);
@@ -312,17 +376,18 @@ export async function saveAccounts(nextAccounts: Account[]) {
         account.name,
         account.email,
         account.avatar,
+        account.ownerUserId ?? null,
         settings ? JSON.stringify(settings) : null,
         account.imap.host,
         account.imap.port,
         account.imap.secure ? 1 : 0,
         account.imap.user,
-        account.imap.password,
+        shouldStorePasswordFallback() ? encodeSecret(account.imap.password) : "",
         account.smtp.host,
         account.smtp.port,
         account.smtp.secure ? 1 : 0,
         account.smtp.user,
-        account.smtp.password
+        shouldStorePasswordFallback() ? encodeSecret(account.smtp.password) : ""
       );
     });
   })();
@@ -343,6 +408,77 @@ function normalizeAccountSettings(settings?: AccountSettings) {
     next.defaultSignatureId = "";
   }
   return next;
+}
+
+// Users
+export async function getUsers() {
+  const db = await getDb();
+  const rows = db.prepare(`SELECT * FROM users`).all() as any[];
+  return rows.map(
+    (row) =>
+      ({
+        id: row.id,
+        email: row.email,
+        role: row.role,
+        createdAt: row.createdAt
+      }) as User
+  );
+}
+
+export async function saveUsers(users: User[]) {
+  const db = await getDb();
+  const insert = db.prepare(
+    `INSERT OR REPLACE INTO users (id, email, role, createdAt) VALUES (?, ?, ?, ?)`
+  );
+  db.transaction(() => {
+    db.exec(`DELETE FROM users`);
+    users.forEach((u) => insert.run(u.id, u.email, u.role, u.createdAt));
+  })();
+}
+
+export async function getUserAccounts() {
+  const db = await getDb();
+  const rows = db.prepare(`SELECT * FROM user_accounts`).all() as any[];
+  return rows as { userId: string; accountId: string }[];
+}
+
+export async function saveUserAccounts(items: { userId: string; accountId: string }[]) {
+  const db = await getDb();
+  const insert = db.prepare(
+    `INSERT OR REPLACE INTO user_accounts (userId, accountId) VALUES (?, ?)`
+  );
+  db.transaction(() => {
+    db.exec(`DELETE FROM user_accounts`);
+    items.forEach((it) => insert.run(it.userId, it.accountId));
+  })();
+}
+
+export async function getInviteCodes() {
+  const db = await getDb();
+  const rows = db.prepare(`SELECT * FROM invite_codes`).all() as any[];
+  return rows.map(
+    (row) =>
+      ({
+        code: row.code,
+        role: row.role,
+        maxUses: row.maxUses === null ? null : Number(row.maxUses),
+        uses: row.uses ?? 0,
+        expiresAt: row.expiresAt === null ? null : Number(row.expiresAt)
+      }) as InviteCode
+  );
+}
+
+export async function saveInviteCodes(items: InviteCode[]) {
+  const db = await getDb();
+  const insert = db.prepare(
+    `INSERT OR REPLACE INTO invite_codes (code, role, maxUses, uses, expiresAt) VALUES (?, ?, ?, ?, ?)`
+  );
+  db.transaction(() => {
+    db.exec(`DELETE FROM invite_codes`);
+    items.forEach((it) =>
+      insert.run(it.code, it.role, it.maxUses, it.uses, it.expiresAt)
+    );
+  })();
 }
 
 export async function getFolders(accountId?: string) {

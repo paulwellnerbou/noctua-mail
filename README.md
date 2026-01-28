@@ -14,7 +14,9 @@ A web-based mail client built with Bun, TypeScript, and Next.js. Noctua Mail sup
 - HTML, Text, Markdown, and Source views for messages
 - Attachments (inline + downloadable)
 - Responsive layout with resizable panes and independent scrolling
-- Dark mode with per-message text scaling
+- Dark mode
+- Per-message text scaling
+- User authentication with IMAP only (no separate user credentials, IMAP passwords are not stored anywhere, just encrypted in session)
 
 ## Tech stack
 
@@ -31,11 +33,16 @@ bun run dev
 
 Open `http://localhost:3654`.
 
-## Development notes
+## Operations
 
 - Local data is stored in `.data/` (SQLite db, sources, attachments).
-- HTML messages are rendered in a shadow DOM and sanitized.
 - Attachments and sources are stored separately for performance.
+- IMAP/SMTP passwords are stored encrypted by default. Control this with:
+  - `STORE_ENCRYPTED_IMAP_PASSWORD_FALLBACK` (default `true` for local dev). If set to `false`, passwords are **not** persisted; the user must re-enter them after a restart.
+  - `IMAP_SECRET_KEY` (32‑byte key; hex recommended). Required to encrypt/decrypt stored passwords when fallback is enabled.
+- Authentication:
+  - `AUTH_ENABLED` (default `true`) gates the app behind a login/signup (invite) flow.
+  - `SESSION_SEAL_KEY` (32‑byte key) seals the session cookie with IMAP creds for the current session.
 
 ## Project structure
 

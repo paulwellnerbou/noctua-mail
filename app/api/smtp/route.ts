@@ -3,6 +3,7 @@ import { getAccounts, getFolders } from "@/lib/db";
 import { appendImapMessage } from "@/lib/mail/imap";
 import { sendSmtpMessage } from "@/lib/mail/smtp";
 import type { Folder } from "@/lib/data";
+import { requireSessionOr401 } from "@/lib/auth";
 
 const SENT_NAMES = [
   "sent",
@@ -44,6 +45,8 @@ function findSentMailbox(folders: Folder[], accountId: string) {
 }
 
 export async function POST(request: Request) {
+  const session = requireSessionOr401(request);
+  if (session instanceof NextResponse) return session;
   const payload = (await request.json()) as {
     accountId: string;
     to: string;
@@ -85,12 +88,18 @@ export async function POST(request: Request) {
         return {
           filename: attachment.filename,
           contentType: attachment.contentType || parsed.contentType,
-          content: parsed.buffer,
-          inline: attachment.inline ?? false,
+          content: parsed.buffer as Buffer<ArrayBufferLike>,
+          inline: Boolean(attachment.inline),
           cid: attachment.cid
         };
       })
-      .filter(Boolean) ?? [];
+      .filter(Boolean) as {
+        filename: string;
+        contentType: string;
+        content: Buffer<ArrayBufferLike>;
+        inline?: boolean;
+        cid?: string;
+      }[] ?? [];
 
   const result = await sendSmtpMessage(account, {
     to: payload.to,

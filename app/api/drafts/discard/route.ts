@@ -2,8 +2,11 @@ import { NextResponse } from "next/server";
 import { getAccounts, getAttachmentIds, getMessageById, deleteMessageById } from "@/lib/db";
 import { deleteImapMessage } from "@/lib/mail/imap";
 import { deleteMessageFiles } from "@/lib/storage";
+import { requireSessionOr401 } from "@/lib/auth";
 
 export async function POST(request: Request) {
+  const auth = await requireSessionOr401(request);
+  if (auth instanceof NextResponse) return auth;
   const payload = (await request.json()) as { accountId: string; draftId: string };
   const accounts = await getAccounts();
   const account = accounts.find((item) => item.id === payload.accountId);

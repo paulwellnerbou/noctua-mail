@@ -1,7 +1,10 @@
 import { NextResponse } from "next/server";
 import { listThreads } from "@/lib/db";
+import { requireSessionOr401 } from "@/lib/auth";
 
 export async function GET(request: Request) {
+  const session = requireSessionOr401(request);
+  if (session instanceof NextResponse) return session;
   const { searchParams } = new URL(request.url);
   const accountId = searchParams.get("accountId");
   if (!accountId) {

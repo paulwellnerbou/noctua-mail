@@ -89,6 +89,72 @@ a {
   animation: floatIn 0.7s ease forwards;
 }
 
+.auth-overlay {
+  position: fixed;
+  inset: 0;
+  backdrop-filter: blur(6px);
+  background: rgba(0, 0, 0, 0.25);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+}
+
+.auth-modal {
+  background: var(--surface-2);
+  color: var(--text);
+  width: min(560px, 92vw);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.auth-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.auth-close {
+  opacity: 0.4;
+}
+
+.auth-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.auth-form input[type="text"],
+.auth-form input[type="email"],
+.auth-form input[type="password"],
+.auth-form input[type="number"] {
+  width: 100%;
+}
+
+.auth-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px 12px;
+}
+
+.auth-error {
+  color: #d93025;
+  background: rgba(217, 48, 37, 0.08);
+  border: 1px solid rgba(217, 48, 37, 0.25);
+  padding: 8px 10px;
+  border-radius: 8px;
+}
+
+.auth-error-floating {
+  position: fixed;
+  top: 24px;
+  right: 24px;
+  z-index: 12;
+  max-width: min(420px, 90vw);
+}
+
 .top-bar {
   display: flex;
   align-items: center;

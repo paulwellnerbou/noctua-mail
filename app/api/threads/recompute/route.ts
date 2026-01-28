@@ -1,7 +1,10 @@
 import { NextResponse } from "next/server";
 import { recomputeThreadIdsForAccount, recomputeThreadsForAccount } from "@/lib/db";
+import { requireSessionOr401 } from "@/lib/auth";
 
 export async function POST(request: Request) {
+  const auth = await requireSessionOr401(request);
+  if (auth instanceof NextResponse) return auth;
   const body = (await request.json().catch(() => null)) as
     | { accountId?: string }
     | null;
