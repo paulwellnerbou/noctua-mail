@@ -59,6 +59,7 @@ function mailboxPathFromFolderId(folderId: string, accountId: string) {
 export async function POST(request: Request) {
   const session = requireSessionOr401(request);
   if (session instanceof NextResponse) return session;
+  const clientId = request.headers.get("x-noctua-client") ?? undefined;
   const payload = (await request.json()) as { accountId: string; messageId: string };
   const accounts = await getAccounts();
   const account = accounts.find((item) => item.id === payload.accountId);
@@ -86,14 +87,14 @@ export async function POST(request: Request) {
   const isInTrash = trashFolder ? message.folderId === trashFolder.id : currentMailbox.toLowerCase().includes("trash");
 
   if (isInTrash) {
-    await deleteImapMessage(account, currentMailbox, message.imapUid);
+    await deleteImapMessage(account, currentMailbox, message.imapUid, clientId);
     const attachmentIds = await getAttachmentIds(message.id);
     await deleteMessageById(payload.accountId, message.id);
     await deleteMessageFiles(payload.accountId, message.id, attachmentIds);
     return NextResponse.json({ ok: true, action: "deleted" });
   }
 
-  await moveImapMessage(account, currentMailbox, message.imapUid, trashMailbox);
+  await moveImapMessage(account, currentMailbox, message.imapUid, trashMailbox, clientId);
   if (trashFolder) {
     await updateMessageFolder(payload.accountId, message.id, trashFolder.id, trashMailbox);
   }

@@ -7,6 +7,7 @@ import { requireSessionOr401 } from "@/lib/auth";
 export async function POST(request: Request) {
   const session = requireSessionOr401(request);
   if (session instanceof NextResponse) return session;
+  const clientId = request.headers.get("x-noctua-client") ?? undefined;
   const payload = (await request.json()) as { accountId: string; folderId?: string };
   const accounts = await getAccounts();
   const account = accounts.find((item) => item.id === payload.accountId);
@@ -21,7 +22,8 @@ export async function POST(request: Request) {
   const { messages, folders } = await syncImapAccount(
     account,
     mailboxPath,
-    payload.folderId ? "full" : "recent"
+    payload.folderId ? "full" : "recent",
+    clientId
   );
   const buildAttachmentUrl = (accountId: string, messageId: string, attachmentId: string) =>
     `/api/attachment?accountId=${encodeURIComponent(accountId)}&messageId=${encodeURIComponent(

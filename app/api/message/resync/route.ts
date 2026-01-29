@@ -7,6 +7,7 @@ import { requireSessionOr401 } from "@/lib/auth";
 export async function POST(request: Request) {
   const session = requireSessionOr401(request);
   if (session instanceof NextResponse) return session;
+  const clientId = request.headers.get("x-noctua-client") ?? undefined;
   const payload = (await request.json()) as { accountId: string; messageId: string };
   if (!payload?.accountId || !payload?.messageId) {
     return NextResponse.json({ ok: false, message: "Missing accountId/messageId" }, { status: 400 });
@@ -28,7 +29,7 @@ export async function POST(request: Request) {
     );
   }
 
-  const message = await syncImapMessage(account, mailboxPath, imapUid);
+  const message = await syncImapMessage(account, mailboxPath, imapUid, clientId);
   if (!message) {
     return NextResponse.json({ ok: false, message: "Message not found on server." }, { status: 404 });
   }

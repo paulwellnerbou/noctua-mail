@@ -16,6 +16,7 @@ import { encodeSecret, shouldStorePasswordInDb } from "@/lib/secret";
 import { randomUUID } from "crypto";
 
 export async function POST(request: Request) {
+  const clientId = request.headers.get("x-noctua-client") ?? undefined;
   const payload = (await request.json()) as { inviteCode: string; account: Account; password: string };
   const code = payload.inviteCode?.trim();
   const password = payload.password ?? "";
@@ -45,7 +46,7 @@ export async function POST(request: Request) {
     ownerUserId: undefined
   };
 
-  const ok = await verifyImapCredentials(account, password);
+  const ok = await verifyImapCredentials(account, password, clientId);
   if (!ok) {
     return NextResponse.json({ ok: false, message: "Invalid IMAP credentials" }, { status: 401 });
   }

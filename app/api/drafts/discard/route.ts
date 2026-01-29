@@ -7,6 +7,7 @@ import { requireSessionOr401 } from "@/lib/auth";
 export async function POST(request: Request) {
   const auth = await requireSessionOr401(request);
   if (auth instanceof NextResponse) return auth;
+  const clientId = request.headers.get("x-noctua-client") ?? undefined;
   const payload = (await request.json()) as { accountId: string; draftId: string };
   const accounts = await getAccounts();
   const account = accounts.find((item) => item.id === payload.accountId);
@@ -18,7 +19,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: false, message: "Draft not found" }, { status: 404 });
   }
   if (message.imapUid && message.mailboxPath) {
-    await deleteImapMessage(account, message.mailboxPath, message.imapUid);
+    await deleteImapMessage(account, message.mailboxPath, message.imapUid, clientId);
   }
   const attachmentIds = await getAttachmentIds(message.id);
   await deleteMessageById(payload.accountId, message.id);

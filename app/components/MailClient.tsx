@@ -231,7 +231,30 @@ export default function MailClient() {
   const [errorTimestamp, setErrorTimestamp] = useState<number | null>(null);
   const [processPanelOpen, setProcessPanelOpen] = useState(false);
   const [exceptionPanelOpen, setExceptionPanelOpen] = useState(false);
-  const [messageView, setMessageView] = useState<"card" | "table">("card");
+  const [messageView, setMessageView] = useState<"card" | "table" | "compact">("compact");
+  const clientId = useMemo(() => {
+    if (typeof window === "undefined") return "";
+    const key = "noctuaClientId";
+    let id = window.localStorage.getItem(key);
+    if (!id) {
+      id = window.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`;
+      window.localStorage.setItem(key, id);
+    }
+    return id;
+  }, []);
+  const apiFetch = useCallback(
+    (input: RequestInfo | URL, init?: RequestInit) => {
+      const headers = new Headers(
+        init?.headers ??
+          (typeof Request !== "undefined" && input instanceof Request ? input.headers : undefined)
+      );
+      if (clientId) {
+        headers.set("X-Noctua-Client", clientId);
+      }
+      return fetch(input, { ...init, headers });
+    },
+    [clientId]
+  );
   const [groupBy, setGroupBy] = useState<
     "none" | "date" | "week" | "sender" | "domain" | "year" | "folder"
   >("date");
@@ -814,6 +837,20 @@ export default function MailClient() {
     );
   };
 
+  const renderUnreadDot = (message: Message) => (
+    <button
+      type="button"
+      className={`unread-dot ${message.seen ? "read" : "unread"}`}
+      title={message.seen ? "Mark as unread" : "Mark as read"}
+      aria-label={message.seen ? "Mark as unread" : "Mark as read"}
+      disabled={pendingMessageActions.has(message.id)}
+      onClick={(event) => {
+        event.stopPropagation();
+        updateFlagState(message, "seen", !message.seen);
+      }}
+    />
+  );
+
   const getWeekGroup = (value: number) => {
     const date = new Date(value);
     const firstDay = new Date(date.getFullYear(), 0, 1);
@@ -1345,7 +1382,7 @@ export default function MailClient() {
     currentAccount?.settings?.threading?.includeAcrossFolders ?? true;
   useEffect(() => {
     const preferred = currentAccount?.settings?.layout?.defaultView;
-    if (preferred === "card" || preferred === "table") {
+    if (preferred === "card" || preferred === "table" || preferred === "compact") {
       setMessageView(preferred);
     }
   }, [currentAccount?.settings?.layout?.defaultView]);
@@ -1888,7 +1925,7 @@ export default function MailClient() {
     }
     setDraftSaving(true);
     try {
-      const res = await fetch("/api/drafts/save", {
+      const res = await apiFetch("/api/drafts/save", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -1944,7 +1981,7 @@ export default function MailClient() {
     if (composeDraftId && activeAccountId) {
       try {
         setDiscardingDraft(true);
-        const res = await fetch("/api/drafts/discard", {
+        const res = await apiFetch("/api/drafts/discard", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -2252,7 +2289,7 @@ export default function MailClient() {
             replyToHeader.trim().toLowerCase() === replyFromValue.trim().toLowerCase()
               ? ""
               : replyToHeader;
-          const res = await fetch("/api/smtp", {
+          const res = await apiFetch("/api/smtp", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
@@ -2275,7 +2312,7 @@ export default function MailClient() {
       if (res.ok) {
         if (composeDraftId && activeAccountId) {
           try {
-            await fetch("/api/drafts/discard", {
+            await apiFetch("/api/drafts/discard", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
@@ -2326,7 +2363,7 @@ export default function MailClient() {
   ) => {
     const allowThreadDeletion = options?.allowThreadDeletion ?? true;
     const deleteSingle = async (target: Message) => {
-      const res = await fetch("/api/message/delete", {
+      const res = await apiFetch("/api/message/delete", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ accountId: activeAccountId, messageId: target.id })
@@ -2434,7 +2471,7 @@ export default function MailClient() {
 
   const handleArchiveMessage = async (message: Message) => {
     try {
-      const res = await fetch("/api/message/archive", {
+      const res = await apiFetch("/api/message/archive", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ accountId: activeAccountId, messageId: message.id })
@@ -2465,7 +2502,7 @@ export default function MailClient() {
 
   const handleMarkSpam = async (message: Message) => {
     try {
-      const res = await fetch("/api/message/spam", {
+      const res = await apiFetch("/api/message/spam", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ accountId: activeAccountId, messageId: message.id })
@@ -2571,18 +2608,6 @@ export default function MailClient() {
           }}
         >
           <Forward size={iconSize} />
-        </button>
-        <button
-          className="icon-button ghost"
-          title={message.seen ? "Mark as unread" : "Mark as read"}
-          aria-label="Toggle read"
-          disabled={pendingMessageActions.has(message.id)}
-          onClick={(event) => {
-            event.stopPropagation();
-            updateFlagState(message, "seen", !message.seen);
-          }}
-        >
-          {message.seen ? <MailOpen size={iconSize} /> : <Mail size={iconSize} />}
         </button>
         <button
           className="icon-button ghost message-delete"
@@ -2736,7 +2761,7 @@ export default function MailClient() {
     value: boolean
   ) => {
     try {
-      const res = await fetch("/api/message/flags", {
+      const res = await apiFetch("/api/message/flags", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -2796,7 +2821,7 @@ export default function MailClient() {
     value: boolean
   ) => {
     try {
-      const res = await fetch("/api/message/flags", {
+      const res = await apiFetch("/api/message/flags", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -2867,7 +2892,7 @@ export default function MailClient() {
     const hasTodo =
       message.flags?.some((flag) => flag.toLowerCase() === "to-do") ?? false;
     try {
-      const res = await fetch("/api/message/flags", {
+      const res = await apiFetch("/api/message/flags", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -2909,7 +2934,7 @@ export default function MailClient() {
     const hasPinned =
       message.flags?.some((flag) => flag.toLowerCase() === "pinned") ?? false;
     try {
-      const res = await fetch("/api/message/flags", {
+      const res = await apiFetch("/api/message/flags", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -2959,7 +2984,7 @@ export default function MailClient() {
     if (!ids.length) return;
     try {
       setPendingMessageActions((prev) => new Set([...prev, ...ids]));
-      const res = await fetch("/api/message/move", {
+      const res = await apiFetch("/api/message/move", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -3228,7 +3253,7 @@ export default function MailClient() {
     setLoadingSource((prev) => ({ ...prev, [messageId]: true }));
     const promise = (async () => {
       try {
-        const res = await fetch(
+        const res = await apiFetch(
           `/api/source?accountId=${encodeURIComponent(activeAccountId)}&messageId=${encodeURIComponent(
             messageId
           )}`
@@ -3437,7 +3462,7 @@ export default function MailClient() {
   useEffect(() => {
     const loadData = async () => {
       try {
-        const me = await fetch("/api/auth/me", { credentials: "include" });
+        const me = await apiFetch("/api/auth/me", { credentials: "include" });
         if (!me.ok) {
           setAuthState("unauth");
           return;
@@ -3448,8 +3473,8 @@ export default function MailClient() {
           setSessionTtlSeconds(meData.ttlSeconds);
         }
         const [accountsRes, foldersRes] = await Promise.all([
-          fetch("/api/accounts"),
-          fetch("/api/folders")
+          apiFetch("/api/accounts"),
+          apiFetch("/api/folders")
         ]);
         if (accountsRes.ok) {
           const nextAccounts = (await accountsRes.json()) as Account[];
@@ -3483,7 +3508,7 @@ export default function MailClient() {
     );
     const timer = window.setInterval(async () => {
       try {
-        const res = await fetch("/api/auth/me", { credentials: "include" });
+        const res = await apiFetch("/api/auth/me", { credentials: "include" });
         if (!res.ok) {
           if (res.status === 401) {
             setAuthState("unauth");
@@ -3564,7 +3589,7 @@ export default function MailClient() {
         if (trimmedQuery && endpoint === "/api/threads") {
           params.set("q", trimmedQuery);
         }
-        const messagesRes = await fetch(`${endpoint}?${params.toString()}`);
+        const messagesRes = await apiFetch(`${endpoint}?${params.toString()}`);
         if (messagesRes.ok) {
           const data = (await messagesRes.json()) as {
             items: Message[];
@@ -3658,7 +3683,7 @@ export default function MailClient() {
         return;
       }
       try {
-        const res = await fetch(`/api/thread/related`, {
+        const res = await apiFetch(`/api/thread/related`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ accountId: activeAccountId, threadIds, groupBy })
@@ -3718,7 +3743,7 @@ export default function MailClient() {
       );
       setThreadContentLoading(threadId);
       try {
-        const res = await fetch(`/api/thread/related`, {
+        const res = await apiFetch(`/api/thread/related`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -3979,7 +4004,7 @@ export default function MailClient() {
         if (recipientQuery.trim()) {
           params.set("q", recipientQuery.trim());
         }
-        const res = await fetch(`/api/compose/recipients?${params.toString()}`, {
+        const res = await apiFetch(`/api/compose/recipients?${params.toString()}`, {
           signal: controller.signal
         });
         if (!res.ok) return;
@@ -4085,12 +4110,12 @@ export default function MailClient() {
     const isNew = !exists;
     const endpoint = exists ? `/api/accounts/${editingAccount.id}` : "/api/accounts";
     const method = exists ? "PUT" : "POST";
-    await fetch(endpoint, {
+    await apiFetch(endpoint, {
       method,
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(editingAccount)
     });
-    const refreshed = await fetch("/api/accounts");
+    const refreshed = await apiFetch("/api/accounts");
     if (refreshed.ok) {
       const nextAccounts = (await refreshed.json()) as Account[];
       setAccounts(nextAccounts);
@@ -4108,7 +4133,7 @@ export default function MailClient() {
     if (!editingAccount) return;
     const exists = accounts.find((account) => account.id === editingAccount.id);
     if (!exists) return;
-    const res = await fetch(`/api/accounts/${editingAccount.id}`, {
+    const res = await apiFetch(`/api/accounts/${editingAccount.id}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ settings: editingAccount.settings ?? {} })
@@ -4117,7 +4142,7 @@ export default function MailClient() {
       reportError(await readErrorMessage(res));
       return;
     }
-    const refreshed = await fetch("/api/accounts");
+    const refreshed = await apiFetch("/api/accounts");
     if (refreshed.ok) {
       const nextAccounts = (await refreshed.json()) as Account[];
       setAccounts(nextAccounts);
@@ -4135,12 +4160,12 @@ export default function MailClient() {
   };
 
   const deleteAccount = async (accountId: string) => {
-    const res = await fetch(`/api/accounts/${accountId}`, { method: "DELETE" });
+    const res = await apiFetch(`/api/accounts/${accountId}`, { method: "DELETE" });
     if (!res.ok) {
       reportError(await readErrorMessage(res));
       return;
     }
-    const refreshed = await fetch("/api/accounts");
+    const refreshed = await apiFetch("/api/accounts");
     if (refreshed.ok) {
       const nextAccounts = (await refreshed.json()) as Account[];
       setAccounts(nextAccounts);
@@ -4160,7 +4185,7 @@ export default function MailClient() {
     const controller = new AbortController();
     const timer = window.setTimeout(() => controller.abort(), 6000);
     try {
-      const response = await fetch("/api/probe", {
+      const response = await apiFetch("/api/probe", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ protocol, host: config.host, port: config.port }),
@@ -4248,7 +4273,7 @@ export default function MailClient() {
       params.set("q", trimmedQuery);
     }
     try {
-      const messageRes = await fetch(`${endpoint}?${params.toString()}`);
+      const messageRes = await apiFetch(`${endpoint}?${params.toString()}`);
       if (!messageRes.ok) {
         const message = await readErrorMessage(messageRes);
         reportError(message || "Failed to refresh mailbox data.");
@@ -4334,7 +4359,7 @@ export default function MailClient() {
 
   const handleResyncMessage = async (message: Message) => {
     try {
-      const res = await fetch("/api/message/resync", {
+      const res = await apiFetch("/api/message/resync", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ accountId: activeAccountId, messageId: message.id })
@@ -4361,7 +4386,7 @@ export default function MailClient() {
 
   const handleDownloadEml = async (message: Message) => {
     try {
-      const res = await fetch(
+      const res = await apiFetch(
         `/api/source?accountId=${encodeURIComponent(activeAccountId)}&messageId=${encodeURIComponent(
           message.id
         )}`
@@ -4394,7 +4419,7 @@ export default function MailClient() {
     const selectionKey = currentKeyRef.current;
     setSyncingFolders((prev) => new Set(prev).add(folderId));
     try {
-      const syncRes = await fetch("/api/sync", {
+      const syncRes = await apiFetch("/api/sync", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ accountId: activeAccountId, folderId, mode })
@@ -4437,7 +4462,7 @@ export default function MailClient() {
 
     const deepSync = (async () => {
       try {
-        const deepRes = await fetch("/api/sync", {
+        const deepRes = await apiFetch("/api/sync", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ accountId: activeAccountId, folderId, fullSync: true })
@@ -4486,7 +4511,7 @@ export default function MailClient() {
     if (accountFolders.length === 0) {
       setIsSyncing(true);
       try {
-        const syncRes = await fetch("/api/sync", {
+        const syncRes = await apiFetch("/api/sync", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ accountId: activeAccountId, fullSync: true, mode: "full" })
@@ -4560,7 +4585,7 @@ export default function MailClient() {
     setErrorMessage(null);
     setIsRecomputingThreads(true);
     try {
-      const res = await fetch("/api/threads/recompute", {
+      const res = await apiFetch("/api/threads/recompute", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ accountId: activeAccountId })
@@ -4579,7 +4604,7 @@ export default function MailClient() {
 
   const refreshFolders = async (): Promise<Folder[] | null> => {
     try {
-      const foldersRes = await fetch("/api/folders");
+      const foldersRes = await apiFetch("/api/folders");
       if (foldersRes.ok) {
         const nextFolders = (await foldersRes.json()) as Folder[];
         setFolders(nextFolders);
@@ -4729,7 +4754,7 @@ export default function MailClient() {
         if (since) {
           params.set("sinceUidNext", String(since));
         }
-        const res = await fetch(`/api/imap/poll?${params.toString()}`);
+        const res = await apiFetch(`/api/imap/poll?${params.toString()}`);
         if (!res.ok) {
           reportError(await readErrorMessage(res));
           return;
@@ -4959,7 +4984,7 @@ export default function MailClient() {
     const name = window.prompt("New subfolder name");
     if (!name?.trim()) return;
     try {
-      const res = await fetch("/api/folders/create", {
+      const res = await apiFetch("/api/folders/create", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -4983,7 +5008,7 @@ export default function MailClient() {
     const name = window.prompt("Rename folder", folder.name);
     if (!name?.trim() || name.trim() === folder.name) return;
     try {
-      const res = await fetch("/api/folders/rename", {
+      const res = await apiFetch("/api/folders/rename", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -5013,7 +5038,7 @@ export default function MailClient() {
       return next;
     });
     try {
-      const res = await fetch("/api/folders/delete", {
+      const res = await apiFetch("/api/folders/delete", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -5260,6 +5285,7 @@ export default function MailClient() {
     "Junk",
     "Spam"
   ]);
+  const isCompactView = messageView === "compact";
   const rootFolders = accountFolders.filter((folder) => !folder.parentId);
   const isExistingAccount = Boolean(
     editingAccount && accounts.some((account) => account.id === editingAccount.id)
@@ -5278,7 +5304,7 @@ export default function MailClient() {
           setTotalMessages(null);
           setLoadedMessageCount(0);
           try {
-        const res = await fetch("/api/auth/me", { credentials: "include" });
+        const res = await apiFetch("/api/auth/me", { credentials: "include" });
         if (res.ok) {
           const data = (await res.json()) as { ttlSeconds?: number } | null;
           if (typeof data?.ttlSeconds === "number") {
@@ -5669,7 +5695,7 @@ export default function MailClient() {
         />
 
         <aside className="pane list-pane" style={{ width: listWidth }} ref={listPaneRef}>
-          <div className="message-list">
+          <div className={`message-list ${isCompactView ? "compact" : ""}`}>
             <div className="list-header">
               <div>
                 <strong>
@@ -5718,6 +5744,12 @@ export default function MailClient() {
               </div>
               <div className="list-actions">
                 <div className="view-toggle">
+                  <button
+                    className={`icon-button ${messageView === "compact" ? "active" : ""}`}
+                    onClick={() => setMessageView("compact")}
+                  >
+                    Compact
+                  </button>
                   <button
                     className={`icon-button ${messageView === "card" ? "active" : ""}`}
                     onClick={() => setMessageView("card")}
@@ -5969,6 +6001,7 @@ export default function MailClient() {
                                           }}
                                         >
                                           <span className="cell-select">
+                                            {renderUnreadDot(message)}
                                             {renderSelectIndicators(message)}
                                             <input
                                               type="checkbox"
@@ -6114,6 +6147,7 @@ export default function MailClient() {
                                   }}
                                 >
                                   <span className="cell-select">
+                                    {renderUnreadDot(message)}
                                     {renderSelectIndicators(message)}
                                     <input
                                       type="checkbox"
@@ -6162,7 +6196,7 @@ export default function MailClient() {
               </div>
             ) : (
               groupedMessages.map((group) => (
-                <div key={group.key} className="card-group">
+                <div key={group.key} className={`card-group ${isCompactView ? "compact" : ""}`}>
                   <div
                     className={`group-title group-toggle ${group.key === "Pinned" ? "pinned" : ""}`}
                     role="button"
@@ -6209,6 +6243,13 @@ export default function MailClient() {
                         const threadSize = fullFlat.length;
                         const isCollapsed = collapsedThreads[threadGroupId] ?? true;
                         const flat = isCollapsed ? [fullFlat[0]] : fullFlat;
+                        const threadGroupHasActive =
+                          isCompactView &&
+                          !!activeMessageId &&
+                          fullFlat.some((item) => item.message.id === activeMessageId);
+                        const threadGroupHasSelected =
+                          isCompactView &&
+                          fullFlat.some((item) => selectedMessageIds.has(item.message.id));
                         const threadFolderIds = Array.from(
                           new Set(fullFlat.map((item) => item.message.folderId))
                         );
@@ -6216,7 +6257,12 @@ export default function MailClient() {
                           searchScope === "all" ||
                           (includeThreadAcrossFolders && threadFolderIds.length > 1);
                         return (
-                            <div key={`${threadGroupId}-${root.message.id}`} className="thread-group">
+                            <div
+                              key={`${threadGroupId}-${root.message.id}`}
+                              className={`thread-group${threadGroupHasActive ? " compact-active" : ""}${
+                                threadGroupHasSelected ? " compact-selected" : ""
+                              }`}
+                            >
                             {flat.map(({ message, depth }, index) => {
                               const isSelected = selectedMessageIds.has(message.id);
                               const isDragging = draggingMessageIds.has(message.id);
@@ -6230,10 +6276,20 @@ export default function MailClient() {
                                         message.folderId !== activeFolderId)
                                     ? [message.folderId]
                                     : [];
+                              const isActiveThread =
+                                !!activeMessageId &&
+                                fullFlat.some((item) => item.message.id === activeMessageId);
+                              const showCollapsedActive =
+                                isCompactView &&
+                                isCollapsed &&
+                                index === 0 &&
+                                depth === 0 &&
+                                threadSize > 1 &&
+                                isActiveThread;
                               return (
                                 <div
                                   key={message.id}
-                                  className={`message-item ${message.id === activeMessageId ? "active" : ""} ${
+                                  className={`message-item ${isCompactView ? "compact" : ""} ${message.id === activeMessageId ? "active" : ""} ${
                                     depth > 0 ? "thread-child" : ""
                                   } ${
                                     (hoveredThreadId === threadGroupId ||
@@ -6243,7 +6299,9 @@ export default function MailClient() {
                                       : ""
                                   } ${!message.seen ? "unread" : ""} ${
                                     pendingMessageActions.has(message.id) ? "disabled" : ""
-                                  } ${isSelected ? "selected" : ""} ${isDragging ? "dragging" : ""}`}
+                                  } ${isSelected ? "selected" : ""} ${isDragging ? "dragging" : ""} ${
+                                    showCollapsedActive ? "active-thread-root" : ""
+                                  }`}
                                   role="button"
                                   tabIndex={0}
                                   draggable
@@ -6289,6 +6347,7 @@ export default function MailClient() {
                                 >
                                   <div className="message-card-header">
                                     <span className="message-select">
+                                      {renderUnreadDot(message)}
                                       {renderSelectIndicators(message)}
                                       <input
                                         type="checkbox"
@@ -6309,7 +6368,7 @@ export default function MailClient() {
                                   <div
                                     className={`message-card-actions ${
                                       pendingMessageActions.has(message.id) ? "disabled" : ""
-                                    }`}
+                                    } ${isCompactView ? "compact-actions" : ""}`}
                                   >
                                     {!message.seen && message.recent && !message.draft && (
                                       <span className="message-new">New</span>
@@ -6320,8 +6379,32 @@ export default function MailClient() {
                                       </span>
                                     )}
                                     <span className="message-date">{message.date}</span>
-                                    {!listIsNarrow && renderQuickActions(message)}
-                                    {renderMessageMenu(message, "list")}
+                                    {isCompactView ? (
+                                      <>
+                                        <button
+                                          className="icon-button ghost message-delete"
+                                          title={
+                                            isTrashFolder(message.folderId)
+                                              ? "Delete permanently"
+                                              : "Move to Trash"
+                                          }
+                                          aria-label="Delete"
+                                          disabled={pendingMessageActions.has(message.id)}
+                                          onClick={(event) => {
+                                            event.stopPropagation();
+                                            handleDeleteMessage(message);
+                                          }}
+                                        >
+                                          <Trash2 size={14} />
+                                        </button>
+                                        {renderMessageMenu(message, "table")}
+                                      </>
+                                    ) : (
+                                      <>
+                                        {!listIsNarrow && renderQuickActions(message)}
+                                        {renderMessageMenu(message, "list")}
+                                      </>
+                                    )}
                                   </div>
                                 </div>
                                 <div className="message-card-subject">
@@ -6374,17 +6457,25 @@ export default function MailClient() {
                                     )}
                                     <span className="subject-text">{message.subject}</span>
                                   </div>
-                                  {threadSize > 1 && index === 0 && (
-                                    <div className="thread-indicator">
-                                      <GitBranch size={12} />
-                                      <span>{threadSize}</span>
+                                  {(isCompactView ||
+                                    (threadSize > 1 && index === 0)) && (
+                                    <div className="message-subject-meta">
+                                      {isCompactView && renderFolderBadges(folderIds)}
+                                      {threadSize > 1 && index === 0 && (
+                                        <div className="thread-indicator">
+                                          <GitBranch size={12} />
+                                          <span>{threadSize}</span>
+                                        </div>
+                                      )}
                                     </div>
                                   )}
                                 </div>
                                 <div className="message-preview">{message.preview}</div>
-                                <div className="message-meta">
-                                  {renderFolderBadges(folderIds)}
-                                </div>
+                                {!isCompactView && (
+                                  <div className="message-meta">
+                                    {renderFolderBadges(folderIds)}
+                                  </div>
+                                )}
                               </div>
                               );
                             })}
@@ -6407,7 +6498,7 @@ export default function MailClient() {
                             return (
                               <div
                                 key={message.id}
-                                className={`message-item ${message.id === activeMessageId ? "active" : ""} ${
+                                className={`message-item ${isCompactView ? "compact" : ""} ${message.id === activeMessageId ? "active" : ""} ${
                                   (hoveredThreadId === threadGroupId ||
                                     activeThreadKey === threadGroupId) &&
                                     message.id !== activeMessage?.id
@@ -6433,6 +6524,7 @@ export default function MailClient() {
                               >
                                 <div className="message-card-header">
                                   <span className="message-select">
+                                    {renderUnreadDot(message)}
                                     {renderSelectIndicators(message)}
                                     <input
                                       type="checkbox"
@@ -6453,7 +6545,7 @@ export default function MailClient() {
                                   <div
                                     className={`message-card-actions ${
                                       pendingMessageActions.has(message.id) ? "disabled" : ""
-                                    }`}
+                                    } ${isCompactView ? "compact-actions" : ""}`}
                                   >
                                     {!message.seen && message.recent && !message.draft && (
                                       <span className="message-new">New</span>
@@ -6464,19 +6556,50 @@ export default function MailClient() {
                                       </span>
                                     )}
                                     <span className="message-date">{message.date}</span>
-                                    {!listIsNarrow && renderQuickActions(message)}
-                                    {renderMessageMenu(message, "list")}
+                                    {isCompactView ? (
+                                      <>
+                                        <button
+                                          className="icon-button ghost message-delete"
+                                          title={
+                                            isTrashFolder(message.folderId)
+                                              ? "Delete permanently"
+                                              : "Move to Trash"
+                                          }
+                                          aria-label="Delete"
+                                          disabled={pendingMessageActions.has(message.id)}
+                                          onClick={(event) => {
+                                            event.stopPropagation();
+                                            handleDeleteMessage(message);
+                                          }}
+                                        >
+                                          <Trash2 size={14} />
+                                        </button>
+                                        {renderMessageMenu(message, "table")}
+                                      </>
+                                    ) : (
+                                      <>
+                                        {!listIsNarrow && renderQuickActions(message)}
+                                        {renderMessageMenu(message, "list")}
+                                      </>
+                                    )}
                                   </div>
                                 </div>
                                 <div className="message-card-subject">
                                   <div className="message-subject">
                                     <span className="subject-text">{message.subject}</span>
                                   </div>
+                                  {isCompactView && (
+                                    <div className="message-subject-meta">
+                                      {renderFolderBadges(folderIds)}
+                                    </div>
+                                  )}
                                 </div>
                                 <div className="message-preview">{message.preview}</div>
-                                <div className="message-meta">
-                                  {renderFolderBadges(folderIds)}
-                                </div>
+                                {!isCompactView && (
+                                  <div className="message-meta">
+                                    {renderFolderBadges(folderIds)}
+                                  </div>
+                                )}
                               </div>
                             );
                           })}

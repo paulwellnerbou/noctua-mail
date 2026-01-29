@@ -112,6 +112,15 @@ export function requireSessionOr401(
       headers: { "Content-Type": "application/json" }
     });
   }
+  const clientId = request.headers.get("x-noctua-client");
+  if (clientId) {
+    try {
+      const url = new URL(request.url);
+      console.info(`[client] ${clientId} ${url.pathname}`);
+    } catch {
+      console.info(`[client] ${clientId}`);
+    }
+  }
   const cookie = request.headers.get("cookie");
   const session = sessionFromCookie(cookie);
   if (session) {

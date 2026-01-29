@@ -26,6 +26,7 @@ function mailboxPathFromFolder(folder: Folder, accountId: string) {
 export async function POST(request: Request) {
   const session = requireSessionOr401(request);
   if (session instanceof NextResponse) return session;
+  const clientId = request.headers.get("x-noctua-client") ?? undefined;
   const payload = (await request.json()) as MovePayload;
   const { accountId, messageIds, destinationFolderId } = payload;
 
@@ -56,7 +57,13 @@ export async function POST(request: Request) {
     if (typeof message.imapUid !== "number" || !message.mailboxPath) continue;
 
     try {
-      await moveImapMessage(account, message.mailboxPath, message.imapUid, destinationMailbox);
+      await moveImapMessage(
+        account,
+        message.mailboxPath,
+        message.imapUid,
+        destinationMailbox,
+        clientId
+      );
       await updateMessageFolder(accountId, message.id, destinationFolderId, destinationMailbox);
     } catch (error) {
       return NextResponse.json(

@@ -461,6 +461,10 @@ a {
   min-height: 100%;
 }
 
+.message-list.compact {
+  gap: 0;
+}
+
 .list-header {
   display: flex;
   align-items: center;
@@ -522,12 +526,45 @@ a {
 
 .view-toggle {
   display: inline-flex;
-  gap: 6px;
+  border-radius: var(--radius-md);
+}
+
+.view-toggle .icon-button {
+  border: 1px solid var(--border);
+  border-radius: 0;
+  background: var(--surface-2);
+  transform: none;
+}
+
+.view-toggle .icon-button + .icon-button {
+  margin-left: -1px;
+}
+
+.view-toggle .icon-button:first-child {
+  border-top-left-radius: var(--radius-md);
+  border-bottom-left-radius: var(--radius-md);
+}
+
+.view-toggle .icon-button:last-child {
+  border-top-right-radius: var(--radius-md);
+  border-bottom-right-radius: var(--radius-md);
+}
+
+.view-toggle .icon-button:hover {
+  transform: none;
+  border-color: var(--border);
+  background: var(--surface-2);
 }
 
 .icon-button.active {
   border-color: var(--accent);
   background: var(--surface-3);
+}
+
+.view-toggle .icon-button.active {
+  background: var(--surface-2);
+  border-color: var(--accent);
+  z-index: 1;
 }
 
 .new-mail-button {
@@ -607,7 +644,7 @@ a {
 
 .table-row {
   display: grid;
-  grid-template-columns: 32px 1.5fr 2.4fr 138px auto;
+  grid-template-columns: minmax(44px, auto) 1.5fr 2.4fr 138px auto;
   gap: 12px;
   padding: 8px 10px;
   border-radius: var(--radius-sm);
@@ -710,9 +747,10 @@ a {
 .cell-select {
   display: flex;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
   flex-direction: row;
   flex-wrap: nowrap;
+  gap: 6px;
 }
 
 .cell-actions {
@@ -730,9 +768,33 @@ a {
 .message-select {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
+  justify-content: flex-start;
   flex-direction: row;
   flex-wrap: nowrap;
+  gap: 6px;
+}
+
+.unread-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  box-sizing: border-box;
+  padding: 0;
+  margin: 0;
+  flex: 0 0 8px;
+  cursor: pointer;
+  transition: opacity 0.15s ease;
+}
+
+.unread-dot.read {
+  background: transparent;
+  opacity: 0.55;
+}
+
+.unread-dot:disabled {
+  cursor: default;
 }
 
 .message-select-icons {
@@ -809,6 +871,10 @@ a {
   gap: 4px;
 }
 
+.card-group.compact {
+  gap: 0;
+}
+
 .thread-caret {
   width: 16px;
   height: 20px;
@@ -868,6 +934,72 @@ a {
   box-sizing: border-box;
 }
 
+.message-item.compact {
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  position: relative;
+}
+
+.message-list.compact .message-item.compact::before {
+  content: "";
+  position: absolute;
+  left: var(--radius-sm);
+  right: var(--radius-sm);
+  top: -1px;
+  height: 1px;
+  background: var(--border);
+  display: none;
+  pointer-events: none;
+}
+
+.message-list.compact .message-item.compact + .message-item.compact::before {
+  display: block;
+}
+
+.card-group.compact > .thread-group + .thread-group .message-item.compact:first-child::before {
+  display: block;
+}
+
+.message-item.compact:hover,
+.message-item.compact.selected {
+  border-color: transparent;
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+
+.message-item.compact.active,
+.message-item.compact.active-thread-root {
+  border-color: transparent;
+  box-shadow: inset 0 0 0 1px var(--text);
+}
+
+.message-item.compact:hover::before,
+.message-item.compact.selected::before,
+.message-item.compact.active::before,
+.message-item.compact.active-thread-root::before {
+  display: none;
+}
+
+.message-item.compact.active + .message-item.compact::before,
+.message-item.compact.selected + .message-item.compact::before,
+.message-item.compact.active-thread-root + .message-item.compact::before,
+.message-item.compact:hover + .message-item.compact::before {
+  display: none;
+}
+
+.thread-group.compact-active + .thread-group .message-item.compact:first-child::before,
+.thread-group.compact-selected + .thread-group .message-item.compact:first-child::before {
+  display: none;
+}
+
+.message-item.active-thread-root,
+.message-item.active-thread-root.selected {
+  background: var(--surface-2);
+  border-color: transparent;
+  box-shadow: inset 0 0 0 1px var(--text);
+}
+
+
 .message-item.unread .message-from,
 .message-item.unread .subject-text,
 .message-item.unread .message-preview {
@@ -922,11 +1054,20 @@ a {
   width: 100%;
 }
 
+.message-item.compact .message-card-header {
+  margin-bottom: 0;
+  font-size: 10px;
+}
+
 .message-card-actions {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   margin-left: auto;
+}
+
+.message-item.compact .message-card-actions {
+  gap: 4px;
 }
 
 .message-delete {
@@ -961,6 +1102,10 @@ a {
   text-align: right;
 }
 
+.message-item.compact .message-date {
+  font-size: 10px;
+}
+
 .message-attach {
   display: inline-flex;
   align-items: center;
@@ -977,6 +1122,19 @@ a {
   font-weight: 600;
   margin-bottom: 6px;
   width: 100%;
+}
+
+.message-item.compact .message-card-subject {
+  font-size: 13px;
+  margin-bottom: 0;
+  font-weight: 400;
+}
+
+.message-subject-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
 }
 
 .message-subject {
@@ -1001,12 +1159,20 @@ a {
   line-height: 1.4;
 }
 
+.message-item.compact .message-preview {
+  display: none;
+}
+
 .message-meta {
   display: flex;
   justify-content: space-between;
   font-size: 11px;
   color: var(--muted);
   margin-top: 8px;
+}
+
+.message-item.compact .message-meta {
+  margin-top: 6px;
 }
 
 .message-view-pane {
@@ -1190,6 +1356,18 @@ a {
   background: rgba(120, 90, 255, 0.16);
   border-color: rgba(120, 90, 255, 0.4);
   color: #4d3ab0;
+}
+
+.dark .thread-badge.flag.answered {
+  color: #b9f0cb;
+  border-color: rgba(120, 220, 150, 0.45);
+  background: rgba(120, 220, 150, 0.2);
+}
+
+.dark .thread-badge.compose {
+  color: #d7ccff;
+  border-color: rgba(160, 135, 255, 0.55);
+  background: rgba(150, 120, 255, 0.22);
 }
 
 .thread-card-subject {
@@ -1614,6 +1792,13 @@ a {
   color: #1a1a1a;
 }
 
+.dark .compose-line input,
+.dark .compose-subject input,
+.dark .compose-grid-row input {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
 .compose-line input[readonly] {
   opacity: 0.8;
 }
@@ -1708,6 +1893,12 @@ a {
   color: #1a1a1a;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
+}
+
+.dark .compose-body textarea,
+.dark .compose-writing.text > textarea {
+  background: var(--surface-2);
+  color: var(--text);
 }
 
 .compose-editor {
@@ -2636,7 +2827,7 @@ a {
 }
 
 .tree-unread {
-  margin-left: auto;
+  margin-left: 6px;
   font-size: 10px;
   padding: 2px 6px;
   border-radius: var(--radius-sm);

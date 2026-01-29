@@ -30,7 +30,7 @@ export type AccountSettings = {
     includeAcrossFolders?: boolean;
   };
   layout?: {
-    defaultView?: "card" | "table";
+    defaultView?: "card" | "table" | "compact";
   };
   signatures?: {
     id: string;

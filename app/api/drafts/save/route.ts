@@ -48,6 +48,7 @@ function findDraftsFolder(folders: Folder[], accountId: string) {
 export async function POST(request: Request) {
   const auth = await requireSessionOr401(request);
   if (auth instanceof NextResponse) return auth;
+  const clientId = request.headers.get("x-noctua-client") ?? undefined;
   const payload = (await request.json()) as {
     accountId: string;
     draftId?: string | null;
@@ -126,17 +127,17 @@ export async function POST(request: Request) {
   if (payload.draftId) {
     const existing = await getMessageById(payload.accountId, payload.draftId);
     if (existing?.imapUid && existing.mailboxPath) {
-      await deleteImapMessage(account, existing.mailboxPath, existing.imapUid);
+      await deleteImapMessage(account, existing.mailboxPath, existing.imapUid, clientId);
     }
     if (existing) {
       await deleteMessageById(payload.accountId, existing.id);
     }
   }
 
-  const uid = await appendImapMessage(account, draftsMailbox, raw, ["\\Draft"]);
+  const uid = await appendImapMessage(account, draftsMailbox, raw, ["\\Draft"], clientId);
   let messageId: string | null = null;
   if (uid) {
-    const message = await syncImapMessage(account, draftsMailbox, uid);
+    const message = await syncImapMessage(account, draftsMailbox, uid, clientId);
     if (message) {
       await upsertMessages(account.id, null, [message], false);
       messageId = message.id;

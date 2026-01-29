@@ -25,6 +25,7 @@ function formatAddress(addresses?: EnvelopeAddress[] | null) {
 export async function GET(request: Request) {
   const session = requireSessionOr401(request);
   if (session instanceof NextResponse) return session;
+  const clientId = request.headers.get("x-noctua-client") ?? undefined;
   const { searchParams } = new URL(request.url);
   const accountId = searchParams.get("accountId");
   const activeFolderId = searchParams.get("activeFolderId");
@@ -37,6 +38,7 @@ export async function GET(request: Request) {
   if (!account) {
     return NextResponse.json({ ok: false, message: "Account not found" }, { status: 404 });
   }
+  const logContext = { accountId, clientId };
 
   const maxIdleSessions =
     Number(searchParams.get("maxIdleSessions")) ||
@@ -93,9 +95,13 @@ export async function GET(request: Request) {
       const stopAll = async () => {
         for (const item of sessions.values()) {
           try {
-            await logImapOp("imap.logout", { accountId, mailbox: item.mailbox }, async () => {
-              await item.client.logout();
-            });
+            await logImapOp(
+              "imap.logout",
+              { ...logContext, mailbox: item.mailbox },
+              async () => {
+                await item.client.logout();
+              }
+            );
           } catch {
             // ignore
           }
@@ -113,7 +119,7 @@ export async function GET(request: Request) {
         if (!sess) return;
         sessions.delete(folderId);
         try {
-          await logImapOp("imap.logout", { accountId, mailbox: sess.mailbox }, async () => {
+          await logImapOp("imap.logout", { ...logContext, mailbox: sess.mailbox }, async () => {
             await sess.client.logout();
           });
         } catch {
@@ -168,7 +174,7 @@ export async function GET(request: Request) {
           qresync: true
         });
 
-        await logImapOp("imap.connect", { accountId, mailbox }, async () => {
+        await logImapOp("imap.connect", { ...logContext, mailbox }, async () => {
           await client.connect();
         });
         const caps: any =
@@ -197,7 +203,7 @@ export async function GET(request: Request) {
 
         const mailboxInfo = await logImapOp(
           "imap.mailboxOpen",
-          { accountId, mailbox, readOnly: true },
+          { ...logContext, mailbox, readOnly: true },
           async () => await client.mailboxOpen(mailbox, mailboxOptions)
         );
         const lastUidNext = mailboxInfo?.uidNext ?? 0;
@@ -233,7 +239,7 @@ export async function GET(request: Request) {
         const fetchNew = async () => {
           const status = await logImapOp(
             "imap.status",
-            { accountId, mailbox },
+            { ...logContext, mailbox },
             async () => await client.status(mailbox, { uidNext: true })
           );
           const uidNext = status?.uidNext ?? lastUidNext;
@@ -241,7 +247,7 @@ export async function GET(request: Request) {
           const range = { uid: `${lastUidNext}:${uidNext - 1}` };
           const items = await logImapOp(
             "imap.fetch",
-            { accountId, mailbox, range: range.uid },
+            { ...logContext, mailbox, range: range.uid },
             async () => {
               const list: Array<{
                 uid: number;
@@ -346,7 +352,7 @@ export async function GET(request: Request) {
             }
           });
           try {
-            await logImapOp("imap.connect", { accountId, mailbox: "poll" }, async () => {
+            await logImapOp("imap.connect", { ...logContext, mailbox: "poll" }, async () => {
               await pollClient.connect();
             });
             const updates: Array<{ id: string; uidNext?: number; unseen?: number; exists?: number }>
@@ -358,7 +364,7 @@ export async function GET(request: Request) {
               try {
                 const status = await logImapOp(
                   "imap.status",
-                  { accountId, mailbox },
+                  { ...logContext, mailbox },
                   async () =>
                     await pollClient.status(mailbox, {
                       uidNext: true,
@@ -383,7 +389,7 @@ export async function GET(request: Request) {
             send("error", { message: (error as Error).message ?? "Poll failed" });
           } finally {
             try {
-              await logImapOp("imap.logout", { accountId, mailbox: "poll" }, async () => {
+              await logImapOp("imap.logout", { ...logContext, mailbox: "poll" }, async () => {
                 await pollClient.logout();
               });
             } catch {

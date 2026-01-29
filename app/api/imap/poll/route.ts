@@ -21,6 +21,7 @@ function formatAddress(addresses?: EnvelopeAddress[] | null) {
 export async function GET(request: Request) {
   const session = requireSessionOr401(request);
   if (session instanceof NextResponse) return session;
+  const clientId = request.headers.get("x-noctua-client") ?? undefined;
   const { searchParams } = new URL(request.url);
   const accountId = searchParams.get("accountId");
   const mailbox = searchParams.get("mailbox") ?? "INBOX";
@@ -62,10 +63,14 @@ export async function GET(request: Request) {
   });
 
   try {
-    await logImapOp("connect", { host: account.imap.host }, () => client.connect());
+    await logImapOp(
+      "connect",
+      { host: account.imap.host, accountId, clientId },
+      () => client.connect()
+    );
     const mailboxInfo = await logImapOp(
       "mailboxOpen",
-      { mailbox },
+      { mailbox, accountId, clientId },
       () => client.mailboxOpen(mailbox, { readOnly: true })
     );
     const uidNext = mailboxInfo?.uidNext ?? 0;
@@ -126,7 +131,7 @@ export async function GET(request: Request) {
     );
   } finally {
     try {
-      await logImapOp("logout", {}, () => client.logout());
+      await logImapOp("logout", { accountId, clientId }, () => client.logout());
     } catch {
       // ignore
     }

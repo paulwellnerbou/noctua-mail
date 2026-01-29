@@ -47,6 +47,7 @@ function findSentMailbox(folders: Folder[], accountId: string) {
 export async function POST(request: Request) {
   const session = requireSessionOr401(request);
   if (session instanceof NextResponse) return session;
+  const clientId = request.headers.get("x-noctua-client") ?? undefined;
   const payload = (await request.json()) as {
     accountId: string;
     to: string;
@@ -118,7 +119,7 @@ export async function POST(request: Request) {
   const sentMailbox = findSentMailbox(folders, account.id);
   if (sentMailbox) {
     try {
-      await appendImapMessage(account, sentMailbox, result.raw, ["\\Seen"]);
+      await appendImapMessage(account, sentMailbox, result.raw, ["\\Seen"], clientId);
     } catch {
       // ignore append failures
     }

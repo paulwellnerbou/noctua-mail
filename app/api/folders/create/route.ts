@@ -6,6 +6,7 @@ import { requireSessionOr401 } from "@/lib/auth";
 export async function POST(request: Request) {
   const auth = await requireSessionOr401(request);
   if (auth instanceof NextResponse) return auth;
+  const clientId = request.headers.get("x-noctua-client") ?? undefined;
   const payload = (await request.json()) as {
     accountId: string;
     name: string;
@@ -24,8 +25,8 @@ export async function POST(request: Request) {
   const parentPath = parent ? parent.id.replace(`${payload.accountId}:`, "") : "";
   const path = parentPath ? `${parentPath}${delimiter}${payload.name}` : payload.name;
 
-  await createImapFolder(account, path);
-  const updated = await listImapFolders(account);
+  await createImapFolder(account, path, clientId);
+  const updated = await listImapFolders(account, clientId);
   const existing = await getFolders();
   const next = [...existing.filter((folder) => folder.accountId !== account.id), ...updated];
   await saveFolders(next);

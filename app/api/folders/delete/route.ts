@@ -54,6 +54,7 @@ function findTrashFolder(folders: Folder[], accountId: string) {
 export async function POST(request: Request) {
   const auth = await requireSessionOr401(request);
   if (auth instanceof NextResponse) return auth;
+  const clientId = request.headers.get("x-noctua-client") ?? undefined;
   const startedAt = Date.now();
   const payload = (await request.json()) as { accountId: string; folderId: string };
   const accounts = await getAccounts();
@@ -83,8 +84,12 @@ export async function POST(request: Request) {
 
   if (isInTrash) {
     const t0 = Date.now();
-    await deleteImapFolder(account, mailboxPath);
-    console.info(`[imap] delete folder mailbox=${mailboxPath} ${Date.now() - t0}ms`);
+    await deleteImapFolder(account, mailboxPath, clientId);
+    console.info(
+      `[imap] delete folder mailbox=${mailboxPath} account=${account.id}${
+        clientId ? ` client=${clientId}` : ""
+      } ${Date.now() - t0}ms`
+    );
     await notifyFolderDeleted(payload.accountId, folder.id);
     const t1 = Date.now();
     await deleteMessagesByFolderPrefix(payload.accountId, mailboxPath);
@@ -92,8 +97,10 @@ export async function POST(request: Request) {
       `[db] delete messages folderPrefix=${mailboxPath} ${Date.now() - t1}ms`
     );
     const t2 = Date.now();
-    const updated = await listImapFolders(account);
-    console.info(`[imap] list folders ${Date.now() - t2}ms`);
+    const updated = await listImapFolders(account, clientId);
+    console.info(
+      `[imap] list folders account=${account.id}${clientId ? ` client=${clientId}` : ""} ${Date.now() - t2}ms`
+    );
     const t3 = Date.now();
     const existing = await getFolders();
     const next = [...existing.filter((item) => item.accountId !== account.id), ...updated];
@@ -107,9 +114,11 @@ export async function POST(request: Request) {
   const leafName = parts[parts.length - 1] || folder.name;
   const newPath = `${trashMailbox}${delimiter}${leafName}`;
   const t0 = Date.now();
-  await renameImapFolder(account, mailboxPath, newPath);
+  await renameImapFolder(account, mailboxPath, newPath, clientId);
   console.info(
-    `[imap] move folder mailbox=${mailboxPath} newMailbox=${newPath} ${Date.now() - t0}ms`
+    `[imap] move folder mailbox=${mailboxPath} newMailbox=${newPath} account=${account.id}${
+      clientId ? ` client=${clientId}` : ""
+    } ${Date.now() - t0}ms`
   );
   await notifyFolderDeleted(payload.accountId, folder.id);
   const t1 = Date.now();
@@ -118,8 +127,10 @@ export async function POST(request: Request) {
     `[db] update messages folderPrefix=${mailboxPath} -> ${newPath} ${Date.now() - t1}ms`
   );
   const t2 = Date.now();
-  const updated = await listImapFolders(account);
-  console.info(`[imap] list folders ${Date.now() - t2}ms`);
+  const updated = await listImapFolders(account, clientId);
+  console.info(
+    `[imap] list folders account=${account.id}${clientId ? ` client=${clientId}` : ""} ${Date.now() - t2}ms`
+  );
   const t3 = Date.now();
   const existing = await getFolders();
   const next = [...existing.filter((item) => item.accountId !== account.id), ...updated];

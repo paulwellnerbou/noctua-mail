@@ -465,13 +465,14 @@ export default function AccountSettingsModal({
                           onUpdateSettings({
                             layout: {
                               ...(editingAccount.settings?.layout ?? {}),
-                              defaultView: event.target.value as "card" | "table"
+                              defaultView: event.target.value as "card" | "table" | "compact"
                             }
                           })
                         }
                       >
                         <option value="card">Card view</option>
                         <option value="table">Table view</option>
+                        <option value="compact">Compact view</option>
                       </select>
                     </label>
                   </form>

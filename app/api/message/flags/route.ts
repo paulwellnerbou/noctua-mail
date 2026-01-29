@@ -14,6 +14,7 @@ const flagMap: Record<string, string> = {
 export async function POST(request: Request) {
   const session = requireSessionOr401(request);
   if (session instanceof NextResponse) return session;
+  const clientId = request.headers.get("x-noctua-client") ?? undefined;
   const payload = (await request.json()) as {
     accountId: string;
     messageId: string;
@@ -42,7 +43,14 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: false, message: "Unknown flag" }, { status: 400 });
   }
 
-  await updateImapFlags(account, message.mailboxPath, message.imapUid, imapFlag, payload.value);
+  await updateImapFlags(
+    account,
+    message.mailboxPath,
+    message.imapUid,
+    imapFlag,
+    payload.value,
+    clientId
+  );
 
   const existing = message.flags ?? [];
   const nextFlags = payload.value

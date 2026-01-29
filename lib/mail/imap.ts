@@ -36,6 +36,16 @@ type ImapParsedMessage = {
   flags?: Set<string>;
 };
 
+type ImapLogContext = {
+  accountId: string;
+  clientId?: string;
+};
+
+const buildLogContext = (account: Account, clientId?: string): ImapLogContext => ({
+  accountId: account.id,
+  clientId
+});
+
 function buildFolderId(accountId: string, path: string) {
   const safePath = path.replace(/\\/g, "/");
   return `${accountId}:${safePath}`;
@@ -61,7 +71,7 @@ function mapImapFolders(account: Account, list: Awaited<ReturnType<typeof listIm
   });
 }
 
-async function listImapRaw(account: Account) {
+async function listImapRaw(account: Account, logContext?: ImapLogContext) {
   let ImapFlow: typeof import("imapflow").ImapFlow;
   try {
     ({ ImapFlow } = await import("imapflow"));
@@ -72,11 +82,11 @@ async function listImapRaw(account: Account) {
   const client = buildImapClient(ImapFlow, account);
 
   try {
-    await logImapOp("connect", { host: account.imap.host }, () => client.connect());
-    return await logImapOp("list", {}, () => client.list());
+    await logImapOp("connect", { host: account.imap.host, ...logContext }, () => client.connect());
+    return await logImapOp("list", { ...logContext }, () => client.list());
   } finally {
     try {
-      await logImapOp("logout", {}, () => client.logout());
+      await logImapOp("logout", { ...logContext }, () => client.logout());
     } catch {
       // ignore logout errors
     }
@@ -268,7 +278,8 @@ async function parseImapMessage(
 export async function syncImapAccount(
   account: Account,
   mailboxPath?: string,
-  mode: "full" | "recent" | "new" = "recent"
+  mode: "full" | "recent" | "new" = "recent",
+  clientId?: string
 ): Promise<ImapSyncResult> {
   let ImapFlow: typeof import("imapflow").ImapFlow;
   let simpleParser: typeof import("mailparser").simpleParser;
@@ -283,14 +294,17 @@ export async function syncImapAccount(
   }
 
   const client = buildImapClient(ImapFlow, account);
+  const logContext = buildLogContext(account, clientId);
 
-  await logImapOp("connect", { host: account.imap.host }, () => client.connect());
+  await logImapOp("connect", { host: account.imap.host, ...logContext }, () =>
+    client.connect()
+  );
 
-  const folderList = await logImapOp("list", {}, () => client.list());
+  const folderList = await logImapOp("list", { ...logContext }, () => client.list());
   const folders: Folder[] = mapImapFolders(account, folderList);
 
   const mailboxToOpen = mailboxPath ?? "INBOX";
-  await logImapOp("mailboxOpen", { mailbox: mailboxToOpen }, () =>
+  await logImapOp("mailboxOpen", { mailbox: mailboxToOpen, ...logContext }, () =>
     client.mailboxOpen(mailboxToOpen)
   );
 
@@ -326,7 +340,7 @@ export async function syncImapAccount(
         ms: Date.now() - start
       });
     }
-    await logImapOp("logout", {}, () => client.logout());
+    await logImapOp("logout", { ...logContext }, () => client.logout());
     return { messages, folders };
   }
 
@@ -357,14 +371,15 @@ export async function syncImapAccount(
     });
   }
 
-  await logImapOp("logout", {}, () => client.logout());
+  await logImapOp("logout", { ...logContext }, () => client.logout());
   return { messages, folders };
 }
 
 export async function syncImapMessage(
   account: Account,
   mailboxPath: string,
-  uid: number
+  uid: number,
+  clientId?: string
 ): Promise<Message | null> {
   let ImapFlow: typeof import("imapflow").ImapFlow;
   let simpleParser: typeof import("mailparser").simpleParser;
@@ -379,16 +394,19 @@ export async function syncImapMessage(
   }
 
   const client = buildImapClient(ImapFlow, account);
+  const logContext = buildLogContext(account, clientId);
 
   let message: Message | null = null;
   try {
-    await logImapOp("connect", { host: account.imap.host }, () => client.connect());
-    await logImapOp("mailboxOpen", { mailbox: mailboxPath }, () =>
+    await logImapOp("connect", { host: account.imap.host, ...logContext }, () =>
+      client.connect()
+    );
+    await logImapOp("mailboxOpen", { mailbox: mailboxPath, ...logContext }, () =>
       client.mailboxOpen(mailboxPath)
     );
     const item = await logImapOp(
       "fetchOne",
-      { mailbox: mailboxPath, uid },
+      { mailbox: mailboxPath, uid, ...logContext },
       () => client.fetchOne(String(uid), { source: true, flags: true }, { uid: true })
     );
     if (item && (item as any).source) {
@@ -401,7 +419,7 @@ export async function syncImapMessage(
     }
   } finally {
     try {
-      await logImapOp("logout", {}, () => client.logout());
+      await logImapOp("logout", { ...logContext }, () => client.logout());
     } catch {
       // ignore logout errors
     }
@@ -413,7 +431,8 @@ export async function appendImapMessage(
   account: Account,
   mailboxPath: string,
   rawMessage: Buffer,
-  flags: string[] = ["\\Seen"]
+  flags: string[] = ["\\Seen"],
+  clientId?: string
 ) {
   let ImapFlow: typeof import("imapflow").ImapFlow;
   try {
@@ -423,12 +442,15 @@ export async function appendImapMessage(
   }
 
   const client = buildImapClient(ImapFlow, account);
+  const logContext = buildLogContext(account, clientId);
 
   try {
-    await logImapOp("connect", { host: account.imap.host }, () => client.connect());
+    await logImapOp("connect", { host: account.imap.host, ...logContext }, () =>
+      client.connect()
+    );
     const result = await logImapOp(
       "append",
-      { mailbox: mailboxPath },
+      { mailbox: mailboxPath, ...logContext },
       () => client.append(mailboxPath, rawMessage, flags, new Date())
     );
     if (!result) return null;
@@ -436,7 +458,7 @@ export async function appendImapMessage(
     return typeof uid === "number" ? uid : null;
   } finally {
     try {
-      await logImapOp("logout", {}, () => client.logout());
+      await logImapOp("logout", { ...logContext }, () => client.logout());
     } catch {
       // ignore logout errors
     }
@@ -447,7 +469,8 @@ export async function moveImapMessage(
   account: Account,
   mailboxPath: string,
   uid: number,
-  destination: string
+  destination: string,
+  clientId?: string
 ) {
   let ImapFlow: typeof import("imapflow").ImapFlow;
   try {
@@ -457,20 +480,23 @@ export async function moveImapMessage(
   }
 
   const client = buildImapClient(ImapFlow, account);
+  const logContext = buildLogContext(account, clientId);
 
   try {
-    await logImapOp("connect", { host: account.imap.host }, () => client.connect());
-    await logImapOp("mailboxOpen", { mailbox: mailboxPath }, () =>
+    await logImapOp("connect", { host: account.imap.host, ...logContext }, () =>
+      client.connect()
+    );
+    await logImapOp("mailboxOpen", { mailbox: mailboxPath, ...logContext }, () =>
       client.mailboxOpen(mailboxPath)
     );
     await logImapOp(
       "messageMove",
-      { mailbox: mailboxPath, uid, destination },
+      { mailbox: mailboxPath, uid, destination, ...logContext },
       () => client.messageMove(uid, destination, { uid: true })
     );
   } finally {
     try {
-      await logImapOp("logout", {}, () => client.logout());
+      await logImapOp("logout", { ...logContext }, () => client.logout());
     } catch {
       // ignore logout errors
     }
@@ -480,7 +506,8 @@ export async function moveImapMessage(
 export async function deleteImapMessage(
   account: Account,
   mailboxPath: string,
-  uid: number
+  uid: number,
+  clientId?: string
 ) {
   let ImapFlow: typeof import("imapflow").ImapFlow;
   try {
@@ -490,18 +517,21 @@ export async function deleteImapMessage(
   }
 
   const client = buildImapClient(ImapFlow, account);
+  const logContext = buildLogContext(account, clientId);
 
   try {
-    await logImapOp("connect", { host: account.imap.host }, () => client.connect());
-    await logImapOp("mailboxOpen", { mailbox: mailboxPath }, () =>
+    await logImapOp("connect", { host: account.imap.host, ...logContext }, () =>
+      client.connect()
+    );
+    await logImapOp("mailboxOpen", { mailbox: mailboxPath, ...logContext }, () =>
       client.mailboxOpen(mailboxPath)
     );
-    await logImapOp("messageDelete", { mailbox: mailboxPath, uid }, () =>
+    await logImapOp("messageDelete", { mailbox: mailboxPath, uid, ...logContext }, () =>
       client.messageDelete(uid, { uid: true })
     );
   } finally {
     try {
-      await logImapOp("logout", {}, () => client.logout());
+      await logImapOp("logout", { ...logContext }, () => client.logout());
     } catch {
       // ignore logout errors
     }
@@ -513,7 +543,8 @@ export async function updateImapFlags(
   mailboxPath: string,
   uid: number,
   flag: string,
-  enable: boolean
+  enable: boolean,
+  clientId?: string
 ) {
   let ImapFlow: typeof import("imapflow").ImapFlow;
   try {
@@ -523,36 +554,41 @@ export async function updateImapFlags(
   }
 
   const client = buildImapClient(ImapFlow, account);
+  const logContext = buildLogContext(account, clientId);
 
   try {
-    await logImapOp("connect", { host: account.imap.host }, () => client.connect());
-    await logImapOp("mailboxOpen", { mailbox: mailboxPath }, () =>
+    await logImapOp("connect", { host: account.imap.host, ...logContext }, () =>
+      client.connect()
+    );
+    await logImapOp("mailboxOpen", { mailbox: mailboxPath, ...logContext }, () =>
       client.mailboxOpen(mailboxPath)
     );
     if (enable) {
-      await logImapOp("flagsAdd", { mailbox: mailboxPath, uid, flag }, () =>
+      await logImapOp("flagsAdd", { mailbox: mailboxPath, uid, flag, ...logContext }, () =>
         client.messageFlagsAdd(uid, [flag], { uid: true })
       );
     } else {
-      await logImapOp("flagsRemove", { mailbox: mailboxPath, uid, flag }, () =>
-        client.messageFlagsRemove(uid, [flag], { uid: true })
+      await logImapOp(
+        "flagsRemove",
+        { mailbox: mailboxPath, uid, flag, ...logContext },
+        () => client.messageFlagsRemove(uid, [flag], { uid: true })
       );
     }
   } finally {
     try {
-      await logImapOp("logout", {}, () => client.logout());
+      await logImapOp("logout", { ...logContext }, () => client.logout());
     } catch {
       // ignore logout errors
     }
   }
 }
 
-export async function listImapFolders(account: Account) {
-  const list = await listImapRaw(account);
+export async function listImapFolders(account: Account, clientId?: string) {
+  const list = await listImapRaw(account, buildLogContext(account, clientId));
   return mapImapFolders(account, list);
 }
 
-export async function createImapFolder(account: Account, path: string) {
+export async function createImapFolder(account: Account, path: string, clientId?: string) {
   let ImapFlow: typeof import("imapflow").ImapFlow;
   try {
     ({ ImapFlow } = await import("imapflow"));
@@ -560,12 +596,17 @@ export async function createImapFolder(account: Account, path: string) {
     throw new Error("IMAP library is missing. Run `bun install` to add imapflow.");
   }
   const client = buildImapClient(ImapFlow, account);
+  const logContext = buildLogContext(account, clientId);
   try {
-    await logImapOp("connect", { host: account.imap.host }, () => client.connect());
-    await logImapOp("mailboxCreate", { mailbox: path }, () => client.mailboxCreate(path));
+    await logImapOp("connect", { host: account.imap.host, ...logContext }, () =>
+      client.connect()
+    );
+    await logImapOp("mailboxCreate", { mailbox: path, ...logContext }, () =>
+      client.mailboxCreate(path)
+    );
   } finally {
     try {
-      await logImapOp("logout", {}, () => client.logout());
+      await logImapOp("logout", { ...logContext }, () => client.logout());
     } catch {
       // ignore logout errors
     }
@@ -575,7 +616,8 @@ export async function createImapFolder(account: Account, path: string) {
 export async function renameImapFolder(
   account: Account,
   path: string,
-  newPath: string
+  newPath: string,
+  clientId?: string
 ) {
   let ImapFlow: typeof import("imapflow").ImapFlow;
   try {
@@ -584,21 +626,26 @@ export async function renameImapFolder(
     throw new Error("IMAP library is missing. Run `bun install` to add imapflow.");
   }
   const client = buildImapClient(ImapFlow, account);
+  const logContext = buildLogContext(account, clientId);
   try {
-    await logImapOp("connect", { host: account.imap.host }, () => client.connect());
-    await logImapOp("mailboxRename", { mailbox: path, newMailbox: newPath }, () =>
-      client.mailboxRename(path, newPath)
+    await logImapOp("connect", { host: account.imap.host, ...logContext }, () =>
+      client.connect()
+    );
+    await logImapOp(
+      "mailboxRename",
+      { mailbox: path, newMailbox: newPath, ...logContext },
+      () => client.mailboxRename(path, newPath)
     );
   } finally {
     try {
-      await logImapOp("logout", {}, () => client.logout());
+      await logImapOp("logout", { ...logContext }, () => client.logout());
     } catch {
       // ignore logout errors
     }
   }
 }
 
-export async function deleteImapFolder(account: Account, path: string) {
+export async function deleteImapFolder(account: Account, path: string, clientId?: string) {
   let ImapFlow: typeof import("imapflow").ImapFlow;
   try {
     ({ ImapFlow } = await import("imapflow"));
@@ -606,12 +653,17 @@ export async function deleteImapFolder(account: Account, path: string) {
     throw new Error("IMAP library is missing. Run `bun install` to add imapflow.");
   }
   const client = buildImapClient(ImapFlow, account);
+  const logContext = buildLogContext(account, clientId);
   try {
-    await logImapOp("connect", { host: account.imap.host }, () => client.connect());
-    await logImapOp("mailboxDelete", { mailbox: path }, () => client.mailboxDelete(path));
+    await logImapOp("connect", { host: account.imap.host, ...logContext }, () =>
+      client.connect()
+    );
+    await logImapOp("mailboxDelete", { mailbox: path, ...logContext }, () =>
+      client.mailboxDelete(path)
+    );
   } finally {
     try {
-      await logImapOp("logout", {}, () => client.logout());
+      await logImapOp("logout", { ...logContext }, () => client.logout());
     } catch {
       // ignore logout errors
     }

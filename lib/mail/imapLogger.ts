@@ -52,16 +52,27 @@ export async function logImapOp<T>(
       : typeof details.folderId === "string"
         ? details.folderId
         : "";
+  const accountId = typeof details.accountId === "string" ? details.accountId : "";
+  const clientId = typeof details.clientId === "string" ? details.clientId : "";
+  const meta = [
+    mailbox ? `mailbox=${mailbox}` : "",
+    accountId ? `account=${accountId}` : "",
+    clientId ? `client=${clientId}` : ""
+  ]
+    .filter(Boolean)
+    .join(" ");
   try {
     const result = await fn();
     const ms = Date.now() - start;
-    const suffix = mailbox ? ` mailbox=${mailbox}` : "";
+    const suffix = meta ? ` ${meta}` : "";
     logger.info?.(`[imap] ${op}${suffix} ${ms}ms`);
     return result;
   } catch (error) {
     const ms = Date.now() - start;
-    const suffix = mailbox ? ` mailbox=${mailbox}` : "";
-    logger.warn?.(`[imap] ${op}${suffix} ${ms}ms error=${(error as Error)?.message ?? String(error)}`);
+    const suffix = meta ? ` ${meta}` : "";
+    logger.warn?.(
+      `[imap] ${op}${suffix} ${ms}ms error=${(error as Error)?.message ?? String(error)}`
+    );
     throw error;
   }
 }

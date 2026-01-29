@@ -5,6 +5,7 @@ import { verifyImapCredentials } from "@/lib/mail/imapAuth";
 import { shouldStorePasswordInDb, encodeSecret } from "@/lib/secret";
 
 export async function POST(request: Request) {
+  const clientId = request.headers.get("x-noctua-client") ?? undefined;
   const payload = (await request.json()) as { email: string; password: string };
   const email = payload.email?.trim().toLowerCase();
   const password = payload.password ?? "";
@@ -25,7 +26,7 @@ export async function POST(request: Request) {
   if (!account) {
     return NextResponse.json({ ok: false, message: "Account not found" }, { status: 404 });
   }
-  const ok = await verifyImapCredentials(account, password);
+  const ok = await verifyImapCredentials(account, password, clientId);
   if (!ok) {
     return NextResponse.json({ ok: false, message: "Invalid IMAP credentials" }, { status: 401 });
   }
