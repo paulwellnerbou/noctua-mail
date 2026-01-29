@@ -12,7 +12,8 @@ import type {
   User
 } from "./data";
 import { accounts as seedAccounts, folders as seedFolders } from "./data";
-import { decodeSecret, encodeSecret, shouldStorePasswordFallback } from "./secret";
+import { decodeSecret, encodeSecret, shouldStorePasswordInDb } from "./secret";
+import { applyCachedCredentials } from "./credentials";
 import { randomUUID } from "crypto";
 
 let dbInstance: any | null = null;
@@ -269,12 +270,12 @@ function initSchema(db: any) {
           account.imap.port,
           account.imap.secure ? 1 : 0,
           account.imap.user,
-          shouldStorePasswordFallback() ? encodeSecret(account.imap.password) : "",
+          shouldStorePasswordInDb() ? encodeSecret(account.imap.password) : "",
           account.smtp.host,
           account.smtp.port,
           account.smtp.secure ? 1 : 0,
           account.smtp.user,
-          shouldStorePasswordFallback() ? encodeSecret(account.smtp.password) : ""
+          shouldStorePasswordInDb() ? encodeSecret(account.smtp.password) : ""
         );
       });
     })();
@@ -333,7 +334,7 @@ export type GroupMeta = { key: string; label: string; count: number };
 export async function getAccounts() {
   const db = await getDb();
   const rows = db.prepare(`SELECT * FROM accounts`).all() as any[];
-  return rows.map((row) => ({
+  return rows.map((row) => applyCachedCredentials({
     id: row.id,
     name: row.name,
     email: row.email,
@@ -382,12 +383,12 @@ export async function saveAccounts(nextAccounts: Account[]) {
         account.imap.port,
         account.imap.secure ? 1 : 0,
         account.imap.user,
-        shouldStorePasswordFallback() ? encodeSecret(account.imap.password) : "",
+        shouldStorePasswordInDb() ? encodeSecret(account.imap.password) : "",
         account.smtp.host,
         account.smtp.port,
         account.smtp.secure ? 1 : 0,
         account.smtp.user,
-        shouldStorePasswordFallback() ? encodeSecret(account.smtp.password) : ""
+        shouldStorePasswordInDb() ? encodeSecret(account.smtp.password) : ""
       );
     });
   })();

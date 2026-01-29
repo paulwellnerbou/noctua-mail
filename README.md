@@ -16,7 +16,7 @@ A web-based mail client built with Bun, TypeScript, and Next.js. Noctua Mail sup
 - Responsive layout with resizable panes and independent scrolling
 - Dark mode
 - Per-message text scaling
-- User authentication with IMAP only (no separate user credentials, IMAP passwords are not stored anywhere, just encrypted in session)
+- User authentication with IMAP only (no separate user credentials)
 
 ## Tech stack
 
@@ -37,12 +37,15 @@ Open `http://localhost:3654`.
 
 - Local data is stored in `.data/` (SQLite db, sources, attachments).
 - Attachments and sources are stored separately for performance.
-- IMAP/SMTP passwords are stored encrypted by default. Control this with:
-  - `STORE_ENCRYPTED_IMAP_PASSWORD_FALLBACK` (default `true` for local dev). If set to `false`, passwords are **not** persisted; the user must re-enter them after a restart.
-  - `IMAP_SECRET_KEY` (32‑byte key; hex recommended). Required to encrypt/decrypt stored passwords when fallback is enabled.
+- IMAP/SMTP credential storage mode:
+  - `IMAP_CREDENTIALS_STORAGE` (`cookie` | `db` | `both`, default `both`).
+    - `cookie`: credentials only in sealed session cookie.
+    - `db`: credentials only in encrypted DB.
+    - `both`: credentials in cookie + encrypted DB.
+  - `IMAP_SECRET_KEY` (32‑byte key; hex recommended). Required to encrypt/decrypt stored DB passwords.
 - Authentication:
   - `AUTH_ENABLED` (default `true`) gates the app behind a login/signup (invite) flow.
-  - `SESSION_SEAL_KEY` (32‑byte key) seals the session cookie with IMAP creds for the current session.
+  - `SESSION_SEAL_KEY` (32‑byte key) seals the session cookie for the current session.
 
 ## Project structure
 

@@ -1291,6 +1291,11 @@ a {
   position: relative;
 }
 
+.source-block .json-copy {
+  top: 12px;
+  right: 12px;
+}
+
 .thread-link {
   border: none;
   background: transparent;

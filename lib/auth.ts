@@ -1,11 +1,19 @@
 import crypto from "crypto";
 import { NextResponse, type NextRequest } from "next/server";
 import type { Account } from "./data";
+import { cacheSessionCredentials } from "./credentials";
+import { shouldIncludeSessionCredentials } from "./secret";
 
 const SESSION_KEY = process.env.SESSION_SEAL_KEY ?? "";
 const AUTH_ENABLED =
   (process.env.AUTH_ENABLED ?? "true").toLowerCase() === "true";
 const SESSION_COOKIE = "noctua_session";
+const SESSION_TTL_SECONDS = (() => {
+  const raw = process.env.SESSION_TTL_SECONDS ?? "43200";
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) return 60 * 60 * 12;
+  return parsed;
+})();
 
 type SessionData = {
   userId: string;
@@ -54,7 +62,7 @@ export function setSessionCookie(response: NextResponse, session: SessionData) {
     sameSite: "lax",
     secure: process.env.NODE_ENV === "production",
     path: "/",
-    maxAge: 60 * 60 * 12 // 12h
+    maxAge: SESSION_TTL_SECONDS
   });
   return response;
 }
@@ -77,7 +85,9 @@ export function authEnabled() {
 export function requireSessionOr401(
   request?: Request | null
 ): SessionData | NextResponse {
-  if (!AUTH_ENABLED) return { userId: "dev", exp: Date.now() / 1000 + 3600 };
+  if (!AUTH_ENABLED) {
+    return { userId: "dev", exp: Date.now() / 1000 + SESSION_TTL_SECONDS };
+  }
   if (!request) {
     return new NextResponse(JSON.stringify({ ok: false, message: "Unauthorized" }), {
       status: 401,
@@ -86,7 +96,10 @@ export function requireSessionOr401(
   }
   const cookie = request.headers.get("cookie");
   const session = sessionFromCookie(cookie);
-  if (session) return session;
+  if (session) {
+    cacheSessionCredentials(session);
+    return session;
+  }
   return new NextResponse(JSON.stringify({ ok: false, message: "Unauthorized" }), {
     status: 401,
     headers: { "Content-Type": "application/json" }
@@ -118,12 +131,35 @@ export function buildSessionPayload(params: {
   imapPass: string;
   smtpPass: string;
 }) {
-  return {
+  const payload: SessionData = {
     userId: params.userId,
     role: params.role,
     accountId: params.account.id,
-    imap: { user: params.account.imap.user, pass: params.imapPass },
-    smtp: { user: params.account.smtp.user, pass: params.smtpPass },
-    exp: Math.floor(Date.now() / 1000) + 60 * 60 * 12
-  } satisfies SessionData;
+    exp: Math.floor(Date.now() / 1000) + SESSION_TTL_SECONDS
+  };
+  if (shouldIncludeSessionCredentials()) {
+    payload.imap = { user: params.account.imap.user, pass: params.imapPass };
+    payload.smtp = { user: params.account.smtp.user, pass: params.smtpPass };
+  }
+  return payload;
+}
+
+export function mergeAccountCredentials(
+  account: Account,
+  session?: {
+    imap?: { user?: string; pass?: string };
+    smtp?: { user?: string; pass?: string };
+  } | null
+) {
+  if (!session) return account;
+  const next: Account = {
+    ...account,
+    imap: { ...account.imap },
+    smtp: { ...account.smtp }
+  };
+  if (session.imap?.user) next.imap.user = session.imap.user;
+  if (session.imap?.pass) next.imap.password = session.imap.pass;
+  if (session.smtp?.user) next.smtp.user = session.smtp.user;
+  if (session.smtp?.pass) next.smtp.password = session.smtp.pass;
+  return next;
 }

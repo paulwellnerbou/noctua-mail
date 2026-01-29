@@ -638,6 +638,9 @@ export default function MailClient() {
     setExceptionPanelOpen(true);
   };
   const readErrorMessage = async (res: Response) => {
+    if (res.status === 401) {
+      setAuthState("unauth");
+    }
     try {
       const data = (await res.json()) as {
         message?: string;
@@ -1191,9 +1194,9 @@ export default function MailClient() {
       let textFromHtml = "";
       if (html) {
         try {
-          textFromHtml = turndownService.turndown(html);
+          textFromHtml = normalizeHtmlDerivedText(turndownService.turndown(html));
         } catch {
-          textFromHtml = stripHtml(html);
+          textFromHtml = normalizeHtmlDerivedText(stripHtml(html));
         }
       }
       return { text: textFromHtml, html, attachments: composeAttachments };
@@ -1252,6 +1255,11 @@ export default function MailClient() {
       .replace(/\n{3,}/g, "\n\n")
       .replace(/[ \t]{2,}/g, " ")
       .trim();
+
+  const normalizeHtmlDerivedText = (value: string): string =>
+    value
+      .replace(/[ \t]+$/gm, "")
+      .replace(/(^|\n)\\--/g, "$1--");
 
   const turndownService = useMemo(() => new TurndownService(), []);
 
@@ -1786,7 +1794,7 @@ export default function MailClient() {
       setComposeCc(message.cc ?? "");
       setComposeBcc(message.bcc ?? "");
       setComposeSubject(message.subject ?? "");
-      setComposeBody(message.body ?? "");
+      setComposeBody(normalizeHtmlDerivedText(message.body ?? ""));
       const nextHtml = message.htmlBody ?? "";
       setComposeHtml(nextHtml);
       setComposeHtmlText(stripHtml(nextHtml));
@@ -6792,7 +6800,7 @@ export default function MailClient() {
                         setComposeView("inline");
                       }}
                     >
-                      Cancel
+                      {composeMode === "edit" ? "Cancel editing" : "Cancel"}
                     </button>
                     <button
                       className="icon-button active"

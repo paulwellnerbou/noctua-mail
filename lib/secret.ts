@@ -1,8 +1,11 @@
 import crypto from "crypto";
 
 const SECRET_KEY = process.env.IMAP_SECRET_KEY ?? "";
-const STORE_FALLBACK =
-  (process.env.STORE_ENCRYPTED_IMAP_PASSWORD_FALLBACK ?? "true").toLowerCase() === "true";
+const IMAP_CREDENTIALS_STORAGE = (process.env.IMAP_CREDENTIALS_STORAGE ?? "both").toLowerCase();
+const STORE_IN_DB =
+  IMAP_CREDENTIALS_STORAGE === "db" || IMAP_CREDENTIALS_STORAGE === "both";
+const STORE_IN_COOKIE =
+  IMAP_CREDENTIALS_STORAGE === "cookie" || IMAP_CREDENTIALS_STORAGE === "both";
 
 const hasKey = SECRET_KEY.length >= 32;
 
@@ -15,13 +18,17 @@ function getKey(): Buffer {
   );
 }
 
-export function shouldStorePasswordFallback() {
-  return STORE_FALLBACK;
+export function shouldStorePasswordInDb() {
+  return STORE_IN_DB;
+}
+
+export function shouldIncludeSessionCredentials() {
+  return STORE_IN_COOKIE;
 }
 
 export function encodeSecret(value: string): string {
   if (!value) return "";
-  if (!STORE_FALLBACK) return "";
+  if (!STORE_IN_DB) return "";
   if (!hasKey) return value;
   try {
     const iv = crypto.randomBytes(12);
@@ -36,6 +43,7 @@ export function encodeSecret(value: string): string {
 
 export function decodeSecret(value: string | null | undefined): string {
   if (!value) return "";
+  if (!STORE_IN_DB) return "";
   if (!value.startsWith("enc:")) return value;
   if (!hasKey) return "";
   try {

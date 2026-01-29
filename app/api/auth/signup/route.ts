@@ -12,7 +12,7 @@ import {
 } from "@/lib/db";
 import type { Account } from "@/lib/data";
 import { verifyImapCredentials } from "@/lib/mail/imapAuth";
-import { encodeSecret, shouldStorePasswordFallback } from "@/lib/secret";
+import { encodeSecret, shouldStorePasswordInDb } from "@/lib/secret";
 import { randomUUID } from "crypto";
 
 export async function POST(request: Request) {
@@ -66,11 +66,11 @@ export async function POST(request: Request) {
       ownerUserId: userId,
       imap: {
         ...account.imap,
-        password: shouldStorePasswordFallback() ? encodeSecret(password) : ""
+        password: shouldStorePasswordInDb() ? encodeSecret(password) : ""
       },
       smtp: {
         ...account.smtp,
-        password: shouldStorePasswordFallback() ? encodeSecret(password) : ""
+        password: shouldStorePasswordInDb() ? encodeSecret(password) : ""
       }
     }
   ];
