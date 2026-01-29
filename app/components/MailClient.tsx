@@ -1,46 +1,19 @@
 "use client";
 
-import Image from "next/image";
-
 import type React from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import TurndownService from "turndown";
 import {
-  Check,
-  ChevronsDown,
-  ChevronsUp,
-  Copy,
   Edit3,
-  ArrowDownLeft,
-  ArrowUpRight,
-  Forward,
-  GitBranch,
   Inbox,
   Archive,
   FileText,
-  Flag,
-  Image as ImageIcon,
-  Maximize2,
-  Minimize2,
-  Moon,
   Paperclip,
-  ZoomIn,
-  ZoomOut,
   Send,
   ShieldOff,
-  RefreshCw,
-  Reply,
-  ReplyAll,
-  Settings,
-  Sun,
   Trash2,
   X,
-  MoreVertical,
-  Download,
-  Mail,
-  MailOpen,
-  Pin,
-  Search
+  Pin
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkBreaks from "remark-breaks";
@@ -48,74 +21,30 @@ import remarkGfm from "remark-gfm";
 import ComposeEditor from "./ComposeEditor";
 import HtmlMessage from "./HtmlMessage";
 import LoginOverlay from "./auth/LoginOverlay";
+import FolderPane from "./mailclient/folder/FolderPane";
+import FolderTree from "./mailclient/folder/FolderTree";
+import InAppNoticeStack from "./mailclient/InAppNoticeStack";
+import ComposeInlineCard from "./mailclient/composition/ComposeInlineCard";
+import ComposeMinimized from "./mailclient/composition/ComposeMinimized";
+import ComposeModal from "./mailclient/composition/ComposeModal";
+import MessageCardList from "./mailclient/messagelist/MessageCardList";
+import MessageListHeader from "./mailclient/messagelist/MessageListHeader";
+import MessageListPane from "./mailclient/messagelist/MessageListPane";
+import MessageTable from "./mailclient/messagelist/MessageTable";
+import MessageMenu from "./mailclient/message/MessageMenu";
+import MessageQuickActions from "./mailclient/message/MessageQuickActions";
+import MessageViewPane from "./mailclient/message/MessageViewPane";
+import SourcePanel from "./mailclient/message/SourcePanel";
+import ThreadJsonModal from "./mailclient/message/ThreadJsonModal";
+import ThreadView from "./mailclient/message/ThreadView";
+import TopBar from "./mailclient/TopBar";
 import type { Account, AccountSettings, Attachment, Folder, Message } from "@/lib/data";
 import { accounts as seedAccounts, folders as seedFolders, messages as seedMessages } from "@/lib/data";
-import QuoteRenderer from "./QuoteRenderer";
 import AccountSettingsModal from "./AccountSettingsModal";
 import AttachmentsList from "./AttachmentsList";
 
 function getThreadMessages(items: Message[], threadId: string, accountId: string) {
   return items.filter((message) => message.threadId === threadId && message.accountId === accountId);
-}
-
-function SourcePanel({
-  messageId,
-  fetchSource,
-  scrubSource
-}: {
-  messageId: string;
-  fetchSource: (id: string) => Promise<string | null>;
-  scrubSource: (value?: string) => string | undefined;
-}) {
-  const [source, setSource] = useState("");
-  const [status, setStatus] = useState<"idle" | "loading" | "loaded" | "error">("idle");
-  const [copyOk, setCopyOk] = useState(false);
-  useEffect(() => {
-    let active = true;
-    setStatus("loading");
-    void fetchSource(messageId).then((data) => {
-      if (!active) return;
-      if (data === null) {
-        console.warn("[noctua] source fetch returned null", { messageId });
-        setStatus("error");
-        return;
-      }
-      setSource(data || "");
-      setStatus("loaded");
-    });
-    return () => {
-      active = false;
-      console.info("[noctua] source panel cleanup", { messageId });
-    };
-  }, [messageId, fetchSource]);
-  return (
-    <div className="source-block">
-      <pre className="source-view">
-        {status === "loading"
-          ? "Loading source…"
-          : status === "error"
-            ? "Failed to load source."
-            : scrubSource(source)}
-      </pre>
-      <button
-        className={`json-copy ${copyOk ? "ok" : ""}`}
-        onClick={async () => {
-          if (!source) return;
-          try {
-            await navigator.clipboard.writeText(source);
-            setCopyOk(true);
-            setTimeout(() => setCopyOk(false), 1200);
-          } catch {
-            // ignore
-          }
-        }}
-        aria-label="Copy source"
-        title="Copy source"
-      >
-        {copyOk ? <Check size={14} /> : <Copy size={14} />}
-      </button>
-    </div>
-  );
 }
 
 function buildFolderTree(items: Folder[]) {
@@ -349,7 +278,9 @@ export default function MailClient() {
   } | null>(null);
   const composeModalRef = useRef<HTMLDivElement | null>(null);
   const composeTextRef = useRef<HTMLTextAreaElement | null>(null);
-  const composeSelectionRef = useRef<{ start: number; end: number } | null>(null);
+  const composeSelectionRef = useRef<{ start: number; end: number; value: string } | null>(
+    null
+  );
   const composeDragDepthRef = useRef(0);
   const composeAttachmentInputRef = useRef<HTMLInputElement | null>(null);
   const [sendingMail, setSendingMail] = useState(false);
@@ -1268,6 +1199,14 @@ export default function MailClient() {
       : `${prefix}: ${cleaned}`;
   };
 
+  const normalizeComposeTo = (value?: string | null) => {
+    const raw = (value ?? "").trim();
+    if (!raw) return "";
+    const normalized = raw.replace(/["<>]/g, "").toLowerCase();
+    if (/undisclosed[- ]recipients?/.test(normalized)) return "";
+    return raw;
+  };
+
   const isDraftMessage = (message: Message) => {
     const folder = folders.find((item) => item.id === message.folderId);
     const name = folder?.name ?? message.folderId ?? "";
@@ -1828,12 +1767,14 @@ export default function MailClient() {
       setComposeStripImages(false);
       setComposeIncludeOriginal(true);
       setComposeQuoteHtml(true);
-      setComposeTo(message.to ?? "");
+      setComposeTo(normalizeComposeTo(message.to ?? ""));
       setComposeCc(message.cc ?? "");
       setComposeBcc(message.bcc ?? "");
+      setComposeShowBcc(Boolean(message.cc || message.bcc));
       setComposeSubject(message.subject ?? "");
       setComposeBody(normalizeHtmlDerivedText(message.body ?? ""));
-      const nextHtml = message.htmlBody ?? "";
+      const rawHtml = message.htmlBody ?? "";
+      const nextHtml = typeof rawHtml === "string" && rawHtml.trim() === "0" ? "" : rawHtml;
       setComposeHtml(nextHtml);
       setComposeHtmlText(stripHtml(nextHtml));
       setComposeQuotedHtml("");
@@ -1920,7 +1861,8 @@ export default function MailClient() {
       const element = composeTextRef.current;
       composeSelectionRef.current = {
         start: element.selectionStart ?? 0,
-        end: element.selectionEnd ?? 0
+        end: element.selectionEnd ?? 0,
+        value: element.value
       };
     }
     setDraftSaving(true);
@@ -1965,8 +1907,10 @@ export default function MailClient() {
       setDraftSaving(false);
       if (composeTab === "text" && composeTextRef.current && composeSelectionRef.current) {
         const element = composeTextRef.current;
-        const { start, end } = composeSelectionRef.current;
+        const { start, end, value } = composeSelectionRef.current;
+        composeSelectionRef.current = null;
         requestAnimationFrame(() => {
+          if (document.activeElement !== element || element.value !== value) return;
           try {
             element.setSelectionRange(start, end);
           } catch {
@@ -2030,6 +1974,28 @@ export default function MailClient() {
     });
   };
 
+  const handleEditQuotedHtml = () => {
+    const quoted = composeQuotedHtml.trim();
+    if (!quoted) return;
+    const baseHtml = composeHtml.trim();
+    const glue = baseHtml ? "<p><br></p>" : "";
+    const quotedWithLine =
+      composeQuoteHtml && !/<blockquote\b/i.test(quoted)
+        ? `<blockquote class=\"compose-quote\">${quoted}</blockquote>`
+        : quoted;
+    const nextHtml = `${baseHtml}${glue}${quotedWithLine}`;
+    setComposeHtml(nextHtml);
+    setComposeHtmlText(stripHtml(nextHtml));
+    setComposeEditorReset((prev) => prev + 1);
+    setComposeIncludeOriginal(false);
+    setComposeQuoteHtml(false);
+    setComposeQuotedHtml("");
+    setComposeQuotedText("");
+    setComposeQuotedParts(null);
+    composeDirtyRef.current = true;
+    composeLastEditedRef.current = "html";
+  };
+
   const visibleComposeAttachments = composeAttachments.filter((item) => !item.inline);
 
   const composeMessageField = (
@@ -2059,7 +2025,9 @@ export default function MailClient() {
               if (composeTab === "text") return;
               if (composeLastEditedRef.current === "html") {
                 const nextText = composeHtmlText || stripHtml(composeHtml);
-                setComposeBody(nextText);
+                if (nextText.trim().length > 0 || composeBody.trim().length === 0) {
+                  setComposeBody(nextText);
+                }
               }
               setComposeTab("text");
             }}
@@ -2200,7 +2168,10 @@ export default function MailClient() {
         </div>
       )}
       {composeTab === "html" && composeQuotedParts && (
-        <details className="compose-quoted-block" open>
+        <details
+          className={`compose-quoted-block ${composeIncludeOriginal ? "expanded" : ""}`}
+          open
+        >
           <summary className="compose-quoted-summary">
             <span className="summary-text">
               <span className="summary-caret" aria-hidden="true">
@@ -2222,6 +2193,19 @@ export default function MailClient() {
                 Include original
               </button>
               <span className="quote-actions">
+                <button
+                  type="button"
+                  className="icon-button small"
+                  title="Edit quoted HTML"
+                  onClick={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    handleEditQuotedHtml();
+                  }}
+                  disabled={!composeQuotedHtml.trim()}
+                >
+                  Edit quoted HTML
+                </button>
                 <button
                   type="button"
                   className="icon-button small"
@@ -2537,223 +2521,43 @@ export default function MailClient() {
     message: Message,
     iconSize = 12,
     origin: "list" | "thread" | "table" = "list"
-  ) => {
-    const allowThreadDeletion = origin !== "thread";
-    if (isDraftItem(message)) {
-      return (
-        <>
-          <button
-            className="icon-button ghost"
-            title="Edit draft"
-            aria-label="Edit draft"
-            disabled={pendingMessageActions.has(message.id)}
-            onClick={(event) => {
-              event.stopPropagation();
-              openCompose("edit", message);
-            }}
-          >
-            <Edit3 size={iconSize} />
-          </button>
-          <button
-            className="icon-button ghost message-delete"
-            title={
-              isTrashFolder(message.folderId) ? "Delete permanently" : "Move to Trash"
-            }
-            aria-label="Delete"
-            disabled={pendingMessageActions.has(message.id)}
-            onClick={(event) => {
-              event.stopPropagation();
-              handleDeleteMessage(message, { allowThreadDeletion });
-            }}
-          >
-            <Trash2 size={iconSize} />
-          </button>
-        </>
-      );
-    }
-    return (
-      <>
-        <button
-          className="icon-button ghost"
-          title="Reply"
-          aria-label="Reply"
-          disabled={pendingMessageActions.has(message.id)}
-          onClick={(event) => {
-            event.stopPropagation();
-            openCompose("reply", message);
-          }}
-        >
-          <Reply size={iconSize} />
-        </button>
-        <button
-          className="icon-button ghost"
-          title="Reply all"
-          aria-label="Reply all"
-          disabled={pendingMessageActions.has(message.id)}
-          onClick={(event) => {
-            event.stopPropagation();
-            openCompose("replyAll", message);
-          }}
-        >
-          <ReplyAll size={iconSize} />
-        </button>
-        <button
-          className="icon-button ghost"
-          title="Forward"
-          aria-label="Forward"
-          disabled={pendingMessageActions.has(message.id)}
-          onClick={(event) => {
-            event.stopPropagation();
-            openCompose("forward", message);
-          }}
-        >
-          <Forward size={iconSize} />
-        </button>
-        <button
-          className="icon-button ghost message-delete"
-          title={
-            isTrashFolder(message.folderId) ? "Delete permanently" : "Move to Trash"
-          }
-          aria-label="Delete"
-          disabled={pendingMessageActions.has(message.id)}
-          onClick={(event) => {
-            event.stopPropagation();
-            handleDeleteMessage(message, { allowThreadDeletion });
-          }}
-        >
-          <Trash2 size={iconSize} />
-        </button>
-      </>
-    );
-  };
+  ) => (
+    <MessageQuickActions
+      message={message}
+      iconSize={iconSize}
+      origin={origin}
+      isDraft={isDraftItem(message)}
+      pendingMessageActions={pendingMessageActions}
+      openCompose={openCompose}
+      handleDeleteMessage={handleDeleteMessage}
+      isTrashFolder={isTrashFolder}
+    />
+  );
 
   const renderMessageMenu = (
     message: Message,
     origin: "list" | "thread" | "table" = "list"
-  ) => {
-    const menuKey = `${origin}:${message.id}`;
-    const isDraft = isDraftItem(message);
-    const showDeleteInMenu = origin !== "table";
-    const allowThreadDeletion = origin !== "thread";
-    const buildItem = (
-      label: string,
-      icon: React.ReactNode,
-      onClick: () => void,
-      disabled?: boolean
-    ) => (
-      <button
-        key={label}
-        className="message-menu-item"
-        onClick={() => {
-          setOpenMessageMenuId(null);
-          onClick();
-        }}
-        disabled={disabled}
-      >
-        <span className="menu-icon">{icon}</span>
-        <span className="menu-label">{label}</span>
-      </button>
-    );
-    return (
-      <div
-        className="message-menu"
-        data-origin={origin}
-        ref={openMessageMenuId === menuKey ? messageMenuRef : null}
-        onClick={(event) => event.stopPropagation()}
-      >
-      <button
-        className="icon-button ghost"
-        title="Message actions"
-        aria-label="Message actions"
-        disabled={pendingMessageActions.has(message.id)}
-        onClick={(event) => {
-          event.stopPropagation();
-          setOpenMessageMenuId((prev) => (prev === menuKey ? null : menuKey));
-        }}
-      >
-        <MoreVertical size={14} />
-      </button>
-      {openMessageMenuId === menuKey && (
-        <div className="message-menu-panel">
-          {[
-            [
-              isDraft
-                ? buildItem("Edit draft", <Edit3 size={14} />, () => openCompose("edit", message))
-                : null,
-              buildItem("Reply", <Reply size={14} />, () => openCompose("reply", message)),
-              buildItem("Reply all", <ReplyAll size={14} />, () => openCompose("replyAll", message)),
-              buildItem("Forward", <Forward size={14} />, () => openCompose("forward", message)),
-              buildItem("Edit as New", <FileText size={14} />, () =>
-                openCompose("editAsNew", message, true)
-              )
-            ].filter(Boolean),
-            [
-              buildItem(
-                message.seen ? "Mark as unread" : "Mark as read",
-                message.seen ? <MailOpen size={14} /> : <Mail size={14} />,
-                () => updateFlagState(message, "seen", !message.seen)
-              ),
-              buildItem(
-                message.flagged ? "Unflag" : "Flag",
-                <Flag size={14} />,
-                () => updateFlagState(message, "flagged", !message.flagged)
-              ),
-              buildItem(
-                message.flags?.some((flag) => flag.toLowerCase() === "pinned") ? "Unpin" : "Pin",
-                <Pin size={14} />,
-                () => togglePinnedFlag(message)
-              ),
-              buildItem(
-                message.flags?.some((flag) => flag.toLowerCase() === "to-do")
-                  ? "Mark as Done"
-                  : "Mark as To-Do",
-                <Check size={14} />,
-                () => toggleTodoFlag(message)
-              ),
-              buildItem(
-                message.answered ? "Unmark answered" : "Mark answered",
-                <Check size={14} />,
-                () => updateFlagState(message, "answered", !message.answered)
-              )
-            ],
-            [
-              buildItem("Mark as Spam", <ShieldOff size={14} />, () =>
-                handleMarkSpam(message)
-              ),
-              buildItem("Archive", <Archive size={14} />, () =>
-                handleArchiveMessage(message)
-              ),
-              showDeleteInMenu
-                ? buildItem(
-                    isTrashFolder(message.folderId)
-                      ? "Delete permanently"
-                      : "Move to Trash",
-                    <Trash2 size={14} />,
-                    () => handleDeleteMessage(message, { allowThreadDeletion })
-                  )
-                : null
-            ].filter(Boolean),
-            [
-              buildItem("Download EML", <Download size={14} />, () =>
-                handleDownloadEml(message)
-              ),
-              buildItem("Re-Sync", <RefreshCw size={14} />, () =>
-                handleResyncMessage(message)
-              )
-            ]
-          ]
-            .filter((group) => group.length > 0)
-            .map((group, idx, all) => (
-            <div key={`group-${idx}`} className="message-menu-group">
-              {group}
-              {idx < all.length - 1 && <div className="message-menu-separator" />}
-            </div>
-          ))}
-        </div>
-      )}
-      </div>
-    );
-  };
+  ) => (
+    <MessageMenu
+      message={message}
+      origin={origin}
+      isDraft={isDraftItem(message)}
+      openMessageMenuId={openMessageMenuId}
+      setOpenMessageMenuId={setOpenMessageMenuId}
+      messageMenuRef={messageMenuRef}
+      pendingMessageActions={pendingMessageActions}
+      openCompose={openCompose}
+      updateFlagState={updateFlagState}
+      togglePinnedFlag={togglePinnedFlag}
+      toggleTodoFlag={toggleTodoFlag}
+      handleMarkSpam={handleMarkSpam}
+      handleArchiveMessage={handleArchiveMessage}
+      handleDeleteMessage={handleDeleteMessage}
+      handleDownloadEml={handleDownloadEml}
+      handleResyncMessage={handleResyncMessage}
+      isTrashFolder={isTrashFolder}
+    />
+  );
 
   const updateFlagState = async (
     message: Message,
@@ -4356,6 +4160,9 @@ export default function MailClient() {
     }
     setInAppNotices((prev) => prev.filter((item) => item.id !== notice.id));
   };
+  const handleDismissNotice = (noticeId: string) => {
+    setInAppNotices((prev) => prev.filter((item) => item.id !== noticeId));
+  };
 
   const handleResyncMessage = async (message: Message) => {
     try {
@@ -5065,231 +4872,17 @@ export default function MailClient() {
     }
   };
 
-  const folderQueryText = folderQuery.trim().toLowerCase();
-  const hasFolderMatch = (folder: Folder): boolean => {
-    if (!folderQueryText) return true;
-    if (folder.name.toLowerCase().includes(folderQueryText)) return true;
-    const children = folderTree.get(folder.id) ?? [];
-    return children.some((child) => hasFolderMatch(child));
-  };
-
-  const isSystemFolder = (folder: Folder) => {
-    const special = (folder.specialUse ?? "").toLowerCase();
-    if (
-      ["\\inbox", "\\sent", "\\drafts", "\\trash", "\\junk", "\\spam", "\\archive"].includes(
-        special
-      )
-    ) {
-      return true;
-    }
-    return systemFolderNames.has(folder.name);
-  };
-
-  const folderPathLabel = (folder: Folder) => {
-    const parts = [folder.name];
-    let parentId = folder.parentId ?? null;
-    while (parentId) {
-      const parent = folderById.get(parentId);
-      if (!parent) break;
-      parts.unshift(parent.name);
-      parentId = parent.parentId ?? null;
-    }
-    return parts.join("/");
-  };
-
-  const renderNode = (folder: Folder, depth: number, forceShow = false) => {
-    const isCollapsed = collapsedFolders[folder.id] ?? false;
-    const hasChildren = (folderTree.get(folder.id) ?? []).length > 0;
-    const isSystem = isSystemFolder(folder);
-    if (folderQueryText && !forceShow && !hasFolderMatch(folder)) {
-      return null;
-    }
-    const matchesQuery = folderQueryText
-      ? folder.name.toLowerCase().includes(folderQueryText)
-      : true;
-    const childNodes = folderTree.get(folder.id) ?? [];
-    const fullPath = folderPathLabel(folder);
-    const totalCount = messageCountByFolder.get(folder.id) ?? folder.count ?? 0;
-    const unreadCount = folder.unreadCount ?? 0;
-    const folderTitle = `${fullPath} (${totalCount} Messages, ${unreadCount} Unread)`;
-    const isDeleting = deletingFolderIds.has(folder.id);
-    return (
-      <div
-        key={folder.id}
-        className={`tree-node ${dragOverFolderId === folder.id ? "drop-target" : ""}`}
-      >
-        <div
-          className={`tree-row ${folder.id === activeFolderId ? "active" : ""}${
-            isDeleting ? " disabled" : ""
-          }`}
-          data-syncing={syncingFolders.has(folder.id) ? "true" : "false"}
-          data-menu-open={openFolderMenuId === folder.id ? "true" : "false"}
-          title={folderTitle}
-          role="button"
-          tabIndex={0}
-          onClick={() => {
-            if (isDeleting) return;
-            setActiveFolderId(folder.id);
-          }}
-          onKeyDown={(event) => {
-            if (event.key === "Enter" || event.key === " ") {
-              event.preventDefault();
-              if (isDeleting) return;
-              setActiveFolderId(folder.id);
-            }
-          }}
-          onDragOver={(event) => {
-            if (isDeleting) return;
-            if (!draggingMessageIds.size && !event.dataTransfer.types.includes("application/json")) {
-              return;
-            }
-            event.preventDefault();
-            setDragOverFolderId(folder.id);
-            event.dataTransfer.dropEffect = "move";
-          }}
-          onDragLeave={() => {
-            if (dragOverFolderId === folder.id) {
-              setDragOverFolderId(null);
-            }
-          }}
-          onDrop={(event) => {
-            event.preventDefault();
-            if (isDeleting) return;
-            setDragOverFolderId(null);
-            let ids =
-              draggingMessageIds.size > 0 ? Array.from(draggingMessageIds) : [];
-            if (!ids.length) {
-              try {
-                const parsed = JSON.parse(event.dataTransfer.getData("application/json"));
-                if (parsed?.messageIds && Array.isArray(parsed.messageIds)) {
-                  ids = parsed.messageIds;
-                }
-              } catch {
-                // ignore
-              }
-            }
-            if (!ids.length) return;
-            handleMoveMessages(folder.id, ids);
-          }}
-          style={{ paddingLeft: `${6 + depth * 2}px` }}
-        >
-          <span
-            className={`tree-caret ${!isCollapsed ? "open" : ""}`}
-            onClick={(event) => {
-              if (!hasChildren) return;
-              event.stopPropagation();
-              if (isDeleting) return;
-              setCollapsedFolders((prev) => ({ ...prev, [folder.id]: !isCollapsed }));
-            }}
-          >
-            {hasChildren ? "▸" : ""}
-          </span>
-          {folderSpecialIcon(folder) ? (
-            <span className="tree-icon" aria-hidden>
-              {folderSpecialIcon(folder)}
-            </span>
-          ) : (
-            <span className={`tree-dot ${isSystem ? "system" : ""}`} aria-hidden />
-          )}
-          <span className={`tree-name ${folder.unreadCount ? "has-unread" : ""}`}>
-            {folder.name}
-          </span>
-          {folder.unreadCount ? (
-            <span className="tree-unread" aria-label={`${folder.unreadCount} unread`}>
-              {folder.unreadCount}
-            </span>
-          ) : null}
-          <span className="tree-actions">
-            <div
-              className="message-menu folder-menu"
-              ref={openFolderMenuId === folder.id ? folderMenuRef : null}
-              onClick={(event) => event.stopPropagation()}
-            >
-              <button
-                className="tree-action"
-                title="Folder actions"
-                aria-label="Folder actions"
-                disabled={isDeleting}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  if (isDeleting) return;
-                  setOpenFolderMenuId((prev) => (prev === folder.id ? null : folder.id));
-                }}
-              >
-                <MoreVertical size={14} />
-              </button>
-              {openFolderMenuId === folder.id && (
-                <div className="message-menu-panel">
-                  <button
-                    className="message-menu-item"
-                    disabled={isDeleting}
-                    onClick={() => {
-                      setOpenFolderMenuId(null);
-                      syncAccount(folder.id);
-                    }}
-                  >
-                    Sync
-                  </button>
-                  <button
-                    className="message-menu-item"
-                    disabled={isDeleting}
-                    onClick={() => {
-                      setOpenFolderMenuId(null);
-                      handleCreateSubfolder(folder);
-                    }}
-                  >
-                    Create Subfolder
-                  </button>
-                  <button
-                    className="message-menu-item"
-                    disabled={isDeleting}
-                    onClick={() => {
-                      setOpenFolderMenuId(null);
-                      handleRenameFolderItem(folder);
-                    }}
-                  >
-                    Rename
-                  </button>
-                  <button
-                    className="message-menu-item"
-                    disabled={isDeleting}
-                    onClick={() => {
-                      setOpenFolderMenuId(null);
-                      handleDeleteFolderItem(folder);
-                    }}
-                  >
-                    Delete
-                  </button>
-                </div>
-              )}
-            </div>
-          </span>
-        </div>
-        {!isCollapsed && hasChildren && (
-          <div className="tree-children">
-            {childNodes.map((child) => renderNode(child, depth + 1, matchesQuery)).filter(Boolean)}
-          </div>
-        )}
-      </div>
-    );
-  };
-
-  const systemFolderNames = new Set([
-    "Inbox",
-    "Pinned",
-    "Unread",
-    "Drafts",
-    "Sent",
-    "Archive",
-    "Trash",
-    "Junk",
-    "Spam"
-  ]);
   const isCompactView = messageView === "compact";
   const rootFolders = accountFolders.filter((folder) => !folder.parentId);
   const isExistingAccount = Boolean(
     editingAccount && accounts.some((account) => account.id === editingAccount.id)
   );
+  const handleToggleDarkMode = () => {
+    const next = !darkMode;
+    setDarkMode(next);
+    document.documentElement.classList.toggle("dark", next);
+    localStorage.setItem("noctua:theme", next ? "dark" : "light");
+  };
 
   if (authState === "unauth") {
     return (
@@ -5324,367 +4917,99 @@ export default function MailClient() {
 
   return (
     <div className="app-shell">
-      <header className="top-bar">
-        <div className="brand">
-          <div className="brand-mark" aria-hidden>
-            <Image
-              className="brand-icon"
-              src="/icon.png"
-              alt=""
-              width={44}
-              height={44}
-              quality={85}
-              priority
-            />
-          </div>
-          <h1>Noctua Mail</h1>
-        </div>
-        <div className="search-bar">
-          <input
-            type="search"
-            placeholder="Search all messages"
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-          />
-          <div className="search-controls">
-            {query && (
-              <button
-                className="search-control search-clear"
-                onClick={() => setQuery("")}
-                aria-label="Clear search"
-                title="Clear search"
-              >
-                <X size={12} />
-              </button>
-            )}
-            <select
-              className="search-control"
-              value={searchScope}
-              onChange={(event) => {
-                const next = event.target.value as "folder" | "all";
-                setSearchScope(next);
-                if (next === "all") {
-                  setLastFolderId(activeFolderId);
-                  setActiveFolderId("");
-                } else {
-                  setActiveFolderId(lastFolderId || accountFolders[0]?.id || "");
-                }
-              }}
-            >
-              <option value="folder">Current folder</option>
-              <option value="all">Everywhere</option>
-            </select>
-            <div className="search-fields" ref={searchFieldsRef}>
-            <button
-              className="search-control"
-              onClick={() => setSearchFieldsOpen((open) => !open)}
-              aria-label="Search fields"
-              title="Search fields"
-            >
-              {searchFieldsLabel}
-            </button>
-            {searchFieldsOpen && (
-              <div className="search-fields-panel">
-                <div className="search-fields-title">Search in</div>
-                <div className="search-fields-grid">
-                  {(
-                    [
-                      ["sender", "Sender"],
-                      ["participants", "Participants"],
-                      ["subject", "Subject"],
-                      ["body", "Body"],
-                      ["attachments", "Attachments"]
-                    ] as const
-                  ).map(([key, label]) => (
-                    <label key={key} className="search-field-option">
-                      <span className="search-field-label">{label}</span>
-                      <input
-                        type="checkbox"
-                        checked={searchFields[key]}
-                        disabled={key === "sender" && searchFields.participants}
-                        onChange={(event) =>
-                          setSearchFields((prev) => ({
-                            ...prev,
-                            [key]: event.target.checked,
-                            ...(key === "participants" && event.target.checked
-                              ? { sender: false }
-                              : {})
-                          }))
-                        }
-                      />
-                    </label>
-                  ))}
-                </div>
-              </div>
-            )}
-            </div>
-            <div className="search-fields" ref={searchBadgesRef}>
-              <button
-                className="search-control"
-                onClick={() => setSearchBadgesOpen((open) => !open)}
-                aria-label="Search badges"
-                title="Search badges"
-              >
-                {searchBadgesLabel}
-              </button>
-              {searchBadgesOpen && (
-                <div className="search-fields-panel">
-                  <div className="search-fields-title">Badges</div>
-                  <div className="search-fields-grid">
-                    {(
-                      [
-                        ["unread", "Unread"],
-                        ["flagged", "Flagged"],
-                        ["todo", "To-Do"],
-                        ["pinned", "Pinned"],
-                        ["attachments", "Attachments"]
-                      ] as const
-                    ).map(([key, label]) => (
-                      <label key={key} className="search-field-option">
-                        <span className="search-field-label">{label}</span>
-                        <input
-                          type="checkbox"
-                          checked={searchBadges[key]}
-                          onChange={(event) =>
-                            setSearchBadges((prev) => ({
-                              ...prev,
-                              [key]: event.target.checked
-                            }))
-                          }
-                        />
-                      </label>
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
-        <div className="action-row">
-          <button
-            className="icon-button new-mail-button"
-            onClick={() => openCompose("new")}
-            title="New mail"
-            aria-label="New mail"
-          >
-            <Edit3 size={14} />
-            New Mail
-          </button>
-          {draftsFolder && draftsCount > 0 && (
-            <button
-              className="icon-button drafts-button"
-              onClick={() => {
-                setSearchScope("folder");
-                setActiveFolderId(draftsFolder.id);
-                setActiveMessageId("");
-              }}
-              title="Open drafts folder"
-              aria-label="Open drafts folder"
-            >
-              <FileText size={14} />
-              {`${draftsCount} Draft${draftsCount === 1 ? "" : "s"}`}
-            </button>
-          )}
-          <button
-            className="icon-button"
-            onClick={() => {
-              const next = !darkMode;
-              setDarkMode(next);
-              document.documentElement.classList.toggle("dark", next);
-              localStorage.setItem("noctua:theme", next ? "dark" : "light");
-            }}
-            title={darkMode ? "Switch to light mode" : "Switch to dark mode"}
-            aria-label={darkMode ? "Switch to light mode" : "Switch to dark mode"}
-          >
-            {darkMode ? <Sun size={14} /> : <Moon size={14} />}
-          </button>
-          <button
-            className="icon-button"
-            onClick={() => syncAccount(undefined, "new")}
-            disabled={isSyncing}
-            aria-label="Check new mail"
-            title="Check for new mail"
-          >
-            <RefreshCw size={18} className={isSyncing ? "spin" : ""} />
-          </button>
-          <div className="user-menu" ref={menuRef}>
-            <button className="icon-button" onClick={() => setMenuOpen((open) => !open)}>
-              {currentAccount?.name ? `${currentAccount.name} ` : ""}
-              {currentAccount?.email ? (
-                <span className="account-email">&lt;{currentAccount.email}&gt;</span>
-              ) : null}
-            </button>
-            {menuOpen && (
-              <div className="user-menu-panel">
-                <h4>Accounts</h4>
-                {accounts.map((account) => (
-                  <div key={account.id} className="user-menu-item">
-                    <div
-                      className="user-menu-select"
-                      role="button"
-                      tabIndex={0}
-                      onClick={() => {
-                        setActiveAccountId(account.id);
-                        setActiveMessageId(
-                          messages.find((m) => m.accountId === account.id)?.id ?? messages[0]?.id ?? ""
-                        );
-                        setMenuOpen(false);
-                      }}
-                      onKeyDown={(event) => {
-                        if (event.key === "Enter" || event.key === " ") {
-                          event.preventDefault();
-                          setActiveAccountId(account.id);
-                          setActiveMessageId(
-                            messages.find((m) => m.accountId === account.id)?.id ??
-                              messages[0]?.id ??
-                              ""
-                          );
-                          setMenuOpen(false);
-                        }
-                      }}
-                    >
-                      <span className="badge">{account.email}</span>
-                      <span className="menu-account">
-                        {account.name}
-                        <span>{account.email}</span>
-                      </span>
-                      <button
-                        className="icon-button menu-gear"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          startEditAccount(account);
-                          setMenuOpen(false);
-                        }}
-                        title="Account settings"
-                        aria-label="Account settings"
-                      >
-                        <Settings size={14} />
-                      </button>
-                      <button
-                        className="icon-button menu-delete"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          deleteAccount(account.id);
-                        }}
-                        title="Delete account"
-                        aria-label="Delete account"
-                      >
-                        <Trash2 size={14} />
-                      </button>
-                    </div>
-                  </div>
-                ))}
-                <button className="icon-button" onClick={() => startEditAccount()}>
-                  + Add account
-                </button>
-              </div>
-            )}
-          </div>
-        </div>
-      </header>
-      {inAppNotices.length > 0 && (
-        <div className="inapp-notice-stack">
-          {inAppNotices.map((notice) => (
-            <div
-              key={notice.id}
-              className="inapp-notice"
-              role="button"
-              tabIndex={0}
-              onClick={() => handleNoticeOpen(notice)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" || event.key === " ") {
-                  event.preventDefault();
-                  handleNoticeOpen(notice);
-                }
-              }}
-            >
-              <div className="notice-text">
-                <strong>{notice.subject}</strong>
-                {notice.from && <span> · {notice.from}</span>}
-                {!notice.from && notice.count ? (
-                  <span> · {notice.count} messages</span>
-                ) : null}
-              </div>
-              <button
-                className="icon-button ghost"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  setInAppNotices((prev) => prev.filter((item) => item.id !== notice.id));
-                }}
-                aria-label="Dismiss notification"
-                title="Dismiss"
-              >
-                <X size={12} />
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
+      <TopBar
+        state={{
+          query,
+          searchScope,
+          searchFields,
+          searchBadges,
+          searchFieldsOpen,
+          searchBadgesOpen,
+          darkMode,
+          accounts,
+          currentAccount: currentAccount ?? null,
+          messages,
+          draftsFolder,
+          draftsCount,
+          activeFolderId,
+          lastFolderId,
+          accountFolders,
+          menuOpen,
+          isSyncing
+        }}
+        ui={{ searchFieldsLabel, searchBadgesLabel }}
+        actions={{
+          setQuery,
+          setSearchScope,
+          setSearchFields,
+          setSearchBadges,
+          setSearchFieldsOpen,
+          setSearchBadgesOpen,
+          toggleDarkMode: handleToggleDarkMode,
+          openCompose,
+          setActiveFolderId,
+          setLastFolderId,
+          setActiveMessageId,
+          startEditAccount,
+          deleteAccount,
+          setActiveAccountId,
+          setMenuOpen,
+          syncAccount
+        }}
+        refs={{ menuRef, searchFieldsRef, searchBadgesRef }}
+      />
+      <InAppNoticeStack
+        state={{ inAppNotices }}
+        actions={{ onOpenNotice: handleNoticeOpen, onDismissNotice: handleDismissNotice }}
+      />
 
       <section className="content-grid" ref={containerRef}>
-        <aside className="pane" style={{ width: leftWidth }}>
-          <div className="folder-panel">
-            <div className="tree-rail">
-              <div className="tree-header">
-                <div>
-                  <div className="panel-title">Folders</div>
-                  <div className="panel-meta">{accountFolders.length} total</div>
-                </div>
-                <div className="tree-header-actions">
-                  <div
-                    className="message-menu folder-header-menu"
-                    ref={folderHeaderMenuOpen ? folderHeaderMenuRef : null}
-                    onClick={(event) => event.stopPropagation()}
-                  >
-                    <button
-                      className="tree-action"
-                      title="Folder actions"
-                      aria-label="Folder actions"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        setFolderHeaderMenuOpen((prev) => !prev);
-                      }}
-                    >
-                      <MoreVertical size={14} />
-                    </button>
-                    {folderHeaderMenuOpen && (
-                      <div className="message-menu-panel">
-                        <button
-                          className="message-menu-item"
-                          onClick={() => {
-                            setFolderHeaderMenuOpen(false);
-                            syncAccount(undefined, "full");
-                          }}
-                        >
-                          Sync Folders
-                        </button>
-                        <button
-                          className="message-menu-item"
-                          onClick={() => {
-                            setFolderHeaderMenuOpen(false);
-                            recomputeThreads();
-                          }}
-                          disabled={isRecomputingThreads}
-                        >
-                          Recompute Threads
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
-              <div className="folder-search">
-                <input
-                  type="search"
-                  placeholder="Search folders"
-                  value={folderQuery}
-                  onChange={(event) => setFolderQuery(event.target.value)}
-                />
-              </div>
-              {rootFolders.map((folder) => renderNode(folder, 0))}
-            </div>
-          </div>
-        </aside>
+        <FolderPane
+          state={{
+            leftWidth,
+            folderQuery,
+            accountFolderCount: accountFolders.length,
+            folderHeaderMenuOpen,
+            isRecomputingThreads
+          }}
+          actions={{
+            setFolderQuery,
+            setFolderHeaderMenuOpen,
+            syncAccount,
+            recomputeThreads
+          }}
+          refs={{ folderHeaderMenuRef }}
+        >
+          <FolderTree
+            state={{
+              rootFolders,
+              folderTree,
+              folderById,
+              folderQuery,
+              activeFolderId,
+              collapsedFolders,
+              syncingFolders,
+              deletingFolderIds,
+              draggingMessageIds,
+              dragOverFolderId,
+              openFolderMenuId,
+              messageCountByFolder
+            }}
+            actions={{
+              setActiveFolderId,
+              setCollapsedFolders,
+              setDragOverFolderId,
+              setOpenFolderMenuId,
+              handleMoveMessages,
+              handleCreateSubfolder,
+              handleRenameFolderItem,
+              handleDeleteFolderItem,
+              syncAccount,
+              folderSpecialIcon
+            }}
+            refs={{ folderMenuRef }}
+          />
+        </FolderPane>
 
         <div
           className="resizer"
@@ -5694,919 +5019,134 @@ export default function MailClient() {
           }}
         />
 
-        <aside className="pane list-pane" style={{ width: listWidth }} ref={listPaneRef}>
+        <MessageListPane state={{ listWidth }} refs={{ listPaneRef }}>
           <div className={`message-list ${isCompactView ? "compact" : ""}`}>
-            <div className="list-header">
-              <div>
-                <strong>
-                  {searchScope === "folder" && activeFolderName
-                    ? `Messages in ${activeFolderName}`
-                    : "Messages"}
-                </strong>
-                {searchActive && (
-                  <div className="list-search-indicator">
-                    <Search size={12} />
-                    <span className="search-text">
-                      Searching {searchCriteriaLabel || "all messages"}
-                    </span>
-                    <button
-                      className="icon-button ghost small"
-                      onClick={clearSearch}
-                      title="Clear search"
-                      aria-label="Clear search"
-                    >
-                      <X size={12} />
-                    </button>
-                  </div>
-                )}
-                <span className="muted-inline load-more-inline">
-                  {(() => {
-                    const countLabel =
-                      totalMessages !== null
-                        ? `${loadedMessageCount} of ${totalMessages} items`
-                        : `${loadedMessageCount} items`;
-                    if (listLoading) {
-                      return `Loading… ${countLabel}`;
-                    }
-                    return searchScope === "all" ? `${countLabel} · Everywhere` : countLabel;
-                  })()}
-                  {hasMoreMessages && !loadingMessages && (
-                    <button
-                      className="icon-button ghost"
-                      onClick={() => setMessagesPage((prev) => prev + 1)}
-                      title="Load more"
-                      aria-label="Load more"
-                    >
-                      <RefreshCw size={12} />
-                    </button>
-                  )}
-                </span>
-              </div>
-              <div className="list-actions">
-                <div className="view-toggle">
-                  <button
-                    className={`icon-button ${messageView === "compact" ? "active" : ""}`}
-                    onClick={() => setMessageView("compact")}
-                  >
-                    Compact
-                  </button>
-                  <button
-                    className={`icon-button ${messageView === "card" ? "active" : ""}`}
-                    onClick={() => setMessageView("card")}
-                  >
-                    Cards
-                  </button>
-                  <button
-                    className={`icon-button ${messageView === "table" ? "active" : ""}`}
-                    onClick={() => setMessageView("table")}
-                  >
-                    Table
-                  </button>
-                </div>
-                <select
-                  value={groupBy}
-                  onChange={(event) =>
-                    setGroupBy(
-                      event.target.value as
-                        | "none"
-                        | "date"
-                        | "week"
-                        | "sender"
-                        | "domain"
-                        | "year"
-                        | "folder"
-                    )
-                  }
-                >
-                  <option value="date">Group: Date</option>
-                  <option value="week">Group: Week</option>
-                  <option value="sender">Group: Sender</option>
-                  <option value="domain">Group: Sender Domain</option>
-                  <option value="year">Group: Year</option>
-                  {searchScope === "all" && <option value="folder">Group: Folder</option>}
-                  <option value="none">Group: None</option>
-                </select>
-                <button
-                  className={`icon-button ${threadsEnabled ? "active" : ""}`}
-                  onClick={() => {
-                    if (!threadsAllowed) return;
-                    setThreadsEnabled((value) => !value);
-                  }}
-                  title={
-                    threadsAllowed ? "Toggle threads" : "Threads are available for Date/Week/Year"
-                  }
-                  disabled={!threadsAllowed}
-                >
-                  <GitBranch size={14} />
-                </button>
-                <button
-                  className="icon-button"
-                  onClick={toggleAllGroups}
-                  title={
-                    groupedMessages.some((group) => !collapsedGroups[group.key])
-                      ? "Collapse all groups"
-                      : "Expand all groups"
-                  }
-                >
-                  {groupedMessages.some((group) => !collapsedGroups[group.key]) ? (
-                    <ChevronsUp size={14} />
-                  ) : (
-                    <ChevronsDown size={14} />
-                  )}
-                </button>
-              </div>
-            </div>
+            <MessageListHeader
+              state={{
+                searchScope,
+                activeFolderName,
+                searchActive,
+                searchCriteriaLabel,
+                loadedMessageCount,
+                totalMessages,
+                listLoading,
+                loadingMessages,
+                hasMoreMessages,
+                messageView,
+                groupBy,
+                threadsEnabled,
+                threadsAllowed,
+                groupedMessages,
+                collapsedGroups
+              }}
+              actions={{
+                clearSearch,
+                setMessagesPage,
+                setMessageView,
+                setGroupBy,
+                setThreadsEnabled,
+                toggleAllGroups
+              }}
+            />
             {listLoading && sortedMessages.length === 0 && (
               <div className="list-loading">Loading messages…</div>
             )}
             {messageView === "table" ? (
-              <div className="message-table">
-                <div className="table-row table-header">
-                  <div className="cell-select" aria-hidden="true">
-                    <input
-                      type="checkbox"
-                      aria-label="Select all"
-                      onChange={() => {
-                        const allIds = visibleMessages.map((item) => item.message.id);
-                        if (allIds.every((id) => selectedMessageIds.has(id))) {
-                          clearSelection();
-                        } else {
-                          setSelectedMessageIds(new Set(allIds));
-                          if (allIds.length > 0) {
-                            setLastSelectedId(allIds[allIds.length - 1]);
-                          }
-                        }
-                      }}
-                      checked={
-                        visibleMessages.length > 0 &&
-                        visibleMessages.every((item) => selectedMessageIds.has(item.message.id))
-                      }
-                    />
-                  </div>
-                  <button
-                    className="table-sort"
-                    onClick={() => {
-                      setSortKey("from");
-                      setSortDir(sortDir === "asc" ? "desc" : "asc");
-                    }}
-                  >
-                    From
-                  </button>
-                  <button
-                    className="table-sort"
-                    onClick={() => {
-                      setSortKey("subject");
-                      setSortDir(sortDir === "asc" ? "desc" : "asc");
-                    }}
-                  >
-                    Subject
-                  </button>
-                  <button
-                    className="table-sort"
-                    onClick={() => {
-                      setSortKey("date");
-                      setSortDir(sortDir === "asc" ? "desc" : "asc");
-                    }}
-                  >
-                    Date
-                  </button>
-                  <div className="cell-actions" aria-hidden="true" />
-                </div>
-                {groupedMessages.map((group) => (
-                  <div key={group.key} className="table-group">
-                    <div
-                    className={`group-title group-toggle ${group.key === "Pinned" ? "pinned" : ""}`}
-                    role="button"
-                    tabIndex={0}
-                    onClick={() => {
-                      if (group.items.length === 0) return;
-                      setCollapsedGroups((prev) => ({
-                        ...prev,
-                        [group.key]: !prev[group.key]
-                      }));
-                    }}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter" || event.key === " ") {
-                        event.preventDefault();
-                        if (group.items.length === 0) return;
-                        setCollapsedGroups((prev) => ({
-                          ...prev,
-                          [group.key]: !prev[group.key]
-                        }));
-                      }
-                    }}
-                    >
-                      <span className={`group-caret ${collapsedGroups[group.key] ? "" : "open"}`}>
-                        {group.items.length === 0 ? "" : "▸"}
-                      </span>
-                    {getGroupLabel(group as any)} ·{" "}
-                    {group.items.length === 0 ? 0 : (group as any).count ?? group.items.length}
-                    </div>
-                    {group.items.length > 0 && !collapsedGroups[group.key] && (
-                      <>
-                        {supportsThreads
-                          ? buildThreadTree(group.items)
-                              .sort((a, b) => getThreadLatestDate(b) - getThreadLatestDate(a))
-                          .map((root) => {
-                                const isPinnedGroup = group.key === "Pinned";
-                                const threadGroupId =
-                                  root.message.threadId ??
-                                  root.message.messageId ??
-                                  root.message.id;
-                                const activeThreadKey =
-                                  activeMessage?.threadId ??
-                                  activeMessage?.messageId ??
-                                  activeMessage?.id;
-                                const fullFlat = flattenThread(root, 0);
-                                const threadSize = fullFlat.length;
-                                const isCollapsed = collapsedThreads[threadGroupId] ?? true;
-                                const flat = isCollapsed ? [fullFlat[0]] : fullFlat;
-                                const threadFolderIds = Array.from(
-                                  new Set(fullFlat.map((item) => item.message.folderId))
-                                );
-                                const showThreadFolderBadges =
-                                  searchScope === "all" ||
-                                  (includeThreadAcrossFolders && threadFolderIds.length > 1);
-                                return (
-                                  <div key={`${threadGroupId}-${root.message.id}`}>
-                                    {flat.map(({ message, depth }, index) => {
-                                      const isSelected = selectedMessageIds.has(message.id);
-                                      const isDragging = draggingMessageIds.has(message.id);
-                                      const folderIds =
-                                        index === 0 && isCollapsed && threadSize > 1
-                                          ? showThreadFolderBadges
-                                            ? threadFolderIds
-                                            : []
-                                          : searchScope === "all" ||
-                                              (includeThreadAcrossFolders &&
-                                                message.folderId !== activeFolderId)
-                                            ? [message.folderId]
-                                            : [];
-                                      return (
-                                        <div
-                                          key={message.id}
-                                          className={`table-row ${message.id === activeMessageId ? "active" : ""} ${
-                                            depth > 0 ? "thread-child" : ""
-                                          } ${
-                                            (hoveredThreadId === threadGroupId ||
-                                              activeThreadKey === threadGroupId) &&
-                                            message.id !== activeMessage?.id
-                                              ? "thread-sibling"
-                                              : ""
-                                          } ${!message.seen ? "unread" : ""} ${isSelected ? "selected" : ""} ${
-                                            isDragging ? "dragging" : ""
-                                          } ${
-                                            pendingMessageActions.has(message.id) ? "disabled" : ""
-                                          }`}
-                                          role="button"
-                                          tabIndex={0}
-                                          draggable
-                                          onDragStart={(event) => handleMessageDragStart(event, message)}
-                                          onDragEnd={handleMessageDragEnd}
-                                          onClick={(event) => {
-                                            if (
-                                              supportsThreads &&
-                                              threadSize > 1 &&
-                                              depth === 0 &&
-                                              index === 0 &&
-                                              isCollapsed
-                                            ) {
-                                              if (isPinnedGroup) {
-                                                const pinnedTarget =
-                                                  fullFlat.find((item) =>
-                                                    isPinnedMessage(item.message)
-                                                  )?.message ?? fullFlat[0].message;
-                                                selectCollapsedThread(fullFlat, pinnedTarget);
-                                              } else {
-                                                const latestTarget = fullFlat.reduce(
-                                                  (acc, item) =>
-                                                    item.message.dateValue > acc.message.dateValue
-                                                      ? item
-                                                      : acc,
-                                                  fullFlat[0]
-                                                ).message;
-                                                selectCollapsedThread(fullFlat, latestTarget);
-                                              }
-                                              return;
-                                            }
-                                            handleRowClick(event, message);
-                                          }}
-                                          onMouseEnter={() => setHoveredThreadId(threadGroupId)}
-                                          onMouseLeave={() => setHoveredThreadId(null)}
-                                          onKeyDown={(event) => {
-                                            if (event.key === "Enter" || event.key === " ") {
-                                              event.preventDefault();
-                                              handleSelectMessage(message);
-                                            }
-                                          }}
-                                        >
-                                          <span className="cell-select">
-                                            {renderUnreadDot(message)}
-                                            {renderSelectIndicators(message)}
-                                            <input
-                                              type="checkbox"
-                                              checked={isSelected}
-                                              onChange={(event) => {
-                                                event.stopPropagation();
-                                                toggleMessageSelection(message.id);
-                                              }}
-                                              onClick={(event) => event.stopPropagation()}
-                                            />
-                                          </span>
-                                          <span className="cell-from" style={{ paddingLeft: `${depth * 14}px` }}>
-                                            {index === 0 && threadSize > 1 ? (
-                                              <>
-                                                <span
-                                                  className={`thread-caret ${isCollapsed ? "" : "open"}`}
-                                                  title={isCollapsed ? "Expand thread" : "Collapse thread"}
-                                                  onClick={(event) => {
-                                                    event.stopPropagation();
-                                                    setCollapsedThreads((prev) => ({
-                                                      ...prev,
-                                                      [threadGroupId]: !isCollapsed
-                                                    }));
-                                                  }}
-                                                >
-                                                  ▸
-                                                </span>
-                                                <span className="thread-indicator thread-indicator-inline">
-                                                  <GitBranch size={12} />
-                                                  <span>{threadSize}</span>
-                                                </span>
-                                              </>
-                                            ) : (
-                                              <span className="thread-caret spacer">▸</span>
-                                            )}
-                                          {message.from}
-                                        </span>
-                                          <span
-                                            className="cell-subject"
-                                            onClick={(event) => {
-                                              event.stopPropagation();
-                                              if (
-                                                supportsThreads &&
-                                                threadSize > 1 &&
-                                                depth === 0 &&
-                                                index === 0 &&
-                                                isCollapsed
-                                              ) {
-                                              if (isPinnedGroup) {
-                                                const pinnedTarget =
-                                                  fullFlat.find((item) =>
-                                                    isPinnedMessage(item.message)
-                                                  )?.message ?? fullFlat[0].message;
-                                                selectCollapsedThread(fullFlat, pinnedTarget);
-                                              } else {
-                                                const latestTarget = fullFlat.reduce(
-                                                  (acc, item) =>
-                                                    item.message.dateValue > acc.message.dateValue
-                                                      ? item
-                                                      : acc,
-                                                  fullFlat[0]
-                                                ).message;
-                                                selectCollapsedThread(fullFlat, latestTarget);
-                                              }
-                                            } else {
-                                              handleSelectMessage(message);
-                                            }
-                                          }}
-                                          >
-                                            {renderFolderBadges(folderIds)}
-                                            <span className="cell-subject-text">
-                                              {message.subject}
-                                            </span>
-                                          </span>
-                                          <span className="cell-date">
-                                            <span className="date-text">{message.date}</span>
-                                          </span>
-                                          <div className="cell-actions">
-                                            <button
-                                              className="icon-button ghost message-delete"
-                                              title={
-                                                isTrashFolder(message.folderId)
-                                                  ? "Delete permanently"
-                                                  : "Move to Trash"
-                                              }
-                                              aria-label="Delete"
-                                              disabled={pendingMessageActions.has(message.id)}
-                                              onClick={(event) => {
-                                                event.stopPropagation();
-                                                handleDeleteMessage(message);
-                                              }}
-                                            >
-                                              <Trash2 size={14} />
-                                            </button>
-                                            {renderMessageMenu(message, "table")}
-                                          </div>
-                                        </div>
-                                      );
-                                    })}
-                                  </div>
-                                );
-                              })
-                          : group.items.map((message) => {
-                              const threadGroupId =
-                                message.threadId ?? message.messageId ?? message.id;
-                              const activeThreadKey =
-                                activeMessage?.threadId ??
-                                activeMessage?.messageId ??
-                                activeMessage?.id;
-                              const folderIds =
-                                searchScope === "all" ||
-                                (includeThreadAcrossFolders &&
-                                  message.folderId !== activeFolderId)
-                                  ? [message.folderId]
-                                  : [];
-                              return (
-                                <div
-                                  key={message.id}
-                                  className={`table-row ${message.id === activeMessageId ? "active" : ""} ${
-                                    (hoveredThreadId === threadGroupId ||
-                                      activeThreadKey === threadGroupId) &&
-                                    message.id !== activeMessage?.id
-                                      ? "thread-sibling"
-                                      : ""
-                                  } ${!message.seen ? "unread" : ""} ${
-                                    selectedMessageIds.has(message.id) ? "selected" : ""
-                                  } ${draggingMessageIds.has(message.id) ? "dragging" : ""} ${
-                                    pendingMessageActions.has(message.id) ? "disabled" : ""
-                                  }`}
-                                  role="button"
-                                  tabIndex={0}
-                                  draggable
-                                  onDragStart={(event) => handleMessageDragStart(event, message)}
-                                  onDragEnd={handleMessageDragEnd}
-                                  onClick={(event) => handleRowClick(event, message)}
-                                  onMouseEnter={() => setHoveredThreadId(threadGroupId)}
-                                  onMouseLeave={() => setHoveredThreadId(null)}
-                                  onKeyDown={(event) => {
-                                    if (event.key === "Enter" || event.key === " ") {
-                                      event.preventDefault();
-                                      handleSelectMessage(message);
-                                    }
-                                  }}
-                                >
-                                  <span className="cell-select">
-                                    {renderUnreadDot(message)}
-                                    {renderSelectIndicators(message)}
-                                    <input
-                                      type="checkbox"
-                                      checked={selectedMessageIds.has(message.id)}
-                                      onChange={(event) => {
-                                        event.stopPropagation();
-                                        toggleMessageSelection(message.id);
-                                      }}
-                                      onClick={(event) => event.stopPropagation()}
-                                    />
-                                  </span>
-                                  <span className="cell-from">{message.from}</span>
-                                  <span className="cell-subject">
-                                    {renderFolderBadges(folderIds)}
-                                    <span className="cell-subject-text">{message.subject}</span>
-                                  </span>
-                                  <span className="cell-date">
-                                    <span className="date-text">{message.date}</span>
-                                  </span>
-                                  <div className="cell-actions">
-                                    <button
-                                      className="icon-button ghost message-delete"
-                                      title={
-                                        isTrashFolder(message.folderId)
-                                          ? "Delete permanently"
-                                          : "Move to Trash"
-                                      }
-                                      aria-label="Delete"
-                                      disabled={pendingMessageActions.has(message.id)}
-                                      onClick={(event) => {
-                                        event.stopPropagation();
-                                        handleDeleteMessage(message);
-                                      }}
-                                    >
-                                      <Trash2 size={14} />
-                                    </button>
-                                    {renderMessageMenu(message, "table")}
-                                  </div>
-                                </div>
-                              );
-                            })}
-                      </>
-                    )}
-                  </div>
-                ))}
-              </div>
+              <MessageTable
+                state={{
+                  groupedMessages,
+                  visibleMessages,
+                  selectedMessageIds,
+                  draggingMessageIds,
+                  collapsedGroups,
+                  collapsedThreads,
+                  pendingMessageActions,
+                  supportsThreads,
+                  includeThreadAcrossFolders,
+                  searchScope,
+                  activeFolderId,
+                  activeMessageId,
+                  activeMessage: activeMessage ?? null,
+                  hoveredThreadId,
+                  sortDir
+                }}
+                actions={{
+                  clearSelection,
+                  setSelectedMessageIds,
+                  setLastSelectedId,
+                  setSortKey,
+                  setSortDir,
+                  setCollapsedGroups,
+                  setCollapsedThreads,
+                  setHoveredThreadId,
+                  handleMessageDragStart,
+                  handleMessageDragEnd,
+                  handleRowClick,
+                  handleSelectMessage,
+                  toggleMessageSelection,
+                  selectCollapsedThread,
+                  handleDeleteMessage
+                }}
+                helpers={{
+                  buildThreadTree,
+                  flattenThread,
+                  getThreadLatestDate,
+                  getGroupLabel,
+                  renderUnreadDot,
+                  renderSelectIndicators,
+                  renderFolderBadges,
+                  isPinnedMessage,
+                  isTrashFolder,
+                  renderMessageMenu
+                }}
+              />
+            
             ) : (
-              groupedMessages.map((group) => (
-                <div key={group.key} className={`card-group ${isCompactView ? "compact" : ""}`}>
-                  <div
-                    className={`group-title group-toggle ${group.key === "Pinned" ? "pinned" : ""}`}
-                    role="button"
-                    tabIndex={0}
-                    onClick={() => {
-                      if (group.items.length === 0) return;
-                      setCollapsedGroups((prev) => ({
-                        ...prev,
-                        [group.key]: !prev[group.key]
-                      }));
-                    }}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter" || event.key === " ") {
-                        event.preventDefault();
-                        if (group.items.length === 0) return;
-                        setCollapsedGroups((prev) => ({
-                          ...prev,
-                          [group.key]: !prev[group.key]
-                        }));
-                      }
-                    }}
-                  >
-                    <span className={`group-caret ${collapsedGroups[group.key] ? "" : "open"}`}>
-                      {group.items.length === 0 ? "" : "▸"}
-                    </span>
-                    {getGroupLabel(group as any)} · {group.items.length === 0 ? 0 : (group as any).count ?? group.items.length}
-                  </div>
-                  {group.items.length > 0 && !collapsedGroups[group.key] && (
-                    <>
-                      {supportsThreads
-                        ? buildThreadTree(group.items)
-                            .sort((a, b) => getThreadLatestDate(b) - getThreadLatestDate(a))
-                            .map((root) => {
-                        const isPinnedGroup = group.key === "Pinned";
-                        const threadGroupId =
-                          root.message.threadId ??
-                          root.message.messageId ??
-                          root.message.id;
-                        const activeThreadKey =
-                          activeMessage?.threadId ??
-                          activeMessage?.messageId ??
-                          activeMessage?.id;
-                        const fullFlat = flattenThread(root, 0);
-                        const threadSize = fullFlat.length;
-                        const isCollapsed = collapsedThreads[threadGroupId] ?? true;
-                        const flat = isCollapsed ? [fullFlat[0]] : fullFlat;
-                        const threadGroupHasActive =
-                          isCompactView &&
-                          !!activeMessageId &&
-                          fullFlat.some((item) => item.message.id === activeMessageId);
-                        const threadGroupHasSelected =
-                          isCompactView &&
-                          fullFlat.some((item) => selectedMessageIds.has(item.message.id));
-                        const threadFolderIds = Array.from(
-                          new Set(fullFlat.map((item) => item.message.folderId))
-                        );
-                        const showThreadFolderBadges =
-                          searchScope === "all" ||
-                          (includeThreadAcrossFolders && threadFolderIds.length > 1);
-                        return (
-                            <div
-                              key={`${threadGroupId}-${root.message.id}`}
-                              className={`thread-group${threadGroupHasActive ? " compact-active" : ""}${
-                                threadGroupHasSelected ? " compact-selected" : ""
-                              }`}
-                            >
-                            {flat.map(({ message, depth }, index) => {
-                              const isSelected = selectedMessageIds.has(message.id);
-                              const isDragging = draggingMessageIds.has(message.id);
-                              const folderIds =
-                                index === 0 && isCollapsed && threadSize > 1
-                                  ? showThreadFolderBadges
-                                    ? threadFolderIds
-                                    : []
-                                  : searchScope === "all" ||
-                                      (includeThreadAcrossFolders &&
-                                        message.folderId !== activeFolderId)
-                                    ? [message.folderId]
-                                    : [];
-                              const isActiveThread =
-                                !!activeMessageId &&
-                                fullFlat.some((item) => item.message.id === activeMessageId);
-                              const showCollapsedActive =
-                                isCompactView &&
-                                isCollapsed &&
-                                index === 0 &&
-                                depth === 0 &&
-                                threadSize > 1 &&
-                                isActiveThread;
-                              return (
-                                <div
-                                  key={message.id}
-                                  className={`message-item ${isCompactView ? "compact" : ""} ${message.id === activeMessageId ? "active" : ""} ${
-                                    depth > 0 ? "thread-child" : ""
-                                  } ${
-                                    (hoveredThreadId === threadGroupId ||
-                                      activeThreadKey === threadGroupId) &&
-                                      message.id !== activeMessage?.id
-                                      ? "thread-sibling"
-                                      : ""
-                                  } ${!message.seen ? "unread" : ""} ${
-                                    pendingMessageActions.has(message.id) ? "disabled" : ""
-                                  } ${isSelected ? "selected" : ""} ${isDragging ? "dragging" : ""} ${
-                                    showCollapsedActive ? "active-thread-root" : ""
-                                  }`}
-                                  role="button"
-                                  tabIndex={0}
-                                  draggable
-                                  onDragStart={(event) => handleMessageDragStart(event, message)}
-                                  onDragEnd={handleMessageDragEnd}
-                                  onClick={(event) => {
-                                    if (
-                                      supportsThreads &&
-                                      threadSize > 1 &&
-                                      depth === 0 &&
-                                      index === 0 &&
-                                      isCollapsed
-                                    ) {
-                                      if (isPinnedGroup) {
-                                        const pinnedTarget =
-                                          fullFlat.find((item) =>
-                                            isPinnedMessage(item.message)
-                                          )?.message ?? fullFlat[0].message;
-                                        selectCollapsedThread(fullFlat, pinnedTarget);
-                                      } else {
-                                        const latestTarget = fullFlat.reduce(
-                                          (acc, item) =>
-                                            item.message.dateValue > acc.message.dateValue
-                                              ? item
-                                              : acc,
-                                          fullFlat[0]
-                                        ).message;
-                                        selectCollapsedThread(fullFlat, latestTarget);
-                                      }
-                                      return;
-                                    }
-                                    handleRowClick(event, message);
-                                  }}
-                                  onMouseEnter={() => setHoveredThreadId(threadGroupId)}
-                                  onMouseLeave={() => setHoveredThreadId(null)}
-                                  style={{ paddingLeft: `${14 + depth * 10}px` }}
-                                  onKeyDown={(event) => {
-                                    if (event.key === "Enter" || event.key === " ") {
-                                      event.preventDefault();
-                                      handleSelectMessage(message);
-                                    }
-                                  }}
-                                >
-                                  <div className="message-card-header">
-                                    <span className="message-select">
-                                      {renderUnreadDot(message)}
-                                      {renderSelectIndicators(message)}
-                                      <input
-                                        type="checkbox"
-                                        checked={isSelected}
-                                        onChange={(event) => {
-                                          event.stopPropagation();
-                                          const nativeEvent = event.nativeEvent as MouseEvent;
-                                          if (nativeEvent.shiftKey) {
-                                            selectRangeTo(message.id);
-                                          } else {
-                                            toggleMessageSelection(message.id);
-                                          }
-                                        }}
-                                        onClick={(event) => event.stopPropagation()}
-                                      />
-                                    </span>
-                                    <span className="message-from">{message.from}</span>
-                                  <div
-                                    className={`message-card-actions ${
-                                      pendingMessageActions.has(message.id) ? "disabled" : ""
-                                    } ${isCompactView ? "compact-actions" : ""}`}
-                                  >
-                                    {!message.seen && message.recent && !message.draft && (
-                                      <span className="message-new">New</span>
-                                    )}
-                                    {(message.attachments?.some((att) => !att.inline) ?? false) && (
-                                      <span className="message-attach" title="Attachments">
-                                        <Paperclip size={12} />
-                                      </span>
-                                    )}
-                                    <span className="message-date">{message.date}</span>
-                                    {isCompactView ? (
-                                      <>
-                                        <button
-                                          className="icon-button ghost message-delete"
-                                          title={
-                                            isTrashFolder(message.folderId)
-                                              ? "Delete permanently"
-                                              : "Move to Trash"
-                                          }
-                                          aria-label="Delete"
-                                          disabled={pendingMessageActions.has(message.id)}
-                                          onClick={(event) => {
-                                            event.stopPropagation();
-                                            handleDeleteMessage(message);
-                                          }}
-                                        >
-                                          <Trash2 size={14} />
-                                        </button>
-                                        {renderMessageMenu(message, "table")}
-                                      </>
-                                    ) : (
-                                      <>
-                                        {!listIsNarrow && renderQuickActions(message)}
-                                        {renderMessageMenu(message, "list")}
-                                      </>
-                                    )}
-                                  </div>
-                                </div>
-                                <div className="message-card-subject">
-                                  <div
-                                    className="message-subject"
-                                    onClick={(event) => {
-                                      event.stopPropagation();
-                                      if (
-                                        supportsThreads &&
-                                        threadSize > 1 &&
-                                        depth === 0 &&
-                                        index === 0 &&
-                                        isCollapsed
-                                      ) {
-                                        if (isPinnedGroup) {
-                                          const pinnedTarget =
-                                            fullFlat.find((item) =>
-                                              isPinnedMessage(item.message)
-                                            )?.message ?? fullFlat[0].message;
-                                          selectCollapsedThread(fullFlat, pinnedTarget);
-                                        } else {
-                                          const latestTarget = fullFlat.reduce(
-                                            (acc, item) =>
-                                              item.message.dateValue > acc.message.dateValue
-                                                ? item
-                                                : acc,
-                                            fullFlat[0]
-                                          ).message;
-                                          selectCollapsedThread(fullFlat, latestTarget);
-                                        }
-                                      } else {
-                                        handleSelectMessage(message);
-                                      }
-                                    }}
-                                  >
-                                    {index === 0 && threadSize > 1 && (
-                                      <span
-                                        className={`thread-caret ${isCollapsed ? "" : "open"}`}
-                                        title={isCollapsed ? "Expand thread" : "Collapse thread"}
-                                        onClick={(event) => {
-                                          event.stopPropagation();
-                                          setCollapsedThreads((prev) => ({
-                                            ...prev,
-                                            [threadGroupId]: !isCollapsed
-                                          }));
-                                        }}
-                                      >
-                                        ▸
-                                      </span>
-                                    )}
-                                    <span className="subject-text">{message.subject}</span>
-                                  </div>
-                                  {(isCompactView ||
-                                    (threadSize > 1 && index === 0)) && (
-                                    <div className="message-subject-meta">
-                                      {isCompactView && renderFolderBadges(folderIds)}
-                                      {threadSize > 1 && index === 0 && (
-                                        <div className="thread-indicator">
-                                          <GitBranch size={12} />
-                                          <span>{threadSize}</span>
-                                        </div>
-                                      )}
-                                    </div>
-                                  )}
-                                </div>
-                                <div className="message-preview">{message.preview}</div>
-                                {!isCompactView && (
-                                  <div className="message-meta">
-                                    {renderFolderBadges(folderIds)}
-                                  </div>
-                                )}
-                              </div>
-                              );
-                            })}
-                          </div>
-                        );
-                      })
-                        : group.items.map((message) => {
-                            const threadGroupId =
-                              message.threadId ?? message.messageId ?? message.id;
-                            const activeThreadKey =
-                              activeMessage?.threadId ??
-                              activeMessage?.messageId ??
-                              activeMessage?.id;
-                            const folderIds =
-                              searchScope === "all" ||
-                              (includeThreadAcrossFolders &&
-                                message.folderId !== activeFolderId)
-                                ? [message.folderId]
-                                : [];
-                            return (
-                              <div
-                                key={message.id}
-                                className={`message-item ${isCompactView ? "compact" : ""} ${message.id === activeMessageId ? "active" : ""} ${
-                                  (hoveredThreadId === threadGroupId ||
-                                    activeThreadKey === threadGroupId) &&
-                                    message.id !== activeMessage?.id
-                                    ? "thread-sibling"
-                                    : ""
-                                } ${!message.seen ? "unread" : ""} ${
-                                  selectedMessageIds.has(message.id) ? "selected" : ""
-                                } ${draggingMessageIds.has(message.id) ? "dragging" : ""}`}
-                                role="button"
-                                tabIndex={0}
-                                draggable
-                                onDragStart={(event) => handleMessageDragStart(event, message)}
-                                onDragEnd={handleMessageDragEnd}
-                                onClick={(event) => handleRowClick(event, message)}
-                                onMouseEnter={() => setHoveredThreadId(threadGroupId)}
-                                onMouseLeave={() => setHoveredThreadId(null)}
-                                onKeyDown={(event) => {
-                                  if (event.key === "Enter" || event.key === " ") {
-                                    event.preventDefault();
-                                    handleSelectMessage(message);
-                                  }
-                                }}
-                              >
-                                <div className="message-card-header">
-                                  <span className="message-select">
-                                    {renderUnreadDot(message)}
-                                    {renderSelectIndicators(message)}
-                                    <input
-                                      type="checkbox"
-                                      checked={selectedMessageIds.has(message.id)}
-                                      onChange={(event) => {
-                                        event.stopPropagation();
-                                        const nativeEvent = event.nativeEvent as MouseEvent;
-                                        if (nativeEvent.shiftKey) {
-                                          selectRangeTo(message.id);
-                                        } else {
-                                          toggleMessageSelection(message.id);
-                                        }
-                                      }}
-                                      onClick={(event) => event.stopPropagation()}
-                                    />
-                                  </span>
-                                  <span className="message-from">{message.from}</span>
-                                  <div
-                                    className={`message-card-actions ${
-                                      pendingMessageActions.has(message.id) ? "disabled" : ""
-                                    } ${isCompactView ? "compact-actions" : ""}`}
-                                  >
-                                    {!message.seen && message.recent && !message.draft && (
-                                      <span className="message-new">New</span>
-                                    )}
-                                    {(message.attachments?.some((att) => !att.inline) ?? false) && (
-                                      <span className="message-attach" title="Attachments">
-                                        <Paperclip size={12} />
-                                      </span>
-                                    )}
-                                    <span className="message-date">{message.date}</span>
-                                    {isCompactView ? (
-                                      <>
-                                        <button
-                                          className="icon-button ghost message-delete"
-                                          title={
-                                            isTrashFolder(message.folderId)
-                                              ? "Delete permanently"
-                                              : "Move to Trash"
-                                          }
-                                          aria-label="Delete"
-                                          disabled={pendingMessageActions.has(message.id)}
-                                          onClick={(event) => {
-                                            event.stopPropagation();
-                                            handleDeleteMessage(message);
-                                          }}
-                                        >
-                                          <Trash2 size={14} />
-                                        </button>
-                                        {renderMessageMenu(message, "table")}
-                                      </>
-                                    ) : (
-                                      <>
-                                        {!listIsNarrow && renderQuickActions(message)}
-                                        {renderMessageMenu(message, "list")}
-                                      </>
-                                    )}
-                                  </div>
-                                </div>
-                                <div className="message-card-subject">
-                                  <div className="message-subject">
-                                    <span className="subject-text">{message.subject}</span>
-                                  </div>
-                                  {isCompactView && (
-                                    <div className="message-subject-meta">
-                                      {renderFolderBadges(folderIds)}
-                                    </div>
-                                  )}
-                                </div>
-                                <div className="message-preview">{message.preview}</div>
-                                {!isCompactView && (
-                                  <div className="message-meta">
-                                    {renderFolderBadges(folderIds)}
-                                  </div>
-                                )}
-                              </div>
-                            );
-                          })}
-                    </>
-                  )}
-                </div>
-              ))
+              <MessageCardList
+                state={{
+                  groupedMessages,
+                  collapsedGroups,
+                  collapsedThreads,
+                  supportsThreads,
+                  includeThreadAcrossFolders,
+                  searchScope,
+                  activeFolderId,
+                  activeMessageId,
+                  activeMessage: activeMessage ?? null,
+                  hoveredThreadId,
+                  selectedMessageIds,
+                  draggingMessageIds,
+                  pendingMessageActions,
+                  isCompactView,
+                  listIsNarrow
+                }}
+                actions={{
+                  setCollapsedGroups,
+                  setCollapsedThreads,
+                  setHoveredThreadId,
+                  handleMessageDragStart,
+                  handleMessageDragEnd,
+                  handleRowClick,
+                  handleSelectMessage,
+                  selectRangeTo,
+                  toggleMessageSelection,
+                  selectCollapsedThread,
+                  handleDeleteMessage
+                }}
+                helpers={{
+                  buildThreadTree,
+                  flattenThread,
+                  getThreadLatestDate,
+                  getGroupLabel,
+                  renderUnreadDot,
+                  renderSelectIndicators,
+                  renderFolderBadges,
+                  renderQuickActions,
+                  renderMessageMenu,
+                  isPinnedMessage,
+                  isTrashFolder
+                }}
+              />
             )}
             {filteredMessages.length === 0 && !listLoading && (
               <div className={`list-empty ${messageListError ? "list-error" : ""}`}>
@@ -6619,7 +5159,7 @@ export default function MailClient() {
               <div className="list-loading">Loading more…</div>
             )}
           </div>
-        </aside>
+        </MessageListPane>
 
         <div
           className="resizer"
@@ -6629,1020 +5169,115 @@ export default function MailClient() {
           }}
         />
 
-        <section className="message-view-pane">
-          <div className="message-view-toolbar">
-            <button className="icon-button small" onClick={() => setShowJson(true)}>
-              Show JSON
-            </button>
-            <button
-              className="icon-button small"
-              onClick={() => {
-                console.info("[noctua] evict thread cache");
-                setThreadContentById({});
-                threadCacheOrderRef.current = [];
-                setThreadContentLoading(null);
-              }}
-              title="Evict cached thread data"
-              aria-label="Evict thread cache"
-            >
-              Evict Thread Cache
-            </button>
-          </div>
-
-          <div className="thread-view">
+        <MessageViewPane
+          onShowJson={() => setShowJson(true)}
+          onEvictThreadCache={() => {
+            console.info("[noctua] evict thread cache");
+            setThreadContentById({});
+            threadCacheOrderRef.current = [];
+            setThreadContentLoading(null);
+          }}
+        >
             {showComposeInline && (
-              <article
-                className={`thread-card compose-card compose-inline ${
-                  discardingDraft ? "disabled" : ""
-                }${composeDragActive ? " compose-drop-active" : ""}`}
-                onDragEnter={handleComposeDragEnter}
-                onDragLeave={handleComposeDragLeave}
-                onDragOver={handleComposeDragOver}
-                onDrop={handleComposeDrop}
-              >
-                <div className="thread-card-header">
-                  <div className="thread-card-top">
-                    <div className="thread-card-badges">
-                      <span className="thread-badge compose">
-                        {composeMode === "reply"
-                          ? "Reply"
-                          : composeMode === "replyAll"
-                            ? "Reply all"
-                            : composeMode === "forward"
-                              ? "Forward"
-                              : composeMode === "edit"
-                                ? "Edit draft"
-                                : composeMode === "editAsNew"
-                                  ? "Edit as New"
-                                  : "New message"}
-                      </span>
-                    </div>
-                    <div className="thread-card-actions">
-                      <button
-                        className="icon-button ghost"
-                        title="Open in modal"
-                        aria-label="Open in modal"
-                        onClick={popOutCompose}
-                      >
-                        <ArrowUpRight size={14} />
-                      </button>
-                    </div>
-                  </div>
-                  <div className="thread-card-info">
-                    <div className="compose-grid">
-                      <div className="compose-grid-row">
-                        <span className="label">Subject:</span>
-                        <input
-                          value={composeSubject}
-                          onChange={(event) => {
-                            composeDirtyRef.current = true;
-                            setComposeSubject(event.target.value);
-                          }}
-                          placeholder="Subject"
-                        />
-                      </div>
-                      <div className="compose-grid-row">
-                        <span className="label">From:</span>
-                        <input value={getAccountFromValue(currentAccount)} readOnly />
-                      </div>
-                      <div className="compose-grid-row">
-                        <span className="label">To:</span>
-                        <div className="compose-row">
-                        <div className="compose-input-wrap">
-                          <input
-                            value={composeTo}
-                            onChange={(event) => {
-                              composeDirtyRef.current = true;
-                              setComposeTo(event.target.value);
-                              setRecipientQuery(getComposeToken(event.target.value));
-                            }}
-                            onFocus={() => {
-                              setRecipientFocus("to");
-                              setRecipientQuery(getComposeToken(composeTo));
-                            }}
-                            onBlur={() => {
-                              setTimeout(() => {
-                                setRecipientFocus((current) =>
-                                  current === "to" ? null : current
-                                );
-                              }, 150);
-                            }}
-                            onKeyDown={(event) => {
-                              if (!recipientOptions.length) return;
-                              if (event.key === "ArrowDown") {
-                                event.preventDefault();
-                                setRecipientActiveIndex((prev) =>
-                                  Math.min(prev + 1, recipientOptions.length - 1)
-                                );
-                              }
-                              if (event.key === "ArrowUp") {
-                                event.preventDefault();
-                                setRecipientActiveIndex((prev) => Math.max(prev - 1, 0));
-                              }
-                              if (event.key === "Enter" && recipientFocus === "to") {
-                                event.preventDefault();
-                                const pick = recipientOptions[recipientActiveIndex];
-                                if (pick) {
-                                  applyRecipientSelection(composeTo, pick, setComposeTo);
-                                }
-                              }
-                            }}
-                            placeholder="recipient@example.com"
-                          />
-                          {recipientFocus === "to" && recipientOptions.length > 0 && (
-                            <div className="compose-suggestions">
-                              {recipientOptions.map((option, index) => (
-                                <button
-                                  key={`${option}-${index}`}
-                                  type="button"
-                                  className={`compose-suggestion ${
-                                    index === recipientActiveIndex ? "active" : ""
-                                  }`}
-                                  onMouseDown={(event) => {
-                                    event.preventDefault();
-                                    applyRecipientSelection(composeTo, option, setComposeTo);
-                                  }}
-                                >
-                                  {option}
-                                </button>
-                              ))}
-                              {recipientLoading && (
-                                <span className="compose-suggestion muted">Loading…</span>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                          <button
-                            type="button"
-                            className="icon-button small"
-                            title={composeShowBcc ? "Hide Cc and Bcc" : "Show Cc and Bcc"}
-                            onClick={() => setComposeShowBcc((value) => !value)}
-                          >
-                            {composeShowBcc ? "Hide Cc/Bcc" : "Show Cc and Bcc"}
-                          </button>
-                        </div>
-                      </div>
-                      {composeShowBcc && (
-                        <div className="compose-grid-row">
-                          <span className="label">Cc:</span>
-                          <div className="compose-input-wrap">
-                            <input
-                              value={composeCc}
-                              onChange={(event) => {
-                                composeDirtyRef.current = true;
-                                setComposeCc(event.target.value);
-                                setRecipientQuery(getComposeToken(event.target.value));
-                              }}
-                              onFocus={() => {
-                                setRecipientFocus("cc");
-                                setRecipientQuery(getComposeToken(composeCc));
-                              }}
-                              onBlur={() => {
-                                setTimeout(() => {
-                                  setRecipientFocus((current) =>
-                                    current === "cc" ? null : current
-                                  );
-                                }, 150);
-                              }}
-                              onKeyDown={(event) => {
-                                if (!recipientOptions.length) return;
-                                if (event.key === "ArrowDown") {
-                                  event.preventDefault();
-                                  setRecipientActiveIndex((prev) =>
-                                    Math.min(prev + 1, recipientOptions.length - 1)
-                                  );
-                                }
-                                if (event.key === "ArrowUp") {
-                                  event.preventDefault();
-                                  setRecipientActiveIndex((prev) => Math.max(prev - 1, 0));
-                                }
-                                if (event.key === "Enter" && recipientFocus === "cc") {
-                                  event.preventDefault();
-                                  const pick = recipientOptions[recipientActiveIndex];
-                                  if (pick) {
-                                    applyRecipientSelection(composeCc, pick, setComposeCc);
-                                  }
-                                }
-                              }}
-                              placeholder="cc@example.com"
-                            />
-                            {recipientFocus === "cc" && recipientOptions.length > 0 && (
-                              <div className="compose-suggestions">
-                                {recipientOptions.map((option, index) => (
-                                  <button
-                                    key={`${option}-${index}`}
-                                    type="button"
-                                    className={`compose-suggestion ${
-                                      index === recipientActiveIndex ? "active" : ""
-                                    }`}
-                                    onMouseDown={(event) => {
-                                      event.preventDefault();
-                                      applyRecipientSelection(composeCc, option, setComposeCc);
-                                    }}
-                                  >
-                                    {option}
-                                  </button>
-                                ))}
-                                {recipientLoading && (
-                                  <span className="compose-suggestion muted">Loading…</span>
-                                )}
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      )}
-                      {composeShowBcc && (
-                        <div className="compose-grid-row">
-                          <span className="label">Bcc:</span>
-                          <div className="compose-input-wrap">
-                            <input
-                              value={composeBcc}
-                              onChange={(event) => {
-                                composeDirtyRef.current = true;
-                                setComposeBcc(event.target.value);
-                                setRecipientQuery(getComposeToken(event.target.value));
-                              }}
-                              onFocus={() => {
-                                setRecipientFocus("bcc");
-                                setRecipientQuery(getComposeToken(composeBcc));
-                              }}
-                              onBlur={() => {
-                                setTimeout(() => {
-                                  setRecipientFocus((current) =>
-                                    current === "bcc" ? null : current
-                                  );
-                                }, 150);
-                              }}
-                              onKeyDown={(event) => {
-                                if (!recipientOptions.length) return;
-                                if (event.key === "ArrowDown") {
-                                  event.preventDefault();
-                                  setRecipientActiveIndex((prev) =>
-                                    Math.min(prev + 1, recipientOptions.length - 1)
-                                  );
-                                }
-                                if (event.key === "ArrowUp") {
-                                  event.preventDefault();
-                                  setRecipientActiveIndex((prev) => Math.max(prev - 1, 0));
-                                }
-                                if (event.key === "Enter" && recipientFocus === "bcc") {
-                                  event.preventDefault();
-                                  const pick = recipientOptions[recipientActiveIndex];
-                                  if (pick) {
-                                    applyRecipientSelection(composeBcc, pick, setComposeBcc);
-                                  }
-                                }
-                              }}
-                              placeholder="bcc@example.com"
-                            />
-                            {recipientFocus === "bcc" && recipientOptions.length > 0 && (
-                              <div className="compose-suggestions">
-                                {recipientOptions.map((option, index) => (
-                                  <button
-                                    key={`${option}-${index}`}
-                                    type="button"
-                                    className={`compose-suggestion ${
-                                      index === recipientActiveIndex ? "active" : ""
-                                    }`}
-                                    onMouseDown={(event) => {
-                                      event.preventDefault();
-                                      applyRecipientSelection(composeBcc, option, setComposeBcc);
-                                    }}
-                                  >
-                                    {option}
-                                  </button>
-                                ))}
-                                {recipientLoading && (
-                                  <span className="compose-suggestion muted">Loading…</span>
-                                )}
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-                <div className="compose-body">{composeMessageField}</div>
-                <div className="compose-footer">
-                  <div className="compose-draft-meta">
-                    {composeDraftId && (
-                      <span className="compose-draft">Draft: {composeDraftId}</span>
-                    )}
-                    {composeOpen && (
-                      <span
-                        className={`compose-draft-status ${
-                          draftSaveError ? "error" : draftSaving ? "saving" : ""
-                        }`}
-                      >
-                        {draftSaving
-                          ? "Saving draft…"
-                          : draftSaveError
-                            ? "Draft save failed"
-                            : draftSavedAt
-                              ? `Draft saved ${formatRelativeTime(draftSavedAt)}`
-                              : "Draft not saved yet"}
-                      </span>
-                    )}
-                  </div>
-                  <div className="compose-actions">
-                    {composeDraftId && (
-                      <button
-                        className="icon-button"
-                        onClick={handleDiscardDraft}
-                        disabled={discardingDraft}
-                      >
-                        Discard Draft
-                      </button>
-                    )}
-                    <button
-                      className="icon-button"
-                      onClick={() => {
-                        setComposeOpen(false);
-                        setComposeView("inline");
-                      }}
-                    >
-                      {composeMode === "edit" ? "Cancel editing" : "Cancel"}
-                    </button>
-                    <button
-                      className="icon-button active"
-                      onClick={handleSendMail}
-                      disabled={sendingMail}
-                    >
-                      {sendingMail ? "Sending..." : "Send"}
-                    </button>
-                  </div>
-                </div>
-              </article>
+              <ComposeInlineCard
+                state={{
+                  composeMode,
+                  composeSubject,
+                  composeTo,
+                  composeCc,
+                  composeBcc,
+                  composeShowBcc,
+                  composeDraftId,
+                  composeOpen,
+                  draftSaving,
+                  draftSaveError,
+                  draftSavedAt,
+                  sendingMail,
+                  discardingDraft,
+                  composeDragActive,
+                  recipientOptions,
+                  recipientActiveIndex,
+                  recipientLoading,
+                  recipientFocus,
+                  fromValue: getAccountFromValue(currentAccount)
+                }}
+                ui={{ composeMessageField }}
+                actions={{
+                  popOutCompose,
+                  setComposeSubject,
+                  setComposeTo,
+                  setComposeCc,
+                  setComposeBcc,
+                  setComposeShowBcc,
+                  setComposeOpen,
+                  setComposeView,
+                  handleSendMail,
+                  handleDiscardDraft,
+                  setRecipientQuery,
+                  setRecipientFocus,
+                  setRecipientActiveIndex,
+                  applyRecipientSelection,
+                  markComposeDirty: () => {
+                    composeDirtyRef.current = true;
+                  }
+                }}
+                helpers={{
+                  getComposeToken,
+                  formatRelativeTime
+                }}
+                dragHandlers={{
+                  handleComposeDragEnter,
+                  handleComposeDragLeave,
+                  handleComposeDragOver,
+                  handleComposeDrop
+                }}
+              />
             )}
-            {activeMessage ? (
-              (() => {
-                const activeThreadId =
-                  activeMessage.threadId ?? activeMessage.messageId ?? activeMessage.id;
-                const hasFullThread =
-                  activeThreadId && (threadContentById[activeThreadId]?.length ?? 0) > 0;
-                const showThreadLoading =
-                  supportsThreads &&
-                  activeThreadId &&
-                  threadContentLoading === activeThreadId &&
-                  !hasFullThread;
-                if (showThreadLoading) {
-                  return <div className="thread-loading">Loading thread…</div>;
-                }
-                return activeThread.map((message) => (
-                  <article
-                    key={message.id}
-                    className={`thread-card ${
-                      openMessageMenuId === `thread:${message.id}` ? "menu-open" : ""
-                    }`}
-                    ref={(el) => {
-                      if (el) messageRefs.current.set(message.id, el);
-                    }}
-                  >
-                  <div
-                    className={`thread-card-header ${
-                      pendingMessageActions.has(message.id) ? "disabled" : ""
-                    }`}
-                  >
-                    <div className="thread-card-top">
-                        <div className="thread-card-badges">
-                          {getImapFlagBadges(message).map((badge) => (
-                            <span
-                              key={`${badge.kind}-${badge.label}`}
-                              className={`thread-badge flag ${badge.kind}`}
-                            >
-                              {badge.kind === "pinned" && <Pin size={12} />}
-                              {badge.label}
-                            </span>
-                          ))}
-                          {includeThreadAcrossFolders && message.folderId !== activeFolderId && (
-                            <button
-                              className="folder-badge"
-                              title={threadPathById(message.folderId)}
-                              onClick={(event) => {
-                                event.stopPropagation();
-                                setSearchScope("folder");
-                                setActiveFolderId(message.folderId);
-                              }}
-                            >
-                              {folderNameById(message.folderId)}
-                            </button>
-                          )}
-                          {message.recent && (
-                            <span className="thread-badge flag recent">Recent</span>
-                          )}
-                          {message.priority && message.priority.toLowerCase() !== "normal" && (
-                            <span className="thread-badge priority">
-                              Priority: {message.priority}
-                            </span>
-                          )}
-                          {(message.attachments?.length ?? 0) > 0 && (
-                            <span className="thread-badge icon attachment" title="Attachments">
-                              <Paperclip size={12} />
-                            </span>
-                          )}
-                          {message.attachments?.some((item) => item.inline) && (
-                            <span className="thread-badge icon inline" title="Inline images">
-                              <ImageIcon size={12} />
-                            </span>
-                          )}
-                        </div>
-                      <div className="thread-card-actions">
-                        <div className="message-actions">
-                          {isDraftMessage(message) ? (
-                            <button
-                              className="icon-button ghost"
-                              title="Edit draft"
-                              aria-label="Edit draft"
-                              onClick={() => openCompose("edit", message)}
-                            >
-                              <Edit3 size={14} />
-                            </button>
-                          ) : (
-                            renderQuickActions(message, 14, "thread")
-                          )}
-                        </div>
-                        {renderMessageMenu(message, "thread")}
-                      </div>
-                    </div>
-                    <div className="thread-card-info">
-                      <button
-                        className="thread-card-subject"
-                        onClick={() =>
-                          setCollapsedMessages((prev) => ({
-                            ...prev,
-                            [message.id]: !prev[message.id]
-                          }))
-                        }
-                        title={collapsedMessages[message.id] ? "Expand message" : "Collapse message"}
-                      >
-                        <span className="thread-card-caret">
-                          {collapsedMessages[message.id] ? "▸" : "▾"}
-                        </span>
-                        <span className="thread-card-subject-text">{message.subject}</span>
-                      </button>
-                      <div className="thread-card-line">
-                        <span className="label">From:</span>
-                        <span className="thread-card-value">{message.from}</span>
-                        {getPrimaryEmail(message.from) && (
-                          <button
-                            className={`icon-button ghost small copy-email ${
-                              copyStatus[`from-${message.id}`] ? "ok" : ""
-                            }`}
-                            title="Copy email"
-                            aria-label="Copy email"
-                            onClick={() =>
-                              triggerCopy(
-                                `from-${message.id}`,
-                                getPrimaryEmail(message.from)
-                              )
-                            }
-                          >
-                            {copyStatus[`from-${message.id}`] ? <Check size={12} /> : <Copy size={12} />}
-                          </button>
-                        )}
-                      </div>
-                      <div className="thread-card-line">
-                        <span className="label">To:</span>
-                        <span className="thread-card-value">{message.to}</span>
-                        {extractEmails(message.to).length > 0 && (
-                          <button
-                            className={`icon-button ghost small copy-email ${
-                              copyStatus[`to-${message.id}`] ? "ok" : ""
-                            }`}
-                            title="Copy emails"
-                            aria-label="Copy emails"
-                            onClick={() =>
-                              triggerCopy(
-                                `to-${message.id}`,
-                                extractEmails(message.to).join(", ")
-                              )
-                            }
-                          >
-                            {copyStatus[`to-${message.id}`] ? <Check size={12} /> : <Copy size={12} />}
-                          </button>
-                        )}
-                      </div>
-                      <div className="thread-card-line">
-                        <span className="label">Date:</span> {message.date}
-                      </div>
-                      {(() => {
-                        const refId =
-                          message.inReplyTo ??
-                          (message.references && message.references.length > 0
-                            ? message.references[message.references.length - 1]
-                            : undefined);
-                        const target =
-                          refId && messageByMessageId.has(refId)
-                            ? messageByMessageId.get(refId)
-                            : null;
-                        return refId && target ? (
-                        <div className="thread-card-line thread-card-line-link">
-                          <span className="label">
-                            {message.xForwardedMessageId ? "Forwarded mail:" : "In Reply To:"}
-                          </span>
-                          <button
-                            className="thread-link"
-                            onClick={() => {
-                              if (target) {
-                                handleSelectMessage(target);
-                              }
-                            }}
-                          >
-                            {target?.subject ?? refId}
-                          </button>
-                        </div>
-                        ) : null;
-                      })()}
-                    </div>
-                  </div>
-                  {!collapsedMessages[message.id] && (
-                    <>
-                      {hasHtmlContent(message.htmlBody) && message.body?.trim() ? (
-                        <>
-                          <div className="message-tabs">
-                            <div className="button-group">
-                              <button
-                                className={`icon-button small ${(
-                                  messageTabs[message.id] ?? "html"
-                                ) === "html" ? "active" : ""}`}
-                                onClick={() =>
-                                  setMessageTabs((prev) => ({ ...prev, [message.id]: "html" }))
-                                }
-                              >
-                                HTML
-                              </button>
-                              <button
-                                className={`icon-button small ${(
-                                  messageTabs[message.id] ?? "html"
-                                ) === "text" ? "active" : ""}`}
-                                onClick={() =>
-                                  setMessageTabs((prev) => ({ ...prev, [message.id]: "text" }))
-                                }
-                              >
-                                Text
-                              </button>
-                              <button
-                                className={`icon-button small ${(
-                                  messageTabs[message.id] ?? "html"
-                                ) === "markdown" ? "active" : ""}`}
-                                onClick={() =>
-                                  setMessageTabs((prev) => ({ ...prev, [message.id]: "markdown" }))
-                                }
-                              >
-                                Markdown
-                              </button>
-                              <button
-                                className={`icon-button small ${(
-                                  messageTabs[message.id] ?? "html"
-                                ) === "source" ? "active" : ""}`}
-                                onClick={() =>
-                                  setMessageTabs((prev) => ({ ...prev, [message.id]: "source" }))
-                                }
-                                onMouseDown={() => fetchSource(message.id)}
-                              >
-                                Source
-                              </button>
-                            </div>
-                            {(messageTabs[message.id] ?? "html") !== "source" && (
-                              <div className="message-zoom">
-                                <div className="button-group">
-                                  <button
-                                    className="icon-button small"
-                                    title="Decrease text size"
-                                    aria-label="Decrease text size"
-                                    onClick={() =>
-                                      setMessageFontScale((prev) => {
-                                        const current = prev[message.id] ?? 1;
-                                        const next = Math.max(
-                                          0.8,
-                                          Number((current - 0.1).toFixed(2))
-                                        );
-                                        return { ...prev, [message.id]: next };
-                                      })
-                                    }
-                                  >
-                                    A-
-                                  </button>
-                                  <button
-                                    className="icon-button small"
-                                    title="Reset text size"
-                                    aria-label="Reset text size"
-                                    onClick={() =>
-                                      setMessageFontScale((prev) => {
-                                        if (!(message.id in prev)) return prev;
-                                        const { [message.id]: _omit, ...rest } = prev;
-                                        return rest;
-                                      })
-                                    }
-                                  >
-                                    A
-                                  </button>
-                                  <button
-                                    className="icon-button small"
-                                    title="Increase text size"
-                                    aria-label="Increase text size"
-                                    onClick={() =>
-                                      setMessageFontScale((prev) => {
-                                        const current = prev[message.id] ?? 1;
-                                        const next = Math.min(
-                                          1.6,
-                                          Number((current + 0.1).toFixed(2))
-                                        );
-                                        return { ...prev, [message.id]: next };
-                                      })
-                                    }
-                                  >
-                                    A+
-                                  </button>
-                                </div>
-                                {(messageTabs[message.id] ?? "html") === "html" && (
-                                  <div className="button-group">
-                                    <button
-                                      className="icon-button small"
-                                      title="Zoom out"
-                                      aria-label="Zoom out"
-                                      onClick={() => adjustMessageZoom(message.id, -0.1)}
-                                    >
-                                      <ZoomOut size={12} />
-                                    </button>
-                                    <button
-                                      className="icon-button small"
-                                      title="Reset zoom"
-                                      aria-label="Reset zoom"
-                                      onClick={() => resetMessageZoom(message.id)}
-                                    >
-                                      100%
-                                    </button>
-                                    <button
-                                      className="icon-button small"
-                                      title="Zoom in"
-                                      aria-label="Zoom in"
-                                      onClick={() => adjustMessageZoom(message.id, 0.1)}
-                                    >
-                                      <ZoomIn size={12} />
-                                    </button>
-                                  </div>
-                                )}
-                              </div>
-                            )}
-                          </div>
-                          {(messageTabs[message.id] ?? "html") === "html" ? (
-                            <div className="html-message-wrapper">
-                              <HtmlMessage
-                                html={message.htmlBody ?? ""}
-                                darkMode={darkMode}
-                                fontScale={messageFontScale[message.id] ?? 1}
-                                zoom={messageZoom[message.id] ?? 1}
-                              />
-                            </div>
-                          ) : (messageTabs[message.id] ?? "html") === "text" ? (
-                            <div
-                              className="text-view"
-                              style={{
-                                fontSize: `${14 * (messageFontScale[message.id] ?? 1)}px`
-                              }}
-                            >
-                              <QuoteRenderer body={message.body} />
-                            </div>
-                          ) : (messageTabs[message.id] ?? "html") === "markdown" ? (
-                            renderMarkdownPanel(message.body, message.id)
-                          ) : (
-                            renderSourcePanel(message.id)
-                          )}
-                        </>
-                      ) : hasHtmlContent(message.htmlBody) ? (
-                        message.hasSource ? (
-                          <>
-                            <div className="message-tabs">
-                              <div className="button-group">
-                                <button
-                                  className={`icon-button small ${(
-                                    messageTabs[message.id] ?? "html"
-                                  ) === "html" ? "active" : ""}`}
-                                  onClick={() =>
-                                    setMessageTabs((prev) => ({ ...prev, [message.id]: "html" }))
-                                  }
-                                >
-                                  HTML
-                                </button>
-                                <button
-                                  className={`icon-button small ${(
-                                    messageTabs[message.id] ?? "html"
-                                  ) === "source" ? "active" : ""}`}
-                                  onClick={() =>
-                                    setMessageTabs((prev) => ({ ...prev, [message.id]: "source" }))
-                                  }
-                                  onMouseDown={() => fetchSource(message.id)}
-                                >
-                                  Source
-                                </button>
-                              </div>
-                              {(messageTabs[message.id] ?? "html") !== "source" && (
-                                <div className="message-zoom">
-                                  <div className="button-group">
-                                    <button
-                                      className="icon-button small"
-                                      title="Decrease text size"
-                                      aria-label="Decrease text size"
-                                      onClick={() =>
-                                        setMessageFontScale((prev) => {
-                                          const current = prev[message.id] ?? 1;
-                                          const next = Math.max(
-                                            0.8,
-                                            Number((current - 0.1).toFixed(2))
-                                          );
-                                          return { ...prev, [message.id]: next };
-                                        })
-                                      }
-                                    >
-                                      A-
-                                    </button>
-                                    <button
-                                      className="icon-button small"
-                                      title="Reset text size"
-                                      aria-label="Reset text size"
-                                      onClick={() =>
-                                        setMessageFontScale((prev) => {
-                                          if (!(message.id in prev)) return prev;
-                                          const { [message.id]: _omit, ...rest } = prev;
-                                          return rest;
-                                        })
-                                      }
-                                    >
-                                      A
-                                    </button>
-                                    <button
-                                      className="icon-button small"
-                                      title="Increase text size"
-                                      aria-label="Increase text size"
-                                      onClick={() =>
-                                        setMessageFontScale((prev) => {
-                                          const current = prev[message.id] ?? 1;
-                                          const next = Math.min(
-                                            1.6,
-                                            Number((current + 0.1).toFixed(2))
-                                          );
-                                          return { ...prev, [message.id]: next };
-                                        })
-                                      }
-                                    >
-                                      A+
-                                    </button>
-                                  </div>
-                                  {(messageTabs[message.id] ?? "html") === "html" && (
-                                    <div className="button-group">
-                                      <button
-                                        className="icon-button small"
-                                        title="Zoom out"
-                                        aria-label="Zoom out"
-                                        onClick={() => adjustMessageZoom(message.id, -0.1)}
-                                      >
-                                        <ZoomOut size={12} />
-                                      </button>
-                                      <button
-                                        className="icon-button small"
-                                        title="Reset zoom"
-                                        aria-label="Reset zoom"
-                                        onClick={() => resetMessageZoom(message.id)}
-                                      >
-                                        100%
-                                      </button>
-                                      <button
-                                        className="icon-button small"
-                                        title="Zoom in"
-                                        aria-label="Zoom in"
-                                        onClick={() => adjustMessageZoom(message.id, 0.1)}
-                                      >
-                                        <ZoomIn size={12} />
-                                      </button>
-                                    </div>
-                                  )}
-                                </div>
-                              )}
-                            </div>
-                            {(messageTabs[message.id] ?? "html") === "html" ? (
-                              <div className="html-message-wrapper">
-                                <HtmlMessage
-                                  html={message.htmlBody ?? ""}
-                                  darkMode={darkMode}
-                                  fontScale={messageFontScale[message.id] ?? 1}
-                                  zoom={messageZoom[message.id] ?? 1}
-                                />
-                              </div>
-                            ) : (
-                              renderSourcePanel(message.id)
-                            )}
-                          </>
-                        ) : (
-                          <div className="html-message-wrapper">
-                            <HtmlMessage
-                              html={message.htmlBody ?? ""}
-                              darkMode={darkMode}
-                              fontScale={messageFontScale[message.id] ?? 1}
-                              zoom={messageZoom[message.id] ?? 1}
-                            />
-                          </div>
-                        )
-                      ) : message.hasSource ? (
-                        <>
-                          <div className="message-tabs">
-                            <div className="button-group">
-                              <button
-                                className={`icon-button small ${(
-                                  messageTabs[message.id] ?? "text"
-                                ) === "text" ? "active" : ""}`}
-                                onClick={() =>
-                                  setMessageTabs((prev) => ({ ...prev, [message.id]: "text" }))
-                                }
-                              >
-                                Text
-                              </button>
-                              <button
-                                className={`icon-button small ${(
-                                  messageTabs[message.id] ?? "text"
-                                ) === "markdown" ? "active" : ""}`}
-                                onClick={() =>
-                                  setMessageTabs((prev) => ({ ...prev, [message.id]: "markdown" }))
-                                }
-                              >
-                                Markdown
-                              </button>
-                              <button
-                                className={`icon-button small ${(
-                                  messageTabs[message.id] ?? "text"
-                                ) === "source" ? "active" : ""}`}
-                                onClick={() =>
-                                  setMessageTabs((prev) => ({ ...prev, [message.id]: "source" }))
-                                }
-                                onMouseDown={() => fetchSource(message.id)}
-                              >
-                                Source
-                              </button>
-                            </div>
-                            {(messageTabs[message.id] ?? "text") !== "source" && (
-                              <div className="message-zoom">
-                                <button
-                                  className="icon-button small"
-                                  title="Decrease text size"
-                                  aria-label="Decrease text size"
-                                  onClick={() =>
-                                    setMessageFontScale((prev) => {
-                                      const current = prev[message.id] ?? 1;
-                                      const next = Math.max(
-                                        0.8,
-                                        Number((current - 0.1).toFixed(2))
-                                      );
-                                      return { ...prev, [message.id]: next };
-                                    })
-                                  }
-                                >
-                                  A-
-                                </button>
-                                <button
-                                  className="icon-button small"
-                                  title="Reset text size"
-                                  aria-label="Reset text size"
-                                  onClick={() =>
-                                    setMessageFontScale((prev) => {
-                                      if (!(message.id in prev)) return prev;
-                                      const { [message.id]: _omit, ...rest } = prev;
-                                      return rest;
-                                    })
-                                  }
-                                >
-                                  A
-                                </button>
-                                <button
-                                  className="icon-button small"
-                                  title="Increase text size"
-                                  aria-label="Increase text size"
-                                  onClick={() =>
-                                    setMessageFontScale((prev) => {
-                                      const current = prev[message.id] ?? 1;
-                                      const next = Math.min(
-                                        1.6,
-                                        Number((current + 0.1).toFixed(2))
-                                      );
-                                      return { ...prev, [message.id]: next };
-                                    })
-                                  }
-                                >
-                                  A+
-                                </button>
-                              </div>
-                            )}
-                          </div>
-                        {(messageTabs[message.id] ?? "text") === "text" ? (
-                          <div
-                            className="text-view"
-                            style={{
-                              fontSize: `${14 * (messageFontScale[message.id] ?? 1)}px`
-                            }}
-                          >
-                            <QuoteRenderer body={message.body} />
-                          </div>
-                        ) : (messageTabs[message.id] ?? "text") === "markdown" ? (
-                          renderMarkdownPanel(message.body, message.id)
-                        ) : (
-                          renderSourcePanel(message.id)
-                        )}
-                      </>
-                    ) : (
-                      <>
-                        <div className="message-tabs">
-                          <div className="button-group">
-                            <button
-                              className={`icon-button small ${(
-                                messageTabs[message.id] ?? "text"
-                              ) === "text" ? "active" : ""}`}
-                              onClick={() =>
-                                setMessageTabs((prev) => ({ ...prev, [message.id]: "text" }))
-                              }
-                            >
-                              Text
-                            </button>
-                            <button
-                              className={`icon-button small ${(
-                                messageTabs[message.id] ?? "text"
-                              ) === "markdown" ? "active" : ""}`}
-                              onClick={() =>
-                                setMessageTabs((prev) => ({ ...prev, [message.id]: "markdown" }))
-                              }
-                            >
-                              Markdown
-                            </button>
-                          </div>
-                          <div className="message-zoom">
-                            <button
-                              className="icon-button small"
-                              title="Decrease text size"
-                              aria-label="Decrease text size"
-                              onClick={() =>
-                                setMessageFontScale((prev) => {
-                                  const current = prev[message.id] ?? 1;
-                                  const next = Math.max(0.8, Number((current - 0.1).toFixed(2)));
-                                  return { ...prev, [message.id]: next };
-                                })
-                              }
-                            >
-                              A-
-                            </button>
-                            <button
-                              className="icon-button small"
-                              title="Reset text size"
-                              aria-label="Reset text size"
-                              onClick={() =>
-                                setMessageFontScale((prev) => {
-                                  if (!(message.id in prev)) return prev;
-                                  const { [message.id]: _omit, ...rest } = prev;
-                                  return rest;
-                                })
-                              }
-                            >
-                              A
-                            </button>
-                            <button
-                              className="icon-button small"
-                              title="Increase text size"
-                              aria-label="Increase text size"
-                              onClick={() =>
-                                setMessageFontScale((prev) => {
-                                  const current = prev[message.id] ?? 1;
-                                  const next = Math.min(1.6, Number((current + 0.1).toFixed(2)));
-                                  return { ...prev, [message.id]: next };
-                                })
-                              }
-                            >
-                              A+
-                            </button>
-                          </div>
-                        </div>
-                        {(messageTabs[message.id] ?? "text") === "markdown" ? (
-                          renderMarkdownPanel(message.body, message.id)
-                        ) : (
-                          <div
-                            className="text-view"
-                            style={{
-                              fontSize: `${14 * (messageFontScale[message.id] ?? 1)}px`
-                            }}
-                          >
-                            <QuoteRenderer body={message.body} />
-                          </div>
-                        )}
-                      </>
-                    )}
-                      <AttachmentsList attachments={message.attachments ?? []} />
-                    </>
-                  )}
-                </article>
-                ));
-              })()
-            ) : showComposeInline ? null : (
-              <p>Select a message to view the thread.</p>
-            )}
-          </div>
-        </section>
+            <ThreadView
+              showComposeInline={showComposeInline}
+              activeMessage={activeMessage ?? null}
+              activeThread={activeThread}
+              supportsThreads={supportsThreads}
+              threadContentById={threadContentById}
+              threadContentLoading={threadContentLoading}
+              messageCardProps={{
+                openMessageMenuId,
+                messageRefs,
+                pendingMessageActions,
+                includeThreadAcrossFolders,
+                activeFolderId,
+                threadPathById,
+                folderNameById,
+                setSearchScope,
+                setActiveFolderId,
+                getImapFlagBadges,
+                isDraftMessage,
+                openCompose,
+                renderQuickActions,
+                renderMessageMenu,
+                collapsedMessages,
+                setCollapsedMessages,
+                messageTabs,
+                setMessageTabs,
+                fetchSource,
+                setMessageFontScale,
+                messageFontScale,
+                adjustMessageZoom,
+                resetMessageZoom,
+                messageZoom,
+                darkMode,
+                hasHtmlContent,
+                renderMarkdownPanel,
+                renderSourcePanel,
+                handleSelectMessage,
+                messageByMessageId,
+                copyStatus,
+                triggerCopy,
+                getPrimaryEmail,
+                extractEmails
+              }}
+            />
+        </MessageViewPane>
       </section>
 
       {manageOpen && editingAccount && (
@@ -7667,473 +5302,82 @@ export default function MailClient() {
         />
       )}
 
-      {showComposeModal && (
-        <div
-          className="modal-backdrop"
-          onClick={(event) => {
-            if (event.target === event.currentTarget) {
-              setComposeOpen(false);
-              setComposeView("inline");
-            }
-          }}
-        >
-          <div
-            className={`compose-modal ${discardingDraft ? "disabled" : ""}${
-              composeDragActive ? " compose-drop-active" : ""
-            }`}
-            ref={composeModalRef}
-            style={{
-              width: composeSize.width,
-              height: composeSize.height ?? "85vh"
-            }}
-            onClick={(event) => event.stopPropagation()}
-            onDragEnter={handleComposeDragEnter}
-            onDragLeave={handleComposeDragLeave}
-            onDragOver={handleComposeDragOver}
-            onDrop={handleComposeDrop}
-          >
-            <div className="compose-header">
-              <div>
-                <h3>
-                  {composeMode === "edit"
-                    ? "Edit draft"
-                    : composeMode === "editAsNew"
-                      ? "Edit as New"
-                      : composeMode === "reply"
-                        ? "Reply"
-                        : composeMode === "replyAll"
-                          ? "Reply All"
-                          : composeMode === "forward"
-                            ? "Forward"
-                            : "New message"}
-                </h3>
-                <p className="compose-subtitle">
-                  From {getAccountFromValue(currentAccount)}
-                </p>
-              </div>
-              <div className="compose-header-actions">
-                <button
-                  className="icon-button"
-                  title="Dock in thread view"
-                  aria-label="Dock in thread view"
-                  onClick={popInCompose}
-                >
-                  <ArrowDownLeft size={14} />
-                </button>
-                <button
-                  className="icon-button"
-                  title="Minimize composer"
-                  aria-label="Minimize composer"
-                  onClick={minimizeCompose}
-                >
-                  <Minimize2 size={14} />
-                </button>
-                <button
-                  className="icon-button"
-                  title="Close composer"
-                  aria-label="Close composer"
-                  onClick={() => {
-                    setComposeOpen(false);
-                    setComposeView("inline");
-                  }}
-                >
-                  <X size={14} />
-                </button>
-              </div>
-            </div>
-                <div className="compose-body">
-                  <div className="compose-grid">
-                    <div className="compose-grid-row">
-                      <span className="label">To:</span>
-                      <div className="compose-row">
-                        <div className="compose-input-wrap">
-                          <input
-                            value={composeTo}
-                            onChange={(event) => {
-                              composeDirtyRef.current = true;
-                              setComposeTo(event.target.value);
-                              setRecipientQuery(getComposeToken(event.target.value));
-                            }}
-                            onFocus={() => {
-                              setRecipientFocus("to");
-                              setRecipientQuery(getComposeToken(composeTo));
-                            }}
-                            onBlur={() => {
-                              setTimeout(() => {
-                                setRecipientFocus((current) =>
-                                  current === "to" ? null : current
-                                );
-                              }, 150);
-                            }}
-                            onKeyDown={(event) => {
-                              if (!recipientOptions.length) return;
-                              if (event.key === "ArrowDown") {
-                                event.preventDefault();
-                                setRecipientActiveIndex((prev) =>
-                                  Math.min(prev + 1, recipientOptions.length - 1)
-                                );
-                              }
-                              if (event.key === "ArrowUp") {
-                                event.preventDefault();
-                                setRecipientActiveIndex((prev) => Math.max(prev - 1, 0));
-                              }
-                              if (event.key === "Enter" && recipientFocus === "to") {
-                                event.preventDefault();
-                                const pick = recipientOptions[recipientActiveIndex];
-                                if (pick) {
-                                  applyRecipientSelection(composeTo, pick, setComposeTo);
-                                }
-                              }
-                            }}
-                            placeholder="recipient@example.com"
-                          />
-                          {recipientFocus === "to" && recipientOptions.length > 0 && (
-                            <div className="compose-suggestions">
-                              {recipientOptions.map((option, index) => (
-                                <button
-                                  key={`${option}-${index}`}
-                                  type="button"
-                                  className={`compose-suggestion ${
-                                    index === recipientActiveIndex ? "active" : ""
-                                  }`}
-                                  onMouseDown={(event) => {
-                                    event.preventDefault();
-                                    applyRecipientSelection(composeTo, option, setComposeTo);
-                                  }}
-                                >
-                                  {option}
-                                </button>
-                              ))}
-                              {recipientLoading && (
-                                <span className="compose-suggestion muted">Loading…</span>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                        <button
-                          type="button"
-                          className="icon-button small"
-                          title={composeShowBcc ? "Hide Cc and Bcc" : "Show Cc and Bcc"}
-                          onClick={() => setComposeShowBcc((value) => !value)}
-                        >
-                          {composeShowBcc ? "Hide Cc/Bcc" : "Show Cc and Bcc"}
-                        </button>
-                      </div>
-                    </div>
-                    {composeShowBcc && (
-                      <div className="compose-grid-row">
-                        <span className="label">Cc:</span>
-                        <div className="compose-input-wrap">
-                          <input
-                            value={composeCc}
-                            onChange={(event) => {
-                              composeDirtyRef.current = true;
-                              setComposeCc(event.target.value);
-                              setRecipientQuery(getComposeToken(event.target.value));
-                            }}
-                            onFocus={() => {
-                              setRecipientFocus("cc");
-                              setRecipientQuery(getComposeToken(composeCc));
-                            }}
-                            onBlur={() => {
-                              setTimeout(() => {
-                                setRecipientFocus((current) =>
-                                  current === "cc" ? null : current
-                                );
-                              }, 150);
-                            }}
-                            onKeyDown={(event) => {
-                              if (!recipientOptions.length) return;
-                              if (event.key === "ArrowDown") {
-                                event.preventDefault();
-                                setRecipientActiveIndex((prev) =>
-                                  Math.min(prev + 1, recipientOptions.length - 1)
-                                );
-                              }
-                              if (event.key === "ArrowUp") {
-                                event.preventDefault();
-                                setRecipientActiveIndex((prev) => Math.max(prev - 1, 0));
-                              }
-                              if (event.key === "Enter" && recipientFocus === "cc") {
-                                event.preventDefault();
-                                const pick = recipientOptions[recipientActiveIndex];
-                                if (pick) {
-                                  applyRecipientSelection(composeCc, pick, setComposeCc);
-                                }
-                              }
-                            }}
-                            placeholder="cc@example.com"
-                          />
-                          {recipientFocus === "cc" && recipientOptions.length > 0 && (
-                            <div className="compose-suggestions">
-                              {recipientOptions.map((option, index) => (
-                                <button
-                                  key={`${option}-${index}`}
-                                  type="button"
-                                  className={`compose-suggestion ${
-                                    index === recipientActiveIndex ? "active" : ""
-                                  }`}
-                                  onMouseDown={(event) => {
-                                    event.preventDefault();
-                                    applyRecipientSelection(composeCc, option, setComposeCc);
-                                  }}
-                                >
-                                  {option}
-                                </button>
-                              ))}
-                              {recipientLoading && (
-                                <span className="compose-suggestion muted">Loading…</span>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    )}
-                    {composeShowBcc && (
-                      <div className="compose-grid-row">
-                        <span className="label">Bcc:</span>
-                        <div className="compose-input-wrap">
-                          <input
-                            value={composeBcc}
-                            onChange={(event) => {
-                              composeDirtyRef.current = true;
-                              setComposeBcc(event.target.value);
-                              setRecipientQuery(getComposeToken(event.target.value));
-                            }}
-                            onFocus={() => {
-                              setRecipientFocus("bcc");
-                              setRecipientQuery(getComposeToken(composeBcc));
-                            }}
-                            onBlur={() => {
-                              setTimeout(() => {
-                                setRecipientFocus((current) =>
-                                  current === "bcc" ? null : current
-                                );
-                              }, 150);
-                            }}
-                            onKeyDown={(event) => {
-                              if (!recipientOptions.length) return;
-                              if (event.key === "ArrowDown") {
-                                event.preventDefault();
-                                setRecipientActiveIndex((prev) =>
-                                  Math.min(prev + 1, recipientOptions.length - 1)
-                                );
-                              }
-                              if (event.key === "ArrowUp") {
-                                event.preventDefault();
-                                setRecipientActiveIndex((prev) => Math.max(prev - 1, 0));
-                              }
-                              if (event.key === "Enter" && recipientFocus === "bcc") {
-                                event.preventDefault();
-                                const pick = recipientOptions[recipientActiveIndex];
-                                if (pick) {
-                                  applyRecipientSelection(composeBcc, pick, setComposeBcc);
-                                }
-                              }
-                            }}
-                            placeholder="bcc@example.com"
-                          />
-                          {recipientFocus === "bcc" && recipientOptions.length > 0 && (
-                            <div className="compose-suggestions">
-                              {recipientOptions.map((option, index) => (
-                                <button
-                                  key={`${option}-${index}`}
-                                  type="button"
-                                  className={`compose-suggestion ${
-                                    index === recipientActiveIndex ? "active" : ""
-                                  }`}
-                                  onMouseDown={(event) => {
-                                    event.preventDefault();
-                                    applyRecipientSelection(composeBcc, option, setComposeBcc);
-                                  }}
-                                >
-                                  {option}
-                                </button>
-                              ))}
-                              {recipientLoading && (
-                                <span className="compose-suggestion muted">Loading…</span>
-                              )}
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    )}
-                    <div className="compose-grid-row">
-                      <span className="label">Subject:</span>
-                      <input
-                        value={composeSubject}
-                        onChange={(event) => {
-                          composeDirtyRef.current = true;
-                          setComposeSubject(event.target.value);
-                        }}
-                        placeholder="Subject"
-                      />
-                    </div>
-                    <div className="compose-grid-row">
-                      <span className="label">Date:</span>
-                      <span className="compose-static">{composeOpenedAt || "Now"}</span>
-                    </div>
-                  </div>
-                  {composeMessageField}
-                </div>
-            <div className="compose-footer">
-              <div className="compose-draft-meta">
-                {composeDraftId && <span className="compose-draft">Draft: {composeDraftId}</span>}
-                {composeOpen && (
-                  <span
-                    className={`compose-draft-status ${
-                      draftSaveError ? "error" : draftSaving ? "saving" : ""
-                    }`}
-                  >
-                    {draftSaving
-                      ? "Saving draft…"
-                      : draftSaveError
-                        ? "Draft save failed"
-                        : draftSavedAt
-                          ? `Draft saved ${formatRelativeTime(draftSavedAt)}`
-                          : "Draft not saved yet"}
-                  </span>
-                )}
-              </div>
-              <div className="compose-actions">
-                {composeDraftId && (
-                  <button
-                    className="icon-button"
-                    onClick={handleDiscardDraft}
-                    disabled={discardingDraft}
-                  >
-                    Discard Draft
-                  </button>
-                )}
-                <button
-                  className="icon-button"
-                  onClick={() => {
-                    setComposeOpen(false);
-                    setComposeView("inline");
-                  }}
-                >
-                  Cancel
-                </button>
-                <button
-                  className="icon-button active"
-                  onClick={handleSendMail}
-                  disabled={sendingMail}
-                >
-                  {sendingMail ? "Sending..." : "Send"}
-                </button>
-              </div>
-            </div>
-            <div
-              className="compose-resizer"
-              onPointerDown={(event) => {
-                event.preventDefault();
-                event.stopPropagation();
-                try {
-                  event.currentTarget.setPointerCapture(event.pointerId);
-                } catch {
-                  // ignore if capture fails
-                }
-                const rect = composeModalRef.current?.getBoundingClientRect();
-                const startWidth = rect?.width ?? composeSize.width;
-                const startHeight =
-                  rect?.height ?? (composeSize.height ?? window.innerHeight * 0.85);
-                composeResizeRef.current = {
-                  startX: event.clientX,
-                  startY: event.clientY,
-                  startWidth,
-                  startHeight
-                };
-                setComposeResizing(true);
-              }}
-            />
-          </div>
-        </div>
-      )}
-      {showComposeMinimized && (
-        <div
-          className="compose-minimized"
-          role="button"
-          tabIndex={0}
-          onClick={() => setComposeView("modal")}
-          onKeyDown={(event) => {
-            if (event.key === "Enter" || event.key === " ") {
-              event.preventDefault();
-              setComposeView("modal");
-            }
-          }}
-        >
-          <span className="compose-minimized-title">
-            {composeSubject.trim() || "New message"}
-          </span>
-          <div className="compose-minimized-actions">
-            <button
-              className="icon-button small"
-              title="Restore"
-              aria-label="Restore"
-              onClick={(event) => {
-                event.stopPropagation();
-                setComposeView("modal");
-              }}
-            >
-              <Maximize2 size={12} />
-            </button>
-            <button
-              className="icon-button small"
-              title="Close composer"
-              aria-label="Close composer"
-              onClick={(event) => {
-                event.stopPropagation();
-                setComposeOpen(false);
-                setComposeView("inline");
-              }}
-            >
-              <X size={12} />
-            </button>
-          </div>
-        </div>
-      )}
-      {showJson && (
-        <div className="modal-backdrop" onClick={() => setShowJson(false)}>
-          <div className="modal" onClick={(event) => event.stopPropagation()}>
-            <h3>Thread JSON</h3>
-            <p>Messages currently visible in the message view pane (thread).</p>
-            <div className="json-toolbar">
-              <button
-                className={`toggle-button ${omitBody ? "" : "on"}`}
-                role="switch"
-                aria-checked={!omitBody}
-                onClick={() => setOmitBody((value) => !value)}
-              >
-                Include body
-              </button>
-            </div>
-            <div className="json-block">
-              <pre className="json-view">{JSON.stringify(jsonPayload, null, 2)}</pre>
-              <button
-                className={`json-copy ${copyOk ? "ok" : ""}`}
-                onClick={async () => {
-                  try {
-                    await navigator.clipboard.writeText(JSON.stringify(jsonPayload, null, 2));
-                    setCopyOk(true);
-                    setTimeout(() => setCopyOk(false), 1200);
-                  } catch {
-                    // ignore
-                  }
-                }}
-                aria-label="Copy JSON"
-                title="Copy JSON"
-              >
-                {copyOk ? <Check size={14} /> : <Copy size={14} />}
-              </button>
-            </div>
-            <div className="form-actions">
-              <button className="icon-button" onClick={() => setShowJson(false)}>
-                Close
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <ComposeModal
+        open={showComposeModal}
+        state={{
+          composeMode,
+          composeTo,
+          composeCc,
+          composeBcc,
+          composeSubject,
+          composeShowBcc,
+          composeOpenedAt,
+          composeDraftId,
+          composeOpen,
+          draftSaving,
+          draftSaveError,
+          draftSavedAt,
+          sendingMail,
+          discardingDraft,
+          composeDragActive,
+          recipientOptions,
+          recipientActiveIndex,
+          recipientLoading,
+          recipientFocus,
+          fromValue: getAccountFromValue(currentAccount),
+          composeSize
+        }}
+        ui={{ composeMessageField }}
+        refs={{ composeModalRef, composeResizeRef }}
+        actions={{
+          setComposeTo,
+          setComposeCc,
+          setComposeBcc,
+          setComposeSubject,
+          setComposeShowBcc,
+          setComposeOpen,
+          setComposeView,
+          setComposeResizing,
+          handleSendMail,
+          handleDiscardDraft,
+          setRecipientQuery,
+          setRecipientFocus,
+          setRecipientActiveIndex,
+          applyRecipientSelection,
+          markComposeDirty: () => {
+            composeDirtyRef.current = true;
+          },
+          popInCompose,
+          minimizeCompose
+        }}
+        helpers={{
+          getComposeToken,
+          formatRelativeTime
+        }}
+        dragHandlers={{
+          handleComposeDragEnter,
+          handleComposeDragLeave,
+          handleComposeDragOver,
+          handleComposeDrop
+        }}
+      />
+
+      <ComposeMinimized
+        open={showComposeMinimized}
+        composeSubject={composeSubject}
+        setComposeView={setComposeView}
+        setComposeOpen={setComposeOpen}
+      />
+
+      <ThreadJsonModal
+        open={showJson}
+        omitBody={omitBody}
+        jsonPayload={jsonPayload}
+        copyOk={copyOk}
+        onClose={() => setShowJson(false)}
+        onToggleOmitBody={() => setOmitBody((value) => !value)}
+        onCopyOk={setCopyOk}
+      />
       <div className="bottom-bar">
         <div
           className="bottom-section"

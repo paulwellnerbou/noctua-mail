@@ -1470,7 +1470,7 @@ a {
 }
 
 .source-block .json-copy {
-  top: 12px;
+  top: 20px;
   right: 12px;
 }
 
@@ -1951,6 +1951,13 @@ a {
   margin: 8px 0;
 }
 
+.compose-editor blockquote,
+.compose-editor .compose-quote {
+  border-left: 2px solid #cfcfcf;
+  margin: 0 0 0 0.8ex;
+  padding-left: 1ex;
+}
+
 .compose-editor td,
 .compose-editor th {
   border: 1px solid var(--border);
@@ -2020,6 +2027,7 @@ a {
   max-height: min(260px, 30vh);
   overflow: auto;
 }
+
 
 .compose-quoted-toolbar {
   display: flex;
@@ -2331,6 +2339,19 @@ a {
 .attachment-meta {
   color: var(--muted);
   font-size: 11px;
+}
+
+.attachment-mime {
+  display: inline-block;
+  max-width: 320px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: bottom;
+}
+
+.attachment-preview {
+  padding: 4px 6px;
 }
 
 .html-message {
@@ -2817,9 +2838,31 @@ a {
 }
 
 .tree-name {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  flex: 1;
+  min-width: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.tree-name-text {
+  position: relative;
+  z-index: 1;
+}
+
+.tree-sync-spinner {
+  position: absolute;
+  left: 0;
+  width: 14px;
+  height: 14px;
+  border-radius: 999px;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  opacity: 0.4;
+  animation: spin 1s linear infinite;
 }
 
 .tree-name.has-unread {
@@ -2999,6 +3042,7 @@ a {
   max-height: 86vh;
   overflow: auto;
   padding: 22px;
+  position: relative;
 }
 
 .account-settings-modal {
@@ -3174,7 +3218,7 @@ a {
 
 .json-copy {
   position: absolute;
-  top: 10px;
+  top: 20px;
   right: 16px;
   width: 28px;
   height: 28px;
@@ -3185,6 +3229,12 @@ a {
   display: grid;
   place-items: center;
   cursor: pointer;
+}
+
+.modal-close {
+  position: absolute;
+  top: 12px;
+  right: 12px;
 }
 
 .json-copy.ok {

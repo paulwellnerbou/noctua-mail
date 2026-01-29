@@ -818,17 +818,18 @@ function parseSearchInput(raw: string | null | undefined, fields?: string[] | nu
     if (cleaned) fromTerms.push(cleaned);
     return lead ? " " : "";
   });
+  const rawQuery = withoutFrom.trim();
   const baseQuery = buildFtsQuery(withoutFrom);
   const columns = normalizeSearchFields(fields);
   if (!baseQuery) {
-    return { ftsQuery: null, fromTerms };
+    return { ftsQuery: null, fromTerms, rawQuery };
   }
   const tokens = baseQuery.split(/\s+AND\s+/);
   const scoped = tokens.map((token) => {
     const orParts = columns.map((col) => `${col}:${token}`);
     return orParts.length > 1 ? `(${orParts.join(" OR ")})` : orParts[0];
   });
-  return { ftsQuery: scoped.join(" AND "), fromTerms };
+  return { ftsQuery: scoped.join(" AND "), fromTerms, rawQuery };
 }
 
 function parseReferences(value?: string | null) {
@@ -886,21 +887,37 @@ async function getGroupCounts(params: {
 }) {
   const { accountId, folderId, query, groupBy, fields, badges, attachmentsOnly } = params;
   const db = await getDb();
-  const { ftsQuery, fromTerms } = parseSearchInput(query, fields);
+  const { ftsQuery, fromTerms, rawQuery } = parseSearchInput(query, fields);
   const hasQuery = Boolean(ftsQuery);
+  const idQuery = rawQuery.trim();
+  const hasIdQuery = Boolean(idQuery);
   const baseWhere = `m.accountId = ? ${folderId ? "AND m.folderId = ?" : ""}`;
   const args: any[] = [accountId];
   if (folderId) args.push(folderId);
-  const join = hasQuery ? `JOIN message_fts ON message_fts.messageId = m.id` : "";
   let where = baseWhere;
   fromTerms.forEach(() => {
     where += " AND lower(m.fromAddr) LIKE ?";
   });
-  if (hasQuery) {
-    where += " AND message_fts MATCH ?";
-  }
   fromTerms.forEach((term) => args.push(`%${term.toLowerCase()}%`));
-  if (hasQuery) args.push(ftsQuery);
+  if (hasQuery || hasIdQuery) {
+    const clauses: string[] = [];
+    if (hasQuery) {
+      clauses.push(
+        "m.id IN (SELECT messageId FROM message_fts WHERE message_fts MATCH ?)"
+      );
+    }
+    if (hasIdQuery) {
+      clauses.push("lower(m.messageId) LIKE ?");
+      clauses.push("lower(m.threadId) LIKE ?");
+      clauses.push("lower(m.id) LIKE ?");
+    }
+    where += ` AND (${clauses.join(" OR ")})`;
+    if (hasQuery) args.push(ftsQuery);
+    if (hasIdQuery) {
+      const pattern = `%${idQuery.toLowerCase()}%`;
+      args.push(pattern, pattern, pattern);
+    }
+  }
   where = applyBadgeFilters(where, args, badges);
   const attachmentsFilter = attachmentsOnly ?? badges?.includes("attachments");
   if (attachmentsFilter) {
@@ -924,7 +941,6 @@ async function getGroupCounts(params: {
           END as key,
           COUNT(*) as count
         FROM messages m
-        ${join}
         WHERE ${where}
         GROUP BY key
       `
@@ -942,7 +958,6 @@ async function getGroupCounts(params: {
         SELECT strftime('%Y-W%W', m.dateValue / 1000, 'unixepoch', 'localtime') as key,
                COUNT(*) as count
         FROM messages m
-        ${join}
         WHERE ${where}
         GROUP BY key
         ORDER BY key DESC
@@ -959,7 +974,6 @@ async function getGroupCounts(params: {
         SELECT strftime('%Y', m.dateValue / 1000, 'unixepoch', 'localtime') as key,
                COUNT(*) as count
         FROM messages m
-        ${join}
         WHERE ${where}
         GROUP BY key
         ORDER BY key DESC
@@ -981,7 +995,6 @@ async function getGroupCounts(params: {
           END as key,
           COUNT(*) as count
         FROM messages m
-        ${join}
         WHERE ${where}
         GROUP BY key
         ORDER BY count DESC
@@ -997,7 +1010,6 @@ async function getGroupCounts(params: {
         `
         SELECT m.fromAddr as key, COUNT(*) as count
         FROM messages m
-        ${join}
         WHERE ${where}
         GROUP BY key
         ORDER BY count DESC
@@ -1013,7 +1025,6 @@ async function getGroupCounts(params: {
         `
         SELECT m.folderId as key, COUNT(*) as count
         FROM messages m
-        ${join}
         WHERE ${where}
         GROUP BY key
         ORDER BY count DESC
@@ -1042,21 +1053,37 @@ async function getTotalCount(params: {
 }) {
   const db = await getDb();
   const { accountId, folderId, query, fields, badges, attachmentsOnly } = params;
-  const { ftsQuery, fromTerms } = parseSearchInput(query, fields);
+  const { ftsQuery, fromTerms, rawQuery } = parseSearchInput(query, fields);
   const hasQuery = Boolean(ftsQuery);
+  const idQuery = rawQuery.trim();
+  const hasIdQuery = Boolean(idQuery);
   const baseWhere = `m.accountId = ? ${folderId ? "AND m.folderId = ?" : ""}`;
   const args: any[] = [accountId];
   if (folderId) args.push(folderId);
-  const join = hasQuery ? `JOIN message_fts ON message_fts.messageId = m.id` : "";
   let where = baseWhere;
   fromTerms.forEach(() => {
     where += " AND lower(m.fromAddr) LIKE ?";
   });
-  if (hasQuery) {
-    where += " AND message_fts MATCH ?";
-  }
   fromTerms.forEach((term) => args.push(`%${term.toLowerCase()}%`));
-  if (hasQuery) args.push(ftsQuery);
+  if (hasQuery || hasIdQuery) {
+    const clauses: string[] = [];
+    if (hasQuery) {
+      clauses.push(
+        "m.id IN (SELECT messageId FROM message_fts WHERE message_fts MATCH ?)"
+      );
+    }
+    if (hasIdQuery) {
+      clauses.push("lower(m.messageId) LIKE ?");
+      clauses.push("lower(m.threadId) LIKE ?");
+      clauses.push("lower(m.id) LIKE ?");
+    }
+    where += ` AND (${clauses.join(" OR ")})`;
+    if (hasQuery) args.push(ftsQuery);
+    if (hasIdQuery) {
+      const pattern = `%${idQuery.toLowerCase()}%`;
+      args.push(pattern, pattern, pattern);
+    }
+  }
   where = applyBadgeFilters(where, args, badges);
   const attachmentsFilter = attachmentsOnly ?? badges?.includes("attachments");
   if (attachmentsFilter) {
@@ -1067,7 +1094,6 @@ async function getTotalCount(params: {
       `
       SELECT COUNT(*) as count
       FROM messages m
-      ${join}
       WHERE ${where}
     `
     )
@@ -1099,21 +1125,37 @@ export async function listMessages(params: {
   } = params;
   const db = await getDb();
   const offset = (page - 1) * pageSize;
-  const { ftsQuery, fromTerms } = parseSearchInput(query, fields);
+  const { ftsQuery, fromTerms, rawQuery } = parseSearchInput(query, fields);
   const hasQuery = Boolean(ftsQuery);
+  const idQuery = rawQuery.trim();
+  const hasIdQuery = Boolean(idQuery);
   const baseWhere = `m.accountId = ? ${folderId ? "AND m.folderId = ?" : ""}`;
   const args: any[] = [accountId];
   if (folderId) args.push(folderId);
-  const join = hasQuery ? `JOIN message_fts ON message_fts.messageId = m.id` : "";
   let where = baseWhere;
   fromTerms.forEach(() => {
     where += " AND lower(m.fromAddr) LIKE ?";
   });
-  if (hasQuery) {
-    where += " AND message_fts MATCH ?";
-  }
   fromTerms.forEach((term) => args.push(`%${term.toLowerCase()}%`));
-  if (hasQuery) args.push(ftsQuery);
+  if (hasQuery || hasIdQuery) {
+    const clauses: string[] = [];
+    if (hasQuery) {
+      clauses.push(
+        "m.id IN (SELECT messageId FROM message_fts WHERE message_fts MATCH ?)"
+      );
+    }
+    if (hasIdQuery) {
+      clauses.push("lower(m.messageId) LIKE ?");
+      clauses.push("lower(m.threadId) LIKE ?");
+      clauses.push("lower(m.id) LIKE ?");
+    }
+    where += ` AND (${clauses.join(" OR ")})`;
+    if (hasQuery) args.push(ftsQuery);
+    if (hasIdQuery) {
+      const pattern = `%${idQuery.toLowerCase()}%`;
+      args.push(pattern, pattern, pattern);
+    }
+  }
   where = applyBadgeFilters(where, args, badges);
   const attachmentsFilter = attachmentsOnly ?? badges?.includes("attachments");
   if (attachmentsFilter) {
@@ -1124,7 +1166,6 @@ export async function listMessages(params: {
       `
       SELECT m.*
       FROM messages m
-      ${join}
       WHERE ${where}
       ORDER BY m.dateValue DESC
       LIMIT ? OFFSET ?
@@ -1239,28 +1280,44 @@ export async function listThreads(params: {
   } = params;
   const db = await getDb();
   const offset = (page - 1) * pageSize;
-  const { ftsQuery, fromTerms } = parseSearchInput(query, fields);
+  const { ftsQuery, fromTerms, rawQuery } = parseSearchInput(query, fields);
   const hasQuery = Boolean(ftsQuery);
+  const idQuery = rawQuery.trim();
+  const hasIdQuery = Boolean(idQuery);
   const baseWhere = `m.accountId = ? ${folderId ? "AND m.folderId = ?" : ""}`;
   const args: any[] = [accountId];
   if (folderId) args.push(folderId);
-  const join = hasQuery ? `JOIN message_fts ON message_fts.messageId = m.id` : "";
   let where = baseWhere;
   fromTerms.forEach(() => {
     where += " AND lower(m.fromAddr) LIKE ?";
   });
-  if (hasQuery) {
-    where += " AND message_fts MATCH ?";
-  }
   fromTerms.forEach((term) => args.push(`%${term.toLowerCase()}%`));
-  if (hasQuery) args.push(ftsQuery);
+  if (hasQuery || hasIdQuery) {
+    const clauses: string[] = [];
+    if (hasQuery) {
+      clauses.push(
+        "m.id IN (SELECT messageId FROM message_fts WHERE message_fts MATCH ?)"
+      );
+    }
+    if (hasIdQuery) {
+      clauses.push("lower(m.messageId) LIKE ?");
+      clauses.push("lower(m.threadId) LIKE ?");
+      clauses.push("lower(m.id) LIKE ?");
+    }
+    where += ` AND (${clauses.join(" OR ")})`;
+    if (hasQuery) args.push(ftsQuery);
+    if (hasIdQuery) {
+      const pattern = `%${idQuery.toLowerCase()}%`;
+      args.push(pattern, pattern, pattern);
+    }
+  }
   where = applyBadgeFilters(where, args, badges);
   const attachmentsFilter = attachmentsOnly ?? badges?.includes("attachments");
   if (attachmentsFilter) {
     where += " AND EXISTS (SELECT 1 FROM attachments a WHERE a.messageId = m.id AND a.inline = 0)";
   }
 
-  const threadFilterSql = `SELECT DISTINCT m.threadId FROM messages m ${join} WHERE ${where}`;
+  const threadFilterSql = `SELECT DISTINCT m.threadId FROM messages m WHERE ${where}`;
 
   const threadRows = db
     .prepare(
@@ -1304,7 +1361,6 @@ export async function listThreads(params: {
             `
             SELECT COUNT(*) as count
             FROM messages m
-            ${join}
             WHERE ${where}
               AND m.threadId IN (${threadIds.map(() => "?").join(",")})
           `
