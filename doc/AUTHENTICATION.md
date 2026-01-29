@@ -32,9 +32,9 @@ We support three modes, controlled by `IMAP_CREDENTIALS_STORAGE`:
 
 This allows fast local development (default true) while keeping a stricter production posture if desired.
 
-## Session rotation (possible, not required)
+## Session rotation
 
-With the current sealed‑cookie approach, rotation is feasible by re‑issuing a fresh session cookie (same claims, new expiry) before TTL. This can be done on `/api/auth/me` or via a dedicated `/api/auth/refresh` endpoint. We haven’t enabled automatic sliding expiry yet.
+When the client calls `/api/auth/me`, the server refreshes the cookie if it is nearing expiry (sliding session). The UI polls `/api/auth/me` periodically to keep active sessions fresh while the app is open.
 
 ## Environment variables
 

@@ -252,6 +252,7 @@ export default function MailClient() {
   const [collapsedMessages, setCollapsedMessages] = useState<Record<string, boolean>>({});
   const [messageFontScale, setMessageFontScale] = useState<Record<string, number>>({});
   const [authState, setAuthState] = useState<"loading" | "ok" | "unauth">("loading");
+  const [sessionTtlSeconds, setSessionTtlSeconds] = useState<number | null>(null);
   const [openMessageMenuId, setOpenMessageMenuId] = useState<string | null>(null);
   const [pendingMessageActions, setPendingMessageActions] = useState<Set<string>>(new Set());
   const [inAppNotices, setInAppNotices] = useState<
@@ -3441,7 +3442,11 @@ export default function MailClient() {
           setAuthState("unauth");
           return;
         }
+        const meData = (await me.json()) as { ttlSeconds?: number } | null;
         setAuthState("ok");
+        if (typeof meData?.ttlSeconds === "number") {
+          setSessionTtlSeconds(meData.ttlSeconds);
+        }
         const [accountsRes, foldersRes] = await Promise.all([
           fetch("/api/accounts"),
           fetch("/api/folders")
@@ -3469,6 +3474,32 @@ export default function MailClient() {
 
     loadData();
   }, [activeAccountId]);
+
+  useEffect(() => {
+    if (authState !== "ok" || !sessionTtlSeconds) return;
+    const intervalMs = Math.max(
+      60_000,
+      Math.min(30 * 60_000, Math.floor((sessionTtlSeconds * 1000) / 3))
+    );
+    const timer = window.setInterval(async () => {
+      try {
+        const res = await fetch("/api/auth/me", { credentials: "include" });
+        if (!res.ok) {
+          if (res.status === 401) {
+            setAuthState("unauth");
+          }
+          return;
+        }
+        const data = (await res.json()) as { ttlSeconds?: number } | null;
+        if (typeof data?.ttlSeconds === "number") {
+          setSessionTtlSeconds(data.ttlSeconds);
+        }
+      } catch {
+        // ignore refresh errors
+      }
+    }, intervalMs);
+    return () => window.clearInterval(timer);
+  }, [authState, sessionTtlSeconds]);
 
   // Initial sync on cold start (once per account)
   useEffect(() => {
@@ -5247,11 +5278,19 @@ export default function MailClient() {
           setTotalMessages(null);
           setLoadedMessageCount(0);
           try {
-            const res = await fetch("/api/auth/me", { credentials: "include" });
-            setAuthState(res.ok ? "ok" : "unauth");
-          } catch {
-            setAuthState("unauth");
+        const res = await fetch("/api/auth/me", { credentials: "include" });
+        if (res.ok) {
+          const data = (await res.json()) as { ttlSeconds?: number } | null;
+          if (typeof data?.ttlSeconds === "number") {
+            setSessionTtlSeconds(data.ttlSeconds);
           }
+          setAuthState("ok");
+        } else {
+          setAuthState("unauth");
+        }
+      } catch {
+        setAuthState("unauth");
+      }
         }}
       />
     );

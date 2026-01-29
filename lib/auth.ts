@@ -15,6 +15,24 @@ const SESSION_TTL_SECONDS = (() => {
   return parsed;
 })();
 
+export function getSessionTtlSeconds() {
+  return SESSION_TTL_SECONDS;
+}
+
+export function shouldRotateSession(session: SessionData) {
+  if (!session?.exp) return true;
+  const remainingMs = session.exp * 1000 - Date.now();
+  const refreshWindowMs = SESSION_TTL_SECONDS * 1000 * 0.3;
+  return remainingMs <= refreshWindowMs;
+}
+
+export function refreshSession(session: SessionData): SessionData {
+  return {
+    ...session,
+    exp: Math.floor(Date.now() / 1000) + SESSION_TTL_SECONDS
+  };
+}
+
 type SessionData = {
   userId: string;
   accountId?: string;

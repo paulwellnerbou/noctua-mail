@@ -1,6 +1,12 @@
 import { NextResponse } from "next/server";
 import { getAccounts, getUserAccounts, getUsers } from "@/lib/db";
-import { sessionFromCookie } from "@/lib/auth";
+import {
+  getSessionTtlSeconds,
+  refreshSession,
+  sessionFromCookie,
+  setSessionCookie,
+  shouldRotateSession
+} from "@/lib/auth";
 
 export async function GET(request: Request) {
   const cookie = request.headers.get("cookie");
@@ -16,9 +22,17 @@ export async function GET(request: Request) {
   const user = users.find((u) => u.id === session.userId);
   const linkedIds = links.filter((l) => l.userId === session.userId).map((l) => l.accountId);
   const linkedAccounts = accounts.filter((a) => linkedIds.includes(a.id));
-  return NextResponse.json({
+  const rotated = shouldRotateSession(session);
+  const nextSession = rotated ? refreshSession(session) : session;
+  const response = NextResponse.json({
     ok: true,
     user: user ?? null,
-    accounts: linkedAccounts
+    accounts: linkedAccounts,
+    exp: nextSession.exp,
+    ttlSeconds: getSessionTtlSeconds()
   });
+  if (rotated) {
+    setSessionCookie(response, nextSession);
+  }
+  return response;
 }
