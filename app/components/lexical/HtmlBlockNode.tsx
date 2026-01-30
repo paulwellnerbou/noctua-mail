@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import type {
   DOMConversionMap,
   DOMConversionOutput,
@@ -9,6 +10,7 @@ import type {
   SerializedLexicalNode
 } from "lexical";
 import { DecoratorNode } from "lexical";
+import HtmlMessage from "../HtmlMessage";
 
 type SerializedHtmlBlockNode = {
   html: string;
@@ -74,10 +76,30 @@ export class HtmlBlockNode extends DecoratorNode<JSX.Element> {
     return (
       <details className="compose-raw-html" contentEditable={false} open>
         <summary>Quoted message (click to collapse)</summary>
-        <div dangerouslySetInnerHTML={{ __html: this.__html }} />
+        <HtmlBlockPreview html={this.__html} />
       </details>
     );
   }
+}
+
+function HtmlBlockPreview({ html }: { html: string }) {
+  const [darkMode, setDarkMode] = useState(false);
+
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    const update = () => {
+      setDarkMode(document.documentElement.classList.contains("dark"));
+    };
+    update();
+    const observer = new MutationObserver(update);
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["class"]
+    });
+    return () => observer.disconnect();
+  }, []);
+
+  return <HtmlMessage html={html} darkMode={darkMode} />;
 }
 
 const convertHtmlBlock = (domNode: Node): DOMConversionOutput | null => {

@@ -35,6 +35,12 @@ import MessageQuickActions from "./mailclient/message/MessageQuickActions";
 import MessageViewPane from "./mailclient/message/MessageViewPane";
 import MarkdownPanel from "./mailclient/message/MarkdownPanel";
 import MessageSourcePanel from "./mailclient/message/MessageSourcePanel";
+import {
+  assembleQuotedHtml,
+  buildQuotedHtmlPartsFromHtml,
+  buildQuotedHtmlPartsFromText,
+  escapeHtml
+} from "@/lib/html";
 import ThreadJsonModal from "./mailclient/message/ThreadJsonModal";
 import ThreadView from "./mailclient/message/ThreadView";
 import TopBar from "./mailclient/TopBar";
@@ -919,80 +925,6 @@ export default function MailClient() {
     const lines = body.split(/\r?\n/);
     const quoted = lines.map((line) => `> ${line}`.trimEnd());
     return `\n\n${header}\n${quoted.join("\n")}`;
-  };
-
-  const escapeHtml = (value: string) =>
-    value
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;")
-      .replace(/'/g, "&#39;");
-
-  const buildQuotedHtmlPartsFromText = (body: string, header: string) => {
-    const lines = (body ?? "").split(/\r?\n/);
-    let currentDepth = 0;
-    const html: string[] = [];
-    const closeTo = (depth: number) => {
-      while (currentDepth > depth) {
-        html.push("</blockquote>");
-        currentDepth--;
-      }
-    };
-    const openTo = (depth: number) => {
-      while (currentDepth < depth) {
-        html.push(`<blockquote class="quote-depth-${currentDepth + 1}">`);
-        currentDepth++;
-      }
-    };
-    lines.forEach((line) => {
-      const match = line.match(/^\s*(>+)\s?(.*)$/);
-      const depth = match ? match[1].length : 0;
-      const content = match ? match[2] : line;
-      closeTo(depth);
-      openTo(depth);
-      const safe = escapeHtml(content || "");
-      html.push(`<p>${safe === "" ? "<br>" : safe}</p>`);
-    });
-    closeTo(0);
-    return {
-      styles: "",
-      headerHtml: `<p><br></p><p>${escapeHtml(header)}</p>`,
-      bodyHtml: html.join("")
-    };
-  };
-
-  const extractHtmlBody = (value: string) => {
-    const match = value.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
-    if (match?.[1]) return match[1];
-    return value;
-  };
-
-  const buildQuotedHtmlPartsFromHtml = (
-    html: string,
-    header: string,
-    stripImages: boolean
-  ) => {
-    let bodyContent = extractHtmlBody(html);
-    if (stripImages) {
-      bodyContent = bodyContent.replace(/<img[\s\S]*?>/gi, "");
-    }
-    const styles = (html.match(/<style[\s\S]*?<\/style>/gi) ?? []).join("\n");
-    return {
-      styles,
-      headerHtml: `<p>${escapeHtml(header)}</p>`,
-      bodyHtml: bodyContent
-    };
-  };
-
-  const assembleQuotedHtml = (
-    parts: { styles: string; headerHtml: string; bodyHtml: string },
-    quoteHtml: boolean
-  ) => {
-    if (!quoteHtml) {
-      return `${parts.styles}${parts.headerHtml}${parts.bodyHtml}`;
-    }
-    return `${parts.styles}${parts.headerHtml}<blockquote type="cite" style="margin:0 0 0 .8ex;border-left:2px solid #cfcfcf;padding-left:1ex;">${parts.bodyHtml}</blockquote>`;
   };
 
   const readFileAsDataUrl = (file: File) =>

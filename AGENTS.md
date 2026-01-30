@@ -1,5 +1,9 @@
 # Repository Guidelines
 
+VERY IMPORTANT:
+- Avoid duplicate code wherever possible, try to reuse existing components!
+- Avoid hacks and fallback just to fix something quickly!
+
 ## Project Structure & Module Organization
 - `app/` contains the Next.js App Router UI and API routes.
 - `lib/` holds shared logic (IMAP/SMTP, DB, search, storage, parsing).
