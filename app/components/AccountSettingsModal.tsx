@@ -1,3 +1,18 @@
+import type { ReactNode } from "react";
+import { X } from "lucide-react";
+import {
+  Button,
+  Card,
+  Dialog,
+  Flex,
+  Grid,
+  IconButton,
+  Select,
+  Tabs,
+  Text,
+  TextArea,
+  TextField
+} from "@radix-ui/themes";
 import type { Account, AccountSettings } from "@/lib/data";
 
 type ManageTab = "account" | "signatures" | "preferences";
@@ -22,6 +37,28 @@ type Props = {
   onRunProbe: (protocol: "imap" | "smtp") => void;
 };
 
+type FieldProps = {
+  label: string;
+  hint?: string;
+  children: ReactNode;
+};
+
+function Field({ label, hint, children }: FieldProps) {
+  return (
+    <Flex direction="column" gap="1">
+      <Text size="2" weight="medium">
+        {label}
+      </Text>
+      {children}
+      {hint && (
+        <Text size="1" color="gray">
+          {hint}
+        </Text>
+      )}
+    </Flex>
+  );
+}
+
 export default function AccountSettingsModal({
   editingAccount,
   isOpen,
@@ -43,284 +80,337 @@ export default function AccountSettingsModal({
 }: Props) {
   if (!isOpen) return null;
   const signatures = editingAccount.settings?.signatures ?? [];
+
   return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal account-settings-modal" onClick={(event) => event.stopPropagation()}>
-        <h3>Account settings</h3>
-        <div className="settings-tabs">
-          <div className="button-group">
-            <button
-              className={`icon-button small ${manageTab === "account" ? "active" : ""}`}
-              onClick={() => onTabChange("account")}
-            >
-              Account
-            </button>
-            <button
-              className={`icon-button small ${manageTab === "signatures" ? "active" : ""}`}
-              onClick={() => onTabChange("signatures")}
-              disabled={!isExistingAccount}
-              title={
-                isExistingAccount
-                  ? "Signatures"
-                  : "Save the account before editing signatures"
-              }
-            >
-              Signatures
-            </button>
-            <button
-              className={`icon-button small ${manageTab === "preferences" ? "active" : ""}`}
-              onClick={() => onTabChange("preferences")}
-              disabled={!isExistingAccount}
-              title={
-                isExistingAccount
-                  ? "Preferences"
-                  : "Save the account before editing preferences"
-              }
-            >
-              Preferences
-            </button>
-          </div>
-        </div>
-        <div className="settings-body">
-          <div className={`settings-tab ${manageTab === "account" ? "active" : ""}`}>
-            <div className="tab-content">
-              <p className="settings-subtitle">
-                Manage IMAP/SMTP credentials for syncing and sending.
-              </p>
-              <div className="form-section">
-                <h4>Account details</h4>
-                <form className="form-grid" onSubmit={(event) => event.preventDefault()}>
-                  <label className="form-field">
-                    Name
-                    <input
-                      value={editingAccount.name}
-                      onChange={(event) =>
-                        onUpdateAccount({ ...editingAccount, name: event.target.value })
-                      }
-                    />
-                  </label>
-                  <label className="form-field">
-                    Email
-                    <input
-                      value={editingAccount.email}
-                      onChange={(event) =>
-                        onUpdateAccount({ ...editingAccount, email: event.target.value })
-                      }
-                    />
-                  </label>
-                </form>
-              </div>
+    <Dialog.Root
+      open={isOpen}
+      onOpenChange={(open) => {
+        if (!open) onClose();
+      }}
+    >
+      <Dialog.Content
+        size="4"
+        style={{
+          width: "min(980px, 94vw)",
+          height: "min(86vh, 900px)",
+          overflow: "hidden"
+        }}
+      >
+        <Flex direction="column" gap="4" style={{ height: "100%" }}>
+          <Flex align="center" justify="between" style={{ paddingBottom: "var(--space-2)" }}>
+            <Dialog.Title size="5" weight="bold">
+              Account settings
+            </Dialog.Title>
+            <IconButton variant="ghost" aria-label="Close" onClick={onClose}>
+              <X size={18} />
+            </IconButton>
+          </Flex>
 
-              <div className="form-section">
-                <div className="section-header">
-                  <h4>IMAP (Incoming Server)</h4>
-                  <button
-                    className="icon-button"
-                    onClick={() => onRunProbe("imap")}
-                    disabled={imapDetecting}
+          <Tabs.Root
+            value={manageTab}
+            onValueChange={(value) => onTabChange(value as ManageTab)}
+            style={{ flex: "1 1 auto", minHeight: 0, display: "flex", flexDirection: "column" }}
+          >
+            <Tabs.List style={{ marginBottom: "var(--space-4)" }}>
+              <Tabs.Trigger value="account">Account</Tabs.Trigger>
+              <Tabs.Trigger value="signatures" disabled={!isExistingAccount}>
+                Signatures
+              </Tabs.Trigger>
+              <Tabs.Trigger value="preferences" disabled={!isExistingAccount}>
+                Preferences
+              </Tabs.Trigger>
+            </Tabs.List>
+
+            <Tabs.Content value="account" style={{ flex: "1 1 auto", minHeight: 0 }}>
+              <Flex direction="column" gap="4" style={{ height: "100%", minHeight: 0 }}>
+                <Flex
+                  direction="column"
+                  gap="4"
+                  style={{ flex: "1 1 auto", minHeight: 0, overflow: "auto" }}
+                >
+                  <Text size="2" color="gray">
+                    Manage IMAP/SMTP credentials for syncing and sending.
+                  </Text>
+                  <Flex direction="column" gap="3">
+                    <Text size="3" weight="medium">
+                      Account details
+                    </Text>
+                    <Grid columns="2" gap="3">
+                      <Field label="Name">
+                        <TextField.Root
+                          value={editingAccount.name}
+                          onChange={(event) =>
+                            onUpdateAccount({
+                              ...editingAccount,
+                              name: event.target.value
+                            })
+                          }
+                        />
+                      </Field>
+                      <Field label="Email">
+                        <TextField.Root
+                          value={editingAccount.email}
+                          onChange={(event) =>
+                            onUpdateAccount({
+                              ...editingAccount,
+                              email: event.target.value
+                            })
+                          }
+                        />
+                      </Field>
+                    </Grid>
+                  </Flex>
+
+                  <Flex direction="column" gap="3">
+                    <Flex align="center" justify="between">
+                      <Text size="3" weight="medium">
+                        IMAP (Incoming Server)
+                      </Text>
+                      <Button
+                        size="1"
+                        variant="soft"
+                        onClick={() => onRunProbe("imap")}
+                        disabled={imapDetecting}
+                      >
+                        {imapDetecting ? "Detecting..." : "Detect security"}
+                      </Button>
+                    </Flex>
+                    {imapProbe && (
+                      <Text size="1" color="gray">
+                        TLS: {imapProbe.tls ? "Yes" : "No"} · STARTTLS:{" "}
+                        {imapProbe.starttls ? "Yes" : "No"}
+                      </Text>
+                    )}
+                    <Grid columns="2" gap="3">
+                      <Field label="Security">
+                        <Select.Root
+                          value={imapSecurity}
+                          onValueChange={(value) => {
+                            const next = value as "tls" | "starttls" | "none";
+                            const port = next === "tls" ? 993 : 143;
+                            onUpdateAccount({
+                              ...editingAccount,
+                              imap: { ...editingAccount.imap, secure: next === "tls", port }
+                            });
+                          }}
+                        >
+                          <Select.Trigger style={{ width: "100%" }} />
+                          <Select.Content position="popper">
+                            {(imapProbe?.tls ?? true) && (
+                              <Select.Item value="tls">TLS (implicit)</Select.Item>
+                            )}
+                            {(imapProbe?.starttls ?? true) && (
+                              <Select.Item value="starttls">STARTTLS</Select.Item>
+                            )}
+                            <Select.Item value="none">None</Select.Item>
+                          </Select.Content>
+                        </Select.Root>
+                      </Field>
+                      <Field label="IMAP host">
+                        <TextField.Root
+                          value={editingAccount.imap.host}
+                          onChange={(event) =>
+                            onUpdateAccount({
+                              ...editingAccount,
+                              imap: { ...editingAccount.imap, host: event.target.value }
+                            })
+                          }
+                        />
+                      </Field>
+                      <Field label="IMAP port">
+                        <TextField.Root
+                          type="number"
+                          value={editingAccount.imap.port}
+                          onChange={(event) =>
+                            onUpdateAccount({
+                              ...editingAccount,
+                              imap: {
+                                ...editingAccount.imap,
+                                port: Number(event.target.value)
+                              }
+                            })
+                          }
+                        />
+                      </Field>
+                      <Field label="IMAP user">
+                        <TextField.Root
+                          value={editingAccount.imap.user}
+                          onChange={(event) =>
+                            onUpdateAccount({
+                              ...editingAccount,
+                              imap: { ...editingAccount.imap, user: event.target.value }
+                            })
+                          }
+                        />
+                      </Field>
+                      <Field label="IMAP password">
+                        <TextField.Root
+                          type="password"
+                          value={editingAccount.imap.password}
+                          onChange={(event) =>
+                            onUpdateAccount({
+                              ...editingAccount,
+                              imap: {
+                                ...editingAccount.imap,
+                                password: event.target.value
+                              }
+                            })
+                          }
+                        />
+                      </Field>
+                    </Grid>
+                  </Flex>
+
+                  <Flex direction="column" gap="3">
+                    <Flex align="center" justify="between">
+                      <Text size="3" weight="medium">
+                        SMTP (Outgoing Server)
+                      </Text>
+                      <Button
+                        size="1"
+                        variant="soft"
+                        onClick={() => onRunProbe("smtp")}
+                        disabled={smtpDetecting}
+                      >
+                        {smtpDetecting ? "Detecting..." : "Detect security"}
+                      </Button>
+                    </Flex>
+                    <Text size="1" color="gray">
+                      Detection reads server capabilities only — it does not require
+                      authentication.
+                    </Text>
+                    {smtpProbe && (
+                      <Text size="1" color="gray">
+                        TLS: {smtpProbe.tls ? "Yes" : "No"} · STARTTLS:{" "}
+                        {smtpProbe.starttls ? "Yes" : "No"}
+                      </Text>
+                    )}
+                    <Grid columns="2" gap="3">
+                      <Field label="Security">
+                        <Select.Root
+                          value={smtpSecurity}
+                          onValueChange={(value) => {
+                            const next = value as "tls" | "starttls" | "none";
+                            const port = next === "tls" ? 465 : next === "starttls" ? 587 : 25;
+                            onUpdateAccount({
+                              ...editingAccount,
+                              smtp: { ...editingAccount.smtp, secure: next === "tls", port }
+                            });
+                          }}
+                        >
+                          <Select.Trigger style={{ width: "100%" }} />
+                          <Select.Content position="popper">
+                            {(smtpProbe?.tls ?? true) && (
+                              <Select.Item value="tls">TLS (implicit)</Select.Item>
+                            )}
+                            {(smtpProbe?.starttls ?? true) && (
+                              <Select.Item value="starttls">STARTTLS</Select.Item>
+                            )}
+                            <Select.Item value="none">None</Select.Item>
+                          </Select.Content>
+                        </Select.Root>
+                      </Field>
+                      <Field label="SMTP host">
+                        <TextField.Root
+                          value={editingAccount.smtp.host}
+                          onChange={(event) =>
+                            onUpdateAccount({
+                              ...editingAccount,
+                              smtp: { ...editingAccount.smtp, host: event.target.value }
+                            })
+                          }
+                        />
+                      </Field>
+                      <Field label="SMTP port">
+                        <TextField.Root
+                          type="number"
+                          value={editingAccount.smtp.port}
+                          onChange={(event) =>
+                            onUpdateAccount({
+                              ...editingAccount,
+                              smtp: {
+                                ...editingAccount.smtp,
+                                port: Number(event.target.value)
+                              }
+                            })
+                          }
+                        />
+                      </Field>
+                      <Field label="SMTP user">
+                        <TextField.Root
+                          value={editingAccount.smtp.user}
+                          onChange={(event) =>
+                            onUpdateAccount({
+                              ...editingAccount,
+                              smtp: { ...editingAccount.smtp, user: event.target.value }
+                            })
+                          }
+                        />
+                      </Field>
+                      <Field label="SMTP password">
+                        <TextField.Root
+                          type="password"
+                          value={editingAccount.smtp.password}
+                          onChange={(event) =>
+                            onUpdateAccount({
+                              ...editingAccount,
+                              smtp: {
+                                ...editingAccount.smtp,
+                                password: event.target.value
+                              }
+                            })
+                          }
+                        />
+                      </Field>
+                    </Grid>
+                  </Flex>
+                </Flex>
+
+                <Flex
+                  justify="between"
+                  align="center"
+                  gap="3"
+                  wrap="wrap"
+                  style={{ paddingTop: "var(--space-3)", borderTop: "1px solid var(--gray-a5)" }}
+                >
+                  <Button
+                    size="2"
+                    color="red"
+                    variant="soft"
+                    onClick={onDelete}
+                    disabled={!isExistingAccount}
                   >
-                    {imapDetecting ? "Detecting..." : "Detect security"}
-                  </button>
-                </div>
-                {imapProbe && (
-                  <p className="section-note">
-                    TLS: {imapProbe.tls ? "Yes" : "No"} · STARTTLS:{" "}
-                    {imapProbe.starttls ? "Yes" : "No"}
-                  </p>
-                )}
-                <form className="form-grid" onSubmit={(event) => event.preventDefault()}>
-                  <label className="form-field">
-                    Security
-                    <select
-                      value={imapSecurity}
-                      onChange={(event) => {
-                        const next = event.target.value as "tls" | "starttls" | "none";
-                        const port = next === "tls" ? 993 : 143;
-                        onUpdateAccount({
-                          ...editingAccount,
-                          imap: { ...editingAccount.imap, secure: next === "tls", port }
-                        });
-                      }}
-                    >
-                      {(imapProbe?.tls ?? true) && <option value="tls">TLS (implicit)</option>}
-                      {(imapProbe?.starttls ?? true) && (
-                        <option value="starttls">STARTTLS</option>
-                      )}
-                      <option value="none">None</option>
-                    </select>
-                  </label>
-                  <label className="form-field">
-                    IMAP host
-                    <input
-                      value={editingAccount.imap.host}
-                      onChange={(event) =>
-                        onUpdateAccount({
-                          ...editingAccount,
-                          imap: { ...editingAccount.imap, host: event.target.value }
-                        })
-                      }
-                    />
-                  </label>
-                  <label className="form-field">
-                    IMAP port
-                    <input
-                      type="number"
-                      value={editingAccount.imap.port}
-                      onChange={(event) =>
-                        onUpdateAccount({
-                          ...editingAccount,
-                          imap: { ...editingAccount.imap, port: Number(event.target.value) }
-                        })
-                      }
-                    />
-                  </label>
-                  <label className="form-field">
-                    IMAP user
-                    <input
-                      value={editingAccount.imap.user}
-                      onChange={(event) =>
-                        onUpdateAccount({
-                          ...editingAccount,
-                          imap: { ...editingAccount.imap, user: event.target.value }
-                        })
-                      }
-                    />
-                  </label>
-                  <label className="form-field">
-                    IMAP password
-                    <input
-                      type="password"
-                      value={editingAccount.imap.password}
-                      onChange={(event) =>
-                        onUpdateAccount({
-                          ...editingAccount,
-                          imap: { ...editingAccount.imap, password: event.target.value }
-                        })
-                      }
-                    />
-                  </label>
-                </form>
-              </div>
+                    Delete Account
+                  </Button>
+                  <Flex gap="3" align="center">
+                    <Button size="2" variant="soft" color="gray" onClick={onClose}>
+                      Cancel
+                    </Button>
+                    <Button size="2" onClick={onSave}>
+                      Save
+                    </Button>
+                  </Flex>
+                </Flex>
+              </Flex>
+            </Tabs.Content>
 
-              <div className="form-section">
-                <div className="section-header">
-                  <h4>SMTP (Outgoing Server)</h4>
-                  <button
-                    className="icon-button"
-                    onClick={() => onRunProbe("smtp")}
-                    disabled={smtpDetecting}
-                  >
-                    {smtpDetecting ? "Detecting..." : "Detect security"}
-                  </button>
-                </div>
-                <p className="section-note">
-                  Detection reads server capabilities only — it does not require authentication.
-                </p>
-                {smtpProbe && (
-                  <p className="section-note">
-                    TLS: {smtpProbe.tls ? "Yes" : "No"} · STARTTLS:{" "}
-                    {smtpProbe.starttls ? "Yes" : "No"}
-                  </p>
-                )}
-                <form className="form-grid" onSubmit={(event) => event.preventDefault()}>
-                  <label className="form-field">
-                    Security
-                    <select
-                      value={smtpSecurity}
-                      onChange={(event) => {
-                        const next = event.target.value as "tls" | "starttls" | "none";
-                        const port = next === "tls" ? 465 : next === "starttls" ? 587 : 25;
-                        onUpdateAccount({
-                          ...editingAccount,
-                          smtp: { ...editingAccount.smtp, secure: next === "tls", port }
-                        });
-                      }}
-                    >
-                      {(smtpProbe?.tls ?? true) && <option value="tls">TLS (implicit)</option>}
-                      {(smtpProbe?.starttls ?? true) && (
-                        <option value="starttls">STARTTLS</option>
-                      )}
-                      <option value="none">None</option>
-                    </select>
-                  </label>
-                  <label className="form-field">
-                    SMTP host
-                    <input
-                      value={editingAccount.smtp.host}
-                      onChange={(event) =>
-                        onUpdateAccount({
-                          ...editingAccount,
-                          smtp: { ...editingAccount.smtp, host: event.target.value }
-                        })
-                      }
-                    />
-                  </label>
-                  <label className="form-field">
-                    SMTP port
-                    <input
-                      type="number"
-                      value={editingAccount.smtp.port}
-                      onChange={(event) =>
-                        onUpdateAccount({
-                          ...editingAccount,
-                          smtp: { ...editingAccount.smtp, port: Number(event.target.value) }
-                        })
-                      }
-                    />
-                  </label>
-                  <label className="form-field">
-                    SMTP user
-                    <input
-                      value={editingAccount.smtp.user}
-                      onChange={(event) =>
-                        onUpdateAccount({
-                          ...editingAccount,
-                          smtp: { ...editingAccount.smtp, user: event.target.value }
-                        })
-                      }
-                    />
-                  </label>
-                  <label className="form-field">
-                    SMTP password
-                    <input
-                      type="password"
-                      value={editingAccount.smtp.password}
-                      onChange={(event) =>
-                        onUpdateAccount({
-                          ...editingAccount,
-                          smtp: { ...editingAccount.smtp, password: event.target.value }
-                        })
-                      }
-                    />
-                  </label>
-                </form>
-              </div>
-            </div>
-            <div className="form-divider" />
-            <div className="form-actions">
-              <button className="icon-button" onClick={onDelete} disabled={!isExistingAccount}>
-                Delete Account
-              </button>
-              <div style={{ marginLeft: "auto", display: "inline-flex", gap: 10 }}>
-                <button className="icon-button" onClick={onClose}>
-                  Cancel
-                </button>
-                <button className="icon-button" onClick={onSave}>
-                  Save
-                </button>
-              </div>
-            </div>
-          </div>
-
-          <div className={`settings-tab ${manageTab === "signatures" ? "active" : ""}`}>
-            <div className="tab-content">
-              <p className="settings-subtitle">Manage signatures for this account.</p>
-              <div className="form-section">
-                <h4>Signature list</h4>
-                <form onSubmit={(event) => event.preventDefault()}>
-                  <div className="section-header" style={{ justifyContent: "flex-end" }}>
-                    <button
-                      className="icon-button"
+            <Tabs.Content value="signatures" style={{ flex: "1 1 auto", minHeight: 0 }}>
+              <Flex direction="column" gap="4" style={{ height: "100%", minHeight: 0 }}>
+                <Flex
+                  direction="column"
+                  gap="4"
+                  style={{ flex: "1 1 auto", minHeight: 0, overflow: "auto" }}
+                >
+                  <Text size="2" color="gray">
+                    Manage signatures for this account.
+                  </Text>
+                  <Flex align="center" justify="between">
+                    <Text size="3" weight="medium">
+                      Signature list
+                    </Text>
+                    <Button
+                      size="1"
+                      variant="soft"
                       onClick={() => {
                         const next = {
                           id: crypto.randomUUID(),
@@ -331,35 +421,41 @@ export default function AccountSettingsModal({
                       }}
                     >
                       Add signature
-                    </button>
-                  </div>
-                  <div className="form-grid">
-                    <label className="form-field">
-                      Default signature
-                      <select
-                        value={editingAccount.settings?.defaultSignatureId ?? ""}
-                        onChange={(event) =>
-                          onUpdateSettings({ defaultSignatureId: event.target.value })
+                    </Button>
+                  </Flex>
+                  <Grid columns="2" gap="3">
+                    <Field label="Default signature">
+                      <Select.Root
+                        value={editingAccount.settings?.defaultSignatureId ?? "none"}
+                        onValueChange={(value) =>
+                          onUpdateSettings({
+                            defaultSignatureId: value === "none" ? "" : value
+                          })
                         }
                       >
-                        <option value="">None</option>
-                        {signatures.map((signature) => (
-                          <option key={signature.id} value={signature.id}>
-                            {signature.name}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                  </div>
+                        <Select.Trigger style={{ width: "100%" }} placeholder="None" />
+                        <Select.Content position="popper">
+                          <Select.Item value="none">None</Select.Item>
+                          {signatures.map((signature) => (
+                            <Select.Item key={signature.id} value={signature.id}>
+                              {signature.name}
+                            </Select.Item>
+                          ))}
+                        </Select.Content>
+                      </Select.Root>
+                    </Field>
+                  </Grid>
                   {signatures.length === 0 ? (
-                    <p className="section-note">No signatures yet.</p>
+                    <Text size="2" color="gray">
+                      No signatures yet.
+                    </Text>
                   ) : (
-                    <div className="signature-list">
+                    <Flex direction="column" gap="3">
                       {signatures.map((signature) => (
-                        <div key={signature.id} className="signature-item">
-                          <label className="form-field">
-                            Name
-                            <input
+                        <Card key={signature.id} size="2">
+                          <Flex direction="column" gap="3">
+                          <Field label="Name">
+                            <TextField.Root
                               value={signature.name}
                               onChange={(event) => {
                                 const nextSignatures = signatures.map((entry) =>
@@ -370,178 +466,208 @@ export default function AccountSettingsModal({
                                 onUpdateSettings({ signatures: nextSignatures });
                               }}
                             />
-                          </label>
-                          <label className="form-field">
-                            Signature text
-                            <textarea
-                              rows={4}
-                              value={signature.body}
-                              onChange={(event) => {
-                                const nextSignatures = signatures.map((entry) =>
-                                  entry.id === signature.id
-                                    ? { ...entry, body: event.target.value }
-                                    : entry
-                                );
-                                onUpdateSettings({ signatures: nextSignatures });
-                              }}
-                            />
-                          </label>
-                          <div className="signature-actions">
-                            <button
-                              className="icon-button small"
-                              onClick={() => {
-                                const nextSignatures = signatures.filter(
-                                  (entry) => entry.id !== signature.id
-                                );
-                                const nextDefault =
-                                  editingAccount.settings?.defaultSignatureId === signature.id
-                                    ? ""
-                                    : editingAccount.settings?.defaultSignatureId ?? "";
-                                onUpdateSettings({
-                                  signatures: nextSignatures,
-                                  defaultSignatureId: nextDefault
-                                });
-                              }}
-                            >
-                              Delete
-                            </button>
-                          </div>
-                        </div>
+                          </Field>
+                            <Field label="Signature text">
+                              <TextArea
+                                rows={4}
+                                value={signature.body}
+                                onChange={(event) => {
+                                  const nextSignatures = signatures.map((entry) =>
+                                    entry.id === signature.id
+                                      ? { ...entry, body: event.target.value }
+                                      : entry
+                                  );
+                                  onUpdateSettings({ signatures: nextSignatures });
+                                }}
+                              />
+                            </Field>
+                            <Flex justify="end">
+                              <Button
+                                size="1"
+                                variant="ghost"
+                                color="red"
+                                onClick={() => {
+                                  const nextSignatures = signatures.filter(
+                                    (entry) => entry.id !== signature.id
+                                  );
+                                  const nextDefault =
+                                    editingAccount.settings?.defaultSignatureId === signature.id
+                                      ? ""
+                                      : editingAccount.settings?.defaultSignatureId ?? "";
+                                  onUpdateSettings({
+                                    signatures: nextSignatures,
+                                    defaultSignatureId: nextDefault
+                                  });
+                                }}
+                              >
+                                Delete
+                              </Button>
+                            </Flex>
+                          </Flex>
+                        </Card>
                       ))}
-                    </div>
+                    </Flex>
                   )}
-                </form>
-              </div>
-            </div>
-            <div className="form-divider" />
-            <div className="form-actions">
-              <button className="icon-button" onClick={onClose}>
-                Cancel
-              </button>
-              <button className="icon-button" onClick={onSave} disabled={!isExistingAccount}>
-                Save
-              </button>
-            </div>
-          </div>
+                </Flex>
 
-          <div className={`settings-tab ${manageTab === "preferences" ? "active" : ""}`}>
-            <div className="tab-content">
-              <p className="settings-subtitle">Control behavior, layout, and sync performance.</p>
-              <div className="form-section">
-                <div className="form-section">
-                  <h4>Behavior</h4>
-                  <form className="form-grid" onSubmit={(event) => event.preventDefault()}>
-                    <label className="form-field">
-                      Include threads across folders
-                      <select
-                        value={
-                          (editingAccount.settings?.threading?.includeAcrossFolders ?? true)
-                            ? "yes"
-                            : "no"
-                        }
-                        onChange={(event) =>
-                          onUpdateSettings({
-                            threading: {
-                              ...(editingAccount.settings?.threading ?? {}),
-                              includeAcrossFolders: event.target.value === "yes"
-                            }
-                          })
-                        }
+                <Flex
+                  justify="end"
+                  align="center"
+                  gap="3"
+                  wrap="wrap"
+                  style={{ paddingTop: "var(--space-3)", borderTop: "1px solid var(--gray-a5)" }}
+                >
+                  <Button size="2" variant="soft" color="gray" onClick={onClose}>
+                    Cancel
+                  </Button>
+                  <Button size="2" onClick={onSave} disabled={!isExistingAccount}>
+                    Save
+                  </Button>
+                </Flex>
+              </Flex>
+            </Tabs.Content>
+
+            <Tabs.Content value="preferences" style={{ flex: "1 1 auto", minHeight: 0 }}>
+              <Flex direction="column" gap="4" style={{ height: "100%", minHeight: 0 }}>
+                <Flex
+                  direction="column"
+                  gap="4"
+                  style={{ flex: "1 1 auto", minHeight: 0, overflow: "auto" }}
+                >
+                  <Text size="2" color="gray">
+                    Control behavior, layout, and sync performance.
+                  </Text>
+                  <Flex direction="column" gap="3">
+                    <Text size="3" weight="medium">
+                      Behavior
+                    </Text>
+                    <Grid columns="2" gap="3">
+                      <Field label="Include threads across folders">
+                        <Select.Root
+                          value={
+                            (editingAccount.settings?.threading?.includeAcrossFolders ?? true)
+                              ? "yes"
+                              : "no"
+                          }
+                          onValueChange={(value) =>
+                            onUpdateSettings({
+                              threading: {
+                                ...(editingAccount.settings?.threading ?? {}),
+                                includeAcrossFolders: value === "yes"
+                              }
+                            })
+                          }
+                        >
+                          <Select.Trigger style={{ width: "100%" }} />
+                          <Select.Content position="popper">
+                            <Select.Item value="yes">Yes</Select.Item>
+                            <Select.Item value="no">No</Select.Item>
+                          </Select.Content>
+                        </Select.Root>
+                      </Field>
+                    </Grid>
+                  </Flex>
+
+                  <Flex direction="column" gap="3">
+                    <Text size="3" weight="medium">
+                      Layout
+                    </Text>
+                    <Grid columns="2" gap="3">
+                      <Field label="Default layout">
+                        <Select.Root
+                          value={editingAccount.settings?.layout?.defaultView ?? "card"}
+                          onValueChange={(value) =>
+                            onUpdateSettings({
+                              layout: {
+                                ...(editingAccount.settings?.layout ?? {}),
+                                defaultView: value as "card" | "table" | "compact"
+                              }
+                            })
+                          }
+                        >
+                          <Select.Trigger style={{ width: "100%" }} />
+                          <Select.Content position="popper">
+                            <Select.Item value="card">Card view</Select.Item>
+                            <Select.Item value="table">Table view</Select.Item>
+                            <Select.Item value="compact">Compact view</Select.Item>
+                          </Select.Content>
+                        </Select.Root>
+                      </Field>
+                    </Grid>
+                  </Flex>
+
+                  <Flex direction="column" gap="3">
+                    <Text size="3" weight="medium">
+                      Performance
+                    </Text>
+                    <Text size="1" color="gray">
+                      Controls IMAP polling and how many folders stay on IDLE.
+                    </Text>
+                    <Grid columns="2" gap="3">
+                      <Field
+                        label="Max idle sessions"
+                        hint="Number of folders kept on IMAP IDLE simultaneously."
                       >
-                        <option value="yes">Yes</option>
-                        <option value="no">No</option>
-                      </select>
-                    </label>
-                  </form>
-                </div>
-                <div className="form-section">
-                  <h4>Layout</h4>
-                  <form className="form-grid" onSubmit={(event) => event.preventDefault()}>
-                    <label className="form-field">
-                      Default layout
-                      <select
-                        value={editingAccount.settings?.layout?.defaultView ?? "card"}
-                        onChange={(event) =>
-                          onUpdateSettings({
-                            layout: {
-                              ...(editingAccount.settings?.layout ?? {}),
-                              defaultView: event.target.value as "card" | "table" | "compact"
-                            }
-                          })
-                        }
+                        <TextField.Root
+                          type="number"
+                          min={1}
+                          placeholder="Default: 3"
+                          value={editingAccount.settings?.sync?.maxIdleSessions ?? ""}
+                          onChange={(event) => {
+                            const value = event.target.value;
+                            onUpdateSettings({
+                              sync: {
+                                ...(editingAccount.settings?.sync ?? {}),
+                                maxIdleSessions: value === "" ? undefined : Number(value)
+                              }
+                            });
+                          }}
+                        />
+                      </Field>
+                      <Field
+                        label="Poll interval (ms)"
+                        hint="Frequency for background folder status checks."
                       >
-                        <option value="card">Card view</option>
-                        <option value="table">Table view</option>
-                        <option value="compact">Compact view</option>
-                      </select>
-                    </label>
-                  </form>
-                </div>
-                <div className="form-section">
-                  <h4>Performance</h4>
-                  <p className="section-note">
-                    Controls IMAP polling and how many folders stay on IDLE.
-                  </p>
-                  <form className="form-grid" onSubmit={(event) => event.preventDefault()}>
-                    <label className="form-field">
-                      Max idle sessions
-                      <input
-                        type="number"
-                      min={1}
-                      placeholder="Default: 3"
-                      value={editingAccount.settings?.sync?.maxIdleSessions ?? ""}
-                        onChange={(event) => {
-                          const value = event.target.value;
-                          onUpdateSettings({
-                            sync: {
-                              ...(editingAccount.settings?.sync ?? {}),
-                              maxIdleSessions: value === "" ? undefined : Number(value)
-                            }
-                          });
-                        }}
-                      />
-                      <span className="section-note">
-                        Number of folders kept on IMAP IDLE simultaneously.
-                      </span>
-                    </label>
-                    <label className="form-field">
-                      Poll interval (ms)
-                      <input
-                        type="number"
-                      min={10000}
-                      step={1000}
-                      placeholder="Default: 300000"
-                      value={editingAccount.settings?.sync?.pollIntervalMs ?? ""}
-                        onChange={(event) => {
-                          const value = event.target.value;
-                          onUpdateSettings({
-                            sync: {
-                              ...(editingAccount.settings?.sync ?? {}),
-                              pollIntervalMs: value === "" ? undefined : Number(value)
-                            }
-                          });
-                        }}
-                      />
-                      <span className="section-note">
-                        Frequency for background folder status checks.
-                      </span>
-                    </label>
-                  </form>
-                </div>
-              </div>
-            </div>
-            <div className="form-divider" />
-            <div className="form-actions">
-              <button className="icon-button" onClick={onClose}>
-                Cancel
-              </button>
-              <button className="icon-button" onClick={onSave} disabled={!isExistingAccount}>
-                Save
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
+                        <TextField.Root
+                          type="number"
+                          min={10000}
+                          step={1000}
+                          placeholder="Default: 300000"
+                          value={editingAccount.settings?.sync?.pollIntervalMs ?? ""}
+                          onChange={(event) => {
+                            const value = event.target.value;
+                            onUpdateSettings({
+                              sync: {
+                                ...(editingAccount.settings?.sync ?? {}),
+                                pollIntervalMs: value === "" ? undefined : Number(value)
+                              }
+                            });
+                          }}
+                        />
+                      </Field>
+                    </Grid>
+                  </Flex>
+                </Flex>
+
+                <Flex
+                  justify="end"
+                  align="center"
+                  gap="3"
+                  wrap="wrap"
+                  style={{ paddingTop: "var(--space-3)", borderTop: "1px solid var(--gray-a5)" }}
+                >
+                  <Button size="2" variant="soft" color="gray" onClick={onClose}>
+                    Cancel
+                  </Button>
+                  <Button size="2" onClick={onSave} disabled={!isExistingAccount}>
+                    Save
+                  </Button>
+                </Flex>
+              </Flex>
+            </Tabs.Content>
+          </Tabs.Root>
+        </Flex>
+      </Dialog.Content>
+    </Dialog.Root>
   );
 }

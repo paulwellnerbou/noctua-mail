@@ -1,6 +1,6 @@
 const sqliteModulePromise = () => import("bun:sqlite" /* webpackIgnore: true */);
 let DatabaseCtor: any | null = null;
-import path from "path";
+import { getDbPath } from "./runtimePaths";
 import type {
   Account,
   AccountSettings,
@@ -31,8 +31,7 @@ async function getDb() {
         );
       }
     }
-    const dbPath = path.join(process.cwd(), ".data", "mail.db");
-    dbInstance = new DatabaseCtor(dbPath);
+    dbInstance = new DatabaseCtor(getDbPath());
     dbInstance.exec("PRAGMA journal_mode = WAL;");
     dbInstance.exec("PRAGMA foreign_keys = ON;");
   }

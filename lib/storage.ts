@@ -1,10 +1,11 @@
 import { promises as fs } from "fs";
 import path from "path";
 import { accounts, folders, messages } from "./data";
+import { getAttachmentsDir, getDataDir, getSourcesDir } from "./runtimePaths";
 
-const dataDir = path.join(process.cwd(), ".data");
-const sourcesDir = path.join(dataDir, "sources");
-const attachmentsDir = path.join(dataDir, "attachments");
+const dataDir = getDataDir();
+const sourcesDir = getSourcesDir();
+const attachmentsDir = getAttachmentsDir();
 
 async function ensureDataDir() {
   await fs.mkdir(dataDir, { recursive: true });

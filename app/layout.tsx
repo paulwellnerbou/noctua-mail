@@ -1,18 +1,7 @@
 import type { Metadata } from "next";
-import { Fraunces, Sora } from "next/font/google";
+import { Theme } from "@radix-ui/themes";
+import "@radix-ui/themes/styles.css";
 import "./globals.css";
-
-const display = Fraunces({
-  subsets: ["latin"],
-  variable: "--font-display",
-  weight: ["400", "600", "700"]
-});
-
-const body = Sora({
-  subsets: ["latin"],
-  variable: "--font-sans",
-  weight: ["300", "400", "500", "600"]
-});
 
 export const metadata: Metadata = {
   title: "Noctua Mail",
@@ -33,9 +22,11 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="en" className={`${display.variable} ${body.variable}`}>
+    <html lang="en">
       <body suppressHydrationWarning>
-        <main>{children}</main>
+        <Theme>
+          <main>{children}</main>
+        </Theme>
       </body>
     </html>
   );

@@ -1,5 +1,6 @@
 import type React from "react";
 import { ArrowDownLeft, Minimize2, X } from "lucide-react";
+import { Button, Heading, IconButton, Text, TextField } from "@radix-ui/themes";
 
 type ComposeMode = "new" | "reply" | "replyAll" | "forward" | "edit" | "editAsNew";
 
@@ -173,28 +174,35 @@ export default function ComposeModal({
       >
         <div className="compose-header">
           <div>
-            <h3>{composeTitle}</h3>
-            <p className="compose-subtitle">From {fromValue}</p>
+            <Heading size="5" weight="bold" className="compose-title">
+              {composeTitle}
+            </Heading>
+            <Text size="2" color="gray" className="compose-subtitle">
+              From {fromValue}
+            </Text>
           </div>
           <div className="compose-header-actions">
-            <button
-              className="icon-button"
+            <IconButton
+              variant="ghost"
+              size="2"
               title="Dock in thread view"
               aria-label="Dock in thread view"
               onClick={popInCompose}
             >
-              <ArrowDownLeft size={14} />
-            </button>
-            <button
-              className="icon-button"
+              <ArrowDownLeft size={16} />
+            </IconButton>
+            <IconButton
+              variant="ghost"
+              size="2"
               title="Minimize composer"
               aria-label="Minimize composer"
               onClick={minimizeCompose}
             >
-              <Minimize2 size={14} />
-            </button>
-            <button
-              className="icon-button"
+              <Minimize2 size={16} />
+            </IconButton>
+            <IconButton
+              variant="ghost"
+              size="2"
               title="Close composer"
               aria-label="Close composer"
               onClick={() => {
@@ -202,17 +210,21 @@ export default function ComposeModal({
                 setComposeView("inline");
               }}
             >
-              <X size={14} />
-            </button>
+              <X size={16} />
+            </IconButton>
           </div>
         </div>
         <div className="compose-body">
           <div className="compose-grid">
             <div className="compose-grid-row">
-              <span className="label">To:</span>
+              <Text size="2" weight="medium" className="label">
+                To:
+              </Text>
               <div className="compose-row">
                 <div className="compose-input-wrap">
-                  <input
+                  <TextField.Root
+                    className="compose-text-field"
+                    size="2"
                     value={composeTo}
                     onChange={(event) => {
                       markComposeDirty();
@@ -273,21 +285,26 @@ export default function ComposeModal({
                     </div>
                   )}
                 </div>
-                <button
+                <Button
                   type="button"
-                  className="icon-button small"
+                  size="1"
+                  variant="soft"
                   title={composeShowBcc ? "Hide Cc and Bcc" : "Show Cc and Bcc"}
                   onClick={() => setComposeShowBcc((value) => !value)}
                 >
                   {composeShowBcc ? "Hide Cc/Bcc" : "Show Cc and Bcc"}
-                </button>
+                </Button>
               </div>
             </div>
             {composeShowBcc && (
               <div className="compose-grid-row">
-                <span className="label">Cc:</span>
+                <Text size="2" weight="medium" className="label">
+                  Cc:
+                </Text>
                 <div className="compose-input-wrap">
-                  <input
+                  <TextField.Root
+                    className="compose-text-field"
+                    size="2"
                     value={composeCc}
                     onChange={(event) => {
                       markComposeDirty();
@@ -352,9 +369,13 @@ export default function ComposeModal({
             )}
             {composeShowBcc && (
               <div className="compose-grid-row">
-                <span className="label">Bcc:</span>
+                <Text size="2" weight="medium" className="label">
+                  Bcc:
+                </Text>
                 <div className="compose-input-wrap">
-                  <input
+                  <TextField.Root
+                    className="compose-text-field"
+                    size="2"
                     value={composeBcc}
                     onChange={(event) => {
                       markComposeDirty();
@@ -418,8 +439,12 @@ export default function ComposeModal({
               </div>
             )}
             <div className="compose-grid-row">
-              <span className="label">Subject:</span>
-              <input
+              <Text size="2" weight="medium" className="label">
+                Subject:
+              </Text>
+              <TextField.Root
+                className="compose-text-field"
+                size="2"
                 value={composeSubject}
                 onChange={(event) => {
                   markComposeDirty();
@@ -429,17 +454,26 @@ export default function ComposeModal({
               />
             </div>
             <div className="compose-grid-row">
-              <span className="label">Date:</span>
-              <span className="compose-static">{composeOpenedAt || "Now"}</span>
+              <Text size="2" weight="medium" className="label">
+                Date:
+              </Text>
+              <Text size="2" className="compose-static">
+                {composeOpenedAt || "Now"}
+              </Text>
             </div>
           </div>
           {ui.composeMessageField}
         </div>
         <div className="compose-footer">
           <div className="compose-draft-meta">
-            {composeDraftId && <span className="compose-draft">Draft: {composeDraftId}</span>}
+            {composeDraftId && (
+              <Text size="1" color="gray" className="compose-draft">
+                Draft: {composeDraftId}
+              </Text>
+            )}
             {composeOpen && (
-              <span
+              <Text
+                size="1"
                 className={`compose-draft-status ${
                   draftSaveError ? "error" : draftSaving ? "saving" : ""
                 }`}
@@ -451,31 +485,35 @@ export default function ComposeModal({
                     : draftSavedAt
                       ? `Draft saved ${formatRelativeTime(draftSavedAt)}`
                       : "Draft not saved yet"}
-              </span>
+              </Text>
             )}
           </div>
           <div className="compose-actions">
             {composeDraftId && (
-              <button
-                className="icon-button"
+              <Button
+                size="2"
+                variant="soft"
+                color="red"
                 onClick={handleDiscardDraft}
                 disabled={discardingDraft}
               >
                 Discard Draft
-              </button>
+              </Button>
             )}
-            <button
-              className="icon-button"
+            <Button
+              size="2"
+              variant="soft"
+              color="gray"
               onClick={() => {
                 setComposeOpen(false);
                 setComposeView("inline");
               }}
             >
               Cancel
-            </button>
-            <button className="icon-button active" onClick={handleSendMail} disabled={sendingMail}>
+            </Button>
+            <Button size="2" onClick={handleSendMail} disabled={sendingMail}>
               {sendingMail ? "Sending..." : "Send"}
-            </button>
+            </Button>
           </div>
         </div>
         <div

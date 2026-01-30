@@ -1,5 +1,14 @@
 import { useState } from "react";
 import { X } from "lucide-react";
+import {
+  Button,
+  Callout,
+  Dialog,
+  Flex,
+  IconButton,
+  Text,
+  TextField
+} from "@radix-ui/themes";
 import AccountSettingsModal from "@/app/components/AccountSettingsModal";
 import type { Account } from "@/lib/data";
 
@@ -179,98 +188,131 @@ export default function LoginOverlay({ onAuthenticated }: Props) {
   return (
     <>
       {!signupOpen && !inviteOpen && (
-        <div className="modal-backdrop">
-          <div className="modal auth-modal" onClick={(event) => event.stopPropagation()}>
-            <div className="auth-header">
+        <Dialog.Root open>
+          <Dialog.Content size="3" style={{ width: "min(440px, 92vw)" }}>
+            <Flex direction="column" gap="4">
               <div>
-                <h3>Sign in</h3>
-                <p className="settings-subtitle">Use your IMAP credentials to access mail.</p>
+                <Dialog.Title>Sign in</Dialog.Title>
+                <Dialog.Description>
+                  Use your IMAP credentials to access mail.
+                </Dialog.Description>
               </div>
-              <X size={18} className="auth-close" />
-            </div>
-            <form className="auth-form" onSubmit={submit}>
-              <label className="form-field">
-                Email
-                <input
-                  type="email"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  required
-                />
-              </label>
-              <label className="form-field">
-                IMAP password
-                <input
-                  type="password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  required
-                />
-              </label>
-              {error && <div className="auth-error">{error}</div>}
-              <div className="form-actions">
-                <button className="icon-button" type="button" onClick={startInviteFlow}>
-                  Got an invite code?
-                </button>
-                <div style={{ marginLeft: "auto", display: "inline-flex", gap: 10 }}>
-                  <button type="submit" className="icon-button" disabled={submitting}>
-                    {submitting ? "Working..." : "Log in"}
-                  </button>
-                </div>
-              </div>
-            </form>
-          </div>
-        </div>
+              <form onSubmit={submit}>
+                <Flex direction="column" gap="3">
+                  <Flex direction="column" gap="1">
+                    <Text size="2" weight="medium">
+                      Email
+                    </Text>
+                    <TextField.Root
+                      type="email"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      required
+                    />
+                  </Flex>
+                  <Flex direction="column" gap="1">
+                    <Text size="2" weight="medium">
+                      IMAP password
+                    </Text>
+                    <TextField.Root
+                      type="password"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      required
+                    />
+                  </Flex>
+                  {error && (
+                    <Callout.Root color="red" role="alert">
+                      <Callout.Text>{error}</Callout.Text>
+                    </Callout.Root>
+                  )}
+                  <Flex justify="between" align="center" gap="3" wrap="wrap">
+                    <Button type="button" variant="ghost" onClick={startInviteFlow}>
+                      Got an invite code?
+                    </Button>
+                    <Button type="submit" disabled={submitting}>
+                      {submitting ? "Working..." : "Log in"}
+                    </Button>
+                  </Flex>
+                </Flex>
+              </form>
+            </Flex>
+          </Dialog.Content>
+        </Dialog.Root>
       )}
 
       {inviteOpen && !signupOpen && (
-        <div className="modal-backdrop">
-          <div className="modal auth-modal" onClick={(event) => event.stopPropagation()}>
-            <div className="auth-header">
-              <div>
-                <h3>Invite code</h3>
-                <p className="settings-subtitle">
-                  Enter your invite code to configure a new account.
-                </p>
-              </div>
-              <X size={18} className="auth-close" onClick={() => setInviteOpen(false)} />
-            </div>
-            <form
-              className="auth-form"
-              onSubmit={(event) => {
-                event.preventDefault();
-                openSignupModal();
-              }}
-            >
-              <label className="form-field">
-                Invite code
-                <input
-                  type="text"
-                  value={inviteCode}
-                  onChange={(e) => setInviteCode(e.target.value)}
-                  required
-                />
-              </label>
-              {inviteError && <div className="auth-error">{inviteError}</div>}
-              <div className="form-actions">
-                <button className="icon-button" type="button" onClick={() => setInviteOpen(false)}>
-                  Back
-                </button>
-                <div style={{ marginLeft: "auto", display: "inline-flex", gap: 10 }}>
-                  <button className="icon-button" type="submit">
-                    Continue
-                  </button>
+        <Dialog.Root
+          open
+          onOpenChange={(open) => {
+            if (!open) setInviteOpen(false);
+          }}
+        >
+          <Dialog.Content size="3" style={{ width: "min(420px, 92vw)" }}>
+            <Flex direction="column" gap="4">
+              <Flex align="start" justify="between" gap="3">
+                <div>
+                  <Dialog.Title>Invite code</Dialog.Title>
+                  <Dialog.Description>
+                    Enter your invite code to configure a new account.
+                  </Dialog.Description>
                 </div>
-              </div>
-            </form>
-          </div>
-        </div>
+                <IconButton
+                  variant="ghost"
+                  aria-label="Close"
+                  onClick={() => setInviteOpen(false)}
+                >
+                  <X size={18} />
+                </IconButton>
+              </Flex>
+              <form
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  openSignupModal();
+                }}
+              >
+                <Flex direction="column" gap="3">
+                  <Flex direction="column" gap="1">
+                    <Text size="2" weight="medium">
+                      Invite code
+                    </Text>
+                    <TextField.Root
+                      type="text"
+                      value={inviteCode}
+                      onChange={(e) => setInviteCode(e.target.value)}
+                      required
+                    />
+                  </Flex>
+                  {inviteError && (
+                    <Callout.Root color="red" role="alert">
+                      <Callout.Text>{inviteError}</Callout.Text>
+                    </Callout.Root>
+                  )}
+                  <Flex justify="between" align="center" gap="3" wrap="wrap">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      onClick={() => setInviteOpen(false)}
+                    >
+                      Back
+                    </Button>
+                    <Button type="submit">Continue</Button>
+                  </Flex>
+                </Flex>
+              </form>
+            </Flex>
+          </Dialog.Content>
+        </Dialog.Root>
       )}
 
       {signupOpen && editingAccount && (
         <>
           {signupError && (
-            <div className="auth-error auth-error-floating">{signupError}</div>
+            <div className="auth-error-floating">
+              <Callout.Root color="red" role="alert">
+                <Callout.Text>{signupError}</Callout.Text>
+              </Callout.Root>
+            </div>
           )}
           <AccountSettingsModal
             editingAccount={editingAccount}

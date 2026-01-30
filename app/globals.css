@@ -55,6 +55,10 @@ body {
   overflow: hidden;
 }
 
+.radix-themes {
+  min-height: 100%;
+}
+
 button {
   white-space: nowrap;
 }
@@ -1669,10 +1673,10 @@ a {
   display: flex;
   flex-direction: column;
   position: relative;
-  background: var(--surface-2);
-  border-radius: var(--radius-md);
-  border: 1px solid var(--border);
-  padding: 16px;
+  background: var(--color-panel-solid);
+  border-radius: var(--radius-5);
+  box-shadow: var(--shadow-6);
+  padding: var(--space-6);
   overflow: hidden;
 }
 
@@ -1681,6 +1685,8 @@ a {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+  padding-bottom: var(--space-4);
+  border-bottom: 1px solid var(--gray-a5);
 }
 
 .compose-header-actions {
@@ -1689,22 +1695,22 @@ a {
   gap: 8px;
 }
 
-.compose-header h3 {
+.compose-title {
   margin: 0;
-  font-size: 16px;
 }
 
 .compose-subtitle {
   margin: 4px 0 0 0;
   font-size: 12px;
-  color: var(--muted);
+  color: var(--gray-a11);
 }
 
 .compose-body {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  margin: 12px 0;
+  gap: var(--space-4);
+  margin: 0;
+  padding: var(--space-4) 0;
   min-height: 0;
   flex: 1;
 }
@@ -1775,16 +1781,20 @@ a {
   width: 100%;
 }
 
+.compose-input-wrap .rt-TextFieldRoot {
+  width: 100%;
+}
+
 .compose-suggestions {
   position: absolute;
   top: calc(100% + 4px);
   left: 0;
   right: 0;
   z-index: 50;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  box-shadow: var(--shadow);
+  background: var(--color-panel);
+  border: 1px solid var(--gray-a5);
+  border-radius: var(--radius-3);
+  box-shadow: var(--shadow-4);
   max-height: 220px;
   overflow: auto;
   display: flex;
@@ -1832,7 +1842,11 @@ a {
   cursor: default;
 }
 
-.compose-row input {
+.compose-row input:not(.rt-TextFieldRoot) {
+  flex: 1;
+}
+
+.compose-row .rt-TextFieldRoot {
   flex: 1;
 }
 
@@ -1846,9 +1860,9 @@ a {
   flex: 1;
 }
 
-.compose-line input,
-.compose-subject input,
-.compose-grid-row input {
+.compose-line input:not(.rt-TextFieldRoot),
+.compose-subject input:not(.rt-TextFieldRoot),
+.compose-grid-row input:not(.rt-TextFieldRoot) {
   flex: 1;
   min-width: 0;
   padding: 8px 10px;
@@ -1872,21 +1886,21 @@ a {
 .compose-grid {
   display: grid;
   grid-template-columns: 1fr;
-  gap: 8px;
+  gap: var(--space-3);
   width: 100%;
 }
 
 .compose-grid-row {
   display: grid;
-  grid-template-columns: 72px 1fr;
-  gap: 10px;
+  grid-template-columns: 84px 1fr;
+  gap: var(--space-3);
   align-items: center;
 }
 
 .compose-grid-row .label {
-  font-size: 12px;
-  color: var(--muted);
-  font-weight: 600;
+  font-size: 13px;
+  color: var(--gray-a11);
+  font-weight: 500;
 }
 
 .compose-static {
@@ -2162,6 +2176,8 @@ a {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--gray-a5);
 }
 
 .compose-draft-meta {
