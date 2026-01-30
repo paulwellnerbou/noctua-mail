@@ -1,10 +1,7 @@
 import { memo, useEffect, useRef } from "react";
+import { stripConditionalComments } from "@/lib/html";
 
 const stylesheetCache = new Map<string, string>();
-
-function stripConditionalComments(input: string) {
-  return input.replace(/<!--\s*\[if[\s\S]*?<!\s*\[endif\s*\]\s*-->/gi, "");
-}
 
 function sanitizeHtml(input: string) {
   return input
