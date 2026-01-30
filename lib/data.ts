@@ -85,6 +85,8 @@ export type Message = {
   htmlBody?: string;
   source?: string;
   hasSource?: boolean;
+  hasAttachments?: boolean;
+  hasInlineAttachments?: boolean;
   attachments?: Attachment[];
   unread?: boolean;
   priority?: string;

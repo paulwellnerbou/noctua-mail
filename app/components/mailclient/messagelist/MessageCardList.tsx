@@ -322,6 +322,7 @@ export default function MessageCardList({ state, actions, helpers }: MessageCard
                                 quickActions={renderQuickActions(message)}
                                 messageMenu={renderMessageMenu(message, isCompactView ? "table" : "list")}
                                 showAttachmentIcon={
+                                  message.hasAttachments ??
                                   (message.attachments?.some((att) => !att.inline) ?? false)
                                 }
                                 showNewBadge={!message.seen && message.recent && !message.draft}

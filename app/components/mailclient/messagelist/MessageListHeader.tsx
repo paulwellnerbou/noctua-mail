@@ -1,5 +1,5 @@
 import type React from "react";
-import { ChevronsDown, ChevronsUp, GitBranch, RefreshCw, Search, X } from "lucide-react";
+import { ChevronsDown, ChevronsUp, GitBranch, RefreshCw } from "lucide-react";
 
 type MessageGroup = {
   key: string;
@@ -9,8 +9,6 @@ type MessageListHeaderProps = {
   state: {
     searchScope: "folder" | "all";
     activeFolderName?: string;
-    searchActive: boolean;
-    searchCriteriaLabel: string;
     loadedMessageCount: number;
     totalMessages: number | null;
     listLoading: boolean;
@@ -24,7 +22,6 @@ type MessageListHeaderProps = {
     collapsedGroups: Record<string, boolean>;
   };
   actions: {
-    clearSearch: () => void;
     setMessagesPage: React.Dispatch<React.SetStateAction<number>>;
     setMessageView: React.Dispatch<React.SetStateAction<"card" | "table" | "compact">>;
     setGroupBy: React.Dispatch<
@@ -39,8 +36,6 @@ export default function MessageListHeader({ state, actions }: MessageListHeaderP
   const {
     searchScope,
     activeFolderName,
-    searchActive,
-    searchCriteriaLabel,
     loadedMessageCount,
     totalMessages,
     listLoading,
@@ -53,7 +48,7 @@ export default function MessageListHeader({ state, actions }: MessageListHeaderP
     groupedMessages,
     collapsedGroups
   } = state;
-  const { clearSearch, setMessagesPage, setMessageView, setGroupBy, setThreadsEnabled, toggleAllGroups } =
+  const { setMessagesPage, setMessageView, setGroupBy, setThreadsEnabled, toggleAllGroups } =
     actions;
 
   return (
@@ -64,20 +59,6 @@ export default function MessageListHeader({ state, actions }: MessageListHeaderP
             ? `Messages in ${activeFolderName}`
             : "Messages"}
         </strong>
-        {searchActive && (
-          <div className="list-search-indicator">
-            <Search size={12} />
-            <span className="search-text">Searching {searchCriteriaLabel || "all messages"}</span>
-            <button
-              className="icon-button ghost small"
-              onClick={clearSearch}
-              title="Clear search"
-              aria-label="Clear search"
-            >
-              <X size={12} />
-            </button>
-          </div>
-        )}
         <span className="muted-inline load-more-inline">
           {(() => {
             const countLabel =

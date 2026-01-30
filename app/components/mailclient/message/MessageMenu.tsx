@@ -11,6 +11,7 @@ import {
   MailOpen,
   MoreVertical,
   Pin,
+  Search,
   RefreshCw,
   Reply,
   ReplyAll,
@@ -42,6 +43,7 @@ type MessageMenuProps = {
   handleDeleteMessage: (message: Message, options?: { allowThreadDeletion?: boolean }) => void;
   handleDownloadEml: (message: Message) => void;
   handleResyncMessage: (message: Message) => void;
+  onShowRelated: (message: Message) => void;
   isTrashFolder: (folderId?: string) => boolean;
 };
 
@@ -62,6 +64,7 @@ export default function MessageMenu({
   handleDeleteMessage,
   handleDownloadEml,
   handleResyncMessage,
+  onShowRelated,
   isTrashFolder
 }: MessageMenuProps) {
   const menuKey = `${origin}:${message.id}`;
@@ -173,6 +176,7 @@ export default function MessageMenu({
                 : null
             ].filter(Boolean),
             [
+              buildItem("Show related", <Search size={14} />, () => onShowRelated(message)),
               buildItem("Download EML", <Download size={14} />, () =>
                 handleDownloadEml(message)
               ),

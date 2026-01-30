@@ -31,6 +31,7 @@ type TopBarProps = {
     searchFieldsOpen: boolean;
     searchBadgesOpen: boolean;
     darkMode: boolean;
+    isRelatedSearch: boolean;
     accounts: Account[];
     currentAccount: Account | null;
     messages: Message[];
@@ -80,6 +81,7 @@ export default function TopBar({ state, ui, actions, refs }: TopBarProps) {
     searchFieldsOpen,
     searchBadgesOpen,
     darkMode,
+    isRelatedSearch,
     accounts,
     currentAccount,
     messages,
@@ -149,6 +151,7 @@ export default function TopBar({ state, ui, actions, refs }: TopBarProps) {
           <select
             className="search-control"
             value={searchScope}
+            disabled={isRelatedSearch}
             onChange={(event) => {
               const next = event.target.value as "folder" | "all";
               setSearchScope(next);
@@ -169,6 +172,7 @@ export default function TopBar({ state, ui, actions, refs }: TopBarProps) {
               onClick={() => setSearchFieldsOpen((open) => !open)}
               aria-label="Search fields"
               title="Search fields"
+              disabled={isRelatedSearch}
             >
               {searchFieldsLabel}
             </button>
@@ -213,6 +217,7 @@ export default function TopBar({ state, ui, actions, refs }: TopBarProps) {
               onClick={() => setSearchBadgesOpen((open) => !open)}
               aria-label="Search badges"
               title="Search badges"
+              disabled={isRelatedSearch}
             >
               {searchBadgesLabel}
             </button>

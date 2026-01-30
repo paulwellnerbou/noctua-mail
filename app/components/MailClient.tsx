@@ -10,6 +10,7 @@ import {
   FileText,
   Paperclip,
   Send,
+  Search,
   ShieldOff,
   Trash2,
   X,
@@ -330,6 +331,10 @@ export default function MailClient() {
     pinned: false,
     attachments: false
   });
+  const [relatedContext, setRelatedContext] = useState<{
+    id: string;
+    subject?: string;
+  } | null>(null);
   const [dragOverFolderId, setDragOverFolderId] = useState<string | null>(null);
   const searchBadgesRef = useRef<HTMLDivElement | null>(null);
   const [openFolderMenuId, setOpenFolderMenuId] = useState<string | null>(null);
@@ -374,6 +379,12 @@ export default function MailClient() {
     [activeAccountId, activeFolderId, groupBy, query, searchBadges, searchFields, searchScope]
   );
   currentKeyRef.current = messagesKey;
+
+  const relatedQueryId = useMemo(() => {
+    const match = query.trim().match(/^related:(.+)$/i);
+    return match?.[1]?.trim() ?? "";
+  }, [query]);
+  const isRelatedSearch = relatedQueryId.length > 0;
 
   const accountFolders = useMemo(
     () => folders.filter((folder) => folder.accountId === activeAccountId),
@@ -570,6 +581,12 @@ export default function MailClient() {
     }
     return parts.join(" · ");
   }, [query, selectedSearchBadges, selectedSearchFields]);
+  const relatedNotice = useMemo(() => {
+    if (!isRelatedSearch) return "";
+    const subject = relatedContext?.subject?.trim();
+    const label = subject ? `"${subject}"` : relatedQueryId || "this message";
+    return `Showing related mails for ${label} (based on subject similarity, sender/recipient overlap, and conversation references).`;
+  }, [isRelatedSearch, relatedContext, relatedQueryId]);
   const clearSearch = () => {
     setQuery("");
     setSearchBadges({
@@ -2517,6 +2534,15 @@ export default function MailClient() {
 
   const isDraftItem = (message: Message) => isDraftMessage(message) || message.draft;
 
+  const handleShowRelated = (message: Message) => {
+    if (searchScope === "folder" && activeFolderId) {
+      setLastFolderId(activeFolderId);
+    }
+    setSearchScope("all");
+    setActiveFolderId("");
+    setQuery(`related:${message.id}`);
+  };
+
   const renderQuickActions = (
     message: Message,
     iconSize = 12,
@@ -2555,6 +2581,7 @@ export default function MailClient() {
       handleDeleteMessage={handleDeleteMessage}
       handleDownloadEml={handleDownloadEml}
       handleResyncMessage={handleResyncMessage}
+      onShowRelated={handleShowRelated}
       isTrashFolder={isTrashFolder}
     />
   );
@@ -3197,6 +3224,20 @@ export default function MailClient() {
   }, [searchFieldsOpen]);
 
   useEffect(() => {
+    if (!isRelatedSearch) {
+      setRelatedContext(null);
+      return;
+    }
+    if (searchScope !== "all") {
+      if (searchScope === "folder" && activeFolderId) {
+        setLastFolderId(activeFolderId);
+      }
+      setSearchScope("all");
+      setActiveFolderId("");
+    }
+  }, [activeFolderId, isRelatedSearch, searchScope]);
+
+  useEffect(() => {
     const handleClick = (event: MouseEvent) => {
       if (!searchBadgesRef.current) return;
       if (searchBadgesRef.current.contains(event.target as Node)) return;
@@ -3366,33 +3407,38 @@ export default function MailClient() {
       lastRequestRef.current = { key: requestKey, page: messagesPage };
       try {
         setLoadingMessages(true);
-        const pageSize = searchScope === "all" ? 600 : 300;
-        const params = new URLSearchParams({
-          accountId: activeAccountId,
-          page: String(messagesPage),
-          pageSize: String(pageSize),
-          groupBy,
-          fields: selectedSearchFields.join(",")
-        });
+      const pageSize = searchScope === "all" ? 600 : 300;
+      const params = new URLSearchParams({
+        accountId: activeAccountId,
+        page: String(messagesPage),
+        pageSize: String(pageSize),
+        groupBy
+      });
+      if (!isRelatedSearch) {
+        params.set("fields", selectedSearchFields.join(","));
+      }
         if (searchBadges.attachments) {
           params.set("attachments", "1");
         }
         if (selectedSearchBadges.length > 0) {
           params.set("badges", selectedSearchBadges.join(","));
         }
-        const trimmedQuery = query.trim();
-        if (searchScope === "folder" && activeFolderId) {
-          params.set("folderId", activeFolderId);
-        }
-        let endpoint = trimmedQuery ? "/api/search" : "/api/messages";
-        if (supportsThreads) {
-          endpoint = "/api/threads";
-        } else if (trimmedQuery) {
-          params.set("q", trimmedQuery);
-        }
-        if (trimmedQuery && endpoint === "/api/threads") {
-          params.set("q", trimmedQuery);
-        }
+      const trimmedQuery = query.trim();
+      if (!isRelatedSearch && searchScope === "folder" && activeFolderId) {
+        params.set("folderId", activeFolderId);
+      }
+      let endpoint = trimmedQuery ? "/api/search" : "/api/messages";
+      if (isRelatedSearch) {
+        endpoint = "/api/related";
+        params.set("relatedId", relatedQueryId);
+      } else if (supportsThreads) {
+        endpoint = "/api/threads";
+      } else if (trimmedQuery) {
+        params.set("q", trimmedQuery);
+      }
+      if (trimmedQuery && endpoint === "/api/threads") {
+        params.set("q", trimmedQuery);
+      }
         const messagesRes = await apiFetch(`${endpoint}?${params.toString()}`);
         if (messagesRes.ok) {
           const data = (await messagesRes.json()) as {
@@ -3401,10 +3447,16 @@ export default function MailClient() {
             groups?: { key: string; label: string; count: number }[];
             total?: number;
             baseCount?: number;
+            relatedSubject?: string;
           };
           const items = Array.isArray(data?.items) ? data.items.filter(Boolean) : [];
           const baseCount = typeof data?.baseCount === "number" ? data.baseCount : items.length;
           if (currentKeyRef.current !== requestKey) return;
+          if (isRelatedSearch) {
+            setRelatedContext({ id: relatedQueryId, subject: data.relatedSubject });
+          } else if (relatedContext) {
+            setRelatedContext(null);
+          }
           setMessages((prev) => (messagesPage === 1 ? items : [...prev, ...items]));
           setHasMoreMessages(Boolean(data?.hasMore));
           setTotalMessages(typeof data?.total === "number" ? data.total : null);
@@ -4054,9 +4106,11 @@ export default function MailClient() {
       accountId: activeAccountId,
       page: "1",
       pageSize: String(pageSize),
-      groupBy,
-      fields: selectedSearchFields.join(",")
+      groupBy
     });
+    if (!isRelatedSearch) {
+      params.set("fields", selectedSearchFields.join(","));
+    }
     if (searchBadges.attachments) {
       params.set("attachments", "1");
     }
@@ -4064,11 +4118,14 @@ export default function MailClient() {
       params.set("badges", selectedSearchBadges.join(","));
     }
     const trimmedQuery = query.trim();
-    if (searchScope === "folder" && activeFolderId) {
+    if (!isRelatedSearch && searchScope === "folder" && activeFolderId) {
       params.set("folderId", activeFolderId);
     }
     let endpoint = trimmedQuery ? "/api/search" : "/api/messages";
-    if (supportsThreads) {
+    if (isRelatedSearch) {
+      endpoint = "/api/related";
+      params.set("relatedId", relatedQueryId);
+    } else if (supportsThreads) {
       endpoint = "/api/threads";
     } else if (trimmedQuery) {
       params.set("q", trimmedQuery);
@@ -4090,6 +4147,7 @@ export default function MailClient() {
         groups?: { key: string; label: string; count: number }[];
         total?: number;
         baseCount?: number;
+        relatedSubject?: string;
       };
       const nextMessages = Array.isArray(messageData?.items)
         ? messageData.items.filter(Boolean)
@@ -4108,6 +4166,11 @@ export default function MailClient() {
       const nextMeta = Array.isArray(messageData?.groups)
         ? messageData.groups
         : computeGroupMeta(nextMessages);
+      if (isRelatedSearch) {
+        setRelatedContext({ id: relatedQueryId, subject: messageData.relatedSubject });
+      } else if (relatedContext) {
+        setRelatedContext(null);
+      }
       setGroupMeta(nextMeta);
       setCollapsedGroups((prev) => {
         const next: Record<string, boolean> = {};
@@ -4926,6 +4989,7 @@ export default function MailClient() {
           searchFieldsOpen,
           searchBadgesOpen,
           darkMode,
+          isRelatedSearch,
           accounts,
           currentAccount: currentAccount ?? null,
           messages,
@@ -4997,6 +5061,8 @@ export default function MailClient() {
             }}
             actions={{
               setActiveFolderId,
+              setSearchScope,
+              clearSearch,
               setCollapsedFolders,
               setDragOverFolderId,
               setOpenFolderMenuId,
@@ -5025,8 +5091,6 @@ export default function MailClient() {
               state={{
                 searchScope,
                 activeFolderName,
-                searchActive,
-                searchCriteriaLabel,
                 loadedMessageCount,
                 totalMessages,
                 listLoading,
@@ -5040,7 +5104,6 @@ export default function MailClient() {
                 collapsedGroups
               }}
               actions={{
-                clearSearch,
                 setMessagesPage,
                 setMessageView,
                 setGroupBy,
@@ -5048,6 +5111,26 @@ export default function MailClient() {
                 toggleAllGroups
               }}
             />
+            {(searchActive || isRelatedSearch) && (
+              <div className="list-search-row">
+                <div className="list-search-indicator">
+                  <Search size={12} />
+                  <span className="search-text">
+                    {isRelatedSearch
+                      ? relatedNotice
+                      : `Searching ${searchCriteriaLabel || "all messages"}`}
+                  </span>
+                </div>
+                <button
+                  className="icon-button ghost small"
+                  onClick={clearSearch}
+                  title="Clear search"
+                  aria-label="Clear search"
+                >
+                  <X size={12} />
+                </button>
+              </div>
+            )}
             {listLoading && sortedMessages.length === 0 && (
               <div className="list-loading">Loading messages…</div>
             )}
@@ -5395,7 +5478,7 @@ export default function MailClient() {
           {isSyncing && <span className="bottom-item">Mailbox sync</span>}
           {isRecomputingThreads && <span className="bottom-item">Recomputing threads…</span>}
           {syncingFolders.size > 0 && (
-            <span className="bottom-item">Deep sync… ({syncingFolders.size})</span>
+            <span className="bottom-item">Folder sync… ({syncingFolders.size})</span>
           )}
           {!isSyncing && syncingFolders.size === 0 && !isRecomputingThreads && (
             <span className="bottom-muted">Idle</span>
@@ -5434,7 +5517,7 @@ export default function MailClient() {
               {isRecomputingThreads && <div>Recomputing threads…</div>}
               {syncingFolders.size > 0 && (
                 <div>
-                  Deep sync running ({syncingFolders.size})
+                  Folder sync running ({syncingFolders.size})
                   <div className="process-list">
                     {Array.from(syncingFolders)
                       .map((folderId) => accountFolders.find((folder) => folder.id === folderId))

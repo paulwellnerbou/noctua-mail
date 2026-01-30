@@ -21,6 +21,8 @@ type FolderTreeNodeProps = {
   };
   actions: {
     setActiveFolderId: React.Dispatch<React.SetStateAction<string>>;
+    setSearchScope: React.Dispatch<React.SetStateAction<"folder" | "all">>;
+    clearSearch: () => void;
     setCollapsedFolders: React.Dispatch<React.SetStateAction<Record<string, boolean>>>;
     setDragOverFolderId: React.Dispatch<React.SetStateAction<string | null>>;
     setOpenFolderMenuId: React.Dispatch<React.SetStateAction<string | null>>;
@@ -64,6 +66,8 @@ export default function FolderTreeNode({
   } = state;
   const {
     setActiveFolderId,
+    setSearchScope,
+    clearSearch,
     setCollapsedFolders,
     setDragOverFolderId,
     setOpenFolderMenuId,
@@ -110,12 +114,16 @@ export default function FolderTreeNode({
         tabIndex={0}
         onClick={() => {
           if (isDeleting) return;
+          clearSearch();
+          setSearchScope("folder");
           setActiveFolderId(folder.id);
         }}
         onKeyDown={(event) => {
           if (event.key === "Enter" || event.key === " ") {
             event.preventDefault();
             if (isDeleting) return;
+            clearSearch();
+            setSearchScope("folder");
             setActiveFolderId(folder.id);
           }
         }}

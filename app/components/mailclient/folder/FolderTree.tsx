@@ -31,6 +31,8 @@ type FolderTreeProps = {
   };
   actions: {
     setActiveFolderId: React.Dispatch<React.SetStateAction<string>>;
+    setSearchScope: React.Dispatch<React.SetStateAction<"folder" | "all">>;
+    clearSearch: () => void;
     setCollapsedFolders: React.Dispatch<React.SetStateAction<Record<string, boolean>>>;
     setDragOverFolderId: React.Dispatch<React.SetStateAction<string | null>>;
     setOpenFolderMenuId: React.Dispatch<React.SetStateAction<string | null>>;

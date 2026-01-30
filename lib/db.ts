@@ -846,6 +846,25 @@ function parseReferences(value?: string | null) {
   return undefined;
 }
 
+function normalizeSubjectLine(subject?: string | null) {
+  let value = (subject ?? "").trim().toLowerCase();
+  if (!value) return "";
+  let previous = "";
+  while (value !== previous) {
+    previous = value;
+    value = value.replace(/^(re|fw|fwd|aw|wg)\s*:\s*/i, "");
+    value = value.replace(/^\[(re|fw|fwd|aw|wg)\]\s*/i, "");
+    value = value.trim();
+  }
+  return value;
+}
+
+function extractEmailsFromText(value?: string | null) {
+  if (!value) return [];
+  const matches = value.toLowerCase().match(/[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/g);
+  return matches ? Array.from(new Set(matches)) : [];
+}
+
 function applyBadgeFilters(where: string, args: any[], badges?: string[] | null) {
   const normalized = (badges ?? []).map((badge) => badge.toLowerCase());
   if (normalized.includes("unread")) {
@@ -1101,6 +1120,319 @@ async function getTotalCount(params: {
   return row?.count ?? 0;
 }
 
+export async function listRelatedMessages(params: {
+  accountId: string;
+  relatedId: string;
+  page: number;
+  pageSize: number;
+  groupBy?: string;
+  badges?: string[] | null;
+  attachmentsOnly?: boolean;
+}) {
+  const {
+    accountId,
+    relatedId,
+    page,
+    pageSize,
+    groupBy = "date",
+    badges,
+    attachmentsOnly
+  } = params;
+  const db = await getDb();
+  const normalizedId = relatedId.trim();
+  if (!normalizedId) {
+    return { items: [] as Message[], groups: [], total: 0, hasMore: false, baseCount: 0 };
+  }
+
+  const accountRow = db
+    .prepare(`SELECT email FROM accounts WHERE id = ?`)
+    .get(accountId) as { email?: string | null } | undefined;
+  const accountEmail = accountRow?.email?.toLowerCase() ?? "";
+
+  const findTarget = (id: string) =>
+    db
+      .prepare(
+        `SELECT * FROM messages WHERE accountId = ? AND (id = ? OR messageId = ?) LIMIT 1`
+      )
+      .get(accountId, id, id) as any;
+  let target = findTarget(normalizedId);
+  if (!target) {
+    const trimmed = normalizedId.replace(/[<>]/g, "");
+    if (trimmed && trimmed !== normalizedId) {
+      target = db
+        .prepare(
+          `SELECT * FROM messages WHERE accountId = ? AND messageId LIKE ? LIMIT 1`
+        )
+        .get(accountId, `%${trimmed}%`) as any;
+    }
+  }
+  if (!target) {
+    return { items: [] as Message[], groups: [], total: 0, hasMore: false, baseCount: 0 };
+  }
+
+  const subjectNormalized = normalizeSubjectLine(target.subject);
+  const subjectTokens = subjectNormalized
+    ? subjectNormalized.split(/\s+/).filter((token) => token.length > 2).slice(0, 6)
+    : [];
+
+  const participantEmails = Array.from(
+    new Set(
+      [
+        ...extractEmailsFromText(target.fromAddr),
+        ...extractEmailsFromText(target.toAddr),
+        ...extractEmailsFromText(target.ccAddr),
+        ...extractEmailsFromText(target.bccAddr)
+      ]
+    )
+  )
+    .filter((email) => email && email !== accountEmail)
+    .slice(0, 6);
+
+  const targetRefs = new Set(
+    [
+      target.messageId,
+      target.inReplyTo,
+      ...(parseReferences(target.references) ?? [])
+    ]
+      .filter(Boolean)
+      .map((value: string) => value.toLowerCase())
+  );
+
+  const clauses: string[] = [];
+  const args: any[] = [accountId, target.id];
+
+  if (subjectNormalized) {
+    clauses.push("lower(m.subject) LIKE ?");
+    args.push(`%${subjectNormalized}%`);
+    subjectTokens.forEach((token) => {
+      clauses.push("lower(m.subject) LIKE ?");
+      args.push(`%${token}%`);
+    });
+  }
+
+  participantEmails.forEach((email) => {
+    clauses.push(
+      "(lower(m.fromAddr) LIKE ? OR lower(m.toAddr) LIKE ? OR lower(m.ccAddr) LIKE ? OR lower(m.bccAddr) LIKE ?)"
+    );
+    const pattern = `%${email}%`;
+    args.push(pattern, pattern, pattern, pattern);
+  });
+
+  if (target.threadId) {
+    clauses.push("m.threadId = ?");
+    args.push(target.threadId);
+  }
+
+  Array.from(targetRefs).slice(0, 8).forEach((ref) => {
+    clauses.push(
+      '(lower(m.messageId) = ? OR lower(m.inReplyTo) = ? OR lower(m."references") LIKE ?)'
+    );
+    args.push(ref, ref, `%${ref}%`);
+  });
+
+  if (clauses.length === 0) {
+    return { items: [] as Message[], groups: [], total: 0, hasMore: false, baseCount: 0 };
+  }
+
+  let where = `m.accountId = ? AND m.id != ? AND (${clauses.join(" OR ")})`;
+  where = applyBadgeFilters(where, args, badges);
+  const attachmentsFilter = attachmentsOnly ?? badges?.includes("attachments");
+  if (attachmentsFilter) {
+    where += " AND EXISTS (SELECT 1 FROM attachments a WHERE a.messageId = m.id AND a.inline = 0)";
+  }
+
+  const rows = db
+    .prepare(
+      `
+      SELECT
+        m.id,
+        m.accountId,
+        m.folderId,
+        m.mailboxPath,
+        m.imapUid,
+        m.threadId,
+        m.messageId,
+        m.inReplyTo,
+        m."references" as "references",
+        m.subject,
+        m.fromAddr,
+        m.toAddr,
+        m.ccAddr,
+        m.bccAddr,
+        m.preview,
+        m.date,
+        m.dateValue,
+        m.priority,
+        m.hasSource,
+        m.unread,
+        m.flags,
+        m.seen,
+        m.answered,
+        m.flagged,
+        m.deleted,
+        m.draft,
+        m.recent,
+        EXISTS(SELECT 1 FROM attachments a WHERE a.messageId = m.id AND a.inline = 0)
+          as hasAttachments,
+        EXISTS(SELECT 1 FROM attachments a WHERE a.messageId = m.id AND a.inline = 1)
+          as hasInlineAttachments
+      FROM messages m
+      WHERE ${where}
+      ORDER BY m.dateValue DESC
+    `
+    )
+    .all(...args) as any[];
+
+  const targetParticipantSet = new Set(participantEmails);
+  const targetRefSet = targetRefs;
+
+  const scored = rows.map((row) => {
+    let score = 0;
+    const candidateSubject = normalizeSubjectLine(row.subject);
+    if (subjectNormalized && candidateSubject) {
+      if (candidateSubject === subjectNormalized) {
+        score += 6;
+      } else if (
+        candidateSubject.includes(subjectNormalized) ||
+        subjectNormalized.includes(candidateSubject)
+      ) {
+        score += 4;
+      } else if (subjectTokens.length > 0) {
+        const tokens = new Set(
+          candidateSubject.split(/\s+/).filter((token: string) => token.length > 2)
+        );
+        const overlap = subjectTokens.filter((token) => tokens.has(token)).length;
+        score += Math.min(3, overlap);
+      }
+    }
+
+    const candidateEmails = new Set(
+      [
+        ...extractEmailsFromText(row.fromAddr),
+        ...extractEmailsFromText(row.toAddr),
+        ...extractEmailsFromText(row.ccAddr),
+        ...extractEmailsFromText(row.bccAddr)
+      ]
+    );
+    let participantOverlap = 0;
+    candidateEmails.forEach((email) => {
+      if (targetParticipantSet.has(email)) participantOverlap += 1;
+    });
+    score += Math.min(5, participantOverlap) * 4;
+
+    if (target.threadId && row.threadId === target.threadId) {
+      score += 5;
+    }
+    if (row.messageId && targetRefSet.has(String(row.messageId).toLowerCase())) {
+      score += 5;
+    }
+    if (row.inReplyTo && targetRefSet.has(String(row.inReplyTo).toLowerCase())) {
+      score += 4;
+    }
+    const candidateRefs =
+      parseReferences(row.references)?.map((ref) => ref.toLowerCase()) ?? [];
+    if (candidateRefs.some((ref) => targetRefSet.has(ref))) {
+      score += 3;
+    }
+    return { row, score };
+  });
+
+  const minScore = 4;
+  const filtered = scored.filter((item) => item.score >= minScore);
+
+  filtered.sort((a, b) => {
+    if (b.score !== a.score) return b.score - a.score;
+    return b.row.dateValue - a.row.dateValue;
+  });
+
+  const total = filtered.length;
+  const start = Math.max(0, (page - 1) * pageSize);
+  const pageRows = filtered.slice(start, start + pageSize).map((item) => item.row);
+
+  const items: Message[] = pageRows.map((row) => {
+    const message: Message = {
+      id: row.id,
+      accountId: row.accountId,
+      folderId: row.folderId,
+      mailboxPath: row.mailboxPath ?? undefined,
+      imapUid: typeof row.imapUid === "number" ? row.imapUid : undefined,
+      threadId: row.threadId,
+      messageId: row.messageId ?? undefined,
+      inReplyTo: row.inReplyTo ?? undefined,
+      references: parseReferences(row.references),
+      subject: row.subject,
+      from: row.fromAddr,
+      to: row.toAddr,
+      cc: row.ccAddr ?? undefined,
+      bcc: row.bccAddr ?? undefined,
+      preview: row.preview,
+      date: row.date,
+      dateValue: row.dateValue,
+      body: "",
+      htmlBody: undefined,
+      priority: row.priority ?? undefined,
+      hasSource: Boolean(row.hasSource),
+      hasAttachments: Boolean(row.hasAttachments),
+      hasInlineAttachments: Boolean(row.hasInlineAttachments),
+      attachments: [],
+      unread: Boolean(row.unread),
+      flags: row.flags ? (JSON.parse(row.flags) as string[]) : undefined,
+      seen: Boolean(row.seen),
+      answered: Boolean(row.answered),
+      flagged: Boolean(row.flagged),
+      deleted: Boolean(row.deleted),
+      draft: Boolean(row.draft),
+      recent: Boolean(row.recent)
+    };
+    (message as any).groupKey = buildGroupKey(message, groupBy);
+    return message;
+  });
+
+  const groupCounts = new Map<string, number>();
+  filtered.forEach(({ row }) => {
+    const message: Message = {
+      id: row.id,
+      accountId: row.accountId,
+      folderId: row.folderId,
+      threadId: row.threadId,
+      subject: row.subject,
+      from: row.fromAddr,
+      to: row.toAddr,
+      preview: row.preview,
+      date: row.date,
+      dateValue: row.dateValue,
+      body: ""
+    } as Message;
+    const key = buildGroupKey(message, groupBy);
+    groupCounts.set(key, (groupCounts.get(key) ?? 0) + 1);
+  });
+
+  const groupRows = Array.from(groupCounts.entries()).map(([key, count]) => ({
+    key,
+    count
+  }));
+  if (groupBy === "date") {
+    const order = ["Today", "Yesterday", "This Week", "Older"];
+    groupRows.sort((a, b) => order.indexOf(a.key) - order.indexOf(b.key));
+  } else if (groupBy === "week" || groupBy === "year") {
+    groupRows.sort((a, b) => String(b.key).localeCompare(String(a.key)));
+  } else {
+    groupRows.sort((a, b) => b.count - a.count);
+  }
+
+  const groups = groupsFromRows(groupRows, groupBy);
+  const hasMore = start + pageRows.length < total;
+
+  return {
+    items,
+    groups,
+    total,
+    hasMore,
+    baseCount: items.length,
+    relatedSubject: target.subject ?? ""
+  };
+}
+
 export async function listMessages(params: {
   accountId: string;
   folderId?: string | null;
@@ -1164,7 +1496,38 @@ export async function listMessages(params: {
   const rows = db
     .prepare(
       `
-      SELECT m.*
+      SELECT
+        m.id,
+        m.accountId,
+        m.folderId,
+        m.mailboxPath,
+        m.imapUid,
+        m.threadId,
+        m.messageId,
+        m.inReplyTo,
+        m."references" as "references",
+        m.subject,
+        m.fromAddr,
+        m.toAddr,
+        m.ccAddr,
+        m.bccAddr,
+        m.preview,
+        m.date,
+        m.dateValue,
+        m.priority,
+        m.hasSource,
+        m.unread,
+        m.flags,
+        m.seen,
+        m.answered,
+        m.flagged,
+        m.deleted,
+        m.draft,
+        m.recent,
+        EXISTS(SELECT 1 FROM attachments a WHERE a.messageId = m.id AND a.inline = 0)
+          as hasAttachments,
+        EXISTS(SELECT 1 FROM attachments a WHERE a.messageId = m.id AND a.inline = 1)
+          as hasInlineAttachments
       FROM messages m
       WHERE ${where}
       ORDER BY m.dateValue DESC
@@ -1172,31 +1535,6 @@ export async function listMessages(params: {
     `
     )
     .all(...args, pageSize, offset) as any[];
-
-  const ids = rows.map((row) => row.id);
-  const attachmentRows =
-    ids.length > 0
-      ? (db
-          .prepare(
-            `SELECT * FROM attachments WHERE messageId IN (${ids.map(() => "?").join(",")})`
-          )
-          .all(...ids) as any[])
-      : [];
-
-  const attachmentsByMessage = new Map<string, Attachment[]>();
-  attachmentRows.forEach((row) => {
-    const list = attachmentsByMessage.get(row.messageId) ?? [];
-    list.push({
-      id: row.id,
-      filename: row.filename,
-      contentType: row.contentType,
-      size: row.size,
-      inline: Boolean(row.inline),
-      cid: row.cid ?? undefined,
-      url: row.url ?? undefined
-    });
-    attachmentsByMessage.set(row.messageId, list);
-  });
 
   const items: Message[] = rows.map((row) => {
     const message: Message = {
@@ -1217,11 +1555,13 @@ export async function listMessages(params: {
       preview: row.preview,
       date: row.date,
       dateValue: row.dateValue,
-      body: row.body,
-      htmlBody: row.htmlBody ?? undefined,
+      body: "",
+      htmlBody: undefined,
       priority: row.priority ?? undefined,
       hasSource: Boolean(row.hasSource),
-      attachments: attachmentsByMessage.get(row.id) ?? [],
+      hasAttachments: Boolean(row.hasAttachments),
+      hasInlineAttachments: Boolean(row.hasInlineAttachments),
+      attachments: [],
       unread: Boolean(row.unread),
       flags: row.flags ? (JSON.parse(row.flags) as string[]) : undefined,
       seen: Boolean(row.seen),
@@ -1373,37 +1713,46 @@ export async function listThreads(params: {
     threadIds.length > 0
       ? (db
           .prepare(
-            `SELECT m.* FROM messages m WHERE m.accountId = ? AND m.threadId IN (${threadIds
-              .map(() => "?")
-              .join(",")}) ORDER BY m.dateValue DESC`
+            `
+            SELECT
+              m.id,
+              m.accountId,
+              m.folderId,
+              m.mailboxPath,
+              m.imapUid,
+              m.threadId,
+              m.messageId,
+              m.inReplyTo,
+              m."references" as "references",
+              m.subject,
+              m.fromAddr,
+              m.toAddr,
+              m.ccAddr,
+              m.bccAddr,
+              m.preview,
+              m.date,
+              m.dateValue,
+              m.priority,
+              m.hasSource,
+              m.unread,
+              m.flags,
+              m.seen,
+              m.answered,
+              m.flagged,
+              m.deleted,
+              m.draft,
+              m.recent,
+              EXISTS(SELECT 1 FROM attachments a WHERE a.messageId = m.id AND a.inline = 0)
+                as hasAttachments,
+              EXISTS(SELECT 1 FROM attachments a WHERE a.messageId = m.id AND a.inline = 1)
+                as hasInlineAttachments
+            FROM messages m
+            WHERE m.accountId = ? AND m.threadId IN (${threadIds.map(() => "?").join(",")})
+            ORDER BY m.dateValue DESC
+          `
           )
           .all(accountId, ...threadIds) as any[])
       : [];
-
-  const ids = messagesRows.map((row) => row.id);
-  const attachmentRows =
-    ids.length > 0
-      ? (db
-          .prepare(
-            `SELECT * FROM attachments WHERE messageId IN (${ids.map(() => "?").join(",")})`
-          )
-          .all(...ids) as any[])
-      : [];
-
-  const attachmentsByMessage = new Map<string, Attachment[]>();
-  attachmentRows.forEach((row) => {
-    const list = attachmentsByMessage.get(row.messageId) ?? [];
-    list.push({
-      id: row.id,
-      filename: row.filename,
-      contentType: row.contentType,
-      size: row.size,
-      inline: Boolean(row.inline),
-      cid: row.cid ?? undefined,
-      url: row.url ?? undefined
-    });
-    attachmentsByMessage.set(row.messageId, list);
-  });
 
   const items: Message[] = messagesRows.map((row) => {
     const message: Message = {
@@ -1428,7 +1777,9 @@ export async function listThreads(params: {
       htmlBody: undefined,
       priority: row.priority ?? undefined,
       hasSource: Boolean(row.hasSource),
-      attachments: attachmentsByMessage.get(row.id) ?? [],
+      hasAttachments: Boolean(row.hasAttachments),
+      hasInlineAttachments: Boolean(row.hasInlineAttachments),
+      attachments: [],
       unread: Boolean(row.unread),
       flags: row.flags ? (JSON.parse(row.flags) as string[]) : undefined,
       seen: Boolean(row.seen),

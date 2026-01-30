@@ -135,12 +135,14 @@ export default function ThreadMessageCard({
             {message.priority && message.priority.toLowerCase() !== "normal" && (
               <span className="thread-badge priority">Priority: {message.priority}</span>
             )}
-            {(message.attachments?.length ?? 0) > 0 && (
+            {(message.hasAttachments ??
+              (message.attachments?.length ?? 0) > 0) && (
               <span className="thread-badge icon attachment" title="Attachments">
                 <Paperclip size={12} />
               </span>
             )}
-            {message.attachments?.some((item) => item.inline) && (
+            {(message.hasInlineAttachments ??
+              message.attachments?.some((item) => item.inline)) && (
               <span className="thread-badge icon inline" title="Inline images">
                 <ImageIcon size={12} />
               </span>
