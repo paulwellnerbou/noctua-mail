@@ -1,5 +1,12 @@
 import { NextResponse } from "next/server";
-import { getAccounts, getFolders, getThreadIdsByMessageIds, saveFolders, upsertMessages } from "@/lib/db";
+import {
+  getAccounts,
+  getFolders,
+  getMessageIdsByMessageIds,
+  getThreadIdsByMessageIds,
+  saveFolders,
+  upsertMessages
+} from "@/lib/db";
 import { saveAttachmentData, saveMessageSource } from "@/lib/storage";
 import { syncImapAccount } from "@/lib/mail/imap";
 import { requireSessionOr401 } from "@/lib/auth";
@@ -87,43 +94,100 @@ export async function POST(request: Request) {
       hasSource: Boolean(source ?? message.hasSource)
     };
   };
-  const normalizeThreadIds = (
+  const normalizeThreading = (
     items: typeof messages,
-    externalThreadIds: Map<string, string>
+    externalThreadIds: Map<string, string>,
+    externalParentIds: Map<string, string>
   ) => {
     const byMessageId = new Map<string, typeof messages[number]>();
     items.forEach((msg) => {
-      if (msg.messageId) byMessageId.set(msg.messageId, msg);
+      if (msg.messageId) {
+        const existing = byMessageId.get(msg.messageId);
+        if (!existing || msg.dateValue < existing.dateValue) {
+          byMessageId.set(msg.messageId, msg);
+        }
+      }
     });
-    const resolveRoot = (msg: typeof messages[number]) => {
-      let current: typeof messages[number] | undefined = msg;
-      const seen = new Set<string>();
-      while (current?.inReplyTo && byMessageId.has(current.inReplyTo)) {
-        const parent = byMessageId.get(current.inReplyTo);
-        if (!parent || seen.has(parent.id)) break;
-        seen.add(parent.id);
-        current = parent;
+    const cache = new Map<string, string>();
+    const resolveParentId = (msg: typeof messages[number]) => {
+      if (msg.inReplyTo && byMessageId.has(msg.inReplyTo)) {
+        return byMessageId.get(msg.inReplyTo)!.id;
       }
-      if (current?.messageId) return current.threadId ?? current.messageId;
-      if (current?.threadId) return current.threadId;
-      if (msg.inReplyTo) {
-        const external = externalThreadIds.get(msg.inReplyTo);
-        if (external) return external;
-        return msg.inReplyTo;
+      if (msg.inReplyTo && externalParentIds.has(msg.inReplyTo)) {
+        return externalParentIds.get(msg.inReplyTo)!;
       }
-      if (msg.references && msg.references.length > 0) {
-        return msg.references[msg.references.length - 1];
+      const refs = msg.references ?? [];
+      for (let i = refs.length - 1; i >= 0; i -= 1) {
+        const ref = refs[i];
+        if (byMessageId.has(ref)) {
+          return byMessageId.get(ref)!.id;
+        }
+        if (externalParentIds.has(ref)) {
+          return externalParentIds.get(ref)!;
+        }
       }
-      return msg.threadId ?? msg.messageId ?? msg.id;
+      return null;
     };
-    return items.map((msg) => ({ ...msg, threadId: resolveRoot(msg) }));
+    const resolveRoot = (msg: typeof messages[number], stack = new Set<string>()) => {
+      const cached = cache.get(msg.id);
+      if (cached) return cached;
+      if (stack.has(msg.id)) {
+        const fallback = msg.messageId ?? msg.threadId ?? msg.id;
+        cache.set(msg.id, fallback);
+        return fallback;
+      }
+      stack.add(msg.id);
+      const refs = msg.references ?? [];
+      let resolved: string | undefined;
+      if (msg.inReplyTo && byMessageId.has(msg.inReplyTo)) {
+        resolved = resolveRoot(byMessageId.get(msg.inReplyTo)!, stack);
+      } else {
+        const refMatch = refs.find((ref) => byMessageId.has(ref));
+        if (refMatch) {
+          resolved = resolveRoot(byMessageId.get(refMatch)!, stack);
+        }
+      }
+      if (!resolved && msg.inReplyTo) {
+        resolved = externalThreadIds.get(msg.inReplyTo);
+      }
+      if (!resolved) {
+        const refMatch = refs.find((ref) => externalThreadIds.has(ref));
+        if (refMatch) resolved = externalThreadIds.get(refMatch);
+      }
+      if (!resolved) {
+        if (msg.inReplyTo) {
+          resolved = msg.inReplyTo;
+        } else if (refs.length > 0) {
+          resolved = refs[refs.length - 1];
+        } else {
+          resolved = msg.threadId ?? msg.messageId ?? msg.id;
+        }
+      }
+      stack.delete(msg.id);
+      cache.set(msg.id, resolved);
+      return resolved;
+    };
+    return items.map((msg) => ({
+      ...msg,
+      threadId: resolveRoot(msg),
+      parentId: resolveParentId(msg) ?? undefined
+    }));
   };
 
-  const replyIds = Array.from(
-    new Set(messages.map((msg) => msg.inReplyTo).filter(Boolean) as string[])
+  const referenceIds = new Set<string>();
+  messages.forEach((msg) => {
+    if (msg.inReplyTo) referenceIds.add(msg.inReplyTo);
+    (msg.references ?? []).forEach((ref) => referenceIds.add(ref));
+  });
+  const externalThreadIds = await getThreadIdsByMessageIds(
+    account.id,
+    Array.from(referenceIds)
   );
-  const externalThreadIds = await getThreadIdsByMessageIds(account.id, replyIds);
-  const normalizedMessages = normalizeThreadIds(messages, externalThreadIds);
+  const externalParentIds = await getMessageIdsByMessageIds(
+    account.id,
+    Array.from(referenceIds)
+  );
+  const normalizedMessages = normalizeThreading(messages, externalThreadIds, externalParentIds);
   const strippedMessages = await Promise.all(
     normalizedMessages.map((message) => sanitizeMessage(message, account.id))
   );

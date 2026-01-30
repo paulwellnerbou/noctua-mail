@@ -2,6 +2,10 @@ import { memo, useEffect, useRef } from "react";
 
 const stylesheetCache = new Map<string, string>();
 
+function stripConditionalComments(input: string) {
+  return input.replace(/<!--\s*\[if[\s\S]*?<!\s*\[endif\s*\]\s*-->/gi, "");
+}
+
 function sanitizeHtml(input: string) {
   return input
     .replace(/<script[\s\S]*?>[\s\S]*?<\/script>/gi, "")
@@ -153,9 +157,10 @@ function HtmlMessage({
     if (!hostRef.current) return;
     const root = hostRef.current.shadowRoot ?? hostRef.current.attachShadow({ mode: "open" });
     const rawHtml = html || "";
-    const hasExplicitColor = /(^|[^-])color\s*:/i.test(rawHtml);
-    const externalStylesheets = extractStylesheetLinks(rawHtml);
-    const safeHtml = sanitizeHtml(rawHtml);
+    const cleanedHtml = stripConditionalComments(rawHtml);
+    const hasExplicitColor = /(^|[^-])color\s*:/i.test(cleanedHtml);
+    const externalStylesheets = extractStylesheetLinks(cleanedHtml);
+    const safeHtml = sanitizeHtml(cleanedHtml);
     const hostEl = root.host as HTMLElement;
     hostEl.setAttribute("data-theme", darkMode ? "dark" : "light");
     hostEl.style.setProperty("--zoom", String(zoom));

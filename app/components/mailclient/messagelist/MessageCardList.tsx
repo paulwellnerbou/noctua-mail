@@ -325,7 +325,11 @@ export default function MessageCardList({ state, actions, helpers }: MessageCard
                                   message.hasAttachments ??
                                   (message.attachments?.some((att) => !att.inline) ?? false)
                                 }
-                                showNewBadge={!message.seen && message.recent && !message.draft}
+                                showNewBadge={
+                                  !Boolean(message.seen) &&
+                                  Boolean(message.recent) &&
+                                  !Boolean(message.draft)
+                                }
                               />
                             );
                           })}
@@ -403,7 +407,11 @@ export default function MessageCardList({ state, actions, helpers }: MessageCard
                         showAttachmentIcon={
                           (message.attachments?.some((att) => !att.inline) ?? false)
                         }
-                        showNewBadge={!message.seen && message.recent && !message.draft}
+                        showNewBadge={
+                          !Boolean(message.seen) &&
+                          Boolean(message.recent) &&
+                          !Boolean(message.draft)
+                        }
                       />
                     );
                   })}

@@ -4,7 +4,6 @@ import type React from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import TurndownService from "turndown";
 import {
-  Edit3,
   Inbox,
   Archive,
   FileText,
@@ -13,8 +12,7 @@ import {
   Search,
   ShieldOff,
   Trash2,
-  X,
-  Pin
+  X
 } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import remarkBreaks from "remark-breaks";
@@ -23,6 +21,7 @@ import ComposeEditor from "./ComposeEditor";
 import HtmlMessage from "./HtmlMessage";
 import LoginOverlay from "./auth/LoginOverlay";
 import FolderPane from "./mailclient/folder/FolderPane";
+import FolderBadges from "./mailclient/folder/FolderBadges";
 import FolderTree from "./mailclient/folder/FolderTree";
 import InAppNoticeStack from "./mailclient/InAppNoticeStack";
 import ComposeInlineCard from "./mailclient/composition/ComposeInlineCard";
@@ -31,7 +30,9 @@ import ComposeModal from "./mailclient/composition/ComposeModal";
 import MessageCardList from "./mailclient/messagelist/MessageCardList";
 import MessageListHeader from "./mailclient/messagelist/MessageListHeader";
 import MessageListPane from "./mailclient/messagelist/MessageListPane";
+import MessageSelectIndicators from "./mailclient/messagelist/MessageSelectIndicators";
 import MessageTable from "./mailclient/messagelist/MessageTable";
+import UnreadDot from "./mailclient/messagelist/UnreadDot";
 import MessageMenu from "./mailclient/message/MessageMenu";
 import MessageQuickActions from "./mailclient/message/MessageQuickActions";
 import MessageViewPane from "./mailclient/message/MessageViewPane";
@@ -765,37 +766,18 @@ export default function MailClient() {
 
   const isPinnedMessage = (message: Message) =>
     message.flags?.some((flag) => flag.toLowerCase() === "pinned") ?? false;
-  const renderSelectIndicators = (message: Message) => {
-    const isPinned = isPinnedMessage(message);
-    const isDraft = message.draft;
-    if (!isPinned && !isDraft) return null;
-    return (
-      <span className="message-select-icons" aria-hidden="true">
-        {isPinned && (
-          <span className="message-select-icon pinned" title="Pinned">
-            <Pin size={12} />
-          </span>
-        )}
-        {isDraft && (
-          <span className="message-select-icon draft" title="Draft">
-            <Edit3 size={12} />
-          </span>
-        )}
-      </span>
-    );
-  };
+  const renderSelectIndicators = (message: Message) => (
+    <MessageSelectIndicators
+      isPinned={isPinnedMessage(message)}
+      isDraft={Boolean(message.draft)}
+    />
+  );
 
   const renderUnreadDot = (message: Message) => (
-    <button
-      type="button"
-      className={`unread-dot ${message.seen ? "read" : "unread"}`}
-      title={message.seen ? "Mark as unread" : "Mark as read"}
-      aria-label={message.seen ? "Mark as unread" : "Mark as read"}
+    <UnreadDot
+      seen={Boolean(message.seen)}
       disabled={pendingMessageActions.has(message.id)}
-      onClick={(event) => {
-        event.stopPropagation();
-        updateFlagState(message, "seen", !message.seen);
-      }}
+      onToggle={() => updateFlagState(message, "seen", !message.seen)}
     />
   );
 
@@ -864,12 +846,12 @@ export default function MailClient() {
     ? draftsFolder.count ?? messageCountByFolder.get(draftsFolder.id) ?? 0
     : 0;
 
-  const extractEmails = (value: string) => {
+  const extractEmails = (value?: string) => {
     if (!value) return [];
     const matches = value.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi);
     return matches ? matches.map((entry) => entry.trim()) : [];
   };
-  const getPrimaryEmail = (value: string) => extractEmails(value)[0] ?? "";
+  const getPrimaryEmail = (value?: string) => extractEmails(value)[0] ?? null;
   const getAccountFromValue = (account?: Account | null) => {
     if (!account?.email) return "";
     const name = (account.name ?? "").trim();
@@ -1273,28 +1255,26 @@ export default function MailClient() {
     };
     buckets.forEach((bucket) => {
       const nodes = new Map<string, ThreadNode>();
-      const byMessageId = new Map<string, Message>();
       bucket.forEach((message) => {
         nodes.set(message.id, { message, children: [], threadSize: bucket.length });
-        if (message.messageId) byMessageId.set(message.messageId, message);
       });
       const roots: ThreadNode[] = [];
+      const findParentId = (message: Message) => {
+        const parentId = message.parentId;
+        if (!parentId) return null;
+        return nodes.has(parentId) ? parentId : null;
+      };
       bucket.forEach((message) => {
         const node = nodes.get(message.id);
         if (!node) return;
-        const parentKey = message.inReplyTo;
-        if (parentKey && byMessageId.has(parentKey)) {
-          const parent = byMessageId.get(parentKey)!;
-          if (parent.id !== message.id) {
-            nodes.get(parent.id)!.children.push(node);
-            return;
-          }
+        const parentId = findParentId(message);
+        if (parentId && parentId !== message.id) {
+          nodes.get(parentId)!.children.push(node);
+          return;
         }
         roots.push(node);
       });
-      const hasLinks = bucket.some(
-        (msg) => msg.inReplyTo && byMessageId.has(msg.inReplyTo)
-      );
+      const hasLinks = bucket.some((msg) => Boolean(findParentId(msg)));
       if (!hasLinks && roots.length > 1) {
         const sorted = [...roots].sort((a, b) => a.message.dateValue - b.message.dateValue);
         const root = sorted[0];
@@ -2311,6 +2291,13 @@ export default function MailClient() {
             })
           });
       if (res.ok) {
+        if (composeReplyMessage) {
+          const threadId =
+            composeReplyMessage.threadId ??
+            composeReplyMessage.messageId ??
+            composeReplyMessage.id;
+          evictThreadCache(threadId);
+        }
         if (composeDraftId && activeAccountId) {
           try {
             await apiFetch("/api/drafts/discard", {
@@ -2532,7 +2519,8 @@ export default function MailClient() {
     }
   };
 
-  const isDraftItem = (message: Message) => isDraftMessage(message) || message.draft;
+  const isDraftItem = (message: Message) =>
+    isDraftMessage(message) || Boolean(message.draft);
 
   const handleShowRelated = (message: Message) => {
     if (searchScope === "folder" && activeFolderId) {
@@ -3576,11 +3564,28 @@ export default function MailClient() {
 
   useEffect(() => {
     const loadThreadContent = async () => {
-      if (!activeMessage || !supportsThreads) return;
+      if (!activeMessage) return;
       const threadId =
         activeMessage.threadId ?? activeMessage.messageId ?? activeMessage.id;
       if (!threadId) return;
-      if (threadContentById[threadId]) return;
+
+      const cachedThread = threadContentById[threadId];
+      const hasContent = (message?: Message | null) => {
+        if (!message) return false;
+        const hasText = (message.body ?? "").trim().length > 0;
+        const hasHtml = hasHtmlContent(message.htmlBody);
+        return hasText || hasHtml;
+      };
+      const cachedActive =
+        cachedThread?.find((item) => item.id === activeMessage.id) ?? null;
+      const activeHasContent = hasContent(cachedActive ?? activeMessage);
+      if (supportsThreads && cachedThread && cachedThread.length > 0 && activeHasContent) {
+        return;
+      }
+      if (!supportsThreads && activeHasContent) {
+        return;
+      }
+
       const findRoot = (
         nodes: ThreadNode[],
         currentRoot: ThreadNode | null = null
@@ -3595,14 +3600,15 @@ export default function MailClient() {
         }
         return null;
       };
-      const localRoot = findRoot(threadForest, null);
+      const localRoot = supportsThreads ? findRoot(threadForest, null) : null;
       const localFlat = localRoot
         ? flattenThread(localRoot).map((item) => item.message)
+        : [activeMessage];
+      const messageIds = Array.from(new Set(localFlat.map((item) => item.id)));
+      const threadIds = supportsThreads
+        ? Array.from(new Set(localFlat.map((item) => item.threadId).filter(Boolean)))
         : [];
-      const messageIds = localFlat.map((item) => item.id);
-      const threadIds = Array.from(
-        new Set(localFlat.map((item) => item.threadId).filter(Boolean))
-      );
+
       setThreadContentLoading(threadId);
       try {
         const res = await apiFetch(`/api/thread/related`, {
@@ -3610,7 +3616,7 @@ export default function MailClient() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             accountId: activeAccountId,
-            threadIds: threadIds.length > 0 ? threadIds : [threadId],
+            threadIds,
             messageIds,
             groupBy
           })
@@ -3813,27 +3819,17 @@ export default function MailClient() {
   const folderNameById = (id: string) =>
     folders.find((folder) => folder.id === id)?.name ?? id;
   const threadPathById = (id: string) => id.replace(`${activeAccountId}:`, "");
-  const renderFolderBadges = (folderIds: string[]) => {
-    if (folderIds.length === 0) return null;
-    return (
-      <span className="folder-badges">
-        {folderIds.map((folderId) => (
-          <button
-            key={folderId}
-            className="folder-badge"
-            title={threadPathById(folderId)}
-            onClick={(event) => {
-              event.stopPropagation();
-              setSearchScope("folder");
-              setActiveFolderId(folderId);
-            }}
-          >
-            {folderNameById(folderId)}
-          </button>
-        ))}
-      </span>
-    );
-  };
+  const renderFolderBadges = (folderIds: string[]) => (
+    <FolderBadges
+      folderIds={folderIds}
+      threadPathById={threadPathById}
+      folderNameById={folderNameById}
+      onSelectFolder={(folderId) => {
+        setSearchScope("folder");
+        setActiveFolderId(folderId);
+      }}
+    />
+  );
   const getGroupLabel = (group: { key: string; label?: string }) => {
     if (groupBy === "folder") {
       return threadPathById(group.key);
@@ -4233,6 +4229,17 @@ export default function MailClient() {
     setInAppNotices((prev) => prev.filter((item) => item.id !== noticeId));
   };
 
+  const evictThreadCache = useCallback((threadId?: string | null) => {
+    if (!threadId) return;
+    setThreadContentById((prev) => {
+      if (!(threadId in prev)) return prev;
+      const next = { ...prev };
+      delete next[threadId];
+      threadCacheOrderRef.current = threadCacheOrderRef.current.filter((id) => id !== threadId);
+      return next;
+    });
+  }, []);
+
   const handleResyncMessage = async (message: Message) => {
     try {
       const res = await apiFetch("/api/message/resync", {
@@ -4245,13 +4252,7 @@ export default function MailClient() {
         return;
       }
       const threadId = message.threadId ?? message.messageId ?? message.id;
-      setThreadContentById((prev) => {
-        if (!threadId || !(threadId in prev)) return prev;
-        const next = { ...prev };
-        delete next[threadId];
-        threadCacheOrderRef.current = threadCacheOrderRef.current.filter((id) => id !== threadId);
-        return next;
-      });
+      evictThreadCache(threadId);
       if (searchScope === "folder" && activeFolderId === message.folderId) {
         await refreshMailboxData();
       }

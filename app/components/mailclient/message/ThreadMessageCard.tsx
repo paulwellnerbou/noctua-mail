@@ -1,3 +1,4 @@
+import { useState } from "react";
 import type React from "react";
 import {
   Check,
@@ -34,7 +35,11 @@ type ThreadMessageCardProps = {
   getImapFlagBadges: (message: Message) => ImapFlagBadge[];
   isDraftMessage: (message: Message) => boolean;
   openCompose: (mode: ComposeMode, message?: Message) => void;
-  renderQuickActions: (message: Message, iconSize?: number, context?: string) => React.ReactNode;
+  renderQuickActions: (
+    message: Message,
+    iconSize?: number,
+    origin?: "list" | "table" | "thread"
+  ) => React.ReactNode;
   renderMessageMenu: (message: Message, view: "thread" | "table" | "list") => React.ReactNode;
   collapsedMessages: Record<string, boolean>;
   setCollapsedMessages: React.Dispatch<React.SetStateAction<Record<string, boolean>>>;
@@ -95,6 +100,9 @@ export default function ThreadMessageCard({
   getPrimaryEmail,
   extractEmails
 }: ThreadMessageCardProps) {
+  const [toExpanded, setToExpanded] = useState(false);
+  const toValue = message.to ?? "";
+  const showToToggle = toValue.length > 120;
   return (
     <article
       className={`thread-card ${openMessageMenuId === `thread:${message.id}` ? "menu-open" : ""}`}
@@ -198,9 +206,24 @@ export default function ThreadMessageCard({
               </button>
             )}
           </div>
-          <div className="thread-card-line">
+          <div className="thread-card-line thread-card-line-to">
             <span className="label">To:</span>
-            <span className="thread-card-value">{message.to}</span>
+            <div className="thread-card-to-wrapper">
+              <span
+                className={`thread-card-value thread-card-to ${toExpanded ? "expanded" : ""}`}
+              >
+                {toValue}
+              </span>
+              {showToToggle && (
+                <button
+                  className="thread-card-more"
+                  type="button"
+                  onClick={() => setToExpanded((prev) => !prev)}
+                >
+                  {toExpanded ? "less..." : "more..."}
+                </button>
+              )}
+            </div>
             {extractEmails(message.to).length > 0 && (
               <button
                 className={`icon-button ghost small copy-email ${

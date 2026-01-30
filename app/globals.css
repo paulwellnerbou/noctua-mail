@@ -1449,6 +1449,11 @@ a {
   line-height: 1.6;
 }
 
+.thread-card-line-to {
+  display: flex;
+  align-items: flex-start;
+}
+
 .thread-card-line .icon-button.ghost {
   padding: 2px 4px;
 }
@@ -1479,6 +1484,43 @@ a {
 
 .thread-card-value {
   color: var(--text);
+}
+
+.thread-card-to-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+}
+
+.thread-card-to {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  white-space: normal;
+  word-break: break-word;
+}
+
+.thread-card-to.expanded {
+  display: block;
+  -webkit-line-clamp: unset;
+  overflow: visible;
+}
+
+.thread-card-more {
+  align-self: flex-start;
+  background: transparent;
+  border: none;
+  padding: 0;
+  color: var(--accent);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.thread-card-more:hover {
+  text-decoration: underline;
 }
 
 .copy-email {

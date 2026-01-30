@@ -80,6 +80,7 @@ function initSchema(db: any) {
       accountId TEXT NOT NULL,
       folderId TEXT NOT NULL,
       threadId TEXT NOT NULL,
+      parentId TEXT,
       messageId TEXT,
       inReplyTo TEXT,
       "references" TEXT,
@@ -190,6 +191,7 @@ function initSchema(db: any) {
   ensureColumn("messages", "ccAddr", "TEXT");
   ensureColumn("messages", "bccAddr", "TEXT");
   ensureColumn("messages", "references", "TEXT");
+  ensureColumn("messages", "parentId", "TEXT");
   ensureColumn("messages", "mailboxPath", "TEXT");
   ensureColumn("messages", "imapUid", "INTEGER");
   ensureColumn("messages", "flags", "TEXT");
@@ -621,7 +623,7 @@ export async function recomputeThreadIdsForAccount(accountId: string) {
   const db = await getDb();
   const rows = db
     .prepare(
-      `SELECT id, messageId, inReplyTo, "references", threadId
+      `SELECT id, messageId, inReplyTo, "references", threadId, parentId, dateValue
        FROM messages
        WHERE accountId = ?`
     )
@@ -631,34 +633,54 @@ export async function recomputeThreadIdsForAccount(accountId: string) {
     inReplyTo: string | null;
     references: string | null;
     threadId: string;
+    parentId: string | null;
+    dateValue: number;
   }>;
   if (rows.length === 0) return;
   const byMessageId = new Map<string, (typeof rows)[number]>();
+  const byId = new Map<string, (typeof rows)[number]>();
   rows.forEach((row) => {
-    if (row.messageId) byMessageId.set(row.messageId, row);
+    byId.set(row.id, row);
+    if (row.messageId) {
+      const existing = byMessageId.get(row.messageId);
+      if (!existing || row.dateValue < existing.dateValue) {
+        byMessageId.set(row.messageId, row);
+      }
+    }
   });
-  const cache = new Map<string, string>();
+  const parentCache = new Map<string, string | null>();
+  const resolveParentId = (msg: (typeof rows)[number]) => {
+    if (parentCache.has(msg.id)) return parentCache.get(msg.id)!;
+    let resolved: string | null = null;
+    if (msg.inReplyTo && byMessageId.has(msg.inReplyTo)) {
+      resolved = byMessageId.get(msg.inReplyTo)!.id;
+    } else {
+      const refs = parseReferences(msg.references) ?? [];
+      for (let i = refs.length - 1; i >= 0; i -= 1) {
+        const ref = refs[i];
+        if (byMessageId.has(ref)) {
+          resolved = byMessageId.get(ref)!.id;
+          break;
+        }
+      }
+    }
+    if (resolved === msg.id) resolved = null;
+    parentCache.set(msg.id, resolved);
+    return resolved;
+  };
+  const threadCache = new Map<string, string>();
   const resolveThreadId = (msg: (typeof rows)[number], stack: Set<string>): string => {
-    if (cache.has(msg.id)) return cache.get(msg.id)!;
+    if (threadCache.has(msg.id)) return threadCache.get(msg.id)!;
     if (stack.has(msg.id)) {
       const fallback = msg.messageId ?? msg.threadId ?? msg.id;
-      cache.set(msg.id, fallback);
+      threadCache.set(msg.id, fallback);
       return fallback;
     }
     stack.add(msg.id);
+    const parentId = resolveParentId(msg);
     let resolved: string | undefined;
-    const refs = parseReferences(msg.references) ?? [];
-    const firstKnownRef = refs.find((ref) => byMessageId.has(ref));
-    if (firstKnownRef) {
-      const parent = byMessageId.get(firstKnownRef)!;
-      resolved = resolveThreadId(parent, stack);
-    } else if (msg.inReplyTo && byMessageId.has(msg.inReplyTo)) {
-      const parent = byMessageId.get(msg.inReplyTo)!;
-      resolved = resolveThreadId(parent, stack);
-    } else if (msg.inReplyTo) {
-      resolved = msg.inReplyTo;
-    } else if (refs.length > 0) {
-      resolved = refs[0];
+    if (parentId && byId.has(parentId)) {
+      resolved = resolveThreadId(byId.get(parentId)!, stack);
     } else if (msg.messageId) {
       resolved = msg.messageId;
     } else if (msg.threadId) {
@@ -667,20 +689,24 @@ export async function recomputeThreadIdsForAccount(accountId: string) {
       resolved = msg.id;
     }
     stack.delete(msg.id);
-    cache.set(msg.id, resolved);
+    threadCache.set(msg.id, resolved);
     return resolved;
   };
-  const updates: Array<{ id: string; threadId: string }> = [];
+  const updates: Array<{ id: string; threadId: string; parentId: string | null }> = [];
   rows.forEach((row) => {
+    const nextParentId = resolveParentId(row);
     const nextThreadId = resolveThreadId(row, new Set());
-    if (nextThreadId && nextThreadId !== row.threadId) {
-      updates.push({ id: row.id, threadId: nextThreadId });
+    if (
+      (nextThreadId && nextThreadId !== row.threadId) ||
+      (nextParentId ?? null) !== (row.parentId ?? null)
+    ) {
+      updates.push({ id: row.id, threadId: nextThreadId, parentId: nextParentId });
     }
   });
   if (updates.length === 0) return;
-  const update = db.prepare(`UPDATE messages SET threadId = ? WHERE id = ?`);
+  const update = db.prepare(`UPDATE messages SET threadId = ?, parentId = ? WHERE id = ?`);
   db.transaction(() => {
-    updates.forEach((row) => update.run(row.threadId, row.id));
+    updates.forEach((row) => update.run(row.threadId, row.parentId, row.id));
   })();
 }
 
@@ -1251,6 +1277,7 @@ export async function listRelatedMessages(params: {
         m.mailboxPath,
         m.imapUid,
         m.threadId,
+        m.parentId,
         m.messageId,
         m.inReplyTo,
         m."references" as "references",
@@ -1357,6 +1384,7 @@ export async function listRelatedMessages(params: {
       mailboxPath: row.mailboxPath ?? undefined,
       imapUid: typeof row.imapUid === "number" ? row.imapUid : undefined,
       threadId: row.threadId,
+      parentId: row.parentId ?? undefined,
       messageId: row.messageId ?? undefined,
       inReplyTo: row.inReplyTo ?? undefined,
       references: parseReferences(row.references),
@@ -1503,6 +1531,7 @@ export async function listMessages(params: {
         m.mailboxPath,
         m.imapUid,
         m.threadId,
+        m.parentId,
         m.messageId,
         m.inReplyTo,
         m."references" as "references",
@@ -1544,6 +1573,7 @@ export async function listMessages(params: {
       mailboxPath: row.mailboxPath ?? undefined,
       imapUid: typeof row.imapUid === "number" ? row.imapUid : undefined,
       threadId: row.threadId,
+      parentId: row.parentId ?? undefined,
       messageId: row.messageId ?? undefined,
       inReplyTo: row.inReplyTo ?? undefined,
       references: parseReferences(row.references),
@@ -1721,6 +1751,7 @@ export async function listThreads(params: {
               m.mailboxPath,
               m.imapUid,
               m.threadId,
+              m.parentId,
               m.messageId,
               m.inReplyTo,
               m."references" as "references",
@@ -1762,6 +1793,7 @@ export async function listThreads(params: {
       mailboxPath: row.mailboxPath ?? undefined,
       imapUid: typeof row.imapUid === "number" ? row.imapUid : undefined,
       threadId: row.threadId,
+      parentId: row.parentId ?? undefined,
       messageId: row.messageId ?? undefined,
       inReplyTo: row.inReplyTo ?? undefined,
       references: parseReferences(row.references),
@@ -1873,6 +1905,7 @@ export async function listThreadMessages(params: {
       mailboxPath: row.mailboxPath ?? undefined,
       imapUid: typeof row.imapUid === "number" ? row.imapUid : undefined,
       threadId: row.threadId,
+      parentId: row.parentId ?? undefined,
       messageId: row.messageId ?? undefined,
       inReplyTo: row.inReplyTo ?? undefined,
       references: parseReferences(row.references),
@@ -1924,6 +1957,30 @@ export async function getThreadIdsByMessageIds(accountId: string, messageIds: st
   return map;
 }
 
+export async function getMessageIdsByMessageIds(accountId: string, messageIds: string[]) {
+  if (messageIds.length === 0) return new Map<string, string>();
+  const db = await getDb();
+  const rows = db
+    .prepare(
+      `SELECT messageId, id, dateValue
+       FROM messages
+       WHERE accountId = ? AND messageId IN (${messageIds.map(() => "?").join(",")})
+       ORDER BY dateValue ASC`
+    )
+    .all(accountId, ...messageIds) as Array<{
+    messageId: string | null;
+    id: string;
+    dateValue: number;
+  }>;
+  const map = new Map<string, string>();
+  rows.forEach((row) => {
+    if (row.messageId && row.id && !map.has(row.messageId)) {
+      map.set(row.messageId, row.id);
+    }
+  });
+  return map;
+}
+
 export async function upsertMessages(
   accountId: string,
   folderId: string | null,
@@ -1959,10 +2016,10 @@ export async function upsertMessages(
 
   const insertMessage = db.prepare(`
     INSERT OR REPLACE INTO messages (
-      id, accountId, folderId, threadId, messageId, inReplyTo, "references",
+      id, accountId, folderId, threadId, parentId, messageId, inReplyTo, "references",
       subject, fromAddr, fromEmail, toAddr, ccAddr, bccAddr, mailboxPath, imapUid, preview, date, dateValue,
       body, htmlBody, priority, hasSource, unread, flags, seen, answered, flagged, deleted, draft, recent
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   const insertFts = db.prepare(`
     INSERT INTO message_fts (messageId, subject, fromAddr, toAddr, ccAddr, bccAddr, body, preview)
@@ -1988,6 +2045,7 @@ export async function upsertMessages(
         message.accountId,
         message.folderId,
         message.threadId,
+        message.parentId ?? null,
         message.messageId ?? null,
         message.inReplyTo ?? null,
         message.references ? JSON.stringify(message.references) : null,
@@ -2069,6 +2127,7 @@ export async function getMessageById(accountId: string, messageId: string) {
     mailboxPath: row.mailboxPath ?? undefined,
     imapUid: typeof row.imapUid === "number" ? row.imapUid : undefined,
     threadId: row.threadId,
+    parentId: row.parentId ?? undefined,
     messageId: row.messageId ?? undefined,
     inReplyTo: row.inReplyTo ?? undefined,
     references: parseReferences(row.references),

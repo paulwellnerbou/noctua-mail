@@ -1,5 +1,11 @@
 import { NextResponse } from "next/server";
-import { getAccounts, getMessageById, getThreadIdsByMessageIds, upsertMessages } from "@/lib/db";
+import {
+  getAccounts,
+  getMessageById,
+  getMessageIdsByMessageIds,
+  getThreadIdsByMessageIds,
+  upsertMessages
+} from "@/lib/db";
 import { saveAttachmentData, saveMessageSource } from "@/lib/storage";
 import { syncImapMessage } from "@/lib/mail/imap";
 import { requireSessionOr401 } from "@/lib/auth";
@@ -91,23 +97,46 @@ export async function POST(request: Request) {
     };
   };
 
-  const threadId = (() => {
-    if (message.inReplyTo) return message.inReplyTo;
-    if (message.references && message.references.length > 0) {
-      return message.references[message.references.length - 1];
+  const referenceIds = new Set<string>();
+  if (message.inReplyTo) referenceIds.add(message.inReplyTo);
+  (message.references ?? []).forEach((ref) => referenceIds.add(ref));
+  const externalThreadIds =
+    referenceIds.size > 0
+      ? await getThreadIdsByMessageIds(account.id, Array.from(referenceIds))
+      : new Map<string, string>();
+  const externalParentIds =
+    referenceIds.size > 0
+      ? await getMessageIdsByMessageIds(account.id, Array.from(referenceIds))
+      : new Map<string, string>();
+  const refs = message.references ?? [];
+  const resolvedThreadId = (() => {
+    if (message.inReplyTo) {
+      const external = externalThreadIds.get(message.inReplyTo);
+      if (external) return external;
     }
+    const refMatch = refs.find((ref) => externalThreadIds.has(ref));
+    if (refMatch) return externalThreadIds.get(refMatch) ?? undefined;
+    if (message.inReplyTo) return message.inReplyTo;
+    if (refs.length > 0) return refs[refs.length - 1];
     return message.threadId;
   })();
-  const replyIds = message.inReplyTo ? [message.inReplyTo] : [];
-  const externalThreadIds = replyIds.length
-    ? await getThreadIdsByMessageIds(account.id, replyIds)
-    : new Map<string, string>();
-  const resolvedThreadId =
-    (message.inReplyTo && externalThreadIds.get(message.inReplyTo)) || threadId;
+  const resolvedParentId = (() => {
+    if (message.inReplyTo) {
+      const external = externalParentIds.get(message.inReplyTo);
+      if (external) return external;
+    }
+    for (let i = refs.length - 1; i >= 0; i -= 1) {
+      const ref = refs[i];
+      const external = externalParentIds.get(ref);
+      if (external) return external;
+    }
+    return undefined;
+  })();
   const sanitized = await sanitizeMessage(
     {
       ...message,
-      threadId: resolvedThreadId ?? message.threadId
+      threadId: resolvedThreadId ?? message.threadId,
+      parentId: resolvedParentId
     },
     account.id
   );

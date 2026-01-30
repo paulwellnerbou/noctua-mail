@@ -65,6 +65,7 @@ export type Folder = {
 export type Message = {
   id: string;
   threadId: string;
+  parentId?: string;
   messageId?: string;
   inReplyTo?: string;
   references?: string[];
