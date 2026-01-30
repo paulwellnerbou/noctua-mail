@@ -1,6 +1,7 @@
 import type React from "react";
 import { GitBranch, Trash2 } from "lucide-react";
 import type { Message } from "@/lib/data";
+import { buildFlatEntries, buildThreadGroupEntries } from "./threadGroupUtils";
 
 type SortKey = "date" | "from" | "subject";
 
@@ -202,29 +203,31 @@ export default function MessageTable({ state, actions, helpers }: MessageTablePr
           {group.items.length > 0 && !collapsedGroups[group.key] && (
             <>
               {supportsThreads
-                ? buildThreadTree(group.items)
-                    .sort((a, b) => getThreadLatestDate(b) - getThreadLatestDate(a))
-                    .map((root) => {
-                      const isPinnedGroup = group.key === "Pinned";
-                      const threadGroupId =
-                        root.message.threadId ?? root.message.messageId ?? root.message.id;
-                      const activeThreadKey =
-                        activeMessage?.threadId ??
-                        activeMessage?.messageId ??
-                        activeMessage?.id;
-                      const fullFlat = flattenThread(root, 0);
-                      const threadSize = fullFlat.length;
-                      const isCollapsed = collapsedThreads[threadGroupId] ?? true;
-                      const flat = isCollapsed ? [fullFlat[0]] : fullFlat;
-                      const threadFolderIds = Array.from(
-                        new Set(fullFlat.map((item) => item.message.folderId))
-                      );
-                      const showThreadFolderBadges =
-                        searchScope === "all" ||
-                        (includeThreadAcrossFolders && threadFolderIds.length > 1);
-                      return (
-                        <div key={`${threadGroupId}-${root.message.id}`}>
-                          {flat.map(({ message, depth }, index) => {
+                ? buildThreadGroupEntries({
+                    group,
+                    collapsedThreads,
+                    includeThreadAcrossFolders,
+                    searchScope,
+                    activeFolderId,
+                    buildThreadTree,
+                    flattenThread,
+                    getThreadLatestDate
+                  }).map((entry) => {
+                    const isPinnedGroup = group.key === "Pinned";
+                    const threadGroupId = entry.threadGroupId;
+                    const activeThreadKey =
+                      activeMessage?.threadId ??
+                      activeMessage?.messageId ??
+                      activeMessage?.id;
+                    const fullFlat = entry.fullFlat;
+                    const threadSize = entry.threadSize;
+                    const isCollapsed = entry.isCollapsed;
+                    const flat = entry.flat;
+                    const threadFolderIds = entry.threadFolderIds;
+                    const showThreadFolderBadges = entry.showThreadFolderBadges;
+                    return (
+                      <div key={`${threadGroupId}-${entry.root.message.id}`}>
+                        {flat.map(({ message, depth }, index) => {
                             const isSelected = selectedMessageIds.has(message.id);
                             const isDragging = draggingMessageIds.has(message.id);
                             const folderIds =
@@ -397,15 +400,14 @@ export default function MessageTable({ state, actions, helpers }: MessageTablePr
                         </div>
                       );
                     })
-                : group.items.map((message) => {
-                    const threadGroupId = message.threadId ?? message.messageId ?? message.id;
+                : buildFlatEntries({
+                    group,
+                    includeThreadAcrossFolders,
+                    searchScope,
+                    activeFolderId
+                  }).map(({ message, threadGroupId, folderIds }) => {
                     const activeThreadKey =
                       activeMessage?.threadId ?? activeMessage?.messageId ?? activeMessage?.id;
-                    const folderIds =
-                      searchScope === "all" ||
-                      (includeThreadAcrossFolders && message.folderId !== activeFolderId)
-                        ? [message.folderId]
-                        : [];
                     return (
                       <div
                         key={message.id}

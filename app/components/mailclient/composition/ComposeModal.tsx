@@ -1,5 +1,6 @@
 import type React from "react";
 import { ArrowDownLeft, Minimize2, X } from "lucide-react";
+import ComposeFields from "./ComposeFields";
 
 type ComposeMode = "new" | "reply" | "replyAll" | "forward" | "edit" | "editAsNew";
 
@@ -207,232 +208,30 @@ export default function ComposeModal({
           </div>
         </div>
         <div className="compose-body">
-          <div className="compose-grid">
-            <div className="compose-grid-row">
-              <span className="label">To:</span>
-              <div className="compose-row">
-                <div className="compose-input-wrap">
-                  <input
-                    value={composeTo}
-                    onChange={(event) => {
-                      markComposeDirty();
-                      setComposeTo(event.target.value);
-                      setRecipientQuery(getComposeToken(event.target.value));
-                    }}
-                    onFocus={() => {
-                      setRecipientFocus("to");
-                      setRecipientQuery(getComposeToken(composeTo));
-                    }}
-                    onBlur={() => {
-                      setTimeout(() => {
-                        setRecipientFocus((current) => (current === "to" ? null : current));
-                      }, 150);
-                    }}
-                    onKeyDown={(event) => {
-                      if (!recipientOptions.length) return;
-                      if (event.key === "ArrowDown") {
-                        event.preventDefault();
-                        setRecipientActiveIndex((prev) =>
-                          Math.min(prev + 1, recipientOptions.length - 1)
-                        );
-                      }
-                      if (event.key === "ArrowUp") {
-                        event.preventDefault();
-                        setRecipientActiveIndex((prev) => Math.max(prev - 1, 0));
-                      }
-                      if (event.key === "Enter" && recipientFocus === "to") {
-                        event.preventDefault();
-                        const pick = recipientOptions[recipientActiveIndex];
-                        if (pick) {
-                          applyRecipientSelection(composeTo, pick, setComposeTo);
-                        }
-                      }
-                    }}
-                    placeholder="recipient@example.com"
-                  />
-                  {recipientFocus === "to" && recipientOptions.length > 0 && (
-                    <div className="compose-suggestions">
-                      {recipientOptions.map((option, index) => (
-                        <button
-                          key={`${option}-${index}`}
-                          type="button"
-                          className={`compose-suggestion ${
-                            index === recipientActiveIndex ? "active" : ""
-                          }`}
-                          onMouseDown={(event) => {
-                            event.preventDefault();
-                            applyRecipientSelection(composeTo, option, setComposeTo);
-                          }}
-                        >
-                          {option}
-                        </button>
-                      ))}
-                      {recipientLoading && (
-                        <span className="compose-suggestion muted">Loading…</span>
-                      )}
-                    </div>
-                  )}
-                </div>
-                <button
-                  type="button"
-                  className="icon-button small"
-                  title={composeShowBcc ? "Hide Cc and Bcc" : "Show Cc and Bcc"}
-                  onClick={() => setComposeShowBcc((value) => !value)}
-                >
-                  {composeShowBcc ? "Hide Cc/Bcc" : "Show Cc and Bcc"}
-                </button>
-              </div>
-            </div>
-            {composeShowBcc && (
-              <div className="compose-grid-row">
-                <span className="label">Cc:</span>
-                <div className="compose-input-wrap">
-                  <input
-                    value={composeCc}
-                    onChange={(event) => {
-                      markComposeDirty();
-                      setComposeCc(event.target.value);
-                      setRecipientQuery(getComposeToken(event.target.value));
-                    }}
-                    onFocus={() => {
-                      setRecipientFocus("cc");
-                      setRecipientQuery(getComposeToken(composeCc));
-                    }}
-                    onBlur={() => {
-                      setTimeout(() => {
-                        setRecipientFocus((current) => (current === "cc" ? null : current));
-                      }, 150);
-                    }}
-                    onKeyDown={(event) => {
-                      if (!recipientOptions.length) return;
-                      if (event.key === "ArrowDown") {
-                        event.preventDefault();
-                        setRecipientActiveIndex((prev) =>
-                          Math.min(prev + 1, recipientOptions.length - 1)
-                        );
-                      }
-                      if (event.key === "ArrowUp") {
-                        event.preventDefault();
-                        setRecipientActiveIndex((prev) => Math.max(prev - 1, 0));
-                      }
-                      if (event.key === "Enter" && recipientFocus === "cc") {
-                        event.preventDefault();
-                        const pick = recipientOptions[recipientActiveIndex];
-                        if (pick) {
-                          applyRecipientSelection(composeCc, pick, setComposeCc);
-                        }
-                      }
-                    }}
-                    placeholder="cc@example.com"
-                  />
-                  {recipientFocus === "cc" && recipientOptions.length > 0 && (
-                    <div className="compose-suggestions">
-                      {recipientOptions.map((option, index) => (
-                        <button
-                          key={`${option}-${index}`}
-                          type="button"
-                          className={`compose-suggestion ${
-                            index === recipientActiveIndex ? "active" : ""
-                          }`}
-                          onMouseDown={(event) => {
-                            event.preventDefault();
-                            applyRecipientSelection(composeCc, option, setComposeCc);
-                          }}
-                        >
-                          {option}
-                        </button>
-                      ))}
-                      {recipientLoading && (
-                        <span className="compose-suggestion muted">Loading…</span>
-                      )}
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-            {composeShowBcc && (
-              <div className="compose-grid-row">
-                <span className="label">Bcc:</span>
-                <div className="compose-input-wrap">
-                  <input
-                    value={composeBcc}
-                    onChange={(event) => {
-                      markComposeDirty();
-                      setComposeBcc(event.target.value);
-                      setRecipientQuery(getComposeToken(event.target.value));
-                    }}
-                    onFocus={() => {
-                      setRecipientFocus("bcc");
-                      setRecipientQuery(getComposeToken(composeBcc));
-                    }}
-                    onBlur={() => {
-                      setTimeout(() => {
-                        setRecipientFocus((current) => (current === "bcc" ? null : current));
-                      }, 150);
-                    }}
-                    onKeyDown={(event) => {
-                      if (!recipientOptions.length) return;
-                      if (event.key === "ArrowDown") {
-                        event.preventDefault();
-                        setRecipientActiveIndex((prev) =>
-                          Math.min(prev + 1, recipientOptions.length - 1)
-                        );
-                      }
-                      if (event.key === "ArrowUp") {
-                        event.preventDefault();
-                        setRecipientActiveIndex((prev) => Math.max(prev - 1, 0));
-                      }
-                      if (event.key === "Enter" && recipientFocus === "bcc") {
-                        event.preventDefault();
-                        const pick = recipientOptions[recipientActiveIndex];
-                        if (pick) {
-                          applyRecipientSelection(composeBcc, pick, setComposeBcc);
-                        }
-                      }
-                    }}
-                    placeholder="bcc@example.com"
-                  />
-                  {recipientFocus === "bcc" && recipientOptions.length > 0 && (
-                    <div className="compose-suggestions">
-                      {recipientOptions.map((option, index) => (
-                        <button
-                          key={`${option}-${index}`}
-                          type="button"
-                          className={`compose-suggestion ${
-                            index === recipientActiveIndex ? "active" : ""
-                          }`}
-                          onMouseDown={(event) => {
-                            event.preventDefault();
-                            applyRecipientSelection(composeBcc, option, setComposeBcc);
-                          }}
-                        >
-                          {option}
-                        </button>
-                      ))}
-                      {recipientLoading && (
-                        <span className="compose-suggestion muted">Loading…</span>
-                      )}
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-            <div className="compose-grid-row">
-              <span className="label">Subject:</span>
-              <input
-                value={composeSubject}
-                onChange={(event) => {
-                  markComposeDirty();
-                  setComposeSubject(event.target.value);
-                }}
-                placeholder="Subject"
-              />
-            </div>
-            <div className="compose-grid-row">
-              <span className="label">Date:</span>
-              <span className="compose-static">{composeOpenedAt || "Now"}</span>
-            </div>
-          </div>
+          <ComposeFields
+            variant="modal"
+            composeSubject={composeSubject}
+            composeTo={composeTo}
+            composeCc={composeCc}
+            composeBcc={composeBcc}
+            composeShowBcc={composeShowBcc}
+            composeOpenedAt={composeOpenedAt}
+            recipientOptions={recipientOptions}
+            recipientActiveIndex={recipientActiveIndex}
+            recipientLoading={recipientLoading}
+            recipientFocus={recipientFocus}
+            setComposeSubject={setComposeSubject}
+            setComposeTo={setComposeTo}
+            setComposeCc={setComposeCc}
+            setComposeBcc={setComposeBcc}
+            setComposeShowBcc={setComposeShowBcc}
+            setRecipientQuery={setRecipientQuery}
+            setRecipientFocus={setRecipientFocus}
+            setRecipientActiveIndex={setRecipientActiveIndex}
+            applyRecipientSelection={applyRecipientSelection}
+            getComposeToken={getComposeToken}
+            markComposeDirty={markComposeDirty}
+          />
           {ui.composeMessageField}
         </div>
         <div className="compose-footer">

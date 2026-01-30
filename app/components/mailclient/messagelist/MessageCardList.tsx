@@ -1,6 +1,7 @@
 import type React from "react";
 import type { Message } from "@/lib/data";
 import MessageRow from "./MessageRow";
+import { buildFlatEntries, buildThreadGroupEntries } from "./threadGroupUtils";
 
 type MessageGroup = {
   key: string;
@@ -145,206 +146,205 @@ export default function MessageCardList({ state, actions, helpers }: MessageCard
           {group.items.length > 0 && !collapsedGroups[group.key] && (
             <>
               {supportsThreads
-                ? buildThreadTree(group.items)
-                    .sort((a, b) => getThreadLatestDate(b) - getThreadLatestDate(a))
-                    .map((root) => {
-                      const isPinnedGroup = group.key === "Pinned";
-                      const threadGroupId =
-                        root.message.threadId ?? root.message.messageId ?? root.message.id;
-                      const activeThreadKey =
-                        activeMessage?.threadId ??
-                        activeMessage?.messageId ??
-                        activeMessage?.id;
-                      const fullFlat = flattenThread(root, 0);
-                      const threadSize = fullFlat.length;
-                      const isCollapsed = collapsedThreads[threadGroupId] ?? true;
-                      const flat = isCollapsed ? [fullFlat[0]] : fullFlat;
-                      const threadGroupHasActive =
-                        isCompactView &&
-                        !!activeMessageId &&
-                        fullFlat.some((item) => item.message.id === activeMessageId);
-                      const threadGroupHasSelected =
-                        isCompactView &&
-                        fullFlat.some((item) => selectedMessageIds.has(item.message.id));
-                      const threadFolderIds = Array.from(
-                        new Set(fullFlat.map((item) => item.message.folderId))
-                      );
-                      const showThreadFolderBadges =
-                        searchScope === "all" ||
-                        (includeThreadAcrossFolders && threadFolderIds.length > 1);
-                      return (
-                        <div
-                          key={`${threadGroupId}-${root.message.id}`}
-                          className={`thread-group${threadGroupHasActive ? " compact-active" : ""}${
-                            threadGroupHasSelected ? " compact-selected" : ""
-                          }`}
-                        >
-                          {flat.map(({ message, depth }, index) => {
-                            const isSelected = selectedMessageIds.has(message.id);
-                            const isDragging = draggingMessageIds.has(message.id);
-                            const folderIds =
-                              index === 0 && isCollapsed && threadSize > 1
-                                ? showThreadFolderBadges
-                                  ? threadFolderIds
-                                  : []
-                                : searchScope === "all" ||
-                                    (includeThreadAcrossFolders &&
-                                      message.folderId !== activeFolderId)
-                                  ? [message.folderId]
-                                  : [];
-                            const isActiveThread =
-                              !!activeMessageId &&
-                              fullFlat.some((item) => item.message.id === activeMessageId);
-                            const showCollapsedActive =
-                              isCompactView &&
-                              isCollapsed &&
-                              index === 0 &&
-                              depth === 0 &&
-                              threadSize > 1 &&
-                              isActiveThread;
-
-                            return (
-                              <MessageRow
-                                key={message.id}
-                                message={message}
-                                isCompactView={isCompactView}
-                                listIsNarrow={listIsNarrow}
-                                isActive={message.id === activeMessageId}
-                                isThreadChild={depth > 0}
-                                isThreadSibling={
-                                  (hoveredThreadId === threadGroupId ||
-                                    activeThreadKey === threadGroupId) &&
-                                  message.id !== activeMessage?.id
-                                }
-                                isSelected={isSelected}
-                                isDragging={isDragging}
-                                isDisabled={pendingMessageActions.has(message.id)}
-                                showCollapsedActive={showCollapsedActive}
-                                paddingLeft={14 + depth * 10}
-                                showThreadCaret={index === 0 && threadSize > 1}
-                                isThreadCaretOpen={!isCollapsed}
-                                onThreadCaretClick={() => {
-                                  setCollapsedThreads((prev) => ({
-                                    ...prev,
-                                    [threadGroupId]: !isCollapsed
-                                  }));
-                                }}
-                                showThreadIndicator={threadSize > 1 && index === 0}
-                                threadSize={threadSize}
-                                onRowClick={(event) => {
-                                  if (
-                                    supportsThreads &&
-                                    threadSize > 1 &&
-                                    depth === 0 &&
-                                    index === 0 &&
-                                    isCollapsed
-                                  ) {
-                                    if (isPinnedGroup) {
-                                      const pinnedTarget =
-                                        fullFlat.find((item) =>
-                                          isPinnedMessage(item.message)
-                                        )?.message ?? fullFlat[0].message;
-                                      selectCollapsedThread(fullFlat, pinnedTarget);
-                                    } else {
-                                      const latestTarget = fullFlat.reduce(
-                                        (acc, item) =>
-                                          item.message.dateValue > acc.message.dateValue
-                                            ? item
-                                            : acc,
-                                        fullFlat[0]
-                                      ).message;
-                                      selectCollapsedThread(fullFlat, latestTarget);
-                                    }
-                                    return;
-                                  }
-                                  handleRowClick(event, message);
-                                }}
-                                onRowKeyDown={(event) => {
-                                  if (event.key === "Enter" || event.key === " ") {
-                                    event.preventDefault();
-                                    handleSelectMessage(message);
-                                  }
-                                }}
-                                onMouseEnter={() => setHoveredThreadId(threadGroupId)}
-                                onMouseLeave={() => setHoveredThreadId(null)}
-                                onDragStart={(event) => handleMessageDragStart(event, message)}
-                                onDragEnd={handleMessageDragEnd}
-                                onCheckboxChange={(_, shiftKey) => {
-                                  if (shiftKey) {
-                                    selectRangeTo(message.id);
-                                  } else {
-                                    toggleMessageSelection(message.id);
-                                  }
-                                }}
-                                onSubjectClick={(event) => {
-                                  event.stopPropagation();
-                                  if (
-                                    supportsThreads &&
-                                    threadSize > 1 &&
-                                    depth === 0 &&
-                                    index === 0 &&
-                                    isCollapsed
-                                  ) {
-                                    if (isPinnedGroup) {
-                                      const pinnedTarget =
-                                        fullFlat.find((item) =>
-                                          isPinnedMessage(item.message)
-                                        )?.message ?? fullFlat[0].message;
-                                      selectCollapsedThread(fullFlat, pinnedTarget);
-                                    } else {
-                                      const latestTarget = fullFlat.reduce(
-                                        (acc, item) =>
-                                          item.message.dateValue > acc.message.dateValue
-                                            ? item
-                                            : acc,
-                                        fullFlat[0]
-                                      ).message;
-                                      selectCollapsedThread(fullFlat, latestTarget);
-                                    }
-                                  } else {
-                                    handleSelectMessage(message);
-                                  }
-                                }}
-                                onDelete={(event) => {
-                                  event.stopPropagation();
-                                  handleDeleteMessage(message);
-                                }}
-                                deleteTitle={
-                                  isTrashFolder(message.folderId)
-                                    ? "Delete permanently"
-                                    : "Move to Trash"
-                                }
-                                renderUnreadDot={renderUnreadDot(message)}
-                                renderSelectIndicators={renderSelectIndicators(message)}
-                                folderBadges={renderFolderBadges(folderIds)}
-                                showFolderBadgesInSubjectMeta={isCompactView}
-                                showFolderBadgesInMeta={!isCompactView}
-                                quickActions={renderQuickActions(message)}
-                                messageMenu={renderMessageMenu(message, isCompactView ? "table" : "list")}
-                                showAttachmentIcon={
-                                  message.hasAttachments ??
-                                  (message.attachments?.some((att) => !att.inline) ?? false)
-                                }
-                                showNewBadge={
-                                  !Boolean(message.seen) &&
-                                  Boolean(message.recent) &&
-                                  !Boolean(message.draft)
-                                }
-                              />
-                            );
-                          })}
-                        </div>
-                      );
-                    })
-                : group.items.map((message) => {
-                    const threadGroupId = message.threadId ?? message.messageId ?? message.id;
+                ? buildThreadGroupEntries({
+                    group,
+                    collapsedThreads,
+                    includeThreadAcrossFolders,
+                    searchScope,
+                    activeFolderId,
+                    buildThreadTree,
+                    flattenThread,
+                    getThreadLatestDate
+                  }).map((entry) => {
+                    const isPinnedGroup = group.key === "Pinned";
+                    const threadGroupId = entry.threadGroupId;
                     const activeThreadKey =
                       activeMessage?.threadId ?? activeMessage?.messageId ?? activeMessage?.id;
-                    const folderIds =
-                      searchScope === "all" ||
-                      (includeThreadAcrossFolders && message.folderId !== activeFolderId)
-                        ? [message.folderId]
-                        : [];
+                    const fullFlat = entry.fullFlat;
+                    const threadSize = entry.threadSize;
+                    const isCollapsed = entry.isCollapsed;
+                    const flat = entry.flat;
+                    const threadGroupHasActive =
+                      isCompactView &&
+                      !!activeMessageId &&
+                      fullFlat.some((item) => item.message.id === activeMessageId);
+                    const threadGroupHasSelected =
+                      isCompactView &&
+                      fullFlat.some((item) => selectedMessageIds.has(item.message.id));
+                    const threadFolderIds = entry.threadFolderIds;
+                    const showThreadFolderBadges = entry.showThreadFolderBadges;
+                    return (
+                      <div
+                        key={`${threadGroupId}-${entry.root.message.id}`}
+                        className={`thread-group${threadGroupHasActive ? " compact-active" : ""}${
+                          threadGroupHasSelected ? " compact-selected" : ""
+                        }`}
+                      >
+                        {flat.map(({ message, depth }, index) => {
+                          const isSelected = selectedMessageIds.has(message.id);
+                          const isDragging = draggingMessageIds.has(message.id);
+                          const folderIds =
+                            index === 0 && isCollapsed && threadSize > 1
+                              ? showThreadFolderBadges
+                                ? threadFolderIds
+                                : []
+                              : searchScope === "all" ||
+                                  (includeThreadAcrossFolders &&
+                                    message.folderId !== activeFolderId)
+                                ? [message.folderId]
+                                : [];
+                          const isActiveThread =
+                            !!activeMessageId &&
+                            fullFlat.some((item) => item.message.id === activeMessageId);
+                          const showCollapsedActive =
+                            isCompactView &&
+                            isCollapsed &&
+                            index === 0 &&
+                            depth === 0 &&
+                            threadSize > 1 &&
+                            isActiveThread;
+
+                          return (
+                            <MessageRow
+                              key={message.id}
+                              message={message}
+                              isCompactView={isCompactView}
+                              listIsNarrow={listIsNarrow}
+                              isActive={message.id === activeMessageId}
+                              isThreadChild={depth > 0}
+                              isThreadSibling={
+                                (hoveredThreadId === threadGroupId ||
+                                  activeThreadKey === threadGroupId) &&
+                                message.id !== activeMessage?.id
+                              }
+                              isSelected={isSelected}
+                              isDragging={isDragging}
+                              isDisabled={pendingMessageActions.has(message.id)}
+                              showCollapsedActive={showCollapsedActive}
+                              paddingLeft={14 + depth * 10}
+                              showThreadCaret={index === 0 && threadSize > 1}
+                              isThreadCaretOpen={!isCollapsed}
+                              onThreadCaretClick={() => {
+                                setCollapsedThreads((prev) => ({
+                                  ...prev,
+                                  [threadGroupId]: !isCollapsed
+                                }));
+                              }}
+                              showThreadIndicator={threadSize > 1 && index === 0}
+                              threadSize={threadSize}
+                              onRowClick={(event) => {
+                                if (
+                                  supportsThreads &&
+                                  threadSize > 1 &&
+                                  depth === 0 &&
+                                  index === 0 &&
+                                  isCollapsed
+                                ) {
+                                  if (isPinnedGroup) {
+                                    const pinnedTarget =
+                                      fullFlat.find((item) =>
+                                        isPinnedMessage(item.message)
+                                      )?.message ?? fullFlat[0].message;
+                                    selectCollapsedThread(fullFlat, pinnedTarget);
+                                  } else {
+                                    const latestTarget = fullFlat.reduce(
+                                      (acc, item) =>
+                                        item.message.dateValue > acc.message.dateValue
+                                          ? item
+                                          : acc,
+                                      fullFlat[0]
+                                    ).message;
+                                    selectCollapsedThread(fullFlat, latestTarget);
+                                  }
+                                  return;
+                                }
+                                handleRowClick(event, message);
+                              }}
+                              onRowKeyDown={(event) => {
+                                if (event.key === "Enter" || event.key === " ") {
+                                  event.preventDefault();
+                                  handleSelectMessage(message);
+                                }
+                              }}
+                              onMouseEnter={() => setHoveredThreadId(threadGroupId)}
+                              onMouseLeave={() => setHoveredThreadId(null)}
+                              onDragStart={(event) => handleMessageDragStart(event, message)}
+                              onDragEnd={handleMessageDragEnd}
+                              onCheckboxChange={(_, shiftKey) => {
+                                if (shiftKey) {
+                                  selectRangeTo(message.id);
+                                } else {
+                                  toggleMessageSelection(message.id);
+                                }
+                              }}
+                              onSubjectClick={(event) => {
+                                event.stopPropagation();
+                                if (
+                                  supportsThreads &&
+                                  threadSize > 1 &&
+                                  depth === 0 &&
+                                  index === 0 &&
+                                  isCollapsed
+                                ) {
+                                  if (isPinnedGroup) {
+                                    const pinnedTarget =
+                                      fullFlat.find((item) =>
+                                        isPinnedMessage(item.message)
+                                      )?.message ?? fullFlat[0].message;
+                                    selectCollapsedThread(fullFlat, pinnedTarget);
+                                  } else {
+                                    const latestTarget = fullFlat.reduce(
+                                      (acc, item) =>
+                                        item.message.dateValue > acc.message.dateValue
+                                          ? item
+                                          : acc,
+                                      fullFlat[0]
+                                    ).message;
+                                    selectCollapsedThread(fullFlat, latestTarget);
+                                  }
+                                } else {
+                                  handleSelectMessage(message);
+                                }
+                              }}
+                              onDelete={(event) => {
+                                event.stopPropagation();
+                                handleDeleteMessage(message);
+                              }}
+                              deleteTitle={
+                                isTrashFolder(message.folderId)
+                                  ? "Delete permanently"
+                                  : "Move to Trash"
+                              }
+                              renderUnreadDot={renderUnreadDot(message)}
+                              renderSelectIndicators={renderSelectIndicators(message)}
+                              folderBadges={renderFolderBadges(folderIds)}
+                              showFolderBadgesInSubjectMeta={isCompactView}
+                              showFolderBadgesInMeta={!isCompactView}
+                              quickActions={renderQuickActions(message)}
+                              messageMenu={renderMessageMenu(message, isCompactView ? "table" : "list")}
+                              showAttachmentIcon={
+                                message.hasAttachments ??
+                                (message.attachments?.some((att) => !att.inline) ?? false)
+                              }
+                              showNewBadge={
+                                !Boolean(message.seen) &&
+                                Boolean(message.recent) &&
+                                !Boolean(message.draft)
+                              }
+                            />
+                          );
+                        })}
+                      </div>
+                    );
+                  })
+                : buildFlatEntries({
+                    group,
+                    includeThreadAcrossFolders,
+                    searchScope,
+                    activeFolderId
+                  }).map(({ message, threadGroupId, folderIds }) => {
+                    const activeThreadKey =
+                      activeMessage?.threadId ?? activeMessage?.messageId ?? activeMessage?.id;
                     const isSelected = selectedMessageIds.has(message.id);
                     const isDragging = draggingMessageIds.has(message.id);
                     return (
