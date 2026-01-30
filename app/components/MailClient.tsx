@@ -14,9 +14,6 @@ import {
   Trash2,
   X
 } from "lucide-react";
-import ReactMarkdown from "react-markdown";
-import remarkBreaks from "remark-breaks";
-import remarkGfm from "remark-gfm";
 import ComposeEditor from "./ComposeEditor";
 import HtmlMessage from "./HtmlMessage";
 import LoginOverlay from "./auth/LoginOverlay";
@@ -36,7 +33,8 @@ import UnreadDot from "./mailclient/messagelist/UnreadDot";
 import MessageMenu from "./mailclient/message/MessageMenu";
 import MessageQuickActions from "./mailclient/message/MessageQuickActions";
 import MessageViewPane from "./mailclient/message/MessageViewPane";
-import SourcePanel from "./mailclient/message/SourcePanel";
+import MarkdownPanel from "./mailclient/message/MarkdownPanel";
+import MessageSourcePanel from "./mailclient/message/MessageSourcePanel";
 import ThreadJsonModal from "./mailclient/message/ThreadJsonModal";
 import ThreadView from "./mailclient/message/ThreadView";
 import TopBar from "./mailclient/TopBar";
@@ -3058,7 +3056,7 @@ export default function MailClient() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [activeMessageId, handleDeleteMessage, messages, selectedMessageIds, threadScopeMessages]);
   const scrubSource = (source?: string) => {
-    if (!source) return source;
+    if (!source) return "";
     return source.replace(/([A-Za-z0-9+/=]{200,})/g, "[base64 omitted]");
   };
 
@@ -3107,30 +3105,14 @@ export default function MailClient() {
   }, [activeAccountId]);
 
   const renderSourcePanel = (messageId: string) => (
-    <SourcePanel
+    <MessageSourcePanel
       messageId={messageId}
       fetchSource={fetchSource}
       scrubSource={scrubSource}
     />
   );
   const renderMarkdownPanel = (body: string | undefined, messageId: string) => (
-    <div
-      className="markdown-view"
-      style={{
-        fontSize: `${15 * (messageFontScale[messageId] ?? 1)}px`
-      }}
-    >
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm, remarkBreaks]}
-        components={{
-          a: ({ node, ...props }) => (
-            <a {...props} target="_blank" rel="noreferrer" />
-          )
-        }}
-      >
-        {(body ?? "").replace(/\*([^*\n]+)\*(?=[A-Za-z0-9ÄÖÜäöü])/g, "*$1* ")}
-      </ReactMarkdown>
-    </div>
+    <MarkdownPanel body={body} fontScale={messageFontScale[messageId] ?? 1} />
   );
 
   const jsonPayload = useMemo(() => {
