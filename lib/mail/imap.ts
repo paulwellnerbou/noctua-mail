@@ -669,3 +669,32 @@ export async function deleteImapFolder(account: Account, path: string, clientId?
     }
   }
 }
+
+export async function unsubscribeImapFolder(
+  account: Account,
+  path: string,
+  clientId?: string
+) {
+  let ImapFlow: typeof import("imapflow").ImapFlow;
+  try {
+    ({ ImapFlow } = await import("imapflow"));
+  } catch (error) {
+    throw new Error("IMAP library is missing. Run `bun install` to add imapflow.");
+  }
+  const client = buildImapClient(ImapFlow, account);
+  const logContext = buildLogContext(account, clientId);
+  try {
+    await logImapOp("connect", { host: account.imap.host, ...logContext }, () =>
+      client.connect()
+    );
+    await logImapOp("mailboxUnsubscribe", { mailbox: path, ...logContext }, () =>
+      client.mailboxUnsubscribe(path)
+    );
+  } finally {
+    try {
+      await logImapOp("logout", { ...logContext }, () => client.logout());
+    } catch {
+      // ignore logout errors
+    }
+  }
+}

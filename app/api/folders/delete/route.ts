@@ -6,7 +6,12 @@ import {
   saveFolders,
   updateMessagesFolderPrefix
 } from "@/lib/db";
-import { deleteImapFolder, listImapFolders, renameImapFolder } from "@/lib/mail/imap";
+import {
+  deleteImapFolder,
+  listImapFolders,
+  renameImapFolder,
+  unsubscribeImapFolder
+} from "@/lib/mail/imap";
 import { notifyFolderDeleted } from "@/lib/mail/imapStreamRegistry";
 import type { Folder } from "@/lib/data";
 import { requireSessionOr401 } from "@/lib/auth";
@@ -84,6 +89,11 @@ export async function POST(request: Request) {
 
   if (isInTrash) {
     const t0 = Date.now();
+    try {
+      await unsubscribeImapFolder(account, mailboxPath, clientId);
+    } catch (error) {
+      console.info(`[imap] unsubscribe failed mailbox=${mailboxPath} ${String(error)}`);
+    }
     await deleteImapFolder(account, mailboxPath, clientId);
     console.info(
       `[imap] delete folder mailbox=${mailboxPath} account=${account.id}${
@@ -120,6 +130,11 @@ export async function POST(request: Request) {
       clientId ? ` client=${clientId}` : ""
     } ${Date.now() - t0}ms`
   );
+  try {
+    await unsubscribeImapFolder(account, newPath, clientId);
+  } catch (error) {
+    console.info(`[imap] unsubscribe failed mailbox=${newPath} ${String(error)}`);
+  }
   await notifyFolderDeleted(payload.accountId, folder.id);
   const t1 = Date.now();
   await updateMessagesFolderPrefix(payload.accountId, mailboxPath, newPath);

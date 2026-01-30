@@ -3307,7 +3307,10 @@ export default function MailClient() {
   useEffect(() => {
     const loadData = async () => {
       try {
-        const me = await apiFetch("/api/auth/me", { credentials: "include" });
+        const me = await apiFetch("/api/auth/me", {
+          credentials: "include",
+          cache: "no-store"
+        });
         if (!me.ok) {
           setAuthState("unauth");
           return;
@@ -3353,7 +3356,10 @@ export default function MailClient() {
     );
     const timer = window.setInterval(async () => {
       try {
-        const res = await apiFetch("/api/auth/me", { credentials: "include" });
+        const res = await apiFetch("/api/auth/me", {
+          credentials: "include",
+          cache: "no-store"
+        });
         if (!res.ok) {
           if (res.status === 401) {
             setAuthState("unauth");
@@ -4960,7 +4966,10 @@ export default function MailClient() {
           setTotalMessages(null);
           setLoadedMessageCount(0);
           try {
-        const res = await apiFetch("/api/auth/me", { credentials: "include" });
+        const res = await apiFetch("/api/auth/me", {
+          credentials: "include",
+          cache: "no-store"
+        });
         if (res.ok) {
           const data = (await res.json()) as { ttlSeconds?: number } | null;
           if (typeof data?.ttlSeconds === "number") {

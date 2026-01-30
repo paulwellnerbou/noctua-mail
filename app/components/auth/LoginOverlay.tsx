@@ -44,6 +44,7 @@ export default function LoginOverlay({ onAuthenticated }: Props) {
         setError(msg);
         return;
       }
+      await res.json().catch(() => ({}));
       onAuthenticated();
     } catch {
       setError("Network error");
@@ -70,6 +71,7 @@ export default function LoginOverlay({ onAuthenticated }: Props) {
         setSignupError(msg);
         return;
       }
+      await res.json().catch(() => ({}));
       onAuthenticated();
     } catch {
       setSignupError("Network error");
