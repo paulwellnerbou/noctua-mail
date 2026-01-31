@@ -1,4 +1,5 @@
 import type React from "react";
+import styles from "./MessageListPane.module.css";
 
 type MessageListPaneProps = {
   state: {
@@ -15,7 +16,7 @@ export default function MessageListPane({ state, refs, children }: MessageListPa
   const { listPaneRef } = refs;
 
   return (
-    <aside className="pane list-pane" style={{ width: listWidth }} ref={listPaneRef}>
+    <aside className={styles.pane} style={{ width: listWidth }} ref={listPaneRef}>
       {children}
     </aside>
   );

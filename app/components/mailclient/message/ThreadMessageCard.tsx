@@ -10,7 +10,10 @@ import {
   ZoomIn,
   ZoomOut
 } from "lucide-react";
+import { Badge, IconButton } from "@radix-ui/themes";
+import { badgeColors, getFlagBadgeColor, getPriorityBadgeColor } from "@/lib/ui/badgeColors";
 import type { Message } from "@/lib/data";
+import badgeStyles from "./MessageBadge.module.css";
 import AttachmentsList from "../../AttachmentsList";
 import HtmlMessage from "../../HtmlMessage";
 import QuoteRenderer from "../../QuoteRenderer";
@@ -23,7 +26,6 @@ type ComposeMode = "new" | "reply" | "replyAll" | "forward" | "edit" | "editAsNe
 
 type ThreadMessageCardProps = {
   message: Message;
-  openMessageMenuId: string | null;
   messageRefs: React.MutableRefObject<Map<string, HTMLElement>>;
   pendingMessageActions: Set<string>;
   includeThreadAcrossFolders: boolean;
@@ -40,7 +42,11 @@ type ThreadMessageCardProps = {
     iconSize?: number,
     origin?: "list" | "table" | "thread"
   ) => React.ReactNode;
-  renderMessageMenu: (message: Message, view: "thread" | "table" | "list") => React.ReactNode;
+  renderMessageMenu: (
+    message: Message,
+    view: "thread" | "table" | "list",
+    onOpenChange?: (open: boolean) => void
+  ) => React.ReactNode;
   collapsedMessages: Record<string, boolean>;
   setCollapsedMessages: React.Dispatch<React.SetStateAction<Record<string, boolean>>>;
   messageTabs: Record<string, MessageTab>;
@@ -65,7 +71,6 @@ type ThreadMessageCardProps = {
 
 export default function ThreadMessageCard({
   message,
-  openMessageMenuId,
   messageRefs,
   pendingMessageActions,
   includeThreadAcrossFolders,
@@ -101,11 +106,13 @@ export default function ThreadMessageCard({
   extractEmails
 }: ThreadMessageCardProps) {
   const [toExpanded, setToExpanded] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
   const toValue = message.to ?? "";
   const showToToggle = toValue.length > 120;
+  const priorityColor = getPriorityBadgeColor(message.priority);
   return (
     <article
-      className={`thread-card ${openMessageMenuId === `thread:${message.id}` ? "menu-open" : ""}`}
+      className={`thread-card ${menuOpen ? "menu-open" : ""}`}
       ref={(el) => {
         if (el) messageRefs.current.set(message.id, el);
       }}
@@ -118,60 +125,84 @@ export default function ThreadMessageCard({
         <div className="thread-card-top">
           <div className="thread-card-badges">
             {getImapFlagBadges(message).map((badge) => (
-              <span
+              <Badge
                 key={`${badge.kind}-${badge.label}`}
-                className={`thread-badge flag ${badge.kind}`}
+                size="1"
+                variant="soft"
+                color={getFlagBadgeColor(badge.kind)}
               >
                 {badge.kind === "pinned" && <Pin size={12} />}
                 {badge.label}
-              </span>
+              </Badge>
             ))}
             {includeThreadAcrossFolders && message.folderId !== activeFolderId && (
-              <button
-                className="folder-badge"
-                title={threadPathById(message.folderId)}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  setSearchScope("folder");
-                  setActiveFolderId(message.folderId);
-                }}
-              >
-                {folderNameById(message.folderId)}
-              </button>
+              <Badge size="1" variant="soft" color={badgeColors.folder} asChild>
+                <button
+                  type="button"
+                  title={threadPathById(message.folderId)}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    setSearchScope("folder");
+                    setActiveFolderId(message.folderId);
+                  }}
+                >
+                  {folderNameById(message.folderId)}
+                </button>
+              </Badge>
             )}
-            {message.recent && <span className="thread-badge flag recent">Recent</span>}
+            {message.recent && (
+              <Badge size="1" variant="soft" color={badgeColors.recent}>
+                Recent
+              </Badge>
+            )}
             {message.priority && message.priority.toLowerCase() !== "normal" && (
-              <span className="thread-badge priority">Priority: {message.priority}</span>
+              <Badge size="1" variant="soft" color={priorityColor}>
+                Priority: {message.priority}
+              </Badge>
             )}
             {(message.hasAttachments ??
               (message.attachments?.length ?? 0) > 0) && (
-              <span className="thread-badge icon attachment" title="Attachments">
+              <Badge
+                size="1"
+                variant="soft"
+                color={badgeColors.attachment}
+                className={badgeStyles.badge}
+                title="Attachments"
+              >
                 <Paperclip size={12} />
-              </span>
+              </Badge>
             )}
             {(message.hasInlineAttachments ??
               message.attachments?.some((item) => item.inline)) && (
-              <span className="thread-badge icon inline" title="Inline images">
+              <Badge
+                size="1"
+                variant="soft"
+                color={badgeColors.inlineAttachment}
+                className={badgeStyles.badge}
+                title="Inline images"
+              >
                 <ImageIcon size={12} />
-              </span>
+              </Badge>
             )}
           </div>
           <div className="thread-card-actions">
             <div className="message-actions">
               {isDraftMessage(message) ? (
-                <button
-                  className="icon-button ghost"
+                <IconButton
+                  size="2"
+                  variant="ghost"
+                  color="gray"
                   title="Edit draft"
                   aria-label="Edit draft"
                   onClick={() => openCompose("edit", message)}
                 >
                   <Edit3 size={14} />
-                </button>
+                </IconButton>
               ) : (
                 renderQuickActions(message, 14, "thread")
               )}
             </div>
-            {renderMessageMenu(message, "thread")}
+            {renderMessageMenu(message, "thread", setMenuOpen)}
           </div>
         </div>
         <div className="thread-card-info">

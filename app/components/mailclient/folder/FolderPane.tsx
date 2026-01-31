@@ -1,94 +1,69 @@
 import type React from "react";
 import { MoreVertical } from "lucide-react";
+import { DropdownMenu, IconButton } from "@radix-ui/themes";
+import styles from "./FolderTree.module.css";
 type FolderPaneProps = {
   state: {
     leftWidth: number;
     folderQuery: string;
     accountFolderCount: number;
-    folderHeaderMenuOpen: boolean;
     isRecomputingThreads: boolean;
   };
   actions: {
     setFolderQuery: React.Dispatch<React.SetStateAction<string>>;
-    setFolderHeaderMenuOpen: React.Dispatch<React.SetStateAction<boolean>>;
     syncAccount: (folderId?: string, mode?: "new" | "full") => void;
     recomputeThreads: () => void;
-  };
-  refs: {
-    folderHeaderMenuRef: React.RefObject<HTMLDivElement | null>;
   };
   children?: React.ReactNode;
 };
 
-export default function FolderPane({ state, actions, refs, children }: FolderPaneProps) {
-  const {
-    leftWidth,
-    folderQuery,
-    accountFolderCount,
-    folderHeaderMenuOpen,
-    isRecomputingThreads
-  } = state;
-  const { setFolderQuery, setFolderHeaderMenuOpen, syncAccount, recomputeThreads } = actions;
-  const { folderHeaderMenuRef } = refs;
+export default function FolderPane({ state, actions, children }: FolderPaneProps) {
+  const { leftWidth, folderQuery, accountFolderCount, isRecomputingThreads } = state;
+  const { setFolderQuery, syncAccount, recomputeThreads } = actions;
 
   return (
     <aside className="pane" style={{ width: leftWidth }}>
-      <div className="folder-panel">
-        <div className="tree-rail">
-          <div className="tree-header">
+      <div className={styles.folderPanel}>
+        <div className={styles.treeRail}>
+          <div className={styles.treeHeader}>
             <div>
-              <div className="panel-title">Folders</div>
-              <div className="panel-meta">{accountFolderCount} total</div>
+              <div className={styles.panelTitle}>Folders</div>
+              <div className={styles.panelMeta}>{accountFolderCount} total</div>
             </div>
-            <div className="tree-header-actions">
-              <div
-                className="message-menu folder-header-menu"
-                ref={folderHeaderMenuOpen ? folderHeaderMenuRef : null}
-                onClick={(event) => event.stopPropagation()}
-              >
-                <button
-                  className="tree-action"
-                  title="Folder actions"
-                  aria-label="Folder actions"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    setFolderHeaderMenuOpen((prev) => !prev);
-                  }}
-                >
-                  <MoreVertical size={14} />
-                </button>
-                {folderHeaderMenuOpen && (
-                  <div className="message-menu-panel">
-                    <button
-                      className="message-menu-item"
-                      onClick={() => {
-                        setFolderHeaderMenuOpen(false);
-                        syncAccount(undefined, "full");
-                      }}
-                    >
-                      Sync Folders
-                    </button>
-                    <button
-                      className="message-menu-item"
-                      onClick={() => {
-                        setFolderHeaderMenuOpen(false);
-                        recomputeThreads();
-                      }}
-                      disabled={isRecomputingThreads}
-                    >
-                      Recompute Threads
-                    </button>
-                  </div>
-                )}
-              </div>
+            <div className={styles.treeHeaderActions}>
+              <DropdownMenu.Root>
+                <DropdownMenu.Trigger>
+                  <IconButton
+                    variant="ghost"
+                    size="1"
+                    className={styles.treeAction}
+                    title="Folder actions"
+                    aria-label="Folder actions"
+                  >
+                    <MoreVertical size={14} />
+                  </IconButton>
+                </DropdownMenu.Trigger>
+                <DropdownMenu.Content align="end" className={styles.menuContent}>
+                  <DropdownMenu.Item onSelect={() => syncAccount(undefined, "full")}>
+                    Sync Folders
+                  </DropdownMenu.Item>
+                  <DropdownMenu.Item
+                    onSelect={() => recomputeThreads()}
+                    disabled={isRecomputingThreads}
+                  >
+                    Recompute Threads
+                  </DropdownMenu.Item>
+                </DropdownMenu.Content>
+              </DropdownMenu.Root>
             </div>
           </div>
-          <div className="folder-search">
+          <div className={styles.folderSearch}>
             <input
               type="search"
               placeholder="Search folders"
               value={folderQuery}
               onChange={(event) => setFolderQuery(event.target.value)}
+              className={styles.folderSearchInput}
             />
           </div>
           {children}

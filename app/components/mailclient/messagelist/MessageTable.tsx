@@ -1,6 +1,13 @@
+import { useEffect, useRef, useState } from "react";
 import type React from "react";
 import { GitBranch, Trash2 } from "lucide-react";
+import { Badge, Checkbox, IconButton, Text } from "@radix-ui/themes";
+import { badgeColors } from "@/lib/ui/badgeColors";
 import type { Message } from "@/lib/data";
+import badgeStyles from "../message/MessageBadge.module.css";
+import { buildFlatEntries, buildThreadGroupEntries } from "./threadGroupUtils";
+import groupStyles from "./MessageCardList.module.css";
+import styles from "./MessageTable.module.css";
 
 type SortKey = "date" | "from" | "subject";
 
@@ -28,7 +35,6 @@ type MessageTableProps = {
     activeFolderId: string;
     activeMessageId: string;
     activeMessage: Message | null;
-    hoveredThreadId: string | null;
     sortDir: "asc" | "desc";
   };
   actions: {
@@ -39,12 +45,12 @@ type MessageTableProps = {
     setSortDir: React.Dispatch<React.SetStateAction<"asc" | "desc">>;
     setCollapsedGroups: React.Dispatch<React.SetStateAction<Record<string, boolean>>>;
     setCollapsedThreads: React.Dispatch<React.SetStateAction<Record<string, boolean>>>;
-    setHoveredThreadId: React.Dispatch<React.SetStateAction<string | null>>;
     handleMessageDragStart: (event: React.DragEvent, message: Message) => void;
     handleMessageDragEnd: () => void;
     handleRowClick: (event: React.MouseEvent, message: Message) => void;
     handleSelectMessage: (message: Message) => void;
     toggleMessageSelection: (messageId: string, replace?: boolean) => void;
+    selectRangeTo: (messageId: string) => void;
     selectCollapsedThread: (
       flat: Array<{ message: Message; depth: number }>,
       target: Message
@@ -65,7 +71,11 @@ type MessageTableProps = {
     renderFolderBadges: (folderIds: string[]) => React.ReactNode;
     isPinnedMessage: (message: Message) => boolean;
     isTrashFolder: (folderId?: string) => boolean;
-    renderMessageMenu: (message: Message, view: "table" | "list") => React.ReactNode;
+    renderMessageMenu: (
+      message: Message,
+      view: "table" | "list",
+      onOpenChange?: (open: boolean) => void
+    ) => React.ReactNode;
   };
 };
 
@@ -84,7 +94,6 @@ export default function MessageTable({ state, actions, helpers }: MessageTablePr
     activeFolderId,
     activeMessageId,
     activeMessage,
-    hoveredThreadId,
     sortDir
   } = state;
   const {
@@ -95,15 +104,16 @@ export default function MessageTable({ state, actions, helpers }: MessageTablePr
     setSortDir,
     setCollapsedGroups,
     setCollapsedThreads,
-    setHoveredThreadId,
     handleMessageDragStart,
     handleMessageDragEnd,
     handleRowClick,
     handleSelectMessage,
     toggleMessageSelection,
+    selectRangeTo,
     selectCollapsedThread,
     handleDeleteMessage
   } = actions;
+
   const {
     buildThreadTree,
     flattenThread,
@@ -117,14 +127,54 @@ export default function MessageTable({ state, actions, helpers }: MessageTablePr
     renderMessageMenu
   } = helpers;
 
+  const [optimisticRow, setOptimisticRow] = useState<{
+    id: string;
+    selected: boolean;
+    active: boolean;
+  } | null>(null);
+  const clearTimerRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (!optimisticRow) return;
+    const matchesSelected = selectedMessageIds.has(optimisticRow.id) === optimisticRow.selected;
+    const matchesActive = !optimisticRow.active || activeMessageId === optimisticRow.id;
+    if (matchesSelected && matchesActive) {
+      setOptimisticRow(null);
+    }
+  }, [activeMessageId, optimisticRow, selectedMessageIds]);
+
+  useEffect(() => {
+    return () => {
+      if (clearTimerRef.current !== null) {
+        window.clearTimeout(clearTimerRef.current);
+      }
+    };
+  }, []);
+
+  const scheduleClear = () => {
+    if (clearTimerRef.current !== null) {
+      window.clearTimeout(clearTimerRef.current);
+    }
+    clearTimerRef.current = window.setTimeout(() => {
+      clearTimerRef.current = null;
+      setOptimisticRow(null);
+    }, 350);
+  };
+
+
   return (
-    <div className="message-table">
-      <div className="table-row table-header">
-        <div className="cell-select" aria-hidden="true">
-          <input
-            type="checkbox"
+    <div className={styles.table}>
+      <div className={`${styles.row} ${styles.rowHeader}`}>
+        <div className={styles.cellSelect} aria-hidden="true">
+          <Checkbox
+            size="1"
+            checked={
+              visibleMessages.length > 0 &&
+              visibleMessages.every((item) => selectedMessageIds.has(item.message.id))
+            }
             aria-label="Select all"
-            onChange={() => {
+            onClick={(event) => {
+              event.stopPropagation();
               const allIds = visibleMessages.map((item) => item.message.id);
               if (allIds.every((id) => selectedMessageIds.has(id))) {
                 clearSelection();
@@ -135,45 +185,49 @@ export default function MessageTable({ state, actions, helpers }: MessageTablePr
                 }
               }
             }}
-            checked={
-              visibleMessages.length > 0 &&
-              visibleMessages.every((item) => selectedMessageIds.has(item.message.id))
-            }
           />
         </div>
-        <button
-          className="table-sort"
-          onClick={() => {
-            setSortKey("from");
-            setSortDir(sortDir === "asc" ? "desc" : "asc");
-          }}
-        >
-          From
-        </button>
-        <button
-          className="table-sort"
-          onClick={() => {
-            setSortKey("subject");
-            setSortDir(sortDir === "asc" ? "desc" : "asc");
-          }}
-        >
-          Subject
-        </button>
-        <button
-          className="table-sort"
-          onClick={() => {
-            setSortKey("date");
-            setSortDir(sortDir === "asc" ? "desc" : "asc");
-          }}
-        >
-          Date
-        </button>
-        <div className="cell-actions" aria-hidden="true" />
+        <div className={styles.cellFrom}>
+          <button
+            className={styles.sortButton}
+            onClick={() => {
+              setSortKey("from");
+              setSortDir(sortDir === "asc" ? "desc" : "asc");
+            }}
+          >
+            From
+          </button>
+        </div>
+        <div className={styles.cellSubject}>
+          <button
+            className={styles.sortButton}
+            onClick={() => {
+              setSortKey("subject");
+              setSortDir(sortDir === "asc" ? "desc" : "asc");
+            }}
+          >
+            Subject
+          </button>
+        </div>
+        <div className={styles.cellDate}>
+          <button
+            className={styles.sortButton}
+            onClick={() => {
+              setSortKey("date");
+              setSortDir(sortDir === "asc" ? "desc" : "asc");
+            }}
+          >
+            Date
+          </button>
+        </div>
+        <div className={styles.cellActions} aria-hidden="true" />
       </div>
       {groupedMessages.map((group) => (
-        <div key={group.key} className="table-group">
+        <div key={group.key} className={groupStyles.group}>
           <div
-            className={`group-title group-toggle ${group.key === "Pinned" ? "pinned" : ""}`}
+            className={`${groupStyles.groupTitle} ${groupStyles.groupToggle} ${
+              group.key === "Pinned" ? groupStyles.groupTitlePinned : ""
+            }`}
             role="button"
             tabIndex={0}
             onClick={() => {
@@ -194,74 +248,114 @@ export default function MessageTable({ state, actions, helpers }: MessageTablePr
               }
             }}
           >
-            <span className={`group-caret ${collapsedGroups[group.key] ? "" : "open"}`}>
+            <span
+              className={`${groupStyles.groupCaret} ${
+                collapsedGroups[group.key] ? "" : groupStyles.groupCaretOpen
+              }`}
+            >
               {group.items.length === 0 ? "" : "▸"}
             </span>
-            {getGroupLabel(group)} · {group.items.length === 0 ? 0 : group.count ?? group.items.length}
+            <Text as="span" size="1">
+              {getGroupLabel(group)} ·{" "}
+              {group.items.length === 0 ? 0 : group.count ?? group.items.length}
+            </Text>
           </div>
           {group.items.length > 0 && !collapsedGroups[group.key] && (
             <>
               {supportsThreads
-                ? buildThreadTree(group.items)
-                    .sort((a, b) => getThreadLatestDate(b) - getThreadLatestDate(a))
-                    .map((root) => {
-                      const isPinnedGroup = group.key === "Pinned";
-                      const threadGroupId =
-                        root.message.threadId ?? root.message.messageId ?? root.message.id;
-                      const activeThreadKey =
-                        activeMessage?.threadId ??
-                        activeMessage?.messageId ??
-                        activeMessage?.id;
-                      const fullFlat = flattenThread(root, 0);
-                      const threadSize = fullFlat.length;
-                      const isCollapsed = collapsedThreads[threadGroupId] ?? true;
-                      const flat = isCollapsed ? [fullFlat[0]] : fullFlat;
-                      const threadFolderIds = Array.from(
-                        new Set(fullFlat.map((item) => item.message.folderId))
-                      );
-                      const showThreadFolderBadges =
-                        searchScope === "all" ||
-                        (includeThreadAcrossFolders && threadFolderIds.length > 1);
-                      return (
-                        <div key={`${threadGroupId}-${root.message.id}`}>
-                          {flat.map(({ message, depth }, index) => {
-                            const isSelected = selectedMessageIds.has(message.id);
-                            const isDragging = draggingMessageIds.has(message.id);
-                            const folderIds =
-                              index === 0 && isCollapsed && threadSize > 1
-                                ? showThreadFolderBadges
-                                  ? threadFolderIds
-                                  : []
-                                : searchScope === "all" ||
-                                    (includeThreadAcrossFolders &&
-                                      message.folderId !== activeFolderId)
-                                  ? [message.folderId]
-                                  : [];
-                            return (
-                              <div
-                                key={message.id}
-                                className={`table-row ${message.id === activeMessageId ? "active" : ""} ${
-                                  depth > 0 ? "thread-child" : ""
-                                } ${
-                                  (hoveredThreadId === threadGroupId ||
-                                    activeThreadKey === threadGroupId) &&
-                                  message.id !== activeMessage?.id
-                                    ? "thread-sibling"
-                                    : ""
-                                } ${!message.seen ? "unread" : ""} ${
-                                  isSelected ? "selected" : ""
-                                } ${isDragging ? "dragging" : ""} ${
-                                  pendingMessageActions.has(message.id) ? "disabled" : ""
-                                }`}
-                                role="button"
-                                tabIndex={0}
-                                draggable
-                                onDragStart={(event) => handleMessageDragStart(event, message)}
-                                onDragEnd={handleMessageDragEnd}
-                                onClick={(event) => {
-                                  if (
-                                    supportsThreads &&
-                                    threadSize > 1 &&
+                ? buildThreadGroupEntries({
+                    group,
+                    collapsedThreads,
+                    includeThreadAcrossFolders,
+                    searchScope,
+                    activeFolderId,
+                    buildThreadTree,
+                    flattenThread,
+                    getThreadLatestDate
+                  }).map((entry) => {
+                    const isPinnedGroup = group.key === "Pinned";
+                    const threadGroupId = entry.threadGroupId;
+                    const activeThreadKey =
+                      activeMessage?.threadId ??
+                      activeMessage?.messageId ??
+                      activeMessage?.id;
+                    const fullFlat = entry.fullFlat;
+                    const threadSize = entry.threadSize;
+                    const isCollapsed = entry.isCollapsed;
+                    const flat = entry.flat;
+                    const threadFolderIds = entry.threadFolderIds;
+                    const showThreadFolderBadges = entry.showThreadFolderBadges;
+                    return (
+                      <div key={`${threadGroupId}-${entry.root.message.id}`}>
+                        {flat.map(({ message, depth }, index) => {
+                          const isSelected = selectedMessageIds.has(message.id);
+                          const isDragging = draggingMessageIds.has(message.id);
+                          const folderIds =
+                            index === 0 && isCollapsed && threadSize > 1
+                              ? showThreadFolderBadges
+                                ? threadFolderIds
+                                : []
+                              : searchScope === "all" ||
+                                  (includeThreadAcrossFolders &&
+                                    message.folderId !== activeFolderId)
+                                ? [message.folderId]
+                                : [];
+                          const optimistic =
+                            optimisticRow && optimisticRow.id === message.id
+                              ? optimisticRow
+                              : null;
+                          const effectiveSelected = optimistic ? optimistic.selected : isSelected;
+                          const effectiveActive =
+                            message.id === activeMessageId || Boolean(optimistic?.active);
+                          const isDisabled = pendingMessageActions.has(message.id);
+                          const rowClassName = [
+                            styles.row,
+                            effectiveActive ? styles.rowActive : "",
+                            depth > 0 ? styles.threadChild : "",
+                            activeThreadKey === threadGroupId &&
+                            message.id !== activeMessage?.id
+                              ? styles.threadSibling
+                              : "",
+                            !message.seen ? styles.rowUnread : "",
+                            effectiveSelected ? styles.rowSelected : "",
+                            isDragging ? styles.rowDragging : "",
+                            isDisabled ? styles.rowDisabled : ""
+                          ]
+                            .filter(Boolean)
+                            .join(" ");
+                          return (
+                            <div
+                              key={message.id}
+                              className={rowClassName}
+                              role="button"
+                              tabIndex={0}
+                              draggable
+                              onDragStart={(event) => handleMessageDragStart(event, message)}
+                              onDragEnd={handleMessageDragEnd}
+                              onPointerDown={(event) => {
+                                if (isDisabled) return;
+                                if (event.button !== 0) return;
+                                const target = event.target as HTMLElement | null;
+                                const isCheckbox = Boolean(
+                                  target?.closest('[role="checkbox"]')
+                                );
+                                const isInteractive = Boolean(
+                                  target?.closest("button, a, input, select, textarea")
+                                );
+                                if (isInteractive && !isCheckbox) return;
+                                const isToggle = event.metaKey || event.ctrlKey;
+                                const isRange = event.shiftKey;
+                                setOptimisticRow({
+                                  id: message.id,
+                                  selected: isCheckbox || isToggle ? !isSelected : true,
+                                  active: !isCheckbox && !isToggle && !isRange
+                                });
+                                scheduleClear();
+                              }}
+                              onClick={(event) => {
+                                if (
+                                  supportsThreads &&
+                                  threadSize > 1 &&
                                     depth === 0 &&
                                     index === 0 &&
                                     isCollapsed
@@ -286,33 +380,50 @@ export default function MessageTable({ state, actions, helpers }: MessageTablePr
                                   }
                                   handleRowClick(event, message);
                                 }}
-                                onMouseEnter={() => setHoveredThreadId(threadGroupId)}
-                                onMouseLeave={() => setHoveredThreadId(null)}
                                 onKeyDown={(event) => {
-                                  if (event.key === "Enter" || event.key === " ") {
+                                  if (event.key === " ") {
+                                    event.preventDefault();
+                                    if (event.shiftKey) {
+                                      selectRangeTo(message.id);
+                                    } else {
+                                      toggleMessageSelection(message.id);
+                                    }
+                                    return;
+                                  }
+                                  if (event.key === "Enter") {
                                     event.preventDefault();
                                     handleSelectMessage(message);
                                   }
-                                }}
+                                  }}
                               >
-                                <span className="cell-select">
+                                <span className={styles.cellSelect}>
                                   {renderUnreadDot(message)}
                                   {renderSelectIndicators(message)}
-                                  <input
-                                    type="checkbox"
-                                    checked={isSelected}
-                                    onChange={(event) => {
+                                  <Checkbox
+                                    size="1"
+                                    checked={effectiveSelected}
+                                    aria-label="Select message"
+                                    disabled={isDisabled}
+                                    onClick={(event) => {
                                       event.stopPropagation();
-                                      toggleMessageSelection(message.id);
+                                      if (event.shiftKey) {
+                                        selectRangeTo(message.id);
+                                      } else {
+                                        toggleMessageSelection(message.id);
+                                      }
                                     }}
-                                    onClick={(event) => event.stopPropagation()}
                                   />
                                 </span>
-                                <span className="cell-from" style={{ paddingLeft: `${depth * 14}px` }}>
+                                <span
+                                  className={styles.cellFrom}
+                                  style={{ paddingLeft: `${depth * 14}px` }}
+                                >
                                   {index === 0 && threadSize > 1 ? (
                                     <>
                                       <span
-                                        className={`thread-caret ${isCollapsed ? "" : "open"}`}
+                                        className={`${styles.threadCaret} ${
+                                          isCollapsed ? "" : styles.threadCaretOpen
+                                        }`}
                                         title={isCollapsed ? "Expand thread" : "Collapse thread"}
                                         onClick={(event) => {
                                           event.stopPropagation();
@@ -324,18 +435,27 @@ export default function MessageTable({ state, actions, helpers }: MessageTablePr
                                       >
                                         ▸
                                       </span>
-                                      <span className="thread-indicator thread-indicator-inline">
+                                      <Badge
+                                        size="1"
+                                        variant="soft"
+                                        color={badgeColors.threadIndicator}
+                                        className={`${badgeStyles.badge} ${styles.threadIndicatorInline}`}
+                                      >
                                         <GitBranch size={12} />
                                         <span>{threadSize}</span>
-                                      </span>
+                                      </Badge>
                                     </>
                                   ) : (
-                                    <span className="thread-caret spacer">▸</span>
+                                    <span
+                                      className={`${styles.threadCaret} ${styles.threadCaretSpacer}`}
+                                    >
+                                      ▸
+                                    </span>
                                   )}
                                   {message.from}
                                 </span>
                                 <span
-                                  className="cell-subject"
+                                  className={styles.cellSubject}
                                   onClick={(event) => {
                                     event.stopPropagation();
                                     if (
@@ -367,14 +487,18 @@ export default function MessageTable({ state, actions, helpers }: MessageTablePr
                                   }}
                                 >
                                   {renderFolderBadges(folderIds)}
-                                  <span className="cell-subject-text">{message.subject}</span>
+                                  <span className={styles.cellSubjectText}>{message.subject}</span>
                                 </span>
-                                <span className="cell-date">
-                                  <span className="date-text">{message.date}</span>
+                                <span className={styles.cellDate}>
+                                  <Text as="span" size="1">
+                                    {message.date}
+                                  </Text>
                                 </span>
-                                <div className="cell-actions">
-                                  <button
-                                    className="icon-button ghost message-delete"
+                                <div className={styles.cellActions}>
+                                  <IconButton
+                                    size="1"
+                                    variant="ghost"
+                                    color="gray"
                                     title={
                                       isTrashFolder(message.folderId)
                                         ? "Delete permanently"
@@ -388,7 +512,7 @@ export default function MessageTable({ state, actions, helpers }: MessageTablePr
                                     }}
                                   >
                                     <Trash2 size={14} />
-                                  </button>
+                                  </IconButton>
                                   {renderMessageMenu(message, "table")}
                                 </div>
                               </div>
@@ -397,68 +521,117 @@ export default function MessageTable({ state, actions, helpers }: MessageTablePr
                         </div>
                       );
                     })
-                : group.items.map((message) => {
-                    const threadGroupId = message.threadId ?? message.messageId ?? message.id;
+                : buildFlatEntries({
+                    group,
+                    includeThreadAcrossFolders,
+                    searchScope,
+                    activeFolderId
+                  }).map(({ message, threadGroupId, folderIds }) => {
                     const activeThreadKey =
                       activeMessage?.threadId ?? activeMessage?.messageId ?? activeMessage?.id;
-                    const folderIds =
-                      searchScope === "all" ||
-                      (includeThreadAcrossFolders && message.folderId !== activeFolderId)
-                        ? [message.folderId]
-                        : [];
+                    const isSelected = selectedMessageIds.has(message.id);
+                    const isDragging = draggingMessageIds.has(message.id);
+                    const optimistic =
+                      optimisticRow && optimisticRow.id === message.id
+                        ? optimisticRow
+                        : null;
+                    const effectiveSelected = optimistic ? optimistic.selected : isSelected;
+                    const effectiveActive =
+                      message.id === activeMessageId || Boolean(optimistic?.active);
+                    const isDisabled = pendingMessageActions.has(message.id);
+                    const rowClassName = [
+                      styles.row,
+                      effectiveActive ? styles.rowActive : "",
+                      activeThreadKey === threadGroupId &&
+                      message.id !== activeMessage?.id
+                        ? styles.threadSibling
+                        : "",
+                      !message.seen ? styles.rowUnread : "",
+                      effectiveSelected ? styles.rowSelected : "",
+                      isDragging ? styles.rowDragging : "",
+                      isDisabled ? styles.rowDisabled : ""
+                    ]
+                      .filter(Boolean)
+                      .join(" ");
                     return (
                       <div
                         key={message.id}
-                        className={`table-row ${message.id === activeMessageId ? "active" : ""} ${
-                          (hoveredThreadId === threadGroupId ||
-                            activeThreadKey === threadGroupId) &&
-                          message.id !== activeMessage?.id
-                            ? "thread-sibling"
-                            : ""
-                        } ${!message.seen ? "unread" : ""} ${
-                          selectedMessageIds.has(message.id) ? "selected" : ""
-                        } ${draggingMessageIds.has(message.id) ? "dragging" : ""} ${
-                          pendingMessageActions.has(message.id) ? "disabled" : ""
-                        }`}
+                        className={rowClassName}
                         role="button"
                         tabIndex={0}
                         draggable
                         onDragStart={(event) => handleMessageDragStart(event, message)}
                         onDragEnd={handleMessageDragEnd}
+                        onPointerDown={(event) => {
+                          if (isDisabled) return;
+                          if (event.button !== 0) return;
+                          const target = event.target as HTMLElement | null;
+                          const isCheckbox = Boolean(
+                            target?.closest('[role="checkbox"]')
+                          );
+                          const isInteractive = Boolean(
+                            target?.closest("button, a, input, select, textarea")
+                          );
+                          if (isInteractive && !isCheckbox) return;
+                          const isToggle = event.metaKey || event.ctrlKey;
+                          const isRange = event.shiftKey;
+                          setOptimisticRow({
+                            id: message.id,
+                            selected: isCheckbox || isToggle ? !isSelected : true,
+                            active: !isCheckbox && !isToggle && !isRange
+                          });
+                          scheduleClear();
+                        }}
                         onClick={(event) => handleRowClick(event, message)}
-                        onMouseEnter={() => setHoveredThreadId(threadGroupId)}
-                        onMouseLeave={() => setHoveredThreadId(null)}
                         onKeyDown={(event) => {
-                          if (event.key === "Enter" || event.key === " ") {
+                          if (event.key === " ") {
+                            event.preventDefault();
+                            if (event.shiftKey) {
+                              selectRangeTo(message.id);
+                            } else {
+                              toggleMessageSelection(message.id);
+                            }
+                            return;
+                          }
+                          if (event.key === "Enter") {
                             event.preventDefault();
                             handleSelectMessage(message);
                           }
                         }}
                       >
-                        <span className="cell-select">
+                        <span className={styles.cellSelect}>
                           {renderUnreadDot(message)}
                           {renderSelectIndicators(message)}
-                          <input
-                            type="checkbox"
-                            checked={selectedMessageIds.has(message.id)}
-                            onChange={(event) => {
+                          <Checkbox
+                            size="1"
+                            checked={effectiveSelected}
+                            aria-label="Select message"
+                            disabled={isDisabled}
+                            onClick={(event) => {
                               event.stopPropagation();
-                              toggleMessageSelection(message.id);
+                              if (event.shiftKey) {
+                                selectRangeTo(message.id);
+                              } else {
+                                toggleMessageSelection(message.id);
+                              }
                             }}
-                            onClick={(event) => event.stopPropagation()}
                           />
                         </span>
-                        <span className="cell-from">{message.from}</span>
-                        <span className="cell-subject">
+                        <span className={styles.cellFrom}>{message.from}</span>
+                        <span className={styles.cellSubject}>
                           {renderFolderBadges(folderIds)}
-                          <span className="cell-subject-text">{message.subject}</span>
+                          <span className={styles.cellSubjectText}>{message.subject}</span>
                         </span>
-                        <span className="cell-date">
-                          <span className="date-text">{message.date}</span>
+                        <span className={styles.cellDate}>
+                          <Text as="span" size="1">
+                            {message.date}
+                          </Text>
                         </span>
-                        <div className="cell-actions">
-                          <button
-                            className="icon-button ghost message-delete"
+                        <div className={styles.cellActions}>
+                          <IconButton
+                            size="1"
+                            variant="ghost"
+                            color="gray"
                             title={
                               isTrashFolder(message.folderId)
                                 ? "Delete permanently"
@@ -472,7 +645,7 @@ export default function MessageTable({ state, actions, helpers }: MessageTablePr
                             }}
                           >
                             <Trash2 size={14} />
-                          </button>
+                          </IconButton>
                           {renderMessageMenu(message, "table")}
                         </div>
                       </div>

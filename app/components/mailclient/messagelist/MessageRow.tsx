@@ -1,6 +1,12 @@
+import { memo, useEffect, useRef, useState } from "react";
 import type React from "react";
 import { GitBranch, Paperclip, Trash2 } from "lucide-react";
+import { Badge, Checkbox, IconButton, Text } from "@radix-ui/themes";
+import { badgeColors } from "@/lib/ui/badgeColors";
 import type { Message } from "@/lib/data";
+import badgeStyles from "../message/MessageBadge.module.css";
+import commonStyles from "./MessageListCommon.module.css";
+import styles from "./MessageRow.module.css";
 
 type MessageRowProps = {
   message: Message;
@@ -21,26 +27,28 @@ type MessageRowProps = {
   threadSize?: number;
   onRowClick: (event: React.MouseEvent) => void;
   onRowKeyDown: (event: React.KeyboardEvent) => void;
-  onMouseEnter: () => void;
-  onMouseLeave: () => void;
+  onMouseEnter?: () => void;
+  onMouseLeave?: () => void;
   onDragStart: (event: React.DragEvent) => void;
   onDragEnd: () => void;
-  onCheckboxChange: (event: React.ChangeEvent<HTMLInputElement>, shiftKey: boolean) => void;
+  onCheckboxChange: (shiftKey: boolean) => void;
   onSubjectClick: (event: React.MouseEvent) => void;
   onDelete: (event: React.MouseEvent) => void;
   deleteTitle: string;
   renderUnreadDot: React.ReactNode;
   renderSelectIndicators: React.ReactNode;
   folderBadges: React.ReactNode;
+  folderBadgeKey?: string;
   showFolderBadgesInSubjectMeta: boolean;
   showFolderBadgesInMeta: boolean;
   quickActions?: React.ReactNode;
   messageMenu: React.ReactNode;
   showAttachmentIcon: boolean;
   showNewBadge: boolean;
+  showCompactDivider?: boolean;
 };
 
-export default function MessageRow({
+function MessageRow({
   message,
   isCompactView,
   listIsNarrow,
@@ -70,72 +78,190 @@ export default function MessageRow({
   renderUnreadDot,
   renderSelectIndicators,
   folderBadges,
+  folderBadgeKey,
   showFolderBadgesInSubjectMeta,
   showFolderBadgesInMeta,
   quickActions,
   messageMenu,
   showAttachmentIcon,
-  showNewBadge
+  showNewBadge,
+  showCompactDivider
 }: MessageRowProps) {
+  const [optimisticSelected, setOptimisticSelected] = useState<boolean | null>(null);
+  const [optimisticActive, setOptimisticActive] = useState(false);
+  const clearTimerRef = useRef<number | null>(null);
+  const effectiveSelected = optimisticSelected ?? isSelected;
+  const effectiveActive = isActive || optimisticActive;
+  const rowClassName = [
+    styles.row,
+    isCompactView ? styles.rowCompact : "",
+    showCompactDivider ? styles.rowDivider : "",
+    isThreadSibling ? styles.rowThreadSibling : "",
+    effectiveActive && !showCollapsedActive ? styles.rowActive : "",
+    effectiveSelected ? styles.rowSelected : "",
+    isDragging ? styles.rowDragging : "",
+    isDisabled ? styles.rowDisabled : "",
+    showCollapsedActive ? styles.rowActiveThreadRoot : ""
+  ]
+    .filter(Boolean)
+    .join(" ");
+  const headerClassName = [
+    styles.header,
+    isCompactView ? styles.headerCompact : ""
+  ]
+    .filter(Boolean)
+    .join(" ");
+  const actionsClassName = [
+    styles.actions,
+    isCompactView ? styles.actionsCompact : ""
+  ]
+    .filter(Boolean)
+    .join(" ");
+  const subjectClassName = [
+    styles.subjectRow,
+    isCompactView ? styles.subjectRowCompact : ""
+  ]
+    .filter(Boolean)
+    .join(" ");
+  const previewClassName = [
+    styles.preview,
+    isCompactView ? styles.previewCompact : "",
+    !message.seen ? styles.unreadText : ""
+  ]
+    .filter(Boolean)
+    .join(" ");
+  const metaClassName = [
+    styles.metaRow,
+    isCompactView ? styles.metaRowCompact : ""
+  ]
+    .filter(Boolean)
+    .join(" ");
+  const dateClassName = [
+    styles.date,
+    isCompactView ? styles.dateCompact : ""
+  ]
+    .filter(Boolean)
+    .join(" ");
+
+  const handleCheckboxClick = (event: React.MouseEvent<HTMLButtonElement>) => {
+    event.stopPropagation();
+    onCheckboxChange(event.shiftKey);
+  };
+
+  const scheduleClear = () => {
+    if (clearTimerRef.current !== null) {
+      window.clearTimeout(clearTimerRef.current);
+    }
+    clearTimerRef.current = window.setTimeout(() => {
+      clearTimerRef.current = null;
+      setOptimisticSelected(null);
+      setOptimisticActive(false);
+    }, 350);
+  };
+
+  const handlePointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (isDisabled) return;
+    if (event.button !== 0) return;
+    const target = event.target as HTMLElement | null;
+    const isCheckbox = Boolean(target?.closest('[role="checkbox"]'));
+    const isInteractive = Boolean(target?.closest("button, a, input, select, textarea"));
+    if (isInteractive && !isCheckbox) return;
+    const isToggle = event.metaKey || event.ctrlKey;
+    const isRange = event.shiftKey;
+    if (isCheckbox) {
+      setOptimisticSelected(!isSelected);
+    } else if (isToggle) {
+      setOptimisticSelected(!isSelected);
+    } else {
+      setOptimisticSelected(true);
+    }
+    if (!isCheckbox && !isToggle && !isRange) {
+      setOptimisticActive(true);
+    }
+    scheduleClear();
+  };
+
+  useEffect(() => {
+    if (optimisticSelected === null && !optimisticActive) return;
+    if (optimisticSelected !== null && optimisticSelected !== isSelected) return;
+    if (optimisticActive && !isActive) return;
+    if (clearTimerRef.current !== null) {
+      window.clearTimeout(clearTimerRef.current);
+      clearTimerRef.current = null;
+    }
+    setOptimisticSelected(null);
+    setOptimisticActive(false);
+  }, [isActive, isSelected, optimisticActive, optimisticSelected]);
+
+  useEffect(() => {
+    return () => {
+      if (clearTimerRef.current !== null) {
+        window.clearTimeout(clearTimerRef.current);
+      }
+    };
+  }, []);
+
   return (
     <div
-      className={`message-item ${isCompactView ? "compact" : ""} ${isActive ? "active" : ""} ${
-        isThreadChild ? "thread-child" : ""
-      } ${isThreadSibling ? "thread-sibling" : ""} ${!message.seen ? "unread" : ""} ${
-        isDisabled ? "disabled" : ""
-      } ${isSelected ? "selected" : ""} ${isDragging ? "dragging" : ""} ${
-        showCollapsedActive ? "active-thread-root" : ""
-      }`}
+      className={rowClassName}
+      data-compact={isCompactView}
+      data-active={effectiveActive}
+      data-selected={effectiveSelected}
+      data-dragging={isDragging}
+      data-thread-child={isThreadChild}
+      data-thread-sibling={isThreadSibling}
+      data-unread={!message.seen}
+      data-disabled={isDisabled}
+      data-active-thread-root={showCollapsedActive}
       role="button"
       tabIndex={0}
       draggable
       onDragStart={onDragStart}
       onDragEnd={onDragEnd}
       onClick={onRowClick}
+      onPointerDown={handlePointerDown}
       onMouseEnter={onMouseEnter}
       onMouseLeave={onMouseLeave}
       style={paddingLeft ? { paddingLeft: `${paddingLeft}px` } : undefined}
       onKeyDown={onRowKeyDown}
     >
-      <div className="message-card-header">
-        <span className="message-select">
+      <div className={headerClassName}>
+        <span className={commonStyles.select}>
           {renderUnreadDot}
           {renderSelectIndicators}
-          <input
-            type="checkbox"
-            checked={isSelected}
-            onChange={(event) => {
-              event.stopPropagation();
-              const nativeEvent = event.nativeEvent as MouseEvent;
-              onCheckboxChange(event, !!nativeEvent.shiftKey);
-            }}
-            onClick={(event) => event.stopPropagation()}
+          <Checkbox
+            size="1"
+            checked={effectiveSelected}
+            aria-label="Select message"
+            onClick={handleCheckboxClick}
+            disabled={isDisabled}
           />
         </span>
-        <span className="message-from">{message.from}</span>
-        <div
-          className={`message-card-actions ${isDisabled ? "disabled" : ""} ${
-            isCompactView ? "compact-actions" : ""
-          }`}
-        >
-          {showNewBadge && <span className="message-new">New</span>}
-          {showAttachmentIcon && (
-            <span className="message-attach" title="Attachments">
-              <Paperclip size={12} />
-            </span>
+        <Text as="span" size="1" className={`${styles.from} ${!message.seen ? styles.unreadText : ""}`}>
+          {message.from}
+        </Text>
+        <div className={actionsClassName}>
+          {showNewBadge && (
+            <Badge size="1" variant="soft" color={badgeColors.new} className={badgeStyles.badge}>
+              New
+            </Badge>
           )}
-          <span className="message-date">{message.date}</span>
+          <Text as="span" size="1" className={dateClassName}>
+            {message.date}
+          </Text>
           {isCompactView ? (
             <>
-              <button
-                className="icon-button ghost message-delete"
+              <IconButton
+                size="1"
+                variant="ghost"
+                color="gray"
                 title={deleteTitle}
                 aria-label="Delete"
                 disabled={isDisabled}
                 onClick={onDelete}
               >
                 <Trash2 size={14} />
-              </button>
+              </IconButton>
               {messageMenu}
             </>
           ) : (
@@ -146,11 +272,13 @@ export default function MessageRow({
           )}
         </div>
       </div>
-      <div className="message-card-subject">
-        <div className="message-subject" onClick={onSubjectClick}>
+      <div className={subjectClassName}>
+        <div className={styles.subject} onClick={onSubjectClick}>
           {showThreadCaret && (
             <span
-              className={`thread-caret ${isThreadCaretOpen ? "open" : ""}`}
+              className={`${styles.threadCaret} ${
+                isThreadCaretOpen ? styles.threadCaretOpen : ""
+              }`}
               title={isThreadCaretOpen ? "Collapse thread" : "Expand thread"}
               onClick={(event) => {
                 event.stopPropagation();
@@ -160,22 +288,71 @@ export default function MessageRow({
               ▸
             </span>
           )}
-          <span className="subject-text">{message.subject}</span>
+          <Text
+            as="span"
+            size={isCompactView ? "1" : "2"}
+            className={`${styles.subjectText} ${!message.seen ? styles.unreadText : ""}`}
+          >
+            {message.subject}
+          </Text>
         </div>
-        {(showFolderBadgesInSubjectMeta || showThreadIndicator) && (
-          <div className="message-subject-meta">
+        {(showFolderBadgesInSubjectMeta || showThreadIndicator || showAttachmentIcon) && (
+          <div className={styles.subjectMeta}>
             {showFolderBadgesInSubjectMeta && folderBadges}
             {showThreadIndicator && (
-              <div className="thread-indicator">
+              <Badge
+                size="1"
+                variant="soft"
+                color={badgeColors.threadIndicator}
+                className={`${badgeStyles.badge} ${styles.threadIndicator}`}
+              >
                 <GitBranch size={12} />
                 <span>{threadSize}</span>
-              </div>
+              </Badge>
+            )}
+            {showAttachmentIcon && (
+              <Badge
+                size="1"
+                variant="soft"
+                color={badgeColors.attachment}
+                className={badgeStyles.badge}
+                title="Attachments"
+                aria-label="Attachments"
+              >
+                <Paperclip size={12} />
+              </Badge>
             )}
           </div>
         )}
       </div>
-      <div className="message-preview">{message.preview}</div>
-      {showFolderBadgesInMeta && <div className="message-meta">{folderBadges}</div>}
+      <div className={previewClassName}>{message.preview}</div>
+      {showFolderBadgesInMeta && <div className={metaClassName}>{folderBadges}</div>}
     </div>
   );
 }
+
+const areEqual = (prev: MessageRowProps, next: MessageRowProps) =>
+  prev.message === next.message &&
+  prev.isCompactView === next.isCompactView &&
+  prev.listIsNarrow === next.listIsNarrow &&
+  prev.isActive === next.isActive &&
+  prev.isThreadChild === next.isThreadChild &&
+  prev.isThreadSibling === next.isThreadSibling &&
+  prev.isSelected === next.isSelected &&
+  prev.isDragging === next.isDragging &&
+  prev.isDisabled === next.isDisabled &&
+  prev.showCollapsedActive === next.showCollapsedActive &&
+  prev.paddingLeft === next.paddingLeft &&
+  prev.showThreadCaret === next.showThreadCaret &&
+  prev.isThreadCaretOpen === next.isThreadCaretOpen &&
+  prev.showThreadIndicator === next.showThreadIndicator &&
+  prev.threadSize === next.threadSize &&
+  prev.showFolderBadgesInSubjectMeta === next.showFolderBadgesInSubjectMeta &&
+  prev.showFolderBadgesInMeta === next.showFolderBadgesInMeta &&
+  prev.showAttachmentIcon === next.showAttachmentIcon &&
+  prev.showNewBadge === next.showNewBadge &&
+  prev.showCompactDivider === next.showCompactDivider &&
+  prev.deleteTitle === next.deleteTitle &&
+  prev.folderBadgeKey === next.folderBadgeKey;
+
+export default memo(MessageRow, areEqual);

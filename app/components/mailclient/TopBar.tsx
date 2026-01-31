@@ -2,7 +2,10 @@ import Image from "next/image";
 
 import type React from "react";
 import { Edit3, FileText, Moon, RefreshCw, Settings, Sun, Trash2, X } from "lucide-react";
+import { Badge, Button, DropdownMenu, IconButton, Select, TextField } from "@radix-ui/themes";
+import { badgeColors } from "@/lib/ui/badgeColors";
 import type { Account, Folder, Message } from "@/lib/data";
+import styles from "./TopBar.module.css";
 
 type SearchFields = {
   sender: boolean;
@@ -28,8 +31,6 @@ type TopBarProps = {
     searchScope: "folder" | "all";
     searchFields: SearchFields;
     searchBadges: SearchBadges;
-    searchFieldsOpen: boolean;
-    searchBadgesOpen: boolean;
     darkMode: boolean;
     isRelatedSearch: boolean;
     accounts: Account[];
@@ -40,7 +41,6 @@ type TopBarProps = {
     activeFolderId: string;
     lastFolderId: string;
     accountFolders: Folder[];
-    menuOpen: boolean;
     isSyncing: boolean;
   };
   ui: {
@@ -52,8 +52,6 @@ type TopBarProps = {
     setSearchScope: React.Dispatch<React.SetStateAction<"folder" | "all">>;
     setSearchFields: React.Dispatch<React.SetStateAction<SearchFields>>;
     setSearchBadges: React.Dispatch<React.SetStateAction<SearchBadges>>;
-    setSearchFieldsOpen: React.Dispatch<React.SetStateAction<boolean>>;
-    setSearchBadgesOpen: React.Dispatch<React.SetStateAction<boolean>>;
     toggleDarkMode: () => void;
     openCompose: (mode: ComposeMode) => void;
     setActiveFolderId: React.Dispatch<React.SetStateAction<string>>;
@@ -62,24 +60,16 @@ type TopBarProps = {
     startEditAccount: (account?: Account) => void;
     deleteAccount: (accountId: string) => void;
     setActiveAccountId: React.Dispatch<React.SetStateAction<string>>;
-    setMenuOpen: React.Dispatch<React.SetStateAction<boolean>>;
     syncAccount: (folderId?: string, mode?: "new" | "full") => void;
-  };
-  refs: {
-    menuRef: React.RefObject<HTMLDivElement | null>;
-    searchFieldsRef: React.RefObject<HTMLDivElement | null>;
-    searchBadgesRef: React.RefObject<HTMLDivElement | null>;
   };
 };
 
-export default function TopBar({ state, ui, actions, refs }: TopBarProps) {
+export default function TopBar({ state, ui, actions }: TopBarProps) {
   const {
     query,
     searchScope,
     searchFields,
     searchBadges,
-    searchFieldsOpen,
-    searchBadgesOpen,
     darkMode,
     isRelatedSearch,
     accounts,
@@ -90,7 +80,6 @@ export default function TopBar({ state, ui, actions, refs }: TopBarProps) {
     activeFolderId,
     lastFolderId,
     accountFolders,
-    menuOpen,
     isSyncing
   } = state;
   const {
@@ -98,8 +87,6 @@ export default function TopBar({ state, ui, actions, refs }: TopBarProps) {
     setSearchScope,
     setSearchFields,
     setSearchBadges,
-    setSearchFieldsOpen,
-    setSearchBadgesOpen,
     toggleDarkMode,
     openCompose,
     setActiveFolderId,
@@ -108,18 +95,35 @@ export default function TopBar({ state, ui, actions, refs }: TopBarProps) {
     startEditAccount,
     deleteAccount,
     setActiveAccountId,
-    setMenuOpen,
     syncAccount
   } = actions;
   const { searchFieldsLabel, searchBadgesLabel } = ui;
-  const { menuRef, searchFieldsRef, searchBadgesRef } = refs;
+
+  const handleScopeChange = (next: string) => {
+    const nextScope = next as "folder" | "all";
+    setSearchScope(nextScope);
+    if (nextScope === "all") {
+      setLastFolderId(activeFolderId);
+      setActiveFolderId("");
+    } else {
+      setActiveFolderId(lastFolderId || accountFolders[0]?.id || "");
+    }
+  };
+
+  const handleAccountChange = (accountId: string) => {
+    if (!accountId) return;
+    setActiveAccountId(accountId);
+    setActiveMessageId(
+      messages.find((message) => message.accountId === accountId)?.id ?? messages[0]?.id ?? ""
+    );
+  };
 
   return (
-    <header className="top-bar">
-      <div className="brand">
-        <div className="brand-mark" aria-hidden>
+    <header className={styles.topBar}>
+      <div className={styles.brand}>
+        <div className={styles.brandMark} aria-hidden>
           <Image
-            className="brand-icon"
+            className={styles.brandIcon}
             src="/icon.png"
             alt=""
             width={44}
@@ -128,145 +132,128 @@ export default function TopBar({ state, ui, actions, refs }: TopBarProps) {
             priority
           />
         </div>
-        <h1>Noctua Mail</h1>
+        <h1 className={styles.brandTitle}>Noctua Mail</h1>
       </div>
-      <div className="search-bar">
-        <input
+      <div className={styles.search}>
+        <TextField.Root
+          size="2"
           type="search"
           placeholder="Search all messages"
           value={query}
           onChange={(event) => setQuery(event.target.value)}
-        />
-        <div className="search-controls">
-          {query && (
-            <button
-              className="search-control search-clear"
-              onClick={() => setQuery("")}
-              aria-label="Clear search"
-              title="Clear search"
-            >
-              <X size={12} />
-            </button>
-          )}
-          <select
-            className="search-control"
-            value={searchScope}
-            disabled={isRelatedSearch}
-            onChange={(event) => {
-              const next = event.target.value as "folder" | "all";
-              setSearchScope(next);
-              if (next === "all") {
-                setLastFolderId(activeFolderId);
-                setActiveFolderId("");
-              } else {
-                setActiveFolderId(lastFolderId || accountFolders[0]?.id || "");
-              }
-            }}
-          >
-            <option value="folder">Current folder</option>
-            <option value="all">Everywhere</option>
-          </select>
-          <div className="search-fields" ref={searchFieldsRef}>
-            <button
-              className="search-control"
-              onClick={() => setSearchFieldsOpen((open) => !open)}
-              aria-label="Search fields"
-              title="Search fields"
-              disabled={isRelatedSearch}
-            >
+          className={styles.searchInput}
+        >
+          {query ? (
+            <TextField.Slot side="right">
+              <IconButton
+                size="1"
+                variant="ghost"
+                onClick={() => setQuery("")}
+                aria-label="Clear search"
+                title="Clear search"
+              >
+                <X size={12} />
+              </IconButton>
+            </TextField.Slot>
+          ) : null}
+        </TextField.Root>
+        <Select.Root
+          size="2"
+          value={searchScope}
+          disabled={isRelatedSearch}
+          onValueChange={handleScopeChange}
+        >
+          <Select.Trigger className={styles.select} color="gray" variant="surface" />
+          <Select.Content position="popper">
+            <Select.Item value="folder">Current folder</Select.Item>
+            <Select.Item value="all">Everywhere</Select.Item>
+          </Select.Content>
+        </Select.Root>
+        <DropdownMenu.Root>
+          <DropdownMenu.Trigger>
+            <Button size="2" variant="surface" color="gray" disabled={isRelatedSearch}>
               {searchFieldsLabel}
-            </button>
-            {searchFieldsOpen && (
-              <div className="search-fields-panel">
-                <div className="search-fields-title">Search in</div>
-                <div className="search-fields-grid">
-                  {(
-                    [
-                      ["sender", "Sender"],
-                      ["participants", "Participants"],
-                      ["subject", "Subject"],
-                      ["body", "Body"],
-                      ["attachments", "Attachments"]
-                    ] as const
-                  ).map(([key, label]) => (
-                    <label key={key} className="search-field-option">
-                      <span className="search-field-label">{label}</span>
-                      <input
-                        type="checkbox"
-                        checked={searchFields[key]}
-                        disabled={key === "sender" && searchFields.participants}
-                        onChange={(event) =>
-                          setSearchFields((prev) => ({
-                            ...prev,
-                            [key]: event.target.checked,
-                            ...(key === "participants" && event.target.checked
-                              ? { sender: false }
-                              : {})
-                          }))
-                        }
-                      />
-                    </label>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-          <div className="search-fields" ref={searchBadgesRef}>
-            <button
-              className="search-control"
-              onClick={() => setSearchBadgesOpen((open) => !open)}
-              aria-label="Search badges"
-              title="Search badges"
-              disabled={isRelatedSearch}
-            >
+            </Button>
+          </DropdownMenu.Trigger>
+          <DropdownMenu.Content>
+            <DropdownMenu.Label>Search in</DropdownMenu.Label>
+            <DropdownMenu.Separator />
+            {(
+              [
+                ["sender", "Sender"],
+                ["participants", "Participants"],
+                ["subject", "Subject"],
+                ["body", "Body"],
+                ["attachments", "Attachments"]
+              ] as const
+            ).map(([key, label]) => (
+              <DropdownMenu.CheckboxItem
+                key={key}
+                checked={searchFields[key]}
+                disabled={key === "sender" && searchFields.participants}
+                onSelect={(event) => event.preventDefault()}
+                onCheckedChange={(checked) =>
+                  setSearchFields((prev) => ({
+                    ...prev,
+                    [key]: checked === true,
+                    ...(key === "participants" && checked === true ? { sender: false } : {})
+                  }))
+                }
+              >
+                {label}
+              </DropdownMenu.CheckboxItem>
+            ))}
+          </DropdownMenu.Content>
+        </DropdownMenu.Root>
+        <DropdownMenu.Root>
+          <DropdownMenu.Trigger>
+            <Button size="2" variant="surface" color="gray" disabled={isRelatedSearch}>
               {searchBadgesLabel}
-            </button>
-            {searchBadgesOpen && (
-              <div className="search-fields-panel">
-                <div className="search-fields-title">Badges</div>
-                <div className="search-fields-grid">
-                  {(
-                    [
-                      ["unread", "Unread"],
-                      ["flagged", "Flagged"],
-                      ["todo", "To-Do"],
-                      ["pinned", "Pinned"],
-                      ["attachments", "Attachments"]
-                    ] as const
-                  ).map(([key, label]) => (
-                    <label key={key} className="search-field-option">
-                      <span className="search-field-label">{label}</span>
-                      <input
-                        type="checkbox"
-                        checked={searchBadges[key]}
-                        onChange={(event) =>
-                          setSearchBadges((prev) => ({
-                            ...prev,
-                            [key]: event.target.checked
-                          }))
-                        }
-                      />
-                    </label>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
+            </Button>
+          </DropdownMenu.Trigger>
+          <DropdownMenu.Content>
+            <DropdownMenu.Label>Badges</DropdownMenu.Label>
+            <DropdownMenu.Separator />
+            {(
+              [
+                ["unread", "Unread"],
+                ["flagged", "Flagged"],
+                ["todo", "To-Do"],
+                ["pinned", "Pinned"],
+                ["attachments", "Attachments"]
+              ] as const
+            ).map(([key, label]) => (
+              <DropdownMenu.CheckboxItem
+                key={key}
+                checked={searchBadges[key]}
+                onSelect={(event) => event.preventDefault()}
+                onCheckedChange={(checked) =>
+                  setSearchBadges((prev) => ({
+                    ...prev,
+                    [key]: checked === true
+                  }))
+                }
+              >
+                {label}
+              </DropdownMenu.CheckboxItem>
+            ))}
+          </DropdownMenu.Content>
+        </DropdownMenu.Root>
       </div>
-      <div className="action-row">
-        <button
-          className="icon-button new-mail-button"
+      <div className={styles.actionRow}>
+        <Button
+          size="2"
           onClick={() => openCompose("new")}
           title="New mail"
           aria-label="New mail"
         >
           <Edit3 size={14} />
           New Mail
-        </button>
+        </Button>
         {draftsFolder && draftsCount > 0 && (
-          <button
-            className="icon-button drafts-button"
+          <Button
+            size="2"
+            variant="surface"
             onClick={() => {
               setSearchScope("folder");
               setActiveFolderId(draftsFolder.id);
@@ -277,100 +264,92 @@ export default function TopBar({ state, ui, actions, refs }: TopBarProps) {
           >
             <FileText size={14} />
             {`${draftsCount} Draft${draftsCount === 1 ? "" : "s"}`}
-          </button>
+          </Button>
         )}
-        <button
-          className="icon-button"
+        <IconButton
+          size="2"
+          variant="ghost"
           onClick={toggleDarkMode}
           title={darkMode ? "Switch to light mode" : "Switch to dark mode"}
           aria-label={darkMode ? "Switch to light mode" : "Switch to dark mode"}
         >
           {darkMode ? <Sun size={14} /> : <Moon size={14} />}
-        </button>
-        <button
-          className="icon-button"
+        </IconButton>
+        <IconButton
+          size="2"
+          variant="ghost"
           onClick={() => syncAccount(undefined, "new")}
           disabled={isSyncing}
           aria-label="Check new mail"
           title="Check for new mail"
         >
-          <RefreshCw size={18} className={isSyncing ? "spin" : ""} />
-        </button>
-        <div className="user-menu" ref={menuRef}>
-          <button className="icon-button" onClick={() => setMenuOpen((open) => !open)}>
-            {currentAccount?.name ? `${currentAccount.name} ` : ""}
-            {currentAccount?.email ? (
-              <span className="account-email">&lt;{currentAccount.email}&gt;</span>
-            ) : null}
-          </button>
-          {menuOpen && (
-            <div className="user-menu-panel">
-              <h4>Accounts</h4>
-              {accounts.map((account) => (
-                <div key={account.id} className="user-menu-item">
-                  <div
-                    className="user-menu-select"
-                    role="button"
-                    tabIndex={0}
-                    onClick={() => {
-                      setActiveAccountId(account.id);
-                      setActiveMessageId(
-                        messages.find((m) => m.accountId === account.id)?.id ??
-                          messages[0]?.id ??
-                          ""
-                      );
-                      setMenuOpen(false);
-                    }}
-                    onKeyDown={(event) => {
-                      if (event.key === "Enter" || event.key === " ") {
-                        event.preventDefault();
-                        setActiveAccountId(account.id);
-                        setActiveMessageId(
-                          messages.find((m) => m.accountId === account.id)?.id ??
-                            messages[0]?.id ??
-                            ""
-                        );
-                        setMenuOpen(false);
-                      }
-                    }}
+          <RefreshCw size={18} className={isSyncing ? styles.spin : undefined} />
+        </IconButton>
+        <DropdownMenu.Root>
+          <DropdownMenu.Trigger>
+            <Button size="2" variant="surface" className={styles.accountButton}>
+              <span className={styles.accountMeta}>
+                <span className={styles.accountName}>
+                  {currentAccount?.name ?? currentAccount?.email ?? "Account"}
+                </span>
+                {currentAccount?.name && currentAccount?.email ? (
+                  <span className={styles.accountEmail}>{currentAccount.email}</span>
+                ) : null}
+              </span>
+            </Button>
+          </DropdownMenu.Trigger>
+          <DropdownMenu.Content className={styles.accountMenu}>
+            <DropdownMenu.Label>Accounts</DropdownMenu.Label>
+            <DropdownMenu.Separator />
+            {accounts.length ? (
+              <DropdownMenu.RadioGroup
+                value={currentAccount?.id ?? ""}
+                onValueChange={handleAccountChange}
+              >
+                {accounts.map((account) => (
+                  <DropdownMenu.RadioItem
+                    key={account.id}
+                    value={account.id}
+                    className={styles.accountMenuItem}
                   >
-                    <span className="badge">{account.email}</span>
-                    <span className="menu-account">
-                      {account.name}
-                      <span>{account.email}</span>
-                    </span>
-                    <button
-                      className="icon-button menu-gear"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        startEditAccount(account);
-                        setMenuOpen(false);
-                      }}
-                      title="Account settings"
-                      aria-label="Account settings"
-                    >
-                      <Settings size={14} />
-                    </button>
-                    <button
-                      className="icon-button menu-delete"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        deleteAccount(account.id);
-                      }}
-                      title="Delete account"
-                      aria-label="Delete account"
-                    >
-                      <Trash2 size={14} />
-                    </button>
-                  </div>
-                </div>
-              ))}
-              <button className="icon-button" onClick={() => startEditAccount()}>
-                + Add account
-              </button>
-            </div>
-          )}
-        </div>
+                    <div className={styles.accountMenuInfo}>
+                      <span className={styles.accountMenuName}>
+                        {account.name || account.email}
+                      </span>
+                      {account.name && account.email ? (
+                        <span className={styles.accountMenuEmail}>{account.email}</span>
+                      ) : null}
+                    </div>
+                    {account.name && account.email ? (
+                      <Badge size="1" variant="soft" color={badgeColors.folder}>
+                        {account.email}
+                      </Badge>
+                    ) : null}
+                  </DropdownMenu.RadioItem>
+                ))}
+              </DropdownMenu.RadioGroup>
+            ) : (
+              <DropdownMenu.Item disabled>No accounts</DropdownMenu.Item>
+            )}
+            <DropdownMenu.Separator />
+            <DropdownMenu.Item
+              disabled={!currentAccount}
+              onSelect={() => (currentAccount ? startEditAccount(currentAccount) : null)}
+            >
+              <Settings size={14} />
+              Account settings
+            </DropdownMenu.Item>
+            <DropdownMenu.Item
+              disabled={!currentAccount}
+              onSelect={() => (currentAccount ? deleteAccount(currentAccount.id) : null)}
+            >
+              <Trash2 size={14} />
+              Delete account
+            </DropdownMenu.Item>
+            <DropdownMenu.Separator />
+            <DropdownMenu.Item onSelect={() => startEditAccount()}>+ Add account</DropdownMenu.Item>
+          </DropdownMenu.Content>
+        </DropdownMenu.Root>
       </div>
     </header>
   );

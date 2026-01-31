@@ -1,0 +1,30 @@
+.pane {
+  padding: 18px;
+  border-right: 1px solid var(--border);
+  background: var(--surface);
+  flex-shrink: 0;
+  overflow-y: auto;
+  scrollbar-gutter: stable;
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 100%;
+}
+
+.listCompact {
+  gap: 0;
+}
+
+.empty {
+  margin: auto;
+  color: var(--muted);
+  font-size: 13px;
+  text-align: center;
+}
+
+.emptyError {
+  color: #b94b4b;
+}

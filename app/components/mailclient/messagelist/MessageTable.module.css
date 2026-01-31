@@ -1,0 +1,178 @@
+.table {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+}
+
+.row {
+  display: grid;
+  grid-template-columns: minmax(44px, auto) 1.5fr 2.4fr 138px auto;
+  gap: 12px;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  text-align: left;
+  background: transparent;
+  color: var(--text);
+  width: 100%;
+  box-sizing: border-box;
+  max-width: 100%;
+  overflow: visible;
+  cursor: pointer;
+  font-size: 12px;
+  align-items: center;
+  transition: background 0.12s ease, border-color 0.12s ease;
+}
+
+.rowHeader {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--muted);
+}
+
+.sortButton {
+  background: transparent;
+  border: none;
+  color: inherit;
+  font: inherit;
+  text-transform: inherit;
+  letter-spacing: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.rowActive,
+.row:hover,
+.row:focus-within {
+  background: var(--surface-3);
+  border-color: var(--border);
+}
+
+.rowActive:hover {
+  border-color: var(--text);
+}
+
+.rowActive {
+  border-color: var(--text);
+}
+
+.row:focus-visible {
+  outline: 2px solid var(--accent-7);
+  outline-offset: 2px;
+}
+
+.rowSelected {
+  background: var(--surface-2);
+  border-color: var(--border);
+  box-shadow: none;
+}
+
+.rowDragging {
+  opacity: 0.65;
+}
+
+.rowDisabled {
+  opacity: 0.6;
+  pointer-events: none;
+}
+
+.cellFrom,
+.cellSubject,
+.cellDate {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
+.cellSubject {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.cellSubjectText {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.cellDate {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  width: 138px;
+}
+
+.cellActions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  min-width: 0;
+  gap: 8px;
+}
+
+.cellSelect {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  gap: 6px;
+}
+
+.rowUnread .cellSubject {
+  font-weight: 600;
+}
+
+.threadCaret {
+  width: 16px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+  font-size: 14px;
+  transform: rotate(0deg);
+  transition: transform 0.2s ease;
+}
+
+.threadCaretOpen {
+  transform: rotate(90deg);
+}
+
+.threadCaretSpacer {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.threadIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+  margin-right: 4px;
+}
+
+.threadIndicatorInline {
+  margin-left: 0;
+  margin-right: 4px;
+}
+
+.threadChild .cellFrom {
+  padding-left: 6px;
+}
+
+.threadSibling {
+  background: color-mix(in srgb, var(--surface-2) 60%, transparent);
+  border-color: var(--border);
+}
+
+.rowActive {
+  background: var(--surface-3);
+  border-color: var(--text);
+}

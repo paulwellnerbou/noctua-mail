@@ -1,3 +1,7 @@
+import { Badge } from "@radix-ui/themes";
+import { badgeColors } from "@/lib/ui/badgeColors";
+import styles from "./FolderBadges.module.css";
+
 type FolderBadgesProps = {
   folderIds: string[];
   folderNameById: (id: string) => string;
@@ -13,19 +17,20 @@ export default function FolderBadges({
 }: FolderBadgesProps) {
   if (folderIds.length === 0) return null;
   return (
-    <span className="folder-badges">
+    <span className={styles.badges}>
       {folderIds.map((folderId) => (
-        <button
-          key={folderId}
-          className="folder-badge"
-          title={threadPathById(folderId)}
-          onClick={(event) => {
-            event.stopPropagation();
-            onSelectFolder(folderId);
-          }}
-        >
-          {folderNameById(folderId)}
-        </button>
+        <Badge key={folderId} size="1" variant="soft" color={badgeColors.folder} asChild>
+          <button
+            type="button"
+            title={threadPathById(folderId)}
+            onClick={(event) => {
+              event.stopPropagation();
+              onSelectFolder(folderId);
+            }}
+          >
+            {folderNameById(folderId)}
+          </button>
+        </Badge>
       ))}
     </span>
   );

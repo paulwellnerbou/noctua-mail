@@ -1,5 +1,8 @@
+import { startTransition, useEffect, useRef, useState } from "react";
 import type React from "react";
 import { ChevronsDown, ChevronsUp, GitBranch, RefreshCw } from "lucide-react";
+import { IconButton, SegmentedControl, Select, Text } from "@radix-ui/themes";
+import styles from "./MessageListHeader.module.css";
 
 type MessageGroup = {
   key: string;
@@ -50,17 +53,59 @@ export default function MessageListHeader({ state, actions }: MessageListHeaderP
   } = state;
   const { setMessagesPage, setMessageView, setGroupBy, setThreadsEnabled, toggleAllGroups } =
     actions;
+  const [localView, setLocalView] = useState(messageView);
+  const [localGroupBy, setLocalGroupBy] = useState(groupBy);
+  const viewFrameRef = useRef<number | null>(null);
+  const groupFrameRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    setLocalView(messageView);
+  }, [messageView]);
+
+  useEffect(() => {
+    setLocalGroupBy(groupBy);
+  }, [groupBy]);
+
+  const scheduleCommit = (ref: React.MutableRefObject<number | null>, fn: () => void) => {
+    if (ref.current) window.cancelAnimationFrame(ref.current);
+    ref.current = window.requestAnimationFrame(() => {
+      ref.current = null;
+      startTransition(fn);
+    });
+  };
+
+  const handleViewChange = (value: string) => {
+    const next = value as "card" | "table" | "compact";
+    setLocalView(next);
+    scheduleCommit(viewFrameRef, () => setMessageView(next));
+  };
+
+  const handleGroupChange = (value: string) => {
+    const next = value as "none" | "date" | "week" | "sender" | "domain" | "year" | "folder";
+    setLocalGroupBy(next);
+    scheduleCommit(groupFrameRef, () => setGroupBy(next));
+  };
+
+  const handleThreadsToggle = () => {
+    if (!threadsAllowed) return;
+    startTransition(() => setThreadsEnabled((value) => !value));
+  };
+
+  const handleToggleGroups = () => {
+    startTransition(() => toggleAllGroups());
+  };
 
   return (
-    <div className="list-header">
-      <div>
-        <strong>
+    <div className={styles.header}>
+      <div className={styles.titleBlock}>
+        <Text as="span" size="3" weight="bold">
           {searchScope === "folder" && activeFolderName
             ? `Messages in ${activeFolderName}`
             : "Messages"}
-        </strong>
-        <span className="muted-inline load-more-inline">
-          {(() => {
+        </Text>
+        <span className={styles.meta}>
+          <Text as="span" size="1" color="gray">
+            {(() => {
             const countLabel =
               totalMessages !== null
                 ? `${loadedMessageCount} of ${totalMessages} items`
@@ -70,88 +115,77 @@ export default function MessageListHeader({ state, actions }: MessageListHeaderP
             }
             return searchScope === "all" ? `${countLabel} · Everywhere` : countLabel;
           })()}
+          </Text>
           {hasMoreMessages && !loadingMessages && (
-            <button
-              className="icon-button ghost"
+            <IconButton
+              size="1"
+              variant="ghost"
+              color="gray"
               onClick={() => setMessagesPage((prev) => prev + 1)}
               title="Load more"
               aria-label="Load more"
             >
               <RefreshCw size={12} />
-            </button>
+            </IconButton>
           )}
         </span>
       </div>
-      <div className="list-actions">
-        <div className="view-toggle">
-          <button
-            className={`icon-button ${messageView === "compact" ? "active" : ""}`}
-            onClick={() => setMessageView("compact")}
+      <div className={styles.actions}>
+        <SegmentedControl.Root
+          size="2"
+          value={localView}
+          onValueChange={handleViewChange}
+          className={styles.segmented}
+        >
+          <SegmentedControl.Item value="compact">Compact</SegmentedControl.Item>
+          <SegmentedControl.Item value="card">Cards</SegmentedControl.Item>
+          <SegmentedControl.Item value="table">Table</SegmentedControl.Item>
+        </SegmentedControl.Root>
+        <div className={styles.rightActions}>
+          <Select.Root
+            size="2"
+            value={localGroupBy}
+            onValueChange={handleGroupChange}
           >
-            Compact
-          </button>
-          <button
-            className={`icon-button ${messageView === "card" ? "active" : ""}`}
-            onClick={() => setMessageView("card")}
+            <Select.Trigger className={styles.groupSelectTrigger} color="gray" />
+            <Select.Content position="popper">
+              <Select.Item value="date">Group: Date</Select.Item>
+              <Select.Item value="week">Group: Week</Select.Item>
+              <Select.Item value="sender">Group: Sender</Select.Item>
+              <Select.Item value="domain">Group: Sender Domain</Select.Item>
+              <Select.Item value="year">Group: Year</Select.Item>
+              {searchScope === "all" && <Select.Item value="folder">Group: Folder</Select.Item>}
+              <Select.Item value="none">Group: None</Select.Item>
+            </Select.Content>
+          </Select.Root>
+          <IconButton
+            size="2"
+            variant="soft"
+            color={threadsEnabled ? "indigo" : "gray"}
+            onClick={handleThreadsToggle}
+            title={threadsAllowed ? "Toggle threads" : "Threads are available for Date/Week/Year"}
+            disabled={!threadsAllowed}
           >
-            Cards
-          </button>
-          <button
-            className={`icon-button ${messageView === "table" ? "active" : ""}`}
-            onClick={() => setMessageView("table")}
+            <GitBranch size={14} />
+          </IconButton>
+          <IconButton
+            size="2"
+            variant="soft"
+            color="gray"
+            onClick={handleToggleGroups}
+            title={
+              groupedMessages.some((group) => !collapsedGroups[group.key])
+                ? "Collapse all groups"
+                : "Expand all groups"
+            }
           >
-            Table
-          </button>
+            {groupedMessages.some((group) => !collapsedGroups[group.key]) ? (
+              <ChevronsUp size={14} />
+            ) : (
+              <ChevronsDown size={14} />
+            )}
+          </IconButton>
         </div>
-        <select
-          value={groupBy}
-          onChange={(event) =>
-            setGroupBy(
-              event.target.value as
-                | "none"
-                | "date"
-                | "week"
-                | "sender"
-                | "domain"
-                | "year"
-                | "folder"
-            )
-          }
-        >
-          <option value="date">Group: Date</option>
-          <option value="week">Group: Week</option>
-          <option value="sender">Group: Sender</option>
-          <option value="domain">Group: Sender Domain</option>
-          <option value="year">Group: Year</option>
-          {searchScope === "all" && <option value="folder">Group: Folder</option>}
-          <option value="none">Group: None</option>
-        </select>
-        <button
-          className={`icon-button ${threadsEnabled ? "active" : ""}`}
-          onClick={() => {
-            if (!threadsAllowed) return;
-            setThreadsEnabled((value) => !value);
-          }}
-          title={threadsAllowed ? "Toggle threads" : "Threads are available for Date/Week/Year"}
-          disabled={!threadsAllowed}
-        >
-          <GitBranch size={14} />
-        </button>
-        <button
-          className="icon-button"
-          onClick={toggleAllGroups}
-          title={
-            groupedMessages.some((group) => !collapsedGroups[group.key])
-              ? "Collapse all groups"
-              : "Expand all groups"
-          }
-        >
-          {groupedMessages.some((group) => !collapsedGroups[group.key]) ? (
-            <ChevronsUp size={14} />
-          ) : (
-            <ChevronsDown size={14} />
-          )}
-        </button>
       </div>
     </div>
   );

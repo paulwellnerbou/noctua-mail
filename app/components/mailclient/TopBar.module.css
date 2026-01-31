@@ -1,0 +1,143 @@
+.topBar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 18px 24px;
+  background: linear-gradient(120deg, var(--gray-4), var(--gray-2));
+  border-bottom: 1px solid var(--gray-a4);
+  z-index: 3;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.brandMark {
+  width: 44px;
+  height: 44px;
+  border-radius: var(--radius-md);
+  background: transparent;
+  display: grid;
+  place-items: center;
+}
+
+.brandIcon {
+  width: 44px;
+  height: 44px;
+  display: block;
+  border-radius: 12px;
+  object-fit: cover;
+}
+
+.brandTitle {
+  font-size: 22px;
+  margin: 0;
+}
+
+.search {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.searchInput {
+  flex: 1;
+  min-width: 220px;
+}
+
+.select {
+  min-width: 160px;
+}
+
+.actionRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.accountButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.accountMeta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  line-height: 1.2;
+  max-width: 220px;
+}
+
+.accountName {
+  font-weight: 600;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.accountEmail {
+  font-size: 11px;
+  color: var(--gray-11);
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.accountMenu {
+  min-width: 260px;
+}
+
+.accountMenuItem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  height: auto;
+  padding-top: var(--space-2);
+  padding-bottom: var(--space-2);
+}
+
+.accountMenuInfo {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.accountMenuName {
+  font-size: 13px;
+  line-height: 1.2;
+}
+
+.accountMenuEmail {
+  font-size: 11px;
+  color: var(--gray-11);
+  line-height: 1.2;
+}
+
+.accountMenu :global(.rt-DropdownMenuItem[data-highlighted]) {
+  color: var(--accent-contrast);
+}
+
+.accountMenu :global(.rt-DropdownMenuItem[data-highlighted]) .accountMenuEmail {
+  color: var(--accent-contrast);
+  opacity: 0.8;
+}
+
+.spin {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  100% {
+    transform: rotate(360deg);
+  }
+}

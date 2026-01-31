@@ -26,7 +26,6 @@ type FolderTreeProps = {
     deletingFolderIds: Set<string>;
     draggingMessageIds: Set<string>;
     dragOverFolderId: string | null;
-    openFolderMenuId: string | null;
     messageCountByFolder: Map<string, number>;
   };
   actions: {
@@ -35,7 +34,6 @@ type FolderTreeProps = {
     clearSearch: () => void;
     setCollapsedFolders: React.Dispatch<React.SetStateAction<Record<string, boolean>>>;
     setDragOverFolderId: React.Dispatch<React.SetStateAction<string | null>>;
-    setOpenFolderMenuId: React.Dispatch<React.SetStateAction<string | null>>;
     handleMoveMessages: (folderId: string, messageIds: string[]) => void;
     handleCreateSubfolder: (folder: Folder) => void;
     handleRenameFolderItem: (folder: Folder) => void;
@@ -43,12 +41,9 @@ type FolderTreeProps = {
     syncAccount: (folderId?: string, mode?: "new" | "full") => void;
     folderSpecialIcon: (folder: Folder) => React.ReactNode;
   };
-  refs: {
-    folderMenuRef: React.RefObject<HTMLDivElement | null>;
-  };
 };
 
-export default function FolderTree({ state, actions, refs }: FolderTreeProps) {
+export default function FolderTree({ state, actions }: FolderTreeProps) {
   const {
     rootFolders,
     folderTree,
@@ -60,7 +55,6 @@ export default function FolderTree({ state, actions, refs }: FolderTreeProps) {
     deletingFolderIds,
     draggingMessageIds,
     dragOverFolderId,
-    openFolderMenuId,
     messageCountByFolder
   } = state;
 
@@ -115,11 +109,9 @@ export default function FolderTree({ state, actions, refs }: FolderTreeProps) {
             deletingFolderIds,
             draggingMessageIds,
             dragOverFolderId,
-            openFolderMenuId,
             messageCountByFolder
           }}
           actions={actions}
-          refs={refs}
           helpers={{ hasFolderMatch, isSystemFolder, folderPathLabel }}
         />
       ))}

@@ -1,6 +1,10 @@
+import { useState } from "react";
 import type React from "react";
 import { MoreVertical } from "lucide-react";
+import { Badge, DropdownMenu, IconButton } from "@radix-ui/themes";
+import { badgeColors } from "@/lib/ui/badgeColors";
 import type { Folder } from "@/lib/data";
+import styles from "./FolderTree.module.css";
 
 type FolderTreeNodeProps = {
   folder: Folder;
@@ -16,7 +20,6 @@ type FolderTreeNodeProps = {
     deletingFolderIds: Set<string>;
     draggingMessageIds: Set<string>;
     dragOverFolderId: string | null;
-    openFolderMenuId: string | null;
     messageCountByFolder: Map<string, number>;
   };
   actions: {
@@ -25,16 +28,12 @@ type FolderTreeNodeProps = {
     clearSearch: () => void;
     setCollapsedFolders: React.Dispatch<React.SetStateAction<Record<string, boolean>>>;
     setDragOverFolderId: React.Dispatch<React.SetStateAction<string | null>>;
-    setOpenFolderMenuId: React.Dispatch<React.SetStateAction<string | null>>;
     handleMoveMessages: (folderId: string, messageIds: string[]) => void;
     handleCreateSubfolder: (folder: Folder) => void;
     handleRenameFolderItem: (folder: Folder) => void;
     handleDeleteFolderItem: (folder: Folder) => void;
     syncAccount: (folderId?: string, mode?: "new" | "full") => void;
     folderSpecialIcon: (folder: Folder) => React.ReactNode;
-  };
-  refs: {
-    folderMenuRef: React.RefObject<HTMLDivElement | null>;
   };
   helpers: {
     hasFolderMatch: (folder: Folder) => boolean;
@@ -49,7 +48,6 @@ export default function FolderTreeNode({
   forceShow,
   state,
   actions,
-  refs,
   helpers
 }: FolderTreeNodeProps) {
   const {
@@ -61,7 +59,6 @@ export default function FolderTreeNode({
     deletingFolderIds,
     draggingMessageIds,
     dragOverFolderId,
-    openFolderMenuId,
     messageCountByFolder
   } = state;
   const {
@@ -70,7 +67,6 @@ export default function FolderTreeNode({
     clearSearch,
     setCollapsedFolders,
     setDragOverFolderId,
-    setOpenFolderMenuId,
     handleMoveMessages,
     handleCreateSubfolder,
     handleRenameFolderItem,
@@ -78,7 +74,6 @@ export default function FolderTreeNode({
     syncAccount,
     folderSpecialIcon
   } = actions;
-  const { folderMenuRef } = refs;
   const { hasFolderMatch, isSystemFolder, folderPathLabel } = helpers;
 
   const isCollapsed = collapsedFolders[folder.id] ?? false;
@@ -97,18 +92,21 @@ export default function FolderTreeNode({
   const folderTitle = `${fullPath} (${totalCount} Messages, ${unreadCount} Unread)`;
   const isDeleting = deletingFolderIds.has(folder.id);
   const isSyncingFolder = syncingFolders.has(folder.id);
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
 
   return (
     <div
       key={folder.id}
-      className={`tree-node ${dragOverFolderId === folder.id ? "drop-target" : ""}`}
+      className={`${styles.treeNode} ${
+        dragOverFolderId === folder.id ? styles.treeNodeDropTarget : ""
+      }`}
     >
       <div
-        className={`tree-row ${folder.id === activeFolderId ? "active" : ""}${
-          isDeleting ? " disabled" : ""
-        }`}
+        className={`${styles.treeRow} ${
+          folder.id === activeFolderId ? styles.treeRowActive : ""
+        } ${isDeleting ? styles.treeRowDisabled : ""}`}
         data-syncing={isSyncingFolder ? "true" : "false"}
-        data-menu-open={openFolderMenuId === folder.id ? "true" : "false"}
+        data-menu-open={isMenuOpen ? "true" : "false"}
         title={folderTitle}
         role="button"
         tabIndex={0}
@@ -162,7 +160,7 @@ export default function FolderTreeNode({
         style={{ paddingLeft: `${6 + depth * 2}px` }}
       >
         <span
-          className={`tree-caret ${!isCollapsed ? "open" : ""}`}
+          className={`${styles.treeCaret} ${!isCollapsed ? styles.treeCaretOpen : ""}`}
           onClick={(event) => {
             if (!hasChildren) return;
             event.stopPropagation();
@@ -173,89 +171,84 @@ export default function FolderTreeNode({
           {hasChildren ? "▸" : ""}
         </span>
         {folderSpecialIcon(folder) ? (
-          <span className="tree-icon" aria-hidden>
+          <span className={styles.treeIcon} aria-hidden>
             {folderSpecialIcon(folder)}
           </span>
         ) : (
-          <span className={`tree-dot ${isSystem ? "system" : ""}`} aria-hidden />
+          <span
+            className={`${styles.treeDot} ${isSystem ? styles.treeDotSystem : ""}`}
+            aria-hidden
+          />
         )}
-        <span className={`tree-name ${folder.unreadCount ? "has-unread" : ""}`}>
-          {isSyncingFolder && <span className="tree-sync-spinner" aria-hidden="true" />}
-          <span className="tree-name-text">{folder.name}</span>
+        <span className={`${styles.treeName} ${folder.unreadCount ? styles.treeNameUnread : ""}`}>
+          {isSyncingFolder && <span className={styles.treeSyncSpinner} aria-hidden="true" />}
+          <span className={styles.treeNameText}>{folder.name}</span>
         </span>
         {folder.unreadCount ? (
-          <span className="tree-unread" aria-label={`${folder.unreadCount} unread`}>
-            {folder.unreadCount}
-          </span>
-        ) : null}
-        <span className="tree-actions">
-          <div
-            className="message-menu folder-menu"
-            ref={openFolderMenuId === folder.id ? folderMenuRef : null}
-            onClick={(event) => event.stopPropagation()}
+          <Badge
+            size="1"
+            variant="soft"
+            color={badgeColors.unread}
+            className={styles.treeUnreadBadge}
+            aria-label={`${folder.unreadCount} unread`}
           >
-            <button
-              className="tree-action"
-              title="Folder actions"
-              aria-label="Folder actions"
-              disabled={isDeleting}
-              onClick={(event) => {
-                event.stopPropagation();
-                if (isDeleting) return;
-                setOpenFolderMenuId((prev) => (prev === folder.id ? null : folder.id));
-              }}
-            >
-              <MoreVertical size={14} />
-            </button>
-            {openFolderMenuId === folder.id && (
-              <div className="message-menu-panel">
-                <button
-                  className="message-menu-item"
-                  disabled={isDeleting || isSyncingFolder}
-                  onClick={() => {
-                    setOpenFolderMenuId(null);
-                    syncAccount(folder.id);
-                  }}
-                >
-                  Sync
-                </button>
-                <button
-                  className="message-menu-item"
-                  disabled={isDeleting}
-                  onClick={() => {
-                    setOpenFolderMenuId(null);
-                    handleCreateSubfolder(folder);
-                  }}
-                >
-                  Create Subfolder
-                </button>
-                <button
-                  className="message-menu-item"
-                  disabled={isDeleting}
-                  onClick={() => {
-                    setOpenFolderMenuId(null);
-                    handleRenameFolderItem(folder);
-                  }}
-                >
-                  Rename
-                </button>
-                <button
-                  className="message-menu-item"
-                  disabled={isDeleting}
-                  onClick={() => {
-                    setOpenFolderMenuId(null);
-                    handleDeleteFolderItem(folder);
-                  }}
-                >
-                  Delete
-                </button>
-              </div>
-            )}
-          </div>
+            {folder.unreadCount}
+          </Badge>
+        ) : null}
+        <span className={styles.treeActions}>
+          <DropdownMenu.Root open={isMenuOpen} onOpenChange={setIsMenuOpen}>
+            <DropdownMenu.Trigger>
+              <IconButton
+                className={styles.treeAction}
+                variant="ghost"
+                size="1"
+                title="Folder actions"
+                aria-label="Folder actions"
+                disabled={isDeleting}
+                onClick={(event) => event.stopPropagation()}
+              >
+                <MoreVertical size={14} />
+              </IconButton>
+            </DropdownMenu.Trigger>
+            <DropdownMenu.Content align="end" className={styles.menuContent}>
+              <DropdownMenu.Item
+                disabled={isDeleting || isSyncingFolder}
+                onSelect={() => {
+                  syncAccount(folder.id);
+                }}
+              >
+                Sync
+              </DropdownMenu.Item>
+              <DropdownMenu.Item
+                disabled={isDeleting}
+                onSelect={() => {
+                  handleCreateSubfolder(folder);
+                }}
+              >
+                Create Subfolder
+              </DropdownMenu.Item>
+              <DropdownMenu.Item
+                disabled={isDeleting}
+                onSelect={() => {
+                  handleRenameFolderItem(folder);
+                }}
+              >
+                Rename
+              </DropdownMenu.Item>
+              <DropdownMenu.Item
+                disabled={isDeleting}
+                onSelect={() => {
+                  handleDeleteFolderItem(folder);
+                }}
+              >
+                Delete
+              </DropdownMenu.Item>
+            </DropdownMenu.Content>
+          </DropdownMenu.Root>
         </span>
       </div>
       {!isCollapsed && hasChildren && (
-        <div className="tree-children">
+        <div className={styles.treeChildren}>
           {childNodes.map((child) => (
             <FolderTreeNode
               key={child.id}
@@ -264,7 +257,6 @@ export default function FolderTreeNode({
               forceShow={matchesQuery}
               state={state}
               actions={actions}
-              refs={refs}
               helpers={helpers}
             />
           ))}

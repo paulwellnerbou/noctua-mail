@@ -1,0 +1,262 @@
+.folderPanel {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.treeRail {
+  border: none;
+  border-radius: 0;
+  padding: 0;
+  background: transparent;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.treeHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.treeHeaderActions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.panelTitle {
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.panelMeta {
+  font-size: 11px;
+  color: var(--gray-11);
+  margin-left: auto;
+}
+
+.folderSearch {
+  margin-bottom: 8px;
+}
+
+.folderSearchInput {
+  width: 100%;
+  padding: 8px 10px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--gray-a4);
+  background: var(--color-surface);
+  color: var(--gray-12);
+  font-size: 12px;
+}
+
+.folderSearchInput::placeholder {
+  color: var(--gray-11);
+  opacity: 0.7;
+}
+
+.treeNode {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.treeNodeDropTarget .treeRow {
+  border-color: var(--accent-9);
+  background: var(--accent-a2);
+}
+
+.treeRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  border-radius: var(--radius-md);
+  border: 1px solid transparent;
+  background: transparent;
+  text-align: left;
+  font-size: 13px;
+  width: 100%;
+  transition: background 0.2s ease, border-color 0.2s ease, transform 0.2s ease;
+  cursor: pointer;
+  position: relative;
+}
+
+.treeRowActive {
+  background: var(--gray-a3);
+  border-color: var(--gray-a4);
+}
+
+.treeRowDisabled {
+  opacity: 0.6;
+  pointer-events: none;
+  cursor: not-allowed;
+}
+
+.treeRow:hover {
+  background: var(--gray-a2);
+  border-color: var(--gray-a4);
+  transform: translateX(1px);
+}
+
+.treeCaret {
+  width: 16px;
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  color: var(--gray-11);
+  transition: transform 0.2s ease;
+}
+
+.treeCaretOpen {
+  transform: rotate(90deg);
+}
+
+.treeDot {
+  width: 6px;
+  height: 6px;
+  border-radius: var(--radius-md);
+  background: var(--accent-7);
+  transition: background 0.2s ease, transform 0.2s ease;
+}
+
+.treeDotSystem {
+  background: var(--accent-9);
+}
+
+.treeRow:hover .treeDot {
+  background: var(--accent-8);
+}
+
+.treeRowActive .treeDot {
+  transform: scale(1.1);
+}
+
+.treeIcon {
+  width: 14px;
+  height: 14px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--gray-11);
+  flex: 0 0 auto;
+}
+
+.treeChildren {
+  margin-left: 6px;
+  padding-left: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.treeActions {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.15s ease;
+}
+
+.treeAction {
+  border: none;
+  background: transparent;
+  border-radius: var(--radius-md);
+  padding: 2px 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--gray-12);
+  cursor: pointer;
+}
+
+.treeAction:hover {
+  color: var(--accent-9);
+}
+
+.treeRow:hover .treeActions,
+.treeRowActive .treeActions,
+.treeRow[data-syncing='true'] .treeActions {
+  opacity: 1;
+  visibility: visible;
+}
+
+.treeRow[data-menu-open='true'] {
+  z-index: 2;
+}
+
+.treeRow[data-menu-open='true'] .treeActions {
+  opacity: 1;
+  visibility: visible;
+}
+
+.treeName {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.treeNameText {
+  position: relative;
+  z-index: 1;
+}
+
+.treeSyncSpinner {
+  position: absolute;
+  left: 0;
+  width: 14px;
+  height: 14px;
+  border-radius: 999px;
+  border: 2px solid var(--gray-a6);
+  border-top-color: var(--accent-9);
+  opacity: 0.4;
+  animation: spin 1s linear infinite;
+}
+
+.treeNameUnread {
+  font-weight: 600;
+}
+
+.treeUnreadBadge {
+  margin-left: 6px;
+}
+
+.menuContent {
+  min-width: 200px;
+}
+
+.menuContent :global(.rt-BaseMenuItem) {
+  font-size: 12px;
+  letter-spacing: 0.01em;
+}
+
+.menuContent :global(.rt-BaseMenuItemIndicator) {
+  left: var(--space-2);
+}
+
+.menuContent :global(.rt-BaseMenuContent) {
+  --base-menu-content-padding: var(--space-2);
+}
+
+.menuContent :global(.rt-BaseMenuSeparator) {
+  margin-left: var(--space-2);
+  margin-right: var(--space-2);
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}

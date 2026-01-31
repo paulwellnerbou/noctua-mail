@@ -1,7 +1,15 @@
 "use client";
 
 import type React from "react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  startTransition,
+  useCallback,
+  useDeferredValue,
+  useEffect,
+  useMemo,
+  useRef,
+  useState
+} from "react";
 import TurndownService from "turndown";
 import {
   Inbox,
@@ -27,6 +35,9 @@ import ComposeModal from "./mailclient/composition/ComposeModal";
 import MessageCardList from "./mailclient/messagelist/MessageCardList";
 import MessageListHeader from "./mailclient/messagelist/MessageListHeader";
 import MessageListPane from "./mailclient/messagelist/MessageListPane";
+import listMetaStyles from "./mailclient/messagelist/MessageListMeta.module.css";
+import listPaneStyles from "./mailclient/messagelist/MessageListPane.module.css";
+import { Card, Flex, IconButton, Text } from "@radix-ui/themes";
 import MessageSelectIndicators from "./mailclient/messagelist/MessageSelectIndicators";
 import MessageTable from "./mailclient/messagelist/MessageTable";
 import UnreadDot from "./mailclient/messagelist/UnreadDot";
@@ -133,9 +144,8 @@ export default function MailClient() {
   const [activeAccountId, setActiveAccountId] = useState(seedAccounts[0]?.id ?? "");
   const [activeFolderId, setActiveFolderId] = useState(seedFolders[0]?.id ?? "");
   const [activeMessageId, setActiveMessageId] = useState(seedMessages[0]?.id ?? "");
+  const [listActiveMessageId, setListActiveMessageId] = useState(activeMessageId);
   const [query, setQuery] = useState("");
-  const [menuOpen, setMenuOpen] = useState(false);
-  const [folderHeaderMenuOpen, setFolderHeaderMenuOpen] = useState(false);
   const [darkMode, setDarkMode] = useState(false);
   const [manageOpen, setManageOpen] = useState(false);
   const [manageTab, setManageTab] = useState<"account" | "signatures" | "preferences">(
@@ -148,8 +158,6 @@ export default function MailClient() {
   const [listWidth, setListWidth] = useState(840);
   const [dragging, setDragging] = useState<"left" | "list" | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const menuRef = useRef<HTMLDivElement | null>(null);
-  const folderHeaderMenuRef = useRef<HTMLDivElement | null>(null);
   const dragImageRef = useRef<HTMLDivElement | null>(null);
   const [imapProbe, setImapProbe] = useState<null | { tls: boolean; starttls: boolean }>(null);
   const [smtpProbe, setSmtpProbe] = useState<null | { tls: boolean; starttls: boolean }>(null);
@@ -200,8 +208,8 @@ export default function MailClient() {
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
   const [selectedMessageIds, setSelectedMessageIds] = useState<Set<string>>(new Set());
   const [lastSelectedId, setLastSelectedId] = useState<string | null>(null);
+  const lastSelectedIdRef = useRef<string | null>(null);
   const [draggingMessageIds, setDraggingMessageIds] = useState<Set<string>>(new Set());
-  const [hoveredThreadId, setHoveredThreadId] = useState<string | null>(null);
   const [threadsEnabled, setThreadsEnabled] = useState(true);
   const [showJson, setShowJson] = useState(false);
   const [omitBody, setOmitBody] = useState(true);
@@ -211,7 +219,6 @@ export default function MailClient() {
   const [messageFontScale, setMessageFontScale] = useState<Record<string, number>>({});
   const [authState, setAuthState] = useState<"loading" | "ok" | "unauth">("loading");
   const [sessionTtlSeconds, setSessionTtlSeconds] = useState<number | null>(null);
-  const [openMessageMenuId, setOpenMessageMenuId] = useState<string | null>(null);
   const [pendingMessageActions, setPendingMessageActions] = useState<Set<string>>(new Set());
   const [inAppNotices, setInAppNotices] = useState<
     Array<{
@@ -319,7 +326,6 @@ export default function MailClient() {
   const composeEditorInitRef = useRef(false);
   const composeLastEditedRef = useRef<"html" | "text">("html");
   const listIsNarrow = listWidth < 360;
-  const [searchFieldsOpen, setSearchFieldsOpen] = useState(false);
   const [searchFields, setSearchFields] = useState({
     sender: true,
     participants: true,
@@ -327,8 +333,6 @@ export default function MailClient() {
     body: true,
     attachments: true
   });
-  const searchFieldsRef = useRef<HTMLDivElement | null>(null);
-  const [searchBadgesOpen, setSearchBadgesOpen] = useState(false);
   const [searchBadges, setSearchBadges] = useState({
     unread: false,
     flagged: false,
@@ -341,11 +345,7 @@ export default function MailClient() {
     subject?: string;
   } | null>(null);
   const [dragOverFolderId, setDragOverFolderId] = useState<string | null>(null);
-  const searchBadgesRef = useRef<HTMLDivElement | null>(null);
-  const [openFolderMenuId, setOpenFolderMenuId] = useState<string | null>(null);
-  const folderMenuRef = useRef<HTMLDivElement | null>(null);
   const [deletingFolderIds, setDeletingFolderIds] = useState<Set<string>>(new Set());
-  const messageMenuRef = useRef<HTMLDivElement | null>(null);
   const streamSourceRef = useRef<EventSource | null>(null);
   const pollTimerRef = useRef<number | null>(null);
   const pollInFlightRef = useRef(false);
@@ -459,13 +459,22 @@ export default function MailClient() {
     });
     return map;
   }, [messages, activeAccountId]);
+  const messageById = useMemo(() => {
+    const map = new Map<string, Message>();
+    messages.forEach((message) => {
+      if (message.accountId !== activeAccountId) return;
+      map.set(message.id, message);
+    });
+    return map;
+  }, [messages, activeAccountId]);
 
   const jumpToMessageId = (messageId: string) => {
     const target = messageByMessageId.get(messageId);
     if (!target) return false;
     setSearchScope("folder");
     setActiveFolderId(target.folderId);
-    setActiveMessageId(target.id);
+    setListActiveMessageId(target.id);
+    startTransition(() => setActiveMessageId(target.id));
     return true;
   };
   const listLoading = loadingMessages || refreshingMessages;
@@ -486,26 +495,39 @@ export default function MailClient() {
     [searchBadges]
   );
 
-  const clearSelection = () => {
-    setSelectedMessageIds(new Set());
-    setLastSelectedId(null);
-  };
-
-  const selectRangeTo = (messageId: string) => {
-    if (!lastSelectedId || !visibleIndexById.has(lastSelectedId) || !visibleIndexById.has(messageId)) {
+  const selectRangeTo = useCallback((messageId: string) => {
+    const lastSelected = lastSelectedIdRef.current;
+    const indexMap = visibleIndexByIdRef.current;
+    const visible = visibleMessagesRef.current;
+    if (!lastSelected || !indexMap.has(lastSelected) || !indexMap.has(messageId)) {
       setSelectedMessageIds(new Set([messageId]));
+      lastSelectedIdRef.current = messageId;
       setLastSelectedId(messageId);
       return;
     }
-    const start = visibleIndexById.get(lastSelectedId)!;
-    const end = visibleIndexById.get(messageId)!;
+    const start = indexMap.get(lastSelected)!;
+    const end = indexMap.get(messageId)!;
     const [lo, hi] = start < end ? [start, end] : [end, start];
-    const ids = visibleMessages.slice(lo, hi + 1).map((item) => item.message.id);
+    const ids = visible.slice(lo, hi + 1).map((item) => item.message.id);
     setSelectedMessageIds(new Set(ids));
+    lastSelectedIdRef.current = messageId;
     setLastSelectedId(messageId);
+  }, []);
+
+  const clearSelection = () => {
+    setSelectedMessageIds(new Set());
+    setLastSelectedId(null);
+    lastSelectedIdRef.current = null;
   };
 
-  const toggleMessageSelection = (messageId: string, replace = false) => {
+  useEffect(() => {
+    setListActiveMessageId(activeMessageId);
+  }, [activeMessageId]);
+  useEffect(() => {
+    lastSelectedIdRef.current = lastSelectedId;
+  }, [lastSelectedId]);
+
+  const toggleMessageSelection = useCallback((messageId: string, replace = false) => {
     setSelectedMessageIds((prev) => {
       const next = replace ? new Set<string>() : new Set(prev);
       if (replace) {
@@ -515,24 +537,46 @@ export default function MailClient() {
       } else {
         next.add(messageId);
       }
-      setLastSelectedId(messageId);
       return next;
     });
-  };
+    lastSelectedIdRef.current = messageId;
+    setLastSelectedId(messageId);
+  }, []);
 
-  const handleRowClick = (event: React.MouseEvent, message: Message) => {
-    if (event.shiftKey) {
-      event.preventDefault();
-      selectRangeTo(message.id);
-      return;
-    }
-    if (event.metaKey || event.ctrlKey) {
-      event.preventDefault();
-      toggleMessageSelection(message.id);
-      return;
-    }
-    handleSelectMessage(message);
-  };
+  const handleSelectMessage = useCallback(
+    (message: Message, options?: { preserveSelection?: boolean }) => {
+      if (!options?.preserveSelection) {
+        setSelectedMessageIds((prev) => {
+          if (prev.size === 1 && prev.has(message.id)) {
+            return prev;
+          }
+          return new Set<string>([message.id]);
+        });
+        lastSelectedIdRef.current = message.id;
+        setLastSelectedId(message.id);
+      }
+      setListActiveMessageId(message.id);
+    },
+    []
+  );
+
+  const handleRowClick = useCallback(
+    (event: React.MouseEvent, message: Message) => {
+      setListActiveMessageId(message.id);
+      if (event.shiftKey) {
+        event.preventDefault();
+        selectRangeTo(message.id);
+        return;
+      }
+      if (event.metaKey || event.ctrlKey) {
+        event.preventDefault();
+        toggleMessageSelection(message.id);
+        return;
+      }
+      handleSelectMessage(message);
+    },
+    [handleSelectMessage, selectRangeTo, toggleMessageSelection]
+  );
 
   const searchFieldsLabel = useMemo(() => {
     const order = ["sender", "participants", "subject", "body"] as const;
@@ -609,12 +653,12 @@ export default function MailClient() {
       attachments: true
     });
   };
-  const reportError = (message: string) => {
+  const reportError = useCallback((message: string) => {
     setErrorMessage(message);
     setErrorTimestamp(Date.now());
     setExceptionPanelOpen(true);
-  };
-  const readErrorMessage = async (res: Response) => {
+  }, []);
+  const readErrorMessage = useCallback(async (res: Response) => {
     if (res.status === 401) {
       setAuthState("unauth");
     }
@@ -639,7 +683,7 @@ export default function MailClient() {
       // ignore
     }
     return `Request failed (${res.status})`;
-  };
+  }, []);
   const errorSummary = errorMessage ? errorMessage.split("\n")[0]?.slice(0, 120) : null;
   const formatRelativeTime = (timestamp: number | null) => {
     if (!timestamp) return "";
@@ -1377,6 +1421,13 @@ export default function MailClient() {
     visibleMessages.forEach((item, index) => map.set(item.message.id, index));
     return map;
   }, [visibleMessages]);
+  const visibleIndexByIdRef = useRef(visibleIndexById);
+  const visibleMessagesRef = useRef(visibleMessages);
+
+  useEffect(() => {
+    visibleIndexByIdRef.current = visibleIndexById;
+    visibleMessagesRef.current = visibleMessages;
+  }, [visibleIndexById, visibleMessages]);
 
 
 
@@ -1396,6 +1447,9 @@ export default function MailClient() {
     hideThreadView || (composeOpen && composeMode === "new")
       ? undefined
       : filteredMessages.find((message) => message.id === activeMessageId);
+  const listActiveMessage = listActiveMessageId
+    ? messageById.get(listActiveMessageId)
+    : undefined;
   const threadForest = useMemo(() => buildThreadTree(threadScopeMessages), [threadScopeMessages]);
 
   const activeThread = useMemo(() => {
@@ -2480,15 +2534,13 @@ export default function MailClient() {
 
   const renderMessageMenu = (
     message: Message,
-    origin: "list" | "thread" | "table" = "list"
+    origin: "list" | "thread" | "table" = "list",
+    onOpenChange?: (open: boolean) => void
   ) => (
     <MessageMenu
       message={message}
       origin={origin}
       isDraft={isDraftItem(message)}
-      openMessageMenuId={openMessageMenuId}
-      setOpenMessageMenuId={setOpenMessageMenuId}
-      messageMenuRef={messageMenuRef}
       pendingMessageActions={pendingMessageActions}
       openCompose={openCompose}
       updateFlagState={updateFlagState}
@@ -2501,6 +2553,7 @@ export default function MailClient() {
       handleResyncMessage={handleResyncMessage}
       onShowRelated={handleShowRelated}
       isTrashFolder={isTrashFolder}
+      onOpenChange={onOpenChange}
     />
   );
 
@@ -2872,56 +2925,12 @@ export default function MailClient() {
     if (composeMode === "new") return;
     setComposeOpen(false);
   }, [activeFolderId]);
-  const handleSelectMessage = (message: Message, options?: { preserveSelection?: boolean }) => {
-    setActiveMessageId(message.id);
-    if (!options?.preserveSelection) {
-      const next = new Set<string>([message.id]);
-      setSelectedMessageIds(next);
-      setLastSelectedId(message.id);
-    }
-    if (isDraftItem(message)) {
-      openCompose("edit", message);
-      setComposeView("inline");
-      setComposeOpen(true);
-      return;
-    }
-    if (composeOpen && composeView === "inline") {
-      setComposeOpen(false);
-    }
-    if (message.threadId) {
-      const threadItems = messages.filter(
-        (item) => item.accountId === activeAccountId && item.threadId === message.threadId
-      );
-      if (threadItems.length) {
-        setCollapsedMessages((prev) => {
-          const next = { ...prev };
-          threadItems.forEach((item) => {
-            next[item.id] = item.id !== message.id;
-          });
-          return next;
-        });
-      }
-    }
-    requestAnimationFrame(() => {
-      const target = messageRefs.current.get(message.id);
-      target?.scrollIntoView({ behavior: "smooth", block: "start" });
-    });
-  };
-
   const activateLatestInThread = (flat: { message: Message; depth: number }[]) => {
     if (!flat.length) return;
     const latest = flat.reduce((acc, item) =>
       item.message.dateValue > acc.message.dateValue ? item : acc
     );
     handleSelectMessage(latest.message, { preserveSelection: true });
-    const threadIds = flat.map((item) => item.message.id);
-    setCollapsedMessages((prev) => {
-      const next = { ...prev };
-      threadIds.forEach((id) => {
-        next[id] = id !== latest.message.id;
-      });
-      return next;
-    });
   };
   const activatePinnedInThread = (flat: { message: Message; depth: number }[]) => {
     if (!flat.length) return;
@@ -2931,14 +2940,6 @@ export default function MailClient() {
       return;
     }
     handleSelectMessage(pinned.message, { preserveSelection: true });
-    const threadIds = flat.map((item) => item.message.id);
-    setCollapsedMessages((prev) => {
-      const next = { ...prev };
-      threadIds.forEach((id) => {
-        next[id] = id !== pinned.message.id;
-      });
-      return next;
-    });
   };
   const selectCollapsedThread = (
     flat: { message: Message; depth: number }[],
@@ -2948,13 +2949,6 @@ export default function MailClient() {
     setSelectedMessageIds(new Set(ids));
     setLastSelectedId(target.id);
     handleSelectMessage(target, { preserveSelection: true });
-    setCollapsedMessages((prev) => {
-      const next = { ...prev };
-      ids.forEach((id) => {
-        next[id] = id !== target.id;
-      });
-      return next;
-    });
   };
 
   useEffect(() => {
@@ -3084,48 +3078,6 @@ export default function MailClient() {
   }, [activeAccountId]);
 
   useEffect(() => {
-    if (!threadsAllowed) {
-      setHoveredThreadId(null);
-    }
-  }, [threadsAllowed]);
-
-  useEffect(() => {
-    const handleClick = (event: MouseEvent) => {
-      if (!menuRef.current) return;
-      if (menuRef.current.contains(event.target as Node)) return;
-      setMenuOpen(false);
-    };
-    if (menuOpen) {
-      document.addEventListener("mousedown", handleClick);
-    }
-    return () => document.removeEventListener("mousedown", handleClick);
-  }, [menuOpen]);
-
-  useEffect(() => {
-    const handleClick = (event: MouseEvent) => {
-      if (!folderHeaderMenuRef.current) return;
-      if (folderHeaderMenuRef.current.contains(event.target as Node)) return;
-      setFolderHeaderMenuOpen(false);
-    };
-    if (folderHeaderMenuOpen) {
-      document.addEventListener("mousedown", handleClick);
-    }
-    return () => document.removeEventListener("mousedown", handleClick);
-  }, [folderHeaderMenuOpen]);
-
-  useEffect(() => {
-    const handleClick = (event: MouseEvent) => {
-      if (!searchFieldsRef.current) return;
-      if (searchFieldsRef.current.contains(event.target as Node)) return;
-      setSearchFieldsOpen(false);
-    };
-    if (searchFieldsOpen) {
-      document.addEventListener("mousedown", handleClick);
-    }
-    return () => document.removeEventListener("mousedown", handleClick);
-  }, [searchFieldsOpen]);
-
-  useEffect(() => {
     if (!isRelatedSearch) {
       setRelatedContext(null);
       return;
@@ -3138,42 +3090,6 @@ export default function MailClient() {
       setActiveFolderId("");
     }
   }, [activeFolderId, isRelatedSearch, searchScope]);
-
-  useEffect(() => {
-    const handleClick = (event: MouseEvent) => {
-      if (!searchBadgesRef.current) return;
-      if (searchBadgesRef.current.contains(event.target as Node)) return;
-      setSearchBadgesOpen(false);
-    };
-    if (searchBadgesOpen) {
-      document.addEventListener("mousedown", handleClick);
-    }
-    return () => document.removeEventListener("mousedown", handleClick);
-  }, [searchBadgesOpen]);
-
-  useEffect(() => {
-    const handleClick = (event: MouseEvent) => {
-      if (!messageMenuRef.current) return;
-      if (messageMenuRef.current.contains(event.target as Node)) return;
-      setOpenMessageMenuId(null);
-    };
-    if (openMessageMenuId) {
-      document.addEventListener("mousedown", handleClick);
-    }
-    return () => document.removeEventListener("mousedown", handleClick);
-  }, [openMessageMenuId]);
-
-  useEffect(() => {
-    const handleClick = (event: MouseEvent) => {
-      if (!folderMenuRef.current) return;
-      if (folderMenuRef.current.contains(event.target as Node)) return;
-      setOpenFolderMenuId(null);
-    };
-    if (openFolderMenuId) {
-      document.addEventListener("mousedown", handleClick);
-    }
-    return () => document.removeEventListener("mousedown", handleClick);
-  }, [openFolderMenuId]);
 
   useEffect(() => {
     syncStateRef.current = { isSyncing, syncingFolders };
@@ -3206,21 +3122,23 @@ export default function MailClient() {
       });
   }, []);
 
-  useEffect(() => {
-    const loadData = async () => {
+  const loadInitialData = useCallback(
+    async (skipAuthCheck = false) => {
       try {
-        const me = await apiFetch("/api/auth/me", {
-          credentials: "include",
-          cache: "no-store"
-        });
-        if (!me.ok) {
-          setAuthState("unauth");
-          return;
-        }
-        const meData = (await me.json()) as { ttlSeconds?: number } | null;
-        setAuthState("ok");
-        if (typeof meData?.ttlSeconds === "number") {
-          setSessionTtlSeconds(meData.ttlSeconds);
+        if (!skipAuthCheck) {
+          const me = await apiFetch("/api/auth/me", {
+            credentials: "include",
+            cache: "no-store"
+          });
+          if (!me.ok) {
+            setAuthState("unauth");
+            return;
+          }
+          const meData = (await me.json()) as { ttlSeconds?: number } | null;
+          setAuthState("ok");
+          if (typeof meData?.ttlSeconds === "number") {
+            setSessionTtlSeconds(meData.ttlSeconds);
+          }
         }
         const [accountsRes, foldersRes] = await Promise.all([
           apiFetch("/api/accounts"),
@@ -3229,9 +3147,10 @@ export default function MailClient() {
         if (accountsRes.ok) {
           const nextAccounts = (await accountsRes.json()) as Account[];
           setAccounts(nextAccounts);
-          if (!nextAccounts.find((account) => account.id === activeAccountId)) {
-            setActiveAccountId(nextAccounts[0]?.id ?? activeAccountId);
-          }
+          setActiveAccountId((prev) => {
+            if (nextAccounts.find((account) => account.id === prev)) return prev;
+            return nextAccounts[0]?.id ?? prev;
+          });
         } else {
           reportError(await readErrorMessage(accountsRes));
         }
@@ -3245,10 +3164,13 @@ export default function MailClient() {
         setAuthState("unauth");
         reportError("Failed to load mailbox data.");
       }
-    };
+    },
+    [readErrorMessage, reportError]
+  );
 
-    loadData();
-  }, [activeAccountId]);
+  useEffect(() => {
+    loadInitialData();
+  }, [loadInitialData]);
 
   useEffect(() => {
     if (authState !== "ok" || !sessionTtlSeconds) return;
@@ -4856,7 +4778,8 @@ export default function MailClient() {
     }
   };
 
-  const isCompactView = messageView === "compact";
+  const deferredMessageView = useDeferredValue(messageView);
+  const isCompactView = deferredMessageView === "compact";
   const rootFolders = accountFolders.filter((folder) => !folder.parentId);
   const isExistingAccount = Boolean(
     editingAccount && accounts.some((account) => account.id === editingAccount.id)
@@ -4873,6 +4796,9 @@ export default function MailClient() {
       <LoginOverlay
         onAuthenticated={async () => {
           setAuthState("loading");
+          setErrorMessage(null);
+          setMessageListError(null);
+          setExceptionPanelOpen(false);
           setMessages([]);
           setFolders([]);
           setAccounts([]);
@@ -4881,22 +4807,23 @@ export default function MailClient() {
           setTotalMessages(null);
           setLoadedMessageCount(0);
           try {
-        const res = await apiFetch("/api/auth/me", {
-          credentials: "include",
-          cache: "no-store"
-        });
-        if (res.ok) {
-          const data = (await res.json()) as { ttlSeconds?: number } | null;
-          if (typeof data?.ttlSeconds === "number") {
-            setSessionTtlSeconds(data.ttlSeconds);
+            const res = await apiFetch("/api/auth/me", {
+              credentials: "include",
+              cache: "no-store"
+            });
+            if (res.ok) {
+              const data = (await res.json()) as { ttlSeconds?: number } | null;
+              if (typeof data?.ttlSeconds === "number") {
+                setSessionTtlSeconds(data.ttlSeconds);
+              }
+              setAuthState("ok");
+              await loadInitialData(true);
+            } else {
+              setAuthState("unauth");
+            }
+          } catch {
+            setAuthState("unauth");
           }
-          setAuthState("ok");
-        } else {
-          setAuthState("unauth");
-        }
-      } catch {
-        setAuthState("unauth");
-      }
         }}
       />
     );
@@ -4910,8 +4837,6 @@ export default function MailClient() {
           searchScope,
           searchFields,
           searchBadges,
-          searchFieldsOpen,
-          searchBadgesOpen,
           darkMode,
           isRelatedSearch,
           accounts,
@@ -4922,7 +4847,6 @@ export default function MailClient() {
           activeFolderId,
           lastFolderId,
           accountFolders,
-          menuOpen,
           isSyncing
         }}
         ui={{ searchFieldsLabel, searchBadgesLabel }}
@@ -4931,8 +4855,6 @@ export default function MailClient() {
           setSearchScope,
           setSearchFields,
           setSearchBadges,
-          setSearchFieldsOpen,
-          setSearchBadgesOpen,
           toggleDarkMode: handleToggleDarkMode,
           openCompose,
           setActiveFolderId,
@@ -4941,10 +4863,8 @@ export default function MailClient() {
           startEditAccount,
           deleteAccount,
           setActiveAccountId,
-          setMenuOpen,
           syncAccount
         }}
-        refs={{ menuRef, searchFieldsRef, searchBadgesRef }}
       />
       <InAppNoticeStack
         state={{ inAppNotices }}
@@ -4957,16 +4877,13 @@ export default function MailClient() {
             leftWidth,
             folderQuery,
             accountFolderCount: accountFolders.length,
-            folderHeaderMenuOpen,
             isRecomputingThreads
           }}
           actions={{
             setFolderQuery,
-            setFolderHeaderMenuOpen,
             syncAccount,
             recomputeThreads
           }}
-          refs={{ folderHeaderMenuRef }}
         >
           <FolderTree
             state={{
@@ -4980,7 +4897,6 @@ export default function MailClient() {
               deletingFolderIds,
               draggingMessageIds,
               dragOverFolderId,
-              openFolderMenuId,
               messageCountByFolder
             }}
             actions={{
@@ -4989,7 +4905,6 @@ export default function MailClient() {
               clearSearch,
               setCollapsedFolders,
               setDragOverFolderId,
-              setOpenFolderMenuId,
               handleMoveMessages,
               handleCreateSubfolder,
               handleRenameFolderItem,
@@ -4997,7 +4912,6 @@ export default function MailClient() {
               syncAccount,
               folderSpecialIcon
             }}
-            refs={{ folderMenuRef }}
           />
         </FolderPane>
 
@@ -5010,7 +4924,9 @@ export default function MailClient() {
         />
 
         <MessageListPane state={{ listWidth }} refs={{ listPaneRef }}>
-          <div className={`message-list ${isCompactView ? "compact" : ""}`}>
+          <div
+            className={`${listPaneStyles.list} ${isCompactView ? listPaneStyles.listCompact : ""}`}
+          >
             <MessageListHeader
               state={{
                 searchScope,
@@ -5036,29 +4952,42 @@ export default function MailClient() {
               }}
             />
             {(searchActive || isRelatedSearch) && (
-              <div className="list-search-row">
-                <div className="list-search-indicator">
-                  <Search size={12} />
-                  <span className="search-text">
-                    {isRelatedSearch
-                      ? relatedNotice
-                      : `Searching ${searchCriteriaLabel || "all messages"}`}
-                  </span>
-                </div>
-                <button
-                  className="icon-button ghost small"
-                  onClick={clearSearch}
-                  title="Clear search"
-                  aria-label="Clear search"
+              <Card size="1" className={listMetaStyles.searchCard}>
+                <Flex
+                  align="center"
+                  justify="between"
+                  gap="3"
+                  className={listMetaStyles.searchRow}
                 >
-                  <X size={12} />
-                </button>
-              </div>
+                  <Flex align="center" gap="2">
+                    <Search size={12} />
+                    <Text size="1" color="gray">
+                      {isRelatedSearch
+                        ? relatedNotice
+                        : `Searching ${searchCriteriaLabel || "all messages"}`}
+                    </Text>
+                  </Flex>
+                  <IconButton
+                    size="1"
+                    variant="ghost"
+                    color="gray"
+                    onClick={clearSearch}
+                    title="Clear search"
+                    aria-label="Clear search"
+                  >
+                    <X size={12} />
+                  </IconButton>
+                </Flex>
+              </Card>
             )}
             {listLoading && sortedMessages.length === 0 && (
-              <div className="list-loading">Loading messages…</div>
+              <Card size="1" className={listMetaStyles.loadingCard}>
+                <Text size="1" color="gray">
+                  Loading messages…
+                </Text>
+              </Card>
             )}
-            {messageView === "table" ? (
+            {deferredMessageView === "table" ? (
               <MessageTable
                 state={{
                   groupedMessages,
@@ -5072,9 +5001,8 @@ export default function MailClient() {
                   includeThreadAcrossFolders,
                   searchScope,
                   activeFolderId,
-                  activeMessageId,
-                  activeMessage: activeMessage ?? null,
-                  hoveredThreadId,
+                  activeMessageId: listActiveMessageId,
+                  activeMessage: listActiveMessage ?? null,
                   sortDir
                 }}
                 actions={{
@@ -5085,12 +5013,12 @@ export default function MailClient() {
                   setSortDir,
                   setCollapsedGroups,
                   setCollapsedThreads,
-                  setHoveredThreadId,
                   handleMessageDragStart,
                   handleMessageDragEnd,
                   handleRowClick,
                   handleSelectMessage,
                   toggleMessageSelection,
+                  selectRangeTo,
                   selectCollapsedThread,
                   handleDeleteMessage
                 }}
@@ -5118,9 +5046,8 @@ export default function MailClient() {
                   includeThreadAcrossFolders,
                   searchScope,
                   activeFolderId,
-                  activeMessageId,
-                  activeMessage: activeMessage ?? null,
-                  hoveredThreadId,
+                  activeMessageId: listActiveMessageId,
+                  activeMessage: listActiveMessage ?? null,
                   selectedMessageIds,
                   draggingMessageIds,
                   pendingMessageActions,
@@ -5130,7 +5057,6 @@ export default function MailClient() {
                 actions={{
                   setCollapsedGroups,
                   setCollapsedThreads,
-                  setHoveredThreadId,
                   handleMessageDragStart,
                   handleMessageDragEnd,
                   handleRowClick,
@@ -5156,14 +5082,22 @@ export default function MailClient() {
               />
             )}
             {filteredMessages.length === 0 && !listLoading && (
-              <div className={`list-empty ${messageListError ? "list-error" : ""}`}>
+              <div
+                className={`${listPaneStyles.empty} ${
+                  messageListError ? listPaneStyles.emptyError : ""
+                }`}
+              >
                 {messageListError
                   ? `Failed to load messages. ${messageListError}`
                   : "No messages in this folder."}
               </div>
             )}
             {listLoading && sortedMessages.length > 0 && (
-              <div className="list-loading">Loading more…</div>
+              <Card size="1" className={listMetaStyles.loadingCard}>
+                <Text size="1" color="gray">
+                  Loading more…
+                </Text>
+              </Card>
             )}
           </div>
         </MessageListPane>
@@ -5248,7 +5182,6 @@ export default function MailClient() {
               threadContentById={threadContentById}
               threadContentLoading={threadContentLoading}
               messageCardProps={{
-                openMessageMenuId,
                 messageRefs,
                 pendingMessageActions,
                 includeThreadAcrossFolders,

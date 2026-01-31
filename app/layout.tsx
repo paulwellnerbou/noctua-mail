@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import type { CSSProperties, ReactNode } from "react";
 import { Theme } from "@radix-ui/themes";
 import "@radix-ui/themes/styles.css";
 import "./globals.css";
@@ -19,12 +20,22 @@ export const metadata: Metadata = {
 export default function RootLayout({
   children
 }: {
-  children: React.ReactNode;
+  children: ReactNode;
 }) {
   return (
     <html lang="en">
       <body suppressHydrationWarning>
-        <Theme>
+        <Theme
+          grayColor="sand"
+          panelBackground="solid"
+          style={
+            {
+              "--color-background": "var(--sand-2)",
+              "--color-panel-solid": "var(--sand-3)",
+              "--color-surface": "var(--sand-2)"
+            } as CSSProperties
+          }
+        >
           <main>{children}</main>
         </Theme>
       </body>

@@ -1,0 +1,55 @@
+.group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.groupCompact {
+  gap: 0;
+}
+
+.groupTitle {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--muted);
+  margin: 8px 0 4px 0;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-2);
+}
+
+.groupTitlePinned {
+  color: var(--accent-2-strong);
+}
+
+.groupToggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+
+.groupTitle:hover {
+  background: var(--surface-3);
+}
+
+.groupCaret {
+  display: inline-flex;
+  transform: rotate(0deg);
+  transition: transform 0.2s ease;
+}
+
+.groupCaretOpen {
+  transform: rotate(90deg);
+}
+
+.threadGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.threadGroupCompact {
+  gap: 0;
+}

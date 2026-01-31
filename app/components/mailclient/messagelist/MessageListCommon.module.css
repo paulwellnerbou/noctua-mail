@@ -1,0 +1,59 @@
+.select {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  flex-direction: row;
+  flex-wrap: nowrap;
+  gap: 6px;
+  position: relative;
+}
+
+.unreadDot {
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--accent);
+  border: 1px solid var(--accent);
+  box-sizing: border-box;
+  padding: 0;
+  margin: 0;
+  flex: 0 0 8px;
+  cursor: pointer;
+  transition: opacity 0.15s ease;
+}
+
+.unreadDotRead {
+  background: transparent;
+  opacity: 0.55;
+}
+
+.unreadDotDisabled {
+  cursor: default;
+}
+
+.selectIcons {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: nowrap;
+}
+
+.selectIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.selectIconPinned {
+  color: var(--accent-2-strong);
+}
+
+.selectIconDraft {
+  color: var(--muted);
+}
