@@ -25,6 +25,7 @@ type MessageRowProps = {
   onThreadCaretClick?: (event: React.MouseEvent) => void;
   showThreadIndicator: boolean;
   threadSize?: number;
+  onRowPointerDown?: () => void;
   onRowClick: (event: React.MouseEvent) => void;
   onRowKeyDown: (event: React.KeyboardEvent) => void;
   onMouseEnter?: () => void;
@@ -65,6 +66,7 @@ function MessageRow({
   onThreadCaretClick,
   showThreadIndicator,
   threadSize,
+  onRowPointerDown,
   onRowClick,
   onRowKeyDown,
   onMouseEnter,
@@ -177,6 +179,7 @@ function MessageRow({
     }
     if (!isCheckbox && !isToggle && !isRange) {
       setOptimisticActive(true);
+      onRowPointerDown?.();
     }
     scheduleClear();
   };

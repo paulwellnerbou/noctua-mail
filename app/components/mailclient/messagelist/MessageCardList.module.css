@@ -13,10 +13,13 @@
   text-transform: uppercase;
   letter-spacing: 0.1em;
   color: var(--muted);
-  margin: 8px 0 4px 0;
+  margin: 0;
   padding: 6px 8px;
   border-radius: var(--radius-sm);
   background: var(--surface-2);
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
 }
 
 .groupTitlePinned {
@@ -24,8 +27,6 @@
 }
 
 .groupToggle {
-  display: inline-flex;
-  align-items: center;
   gap: 6px;
   cursor: pointer;
 }
@@ -52,4 +53,16 @@
 
 .threadGroupCompact {
   gap: 0;
+}
+
+.virtualList {
+  position: relative;
+  width: 100%;
+}
+
+.virtualItem {
+  position: absolute;
+  left: 0;
+  right: 0;
+  will-change: transform;
 }

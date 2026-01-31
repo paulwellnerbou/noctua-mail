@@ -18,11 +18,12 @@
   width: 100%;
   box-sizing: border-box;
   max-width: 100%;
-  overflow: visible;
+  overflow: hidden;
   cursor: pointer;
   font-size: 12px;
   align-items: center;
   transition: background 0.12s ease, border-color 0.12s ease;
+  height: 44px;
 }
 
 .rowHeader {
@@ -30,6 +31,7 @@
   text-transform: uppercase;
   letter-spacing: 0.1em;
   color: var(--muted);
+  height: 44px;
 }
 
 .sortButton {
@@ -76,6 +78,18 @@
 .rowDisabled {
   opacity: 0.6;
   pointer-events: none;
+}
+
+.virtualList {
+  position: relative;
+  width: 100%;
+}
+
+.virtualItem {
+  position: absolute;
+  left: 0;
+  right: 0;
+  will-change: transform;
 }
 
 .cellFrom,

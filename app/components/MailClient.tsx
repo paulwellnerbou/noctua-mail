@@ -37,6 +37,7 @@ import MessageListHeader from "./mailclient/messagelist/MessageListHeader";
 import MessageListPane from "./mailclient/messagelist/MessageListPane";
 import listMetaStyles from "./mailclient/messagelist/MessageListMeta.module.css";
 import listPaneStyles from "./mailclient/messagelist/MessageListPane.module.css";
+import { createSelectionStore } from "./mailclient/messagelist/selectionStore";
 import { Card, Flex, IconButton, Text } from "@radix-ui/themes";
 import MessageSelectIndicators from "./mailclient/messagelist/MessageSelectIndicators";
 import MessageTable from "./mailclient/messagelist/MessageTable";
@@ -144,7 +145,6 @@ export default function MailClient() {
   const [activeAccountId, setActiveAccountId] = useState(seedAccounts[0]?.id ?? "");
   const [activeFolderId, setActiveFolderId] = useState(seedFolders[0]?.id ?? "");
   const [activeMessageId, setActiveMessageId] = useState(seedMessages[0]?.id ?? "");
-  const [listActiveMessageId, setListActiveMessageId] = useState(activeMessageId);
   const [query, setQuery] = useState("");
   const [darkMode, setDarkMode] = useState(false);
   const [manageOpen, setManageOpen] = useState(false);
@@ -206,8 +206,11 @@ export default function MailClient() {
   >([]);
   const [collapsedThreads, setCollapsedThreads] = useState<Record<string, boolean>>({});
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
-  const [selectedMessageIds, setSelectedMessageIds] = useState<Set<string>>(new Set());
-  const [lastSelectedId, setLastSelectedId] = useState<string | null>(null);
+  const selectionStoreRef = useRef<ReturnType<typeof createSelectionStore> | null>(null);
+  if (!selectionStoreRef.current) {
+    selectionStoreRef.current = createSelectionStore(activeMessageId || null);
+  }
+  const selectionStore = selectionStoreRef.current!;
   const lastSelectedIdRef = useRef<string | null>(null);
   const [draggingMessageIds, setDraggingMessageIds] = useState<Set<string>>(new Set());
   const [threadsEnabled, setThreadsEnabled] = useState(true);
@@ -473,7 +476,7 @@ export default function MailClient() {
     if (!target) return false;
     setSearchScope("folder");
     setActiveFolderId(target.folderId);
-    setListActiveMessageId(target.id);
+    selectionStore.setActiveId(target.id);
     startTransition(() => setActiveMessageId(target.id));
     return true;
   };
@@ -500,69 +503,56 @@ export default function MailClient() {
     const indexMap = visibleIndexByIdRef.current;
     const visible = visibleMessagesRef.current;
     if (!lastSelected || !indexMap.has(lastSelected) || !indexMap.has(messageId)) {
-      setSelectedMessageIds(new Set([messageId]));
+      selectionStore.setSelection(new Set([messageId]));
       lastSelectedIdRef.current = messageId;
-      setLastSelectedId(messageId);
       return;
     }
     const start = indexMap.get(lastSelected)!;
     const end = indexMap.get(messageId)!;
     const [lo, hi] = start < end ? [start, end] : [end, start];
     const ids = visible.slice(lo, hi + 1).map((item) => item.message.id);
-    setSelectedMessageIds(new Set(ids));
+    selectionStore.setSelection(new Set(ids));
     lastSelectedIdRef.current = messageId;
-    setLastSelectedId(messageId);
-  }, []);
+  }, [selectionStore]);
 
   const clearSelection = () => {
-    setSelectedMessageIds(new Set());
-    setLastSelectedId(null);
+    selectionStore.clearSelection();
     lastSelectedIdRef.current = null;
   };
 
+  const setLastSelectedIdRef = useCallback((id: string | null) => {
+    lastSelectedIdRef.current = id;
+  }, []);
+
   useEffect(() => {
-    setListActiveMessageId(activeMessageId);
-  }, [activeMessageId]);
-  useEffect(() => {
-    lastSelectedIdRef.current = lastSelectedId;
-  }, [lastSelectedId]);
+    selectionStore.setActiveId(activeMessageId);
+  }, [activeMessageId, selectionStore]);
 
   const toggleMessageSelection = useCallback((messageId: string, replace = false) => {
-    setSelectedMessageIds((prev) => {
-      const next = replace ? new Set<string>() : new Set(prev);
-      if (replace) {
-        next.add(messageId);
-      } else if (next.has(messageId)) {
-        next.delete(messageId);
-      } else {
-        next.add(messageId);
-      }
-      return next;
-    });
+    selectionStore.toggle(messageId, replace);
     lastSelectedIdRef.current = messageId;
-    setLastSelectedId(messageId);
-  }, []);
+  }, [selectionStore]);
 
   const handleSelectMessage = useCallback(
     (message: Message, options?: { preserveSelection?: boolean }) => {
       if (!options?.preserveSelection) {
-        setSelectedMessageIds((prev) => {
-          if (prev.size === 1 && prev.has(message.id)) {
-            return prev;
-          }
-          return new Set<string>([message.id]);
-        });
+        const current = selectionStore.getIds();
+        if (!(current.size === 1 && current.has(message.id))) {
+          selectionStore.setSelection(new Set([message.id]), message.id);
+        } else {
+          selectionStore.setActiveId(message.id);
+        }
         lastSelectedIdRef.current = message.id;
-        setLastSelectedId(message.id);
       }
-      setListActiveMessageId(message.id);
+      selectionStore.setActiveId(message.id);
+      startTransition(() => setActiveMessageId(message.id));
     },
-    []
+    [selectionStore]
   );
 
   const handleRowClick = useCallback(
     (event: React.MouseEvent, message: Message) => {
-      setListActiveMessageId(message.id);
+      selectionStore.setActiveId(message.id);
       if (event.shiftKey) {
         event.preventDefault();
         selectRangeTo(message.id);
@@ -575,7 +565,7 @@ export default function MailClient() {
       }
       handleSelectMessage(message);
     },
-    [handleSelectMessage, selectRangeTo, toggleMessageSelection]
+    [handleSelectMessage, selectRangeTo, selectionStore, toggleMessageSelection]
   );
 
   const searchFieldsLabel = useMemo(() => {
@@ -1447,9 +1437,6 @@ export default function MailClient() {
     hideThreadView || (composeOpen && composeMode === "new")
       ? undefined
       : filteredMessages.find((message) => message.id === activeMessageId);
-  const listActiveMessage = listActiveMessageId
-    ? messageById.get(listActiveMessageId)
-    : undefined;
   const threadForest = useMemo(() => buildThreadTree(threadScopeMessages), [threadScopeMessages]);
 
   const activeThread = useMemo(() => {
@@ -2423,10 +2410,11 @@ export default function MailClient() {
       if (activeWasDeleted) {
         if (nextActiveId) {
           setActiveMessageId(nextActiveId);
-          setSelectedMessageIds(new Set([nextActiveId]));
+          selectionStore.setSelection(new Set([nextActiveId]), nextActiveId);
+          lastSelectedIdRef.current = nextActiveId;
         } else {
           setActiveMessageId("");
-          setSelectedMessageIds(new Set());
+          selectionStore.clearSelection();
         }
       }
       await refreshFolders();
@@ -2775,11 +2763,12 @@ export default function MailClient() {
   };
 
   const handleMoveMessages = async (destinationFolderId: string, messageIds?: string[]) => {
+    const selected = selectionStore.getIds();
     const ids =
       messageIds && messageIds.length > 0
         ? messageIds
-        : selectedMessageIds.size > 0
-          ? Array.from(selectedMessageIds)
+        : selected.size > 0
+          ? Array.from(selected)
           : activeMessageId
             ? [activeMessageId]
             : [];
@@ -2853,9 +2842,10 @@ export default function MailClient() {
   };
 
   const handleMessageDragStart = (event: React.DragEvent, message: Message) => {
+    const selected = selectionStore.getIds();
     const ids =
-      selectedMessageIds.size > 0 && selectedMessageIds.has(message.id)
-        ? Array.from(selectedMessageIds)
+      selected.size > 0 && selected.has(message.id)
+        ? Array.from(selected)
         : [message.id];
     const items = messages.filter((item) => ids.includes(item.id));
     const ghost = buildDragPreview(items);
@@ -2946,8 +2936,8 @@ export default function MailClient() {
     target: Message
   ) => {
     const ids = flat.map((item) => item.message.id);
-    setSelectedMessageIds(new Set(ids));
-    setLastSelectedId(target.id);
+    selectionStore.setSelection(new Set(ids), target.id);
+    lastSelectedIdRef.current = target.id;
     handleSelectMessage(target, { preserveSelection: true });
   };
 
@@ -2960,9 +2950,10 @@ export default function MailClient() {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Delete") return;
       if (isTypingTarget(event.target)) return;
+      const selected = selectionStore.getIds();
       const ids =
-        selectedMessageIds.size > 0
-          ? Array.from(selectedMessageIds)
+        selected.size > 0
+          ? Array.from(selected)
           : activeMessageId
             ? [activeMessageId]
             : [];
@@ -2980,7 +2971,7 @@ export default function MailClient() {
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [activeMessageId, handleDeleteMessage, messages, selectedMessageIds, threadScopeMessages]);
+  }, [activeMessageId, handleDeleteMessage, messages, selectionStore, threadScopeMessages]);
   const scrubSource = (source?: string) => {
     if (!source) return "";
     return source.replace(/([A-Za-z0-9+/=]{200,})/g, "[base64 omitted]");
@@ -4992,7 +4983,7 @@ export default function MailClient() {
                 state={{
                   groupedMessages,
                   visibleMessages,
-                  selectedMessageIds,
+                  selectionStore,
                   draggingMessageIds,
                   collapsedGroups,
                   collapsedThreads,
@@ -5001,18 +4992,15 @@ export default function MailClient() {
                   includeThreadAcrossFolders,
                   searchScope,
                   activeFolderId,
-                  activeMessageId: listActiveMessageId,
-                  activeMessage: listActiveMessage ?? null,
+                  messageById,
                   sortDir
                 }}
                 actions={{
-                  clearSelection,
-                  setSelectedMessageIds,
-                  setLastSelectedId,
                   setSortKey,
                   setSortDir,
                   setCollapsedGroups,
                   setCollapsedThreads,
+                  setLastSelectedIdRef,
                   handleMessageDragStart,
                   handleMessageDragEnd,
                   handleRowClick,
@@ -5034,6 +5022,7 @@ export default function MailClient() {
                   isTrashFolder,
                   renderMessageMenu
                 }}
+                refs={{ scrollRef: listPaneRef }}
               />
             
             ) : (
@@ -5046,9 +5035,8 @@ export default function MailClient() {
                   includeThreadAcrossFolders,
                   searchScope,
                   activeFolderId,
-                  activeMessageId: listActiveMessageId,
-                  activeMessage: listActiveMessage ?? null,
-                  selectedMessageIds,
+                  messageById,
+                  selectionStore,
                   draggingMessageIds,
                   pendingMessageActions,
                   isCompactView,
@@ -5079,6 +5067,7 @@ export default function MailClient() {
                   isPinnedMessage,
                   isTrashFolder
                 }}
+                refs={{ scrollRef: listPaneRef }}
               />
             )}
             {filteredMessages.length === 0 && !listLoading && (
