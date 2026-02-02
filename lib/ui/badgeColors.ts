@@ -21,7 +21,7 @@ const flagColorMap: Record<string, BadgeColor> = {
   seen: "gray",
   answered: "green",
   flagged: "amber",
-  pinned: "indigo",
+  pinned: "yellow",
   deleted: "red",
   draft: "violet",
   new: "blue",

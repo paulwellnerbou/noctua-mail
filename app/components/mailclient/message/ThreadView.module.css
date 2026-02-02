@@ -1,0 +1,10 @@
+.loading {
+  padding: var(--space-3) var(--space-2);
+  color: var(--gray-11);
+  font-size: 13px;
+}
+
+.empty {
+  color: var(--gray-11);
+  font-size: 13px;
+}

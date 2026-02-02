@@ -2,6 +2,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type React from "react";
 import { GitBranch, Trash2 } from "lucide-react";
 import { Badge, Checkbox, IconButton, Text } from "@radix-ui/themes";
+import * as Collapsible from "@radix-ui/react-collapsible";
+import { CaretRightIcon } from "@radix-ui/react-icons";
 import { badgeColors } from "@/lib/ui/badgeColors";
 import type { Message } from "@/lib/data";
 import badgeStyles from "../message/MessageBadge.module.css";
@@ -30,6 +32,7 @@ type ListGroupItem = {
 type ListRowItem = {
   type: "row";
   key: string;
+  groupKey: string;
   message: Message;
   depth: number;
   threadGroupId: string;
@@ -248,6 +251,7 @@ export default function MessageTable({
 
   const rowHeight = 44;
   const groupHeight = 32;
+  const lastGroupToggleRef = useRef<{ key: string; open: boolean; at: number } | null>(null);
   const activeThreadKey =
     activeMessage?.threadId ?? activeMessage?.messageId ?? activeMessage?.id;
 
@@ -292,6 +296,7 @@ export default function MessageTable({
             items.push({
               type: "row",
               key: message.id,
+              groupKey: group.key,
               message,
               depth,
               threadGroupId,
@@ -316,6 +321,7 @@ export default function MessageTable({
         items.push({
           type: "row",
           key: message.id,
+          groupKey: group.key,
           message,
           depth: 0,
           threadGroupId,
@@ -434,56 +440,56 @@ export default function MessageTable({
         {visibleItems.map((item, offsetIndex) => {
           const index = startIndex + offsetIndex;
           const top = offsets[index] ?? 0;
+          const lastToggle = lastGroupToggleRef.current;
+          const now = Date.now();
           if (item.type === "group") {
             const group = item.group;
             const isPinned = group.key === "Pinned";
             const isCollapsed = collapsedGroups[group.key];
             const count =
               group.items.length === 0 ? 0 : group.count ?? group.items.length;
+            const isEmpty = group.items.length === 0;
             return (
-              <div
+              <Collapsible.Root
                 key={`group-${group.key}`}
-                className={`${styles.virtualItem} ${groupStyles.groupTitle} ${groupStyles.groupToggle} ${
-                  isPinned ? groupStyles.groupTitlePinned : ""
-                }`}
+                className={styles.virtualItem}
                 style={{ transform: `translateY(${top}px)`, height: groupHeight }}
-                role="button"
-                tabIndex={0}
-                onClick={() => {
-                  if (group.items.length === 0) return;
+                open={!isCollapsed}
+                onOpenChange={(open) => {
+                  if (isEmpty) return;
+                  lastGroupToggleRef.current = { key: group.key, open, at: Date.now() };
                   setCollapsedGroups((prev) => ({
                     ...prev,
-                    [group.key]: !prev[group.key]
+                    [group.key]: !open
                   }));
                 }}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter" || event.key === " ") {
-                    event.preventDefault();
-                    if (group.items.length === 0) return;
-                    setCollapsedGroups((prev) => ({
-                      ...prev,
-                      [group.key]: !prev[group.key]
-                    }));
-                  }
-                }}
               >
-                <span
-                  className={`${groupStyles.groupCaret} ${
-                    isCollapsed ? "" : groupStyles.groupCaretOpen
-                  }`}
-                >
-                  {group.items.length === 0 ? "" : "▸"}
-                </span>
-                <Text as="span" size="1">
-                  {getGroupLabel(group)} · {count}
-                </Text>
-              </div>
+                <Collapsible.Trigger asChild disabled={isEmpty}>
+                  <button
+                    type="button"
+                    className={`${groupStyles.groupTitle} ${groupStyles.groupToggle} ${
+                      isPinned ? groupStyles.groupTitlePinned : ""
+                    }`}
+                  >
+                    <span className={groupStyles.groupCaret}>
+                      {isEmpty ? "" : <CaretRightIcon />}
+                    </span>
+                    <Text as="span" size="1">
+                      {getGroupLabel(group)} · {count}
+                    </Text>
+                  </button>
+                </Collapsible.Trigger>
+              </Collapsible.Root>
             );
           }
 
           const message = item.message;
           const isSelected = selectedMessageIds.has(message.id);
           const isDragging = draggingMessageIds.has(message.id);
+          const shouldAnimateRow =
+            lastToggle?.open &&
+            lastToggle.key === item.groupKey &&
+            now - lastToggle.at < 220;
           const optimistic =
             optimisticRow && optimisticRow.id === message.id
               ? optimisticRow
@@ -511,7 +517,9 @@ export default function MessageTable({
           return (
             <div
               key={`row-${item.key}`}
-              className={`${styles.virtualItem} ${rowClassName}`}
+              className={`${styles.virtualItem} ${rowClassName} ${
+                shouldAnimateRow ? styles.rowEnter : ""
+              }`}
               style={{ transform: `translateY(${top}px)`, height: rowHeight }}
               role="button"
               tabIndex={0}
@@ -620,7 +628,7 @@ export default function MessageTable({
                         }));
                       }}
                     >
-                      ▸
+                      <CaretRightIcon />
                     </span>
                     <Badge
                       size="1"
@@ -634,7 +642,7 @@ export default function MessageTable({
                   </>
                 ) : (
                   <span className={`${styles.threadCaret} ${styles.threadCaretSpacer}`}>
-                    ▸
+                    <CaretRightIcon />
                   </span>
                 )}
                 {message.from}

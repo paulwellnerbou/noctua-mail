@@ -2,6 +2,7 @@ import { memo, useEffect, useRef, useState } from "react";
 import type React from "react";
 import { GitBranch, Paperclip, Trash2 } from "lucide-react";
 import { Badge, Checkbox, IconButton, Text } from "@radix-ui/themes";
+import { CaretRightIcon } from "@radix-ui/react-icons";
 import { badgeColors } from "@/lib/ui/badgeColors";
 import type { Message } from "@/lib/data";
 import badgeStyles from "../message/MessageBadge.module.css";
@@ -288,7 +289,7 @@ function MessageRow({
                 onThreadCaretClick?.(event);
               }}
             >
-              ▸
+              <CaretRightIcon />
             </span>
           )}
           <Text

@@ -45,17 +45,7 @@
 
 .folderSearchInput {
   width: 100%;
-  padding: 8px 10px;
-  border-radius: var(--radius-md);
-  border: 1px solid var(--gray-a4);
-  background: var(--color-surface);
-  color: var(--gray-12);
-  font-size: 12px;
-}
-
-.folderSearchInput::placeholder {
-  color: var(--gray-11);
-  opacity: 0.7;
+  min-width: 0;
 }
 
 .treeNode {
@@ -108,7 +98,6 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  font-size: 12px;
   color: var(--gray-11);
   transition: transform 0.2s ease;
 }
@@ -117,20 +106,29 @@
   transform: rotate(90deg);
 }
 
+.treeCaret :global(svg) {
+  width: 15px;
+  height: 15px;
+}
+
 .treeDot {
-  width: 6px;
-  height: 6px;
-  border-radius: var(--radius-md);
-  background: var(--accent-7);
-  transition: background 0.2s ease, transform 0.2s ease;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--accent-9);
+  border: 1px solid var(--accent-9);
+  box-sizing: border-box;
+  transition: transform 0.2s ease;
 }
 
 .treeDotSystem {
   background: var(--accent-9);
+  border-color: var(--accent-9);
 }
 
 .treeRow:hover .treeDot {
-  background: var(--accent-8);
+  background: var(--accent-9);
+  border-color: var(--accent-9);
 }
 
 .treeRowActive .treeDot {
@@ -211,6 +209,11 @@
 .treeNameText {
   position: relative;
   z-index: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  display: block;
 }
 
 .treeSyncSpinner {

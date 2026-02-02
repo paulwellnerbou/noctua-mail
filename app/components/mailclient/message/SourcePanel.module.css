@@ -1,0 +1,26 @@
+.sourceBlock {
+  position: relative;
+}
+
+.sourceView {
+  background: var(--gray-1);
+  border: 1px solid var(--gray-5);
+  border-radius: var(--radius-2);
+  padding: var(--space-3);
+  font-size: 11px;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  margin: 0;
+}
+
+.copyButton {
+  position: absolute;
+  top: var(--space-2);
+  right: var(--space-2);
+}
+
+.copyOk {
+  color: var(--green-11);
+}

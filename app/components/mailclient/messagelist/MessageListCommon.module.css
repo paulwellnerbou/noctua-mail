@@ -12,8 +12,8 @@
   width: 8px;
   height: 8px;
   border-radius: 999px;
-  background: var(--accent);
-  border: 1px solid var(--accent);
+  background: var(--accent-9);
+  border: 1px solid var(--accent-9);
   box-sizing: border-box;
   padding: 0;
   margin: 0;
@@ -45,15 +45,15 @@
   width: 18px;
   height: 18px;
   border-radius: var(--radius-sm);
-  border: 1px solid var(--border);
-  background: var(--surface-2);
-  color: var(--text);
+  border: 1px solid var(--gray-5);
+  background: var(--gray-2);
+  color: var(--gray-12);
 }
 
 .selectIconPinned {
-  color: var(--accent-2-strong);
+  color: var(--yellow-11);
 }
 
 .selectIconDraft {
-  color: var(--muted);
+  color: var(--gray-10);
 }

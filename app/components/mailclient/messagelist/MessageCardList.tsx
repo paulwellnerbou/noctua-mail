@@ -2,6 +2,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type React from "react";
 import type { Message } from "@/lib/data";
 import { Text } from "@radix-ui/themes";
+import * as Collapsible from "@radix-ui/react-collapsible";
+import { CaretRightIcon } from "@radix-ui/react-icons";
 import MessageRow from "./MessageRow";
 import { buildFlatEntries, buildThreadGroupEntries } from "./threadGroupUtils";
 import { useSelectionSnapshot, type SelectionStore } from "./selectionStore";
@@ -25,6 +27,8 @@ type ListGroupItem = {
 type ListRowItem = {
   type: "row";
   key: string;
+  groupKey: string;
+  isFirstInGroup: boolean;
   message: Message;
   depth: number;
   threadGroupId: string;
@@ -165,6 +169,7 @@ export default function MessageCardList({
 
 
   const listRef = useRef<HTMLDivElement | null>(null);
+  const lastGroupToggleRef = useRef<{ key: string; open: boolean; at: number } | null>(null);
   const [scrollState, setScrollState] = useState({ scrollTop: 0, height: 0 });
 
   useEffect(() => {
@@ -200,7 +205,7 @@ export default function MessageCardList({
     };
   }, [scrollRef]);
 
-  const rowHeight = isCompactView ? 72 : 120;
+  const rowHeight = isCompactView ? 60 : 120;
   const groupHeight = isCompactView ? 28 : 32;
   const { ids: selectedMessageIds, activeId: activeMessageId } =
     useSelectionSnapshot(selectionStore);
@@ -213,6 +218,7 @@ export default function MessageCardList({
     groupedMessages.forEach((group) => {
       items.push({ type: "group", key: group.key, group });
       if (group.items.length === 0 || collapsedGroups[group.key]) return;
+      let isFirstRow = true;
 
       if (supportsThreads) {
         const entries = buildThreadGroupEntries({
@@ -249,6 +255,8 @@ export default function MessageCardList({
             items.push({
               type: "row",
               key: message.id,
+              groupKey: group.key,
+              isFirstInGroup: isFirstRow,
               message,
               depth,
               threadGroupId,
@@ -259,6 +267,7 @@ export default function MessageCardList({
               fullFlat,
               folderIds
             });
+            if (isFirstRow) isFirstRow = false;
           });
         });
         return;
@@ -273,6 +282,8 @@ export default function MessageCardList({
         items.push({
           type: "row",
           key: message.id,
+          groupKey: group.key,
+          isFirstInGroup: isFirstRow,
           message,
           depth: 0,
           threadGroupId,
@@ -283,6 +294,7 @@ export default function MessageCardList({
           fullFlat: [{ message, depth: 0 }],
           folderIds
         });
+        if (isFirstRow) isFirstRow = false;
       });
     });
     return items;
@@ -324,6 +336,8 @@ export default function MessageCardList({
         );
   const visibleItems =
     startIndex <= endIndex ? listItems.slice(startIndex, endIndex + 1) : [];
+  const lastToggle = lastGroupToggleRef.current;
+  const now = Date.now();
 
   return (
     <div
@@ -340,50 +354,48 @@ export default function MessageCardList({
           const isCollapsed = collapsedGroups[group.key];
           const count =
             group.items.length === 0 ? 0 : group.count ?? group.items.length;
+          const isEmpty = group.items.length === 0;
           return (
-            <div
+            <Collapsible.Root
               key={`group-${group.key}`}
-              className={`${styles.virtualItem} ${styles.groupTitle} ${styles.groupToggle} ${
-                isPinned ? styles.groupTitlePinned : ""
-              }`}
+              className={styles.virtualItem}
               style={{ transform: `translateY(${top}px)`, height: groupHeight }}
-              role="button"
-              tabIndex={0}
-              onClick={() => {
-                if (group.items.length === 0) return;
+              open={!isCollapsed}
+              onOpenChange={(open) => {
+                if (isEmpty) return;
+                lastGroupToggleRef.current = { key: group.key, open, at: Date.now() };
                 setCollapsedGroups((prev) => ({
                   ...prev,
-                  [group.key]: !prev[group.key]
+                  [group.key]: !open
                 }));
               }}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" || event.key === " ") {
-                  event.preventDefault();
-                  if (group.items.length === 0) return;
-                  setCollapsedGroups((prev) => ({
-                    ...prev,
-                    [group.key]: !prev[group.key]
-                  }));
-                }
-              }}
             >
-              <span
-                className={`${styles.groupCaret} ${
-                  isCollapsed ? "" : styles.groupCaretOpen
-                }`}
-              >
-                {group.items.length === 0 ? "" : "▸"}
-              </span>
-              <Text as="span" size="1">
-                {getGroupLabel(group)} · {count}
-              </Text>
-            </div>
+              <Collapsible.Trigger asChild disabled={isEmpty}>
+                <button
+                  type="button"
+                  className={`${styles.groupTitle} ${styles.groupToggle} ${
+                    isPinned ? styles.groupTitlePinned : ""
+                  }`}
+                >
+                  <span className={styles.groupCaret}>
+                    {isEmpty ? "" : <CaretRightIcon />}
+                  </span>
+                  <Text as="span" size="1">
+                    {getGroupLabel(group)} · {count}
+                  </Text>
+                </button>
+              </Collapsible.Trigger>
+            </Collapsible.Root>
           );
         }
 
         const message = item.message;
         const isSelected = selectedMessageIds.has(message.id);
         const isDragging = draggingMessageIds.has(message.id);
+        const shouldAnimateRow =
+          lastToggle?.open &&
+          lastToggle.key === item.groupKey &&
+          now - lastToggle.at < 220;
         const folderBadgeKey = item.folderIds.length ? item.folderIds.join("|") : "";
         const isActiveThread =
           !!activeMessageId &&
@@ -395,12 +407,13 @@ export default function MessageCardList({
           item.depth === 0 &&
           item.threadSize > 1 &&
           isActiveThread;
-        const showCompactDivider = isCompactView && index > 0;
+        const showCompactDivider =
+          isCompactView && index > 0 && !item.isFirstInGroup;
 
         return (
           <div
             key={`row-${item.key}`}
-            className={styles.virtualItem}
+            className={`${styles.virtualItem} ${shouldAnimateRow ? styles.rowEnter : ""}`}
             style={{ transform: `translateY(${top}px)`, height: rowHeight }}
           >
             <MessageRow
@@ -526,8 +539,8 @@ export default function MessageCardList({
               renderSelectIndicators={renderSelectIndicators(message)}
               folderBadges={renderFolderBadges(item.folderIds)}
               folderBadgeKey={folderBadgeKey}
-              showFolderBadgesInSubjectMeta={isCompactView}
-              showFolderBadgesInMeta={!isCompactView}
+              showFolderBadgesInSubjectMeta
+              showFolderBadgesInMeta={false}
               quickActions={renderQuickActions(message)}
               messageMenu={renderMessageMenu(message, isCompactView ? "table" : "list")}
               showAttachmentIcon={

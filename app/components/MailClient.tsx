@@ -1293,8 +1293,12 @@ export default function MailClient() {
   const [threadRelatedMessages, setThreadRelatedMessages] = useState<Message[]>([]);
   const [threadContentById, setThreadContentById] = useState<Record<string, Message[]>>({});
   const [threadContentLoading, setThreadContentLoading] = useState<string | null>(null);
+  const threadContentByIdRef = useRef(threadContentById);
   const threadCacheOrderRef = useRef<string[]>([]);
   const THREAD_CACHE_LIMIT = 20;
+  useEffect(() => {
+    threadContentByIdRef.current = threadContentById;
+  }, [threadContentById]);
   const upsertThreadCache = useCallback((threadId: string, items: Message[]) => {
     setThreadContentById((prev) => {
       const next = { ...prev, [threadId]: items };
@@ -3396,7 +3400,7 @@ export default function MailClient() {
         activeMessage.threadId ?? activeMessage.messageId ?? activeMessage.id;
       if (!threadId) return;
 
-      const cachedThread = threadContentById[threadId];
+      const cachedThread = threadContentByIdRef.current[threadId];
       const hasContent = (message?: Message | null) => {
         if (!message) return false;
         const hasText = (message.body ?? "").trim().length > 0;
@@ -3468,7 +3472,6 @@ export default function MailClient() {
     activeMessage,
     groupBy,
     supportsThreads,
-    threadContentById,
     upsertThreadCache
   ]);
 

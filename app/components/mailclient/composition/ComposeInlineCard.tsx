@@ -1,8 +1,10 @@
 import type React from "react";
 import { ArrowUpRight } from "lucide-react";
-import { Badge, Button, IconButton, Text } from "@radix-ui/themes";
+import { Badge, Button, Card, IconButton, Text } from "@radix-ui/themes";
 import { badgeColors } from "@/lib/ui/badgeColors";
 import ComposeFields from "./ComposeFields";
+import threadStyles from "../message/ThreadMessageCard.module.css";
+import styles from "./ComposeInlineCard.module.css";
 
 type ComposeMode = "new" | "reply" | "replyAll" | "forward" | "edit" | "editAsNew";
 
@@ -127,23 +129,28 @@ export default function ComposeInlineCard({
               : "New message";
 
   return (
-    <article
-      className={`thread-card compose-card compose-inline ${
-        discardingDraft ? "disabled" : ""
+    <Card
+      asChild
+      size="2"
+      variant="surface"
+      className={`${threadStyles.card} ${styles.card} ${
+        discardingDraft ? styles.disabled : ""
       }${composeDragActive ? " compose-drop-active" : ""}`}
-      onDragEnter={handleComposeDragEnter}
-      onDragLeave={handleComposeDragLeave}
-      onDragOver={handleComposeDragOver}
-      onDrop={handleComposeDrop}
     >
-      <div className="thread-card-header">
-        <div className="thread-card-top">
-          <div className="thread-card-badges">
+      <article
+        onDragEnter={handleComposeDragEnter}
+        onDragLeave={handleComposeDragLeave}
+        onDragOver={handleComposeDragOver}
+        onDrop={handleComposeDrop}
+      >
+        <div className={threadStyles.header}>
+          <div className={threadStyles.topRow}>
+            <div className={threadStyles.badges}>
             <Badge size="1" variant="soft" color={badgeColors.compose}>
               {composeModeLabel}
             </Badge>
-          </div>
-          <div className="thread-card-actions">
+            </div>
+            <div className={threadStyles.actions}>
             <IconButton
               variant="ghost"
               size="2"
@@ -153,9 +160,9 @@ export default function ComposeInlineCard({
             >
               <ArrowUpRight size={14} />
             </IconButton>
+            </div>
           </div>
-        </div>
-        <div className="thread-card-info">
+          <div className={`${threadStyles.info} ${styles.info}`}>
           <ComposeFields
             variant="inline"
             composeSubject={composeSubject}
@@ -180,9 +187,9 @@ export default function ComposeInlineCard({
             getComposeToken={getComposeToken}
             markComposeDirty={markComposeDirty}
           />
+          </div>
         </div>
-      </div>
-      <div className="compose-body">{ui.composeMessageField}</div>
+        <div className={`compose-body ${styles.body}`}>{ui.composeMessageField}</div>
       <div className="compose-footer">
         <div className="compose-draft-meta">
           {composeDraftId && (
@@ -235,6 +242,7 @@ export default function ComposeInlineCard({
           </Button>
         </div>
       </div>
-    </article>
+      </article>
+    </Card>
   );
 }

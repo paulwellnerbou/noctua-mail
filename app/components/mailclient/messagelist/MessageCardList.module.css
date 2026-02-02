@@ -12,38 +12,122 @@
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.1em;
-  color: var(--muted);
+  color: var(--gray-11);
   margin: 0;
   padding: 6px 8px;
   border-radius: var(--radius-sm);
-  background: var(--surface-2);
-  height: 32px;
+  background: var(--gray-4);
+  height: 100%;
   display: inline-flex;
   align-items: center;
+  border: none;
+  font: inherit;
+  text-align: left;
+  width: 100%;
+  transition: background 0.16s ease, color 0.16s ease;
+  border: 1px solid var(--gray-7);
 }
 
 .groupTitlePinned {
-  color: var(--accent-2-strong);
+  color: var(--yellow-11);
 }
 
 .groupToggle {
   gap: 6px;
   cursor: pointer;
+  position: relative;
+  overflow: hidden;
 }
 
 .groupTitle:hover {
-  background: var(--surface-3);
+  background: var(--gray-5);
 }
 
 .groupCaret {
   display: inline-flex;
+  width: 16px;
+  height: 16px;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 16px;
   transform: rotate(0deg);
+  transform-origin: center;
   transition: transform 0.2s ease;
 }
 
-.groupCaretOpen {
+.groupCaret :global(svg) {
+  width: 15px;
+  height: 15px;
+}
+
+.groupToggle[data-state="open"] {
+  background: var(--gray-5);
+}
+
+.groupToggle[data-state="open"] .groupCaret {
   transform: rotate(90deg);
 }
+
+.groupToggle::after {
+  content: "";
+  position: absolute;
+  inset: -1px;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in srgb, var(--gray-5) 35%, transparent),
+    transparent
+  );
+  opacity: 0;
+  transform: translateX(-20%);
+  pointer-events: none;
+}
+
+.groupToggle[data-state="closed"]::after {
+  animation: groupCloseFlash 240ms ease-out;
+}
+
+@keyframes groupCloseFlash {
+  0% {
+    opacity: 0;
+    transform: translateX(-20%);
+  }
+  40% {
+    opacity: 0.5;
+    transform: translateX(0);
+  }
+  100% {
+    opacity: 0;
+    transform: translateX(20%);
+  }
+}
+
+.groupToggle:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.groupToggle:focus-visible {
+  outline: 2px solid var(--accent-8);
+  outline-offset: 2px;
+}
+
+.rowEnter > * {
+  animation: rowEnterFade 200ms ease-out;
+  will-change: transform, opacity;
+}
+
+@keyframes rowEnterFade {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
 
 .threadGroup {
   display: flex;

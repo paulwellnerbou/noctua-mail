@@ -1,4 +1,5 @@
 import { Badge } from "@radix-ui/themes";
+import { Folder } from "lucide-react";
 import { badgeColors } from "@/lib/ui/badgeColors";
 import styles from "./FolderBadges.module.css";
 
@@ -23,11 +24,13 @@ export default function FolderBadges({
           <button
             type="button"
             title={threadPathById(folderId)}
+            className={styles.badgeButton}
             onClick={(event) => {
               event.stopPropagation();
               onSelectFolder(folderId);
             }}
           >
+            <Folder size={12} />
             {folderNameById(folderId)}
           </button>
         </Badge>

@@ -141,6 +141,7 @@ export default function TopBar({ state, ui, actions }: TopBarProps) {
           placeholder="Search all messages"
           value={query}
           onChange={(event) => setQuery(event.target.value)}
+          id="top-search-input"
           className={styles.searchInput}
         >
           {query ? (
@@ -277,7 +278,7 @@ export default function TopBar({ state, ui, actions }: TopBarProps) {
         </IconButton>
         <IconButton
           size="2"
-          variant="ghost"
+          variant="surface"
           onClick={() => syncAccount(undefined, "new")}
           disabled={isSyncing}
           aria-label="Check new mail"

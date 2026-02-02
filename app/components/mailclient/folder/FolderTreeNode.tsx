@@ -2,6 +2,7 @@ import { useState } from "react";
 import type React from "react";
 import { MoreVertical } from "lucide-react";
 import { Badge, DropdownMenu, IconButton } from "@radix-ui/themes";
+import { CaretRightIcon } from "@radix-ui/react-icons";
 import { badgeColors } from "@/lib/ui/badgeColors";
 import type { Folder } from "@/lib/data";
 import styles from "./FolderTree.module.css";
@@ -168,7 +169,7 @@ export default function FolderTreeNode({
             setCollapsedFolders((prev) => ({ ...prev, [folder.id]: !isCollapsed }));
           }}
         >
-          {hasChildren ? "▸" : ""}
+          {hasChildren ? <CaretRightIcon /> : ""}
         </span>
         {folderSpecialIcon(folder) ? (
           <span className={styles.treeIcon} aria-hidden>

@@ -1,10 +1,14 @@
 .pane {
   padding: 18px;
-  border-right: 1px solid var(--border);
-  background: var(--surface);
+  border-right: 1px solid var(--gray-5);
+  background: var(--gray-2);
   flex-shrink: 0;
   overflow-y: auto;
   scrollbar-gutter: stable;
+}
+
+:global(.dark) .pane {
+  background: var(--gray-3);
 }
 
 .list {
@@ -20,11 +24,11 @@
 
 .empty {
   margin: auto;
-  color: var(--muted);
+  color: var(--gray-11);
   font-size: 13px;
   text-align: center;
 }
 
 .emptyError {
-  color: #b94b4b;
+  color: var(--red-11);
 }

@@ -1,0 +1,16 @@
+.card {
+  width: 100%;
+}
+
+.disabled {
+  opacity: 0.6;
+  pointer-events: none;
+}
+
+.info {
+  width: 100%;
+}
+
+.body {
+  margin-top: var(--space-2);
+}

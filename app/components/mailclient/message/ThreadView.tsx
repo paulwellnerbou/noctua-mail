@@ -1,6 +1,8 @@
 import type { Message } from "@/lib/data";
+import { Text } from "@radix-ui/themes";
 import ThreadMessageCard from "./ThreadMessageCard";
 import type { ThreadMessageCardProps } from "./ThreadMessageCard";
+import styles from "./ThreadView.module.css";
 
 type ThreadViewProps = {
   showComposeInline: boolean;
@@ -35,7 +37,11 @@ export default function ThreadView({
             threadContentLoading === activeThreadId &&
             !hasFullThread;
           if (showThreadLoading) {
-            return <div className="thread-loading">Loading thread…</div>;
+            return (
+              <Text size="2" color="gray" className={styles.loading}>
+                Loading thread…
+              </Text>
+            );
           }
           return activeThread.map((message) => (
             <ThreadMessageCard
@@ -46,7 +52,9 @@ export default function ThreadView({
           ));
         })()
       ) : showComposeInline ? null : (
-        <p>Select a message to view the thread.</p>
+        <Text size="2" color="gray" className={styles.empty}>
+          Select a message to view the thread.
+        </Text>
       )}
     </>
   );

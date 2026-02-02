@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import { Check, Copy } from "lucide-react";
+import { IconButton } from "@radix-ui/themes";
+import styles from "./SourcePanel.module.css";
 
 type SourcePanelProps = {
   messageId: string;
@@ -32,16 +34,18 @@ export default function SourcePanel({ messageId, fetchSource, scrubSource }: Sou
   }, [messageId, fetchSource]);
 
   return (
-    <div className="source-block">
-      <pre className="source-view">
+    <div className={styles.sourceBlock}>
+      <pre className={styles.sourceView}>
         {status === "loading"
           ? "Loading source…"
           : status === "error"
             ? "Failed to load source."
             : scrubSource(source)}
       </pre>
-      <button
-        className={`json-copy ${copyOk ? "ok" : ""}`}
+      <IconButton
+        size="1"
+        variant="surface"
+        className={`${styles.copyButton} ${copyOk ? styles.copyOk : ""}`}
         onClick={async () => {
           if (!source) return;
           try {
@@ -56,7 +60,7 @@ export default function SourcePanel({ messageId, fetchSource, scrubSource }: Sou
         title="Copy source"
       >
         {copyOk ? <Check size={14} /> : <Copy size={14} />}
-      </button>
+      </IconButton>
     </div>
   );
 }

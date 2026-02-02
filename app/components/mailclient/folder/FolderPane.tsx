@@ -1,6 +1,6 @@
 import type React from "react";
 import { MoreVertical } from "lucide-react";
-import { DropdownMenu, IconButton } from "@radix-ui/themes";
+import { DropdownMenu, IconButton, TextField } from "@radix-ui/themes";
 import styles from "./FolderTree.module.css";
 type FolderPaneProps = {
   state: {
@@ -58,11 +58,13 @@ export default function FolderPane({ state, actions, children }: FolderPaneProps
             </div>
           </div>
           <div className={styles.folderSearch}>
-            <input
+            <TextField.Root
+              size="2"
               type="search"
               placeholder="Search folders"
               value={folderQuery}
               onChange={(event) => setFolderQuery(event.target.value)}
+              id="folder-search-input"
               className={styles.folderSearchInput}
             />
           </div>

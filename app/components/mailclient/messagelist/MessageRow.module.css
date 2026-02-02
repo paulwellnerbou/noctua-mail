@@ -17,7 +17,8 @@
 .rowCompact {
   padding: 8px 10px;
   gap: 4px;
-  height: 72px;
+  height: 60px;
+  overflow: visible;
 }
 
 .rowDivider::before {
@@ -27,7 +28,7 @@
   right: var(--radius-sm);
   top: -1px;
   height: 1px;
-  background: var(--border);
+  background: var(--gray-5);
   pointer-events: none;
 }
 
@@ -35,23 +36,23 @@
 .rowCompact.rowDivider[data-active="true"]::before,
 .rowCompact.rowDivider[data-selected="true"]::before,
 .rowCompact.rowDivider[data-active-thread-root="true"]::before {
-  display: none;
+  opacity: 0;
 }
 
 .rowThreadSibling {
-  background: color-mix(in srgb, var(--surface-2) 60%, transparent);
-  border-color: var(--border);
+  background: color-mix(in srgb, var(--gray-2) 60%, transparent);
+  border-color: var(--gray-5);
 }
 
 .rowActive {
-  background: var(--surface-2);
-  border-color: var(--text);
+  background: var(--gray-3);
+  border-color: var(--gray-12);
   box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.02);
 }
 
 .row:focus-within {
-  background: var(--surface-2);
-  border-color: var(--text);
+  background: var(--gray-3);
+  border-color: var(--gray-12);
 }
 
 .row:focus-visible {
@@ -60,8 +61,8 @@
 }
 
 .rowSelected {
-  background: var(--surface-2);
-  border-color: var(--border);
+  background: var(--gray-3);
+  border-color: var(--gray-5);
   box-shadow: none;
 }
 
@@ -75,23 +76,23 @@
 }
 
 .rowActiveThreadRoot {
-  background: var(--surface-2);
+  background: var(--gray-3);
   border-color: transparent;
-  box-shadow: inset 0 0 0 1px var(--text);
+  box-shadow: inset 0 0 0 1px var(--gray-12);
 }
 
 .rowActive {
-  background: var(--surface-2);
-  border-color: var(--text);
+  background: var(--gray-3);
+  border-color: var(--gray-12);
 }
 
 .row:hover {
-  border-color: var(--border);
-  background: var(--surface-3);
+  border-color: var(--gray-5);
+  background: var(--gray-3);
 }
 
 .rowActive:hover {
-  border-color: var(--text);
+  border-color: var(--gray-12);
 }
 
 .header {
@@ -100,7 +101,7 @@
   justify-content: space-between;
   gap: 10px;
   font-size: 11px;
-  color: var(--muted);
+  color: var(--gray-11);
   width: 100%;
 }
 
@@ -183,7 +184,7 @@
 .preview {
   margin: 0;
   font-size: 12px;
-  color: var(--muted);
+  color: var(--gray-11);
   line-height: 1.4;
   overflow: hidden;
   display: -webkit-box;
@@ -199,7 +200,7 @@
   display: flex;
   justify-content: space-between;
   font-size: 11px;
-  color: var(--muted);
+  color: var(--gray-11);
   margin-top: 8px;
 }
 
@@ -209,21 +210,26 @@
 
 .unreadText {
   font-weight: 600;
-  color: var(--text);
+  color: var(--gray-12);
 }
 
 .threadCaret {
   width: 16px;
-  height: 20px;
+  height: 16px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  color: var(--muted);
-  font-size: 14px;
+  color: var(--gray-11);
   transform: rotate(0deg);
+  transform-origin: center;
   transition: transform 0.2s ease;
 }
 
 .threadCaretOpen {
   transform: rotate(90deg);
+}
+
+.threadCaret :global(svg) {
+  width: 15px;
+  height: 15px;
 }

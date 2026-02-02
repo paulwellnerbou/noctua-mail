@@ -14,7 +14,7 @@
   border: 1px solid transparent;
   text-align: left;
   background: transparent;
-  color: var(--text);
+  color: var(--gray-12);
   width: 100%;
   box-sizing: border-box;
   max-width: 100%;
@@ -30,7 +30,7 @@
   font-size: 11px;
   text-transform: uppercase;
   letter-spacing: 0.1em;
-  color: var(--muted);
+  color: var(--gray-11);
   height: 44px;
 }
 
@@ -48,16 +48,16 @@
 .rowActive,
 .row:hover,
 .row:focus-within {
-  background: var(--surface-3);
-  border-color: var(--border);
+  background: var(--gray-3);
+  border-color: var(--gray-5);
 }
 
 .rowActive:hover {
-  border-color: var(--text);
+  border-color: var(--gray-12);
 }
 
 .rowActive {
-  border-color: var(--text);
+  border-color: var(--gray-12);
 }
 
 .row:focus-visible {
@@ -66,8 +66,8 @@
 }
 
 .rowSelected {
-  background: var(--surface-2);
-  border-color: var(--border);
+  background: var(--gray-3);
+  border-color: var(--gray-5);
   box-shadow: none;
 }
 
@@ -91,6 +91,23 @@
   right: 0;
   will-change: transform;
 }
+
+.rowEnter {
+  animation: rowEnterFade 200ms ease-out;
+  will-change: opacity, filter;
+}
+
+@keyframes rowEnterFade {
+  from {
+    opacity: 0;
+    filter: blur(2px);
+  }
+  to {
+    opacity: 1;
+    filter: blur(0);
+  }
+}
+
 
 .cellFrom,
 .cellSubject,
@@ -145,13 +162,13 @@
 
 .threadCaret {
   width: 16px;
-  height: 20px;
+  height: 16px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  color: var(--muted);
-  font-size: 14px;
+  color: var(--gray-11);
   transform: rotate(0deg);
+  transform-origin: center;
   transition: transform 0.2s ease;
 }
 
@@ -164,11 +181,16 @@
   pointer-events: none;
 }
 
+.threadCaret :global(svg) {
+  width: 15px;
+  height: 15px;
+}
+
 .threadIcon {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  color: var(--muted);
+  color: var(--gray-11);
   margin-right: 4px;
 }
 
@@ -182,11 +204,11 @@
 }
 
 .threadSibling {
-  background: color-mix(in srgb, var(--surface-2) 60%, transparent);
-  border-color: var(--border);
+  background: color-mix(in srgb, var(--gray-2) 60%, transparent);
+  border-color: var(--gray-5);
 }
 
 .rowActive {
-  background: var(--surface-3);
-  border-color: var(--text);
+  background: var(--gray-3);
+  border-color: var(--gray-12);
 }
