@@ -363,6 +363,7 @@ export default function MailClient() {
     at: 0,
     accountId: null
   });
+  const lastDeleteReconcileAtRef = useRef<Record<string, number>>({});
   const pendingInboxSyncRef = useRef(false);
   const swRegistrationRef = useRef<ServiceWorkerRegistration | null>(null);
   const syncStateRef = useRef<{ isSyncing: boolean; syncingFolders: Set<string> }>({
@@ -533,8 +534,22 @@ export default function MailClient() {
     lastSelectedIdRef.current = messageId;
   }, [selectionStore]);
 
+  const getThreadSelectionKey = (message?: Message | null) =>
+    message ? message.threadId ?? message.messageId ?? message.id : "";
+
   const handleSelectMessage = useCallback(
     (message: Message, options?: { preserveSelection?: boolean }) => {
+      const currentMessage = activeMessageId ? messageById.get(activeMessageId) ?? null : null;
+      const nextThreadKey = getThreadSelectionKey(message);
+      const currentThreadKey = getThreadSelectionKey(currentMessage);
+      const shouldAutoMinimizeComposer =
+        composeOpen &&
+        composeView === "inline" &&
+        (composeMode === "new" || composeMode === "reply" || composeMode === "replyAll") &&
+        nextThreadKey !== currentThreadKey;
+      if (shouldAutoMinimizeComposer) {
+        setComposeView("minimized");
+      }
       if (!options?.preserveSelection) {
         const current = selectionStore.getIds();
         if (!(current.size === 1 && current.has(message.id))) {
@@ -547,7 +562,7 @@ export default function MailClient() {
       selectionStore.setActiveId(message.id);
       startTransition(() => setActiveMessageId(message.id));
     },
-    [selectionStore]
+    [activeMessageId, composeMode, composeOpen, composeView, messageById, selectionStore]
   );
 
   const handleRowClick = useCallback(
@@ -2520,6 +2535,7 @@ export default function MailClient() {
       pendingMessageActions={pendingMessageActions}
       openCompose={openCompose}
       handleDeleteMessage={handleDeleteMessage}
+      onShowRelated={handleShowRelated}
       isTrashFolder={isTrashFolder}
     />
   );
@@ -4201,9 +4217,35 @@ export default function MailClient() {
     }
   };
 
+  const syncNewlyDetectedFolders = async (
+    knownFolderIds: Set<string>,
+    mode: "new" | "full"
+  ) => {
+    const nextFolders = await refreshFolders();
+    const accountList = (nextFolders ?? folders).filter(
+      (folder) => folder.accountId === activeAccountId
+    );
+    const newlyDetected = accountList.filter((folder) => !knownFolderIds.has(folder.id));
+    if (newlyDetected.length === 0) {
+      return accountList;
+    }
+    for (const folder of newlyDetected) {
+      await syncFolderWithBackground(
+        folder.id,
+        true,
+        false,
+        mode === "new" ? "new" : "recent",
+        mode !== "new"
+      );
+    }
+    const refreshed = await refreshFolders();
+    return (refreshed ?? accountList).filter((folder) => folder.accountId === activeAccountId);
+  };
+
   const syncAccount = async (folderId?: string, mode: "new" | "full" = "full") => {
     setErrorMessage(null);
     const selectionKey = currentKeyRef.current;
+    const knownFolderIds = new Set(accountFolders.map((folder) => folder.id));
     if (folderId) {
       await syncFolderWithBackground(
         folderId,
@@ -4212,6 +4254,9 @@ export default function MailClient() {
         mode === "new" ? "new" : "recent",
         mode !== "new"
       );
+      if (mode !== "new") {
+        await syncNewlyDetectedFolders(knownFolderIds, mode);
+      }
       return;
     }
 
@@ -4227,10 +4272,7 @@ export default function MailClient() {
           reportError(await readErrorMessage(syncRes));
           return;
         }
-        const nextFolders = await refreshFolders();
-        const accountList = (nextFolders ?? folders).filter(
-          (folder) => folder.accountId === activeAccountId
-        );
+        const accountList = await syncNewlyDetectedFolders(knownFolderIds, "full");
         const findInboxInList = (list: Folder[]) => {
           const bySpecial = list.find(
             (folder) => (folder.specialUse ?? "").toLowerCase() === "\\inbox"
@@ -4268,7 +4310,7 @@ export default function MailClient() {
             false
           );
         }
-        await refreshFolders();
+        await syncNewlyDetectedFolders(knownFolderIds, "new");
         if (
           currentKeyRef.current === selectionKey &&
           searchScope === "folder" &&
@@ -4282,6 +4324,7 @@ export default function MailClient() {
       for (const folder of accountFolders) {
         await syncFolderWithBackground(folder.id, true, false);
       }
+      await syncNewlyDetectedFolders(knownFolderIds, "full");
       setIsSyncing(false);
     })();
   };
@@ -4524,6 +4567,16 @@ export default function MailClient() {
       });
       const source = new EventSource(`/api/imap/stream?${params.toString()}`);
       streamSourceRef.current = source;
+      const requestFolderReconcileSync = (folderId?: string) => {
+        if (!folderId) return;
+        const now = Date.now();
+        const lastRun = lastDeleteReconcileAtRef.current[folderId] ?? 0;
+        if (now - lastRun < 5000) return;
+        const { isSyncing, syncingFolders } = syncStateRef.current;
+        if (isSyncing || syncingFolders.has(folderId)) return;
+        lastDeleteReconcileAtRef.current[folderId] = now;
+        void syncAccountRef.current?.(folderId, "full");
+      };
       source.addEventListener("open", () => {
         setMailCheckMode("idle");
         setStreamMode("stream");
@@ -4626,6 +4679,12 @@ export default function MailClient() {
               };
             })
           );
+          const hasDeletedFlag = (data.flags ?? []).some(
+            (flag) => flag.toLowerCase() === "\\deleted"
+          );
+          if (hasDeletedFlag) {
+            requestFolderReconcileSync(data.folderId ?? activeFolderId);
+          }
         } catch {
           // ignore
         }
@@ -4637,7 +4696,7 @@ export default function MailClient() {
           if (data.uid && folderId) {
             setMessages((prev) => prev.filter((msg) => !(msg.folderId === folderId && msg.imapUid === data.uid)));
           }
-          if (folderId) void syncAccountRef.current?.(folderId, "new");
+          requestFolderReconcileSync(folderId);
         } catch {
           // ignore
         }
@@ -4849,6 +4908,7 @@ export default function MailClient() {
           setSearchScope,
           setSearchFields,
           setSearchBadges,
+          clearSearch,
           toggleDarkMode: handleToggleDarkMode,
           openCompose,
           setActiveFolderId,
@@ -5023,7 +5083,8 @@ export default function MailClient() {
                   renderFolderBadges,
                   isPinnedMessage,
                   isTrashFolder,
-                  renderMessageMenu
+                  renderMessageMenu,
+                  handleShowRelated
                 }}
                 refs={{ scrollRef: listPaneRef }}
               />
@@ -5067,6 +5128,7 @@ export default function MailClient() {
                   renderFolderBadges,
                   renderQuickActions,
                   renderMessageMenu,
+                  handleShowRelated,
                   isPinnedMessage,
                   isTrashFolder
                 }}

@@ -1,6 +1,6 @@
 import { memo, useEffect, useRef, useState } from "react";
 import type React from "react";
-import { GitBranch, Paperclip, Trash2 } from "lucide-react";
+import { GitBranch, Paperclip, Search, Trash2 } from "lucide-react";
 import { Badge, Checkbox, IconButton, Text } from "@radix-ui/themes";
 import { CaretRightIcon } from "@radix-ui/react-icons";
 import { badgeColors } from "@/lib/ui/badgeColors";
@@ -36,9 +36,12 @@ type MessageRowProps = {
   onCheckboxChange: (shiftKey: boolean) => void;
   onSubjectClick: (event: React.MouseEvent) => void;
   onDelete: (event: React.MouseEvent) => void;
+  onShowRelated: (event: React.MouseEvent) => void;
   deleteTitle: string;
   renderUnreadDot: React.ReactNode;
   renderSelectIndicators: React.ReactNode;
+  fromText?: string;
+  fromTooltip?: string;
   folderBadges: React.ReactNode;
   folderBadgeKey?: string;
   showFolderBadgesInSubjectMeta: boolean;
@@ -77,9 +80,12 @@ function MessageRow({
   onCheckboxChange,
   onSubjectClick,
   onDelete,
+  onShowRelated,
   deleteTitle,
   renderUnreadDot,
   renderSelectIndicators,
+  fromText,
+  fromTooltip,
   folderBadges,
   folderBadgeKey,
   showFolderBadgesInSubjectMeta,
@@ -145,6 +151,9 @@ function MessageRow({
   ]
     .filter(Boolean)
     .join(" ");
+  const fromLine = fromText && fromText.trim() ? fromText : message.from;
+  const fromLineTooltip =
+    fromTooltip && fromTooltip.trim() ? fromTooltip : message.from;
 
   const handleCheckboxClick = (event: React.MouseEvent<HTMLButtonElement>) => {
     event.stopPropagation();
@@ -241,8 +250,13 @@ function MessageRow({
             disabled={isDisabled}
           />
         </span>
-        <Text as="span" size="1" className={`${styles.from} ${!message.seen ? styles.unreadText : ""}`}>
-          {message.from}
+        <Text
+          as="span"
+          size="1"
+          className={`${styles.from} ${!message.seen ? styles.unreadText : ""}`}
+          title={fromLineTooltip}
+        >
+          {fromLine}
         </Text>
         <div className={actionsClassName}>
           {showNewBadge && (
@@ -265,6 +279,17 @@ function MessageRow({
                 onClick={onDelete}
               >
                 <Trash2 size={14} />
+              </IconButton>
+              <IconButton
+                size="1"
+                variant="ghost"
+                color="gray"
+                title="Show related"
+                aria-label="Show related"
+                disabled={isDisabled}
+                onClick={onShowRelated}
+              >
+                <Search size={14} />
               </IconButton>
               {messageMenu}
             </>
@@ -353,6 +378,8 @@ const areEqual = (prev: MessageRowProps, next: MessageRowProps) =>
   prev.threadSize === next.threadSize &&
   prev.showFolderBadgesInSubjectMeta === next.showFolderBadgesInSubjectMeta &&
   prev.showFolderBadgesInMeta === next.showFolderBadgesInMeta &&
+  prev.fromText === next.fromText &&
+  prev.fromTooltip === next.fromTooltip &&
   prev.showAttachmentIcon === next.showAttachmentIcon &&
   prev.showNewBadge === next.showNewBadge &&
   prev.showCompactDivider === next.showCompactDivider &&

@@ -52,6 +52,7 @@ type TopBarProps = {
     setSearchScope: React.Dispatch<React.SetStateAction<"folder" | "all">>;
     setSearchFields: React.Dispatch<React.SetStateAction<SearchFields>>;
     setSearchBadges: React.Dispatch<React.SetStateAction<SearchBadges>>;
+    clearSearch: () => void;
     toggleDarkMode: () => void;
     openCompose: (mode: ComposeMode) => void;
     setActiveFolderId: React.Dispatch<React.SetStateAction<string>>;
@@ -87,6 +88,7 @@ export default function TopBar({ state, ui, actions }: TopBarProps) {
     setSearchScope,
     setSearchFields,
     setSearchBadges,
+    clearSearch,
     toggleDarkMode,
     openCompose,
     setActiveFolderId,
@@ -135,222 +137,249 @@ export default function TopBar({ state, ui, actions }: TopBarProps) {
         <h1 className={styles.brandTitle}>Noctua Mail</h1>
       </div>
       <div className={styles.search}>
-        <TextField.Root
-          size="2"
-          type="search"
-          placeholder="Search all messages"
-          value={query}
-          onChange={(event) => setQuery(event.target.value)}
-          id="top-search-input"
-          className={styles.searchInput}
-        >
-          {query ? (
-            <TextField.Slot side="right">
-              <IconButton
-                size="1"
-                variant="ghost"
-                onClick={() => setQuery("")}
-                aria-label="Clear search"
-                title="Clear search"
+        <div className={styles.searchPrimary}>
+          <TextField.Root
+            size="2"
+            type="search"
+            placeholder="Search all messages"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            id="top-search-input"
+            className={styles.searchInput}
+          >
+            {query ? (
+              <TextField.Slot side="right">
+                <IconButton
+                  size="1"
+                  variant="ghost"
+                  onClick={() => setQuery("")}
+                  aria-label="Clear search"
+                  title="Clear search"
+                >
+                  <X size={12} />
+                </IconButton>
+              </TextField.Slot>
+            ) : null}
+          </TextField.Root>
+        </div>
+        <div className={styles.searchFilters}>
+          <Select.Root
+            size="2"
+            value={searchScope}
+            disabled={isRelatedSearch}
+            onValueChange={handleScopeChange}
+          >
+            <Select.Trigger className={styles.select} color="gray" variant="surface" />
+            <Select.Content position="popper">
+              <Select.Item value="folder">Current folder</Select.Item>
+              <Select.Item value="all">Everywhere</Select.Item>
+            </Select.Content>
+          </Select.Root>
+          <DropdownMenu.Root>
+            <DropdownMenu.Trigger>
+              <Button
+                size="2"
+                variant="surface"
+                color="gray"
+                disabled={isRelatedSearch}
+                className={styles.filterButton}
+                title={searchFieldsLabel}
               >
-                <X size={12} />
-              </IconButton>
-            </TextField.Slot>
-          ) : null}
-        </TextField.Root>
-        <Select.Root
-          size="2"
-          value={searchScope}
-          disabled={isRelatedSearch}
-          onValueChange={handleScopeChange}
-        >
-          <Select.Trigger className={styles.select} color="gray" variant="surface" />
-          <Select.Content position="popper">
-            <Select.Item value="folder">Current folder</Select.Item>
-            <Select.Item value="all">Everywhere</Select.Item>
-          </Select.Content>
-        </Select.Root>
-        <DropdownMenu.Root>
-          <DropdownMenu.Trigger>
-            <Button size="2" variant="surface" color="gray" disabled={isRelatedSearch}>
-              {searchFieldsLabel}
-            </Button>
-          </DropdownMenu.Trigger>
-          <DropdownMenu.Content>
-            <DropdownMenu.Label>Search in</DropdownMenu.Label>
-            <DropdownMenu.Separator />
-            {(
-              [
-                ["sender", "Sender"],
-                ["participants", "Participants"],
-                ["subject", "Subject"],
-                ["body", "Body"],
-                ["attachments", "Attachments"]
-              ] as const
-            ).map(([key, label]) => (
-              <DropdownMenu.CheckboxItem
-                key={key}
-                checked={searchFields[key]}
-                disabled={key === "sender" && searchFields.participants}
-                onSelect={(event) => event.preventDefault()}
-                onCheckedChange={(checked) =>
-                  setSearchFields((prev) => ({
-                    ...prev,
-                    [key]: checked === true,
-                    ...(key === "participants" && checked === true ? { sender: false } : {})
-                  }))
-                }
+                {searchFieldsLabel}
+              </Button>
+            </DropdownMenu.Trigger>
+            <DropdownMenu.Content>
+              <DropdownMenu.Label>Search in</DropdownMenu.Label>
+              <DropdownMenu.Separator />
+              {(
+                [
+                  ["sender", "Sender"],
+                  ["participants", "Participants"],
+                  ["subject", "Subject"],
+                  ["body", "Body"],
+                  ["attachments", "Attachments"]
+                ] as const
+              ).map(([key, label]) => (
+                <DropdownMenu.CheckboxItem
+                  key={key}
+                  checked={searchFields[key]}
+                  disabled={key === "sender" && searchFields.participants}
+                  onSelect={(event) => event.preventDefault()}
+                  onCheckedChange={(checked) =>
+                    setSearchFields((prev) => ({
+                      ...prev,
+                      [key]: checked === true,
+                      ...(key === "participants" && checked === true ? { sender: false } : {})
+                    }))
+                  }
+                >
+                  {label}
+                </DropdownMenu.CheckboxItem>
+              ))}
+            </DropdownMenu.Content>
+          </DropdownMenu.Root>
+          <DropdownMenu.Root>
+            <DropdownMenu.Trigger>
+              <Button
+                size="2"
+                variant="surface"
+                color="gray"
+                disabled={isRelatedSearch}
+                className={styles.filterButton}
+                title={searchBadgesLabel}
               >
-                {label}
-              </DropdownMenu.CheckboxItem>
-            ))}
-          </DropdownMenu.Content>
-        </DropdownMenu.Root>
-        <DropdownMenu.Root>
-          <DropdownMenu.Trigger>
-            <Button size="2" variant="surface" color="gray" disabled={isRelatedSearch}>
-              {searchBadgesLabel}
-            </Button>
-          </DropdownMenu.Trigger>
-          <DropdownMenu.Content>
-            <DropdownMenu.Label>Badges</DropdownMenu.Label>
-            <DropdownMenu.Separator />
-            {(
-              [
-                ["unread", "Unread"],
-                ["flagged", "Flagged"],
-                ["todo", "To-Do"],
-                ["pinned", "Pinned"],
-                ["attachments", "Attachments"]
-              ] as const
-            ).map(([key, label]) => (
-              <DropdownMenu.CheckboxItem
-                key={key}
-                checked={searchBadges[key]}
-                onSelect={(event) => event.preventDefault()}
-                onCheckedChange={(checked) =>
-                  setSearchBadges((prev) => ({
-                    ...prev,
-                    [key]: checked === true
-                  }))
-                }
-              >
-                {label}
-              </DropdownMenu.CheckboxItem>
-            ))}
-          </DropdownMenu.Content>
-        </DropdownMenu.Root>
+                {searchBadgesLabel}
+              </Button>
+            </DropdownMenu.Trigger>
+            <DropdownMenu.Content>
+              <DropdownMenu.Label>Badges</DropdownMenu.Label>
+              <DropdownMenu.Separator />
+              {(
+                [
+                  ["unread", "Unread"],
+                  ["flagged", "Flagged"],
+                  ["todo", "To-Do"],
+                  ["pinned", "Pinned"],
+                  ["attachments", "Attachments"]
+                ] as const
+              ).map(([key, label]) => (
+                <DropdownMenu.CheckboxItem
+                  key={key}
+                  checked={searchBadges[key]}
+                  onSelect={(event) => event.preventDefault()}
+                  onCheckedChange={(checked) =>
+                    setSearchBadges((prev) => ({
+                      ...prev,
+                      [key]: checked === true
+                    }))
+                  }
+                >
+                  {label}
+                </DropdownMenu.CheckboxItem>
+              ))}
+            </DropdownMenu.Content>
+          </DropdownMenu.Root>
+        </div>
       </div>
       <div className={styles.actionRow}>
-        <Button
-          size="2"
-          onClick={() => openCompose("new")}
-          title="New mail"
-          aria-label="New mail"
-        >
-          <Edit3 size={14} />
-          New Mail
-        </Button>
-        {draftsFolder && draftsCount > 0 && (
+        <div className={styles.actionGroup}>
           <Button
             size="2"
-            variant="surface"
-            onClick={() => {
-              setSearchScope("folder");
-              setActiveFolderId(draftsFolder.id);
-              setActiveMessageId("");
-            }}
-            title="Open drafts folder"
-            aria-label="Open drafts folder"
+            onClick={() => openCompose("new")}
+            title="New mail"
+            aria-label="New mail"
           >
-            <FileText size={14} />
-            {`${draftsCount} Draft${draftsCount === 1 ? "" : "s"}`}
+            <Edit3 size={14} />
+            New Mail
           </Button>
-        )}
-        <IconButton
-          size="2"
-          variant="ghost"
-          onClick={toggleDarkMode}
-          title={darkMode ? "Switch to light mode" : "Switch to dark mode"}
-          aria-label={darkMode ? "Switch to light mode" : "Switch to dark mode"}
-        >
-          {darkMode ? <Sun size={14} /> : <Moon size={14} />}
-        </IconButton>
-        <IconButton
-          size="2"
-          variant="surface"
-          onClick={() => syncAccount(undefined, "new")}
-          disabled={isSyncing}
-          aria-label="Check new mail"
-          title="Check for new mail"
-        >
-          <RefreshCw size={18} className={isSyncing ? styles.spin : undefined} />
-        </IconButton>
-        <DropdownMenu.Root>
-          <DropdownMenu.Trigger>
-            <Button size="2" variant="surface" className={styles.accountButton}>
-              <span className={styles.accountMeta}>
-                <span className={styles.accountName}>
-                  {currentAccount?.name ?? currentAccount?.email ?? "Account"}
-                </span>
-                {currentAccount?.name && currentAccount?.email ? (
-                  <span className={styles.accountEmail}>{currentAccount.email}</span>
-                ) : null}
-              </span>
+          {draftsFolder && draftsCount > 0 && (
+            <Button
+              size="2"
+              variant="surface"
+              onClick={() => {
+                clearSearch();
+                setSearchScope("folder");
+                setActiveFolderId(draftsFolder.id);
+              }}
+              title="Open drafts folder"
+              aria-label="Open drafts folder"
+            >
+              <FileText size={14} />
+              {`${draftsCount} Draft${draftsCount === 1 ? "" : "s"}`}
             </Button>
-          </DropdownMenu.Trigger>
-          <DropdownMenu.Content className={styles.accountMenu}>
-            <DropdownMenu.Label>Accounts</DropdownMenu.Label>
-            <DropdownMenu.Separator />
-            {accounts.length ? (
-              <DropdownMenu.RadioGroup
-                value={currentAccount?.id ?? ""}
-                onValueChange={handleAccountChange}
-              >
-                {accounts.map((account) => (
-                  <DropdownMenu.RadioItem
-                    key={account.id}
-                    value={account.id}
-                    className={styles.accountMenuItem}
-                  >
-                    <div className={styles.accountMenuInfo}>
-                      <span className={styles.accountMenuName}>
-                        {account.name || account.email}
-                      </span>
+          )}
+          <IconButton
+            size="2"
+            variant="surface"
+            onClick={() => syncAccount(undefined, "new")}
+            disabled={isSyncing}
+            aria-label="Check new mail"
+            title="Check for new mail"
+          >
+            <RefreshCw size={18} className={isSyncing ? styles.spin : undefined} />
+          </IconButton>
+        </div>
+
+        <div className={styles.accountSlot}>
+          <DropdownMenu.Root>
+            <DropdownMenu.Trigger>
+              <Button size="2" variant="surface" className={styles.accountButton}>
+                <span className={styles.accountMeta}>
+                  <span className={styles.accountName}>
+                    {currentAccount?.name ?? currentAccount?.email ?? "Account"}
+                  </span>
+                  {currentAccount?.name && currentAccount?.email ? (
+                    <span className={styles.accountEmail}>{currentAccount.email}</span>
+                  ) : null}
+                </span>
+              </Button>
+            </DropdownMenu.Trigger>
+            <DropdownMenu.Content className={styles.accountMenu}>
+              <DropdownMenu.Label>Accounts</DropdownMenu.Label>
+              <DropdownMenu.Separator />
+              {accounts.length ? (
+                <DropdownMenu.RadioGroup
+                  value={currentAccount?.id ?? ""}
+                  onValueChange={handleAccountChange}
+                >
+                  {accounts.map((account) => (
+                    <DropdownMenu.RadioItem
+                      key={account.id}
+                      value={account.id}
+                      className={styles.accountMenuItem}
+                    >
+                      <div className={styles.accountMenuInfo}>
+                        <span className={styles.accountMenuName}>
+                          {account.name || account.email}
+                        </span>
+                        {account.name && account.email ? (
+                          <span className={styles.accountMenuEmail}>{account.email}</span>
+                        ) : null}
+                      </div>
                       {account.name && account.email ? (
-                        <span className={styles.accountMenuEmail}>{account.email}</span>
+                        <Badge size="1" variant="soft" color={badgeColors.folder}>
+                          {account.email}
+                        </Badge>
                       ) : null}
-                    </div>
-                    {account.name && account.email ? (
-                      <Badge size="1" variant="soft" color={badgeColors.folder}>
-                        {account.email}
-                      </Badge>
-                    ) : null}
-                  </DropdownMenu.RadioItem>
-                ))}
-              </DropdownMenu.RadioGroup>
-            ) : (
-              <DropdownMenu.Item disabled>No accounts</DropdownMenu.Item>
-            )}
-            <DropdownMenu.Separator />
-            <DropdownMenu.Item
-              disabled={!currentAccount}
-              onSelect={() => (currentAccount ? startEditAccount(currentAccount) : null)}
-            >
-              <Settings size={14} />
-              Account settings
-            </DropdownMenu.Item>
-            <DropdownMenu.Item
-              disabled={!currentAccount}
-              onSelect={() => (currentAccount ? deleteAccount(currentAccount.id) : null)}
-            >
-              <Trash2 size={14} />
-              Delete account
-            </DropdownMenu.Item>
-            <DropdownMenu.Separator />
-            <DropdownMenu.Item onSelect={() => startEditAccount()}>+ Add account</DropdownMenu.Item>
-          </DropdownMenu.Content>
-        </DropdownMenu.Root>
+                    </DropdownMenu.RadioItem>
+                  ))}
+                </DropdownMenu.RadioGroup>
+              ) : (
+                <DropdownMenu.Item disabled>No accounts</DropdownMenu.Item>
+              )}
+              <DropdownMenu.Separator />
+              <DropdownMenu.Item
+                disabled={!currentAccount}
+                onSelect={() => (currentAccount ? startEditAccount(currentAccount) : null)}
+              >
+                <Settings size={14} />
+                Account settings
+              </DropdownMenu.Item>
+              <DropdownMenu.Item
+                disabled={!currentAccount}
+                onSelect={() => (currentAccount ? deleteAccount(currentAccount.id) : null)}
+              >
+                <Trash2 size={14} />
+                Delete account
+              </DropdownMenu.Item>
+              <DropdownMenu.Separator />
+              <DropdownMenu.Item onSelect={() => startEditAccount()}>+ Add account</DropdownMenu.Item>
+            </DropdownMenu.Content>
+          </DropdownMenu.Root>
+        </div>
+
+        <div className={`${styles.actionGroup} ${styles.utilitySlot}`}>
+          <IconButton
+            size="3"
+            variant="ghost"
+            className={styles.themeButton}
+            onClick={toggleDarkMode}
+            title={darkMode ? "Switch to light mode" : "Switch to dark mode"}
+            aria-label={darkMode ? "Switch to light mode" : "Switch to dark mode"}
+          >
+            {darkMode ? <Sun size={16} /> : <Moon size={16} />}
+          </IconButton>
+        </div>
       </div>
     </header>
   );

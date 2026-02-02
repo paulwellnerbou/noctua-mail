@@ -9,6 +9,79 @@ type MessageGroup = {
 
 type ThreadNode = { message: Message; children: ThreadNode[]; threadSize: number };
 
+export type FromDisplayInfo = {
+  text: string;
+  tooltip: string;
+};
+
+const EMAIL_PATTERN = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i;
+
+const normalizeFromValue = (value: string) => value.replace(/\s+/g, " ").trim();
+
+const stripWrappingQuotes = (value: string) => {
+  if (
+    (value.startsWith("\"") && value.endsWith("\"")) ||
+    (value.startsWith("'") && value.endsWith("'"))
+  ) {
+    return value.slice(1, -1).trim();
+  }
+  return value;
+};
+
+const extractDisplayName = (value: string) => {
+  const normalized = normalizeFromValue(value);
+  if (!normalized) return "";
+  const ltIndex = normalized.lastIndexOf("<");
+  if (ltIndex <= 0 || !normalized.endsWith(">")) return "";
+  const rawName = normalizeFromValue(normalized.slice(0, ltIndex));
+  if (!rawName) return "";
+  return stripWrappingQuotes(rawName);
+};
+
+const extractPrimaryEmail = (value: string) => {
+  const normalized = normalizeFromValue(value);
+  if (!normalized) return null;
+  const angleMatch = normalized.match(/<\s*([^>]+)\s*>/);
+  if (angleMatch?.[1]) return angleMatch[1].trim().toLowerCase();
+  const directMatch = normalized.match(EMAIL_PATTERN);
+  return directMatch?.[0]?.toLowerCase() ?? null;
+};
+
+export function getMessageFromDisplay(fromValue: string): FromDisplayInfo {
+  const normalized = normalizeFromValue(fromValue);
+  if (!normalized) return { text: "", tooltip: "" };
+  const displayName = extractDisplayName(normalized);
+  return {
+    text: displayName || normalized,
+    tooltip: normalized
+  };
+}
+
+export function getCollapsedThreadFromDisplay(
+  fullFlat: Array<{ message: Message; depth: number }>
+): FromDisplayInfo {
+  const seen = new Set<string>();
+  const fromTexts: string[] = [];
+  const fromTooltips: string[] = [];
+  fullFlat.forEach(({ message }) => {
+    const normalized = normalizeFromValue(message.from ?? "");
+    if (!normalized) return;
+    const entry = getMessageFromDisplay(normalized);
+    const key = extractPrimaryEmail(normalized) ?? entry.text.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    fromTexts.push(entry.text);
+    fromTooltips.push(entry.tooltip);
+  });
+  if (!fromTexts.length) {
+    return { text: "", tooltip: "" };
+  }
+  return {
+    text: fromTexts.join(", "),
+    tooltip: fromTooltips.join(", ")
+  };
+}
+
 export type ThreadGroupEntry = {
   threadGroupId: string;
   threadSize: number;

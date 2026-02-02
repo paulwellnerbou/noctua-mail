@@ -182,8 +182,8 @@ export default function FolderTreeNode({
           />
         )}
         <span className={`${styles.treeName} ${folder.unreadCount ? styles.treeNameUnread : ""}`}>
-          {isSyncingFolder && <span className={styles.treeSyncSpinner} aria-hidden="true" />}
           <span className={styles.treeNameText}>{folder.name}</span>
+          {isSyncingFolder && <span className={styles.treeSyncSpinner} aria-hidden="true" />}
         </span>
         {folder.unreadCount ? (
           <Badge

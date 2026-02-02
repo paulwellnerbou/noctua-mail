@@ -20,6 +20,7 @@ import styles from "./ThreadMessageCard.module.css";
 import AttachmentsList from "../../AttachmentsList";
 import HtmlMessage from "../../HtmlMessage";
 import QuoteRenderer from "../../QuoteRenderer";
+import FolderBadges from "../folder/FolderBadges";
 
 type MessageTab = "html" | "text" | "markdown" | "source";
 
@@ -119,6 +120,16 @@ export default function ThreadMessageCard({
   const hasSource = Boolean(message.hasSource);
   const fontScale = messageFontScale[message.id] ?? 1;
   const zoomValue = messageZoom[message.id] ?? 1;
+  const folderBadgeIds = message.folderId ? [message.folderId] : [];
+
+  const handleFolderBadgeSelect = (folderId: string) => {
+    if (includeThreadAcrossFolders || folderId !== activeFolderId) {
+      setSearchScope("folder");
+    }
+    if (folderId !== activeFolderId) {
+      setActiveFolderId(folderId);
+    }
+  };
 
   const pickTabValue = (tabs: MessageTab[], fallback: MessageTab) => {
     const stored = messageTabs[message.id];
@@ -355,123 +366,125 @@ export default function ThreadMessageCard({
         }}
       >
         <div className={styles.header}>
-          <div className={styles.topRow}>
-            <div className={styles.badges}>
-              {getImapFlagBadges(message).map((badge) => (
-                <Badge
-                  key={`${badge.kind}-${badge.label}`}
-                  size="1"
-                  variant="soft"
-                  color={getFlagBadgeColor(badge.kind)}
-                >
-                  {badge.kind === "pinned" && <Pin size={12} />}
-                  {badge.label}
-                </Badge>
-              ))}
-              {includeThreadAcrossFolders && message.folderId !== activeFolderId && (
-                <Badge size="1" variant="soft" color={badgeColors.folder} asChild>
-                  <button
-                    type="button"
-                    title={threadPathById(message.folderId)}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      setSearchScope("folder");
-                      setActiveFolderId(message.folderId);
-                    }}
-                  >
-                    {folderNameById(message.folderId)}
-                  </button>
-                </Badge>
-              )}
-              {message.recent && (
-                <Badge size="1" variant="soft" color={badgeColors.recent}>
-                  Recent
-                </Badge>
-              )}
-              {message.priority && message.priority.toLowerCase() !== "normal" && (
-                <Badge size="1" variant="soft" color={priorityColor}>
-                  Priority: {message.priority}
-                </Badge>
-              )}
-              {(message.hasAttachments ?? (message.attachments?.length ?? 0) > 0) && (
-                <Badge
-                  size="1"
-                  variant="soft"
-                  color={badgeColors.attachment}
-                  className={badgeStyles.badge}
-                  title="Attachments"
-                >
-                  <Paperclip size={12} />
-                </Badge>
-              )}
-              {(message.hasInlineAttachments ??
-                message.attachments?.some((item) => item.inline)) && (
-                <Badge
-                  size="1"
-                  variant="soft"
-                  color={badgeColors.inlineAttachment}
-                  className={badgeStyles.badge}
-                  title="Inline images"
-                >
-                  <ImageIcon size={12} />
-                </Badge>
-              )}
-            </div>
-            <div className={styles.actions}>
-              <div className={styles.messageActions}>
-                {isDraftMessage(message) ? (
-                  <IconButton
-                    size="2"
-                    variant="ghost"
-                    color="gray"
-                    title="Edit draft"
-                    aria-label="Edit draft"
-                    onClick={() => openCompose("edit", message)}
-                  >
-                    <Edit3 size={14} />
-                  </IconButton>
-                ) : (
-                  renderQuickActions(message, 14, "thread")
-                )}
-              </div>
-              {renderMessageMenu(message, "thread", setMenuOpen)}
-            </div>
-          </div>
           <Collapsible.Root
             open={!isCollapsed}
             onOpenChange={(open) =>
               setCollapsedMessages((prev) => ({ ...prev, [message.id]: !open }))
             }
           >
+            <div className={styles.topRow}>
+              <div className={styles.topRowLead}>
+                <Collapsible.Trigger
+                  type="button"
+                  className={styles.caretTrigger}
+                  title={isCollapsed ? "Expand message" : "Collapse message"}
+                  aria-label={isCollapsed ? "Expand message" : "Collapse message"}
+                >
+                  <span className={styles.caret}>
+                    <CaretRightIcon />
+                  </span>
+                </Collapsible.Trigger>
+                <div className={styles.badges}>
+                  {getImapFlagBadges(message).map((badge) => (
+                    <Badge
+                      key={`${badge.kind}-${badge.label}`}
+                      size="1"
+                      variant="soft"
+                      color={getFlagBadgeColor(badge.kind)}
+                    >
+                      {badge.kind === "pinned" && <Pin size={12} />}
+                      {badge.label}
+                    </Badge>
+                  ))}
+                  <FolderBadges
+                    folderIds={folderBadgeIds}
+                    folderNameById={folderNameById}
+                    threadPathById={threadPathById}
+                    onSelectFolder={handleFolderBadgeSelect}
+                  />
+                  {message.recent && (
+                    <Badge size="1" variant="soft" color={badgeColors.recent}>
+                      Recent
+                    </Badge>
+                  )}
+                  {message.priority && message.priority.toLowerCase() !== "normal" && (
+                    <Badge size="1" variant="soft" color={priorityColor}>
+                      Priority: {message.priority}
+                    </Badge>
+                  )}
+                  {(message.hasAttachments ?? (message.attachments?.length ?? 0) > 0) && (
+                    <Badge
+                      size="1"
+                      variant="soft"
+                      color={badgeColors.attachment}
+                      className={badgeStyles.badge}
+                      title="Attachments"
+                    >
+                      <Paperclip size={12} />
+                    </Badge>
+                  )}
+                  {(message.hasInlineAttachments ??
+                    message.attachments?.some((item) => item.inline)) && (
+                    <Badge
+                      size="1"
+                      variant="soft"
+                      color={badgeColors.inlineAttachment}
+                      className={badgeStyles.badge}
+                      title="Inline images"
+                    >
+                      <ImageIcon size={12} />
+                    </Badge>
+                  )}
+                </div>
+              </div>
+              <div className={styles.actions}>
+                <div className={styles.messageActions}>
+                  {isDraftMessage(message) ? (
+                    <IconButton
+                      size="2"
+                      variant="ghost"
+                      color="gray"
+                      title="Edit draft"
+                      aria-label="Edit draft"
+                      onClick={() => openCompose("edit", message)}
+                    >
+                      <Edit3 size={14} />
+                    </IconButton>
+                  ) : (
+                    renderQuickActions(message, 14, "thread")
+                  )}
+                </div>
+                {renderMessageMenu(message, "thread", setMenuOpen)}
+              </div>
+            </div>
             <div className={styles.info}>
-              <Collapsible.Trigger
-                type="button"
-                className={styles.subjectTrigger}
-                title={isCollapsed ? "Expand message" : "Collapse message"}
-              >
-                <span className={styles.caret}>
-                  <CaretRightIcon />
-                </span>
+              <div className={styles.subjectLine}>
                 <span className={styles.subjectText}>{message.subject}</span>
-              </Collapsible.Trigger>
-              <div className={styles.metaLine}>
-                <span className={styles.metaLabel}>From:</span>
-                <span className={styles.metaValue}>{message.from}</span>
-                {getPrimaryEmail(message.from) && (
-                  <IconButton
-                    size="1"
-                    variant="ghost"
-                    color="gray"
-                    className={`${copyStatus[`from-${message.id}`] ? styles.copyOk : ""}`}
-                    title="Copy email"
-                    aria-label="Copy email"
-                    onClick={() =>
-                      triggerCopy(`from-${message.id}`, getPrimaryEmail(message.from) ?? "")
-                    }
-                  >
-                    {copyStatus[`from-${message.id}`] ? <Check size={12} /> : <Copy size={12} />}
-                  </IconButton>
-                )}
+              </div>
+              <div className={`${styles.metaLine} ${styles.metaSplit}`}>
+                <div className={`${styles.metaSegment} ${styles.metaSegmentFrom}`}>
+                  <span className={styles.metaLabel}>From:</span>
+                  <span className={styles.metaValue}>{message.from}</span>
+                  {getPrimaryEmail(message.from) && (
+                    <IconButton
+                      size="1"
+                      variant="ghost"
+                      color="gray"
+                      className={`${copyStatus[`from-${message.id}`] ? styles.copyOk : ""}`}
+                      title="Copy email"
+                      aria-label="Copy email"
+                      onClick={() =>
+                        triggerCopy(`from-${message.id}`, getPrimaryEmail(message.from) ?? "")
+                      }
+                    >
+                      {copyStatus[`from-${message.id}`] ? <Check size={12} /> : <Copy size={12} />}
+                    </IconButton>
+                  )}
+                </div>
+                <div className={`${styles.metaSegment} ${styles.metaSegmentDate}`}>
+                  <span className={styles.metaLabel}>Date:</span>
+                  <span className={styles.metaValue}>{message.date}</span>
+                </div>
               </div>
               <div className={`${styles.metaLine} ${styles.metaLineTo}`}>
                 <span className={styles.metaLabel}>To:</span>
@@ -510,10 +523,6 @@ export default function ThreadMessageCard({
                     </button>
                   )}
                 </div>
-              </div>
-              <div className={styles.metaLine}>
-                <span className={styles.metaLabel}>Date:</span>
-                <span className={styles.metaValue}>{message.date}</span>
               </div>
               {(() => {
                 const refId =

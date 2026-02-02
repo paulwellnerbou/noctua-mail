@@ -5,7 +5,12 @@ import { Text } from "@radix-ui/themes";
 import * as Collapsible from "@radix-ui/react-collapsible";
 import { CaretRightIcon } from "@radix-ui/react-icons";
 import MessageRow from "./MessageRow";
-import { buildFlatEntries, buildThreadGroupEntries } from "./threadGroupUtils";
+import {
+  buildFlatEntries,
+  buildThreadGroupEntries,
+  getCollapsedThreadFromDisplay,
+  getMessageFromDisplay
+} from "./threadGroupUtils";
 import { useSelectionSnapshot, type SelectionStore } from "./selectionStore";
 import styles from "./MessageCardList.module.css";
 
@@ -38,6 +43,8 @@ type ListRowItem = {
   threadIndex: number;
   fullFlat: Array<{ message: Message; depth: number }>;
   folderIds: string[];
+  fromText: string;
+  fromTooltip: string;
 };
 
 type ListItem = ListGroupItem | ListRowItem;
@@ -111,6 +118,7 @@ type MessageCardListProps = {
       view: "table" | "list",
       onOpenChange?: (open: boolean) => void
     ) => React.ReactNode;
+    handleShowRelated: (message: Message) => void;
     isPinnedMessage: (message: Message) => boolean;
     isTrashFolder: (folderId?: string) => boolean;
   };
@@ -163,6 +171,7 @@ export default function MessageCardList({
     renderFolderBadges,
     renderQuickActions,
     renderMessageMenu,
+    handleShowRelated,
     isPinnedMessage,
     isTrashFolder
   } = helpers;
@@ -241,6 +250,8 @@ export default function MessageCardList({
             threadFolderIds,
             showThreadFolderBadges
           } = entry;
+          const collapsedThreadFrom =
+            isCollapsed && threadSize > 1 ? getCollapsedThreadFromDisplay(fullFlat) : null;
           flat.forEach(({ message, depth }, index) => {
             const folderIds =
               index === 0 && isCollapsed && threadSize > 1
@@ -252,6 +263,10 @@ export default function MessageCardList({
                       message.folderId !== activeFolderId)
                   ? [message.folderId]
                   : [];
+            const fromDisplay =
+              index === 0 && collapsedThreadFrom
+                ? collapsedThreadFrom
+                : getMessageFromDisplay(message.from);
             items.push({
               type: "row",
               key: message.id,
@@ -265,7 +280,9 @@ export default function MessageCardList({
               isPinnedGroup: group.key === "Pinned",
               threadIndex: index,
               fullFlat,
-              folderIds
+              folderIds,
+              fromText: fromDisplay.text,
+              fromTooltip: fromDisplay.tooltip
             });
             if (isFirstRow) isFirstRow = false;
           });
@@ -279,6 +296,7 @@ export default function MessageCardList({
         searchScope,
         activeFolderId
       }).forEach(({ message, threadGroupId, folderIds }) => {
+        const fromDisplay = getMessageFromDisplay(message.from);
         items.push({
           type: "row",
           key: message.id,
@@ -292,7 +310,9 @@ export default function MessageCardList({
           isPinnedGroup: false,
           threadIndex: 0,
           fullFlat: [{ message, depth: 0 }],
-          folderIds
+          folderIds,
+          fromText: fromDisplay.text,
+          fromTooltip: fromDisplay.tooltip
         });
         if (isFirstRow) isFirstRow = false;
       });
@@ -530,6 +550,10 @@ export default function MessageCardList({
                 event.stopPropagation();
                 handleDeleteMessage(message);
               }}
+              onShowRelated={(event) => {
+                event.stopPropagation();
+                handleShowRelated(message);
+              }}
               deleteTitle={
                 isTrashFolder(message.folderId)
                   ? "Delete permanently"
@@ -537,6 +561,8 @@ export default function MessageCardList({
               }
               renderUnreadDot={renderUnreadDot(message)}
               renderSelectIndicators={renderSelectIndicators(message)}
+              fromText={item.fromText}
+              fromTooltip={item.fromTooltip}
               folderBadges={renderFolderBadges(item.folderIds)}
               folderBadgeKey={folderBadgeKey}
               showFolderBadgesInSubjectMeta

@@ -1,13 +1,18 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type React from "react";
-import { GitBranch, Trash2 } from "lucide-react";
+import { GitBranch, Search, Trash2 } from "lucide-react";
 import { Badge, Checkbox, IconButton, Text } from "@radix-ui/themes";
 import * as Collapsible from "@radix-ui/react-collapsible";
 import { CaretRightIcon } from "@radix-ui/react-icons";
 import { badgeColors } from "@/lib/ui/badgeColors";
 import type { Message } from "@/lib/data";
 import badgeStyles from "../message/MessageBadge.module.css";
-import { buildFlatEntries, buildThreadGroupEntries } from "./threadGroupUtils";
+import {
+  buildFlatEntries,
+  buildThreadGroupEntries,
+  getCollapsedThreadFromDisplay,
+  getMessageFromDisplay
+} from "./threadGroupUtils";
 import { useSelectionSnapshot, type SelectionStore } from "./selectionStore";
 import groupStyles from "./MessageCardList.module.css";
 import styles from "./MessageTable.module.css";
@@ -42,6 +47,8 @@ type ListRowItem = {
   threadIndex: number;
   fullFlat: Array<{ message: Message; depth: number }>;
   folderIds: string[];
+  fromText: string;
+  fromTooltip: string;
 };
 
 type ListItem = ListGroupItem | ListRowItem;
@@ -119,6 +126,7 @@ type MessageTableProps = {
       view: "table" | "list",
       onOpenChange?: (open: boolean) => void
     ) => React.ReactNode;
+    handleShowRelated: (message: Message) => void;
   };
 };
 
@@ -170,7 +178,8 @@ export default function MessageTable({
     renderFolderBadges,
     isPinnedMessage,
     isTrashFolder,
-    renderMessageMenu
+    renderMessageMenu,
+    handleShowRelated
   } = helpers;
 
   const { ids: selectedMessageIds, activeId: activeMessageId } =
@@ -282,6 +291,8 @@ export default function MessageTable({
             threadFolderIds,
             showThreadFolderBadges
           } = entry;
+          const collapsedThreadFrom =
+            isCollapsed && threadSize > 1 ? getCollapsedThreadFromDisplay(fullFlat) : null;
           flat.forEach(({ message, depth }, index) => {
             const folderIds =
               index === 0 && isCollapsed && threadSize > 1
@@ -293,6 +304,10 @@ export default function MessageTable({
                       message.folderId !== activeFolderId)
                   ? [message.folderId]
                   : [];
+            const fromDisplay =
+              index === 0 && collapsedThreadFrom
+                ? collapsedThreadFrom
+                : getMessageFromDisplay(message.from);
             items.push({
               type: "row",
               key: message.id,
@@ -305,7 +320,9 @@ export default function MessageTable({
               isPinnedGroup: group.key === "Pinned",
               threadIndex: index,
               fullFlat,
-              folderIds
+              folderIds,
+              fromText: fromDisplay.text,
+              fromTooltip: fromDisplay.tooltip
             });
           });
         });
@@ -318,6 +335,7 @@ export default function MessageTable({
         searchScope,
         activeFolderId
       }).forEach(({ message, threadGroupId, folderIds }) => {
+        const fromDisplay = getMessageFromDisplay(message.from);
         items.push({
           type: "row",
           key: message.id,
@@ -330,7 +348,9 @@ export default function MessageTable({
           isPinnedGroup: false,
           threadIndex: 0,
           fullFlat: [{ message, depth: 0 }],
-          folderIds
+          folderIds,
+          fromText: fromDisplay.text,
+          fromTooltip: fromDisplay.tooltip
         });
       });
     });
@@ -645,7 +665,7 @@ export default function MessageTable({
                     <CaretRightIcon />
                   </span>
                 )}
-                {message.from}
+                <span title={item.fromTooltip}>{item.fromText}</span>
               </span>
               <span
                 className={styles.cellSubject}
@@ -705,6 +725,20 @@ export default function MessageTable({
                   }}
                 >
                   <Trash2 size={14} />
+                </IconButton>
+                <IconButton
+                  size="1"
+                  variant="ghost"
+                  color="gray"
+                  title="Show related"
+                  aria-label="Show related"
+                  disabled={pendingMessageActions.has(message.id)}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    handleShowRelated(message);
+                  }}
+                >
+                  <Search size={14} />
                 </IconButton>
                 {renderMessageMenu(message, "table")}
               </div>

@@ -15,9 +15,12 @@ export async function GET(request: Request) {
   }
 
   const message = await getMessageById(accountId, messageId);
+  if (!message) {
+    return NextResponse.json({ ok: false, message: "Message not found" }, { status: 404 });
+  }
 
   const storedSource = await getMessageSource(accountId, messageId);
-  const fallbackSource = message?.source ?? null;
+  const fallbackSource = message.source ?? null;
   const source = storedSource ?? fallbackSource;
   if (!source) {
     return NextResponse.json({ ok: false, message: "Source not found" }, { status: 404 });

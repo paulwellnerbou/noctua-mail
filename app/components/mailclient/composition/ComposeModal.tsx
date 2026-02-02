@@ -1,5 +1,6 @@
 import type React from "react";
-import { ArrowDownLeft, Minimize2, X } from "lucide-react";
+import { X } from "lucide-react";
+import { MinusIcon, RowsIcon } from "@radix-ui/react-icons";
 import ComposeFields from "./ComposeFields";
 import { Button, Heading, IconButton, Text } from "@radix-ui/themes";
 
@@ -190,7 +191,7 @@ export default function ComposeModal({
               aria-label="Dock in thread view"
               onClick={popInCompose}
             >
-              <ArrowDownLeft size={16} />
+              <RowsIcon width={16} height={16} />
             </IconButton>
             <IconButton
               variant="ghost"
@@ -199,7 +200,7 @@ export default function ComposeModal({
               aria-label="Minimize composer"
               onClick={minimizeCompose}
             >
-              <Minimize2 size={16} />
+              <MinusIcon width={16} height={16} />
             </IconButton>
             <IconButton
               variant="ghost"

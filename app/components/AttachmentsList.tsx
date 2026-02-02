@@ -1,4 +1,4 @@
-import { ExternalLink, FileText, Image as ImageIcon, X } from "lucide-react";
+import { Eye, X } from "lucide-react";
 import type { Attachment } from "@/lib/data";
 
 const PREVIEW_MIME_PREFIXES = ["image/", "text/"];
@@ -14,13 +14,6 @@ const canPreview = (contentType?: string) => {
   const lower = contentType.toLowerCase();
   if (PREVIEW_MIME_TYPES.has(lower)) return true;
   return PREVIEW_MIME_PREFIXES.some((prefix) => lower.startsWith(prefix));
-};
-
-const getPreviewIcon = (contentType?: string) => {
-  const lower = (contentType ?? "").toLowerCase();
-  if (lower.startsWith("image/")) return <ImageIcon size={12} />;
-  if (lower.startsWith("text/") || PREVIEW_MIME_TYPES.has(lower)) return <FileText size={12} />;
-  return <ExternalLink size={12} />;
 };
 
 export default function AttachmentsList({
@@ -67,7 +60,7 @@ export default function AttachmentsList({
                 aria-label="Preview attachment"
                 title="Preview attachment"
               >
-                {getPreviewIcon(file.contentType)}
+                <Eye size={12} />
               </a>
             )}
             {onRemove && (

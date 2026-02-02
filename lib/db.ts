@@ -1223,7 +1223,8 @@ export async function listRelatedMessages(params: {
       .map((value: string) => value.toLowerCase())
   );
 
-  const clauses: string[] = [];
+  // Always include the reference message itself in related results.
+  const clauses: string[] = ["m.id = ?"];
   const args: any[] = [accountId, target.id];
 
   if (subjectNormalized) {
@@ -1255,11 +1256,7 @@ export async function listRelatedMessages(params: {
     args.push(ref, ref, `%${ref}%`);
   });
 
-  if (clauses.length === 0) {
-    return { items: [] as Message[], groups: [], total: 0, hasMore: false, baseCount: 0 };
-  }
-
-  let where = `m.accountId = ? AND m.id != ? AND (${clauses.join(" OR ")})`;
+  let where = `m.accountId = ? AND (${clauses.join(" OR ")})`;
   where = applyBadgeFilters(where, args, badges);
   const attachmentsFilter = attachmentsOnly ?? badges?.includes("attachments");
   if (attachmentsFilter) {
@@ -1313,6 +1310,9 @@ export async function listRelatedMessages(params: {
   const targetRefSet = targetRefs;
 
   const scored = rows.map((row) => {
+    if (row.id === target.id) {
+      return { row, score: 1000 };
+    }
     let score = 0;
     const candidateSubject = normalizeSubjectLine(row.subject);
     if (subjectNormalized && candidateSubject) {
@@ -1364,7 +1364,7 @@ export async function listRelatedMessages(params: {
   });
 
   const minScore = 4;
-  const filtered = scored.filter((item) => item.score >= minScore);
+  const filtered = scored.filter((item) => item.row.id === target.id || item.score >= minScore);
 
   filtered.sort((a, b) => {
     if (b.score !== a.score) return b.score - a.score;
@@ -2174,6 +2174,45 @@ export async function getAttachmentIds(messageId: string) {
   return (db.prepare(`SELECT id FROM attachments WHERE messageId = ?`).all(messageId) as any[]).map(
     (row) => row.id as string
   );
+}
+
+export async function listMessageFileRefs(
+  accountId: string,
+  folderId: string | null = null
+) {
+  const db = await getDb();
+  const rows = (folderId
+    ? db
+        .prepare(
+          `SELECT m.id as messageId, a.id as attachmentId
+           FROM messages m
+           LEFT JOIN attachments a ON a.messageId = m.id
+           WHERE m.accountId = ? AND m.folderId = ?`
+        )
+        .all(accountId, folderId)
+    : db
+        .prepare(
+          `SELECT m.id as messageId, a.id as attachmentId
+           FROM messages m
+           LEFT JOIN attachments a ON a.messageId = m.id
+           WHERE m.accountId = ?`
+        )
+        .all(accountId)) as Array<{ messageId: string; attachmentId: string | null }>;
+
+  const refs = new Map<string, string[]>();
+  rows.forEach((row) => {
+    if (!refs.has(row.messageId)) {
+      refs.set(row.messageId, []);
+    }
+    if (row.attachmentId) {
+      refs.get(row.messageId)!.push(row.attachmentId);
+    }
+  });
+
+  return Array.from(refs.entries()).map(([messageId, attachmentIds]) => ({
+    messageId,
+    attachmentIds
+  }));
 }
 
 export async function getLatestMessageDate(accountId: string, mailboxPath?: string) {

@@ -196,19 +196,15 @@
 }
 
 .treeName {
-  position: relative;
   display: inline-flex;
   align-items: center;
+  gap: 6px;
   flex: 1;
   min-width: 0;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
 }
 
 .treeNameText {
-  position: relative;
-  z-index: 1;
+  flex: 1;
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -217,14 +213,13 @@
 }
 
 .treeSyncSpinner {
-  position: absolute;
-  left: 0;
-  width: 14px;
-  height: 14px;
+  width: 12px;
+  height: 12px;
+  flex: 0 0 auto;
   border-radius: 999px;
   border: 2px solid var(--gray-a6);
   border-top-color: var(--accent-9);
-  opacity: 0.4;
+  opacity: 0.55;
   animation: spin 1s linear infinite;
 }
 

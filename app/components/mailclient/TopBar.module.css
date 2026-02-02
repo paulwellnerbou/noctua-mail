@@ -2,8 +2,8 @@
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 20px;
-  padding: 18px 24px;
+  gap: 10px;
+  padding: var(--space-4);
   background: linear-gradient(120deg, var(--gray-4), var(--gray-2));
   border-bottom: 1px solid var(--gray-a4);
   z-index: 3;
@@ -43,27 +43,83 @@
   align-items: center;
   gap: 10px;
   min-width: 0;
+  min-height: 44px;
+  padding: 6px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--gray-a5);
+  background: linear-gradient(135deg, var(--gray-a2), transparent);
+}
+
+.searchPrimary {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.searchFilters {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 0 0 auto;
 }
 
 .searchInput {
-  flex: 1;
-  min-width: 220px;
+  width: 100%;
+  min-width: 200px;
 }
 
 .select {
   min-width: 160px;
 }
 
+.filterButton {
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .actionRow {
   display: flex;
+  align-items: stretch;
+  gap: 10px;
+  flex: 0 0 auto;
+}
+
+.actionGroup {
+  display: inline-flex;
   align-items: center;
-  gap: 12px;
+  gap: 8px;
+  padding: 6px;
+  min-height: 44px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--gray-a5);
+  background: linear-gradient(135deg, var(--gray-a2), transparent);
+}
+
+.accountSlot {
+  display: inline-flex;
+  align-items: stretch;
+}
+
+.utilitySlot {
+  gap: 0;
 }
 
 .accountButton {
   display: inline-flex;
   align-items: center;
   gap: 10px;
+  min-height: 44px;
+  height: 100%;
+  padding-top: 8px;
+  padding-bottom: 8px;
+}
+
+.themeButton {
+  width: 32px;
+  height: 32px;
+  min-width: 32px;
+  min-height: 32px;
 }
 
 .accountMeta {
@@ -134,6 +190,70 @@
 
 .spin {
   animation: spin 1s linear infinite;
+}
+
+@media (max-width: 1260px) {
+  .topBar {
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+
+  .search {
+    order: 3;
+    flex: 1 1 100%;
+  }
+
+  .actionRow {
+    margin-left: auto;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+}
+
+@media (max-width: 900px) {
+  .topBar {
+    padding: var(--space-3) var(--space-4);
+  }
+
+  .search {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
+
+  .searchFilters {
+    flex-wrap: wrap;
+  }
+
+  .select {
+    flex: 1 1 170px;
+  }
+
+  .filterButton {
+    flex: 1 1 180px;
+    max-width: none;
+    min-width: 0;
+  }
+
+  .actionRow {
+    gap: 8px;
+    justify-content: flex-end;
+  }
+
+  .actionGroup {
+    width: 100%;
+    justify-content: flex-end;
+  }
+
+  .accountSlot {
+    width: 100%;
+    justify-content: flex-end;
+  }
+
+  .utilitySlot {
+    width: 100%;
+    justify-content: flex-end;
+  }
 }
 
 @keyframes spin {

@@ -1,5 +1,5 @@
 import type React from "react";
-import { Edit3, Forward, Reply, ReplyAll, Trash2 } from "lucide-react";
+import { Edit3, Forward, Reply, ReplyAll, Search, Trash2 } from "lucide-react";
 import { IconButton } from "@radix-ui/themes";
 import type { Message } from "@/lib/data";
 
@@ -13,6 +13,7 @@ type MessageQuickActionsProps = {
   pendingMessageActions: Set<string>;
   openCompose: (mode: ComposeMode, message?: Message, asNew?: boolean) => void;
   handleDeleteMessage: (message: Message, options?: { allowThreadDeletion?: boolean }) => void;
+  onShowRelated: (message: Message) => void;
   isTrashFolder: (folderId?: string) => boolean;
 };
 
@@ -24,6 +25,7 @@ export default function MessageQuickActions({
   pendingMessageActions,
   openCompose,
   handleDeleteMessage,
+  onShowRelated,
   isTrashFolder
 }: MessageQuickActionsProps) {
   const allowThreadDeletion = origin !== "thread";
@@ -45,6 +47,20 @@ export default function MessageQuickActions({
           }}
         >
           <Edit3 size={iconSize} />
+        </IconButton>
+        <IconButton
+          size={buttonSize}
+          variant="ghost"
+          color="gray"
+          title="Show related"
+          aria-label="Show related"
+          disabled={pendingMessageActions.has(message.id)}
+          onClick={(event) => {
+            event.stopPropagation();
+            onShowRelated(message);
+          }}
+        >
+          <Search size={iconSize} />
         </IconButton>
         <IconButton
           size={buttonSize}
@@ -107,6 +123,20 @@ export default function MessageQuickActions({
         }}
       >
         <Forward size={iconSize} />
+      </IconButton>
+      <IconButton
+        size={buttonSize}
+        variant="ghost"
+        color="gray"
+        title="Show related"
+        aria-label="Show related"
+        disabled={pendingMessageActions.has(message.id)}
+        onClick={(event) => {
+          event.stopPropagation();
+          onShowRelated(message);
+        }}
+      >
+        <Search size={iconSize} />
       </IconButton>
       <IconButton
         size={buttonSize}

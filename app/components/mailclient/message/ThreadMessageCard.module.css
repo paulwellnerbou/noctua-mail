@@ -30,10 +30,36 @@
   gap: var(--space-4);
 }
 
+.topRowLead {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-2);
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
 .badges {
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-2);
+  min-width: 0;
+}
+
+.caretTrigger {
+  background: transparent;
+  border: none;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: inherit;
+}
+
+.caretTrigger:focus-visible {
+  outline: 2px solid var(--accent-7);
+  outline-offset: 2px;
+  border-radius: var(--radius-2);
 }
 
 .actions {
@@ -55,23 +81,9 @@
   min-width: 0;
 }
 
-.subjectTrigger {
-  display: inline-flex;
-  align-items: flex-start;
-  gap: var(--space-2);
-  background: transparent;
-  border: none;
-  padding: 0;
-  cursor: pointer;
-  text-align: left;
-  font: inherit;
-  color: var(--gray-12);
-}
-
-.subjectTrigger:focus-visible {
-  outline: 2px solid var(--accent-7);
-  outline-offset: 2px;
-  border-radius: var(--radius-2);
+.subjectLine {
+  display: flex;
+  min-width: 0;
 }
 
 .caret {
@@ -86,7 +98,7 @@
   transition: transform 0.2s ease;
 }
 
-.subjectTrigger[data-state="open"] .caret {
+.caretTrigger[data-state="open"] .caret {
   transform: rotate(90deg);
 }
 
@@ -132,6 +144,27 @@
 
 .metaValue {
   color: var(--gray-12);
+}
+
+.metaSplit {
+  width: 100%;
+  align-items: flex-start;
+}
+
+.metaSegment {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.metaSegmentFrom {
+  flex: 1 1 320px;
+}
+
+.metaSegmentDate {
+  margin-left: auto;
+  flex: 0 0 auto;
 }
 
 .toWrapper {
@@ -207,7 +240,6 @@
   gap: var(--space-3);
   flex-wrap: wrap;
   width: 100%;
-  margin-top: var(--space-3);
 }
 
 .tabsList {
@@ -267,7 +299,6 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
-  margin-top: var(--space-3);
 }
 
 .collapsibleContent {

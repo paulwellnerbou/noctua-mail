@@ -2,12 +2,13 @@ import { NextResponse } from "next/server";
 import {
   getAccounts,
   getFolders,
+  listMessageFileRefs,
   getMessageIdsByMessageIds,
   getThreadIdsByMessageIds,
   saveFolders,
   upsertMessages
 } from "@/lib/db";
-import { saveAttachmentData, saveMessageSource } from "@/lib/storage";
+import { deleteMessageFiles, saveAttachmentData, saveMessageSource } from "@/lib/storage";
 import { syncImapAccount } from "@/lib/mail/imap";
 import { requireSessionOr401 } from "@/lib/auth";
 
@@ -191,12 +192,26 @@ export async function POST(request: Request) {
   const strippedMessages = await Promise.all(
     normalizedMessages.map((message) => sanitizeMessage(message, account.id))
   );
+  const existingFileRefs = payload.fullSync
+    ? await listMessageFileRefs(account.id, payload.folderId ?? null)
+    : [];
   await upsertMessages(
     account.id,
     payload.folderId ?? null,
     strippedMessages,
     Boolean(payload.fullSync)
   );
+  if (payload.fullSync && existingFileRefs.length > 0) {
+    const nextIds = new Set(strippedMessages.map((message) => message.id));
+    const removed = existingFileRefs.filter((item) => !nextIds.has(item.messageId));
+    if (removed.length > 0) {
+      await Promise.all(
+        removed.map((item) =>
+          deleteMessageFiles(account.id, item.messageId, item.attachmentIds)
+        )
+      );
+    }
+  }
 
   const existing = await getFolders();
   const nextFolders = [...existing.filter((folder) => folder.accountId !== account.id), ...folders];
