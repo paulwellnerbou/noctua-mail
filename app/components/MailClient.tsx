@@ -28,7 +28,10 @@ import LoginOverlay from "./auth/LoginOverlay";
 import FolderPane from "./mailclient/folder/FolderPane";
 import FolderBadges from "./mailclient/folder/FolderBadges";
 import FolderTree from "./mailclient/folder/FolderTree";
-import InAppNoticeStack from "./mailclient/InAppNoticeStack";
+import InAppNoticeStack, {
+  type InAppNotice,
+  type InAppNoticeType
+} from "./mailclient/InAppNoticeStack";
 import ComposeInlineCard from "./mailclient/composition/ComposeInlineCard";
 import ComposeMinimized from "./mailclient/composition/ComposeMinimized";
 import ComposeModal from "./mailclient/composition/ComposeModal";
@@ -138,6 +141,42 @@ function getImapFlagBadges(message: Message) {
     .filter(Boolean) as { label: string; kind: string }[];
 }
 
+type ExceptionEntry = {
+  id: string;
+  message: string;
+  timestamp: number;
+};
+
+type NoticeInput = Omit<InAppNotice, "id" | "expiresAt"> & {
+  durationMs?: number | null;
+};
+
+type UndoMoveTarget = {
+  messageId: string;
+  restoreFolderId: string;
+};
+
+const NOTICE_TIMEOUTS: Record<InAppNoticeType, number> = {
+  info: 7000,
+  success: 6500,
+  warning: 8000,
+  error: 10000
+};
+
+function makeClientId() {
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function getExceptionSummary(message: string) {
+  return message.split("\n")[0]?.slice(0, 120) || "(no message)";
+}
+
+function getExceptionDetail(message: string) {
+  const [, ...detailLines] = message.split("\n");
+  const detail = detailLines.join("\n").trim();
+  return detail || null;
+}
+
 export default function MailClient() {
   const [accounts, setAccounts] = useState<Account[]>(seedAccounts);
   const [folders, setFolders] = useState<Folder[]>(seedFolders);
@@ -170,8 +209,8 @@ export default function MailClient() {
   const [collapsedFolders, setCollapsedFolders] = useState<Record<string, boolean>>({});
   const [syncingFolders, setSyncingFolders] = useState<Set<string>>(new Set());
   const [folderQuery, setFolderQuery] = useState("");
-  const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [errorTimestamp, setErrorTimestamp] = useState<number | null>(null);
+  const [exceptionEntries, setExceptionEntries] = useState<ExceptionEntry[]>([]);
+  const [selectedExceptionId, setSelectedExceptionId] = useState<string | null>(null);
   const [processPanelOpen, setProcessPanelOpen] = useState(false);
   const [exceptionPanelOpen, setExceptionPanelOpen] = useState(false);
   const [messageView, setMessageView] = useState<"card" | "table" | "compact">("compact");
@@ -223,16 +262,7 @@ export default function MailClient() {
   const [authState, setAuthState] = useState<"loading" | "ok" | "unauth">("loading");
   const [sessionTtlSeconds, setSessionTtlSeconds] = useState<number | null>(null);
   const [pendingMessageActions, setPendingMessageActions] = useState<Set<string>>(new Set());
-  const [inAppNotices, setInAppNotices] = useState<
-    Array<{
-      id: string;
-      subject: string;
-      from?: string;
-      messageId?: string;
-      count?: number;
-      ids?: string[];
-    }>
-  >([]);
+  const [inAppNotices, setInAppNotices] = useState<InAppNotice[]>([]);
   const [searchScope, setSearchScope] = useState<"folder" | "all">("folder");
   const [lastFolderId, setLastFolderId] = useState("");
   const [composeOpen, setComposeOpen] = useState(false);
@@ -658,11 +688,41 @@ export default function MailClient() {
       attachments: true
     });
   };
-  const reportError = useCallback((message: string) => {
-    setErrorMessage(message);
-    setErrorTimestamp(Date.now());
-    setExceptionPanelOpen(true);
+  const pushNotice = useCallback((input: NoticeInput) => {
+    const { durationMs, ...notice } = input;
+    const timeoutMs =
+      durationMs === null
+        ? null
+        : typeof durationMs === "number"
+          ? durationMs
+          : NOTICE_TIMEOUTS[notice.type];
+    const nextNotice: InAppNotice = {
+      ...notice,
+      id: makeClientId(),
+      expiresAt: timeoutMs == null ? null : Date.now() + timeoutMs
+    };
+    setInAppNotices((prev) => [...prev, nextNotice].slice(-8));
   }, []);
+  const dismissNotice = useCallback((noticeId: string) => {
+    setInAppNotices((prev) => prev.filter((item) => item.id !== noticeId));
+  }, []);
+  const reportError = useCallback((message: string) => {
+    const normalized = message?.trim() || "Unexpected error.";
+    const entry: ExceptionEntry = {
+      id: makeClientId(),
+      message: normalized,
+      timestamp: Date.now()
+    };
+    setExceptionEntries((prev) => [entry, ...prev].slice(0, 30));
+    setSelectedExceptionId(entry.id);
+    setExceptionPanelOpen(true);
+    pushNotice({
+      type: "error",
+      title: "Operation failed",
+      description: normalized.split("\n")[0]?.slice(0, 220),
+      durationMs: NOTICE_TIMEOUTS.error
+    });
+  }, [pushNotice]);
   const readErrorMessage = useCallback(async (res: Response) => {
     if (res.status === 401) {
       setAuthState("unauth");
@@ -689,8 +749,31 @@ export default function MailClient() {
     }
     return `Request failed (${res.status})`;
   }, []);
-  const errorSummary = errorMessage ? errorMessage.split("\n")[0]?.slice(0, 120) : null;
-  const formatRelativeTime = (timestamp: number | null) => {
+  useEffect(() => {
+    const timers = inAppNotices
+      .filter((notice) => typeof notice.expiresAt === "number")
+      .map((notice) =>
+        window.setTimeout(() => {
+          setInAppNotices((prev) => prev.filter((item) => item.id !== notice.id));
+        }, Math.max(0, (notice.expiresAt as number) - Date.now()))
+      );
+    return () => {
+      timers.forEach((timer) => window.clearTimeout(timer));
+    };
+  }, [inAppNotices]);
+  const latestException = exceptionEntries[0] ?? null;
+  const selectedException = useMemo(() => {
+    if (exceptionEntries.length === 0) return null;
+    if (!selectedExceptionId) return exceptionEntries[0];
+    return (
+      exceptionEntries.find((entry) => entry.id === selectedExceptionId) ?? exceptionEntries[0]
+    );
+  }, [exceptionEntries, selectedExceptionId]);
+  const errorSummary = latestException ? getExceptionSummary(latestException.message) : null;
+  const selectedExceptionDetail = selectedException
+    ? getExceptionDetail(selectedException.message)
+    : null;
+  const formatRelativeTime = (timestamp?: number | null) => {
     if (!timestamp) return "";
     const seconds = Math.max(1, Math.floor((Date.now() - timestamp) / 1000));
     if (seconds < 60) return `${seconds}s ago`;
@@ -748,6 +831,51 @@ export default function MailClient() {
       } catch (fallbackError) {
         console.warn("[noctua] notification fallback failed", fallbackError);
       }
+    }
+  };
+
+  const undoMoveOperation = async (
+    targets: UndoMoveTarget[],
+    accountId: string,
+    successTitle = "Move undone."
+  ) => {
+    if (targets.length === 0) return;
+    const grouped = new Map<string, string[]>();
+    targets.forEach((target) => {
+      const list = grouped.get(target.restoreFolderId);
+      if (list) {
+        list.push(target.messageId);
+        return;
+      }
+      grouped.set(target.restoreFolderId, [target.messageId]);
+    });
+    try {
+      for (const [destinationFolderId, messageIds] of grouped.entries()) {
+        const res = await apiFetch("/api/message/move", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            accountId,
+            messageIds,
+            destinationFolderId
+          })
+        });
+        if (!res.ok) {
+          reportError(await readErrorMessage(res));
+          return;
+        }
+      }
+      await refreshFolders();
+      if (accountId === activeAccountId) {
+        await refreshMailboxData();
+      }
+      pushNotice({
+        type: "success",
+        title: successTitle,
+        durationMs: 4500
+      });
+    } catch {
+      reportError("Failed to undo message move.");
     }
   };
 
@@ -2325,6 +2453,11 @@ export default function MailClient() {
         if (sentFolder && activeFolderId === sentFolder.id && searchScope === "folder") {
           await refreshMailboxData();
         }
+        pushNotice({
+          type: "success",
+          title: "Email sent.",
+          description: composeSubject.trim() ? composeSubject.trim().slice(0, 180) : undefined
+        });
       } else {
         reportError(await readErrorMessage(res));
       }
@@ -2347,8 +2480,8 @@ export default function MailClient() {
         body: JSON.stringify({ accountId: activeAccountId, messageId: target.id })
       });
       if (!res.ok) {
-        reportError(await readErrorMessage(res));
-        return;
+        const errorMessage = await readErrorMessage(res);
+        throw new Error(errorMessage || "Failed to delete message.");
       }
       const data = (await res.json()) as {
         action: "deleted" | "moved";
@@ -2373,6 +2506,7 @@ export default function MailClient() {
       if (activeMessageId === target.id) {
         setActiveMessageId("");
       }
+      return data;
     };
     const threadId = message.threadId ?? message.messageId ?? message.id;
     const threadItems = supportsThreads
@@ -2421,10 +2555,24 @@ export default function MailClient() {
       const confirmed = window.confirm("Delete entire thread?");
       if (!confirmed) return;
     }
+    const undoTargets: UndoMoveTarget[] = [];
+    let movedToTrashCount = 0;
+    let permanentlyDeletedCount = 0;
     try {
       setPendingMessageActions((prev) => new Set([...prev, ...targets.map((t) => t.id)]));
       for (const target of targets) {
-        await deleteSingle(target);
+        const result = await deleteSingle(target);
+        if (result.action === "moved") {
+          movedToTrashCount += 1;
+          if (result.trashFolderId) {
+            undoTargets.push({
+              messageId: target.id,
+              restoreFolderId: target.folderId
+            });
+          }
+        } else {
+          permanentlyDeletedCount += 1;
+        }
       }
       if (activeWasDeleted) {
         if (nextActiveId) {
@@ -2437,8 +2585,46 @@ export default function MailClient() {
         }
       }
       await refreshFolders();
-    } catch {
-      reportError("Failed to delete message.");
+      if (movedToTrashCount > 0) {
+        pushNotice({
+          type: "success",
+          title:
+            movedToTrashCount === 1
+              ? "Moved message to Trash."
+              : `Moved ${movedToTrashCount} messages to Trash.`,
+          description:
+            permanentlyDeletedCount > 0
+              ? permanentlyDeletedCount === 1
+                ? "1 message was deleted permanently."
+                : `${permanentlyDeletedCount} messages were deleted permanently.`
+              : undefined,
+          actionLabel: undoTargets.length > 0 ? "Undo" : undefined,
+          onAction:
+            undoTargets.length > 0
+              ? () =>
+                  undoMoveOperation(
+                    undoTargets,
+                    activeAccountId,
+                    undoTargets.length === 1 ? "Message restored." : "Messages restored."
+                  )
+              : undefined,
+          durationMs: undoTargets.length > 0 ? 12000 : NOTICE_TIMEOUTS.success
+        });
+      } else if (permanentlyDeletedCount > 0) {
+        pushNotice({
+          type: "success",
+          title:
+            permanentlyDeletedCount === 1
+              ? "Message deleted permanently."
+              : `${permanentlyDeletedCount} messages deleted permanently.`
+        });
+      }
+    } catch (error) {
+      if (error instanceof Error && error.message) {
+        reportError(error.message);
+      } else {
+        reportError("Failed to delete message.");
+      }
     } finally {
       setPendingMessageActions((prev) => {
         const next = new Set(prev);
@@ -2449,6 +2635,10 @@ export default function MailClient() {
   };
 
   const handleArchiveMessage = async (message: Message) => {
+    const undoTarget: UndoMoveTarget = {
+      messageId: message.id,
+      restoreFolderId: message.folderId
+    };
     try {
       const res = await apiFetch("/api/message/archive", {
         method: "POST",
@@ -2474,12 +2664,26 @@ export default function MailClient() {
       if (activeMessageId === message.id) {
         setActiveMessageId("");
       }
+      pushNotice({
+        type: "success",
+        title: "Message archived.",
+        actionLabel: data.archiveFolderId ? "Undo" : undefined,
+        onAction:
+          data.archiveFolderId
+            ? () => undoMoveOperation([undoTarget], activeAccountId, "Archive undone.")
+            : undefined,
+        durationMs: data.archiveFolderId ? 12000 : NOTICE_TIMEOUTS.success
+      });
     } catch {
       reportError("Failed to archive message.");
     }
   };
 
   const handleMarkSpam = async (message: Message) => {
+    const undoTarget: UndoMoveTarget = {
+      messageId: message.id,
+      restoreFolderId: message.folderId
+    };
     try {
       const res = await apiFetch("/api/message/spam", {
         method: "POST",
@@ -2505,6 +2709,16 @@ export default function MailClient() {
       if (activeMessageId === message.id) {
         setActiveMessageId("");
       }
+      pushNotice({
+        type: "success",
+        title: "Message marked as spam.",
+        actionLabel: data.junkFolderId ? "Undo" : undefined,
+        onAction:
+          data.junkFolderId
+            ? () => undoMoveOperation([undoTarget], activeAccountId, "Spam action undone.")
+            : undefined,
+        durationMs: data.junkFolderId ? 12000 : NOTICE_TIMEOUTS.success
+      });
     } catch {
       reportError("Failed to mark message as spam.");
     }
@@ -2793,6 +3007,13 @@ export default function MailClient() {
             ? [activeMessageId]
             : [];
     if (!ids.length) return;
+    const idSet = new Set(ids);
+    const undoTargets: UndoMoveTarget[] = messages
+      .filter((item) => item.accountId === activeAccountId && idSet.has(item.id))
+      .map((item) => ({
+        messageId: item.id,
+        restoreFolderId: item.folderId
+      }));
     try {
       setPendingMessageActions((prev) => new Set([...prev, ...ids]));
       const res = await apiFetch("/api/message/move", {
@@ -2835,7 +3056,26 @@ export default function MailClient() {
         setActiveMessageId("");
       }
       clearSelection();
-    } catch (error) {
+      const destinationName = folderById.get(destinationFolderId)?.name ?? "folder";
+      pushNotice({
+        type: "success",
+        title:
+          ids.length === 1
+            ? `Moved message to ${destinationName}.`
+            : `Moved ${ids.length} messages to ${destinationName}.`,
+        actionLabel: undoTargets.length > 0 ? "Undo" : undefined,
+        onAction:
+          undoTargets.length > 0
+            ? () =>
+                undoMoveOperation(
+                  undoTargets,
+                  activeAccountId,
+                  undoTargets.length === 1 ? "Move undone." : "Moves undone."
+                )
+            : undefined,
+        durationMs: undoTargets.length > 0 ? 12000 : NOTICE_TIMEOUTS.success
+      });
+    } catch {
       reportError("Failed to move messages.");
     } finally {
       setPendingMessageActions((prev) => {
@@ -4046,15 +4286,11 @@ export default function MailClient() {
     }
   };
 
-  const handleNoticeOpen = (notice: {
-    id: string;
-    messageId?: string;
-    count?: number;
-    ids?: string[];
-  }) => {
-    if (notice.messageId) {
-      if (!jumpToMessageId(notice.messageId)) {
-        pendingJumpMessageIdRef.current = notice.messageId;
+  const handleNoticeOpen = (notice: InAppNotice) => {
+    const jumpTarget = notice.messageId ?? notice.ids?.[0];
+    if (jumpTarget) {
+      if (!jumpToMessageId(jumpTarget)) {
+        pendingJumpMessageIdRef.current = jumpTarget;
         const inbox = inboxFolderRef.current;
         if (inbox) {
           setSearchScope("folder");
@@ -4069,11 +4305,9 @@ export default function MailClient() {
         setActiveFolderId(inbox.id);
       }
     }
-    setInAppNotices((prev) => prev.filter((item) => item.id !== notice.id));
+    dismissNotice(notice.id);
   };
-  const handleDismissNotice = (noticeId: string) => {
-    setInAppNotices((prev) => prev.filter((item) => item.id !== noticeId));
-  };
+  const handleDismissNotice = dismissNotice;
 
   const evictThreadCache = useCallback((threadId?: string | null) => {
     if (!threadId) return;
@@ -4243,7 +4477,6 @@ export default function MailClient() {
   };
 
   const syncAccount = async (folderId?: string, mode: "new" | "full" = "full") => {
-    setErrorMessage(null);
     const selectionKey = currentKeyRef.current;
     const knownFolderIds = new Set(accountFolders.map((folder) => folder.id));
     if (folderId) {
@@ -4332,7 +4565,6 @@ export default function MailClient() {
 
   const recomputeThreads = async () => {
     if (!activeAccountId) return;
-    setErrorMessage(null);
     setIsRecomputingThreads(true);
     try {
       const res = await apiFetch("/api/threads/recompute", {
@@ -4439,24 +4671,19 @@ export default function MailClient() {
         localStorage.setItem(`noctua:lastNotifiedUid:${activeAccountId}`, String(maxUid));
       }
 
-      const createNoticeId = () =>
-        `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-
       if (unique.length === 1) {
         const message = unique[0];
         const title = message.subject || "(no subject)";
         const body = message.from ? `From: ${message.from}` : "New message received";
         console.info("[noctua] new mail", message);
         await showNotification(title, body, `mail-${message.messageId ?? message.uid}`);
-        setInAppNotices((prev) => [
-          ...prev,
-          {
-            id: createNoticeId(),
-            subject: title,
-            from: message.from,
-            messageId: message.messageId ?? undefined
-          }
-        ]);
+        pushNotice({
+          type: "info",
+          title,
+          description: body,
+          messageId: message.messageId ?? undefined,
+          durationMs: 12000
+        });
       } else if (unique.length > 1) {
         const title = `${unique.length} new messages`;
         const preview = unique
@@ -4465,15 +4692,13 @@ export default function MailClient() {
           .join(" • ");
         console.info("[noctua] new mail batch", unique);
         await showNotification(title, preview, "mail-batch");
-        setInAppNotices((prev) => [
-          ...prev,
-          {
-            id: createNoticeId(),
-            subject: title,
-            count: unique.length,
-            ids: unique.map((item) => item.messageId ?? undefined).filter(Boolean) as string[]
-          }
-        ]);
+        pushNotice({
+          type: "info",
+          title,
+          description: preview,
+          ids: unique.map((item) => item.messageId ?? undefined).filter(Boolean) as string[],
+          durationMs: 12000
+        });
       }
 
       const inbox = inboxFolderRef.current;
@@ -4843,13 +5068,23 @@ export default function MailClient() {
     document.documentElement.classList.toggle("dark", next);
     localStorage.setItem("noctua:theme", next ? "dark" : "light");
   };
+  const toggleExceptionPanel = () => {
+    setExceptionPanelOpen((open) => {
+      const next = !open;
+      if (next && !selectedExceptionId && latestException) {
+        setSelectedExceptionId(latestException.id);
+      }
+      return next;
+    });
+  };
 
   if (authState === "unauth") {
     return (
       <LoginOverlay
         onAuthenticated={async () => {
           setAuthState("loading");
-          setErrorMessage(null);
+          setExceptionEntries([]);
+          setSelectedExceptionId(null);
           setMessageListError(null);
           setExceptionPanelOpen(false);
           setMessages([]);
@@ -5405,16 +5640,16 @@ export default function MailClient() {
           className="bottom-section bottom-right"
           role="button"
           tabIndex={0}
-          onClick={() => setExceptionPanelOpen((open) => !open)}
+          onClick={toggleExceptionPanel}
           onKeyDown={(event) => {
             if (event.key === "Enter" || event.key === " ") {
               event.preventDefault();
-              setExceptionPanelOpen((open) => !open);
+              toggleExceptionPanel();
             }
           }}
         >
           <span className="bottom-label">Exceptions</span>
-          {errorMessage ? (
+          {latestException ? (
             <span className="bottom-error">{errorSummary}</span>
           ) : (
             <span className="bottom-muted">None</span>
@@ -5454,8 +5689,8 @@ export default function MailClient() {
                   title="Clear exceptions"
                   aria-label="Clear exceptions"
                   onClick={() => {
-                    setErrorMessage(null);
-                    setErrorTimestamp(null);
+                    setExceptionEntries([]);
+                    setSelectedExceptionId(null);
                     setExceptionPanelOpen(false);
                   }}
                 >
@@ -5463,10 +5698,34 @@ export default function MailClient() {
                 </button>
             </div>
             <div className="popover-body">
-              {errorMessage ? (
+              {exceptionEntries.length > 0 ? (
                 <>
-                  <div className="exception-meta">{formatRelativeTime(errorTimestamp)}</div>
-                  <pre className="exception-detail">{errorMessage}</pre>
+                  <div className="exception-list">
+                    {exceptionEntries.map((entry) => {
+                      const summary = getExceptionSummary(entry.message);
+                      const active = selectedException?.id === entry.id;
+                      return (
+                        <button
+                          key={entry.id}
+                          className={`exception-item ${active ? "active" : ""}`}
+                          onClick={() => setSelectedExceptionId(entry.id)}
+                        >
+                          <span className="exception-item-summary">{summary}</span>
+                          <span className="exception-item-time">
+                            {formatRelativeTime(entry.timestamp)}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {selectedException && selectedExceptionDetail ? (
+                    <>
+                      <div className="exception-meta">
+                        {formatRelativeTime(selectedException.timestamp)}
+                      </div>
+                      <pre className="exception-detail">{selectedExceptionDetail}</pre>
+                    </>
+                  ) : null}
                 </>
               ) : (
                 <div>No exceptions.</div>

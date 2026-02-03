@@ -222,43 +222,156 @@ a {
 
 .inapp-notice-stack {
   position: fixed;
-  top: 72px;
-  right: 18px;
+  right: 16px;
+  bottom: 44px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  z-index: 50;
+  gap: 10px;
+  z-index: 60;
   pointer-events: none;
+  align-items: flex-end;
 }
 
 .inapp-notice {
-  width: min(360px, calc(100vw - 24px));
-  padding: 10px 12px;
-  border: 1px solid rgba(24, 71, 213, 0.25);
-  background: #dfe7f6;
+  width: min(400px, calc(100vw - 24px));
+  padding: 10px 10px 10px 12px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
   color: var(--text);
-  border-radius: var(--radius-sm);
+  border-radius: var(--radius-md);
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
-  gap: 12px;
-  cursor: pointer;
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.08);
+  gap: 10px;
+  box-shadow: var(--shadow);
   pointer-events: auto;
+  animation: riseIn 0.2s ease both;
+  transition: transform 0.14s ease;
 }
 
-.dark .inapp-notice {
-  border-color: rgba(184, 213, 255, 0.35);
-  background: #334a7a;
-  color: var(--text);
+.inapp-notice.openable {
+  cursor: pointer;
+}
+
+.inapp-notice.openable:hover {
+  transform: translateY(-1px);
+}
+
+.inapp-notice .notice-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 1px;
 }
 
 .inapp-notice .notice-text {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
   font-size: 12px;
   color: inherit;
+}
+
+.inapp-notice .notice-title {
+  display: block;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.inapp-notice .notice-description {
+  display: block;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.inapp-notice .notice-controls {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 2px;
+}
+
+.inapp-notice .notice-action {
+  border: none;
+  background: rgba(0, 0, 0, 0.08);
+  color: inherit;
+  border-radius: var(--radius-sm);
+  font-size: 11px;
+  line-height: 1;
+  padding: 6px 8px;
+  cursor: pointer;
+}
+
+.inapp-notice .notice-action:hover {
+  background: rgba(0, 0, 0, 0.14);
+}
+
+.inapp-notice .notice-dismiss {
+  align-self: flex-start;
+}
+
+.inapp-notice-info {
+  border-color: rgba(32, 99, 201, 0.35);
+  background: #d7e7ff;
+}
+
+.inapp-notice-success {
+  border-color: rgba(15, 124, 74, 0.34);
+  background: #d8f3e5;
+}
+
+.inapp-notice-warning {
+  border-color: rgba(167, 93, 0, 0.36);
+  background: #ffe8c7;
+}
+
+.inapp-notice-error {
+  border-color: rgba(176, 38, 34, 0.38);
+  background: #ffd8d6;
+}
+
+.dark .inapp-notice .notice-description {
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.dark .inapp-notice .notice-action {
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.dark .inapp-notice .notice-action:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.dark .inapp-notice-info {
+  border-color: rgba(113, 178, 255, 0.45);
+  background: #29436c;
+}
+
+.dark .inapp-notice-success {
+  border-color: rgba(98, 208, 160, 0.46);
+  background: #245545;
+}
+
+.dark .inapp-notice-warning {
+  border-color: rgba(255, 196, 114, 0.5);
+  background: #65461b;
+}
+
+.dark .inapp-notice-error {
+  border-color: rgba(255, 156, 149, 0.52);
+  background: #632f2f;
+}
+
+@media (max-width: 860px) {
+  .inapp-notice-stack {
+    right: 10px;
+    bottom: 40px;
+  }
 }
 
 .content-grid {
@@ -1246,6 +1359,52 @@ a {
 .exception-meta {
   font-size: 10px;
   color: var(--muted);
+}
+
+.exception-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 140px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 4px;
+  background: var(--surface);
+}
+
+.exception-item {
+  border: none;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border-radius: var(--radius-sm);
+  padding: 4px 6px;
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.exception-item:hover {
+  background: var(--surface-2);
+}
+
+.exception-item.active {
+  background: rgba(204, 83, 72, 0.14);
+}
+
+.exception-item-summary {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.exception-item-time {
+  color: var(--muted);
+  font-size: 10px;
 }
 
 .exception-detail {

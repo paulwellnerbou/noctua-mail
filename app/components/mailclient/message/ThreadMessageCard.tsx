@@ -246,7 +246,7 @@ export default function ThreadMessageCard({
 
   const renderTextPanel = (body: string | undefined) => (
     <div className={styles.textView} style={{ fontSize: `${14 * fontScale}px` }}>
-      <QuoteRenderer body={body} />
+      <QuoteRenderer body={body ?? ""} />
     </div>
   );
 
