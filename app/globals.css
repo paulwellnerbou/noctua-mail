@@ -576,8 +576,8 @@ a {
   left: 0;
   right: 0;
   z-index: 50;
-  background: var(--color-panel);
-  border: 1px solid var(--gray-a5);
+  background: var(--gray-1);
+  border: 1px solid var(--gray-a6);
   border-radius: var(--radius-3);
   box-shadow: var(--shadow-4);
   max-height: 220px;
@@ -586,25 +586,18 @@ a {
   flex-direction: column;
 }
 
-.compose-signature {
-  position: relative;
-  display: inline-flex;
-}
-
 .compose-signature-menu {
-  position: absolute;
-  top: calc(100% + 4px);
-  right: 0;
   min-width: 180px;
-  background: var(--surface);
-  border: 1px solid var(--border);
+  background: var(--gray-1);
+  border: 1px solid var(--gray-a6);
   border-radius: var(--radius-md);
-  box-shadow: var(--shadow);
+  box-shadow: var(--shadow-4);
   max-height: 240px;
   overflow: auto;
-  display: flex;
-  flex-direction: column;
-  z-index: 60;
+}
+
+.compose-signature-menu .rt-DropdownMenuItem {
+  font-size: 12px;
 }
 
 .compose-suggestion {
@@ -614,16 +607,16 @@ a {
   padding: 8px 10px;
   cursor: pointer;
   font-size: 12px;
-  color: var(--text);
+  color: var(--gray-12);
 }
 
 .compose-suggestion:hover,
 .compose-suggestion.active {
-  background: var(--surface-2);
+  background: var(--gray-3);
 }
 
 .compose-suggestion.muted {
-  color: var(--muted);
+  color: var(--gray-10);
   cursor: default;
 }
 
@@ -645,23 +638,23 @@ a {
   flex: 1;
 }
 
-.compose-line input:not(.rt-TextFieldRoot),
-.compose-subject input:not(.rt-TextFieldRoot),
-.compose-grid-row input:not(.rt-TextFieldRoot) {
+.compose-line > input,
+.compose-subject > input,
+.compose-grid-row > input {
   flex: 1;
   min-width: 0;
   padding: 8px 10px;
   border-radius: var(--radius-md);
-  border: 1px solid var(--border);
-  background: #ffffff;
-  color: #1a1a1a;
+  border: 1px solid var(--gray-a6);
+  background: var(--gray-1);
+  color: var(--gray-12);
 }
 
-.dark .compose-line input,
-.dark .compose-subject input,
-.dark .compose-grid-row input {
-  background: var(--surface-2);
-  color: var(--text);
+.dark .compose-line > input,
+.dark .compose-subject > input,
+.dark .compose-grid-row > input {
+  background: var(--gray-2);
+  color: var(--gray-12);
 }
 
 .compose-line input[readonly] {
@@ -690,7 +683,7 @@ a {
 
 .compose-static {
   font-size: 12px;
-  color: var(--text);
+  color: var(--gray-12);
 }
 
 .compose-minimized {
@@ -741,6 +734,12 @@ a {
   margin-bottom: 8px;
 }
 
+.compose-attach {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
 .compose-body textarea {
   resize: vertical;
   min-height: 0;
@@ -750,16 +749,16 @@ a {
     monospace;
   font-size: 14px;
   line-height: 1.5;
-  background: #ffffff;
-  color: #1a1a1a;
-  border: 1px solid var(--border);
+  background: var(--gray-1);
+  color: var(--gray-12);
+  border: 1px solid var(--gray-a6);
   border-radius: var(--radius-md);
 }
 
 .dark .compose-body textarea,
 .dark .compose-writing.text > textarea {
-  background: var(--surface-2);
-  color: var(--text);
+  background: var(--gray-2);
+  color: var(--gray-12);
 }
 
 .compose-editor {
@@ -768,9 +767,9 @@ a {
   flex-direction: column;
   flex: 1;
   min-height: 0;
-  border: 1px solid var(--border);
+  border: 1px solid var(--gray-a6);
   border-radius: var(--radius-sm);
-  background: var(--surface);
+  background: var(--gray-1);
   padding: 10px 12px;
   overflow: auto;
   --font-scale: 1;
@@ -782,11 +781,11 @@ a {
   gap: 6px;
   margin: -10px -12px 8px;
   padding: 6px 10px;
-  background: var(--surface-2);
-  border-bottom: 1px solid var(--border);
+  background: var(--gray-2);
+  border-bottom: 1px solid var(--gray-a6);
 }
 
-.compose-toolbar .icon-button.small {
+.compose-toolbar .compose-toolbar-button {
   padding: 4px 6px;
   font-size: 11px;
 }
@@ -814,32 +813,24 @@ a {
 
 .compose-editor blockquote,
 .compose-editor .compose-quote {
-  border-left: 2px solid #cfcfcf;
+  border-left: 2px solid var(--gray-a7);
   margin: 0 0 0 0.8ex;
   padding-left: 1ex;
 }
 
 .compose-editor td,
 .compose-editor th {
-  border: 1px solid var(--border);
+  border: 1px solid var(--gray-a6);
   padding: 6px 8px;
 }
 
 .compose-quoted-block {
-  border: 1px solid var(--border);
+  border: 1px solid var(--gray-a6);
   border-radius: var(--radius-sm);
   padding: 8px 10px;
-  background: var(--surface-2);
-  color: var(--text);
+  background: var(--gray-2);
+  color: var(--gray-12);
   margin-top: 8px;
-}
-
-.compose-quoted-block > summary {
-  cursor: pointer;
-  font-size: 12px;
-  color: var(--muted);
-  margin-bottom: 8px;
-  list-style: none;
 }
 
 .compose-quoted-summary {
@@ -849,15 +840,36 @@ a {
   gap: 8px;
 }
 
-.compose-quoted-summary .summary-text {
+.compose-quoted-trigger {
   display: inline-flex;
   align-items: center;
   gap: 6px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  box-shadow: none;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--gray-11);
 }
 
-.compose-quoted-summary .summary-caret {
+.compose-quoted-trigger:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.compose-quoted-trigger .summary-text {
+  display: inline-flex;
+  align-items: center;
+}
+
+.compose-quoted-trigger .summary-caret {
   display: inline-flex;
   transition: transform 0.2s ease;
+}
+
+.compose-quoted-trigger[data-state="open"] .summary-caret {
+  transform: rotate(90deg);
 }
 
 .compose-quoted-summary .summary-actions {
@@ -868,23 +880,21 @@ a {
   margin-left: auto;
 }
 
-.compose-quoted-block:not([open]) .summary-actions .quote-actions {
+.compose-quoted-summary .quote-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.compose-quoted-block[data-state="closed"] .summary-actions .quote-actions {
   display: none;
-}
-
-.compose-quoted-block > summary::-webkit-details-marker {
-  display: none;
-}
-
-.compose-quoted-block[open] > summary {
-  margin-bottom: 10px;
-}
-
-.compose-quoted-block[open] .summary-caret {
-  transform: rotate(90deg);
 }
 
 .compose-quoted-content {
+  margin-top: 10px;
+  border-top: 1px solid var(--gray-a5);
+  padding-top: 10px;
   max-height: min(260px, 30vh);
   overflow: auto;
 }
@@ -899,9 +909,9 @@ a {
 .compose-quoted-text {
   margin-top: 8px;
   padding: 8px 10px;
-  border-left: 2px solid #cfcfcf;
-  background: var(--surface-2);
-  color: var(--text);
+  border-left: 2px solid var(--gray-a7);
+  background: var(--gray-2);
+  color: var(--gray-12);
   white-space: pre-wrap;
   font-size: 12px;
 }
@@ -919,7 +929,7 @@ a {
 
 .compose-quoted-content td,
 .compose-quoted-content th {
-  border: 1px solid var(--border);
+  border: 1px solid var(--gray-a6);
   padding: 6px 8px;
 }
 

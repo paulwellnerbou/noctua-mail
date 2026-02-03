@@ -22,6 +22,8 @@ import {
   Trash2,
   X
 } from "lucide-react";
+import * as Collapsible from "@radix-ui/react-collapsible";
+import { CaretRightIcon, ChevronDownIcon } from "@radix-ui/react-icons";
 import ComposeEditor from "./ComposeEditor";
 import HtmlMessage from "./HtmlMessage";
 import LoginOverlay from "./auth/LoginOverlay";
@@ -41,7 +43,8 @@ import MessageListPane from "./mailclient/messagelist/MessageListPane";
 import listMetaStyles from "./mailclient/messagelist/MessageListMeta.module.css";
 import listPaneStyles from "./mailclient/messagelist/MessageListPane.module.css";
 import { createSelectionStore } from "./mailclient/messagelist/selectionStore";
-import { Card, Flex, IconButton, Text } from "@radix-ui/themes";
+import threadStyles from "./mailclient/message/ThreadMessageCard.module.css";
+import { Button, Card, DropdownMenu, Flex, IconButton, Tabs, Text } from "@radix-ui/themes";
 import MessageSelectIndicators from "./mailclient/messagelist/MessageSelectIndicators";
 import MessageTable from "./mailclient/messagelist/MessageTable";
 import UnreadDot from "./mailclient/messagelist/UnreadDot";
@@ -245,7 +248,6 @@ export default function MailClient() {
   const [composeAttachments, setComposeAttachments] = useState<Attachment[]>([]);
   const [composeDragActive, setComposeDragActive] = useState(false);
   const [composeEditorReset, setComposeEditorReset] = useState(0);
-  const signatureMenuRef = useRef<HTMLDivElement | null>(null);
   const [composeQuotedParts, setComposeQuotedParts] = useState<{
     styles: string;
     headerHtml: string;
@@ -1085,14 +1087,17 @@ export default function MailClient() {
   const applyRecipientSelection = (
     value: string,
     suggestion: string,
-    setValue: (next: string) => void
+    setValue: (next: string) => void,
+    focusAfter: "to" | "cc" | "bcc" | null = null
   ) => {
     const parts = value.split(/[;,]/);
     parts[parts.length - 1] = ` ${suggestion}`.trim();
     const joined = parts.map((part) => part.trim()).filter(Boolean).join(", ");
-    setValue(joined ? `${joined}, ` : `${suggestion}, `);
+    const nextValue = joined ? `${joined}, ` : `${suggestion}, `;
+    setValue(nextValue);
     setRecipientQuery("");
-    setRecipientFocus(null);
+    setRecipientFocus(focusAfter);
+    return nextValue;
   };
 
   const triggerCopy = async (key: string, value: string) => {
@@ -1759,17 +1764,17 @@ export default function MailClient() {
     const bccEmails = extractEmails(message.bcc ?? "");
 
     const prefersHtml = hasHtmlContent(message.htmlBody);
+    const replyMessageId = message.messageId ?? undefined;
+    const replyReferences = replyMessageId
+      ? [
+          ...(message.references ?? []),
+          ...(message.inReplyTo ? [message.inReplyTo] : []),
+          replyMessageId
+        ]
+      : undefined;
 
     if (mode === "reply") {
       setComposeReplyMessage(message);
-      const replyMessageId = message.messageId ?? undefined;
-      const replyReferences = replyMessageId
-        ? [
-            ...(message.references ?? []),
-            ...(message.inReplyTo ? [message.inReplyTo] : []),
-            replyMessageId
-          ]
-        : undefined;
       setComposeReplyHeaders({
         inReplyTo: replyMessageId,
         references: replyReferences
@@ -1810,14 +1815,6 @@ export default function MailClient() {
       }
     } else if (mode === "replyAll") {
       setComposeReplyMessage(message);
-      const replyMessageId = message.messageId ?? undefined;
-      const replyReferences = replyMessageId
-        ? [
-            ...(message.references ?? []),
-            ...(message.inReplyTo ? [message.inReplyTo] : []),
-            replyMessageId
-          ]
-        : undefined;
       setComposeReplyHeaders({
         inReplyTo: replyMessageId,
         references: replyReferences
@@ -1863,14 +1860,6 @@ export default function MailClient() {
       }
     } else if (mode === "forward") {
       setComposeReplyMessage(message);
-      const replyMessageId = message.messageId ?? undefined;
-      const replyReferences = replyMessageId
-        ? [
-            ...(message.references ?? []),
-            ...(message.inReplyTo ? [message.inReplyTo] : []),
-            replyMessageId
-          ]
-        : undefined;
       setComposeReplyHeaders({
         inReplyTo: replyMessageId,
         references: replyReferences,
@@ -1908,6 +1897,12 @@ export default function MailClient() {
         setComposeTab("text");
       }
     } else {
+      if (mode === "editAsNew") {
+        setComposeReplyHeaders({
+          inReplyTo: replyMessageId,
+          references: replyReferences
+        });
+      }
       setComposeStripImages(false);
       setComposeIncludeOriginal(true);
       setComposeQuoteHtml(true);
@@ -2141,104 +2136,92 @@ export default function MailClient() {
   };
 
   const visibleComposeAttachments = composeAttachments.filter((item) => !item.inline);
+  const switchComposeTab = (nextTab: "text" | "html") => {
+    if (nextTab === composeTab) return;
+    if (nextTab === "html") {
+      if (composeLastEditedRef.current === "text") {
+        const nextHtml = composeBody ? `<p>${escapeHtml(composeBody).replace(/\n/g, "<br>")}</p>` : "";
+        setComposeHtml(nextHtml);
+        setComposeHtmlText(stripHtml(nextHtml));
+      }
+      setComposeTab("html");
+      return;
+    }
+    if (composeLastEditedRef.current === "html") {
+      const nextText = composeHtmlText || stripHtml(composeHtml);
+      if (nextText.trim().length > 0 || composeBody.trim().length === 0) {
+        setComposeBody(nextText);
+      }
+    }
+    setComposeTab("text");
+  };
 
   const composeMessageField = (
     <div className="form-field compose-message-field">
       <div className="compose-tabs-row">
         <div className="compose-tabs">
-          <button
-            className={`icon-button small ${composeTab === "html" ? "active" : ""}`}
-            onClick={() => {
-              if (composeTab === "html") return;
-              if (composeLastEditedRef.current === "text") {
-                const nextHtml = composeBody
-                  ? `<p>${escapeHtml(composeBody).replace(/\n/g, "<br>")}</p>`
-                  : "";
-                setComposeHtml(nextHtml);
-                setComposeHtmlText(stripHtml(nextHtml));
-              }
-              setComposeTab("html");
-            }}
-            type="button"
-          >
-            HTML
-          </button>
-          <button
-            className={`icon-button small ${composeTab === "text" ? "active" : ""}`}
-            onClick={() => {
-              if (composeTab === "text") return;
-              if (composeLastEditedRef.current === "html") {
-                const nextText = composeHtmlText || stripHtml(composeHtml);
-                if (nextText.trim().length > 0 || composeBody.trim().length === 0) {
-                  setComposeBody(nextText);
-                }
-              }
-              setComposeTab("text");
-            }}
-            type="button"
-          >
-            Text
-          </button>
+          <Tabs.Root value={composeTab} onValueChange={(value) => switchComposeTab(value as "text" | "html")}>
+            <Tabs.List size="1" className={threadStyles.tabsList}>
+              <Tabs.Trigger value="html" className={threadStyles.tabTrigger}>
+                HTML
+              </Tabs.Trigger>
+              <Tabs.Trigger value="text" className={threadStyles.tabTrigger}>
+                Text
+              </Tabs.Trigger>
+            </Tabs.List>
+          </Tabs.Root>
         </div>
         <div className="compose-attach">
-          <div className="compose-signature" ref={signatureMenuRef}>
-            <button
-              type="button"
-              className="icon-button small"
-              title="Choose signature"
-              onClick={() => setSignatureMenuOpen((open) => !open)}
-            >
-              {selectedSignature ? selectedSignature.name : "Signature"}
-            </button>
-            {signatureMenuOpen && (
-              <div className="compose-signature-menu">
-                <button
-                  type="button"
-                  className={`compose-suggestion ${
-                    !composeSignatureId ? "active" : ""
-                  }`}
-                  onMouseDown={(event) => {
-                    event.preventDefault();
+          <DropdownMenu.Root open={signatureMenuOpen} onOpenChange={setSignatureMenuOpen}>
+            <DropdownMenu.Trigger>
+              <Button type="button" size="1" variant="soft" color="gray" title="Choose signature">
+                {selectedSignature ? selectedSignature.name : "Signature"}
+                <ChevronDownIcon width={14} height={14} />
+              </Button>
+            </DropdownMenu.Trigger>
+            <DropdownMenu.Content align="end" className="compose-signature-menu">
+              <DropdownMenu.RadioGroup
+                value={composeSignatureId || "__none"}
+                onValueChange={(value) => {
+                  if (value === "__none") {
                     setComposeSignatureId("");
                     applySignatureToCompose(null);
                     setSignatureMenuOpen(false);
-                  }}
-                >
-                  No signature
-                </button>
+                    return;
+                  }
+                  const signature = accountSignatures.find((entry) => entry.id === value);
+                  if (!signature) return;
+                  setComposeSignatureId(signature.id);
+                  applySignatureToCompose(signature);
+                  setSignatureMenuOpen(false);
+                }}
+              >
+                <DropdownMenu.RadioItem value="__none">No signature</DropdownMenu.RadioItem>
                 {accountSignatures.map((signature) => (
-                  <button
-                    key={signature.id}
-                    type="button"
-                    className={`compose-suggestion ${
-                      composeSignatureId === signature.id ? "active" : ""
-                    }`}
-                    onMouseDown={(event) => {
-                      event.preventDefault();
-                      setComposeSignatureId(signature.id);
-                      applySignatureToCompose(signature);
-                      setSignatureMenuOpen(false);
-                    }}
-                  >
+                  <DropdownMenu.RadioItem key={signature.id} value={signature.id}>
                     {signature.name}
-                  </button>
+                  </DropdownMenu.RadioItem>
                 ))}
-              </div>
-            )}
-          </div>
-          <button
+              </DropdownMenu.RadioGroup>
+            </DropdownMenu.Content>
+          </DropdownMenu.Root>
+          <Button
             type="button"
-            className="icon-button small"
+            size="1"
+            variant="soft"
+            color="gray"
             title="Add attachment"
             onClick={() => composeAttachmentInputRef.current?.click()}
           >
             <Paperclip size={12} />
             Attach
-          </button>
+          </Button>
           <input
             ref={composeAttachmentInputRef}
             type="file"
             multiple
+            id="compose-attachment-input"
+            name="compose_attachments"
             style={{ display: "none" }}
             onChange={handleComposeAttachmentPick}
           />
@@ -2248,18 +2231,22 @@ export default function MailClient() {
         <>
           {composeMode !== "new" && composeQuotedText && (
             <div className="compose-quoted-toolbar">
-              <button
+              <Button
                 type="button"
-                className={`icon-button small ${composeIncludeOriginal ? "active" : ""}`}
+                size="1"
+                color="gray"
+                variant={composeIncludeOriginal ? "solid" : "soft"}
                 title="Toggle original message"
                 onClick={toggleIncludeOriginal}
               >
                 Include original
-              </button>
+              </Button>
             </div>
           )}
           <div className="compose-writing text">
             <textarea
+              id="compose-text-body"
+              name="compose_body"
               ref={composeTextRef}
               value={
                 `${composeBody}${
@@ -2312,80 +2299,81 @@ export default function MailClient() {
         </div>
       )}
       {composeTab === "html" && composeQuotedParts && (
-        <details
+        <Collapsible.Root
           className={`compose-quoted-block ${composeIncludeOriginal ? "expanded" : ""}`}
-          open
+          open={composeIncludeOriginal}
+          onOpenChange={(open) => {
+            if (open !== composeIncludeOriginal) {
+              toggleIncludeOriginal();
+            }
+          }}
         >
-          <summary className="compose-quoted-summary">
-            <span className="summary-text">
-              <span className="summary-caret" aria-hidden="true">
-                ▸
-              </span>
-              Quoted Message
-            </span>
-            <span className="summary-actions">
+          <div className="compose-quoted-summary">
+            <Collapsible.Trigger asChild>
               <button
                 type="button"
-                className={`icon-button small ${composeIncludeOriginal ? "active" : ""}`}
+                className="compose-quoted-trigger"
+                title={composeIncludeOriginal ? "Hide quoted message" : "Show quoted message"}
+              >
+                <CaretRightIcon className="summary-caret" />
+                <span className="summary-text">
+                  Quoted Message
+                </span>
+              </button>
+            </Collapsible.Trigger>
+            <span className="summary-actions">
+              <Button
+                type="button"
+                size="1"
+                color="gray"
+                variant={composeIncludeOriginal ? "solid" : "soft"}
                 title="Toggle original message"
-                onClick={(event) => {
-                  event.preventDefault();
-                  event.stopPropagation();
-                  toggleIncludeOriginal();
-                }}
+                onClick={toggleIncludeOriginal}
               >
                 Include original
-              </button>
+              </Button>
               <span className="quote-actions">
-                <button
+                <Button
                   type="button"
-                  className="icon-button small"
+                  size="1"
+                  variant="soft"
+                  color="gray"
                   title="Edit quoted HTML"
-                  onClick={(event) => {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    handleEditQuotedHtml();
-                  }}
+                  onClick={handleEditQuotedHtml}
                   disabled={!composeQuotedHtml.trim()}
                 >
                   Edit quoted HTML
-                </button>
-                <button
+                </Button>
+                <Button
                   type="button"
-                  className="icon-button small"
+                  size="1"
+                  variant="soft"
+                  color="gray"
                   title={
                     composeStripImages ? "Images already stripped" : "Strip images from quoted HTML"
                   }
                   disabled={composeStripImages}
-                  onClick={(event) => {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    handleStripImages();
-                  }}
+                  onClick={handleStripImages}
                 >
                   Strip images
-                </button>
-                <button
+                </Button>
+                <Button
                   type="button"
-                  className={`icon-button small ${composeQuoteHtml ? "active" : ""}`}
+                  size="1"
+                  color="gray"
+                  variant={composeQuoteHtml ? "solid" : "soft"}
                   title="Toggle HTML quoting"
-                  onClick={(event) => {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    toggleQuoteHtml();
-                  }}
+                  onClick={toggleQuoteHtml}
                 >
                   Quote HTML
-                </button>
+                </Button>
               </span>
             </span>
-          </summary>
-          {composeIncludeOriginal && (
-            <div className="compose-quoted-content">
-              <HtmlMessage html={composeQuotedHtml} darkMode={darkMode} />
-            </div>
-          )}
-        </details>
+          </div>
+          <Collapsible.Content className="compose-quoted-content">
+            <HtmlMessage html={composeQuotedHtml} darkMode={darkMode} />
+          </Collapsible.Content>
+        </Collapsible.Root>
       )}
     </div>
   );
@@ -2411,7 +2399,10 @@ export default function MailClient() {
         xForwardedMessageId: composeReplyMessage?.messageId ?? undefined
       };
       const shouldThreadCompose =
-        composeMode === "reply" || composeMode === "replyAll" || composeMode === "forward";
+        composeMode === "reply" ||
+        composeMode === "replyAll" ||
+        composeMode === "forward" ||
+        composeMode === "editAsNew";
       const replyFromValue = getAccountFromValue(currentAccount);
       const replyToHeader =
         composeMode === "reply" || composeMode === "replyAll" ? replyFromValue : "";
@@ -3908,19 +3899,6 @@ export default function MailClient() {
     composeReplyHeaders,
     composeAttachments
   ]);
-
-  useEffect(() => {
-    if (!signatureMenuOpen) return;
-    const handleClick = (event: MouseEvent) => {
-      if (!signatureMenuRef.current) return;
-      if (signatureMenuRef.current.contains(event.target as Node)) return;
-      setSignatureMenuOpen(false);
-    };
-    document.addEventListener("mousedown", handleClick);
-    return () => {
-      document.removeEventListener("mousedown", handleClick);
-    };
-  }, [signatureMenuOpen]);
 
   useEffect(() => {
     if (composeOpen && composeMode === "new") return;
@@ -5586,6 +5564,7 @@ export default function MailClient() {
                   composeShowBcc,
                   composeDraftId,
                   composeOpen,
+                  composeFieldsReset: composeEditorReset,
                   draftSaving,
                   draftSaveError,
                   draftSavedAt,
@@ -5710,6 +5689,7 @@ export default function MailClient() {
           composeOpenedAt,
           composeDraftId,
           composeOpen,
+          composeFieldsReset: composeEditorReset,
           draftSaving,
           draftSaveError,
           draftSavedAt,

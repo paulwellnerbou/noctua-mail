@@ -18,6 +18,7 @@ type ComposeInlineCardProps = {
     composeShowBcc: boolean;
     composeDraftId: string | null;
     composeOpen: boolean;
+    composeFieldsReset: number;
     draftSaving: boolean;
     draftSaveError: string | null;
     draftSavedAt: number | null;
@@ -50,8 +51,9 @@ type ComposeInlineCardProps = {
     applyRecipientSelection: (
       current: string,
       selection: string,
-      setter: React.Dispatch<React.SetStateAction<string>>
-    ) => void;
+      setter: React.Dispatch<React.SetStateAction<string>>,
+      focusAfter?: "to" | "cc" | "bcc" | null
+    ) => string;
     markComposeDirty: () => void;
   };
   helpers: {
@@ -82,6 +84,7 @@ export default function ComposeInlineCard({
     composeShowBcc,
     composeDraftId,
     composeOpen,
+    composeFieldsReset,
     draftSaving,
     draftSaveError,
     draftSavedAt,
@@ -164,6 +167,7 @@ export default function ComposeInlineCard({
           </div>
           <div className={`${threadStyles.info} ${styles.info}`}>
           <ComposeFields
+            key={`inline-fields-${composeFieldsReset}`}
             variant="inline"
             composeSubject={composeSubject}
             composeTo={composeTo}

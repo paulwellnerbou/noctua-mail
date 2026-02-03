@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Button } from "@radix-ui/themes";
 import { LexicalComposer } from "@lexical/react/LexicalComposer";
 import { RichTextPlugin } from "@lexical/react/LexicalRichTextPlugin";
 import { ContentEditable } from "@lexical/react/LexicalContentEditable";
@@ -67,67 +68,69 @@ function ComposeToolbar({ toolbarRef }: { toolbarRef: React.Ref<HTMLDivElement> 
     editor.dispatchCommand(TOGGLE_LINK_COMMAND, url.trim());
   };
 
+  const toolbarButtons: Array<{
+    title: string;
+    label: string;
+    onClick: () => void;
+  }> = [
+    {
+      title: "Bold",
+      label: "B",
+      onClick: () => editor.dispatchCommand(FORMAT_TEXT_COMMAND, "bold")
+    },
+    {
+      title: "Italic",
+      label: "I",
+      onClick: () => editor.dispatchCommand(FORMAT_TEXT_COMMAND, "italic")
+    },
+    {
+      title: "Underline",
+      label: "U",
+      onClick: () => editor.dispatchCommand(FORMAT_TEXT_COMMAND, "underline")
+    },
+    {
+      title: "Strikethrough",
+      label: "S",
+      onClick: () => editor.dispatchCommand(FORMAT_TEXT_COMMAND, "strikethrough")
+    },
+    {
+      title: "Bulleted list",
+      label: "• List",
+      onClick: () => editor.dispatchCommand(INSERT_UNORDERED_LIST_COMMAND, undefined)
+    },
+    {
+      title: "Numbered list",
+      label: "1. List",
+      onClick: () => editor.dispatchCommand(INSERT_ORDERED_LIST_COMMAND, undefined)
+    },
+    {
+      title: "Remove list",
+      label: "List ×",
+      onClick: () => editor.dispatchCommand(REMOVE_LIST_COMMAND, undefined)
+    },
+    {
+      title: "Link",
+      label: "Link",
+      onClick: toggleLink
+    }
+  ];
+
   return (
     <div className="compose-toolbar" ref={toolbarRef}>
-      <button
-        type="button"
-        className="icon-button small"
-        title="Bold"
-        onClick={() => editor.dispatchCommand(FORMAT_TEXT_COMMAND, "bold")}
-      >
-        B
-      </button>
-      <button
-        type="button"
-        className="icon-button small"
-        title="Italic"
-        onClick={() => editor.dispatchCommand(FORMAT_TEXT_COMMAND, "italic")}
-      >
-        I
-      </button>
-      <button
-        type="button"
-        className="icon-button small"
-        title="Underline"
-        onClick={() => editor.dispatchCommand(FORMAT_TEXT_COMMAND, "underline")}
-      >
-        U
-      </button>
-      <button
-        type="button"
-        className="icon-button small"
-        title="Strikethrough"
-        onClick={() => editor.dispatchCommand(FORMAT_TEXT_COMMAND, "strikethrough")}
-      >
-        S
-      </button>
-      <button
-        type="button"
-        className="icon-button small"
-        title="Bulleted list"
-        onClick={() => editor.dispatchCommand(INSERT_UNORDERED_LIST_COMMAND, undefined)}
-      >
-        • List
-      </button>
-      <button
-        type="button"
-        className="icon-button small"
-        title="Numbered list"
-        onClick={() => editor.dispatchCommand(INSERT_ORDERED_LIST_COMMAND, undefined)}
-      >
-        1. List
-      </button>
-      <button
-        type="button"
-        className="icon-button small"
-        title="Remove list"
-        onClick={() => editor.dispatchCommand(REMOVE_LIST_COMMAND, undefined)}
-      >
-        List ×
-      </button>
-      <button type="button" className="icon-button small" title="Link" onClick={toggleLink}>
-        Link
-      </button>
+      {toolbarButtons.map((item) => (
+        <Button
+          key={item.title}
+          type="button"
+          size="1"
+          variant="soft"
+          color="gray"
+          className="compose-toolbar-button"
+          title={item.title}
+          onClick={item.onClick}
+        >
+          {item.label}
+        </Button>
+      ))}
     </div>
   );
 }
@@ -244,6 +247,8 @@ export default function ComposeEditor({
 }: ComposeEditorProps) {
   const toolbarRef = useRef<HTMLDivElement | null>(null);
   const [toolbarHeight, setToolbarHeight] = useState(0);
+  const changeFrameRef = useRef<number | null>(null);
+  const pendingChangeRef = useRef<{ html: string; text: string } | null>(null);
   const initialConfig = useMemo(
     () => ({
       namespace: "noctua-compose",
@@ -280,6 +285,14 @@ export default function ComposeEditor({
     return () => observer.disconnect();
   }, []);
 
+  useEffect(() => {
+    return () => {
+      if (changeFrameRef.current !== null) {
+        window.cancelAnimationFrame(changeFrameRef.current);
+      }
+    };
+  }, []);
+
   return (
     <div
       className="compose-editor"
@@ -303,7 +316,14 @@ export default function ComposeEditor({
             editorState.read(() => {
               const html = $generateHtmlFromNodes(editor, null);
               const text = $getRoot().getTextContent();
-              onChange(html, text);
+              pendingChangeRef.current = { html, text };
+              if (changeFrameRef.current !== null) return;
+              changeFrameRef.current = window.requestAnimationFrame(() => {
+                changeFrameRef.current = null;
+                const payload = pendingChangeRef.current;
+                if (!payload) return;
+                onChange(payload.html, payload.text);
+              });
             });
           }}
         />

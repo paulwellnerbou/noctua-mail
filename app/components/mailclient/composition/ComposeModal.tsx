@@ -18,6 +18,7 @@ type ComposeModalProps = {
     composeOpenedAt: string;
     composeDraftId: string | null;
     composeOpen: boolean;
+    composeFieldsReset: number;
     draftSaving: boolean;
     draftSaveError: string | null;
     draftSavedAt: number | null;
@@ -60,8 +61,9 @@ type ComposeModalProps = {
     applyRecipientSelection: (
       current: string,
       selection: string,
-      setter: React.Dispatch<React.SetStateAction<string>>
-    ) => void;
+      setter: React.Dispatch<React.SetStateAction<string>>,
+      focusAfter?: "to" | "cc" | "bcc" | null
+    ) => string;
     markComposeDirty: () => void;
     popInCompose: () => void;
     minimizeCompose: () => void;
@@ -99,6 +101,7 @@ export default function ComposeModal({
     composeOpenedAt,
     composeDraftId,
     composeOpen,
+    composeFieldsReset,
     draftSaving,
     draftSaveError,
     draftSavedAt,
@@ -218,6 +221,7 @@ export default function ComposeModal({
         </div>
         <div className="compose-body">
           <ComposeFields
+            key={`modal-fields-${composeFieldsReset}`}
             variant="modal"
             composeSubject={composeSubject}
             composeTo={composeTo}

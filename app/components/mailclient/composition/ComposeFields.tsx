@@ -1,3 +1,4 @@
+import { startTransition, useState } from "react";
 import type React from "react";
 import { Button, Text, TextField } from "@radix-ui/themes";
 
@@ -27,13 +28,15 @@ type ComposeFieldsProps = {
   applyRecipientSelection: (
     current: string,
     selection: string,
-    setter: React.Dispatch<React.SetStateAction<string>>
-  ) => void;
+    setter: React.Dispatch<React.SetStateAction<string>>,
+    focusAfter?: RecipientFocus
+  ) => string;
   getComposeToken: (value: string) => string;
   markComposeDirty: () => void;
 };
 
 type RecipientFieldProps = {
+  variant: "inline" | "modal";
   label: string;
   focusKey: Exclude<RecipientFocus, null>;
   value: string;
@@ -45,14 +48,9 @@ type RecipientFieldProps = {
   setRecipientQuery: React.Dispatch<React.SetStateAction<string>>;
   setRecipientFocus: React.Dispatch<React.SetStateAction<RecipientFocus>>;
   setRecipientActiveIndex: React.Dispatch<React.SetStateAction<number>>;
-  applyRecipientSelection: (
-    current: string,
-    selection: string,
-    setter: React.Dispatch<React.SetStateAction<string>>
-  ) => void;
+  onChangeValue: (next: string) => void;
+  onPickRecipient: (current: string, selection: string) => void;
   getComposeToken: (value: string) => string;
-  setter: React.Dispatch<React.SetStateAction<string>>;
-  markComposeDirty: () => void;
   showToggle?: boolean;
   toggleLabel?: string;
   toggleTitle?: string;
@@ -60,6 +58,7 @@ type RecipientFieldProps = {
 };
 
 function RecipientField({
+  variant,
   label,
   focusKey,
   value,
@@ -71,10 +70,9 @@ function RecipientField({
   setRecipientQuery,
   setRecipientFocus,
   setRecipientActiveIndex,
-  applyRecipientSelection,
+  onChangeValue,
+  onPickRecipient,
   getComposeToken,
-  setter,
-  markComposeDirty,
   showToggle,
   toggleLabel,
   toggleTitle,
@@ -88,11 +86,12 @@ function RecipientField({
       <div className="compose-row">
         <div className="compose-input-wrap">
           <TextField.Root
+            id={`compose-${variant}-${focusKey}`}
+            name={`compose_${focusKey}`}
             size="2"
             value={value}
             onChange={(event) => {
-              markComposeDirty();
-              setter(event.target.value);
+              onChangeValue(event.target.value);
               setRecipientQuery(getComposeToken(event.target.value));
             }}
             onFocus={() => {
@@ -108,9 +107,7 @@ function RecipientField({
               if (!recipientOptions.length) return;
               if (event.key === "ArrowDown") {
                 event.preventDefault();
-                setRecipientActiveIndex((prev) =>
-                  Math.min(prev + 1, recipientOptions.length - 1)
-                );
+                setRecipientActiveIndex((prev) => Math.min(prev + 1, recipientOptions.length - 1));
               }
               if (event.key === "ArrowUp") {
                 event.preventDefault();
@@ -120,7 +117,7 @@ function RecipientField({
                 event.preventDefault();
                 const pick = recipientOptions[recipientActiveIndex];
                 if (pick) {
-                  applyRecipientSelection(value, pick, setter);
+                  onPickRecipient(value, pick);
                 }
               }
             }}
@@ -132,12 +129,10 @@ function RecipientField({
                 <button
                   key={`${option}-${index}`}
                   type="button"
-                  className={`compose-suggestion ${
-                    index === recipientActiveIndex ? "active" : ""
-                  }`}
+                  className={`compose-suggestion ${index === recipientActiveIndex ? "active" : ""}`}
                   onMouseDown={(event) => {
                     event.preventDefault();
-                    applyRecipientSelection(value, option, setter);
+                    onPickRecipient(value, option);
                   }}
                 >
                   {option}
@@ -189,6 +184,40 @@ export default function ComposeFields({
   getComposeToken,
   markComposeDirty
 }: ComposeFieldsProps) {
+  const [localSubject, setLocalSubject] = useState(composeSubject);
+  const [localTo, setLocalTo] = useState(composeTo);
+  const [localCc, setLocalCc] = useState(composeCc);
+  const [localBcc, setLocalBcc] = useState(composeBcc);
+
+  const commitSubject = (next: string) => {
+    markComposeDirty();
+    setLocalSubject(next);
+    startTransition(() => setComposeSubject(next));
+  };
+
+  const commitRecipient = (
+    next: string,
+    setter: React.Dispatch<React.SetStateAction<string>>,
+    setLocal: React.Dispatch<React.SetStateAction<string>>
+  ) => {
+    markComposeDirty();
+    setLocal(next);
+    startTransition(() => setter(next));
+  };
+
+  const pickRecipient = (
+    current: string,
+    selection: string,
+    setter: React.Dispatch<React.SetStateAction<string>>,
+    setLocal: React.Dispatch<React.SetStateAction<string>>,
+    focusKey: Exclude<RecipientFocus, null>
+  ) => {
+    markComposeDirty();
+    const next = applyRecipientSelection(current, selection, setter, focusKey);
+    setLocal(next);
+    setRecipientQuery("");
+  };
+
   const toggleLabel = composeShowBcc ? "Hide Cc/Bcc" : "Show Cc and Bcc";
   const toggleTitle = composeShowBcc ? "Hide Cc and Bcc" : "Show Cc and Bcc";
   const showFrom = variant === "inline";
@@ -199,11 +228,12 @@ export default function ComposeFields({
         Subject:
       </Text>
       <TextField.Root
+        id={`compose-${variant}-subject`}
+        name="compose_subject"
         size="2"
-        value={composeSubject}
+        value={localSubject}
         onChange={(event) => {
-          markComposeDirty();
-          setComposeSubject(event.target.value);
+          commitSubject(event.target.value);
         }}
         placeholder="Subject"
       />
@@ -214,7 +244,13 @@ export default function ComposeFields({
       <Text size="2" weight="medium" className="label">
         From:
       </Text>
-      <TextField.Root size="2" value={fromValue ?? ""} readOnly />
+      <TextField.Root
+        id={`compose-${variant}-from`}
+        name="compose_from"
+        size="2"
+        value={fromValue ?? ""}
+        readOnly
+      />
     </div>
   );
   const dateRow = (
@@ -230,12 +266,12 @@ export default function ComposeFields({
 
   return (
     <div className="compose-grid">
-      {variant === "inline" && subjectRow}
       {showFrom && fromRow}
       <RecipientField
+        variant={variant}
         label="To:"
         focusKey="to"
-        value={composeTo}
+        value={localTo}
         placeholder="recipient@example.com"
         recipientOptions={recipientOptions}
         recipientActiveIndex={recipientActiveIndex}
@@ -244,10 +280,11 @@ export default function ComposeFields({
         setRecipientQuery={setRecipientQuery}
         setRecipientFocus={setRecipientFocus}
         setRecipientActiveIndex={setRecipientActiveIndex}
-        applyRecipientSelection={applyRecipientSelection}
+        onChangeValue={(next) => commitRecipient(next, setComposeTo, setLocalTo)}
+        onPickRecipient={(current, selection) =>
+          pickRecipient(current, selection, setComposeTo, setLocalTo, "to")
+        }
         getComposeToken={getComposeToken}
-        setter={setComposeTo}
-        markComposeDirty={markComposeDirty}
         showToggle
         toggleLabel={toggleLabel}
         onToggle={() => setComposeShowBcc((value) => !value)}
@@ -255,9 +292,10 @@ export default function ComposeFields({
       />
       {composeShowBcc && (
         <RecipientField
+          variant={variant}
           label="Cc:"
           focusKey="cc"
-          value={composeCc}
+          value={localCc}
           placeholder="cc@example.com"
           recipientOptions={recipientOptions}
           recipientActiveIndex={recipientActiveIndex}
@@ -266,17 +304,19 @@ export default function ComposeFields({
           setRecipientQuery={setRecipientQuery}
           setRecipientFocus={setRecipientFocus}
           setRecipientActiveIndex={setRecipientActiveIndex}
-          applyRecipientSelection={applyRecipientSelection}
+          onChangeValue={(next) => commitRecipient(next, setComposeCc, setLocalCc)}
+          onPickRecipient={(current, selection) =>
+            pickRecipient(current, selection, setComposeCc, setLocalCc, "cc")
+          }
           getComposeToken={getComposeToken}
-          setter={setComposeCc}
-          markComposeDirty={markComposeDirty}
         />
       )}
       {composeShowBcc && (
         <RecipientField
+          variant={variant}
           label="Bcc:"
           focusKey="bcc"
-          value={composeBcc}
+          value={localBcc}
           placeholder="bcc@example.com"
           recipientOptions={recipientOptions}
           recipientActiveIndex={recipientActiveIndex}
@@ -285,13 +325,14 @@ export default function ComposeFields({
           setRecipientQuery={setRecipientQuery}
           setRecipientFocus={setRecipientFocus}
           setRecipientActiveIndex={setRecipientActiveIndex}
-          applyRecipientSelection={applyRecipientSelection}
+          onChangeValue={(next) => commitRecipient(next, setComposeBcc, setLocalBcc)}
+          onPickRecipient={(current, selection) =>
+            pickRecipient(current, selection, setComposeBcc, setLocalBcc, "bcc")
+          }
           getComposeToken={getComposeToken}
-          setter={setComposeBcc}
-          markComposeDirty={markComposeDirty}
         />
       )}
-      {variant === "modal" && subjectRow}
+      {subjectRow}
       {showDate && dateRow}
     </div>
   );
