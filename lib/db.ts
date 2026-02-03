@@ -838,26 +838,56 @@ function normalizeSearchFields(fields?: string[] | null) {
   return Array.from(columns);
 }
 
-function parseSearchInput(raw: string | null | undefined, fields?: string[] | null) {
+function parseSearchInput(
+  raw: string | null | undefined,
+  fields?: string[] | null,
+  accountEmail?: string | null
+) {
   const input = raw ?? "";
+
+  // Extract "from:" terms and handle "from:me"
   const fromTerms: string[] = [];
   const withoutFrom = input.replace(/(^|\s)from:("([^"]+)"|\S+)/gi, (match, lead, term) => {
     const cleaned = term.replace(/^"|"$/g, "").trim();
-    if (cleaned) fromTerms.push(cleaned);
+    if (cleaned) {
+      // Handle "from:me" - replace with current account email
+      if (cleaned.toLowerCase() === "me" && accountEmail) {
+        fromTerms.push(accountEmail);
+      } else {
+        fromTerms.push(cleaned);
+      }
+    }
     return lead ? " " : "";
   });
-  const rawQuery = withoutFrom.trim();
-  const baseQuery = buildFtsQuery(withoutFrom);
+
+  // Extract "to:" terms (searches in To, Cc, and Bcc fields)
+  const toTerms: string[] = [];
+  const withoutTo = withoutFrom.replace(/(^|\s)to:("([^"]+)"|\S+)/gi, (match, lead, term) => {
+    const cleaned = term.replace(/^"|"$/g, "").trim();
+    if (cleaned) toTerms.push(cleaned);
+    return lead ? " " : "";
+  });
+
+  // Extract "in:" terms (searches in folder names)
+  const inTerms: string[] = [];
+  const withoutIn = withoutTo.replace(/(^|\s)in:("([^"]+)"|\S+)/gi, (match, lead, term) => {
+    const cleaned = term.replace(/^"|"$/g, "").trim();
+    if (cleaned) inTerms.push(cleaned);
+    return lead ? " " : "";
+  });
+
+  const rawQuery = withoutIn.trim();
+  const baseQuery = buildFtsQuery(withoutIn);
   const columns = normalizeSearchFields(fields);
   if (!baseQuery) {
-    return { ftsQuery: null, fromTerms, rawQuery };
+    return { ftsQuery: null, fromTerms, toTerms, inTerms, rawQuery };
   }
   const tokens = baseQuery.split(/\s+AND\s+/);
   const scoped = tokens.map((token) => {
     const orParts = columns.map((col) => `${col}:${token}`);
     return orParts.length > 1 ? `(${orParts.join(" OR ")})` : orParts[0];
   });
-  return { ftsQuery: scoped.join(" AND "), fromTerms, rawQuery };
+  return { ftsQuery: scoped.join(" AND "), fromTerms, toTerms, inTerms, rawQuery };
 }
 
 function parseReferences(value?: string | null) {
@@ -950,7 +980,18 @@ async function getGroupCounts(params: {
   const { accountId, folderId, query, groupBy, fields, badges, attachmentsOnly, excludedFolderIds } =
     params;
   const db = await getDb();
-  const { ftsQuery, fromTerms, rawQuery } = parseSearchInput(query, fields);
+
+  // Get account email for "from:me" support
+  const accountRow = db
+    .prepare(`SELECT email FROM accounts WHERE id = ?`)
+    .get(accountId) as { email?: string | null } | undefined;
+  const accountEmail = accountRow?.email?.toLowerCase() ?? "";
+
+  const { ftsQuery, fromTerms, toTerms, inTerms, rawQuery } = parseSearchInput(
+    query,
+    fields,
+    accountEmail
+  );
   const hasQuery = Boolean(ftsQuery);
   const idQuery = rawQuery.trim();
   const hasIdQuery = Boolean(idQuery);
@@ -958,10 +999,40 @@ async function getGroupCounts(params: {
   const args: any[] = [accountId];
   if (folderId) args.push(folderId);
   let where = baseWhere;
+
+  // Apply "from:" filter
   fromTerms.forEach(() => {
     where += " AND lower(m.fromAddr) LIKE ?";
   });
   fromTerms.forEach((term) => args.push(`%${term.toLowerCase()}%`));
+
+  // Apply "to:" filter (searches in To, Cc, and Bcc fields)
+  toTerms.forEach(() => {
+    where += " AND (lower(m.toAddr) LIKE ? OR lower(m.ccAddr) LIKE ? OR lower(m.bccAddr) LIKE ?)";
+  });
+  toTerms.forEach((term) => {
+    const pattern = `%${term.toLowerCase()}%`;
+    args.push(pattern, pattern, pattern);
+  });
+
+  // Apply "in:" filter (searches in folder names)
+  if (inTerms.length > 0) {
+    const folderRows = db
+      .prepare(
+        `SELECT id FROM folders WHERE accountId = ? AND (${inTerms
+          .map(() => "lower(name) LIKE ?")
+          .join(" OR ")})`
+      )
+      .all(accountId, ...inTerms.map((term) => `%${term.toLowerCase()}%`)) as Array<{ id: string }>;
+    const folderIds = folderRows.map((row) => row.id);
+    if (folderIds.length > 0) {
+      where += ` AND m.folderId IN (${folderIds.map(() => "?").join(",")})`;
+      args.push(...folderIds);
+    } else {
+      // No matching folders, so no messages will match
+      where += " AND 0 = 1";
+    }
+  }
   if (hasQuery || hasIdQuery) {
     const clauses: string[] = [];
     if (hasQuery) {
@@ -1125,7 +1196,18 @@ async function getTotalCount(params: {
   const db = await getDb();
   const { accountId, folderId, query, fields, badges, attachmentsOnly, excludedFolderIds } =
     params;
-  const { ftsQuery, fromTerms, rawQuery } = parseSearchInput(query, fields);
+
+  // Get account email for "from:me" support
+  const accountRow = db
+    .prepare(`SELECT email FROM accounts WHERE id = ?`)
+    .get(accountId) as { email?: string | null } | undefined;
+  const accountEmail = accountRow?.email?.toLowerCase() ?? "";
+
+  const { ftsQuery, fromTerms, toTerms, inTerms, rawQuery } = parseSearchInput(
+    query,
+    fields,
+    accountEmail
+  );
   const hasQuery = Boolean(ftsQuery);
   const idQuery = rawQuery.trim();
   const hasIdQuery = Boolean(idQuery);
@@ -1133,10 +1215,40 @@ async function getTotalCount(params: {
   const args: any[] = [accountId];
   if (folderId) args.push(folderId);
   let where = baseWhere;
+
+  // Apply "from:" filter
   fromTerms.forEach(() => {
     where += " AND lower(m.fromAddr) LIKE ?";
   });
   fromTerms.forEach((term) => args.push(`%${term.toLowerCase()}%`));
+
+  // Apply "to:" filter (searches in To, Cc, and Bcc fields)
+  toTerms.forEach(() => {
+    where += " AND (lower(m.toAddr) LIKE ? OR lower(m.ccAddr) LIKE ? OR lower(m.bccAddr) LIKE ?)";
+  });
+  toTerms.forEach((term) => {
+    const pattern = `%${term.toLowerCase()}%`;
+    args.push(pattern, pattern, pattern);
+  });
+
+  // Apply "in:" filter (searches in folder names)
+  if (inTerms.length > 0) {
+    const folderRows = db
+      .prepare(
+        `SELECT id FROM folders WHERE accountId = ? AND (${inTerms
+          .map(() => "lower(name) LIKE ?")
+          .join(" OR ")})`
+      )
+      .all(accountId, ...inTerms.map((term) => `%${term.toLowerCase()}%`)) as Array<{ id: string }>;
+    const folderIds = folderRows.map((row) => row.id);
+    if (folderIds.length > 0) {
+      where += ` AND m.folderId IN (${folderIds.map(() => "?").join(",")})`;
+      args.push(...folderIds);
+    } else {
+      // No matching folders, so no messages will match
+      where += " AND 0 = 1";
+    }
+  }
   if (hasQuery || hasIdQuery) {
     const clauses: string[] = [];
     if (hasQuery) {
@@ -1520,7 +1632,18 @@ export async function listMessages(params: {
   } = params;
   const db = await getDb();
   const offset = (page - 1) * pageSize;
-  const { ftsQuery, fromTerms, rawQuery } = parseSearchInput(query, fields);
+
+  // Get account email for "from:me" support
+  const accountRow = db
+    .prepare(`SELECT email FROM accounts WHERE id = ?`)
+    .get(accountId) as { email?: string | null } | undefined;
+  const accountEmail = accountRow?.email?.toLowerCase() ?? "";
+
+  const { ftsQuery, fromTerms, toTerms, inTerms, rawQuery } = parseSearchInput(
+    query,
+    fields,
+    accountEmail
+  );
   const hasQuery = Boolean(ftsQuery);
   const idQuery = rawQuery.trim();
   const hasIdQuery = Boolean(idQuery);
@@ -1528,10 +1651,40 @@ export async function listMessages(params: {
   const args: any[] = [accountId];
   if (folderId) args.push(folderId);
   let where = baseWhere;
+
+  // Apply "from:" filter
   fromTerms.forEach(() => {
     where += " AND lower(m.fromAddr) LIKE ?";
   });
   fromTerms.forEach((term) => args.push(`%${term.toLowerCase()}%`));
+
+  // Apply "to:" filter (searches in To, Cc, and Bcc fields)
+  toTerms.forEach(() => {
+    where += " AND (lower(m.toAddr) LIKE ? OR lower(m.ccAddr) LIKE ? OR lower(m.bccAddr) LIKE ?)";
+  });
+  toTerms.forEach((term) => {
+    const pattern = `%${term.toLowerCase()}%`;
+    args.push(pattern, pattern, pattern);
+  });
+
+  // Apply "in:" filter (searches in folder names)
+  if (inTerms.length > 0) {
+    const folderRows = db
+      .prepare(
+        `SELECT id FROM folders WHERE accountId = ? AND (${inTerms
+          .map(() => "lower(name) LIKE ?")
+          .join(" OR ")})`
+      )
+      .all(accountId, ...inTerms.map((term) => `%${term.toLowerCase()}%`)) as Array<{ id: string }>;
+    const folderIds = folderRows.map((row) => row.id);
+    if (folderIds.length > 0) {
+      where += ` AND m.folderId IN (${folderIds.map(() => "?").join(",")})`;
+      args.push(...folderIds);
+    } else {
+      // No matching folders, so no messages will match
+      where += " AND 0 = 1";
+    }
+  }
   if (hasQuery || hasIdQuery) {
     const clauses: string[] = [];
     if (hasQuery) {
@@ -1692,7 +1845,18 @@ export async function listThreads(params: {
   } = params;
   const db = await getDb();
   const offset = (page - 1) * pageSize;
-  const { ftsQuery, fromTerms, rawQuery } = parseSearchInput(query, fields);
+
+  // Get account email for "from:me" support
+  const accountRow = db
+    .prepare(`SELECT email FROM accounts WHERE id = ?`)
+    .get(accountId) as { email?: string | null } | undefined;
+  const accountEmail = accountRow?.email?.toLowerCase() ?? "";
+
+  const { ftsQuery, fromTerms, toTerms, inTerms, rawQuery } = parseSearchInput(
+    query,
+    fields,
+    accountEmail
+  );
   const hasQuery = Boolean(ftsQuery);
   const idQuery = rawQuery.trim();
   const hasIdQuery = Boolean(idQuery);
@@ -1700,10 +1864,40 @@ export async function listThreads(params: {
   const args: any[] = [accountId];
   if (folderId) args.push(folderId);
   let where = baseWhere;
+
+  // Apply "from:" filter
   fromTerms.forEach(() => {
     where += " AND lower(m.fromAddr) LIKE ?";
   });
   fromTerms.forEach((term) => args.push(`%${term.toLowerCase()}%`));
+
+  // Apply "to:" filter (searches in To, Cc, and Bcc fields)
+  toTerms.forEach(() => {
+    where += " AND (lower(m.toAddr) LIKE ? OR lower(m.ccAddr) LIKE ? OR lower(m.bccAddr) LIKE ?)";
+  });
+  toTerms.forEach((term) => {
+    const pattern = `%${term.toLowerCase()}%`;
+    args.push(pattern, pattern, pattern);
+  });
+
+  // Apply "in:" filter (searches in folder names)
+  if (inTerms.length > 0) {
+    const folderRows = db
+      .prepare(
+        `SELECT id FROM folders WHERE accountId = ? AND (${inTerms
+          .map(() => "lower(name) LIKE ?")
+          .join(" OR ")})`
+      )
+      .all(accountId, ...inTerms.map((term) => `%${term.toLowerCase()}%`)) as Array<{ id: string }>;
+    const folderIds = folderRows.map((row) => row.id);
+    if (folderIds.length > 0) {
+      where += ` AND m.folderId IN (${folderIds.map(() => "?").join(",")})`;
+      args.push(...folderIds);
+    } else {
+      // No matching folders, so no messages will match
+      where += " AND 0 = 1";
+    }
+  }
   if (hasQuery || hasIdQuery) {
     const clauses: string[] = [];
     if (hasQuery) {

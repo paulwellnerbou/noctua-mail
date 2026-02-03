@@ -1,5 +1,6 @@
 import { Eye, X } from "lucide-react";
 import type { Attachment } from "@/lib/data";
+import { openDetachedWindow } from "@/lib/ui/openDetachedWindow";
 
 const PREVIEW_MIME_PREFIXES = ["image/", "text/"];
 const PREVIEW_MIME_TYPES = new Set([
@@ -55,10 +56,14 @@ export default function AttachmentsList({
               <a
                 className="icon-button ghost attachment-preview"
                 href={file.url ?? file.dataUrl ?? "#"}
-                target="_blank"
-                rel="noreferrer"
                 aria-label="Preview attachment"
                 title="Preview attachment"
+                onClick={(event) => {
+                  event.preventDefault();
+                  const url = file.url ?? file.dataUrl;
+                  if (!url) return;
+                  openDetachedWindow(url, { width: 920, height: 760 });
+                }}
               >
                 <Eye size={12} />
               </a>

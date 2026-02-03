@@ -7,7 +7,7 @@ import {
   ChevronDown,
   Edit3,
   FileText,
-  Folder,
+  Folder as FolderIcon,
   Moon,
   RefreshCw,
   Settings,
@@ -261,7 +261,7 @@ export default function TopBar({ state, ui, actions }: TopBarProps) {
                     {currentFolder ? (
                       <Badge size="1" variant="soft" color={badgeColors.folder}>
                         <span className={styles.scopeFolderBadge} title={currentFolderPath}>
-                          <Folder size={12} />
+                          <FolderIcon size={12} />
                           {currentFolder.name}
                         </span>
                       </Badge>

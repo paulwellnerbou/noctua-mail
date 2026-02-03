@@ -10,6 +10,7 @@ type MessageGroup = {
 
 type MessageListHeaderProps = {
   state: {
+    listWidth: number;
     searchScope: "folder" | "all";
     activeFolderName?: string;
     loadedMessageCount: number;
@@ -37,6 +38,7 @@ type MessageListHeaderProps = {
 
 export default function MessageListHeader({ state, actions }: MessageListHeaderProps) {
   const {
+    listWidth,
     searchScope,
     activeFolderName,
     loadedMessageCount,
@@ -94,6 +96,7 @@ export default function MessageListHeader({ state, actions }: MessageListHeaderP
   const handleToggleGroups = () => {
     startTransition(() => toggleAllGroups());
   };
+  const collapseViewSwitcher = listWidth < 720;
 
   return (
     <div className={styles.header}>
@@ -131,16 +134,31 @@ export default function MessageListHeader({ state, actions }: MessageListHeaderP
         </span>
       </div>
       <div className={styles.actions}>
-        <SegmentedControl.Root
-          size="2"
-          value={localView}
-          onValueChange={handleViewChange}
-          className={styles.segmented}
-        >
-          <SegmentedControl.Item value="compact">Compact</SegmentedControl.Item>
-          <SegmentedControl.Item value="card">Cards</SegmentedControl.Item>
-          <SegmentedControl.Item value="table">Table</SegmentedControl.Item>
-        </SegmentedControl.Root>
+        {collapseViewSwitcher ? (
+          <Select.Root
+            size="2"
+            value={localView}
+            onValueChange={handleViewChange}
+          >
+            <Select.Trigger className={styles.viewSelectTrigger} color="gray" />
+            <Select.Content position="popper">
+              <Select.Item value="compact">View: Compact</Select.Item>
+              <Select.Item value="card">View: Cards</Select.Item>
+              <Select.Item value="table">View: Table</Select.Item>
+            </Select.Content>
+          </Select.Root>
+        ) : (
+          <SegmentedControl.Root
+            size="2"
+            value={localView}
+            onValueChange={handleViewChange}
+            className={styles.segmented}
+          >
+            <SegmentedControl.Item value="compact">Compact</SegmentedControl.Item>
+            <SegmentedControl.Item value="card">Cards</SegmentedControl.Item>
+            <SegmentedControl.Item value="table">Table</SegmentedControl.Item>
+          </SegmentedControl.Root>
+        )}
         <div className={styles.rightActions}>
           <Select.Root
             size="2"

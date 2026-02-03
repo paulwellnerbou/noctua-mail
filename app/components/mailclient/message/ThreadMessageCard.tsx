@@ -22,6 +22,7 @@ import AttachmentsList from "../../AttachmentsList";
 import HtmlMessage from "../../HtmlMessage";
 import QuoteRenderer from "../../QuoteRenderer";
 import FolderBadges from "../folder/FolderBadges";
+import CalendarEventPreview from "./CalendarEventPreview";
 
 type MessageTab = "html" | "text" | "markdown" | "source";
 
@@ -556,6 +557,7 @@ export default function ThreadMessageCard({
             <Collapsible.Content className={`${styles.content} ${styles.collapsibleContent}`}>
               <div className={styles.collapsibleInner}>
                 {content}
+                <CalendarEventPreview attachments={message.attachments ?? []} />
                 <AttachmentsList attachments={message.attachments ?? []} />
               </div>
             </Collapsible.Content>

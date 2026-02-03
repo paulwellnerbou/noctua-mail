@@ -38,7 +38,7 @@ function hasCalendarMime(value?: string | null) {
   return CALENDAR_MIME_HINTS.some((hint) => normalized.includes(hint));
 }
 
-function isCalendarAttachment(attachment: Attachment) {
+export function isCalendarAttachment(attachment: Attachment) {
   if (hasCalendarMime(attachment.contentType)) return true;
   const filename = normalize(attachment.filename);
   return CALENDAR_FILENAME_EXTENSIONS.some((ext) => filename.endsWith(ext));

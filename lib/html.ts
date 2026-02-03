@@ -8,6 +8,14 @@ export function stripConditionalComments(input: string) {
   return input.replace(/<!--\s*\[if[\s\S]*?<!\s*\[endif\s*\]\s*-->/gi, "");
 }
 
+export function sanitizeHtmlForDisplay(input: string) {
+  return input
+    .replace(/<script[\s\S]*?>[\s\S]*?<\/script>/gi, "")
+    .replace(/<link[\s\S]*?>/gi, "")
+    .replace(/\son[a-z]+\s*=\s*["'][\s\S]*?["']/gi, "")
+    .replace(/\s(href|src)\s*=\s*["']\s*javascript:[^"']*["']/gi, "");
+}
+
 export function escapeHtml(value: string) {
   return value
     .replace(/&/g, "&amp;")

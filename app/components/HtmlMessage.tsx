@@ -1,15 +1,7 @@
 import { memo, useEffect, useRef } from "react";
-import { stripConditionalComments } from "@/lib/html";
+import { sanitizeHtmlForDisplay, stripConditionalComments } from "@/lib/html";
 
 const stylesheetCache = new Map<string, string>();
-
-function sanitizeHtml(input: string) {
-  return input
-    .replace(/<script[\s\S]*?>[\s\S]*?<\/script>/gi, "")
-    .replace(/<link[\s\S]*?>/gi, "")
-    .replace(/\son[a-z]+\s*=\s*["'][\s\S]*?["']/gi, "")
-    .replace(/\s(href|src)\s*=\s*["']\s*javascript:[^"']*["']/gi, "");
-}
 
 function scaleFontSizes(input: string) {
   return input
@@ -157,7 +149,7 @@ function HtmlMessage({
     const cleanedHtml = stripConditionalComments(rawHtml);
     const hasExplicitColor = /(^|[^-])color\s*:/i.test(cleanedHtml);
     const externalStylesheets = extractStylesheetLinks(cleanedHtml);
-    const safeHtml = sanitizeHtml(cleanedHtml);
+    const safeHtml = sanitizeHtmlForDisplay(cleanedHtml);
     const hostEl = root.host as HTMLElement;
     hostEl.setAttribute("data-theme", darkMode ? "dark" : "light");
     hostEl.style.setProperty("--zoom", String(zoom));

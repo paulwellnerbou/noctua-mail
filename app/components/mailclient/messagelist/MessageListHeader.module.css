@@ -36,6 +36,10 @@
   width: max-content;
 }
 
+.viewSelectTrigger {
+  min-width: 160px;
+}
+
 .rightActions {
   display: flex;
   align-items: center;

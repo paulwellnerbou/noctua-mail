@@ -56,7 +56,9 @@ import {
   buildQuotedHtmlPartsFromText,
   escapeHtml
 } from "@/lib/html";
-import { CALENDAR_INVITE_FLAG, withCalendarInviteFlag } from "@/lib/messageFlags";
+import { withCalendarInviteFlag } from "@/lib/messageFlags";
+import { openDetachedWindow } from "@/lib/ui/openDetachedWindow";
+import { getImapFlagBadges, hasHtmlContent } from "@/lib/ui/messageView";
 import ThreadJsonModal from "./mailclient/message/ThreadJsonModal";
 import ThreadView from "./mailclient/message/ThreadView";
 import TopBar from "./mailclient/TopBar";
@@ -78,77 +80,6 @@ function buildFolderTree(items: Folder[]) {
   });
 
   return map;
-}
-
-function hasHtmlContent(html?: string) {
-  if (!html) return false;
-  const trimmed = html.trim();
-  if (!trimmed || trimmed === "0") return false;
-  if (/<(img|table|svg|video|iframe|canvas|object|embed)\b/i.test(trimmed)) return true;
-  const textOnly = trimmed
-    .replace(/<style[\s\S]*?<\/style>/gi, " ")
-    .replace(/<script[\s\S]*?<\/script>/gi, " ")
-    .replace(/<[^>]+>/g, " ")
-    .replace(/&nbsp;/gi, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-  return textOnly.length > 0;
-}
-
-function getImapFlagBadges(message: Message) {
-  const rawFlags =
-    message.flags && message.flags.length > 0
-      ? message.flags
-      : [
-          message.seen ? "\\Seen" : null,
-          message.answered ? "\\Answered" : null,
-          message.flagged ? "\\Flagged" : null,
-          message.deleted ? "\\Deleted" : null,
-          message.draft ? "\\Draft" : null,
-          message.recent ? "\\Recent" : null
-        ].filter(Boolean);
-  const hasForwardedHeader = Boolean(message.xForwardedMessageId?.trim());
-  const seen = new Set<string>();
-  const badges = (rawFlags as string[])
-    .map((flag) => flag.trim())
-    .filter((flag) => {
-      if (!flag) return false;
-      const key = flag.toLowerCase();
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    })
-    .map((flag) => {
-      const lower = flag.toLowerCase();
-      const isForwarded = lower === "$forwarded" || lower === "forwarded";
-      const isCalendarInvite = lower === CALENDAR_INVITE_FLAG;
-      if (lower === "\\recent" && (message.seen || message.draft)) return null;
-      const label = isForwarded
-        ? "Forwarded"
-        : isCalendarInvite
-        ? "Calendar Invite"
-        : lower === "\\recent"
-        ? "New"
-        : flag.startsWith("\\")
-        ? flag.slice(1)
-        : flag;
-      let kind = "custom";
-      if (lower === "\\seen") kind = "seen";
-      if (lower === "\\answered") kind = "answered";
-      if (lower === "\\flagged") kind = "flagged";
-      if (lower === "\\deleted") kind = "deleted";
-      if (lower === "\\draft") kind = "draft";
-      if (lower === "\\recent") kind = "new";
-      if (lower === "pinned") kind = "pinned";
-      if (isForwarded) kind = "forwarded";
-      if (isCalendarInvite) kind = "calendar";
-      return { label, kind };
-    })
-    .filter(Boolean) as { label: string; kind: string }[];
-  if (hasForwardedHeader && !badges.some((badge) => badge.kind === "forwarded")) {
-    badges.unshift({ label: "Forwarded", kind: "forwarded" });
-  }
-  return badges;
 }
 
 type ExceptionEntry = {
@@ -402,6 +333,7 @@ export default function MailClient() {
   const [mailCheckMode, setMailCheckMode] = useState<"idle" | "polling">("polling");
   const [streamMode, setStreamMode] = useState<"stream" | "polling" | "idle">("polling");
   const pendingJumpMessageIdRef = useRef<string | null>(null);
+  const pendingJumpLocalMessageIdRef = useRef<string | null>(null);
   const pendingJumpRefreshKeyRef = useRef("");
   const lastUidNextRef = useRef<Record<string, number>>({});
   const lastUidNextByFolderRef = useRef<Record<string, number>>({});
@@ -571,14 +503,17 @@ export default function MailClient() {
     startTransition(() => setActiveMessageId(target.id));
     return true;
   };
-  const clearNotificationDeepLink = (messageId?: string | null) => {
+  const clearUrlParam = (name: string, value?: string | null) => {
     if (typeof window === "undefined") return;
     const url = new URL(window.location.href);
-    const current = url.searchParams.get("messageId");
+    const current = url.searchParams.get(name);
     if (!current) return;
-    if (messageId && current !== messageId) return;
-    url.searchParams.delete("messageId");
+    if (value && current !== value) return;
+    url.searchParams.delete(name);
     window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
+  };
+  const clearNotificationDeepLink = (messageId?: string | null) => {
+    clearUrlParam("messageId", messageId);
   };
   const listLoading = loadingMessages || refreshingMessages;
   const selectedSearchFields = useMemo(() => {
@@ -2870,6 +2805,8 @@ export default function MailClient() {
       handleDeleteMessage={handleDeleteMessage}
       handleDownloadEml={handleDownloadEml}
       handleResyncMessage={handleResyncMessage}
+      handleOpenInNewWindow={handleOpenInNewWindow}
+      handleOpenHtmlInNewWindow={handleOpenHtmlInNewWindow}
       onShowRelated={handleShowRelated}
       isTrashFolder={isTrashFolder}
       onOpenChange={onOpenChange}
@@ -3472,10 +3409,28 @@ export default function MailClient() {
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    const messageId = new URL(window.location.href).searchParams.get("messageId");
-    if (!messageId) return;
-    pendingJumpMessageIdRef.current = messageId;
-    pendingJumpRefreshKeyRef.current = "";
+    const params = new URL(window.location.href).searchParams;
+    const accountIdParam = params.get("accountId");
+    const scopeParam = params.get("scope");
+    const queryParam = params.get("q");
+    const messageId = params.get("messageId");
+    const localMessageId = params.get("openMessageId");
+    if (accountIdParam) {
+      setActiveAccountId(accountIdParam);
+    }
+    if (scopeParam === "all" || scopeParam === "folder") {
+      setSearchScope(scopeParam);
+    }
+    if (queryParam?.trim()) {
+      setQuery(queryParam.trim());
+    }
+    if (messageId) {
+      pendingJumpMessageIdRef.current = messageId;
+      pendingJumpRefreshKeyRef.current = "";
+    }
+    if (localMessageId) {
+      pendingJumpLocalMessageIdRef.current = localMessageId;
+    }
   }, []);
 
   useEffect(() => {
@@ -3973,6 +3928,25 @@ export default function MailClient() {
       setActiveMessageId(filteredMessages[0]?.id ?? "");
     }
   }, [activeMessageId, composeMode, composeOpen, filteredMessages]);
+
+  useEffect(() => {
+    const pending = pendingJumpLocalMessageIdRef.current;
+    if (!pending) return;
+    const target = messageById.get(pending);
+    if (!target) return;
+    setSearchScope("folder");
+    setActiveFolderId(target.folderId);
+    selectionStore.setActiveId(target.id);
+    startTransition(() => setActiveMessageId(target.id));
+    pendingJumpLocalMessageIdRef.current = null;
+    if (typeof window !== "undefined") {
+      const url = new URL(window.location.href);
+      if (url.searchParams.get("openMessageId") === pending) {
+        url.searchParams.delete("openMessageId");
+        window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
+      }
+    }
+  }, [messageById, selectionStore]);
 
   useEffect(() => {
     const pending = pendingJumpMessageIdRef.current;
@@ -4514,6 +4488,38 @@ export default function MailClient() {
       URL.revokeObjectURL(url);
     } catch {
       reportError("Download failed due to a network error.");
+    }
+  };
+
+  const handleOpenInNewWindow = (message: Message) => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams({
+      accountId: message.accountId,
+      messageId: message.id
+    });
+    const opened = openDetachedWindow(`/message/window?${params.toString()}`);
+    if (!opened) {
+      pushNotice({
+        type: "warning",
+        title: "Pop-up blocked",
+        description: "Allow pop-ups to open the message in a new window."
+      });
+    }
+  };
+
+  const handleOpenHtmlInNewWindow = (message: Message) => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams({
+      accountId: message.accountId,
+      messageId: message.id
+    });
+    const opened = openDetachedWindow(`/api/message/html?${params.toString()}`);
+    if (!opened) {
+      pushNotice({
+        type: "warning",
+        title: "Pop-up blocked",
+        description: "Allow pop-ups to open the HTML debug view."
+      });
     }
   };
 
@@ -5378,6 +5384,7 @@ export default function MailClient() {
           >
             <MessageListHeader
               state={{
+                listWidth,
                 searchScope,
                 activeFolderName,
                 loadedMessageCount,

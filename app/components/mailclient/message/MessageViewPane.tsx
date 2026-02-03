@@ -6,32 +6,36 @@ type MessageViewPaneProps = {
   onShowJson: () => void;
   onEvictThreadCache: () => void;
   children: React.ReactNode;
+  hideToolbar?: boolean;
 };
 
 export default function MessageViewPane({
   onShowJson,
   onEvictThreadCache,
-  children
+  children,
+  hideToolbar = false
 }: MessageViewPaneProps) {
   return (
     <section className={styles.pane}>
-      <div className={styles.toolbar}>
-        <div className={styles.toolbarActions}>
-          <Button size="1" variant="surface" onClick={onShowJson}>
-            Show JSON
-          </Button>
-          <Button
-            size="1"
-            variant="surface"
-            color="gray"
-            onClick={onEvictThreadCache}
-            title="Evict cached thread data"
-            aria-label="Evict thread cache"
-          >
-            Evict Thread Cache
-          </Button>
+      {!hideToolbar && (
+        <div className={styles.toolbar}>
+          <div className={styles.toolbarActions}>
+            <Button size="1" variant="surface" onClick={onShowJson}>
+              Show JSON
+            </Button>
+            <Button
+              size="1"
+              variant="surface"
+              color="gray"
+              onClick={onEvictThreadCache}
+              title="Evict cached thread data"
+              aria-label="Evict thread cache"
+            >
+              Evict Thread Cache
+            </Button>
+          </div>
         </div>
-      </div>
+      )}
       <div className={styles.threadView}>{children}</div>
     </section>
   );
