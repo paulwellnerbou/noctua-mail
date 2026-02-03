@@ -1,6 +1,6 @@
 import { memo, useEffect, useRef, useState } from "react";
 import type React from "react";
-import { GitBranch, Paperclip, Search, Trash2 } from "lucide-react";
+import { CalendarDays, GitBranch, Paperclip, Search, Trash2 } from "lucide-react";
 import { Badge, Checkbox, IconButton, Text } from "@radix-ui/themes";
 import { CaretRightIcon } from "@radix-ui/react-icons";
 import { badgeColors } from "@/lib/ui/badgeColors";
@@ -49,6 +49,7 @@ type MessageRowProps = {
   quickActions?: React.ReactNode;
   messageMenu: React.ReactNode;
   showAttachmentIcon: boolean;
+  showCalendarInviteIcon: boolean;
   showNewBadge: boolean;
   showCompactDivider?: boolean;
 };
@@ -93,6 +94,7 @@ function MessageRow({
   quickActions,
   messageMenu,
   showAttachmentIcon,
+  showCalendarInviteIcon,
   showNewBadge,
   showCompactDivider
 }: MessageRowProps) {
@@ -325,7 +327,12 @@ function MessageRow({
             {message.subject}
           </Text>
         </div>
-        {(showFolderBadgesInSubjectMeta || showThreadIndicator || showAttachmentIcon) && (
+        {(
+          showFolderBadgesInSubjectMeta ||
+          showThreadIndicator ||
+          showAttachmentIcon ||
+          showCalendarInviteIcon
+        ) && (
           <div className={styles.subjectMeta}>
             {showFolderBadgesInSubjectMeta && folderBadges}
             {showThreadIndicator && (
@@ -349,6 +356,18 @@ function MessageRow({
                 aria-label="Attachments"
               >
                 <Paperclip size={12} />
+              </Badge>
+            )}
+            {showCalendarInviteIcon && (
+              <Badge
+                size="1"
+                variant="soft"
+                color={badgeColors.calendarInvite}
+                className={badgeStyles.badge}
+                title="Calendar invite"
+                aria-label="Calendar invite"
+              >
+                <CalendarDays size={12} />
               </Badge>
             )}
           </div>
@@ -381,6 +400,7 @@ const areEqual = (prev: MessageRowProps, next: MessageRowProps) =>
   prev.fromText === next.fromText &&
   prev.fromTooltip === next.fromTooltip &&
   prev.showAttachmentIcon === next.showAttachmentIcon &&
+  prev.showCalendarInviteIcon === next.showCalendarInviteIcon &&
   prev.showNewBadge === next.showNewBadge &&
   prev.showCompactDivider === next.showCompactDivider &&
   prev.deleteTitle === next.deleteTitle &&

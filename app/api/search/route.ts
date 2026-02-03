@@ -13,6 +13,10 @@ export async function GET(request: Request) {
   const fields = fieldsParam ? fieldsParam.split(",").filter(Boolean) : undefined;
   const badgesParam = searchParams.get("badges");
   const badges = badgesParam ? badgesParam.split(",").filter(Boolean) : undefined;
+  const excludedFolderIdsParam = searchParams.get("excludeFolderIds");
+  const excludedFolderIds = excludedFolderIdsParam
+    ? excludedFolderIdsParam.split(",").map((value) => value.trim()).filter(Boolean)
+    : undefined;
   const attachmentsOnly = searchParams.get("attachments") === "1";
   const page = Math.max(1, Number(searchParams.get("page") ?? 1) || 1);
   const pageSize = Math.max(1, Math.min(1000, Number(searchParams.get("pageSize") ?? 200) || 200));
@@ -31,7 +35,8 @@ export async function GET(request: Request) {
     groupBy,
     fields,
     badges,
-    attachmentsOnly
+    attachmentsOnly,
+    excludedFolderIds
   });
 
   return NextResponse.json({

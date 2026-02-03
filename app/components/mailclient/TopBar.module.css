@@ -60,6 +60,7 @@
   align-items: center;
   gap: 8px;
   flex: 0 0 auto;
+  position: relative;
 }
 
 .searchInput {
@@ -71,11 +72,74 @@
   min-width: 160px;
 }
 
+.scopeButton {
+  justify-content: space-between;
+}
+
+.searchMenuContent :global(.rt-BaseMenuItemIndicator) {
+  display: none;
+}
+
+.searchMenuContent :global(.rt-BaseMenuCheckboxItem),
+.searchMenuContent :global(.rt-BaseMenuRadioItem) {
+  padding-left: var(--space-2);
+}
+
+.menuCheckboxLabel {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.menuCheckboxLabelIndented {
+  padding-left: 16px;
+}
+
+.menuCheckboxIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.scopeMenuRow {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.scopeFolderBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
 .filterButton {
   max-width: 220px;
+  min-width: 0;
+  overflow: hidden;
+  transition: width 180ms ease;
+}
+
+.filterButtonLabel {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.filterLabelMeasure {
+  position: absolute;
+  visibility: hidden;
+  pointer-events: none;
+  height: 0;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.filterLabelMeasureText {
+  display: inline-block;
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: normal;
 }
 
 .actionRow {
@@ -233,6 +297,7 @@
     flex: 1 1 180px;
     max-width: none;
     min-width: 0;
+    width: auto !important;
   }
 
   .actionRow {

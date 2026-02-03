@@ -59,6 +59,7 @@ export async function POST(request: Request) {
     inReplyTo?: string;
     references?: string[];
     replyTo?: string;
+    xForwardedMessageId?: string;
     attachments?: Array<{
       filename: string;
       contentType: string;
@@ -112,6 +113,7 @@ export async function POST(request: Request) {
     inReplyTo: payload.inReplyTo,
     references: payload.references,
     replyTo: payload.replyTo,
+    xForwardedMessageId: payload.xForwardedMessageId,
     ...(attachments.length > 0 ? { attachments } : {})
   });
 

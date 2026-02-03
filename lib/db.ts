@@ -14,6 +14,7 @@ import type {
 import { accounts as seedAccounts, folders as seedFolders } from "./data";
 import { decodeSecret, encodeSecret, shouldStorePasswordInDb } from "./secret";
 import { applyCachedCredentials } from "./credentials";
+import { CALENDAR_INVITE_FLAG } from "./messageFlags";
 import { randomUUID } from "crypto";
 
 let dbInstance: any | null = null;
@@ -83,6 +84,7 @@ function initSchema(db: any) {
       messageId TEXT,
       inReplyTo TEXT,
       "references" TEXT,
+      xForwardedMessageId TEXT,
       subject TEXT NOT NULL,
       fromAddr TEXT NOT NULL,
       fromEmail TEXT,
@@ -190,6 +192,7 @@ function initSchema(db: any) {
   ensureColumn("messages", "ccAddr", "TEXT");
   ensureColumn("messages", "bccAddr", "TEXT");
   ensureColumn("messages", "references", "TEXT");
+  ensureColumn("messages", "xForwardedMessageId", "TEXT");
   ensureColumn("messages", "parentId", "TEXT");
   ensureColumn("messages", "mailboxPath", "TEXT");
   ensureColumn("messages", "imapUid", "INTEGER");
@@ -906,6 +909,20 @@ function applyBadgeFilters(where: string, args: any[], badges?: string[] | null)
     where += " AND m.flags IS NOT NULL AND lower(m.flags) LIKE ?";
     args.push('%"pinned"%');
   }
+  if (normalized.includes("calendar")) {
+    where += " AND m.flags IS NOT NULL AND lower(m.flags) LIKE ?";
+    args.push(`%"${CALENDAR_INVITE_FLAG}"%`);
+  }
+  return where;
+}
+
+function applyExcludedFolderFilters(where: string, args: any[], excludedFolderIds?: string[] | null) {
+  const normalized = Array.from(
+    new Set((excludedFolderIds ?? []).map((value) => value.trim()).filter(Boolean))
+  );
+  if (normalized.length === 0) return where;
+  where += ` AND m.folderId NOT IN (${normalized.map(() => "?").join(",")})`;
+  args.push(...normalized);
   return where;
 }
 
@@ -928,8 +945,10 @@ async function getGroupCounts(params: {
   fields?: string[] | null;
   badges?: string[] | null;
   attachmentsOnly?: boolean;
+  excludedFolderIds?: string[] | null;
 }) {
-  const { accountId, folderId, query, groupBy, fields, badges, attachmentsOnly } = params;
+  const { accountId, folderId, query, groupBy, fields, badges, attachmentsOnly, excludedFolderIds } =
+    params;
   const db = await getDb();
   const { ftsQuery, fromTerms, rawQuery } = parseSearchInput(query, fields);
   const hasQuery = Boolean(ftsQuery);
@@ -963,6 +982,7 @@ async function getGroupCounts(params: {
     }
   }
   where = applyBadgeFilters(where, args, badges);
+  where = applyExcludedFolderFilters(where, args, excludedFolderIds);
   const attachmentsFilter = attachmentsOnly ?? badges?.includes("attachments");
   if (attachmentsFilter) {
     where += " AND EXISTS (SELECT 1 FROM attachments a WHERE a.messageId = m.id AND a.inline = 0)";
@@ -1082,7 +1102,13 @@ async function getGroupCounts(params: {
     {
       key: "All",
       label: "All",
-      count: await getTotalCount({ accountId, folderId, query: query ?? undefined, fields })
+      count: await getTotalCount({
+        accountId,
+        folderId,
+        query: query ?? undefined,
+        fields,
+        excludedFolderIds
+      })
     }
   ];
 }
@@ -1094,9 +1120,11 @@ async function getTotalCount(params: {
   fields?: string[] | null;
   badges?: string[] | null;
   attachmentsOnly?: boolean;
+  excludedFolderIds?: string[] | null;
 }) {
   const db = await getDb();
-  const { accountId, folderId, query, fields, badges, attachmentsOnly } = params;
+  const { accountId, folderId, query, fields, badges, attachmentsOnly, excludedFolderIds } =
+    params;
   const { ftsQuery, fromTerms, rawQuery } = parseSearchInput(query, fields);
   const hasQuery = Boolean(ftsQuery);
   const idQuery = rawQuery.trim();
@@ -1129,6 +1157,7 @@ async function getTotalCount(params: {
     }
   }
   where = applyBadgeFilters(where, args, badges);
+  where = applyExcludedFolderFilters(where, args, excludedFolderIds);
   const attachmentsFilter = attachmentsOnly ?? badges?.includes("attachments");
   if (attachmentsFilter) {
     where += " AND EXISTS (SELECT 1 FROM attachments a WHERE a.messageId = m.id AND a.inline = 0)";
@@ -1153,6 +1182,7 @@ export async function listRelatedMessages(params: {
   groupBy?: string;
   badges?: string[] | null;
   attachmentsOnly?: boolean;
+  excludedFolderIds?: string[] | null;
 }) {
   const {
     accountId,
@@ -1161,7 +1191,8 @@ export async function listRelatedMessages(params: {
     pageSize,
     groupBy = "date",
     badges,
-    attachmentsOnly
+    attachmentsOnly,
+    excludedFolderIds
   } = params;
   const db = await getDb();
   const normalizedId = relatedId.trim();
@@ -1258,6 +1289,7 @@ export async function listRelatedMessages(params: {
 
   let where = `m.accountId = ? AND (${clauses.join(" OR ")})`;
   where = applyBadgeFilters(where, args, badges);
+  where = applyExcludedFolderFilters(where, args, excludedFolderIds);
   const attachmentsFilter = attachmentsOnly ?? badges?.includes("attachments");
   if (attachmentsFilter) {
     where += " AND EXISTS (SELECT 1 FROM attachments a WHERE a.messageId = m.id AND a.inline = 0)";
@@ -1277,6 +1309,7 @@ export async function listRelatedMessages(params: {
         m.messageId,
         m.inReplyTo,
         m."references" as "references",
+        m.xForwardedMessageId,
         m.subject,
         m.fromAddr,
         m.toAddr,
@@ -1387,6 +1420,7 @@ export async function listRelatedMessages(params: {
       messageId: row.messageId ?? undefined,
       inReplyTo: row.inReplyTo ?? undefined,
       references: parseReferences(row.references),
+      xForwardedMessageId: row.xForwardedMessageId ?? undefined,
       subject: row.subject,
       from: row.fromAddr,
       to: row.toAddr,
@@ -1470,6 +1504,7 @@ export async function listMessages(params: {
   fields?: string[] | null;
   badges?: string[] | null;
   attachmentsOnly?: boolean;
+  excludedFolderIds?: string[] | null;
 }) {
   const {
     accountId,
@@ -1480,7 +1515,8 @@ export async function listMessages(params: {
     groupBy = "date",
     fields,
     badges,
-    attachmentsOnly
+    attachmentsOnly,
+    excludedFolderIds
   } = params;
   const db = await getDb();
   const offset = (page - 1) * pageSize;
@@ -1516,6 +1552,7 @@ export async function listMessages(params: {
     }
   }
   where = applyBadgeFilters(where, args, badges);
+  where = applyExcludedFolderFilters(where, args, excludedFolderIds);
   const attachmentsFilter = attachmentsOnly ?? badges?.includes("attachments");
   if (attachmentsFilter) {
     where += " AND EXISTS (SELECT 1 FROM attachments a WHERE a.messageId = m.id AND a.inline = 0)";
@@ -1534,6 +1571,7 @@ export async function listMessages(params: {
         m.messageId,
         m.inReplyTo,
         m."references" as "references",
+        m.xForwardedMessageId,
         m.subject,
         m.fromAddr,
         m.toAddr,
@@ -1576,6 +1614,7 @@ export async function listMessages(params: {
       messageId: row.messageId ?? undefined,
       inReplyTo: row.inReplyTo ?? undefined,
       references: parseReferences(row.references),
+      xForwardedMessageId: row.xForwardedMessageId ?? undefined,
       subject: row.subject,
       from: row.fromAddr,
       to: row.toAddr,
@@ -1611,7 +1650,8 @@ export async function listMessages(params: {
     groupBy,
     fields,
     badges,
-    attachmentsOnly
+    attachmentsOnly,
+    excludedFolderIds
   });
   const total = await getTotalCount({
     accountId,
@@ -1619,7 +1659,8 @@ export async function listMessages(params: {
     query: query ?? undefined,
     fields,
     badges,
-    attachmentsOnly
+    attachmentsOnly,
+    excludedFolderIds
   });
   const hasMore = offset + items.length < total;
   return { items, groups, total, hasMore, baseCount: items.length };
@@ -1635,6 +1676,7 @@ export async function listThreads(params: {
   fields?: string[] | null;
   badges?: string[] | null;
   attachmentsOnly?: boolean;
+  excludedFolderIds?: string[] | null;
 }) {
   const {
     accountId,
@@ -1645,7 +1687,8 @@ export async function listThreads(params: {
     groupBy = "date",
     fields,
     badges,
-    attachmentsOnly
+    attachmentsOnly,
+    excludedFolderIds
   } = params;
   const db = await getDb();
   const offset = (page - 1) * pageSize;
@@ -1681,6 +1724,7 @@ export async function listThreads(params: {
     }
   }
   where = applyBadgeFilters(where, args, badges);
+  where = applyExcludedFolderFilters(where, args, excludedFolderIds);
   const attachmentsFilter = attachmentsOnly ?? badges?.includes("attachments");
   if (attachmentsFilter) {
     where += " AND EXISTS (SELECT 1 FROM attachments a WHERE a.messageId = m.id AND a.inline = 0)";
@@ -1720,7 +1764,8 @@ export async function listThreads(params: {
     query: query ?? undefined,
     fields,
     badges,
-    attachmentsOnly
+    attachmentsOnly,
+    excludedFolderIds
   });
 
   const baseCountRow =
@@ -1738,6 +1783,14 @@ export async function listThreads(params: {
       : { count: 0 };
   const baseCount = baseCountRow?.count ?? 0;
 
+  const threadMessageArgs: any[] = [accountId];
+  let threadMessageWhere = "m.accountId = ?";
+  threadMessageWhere = applyExcludedFolderFilters(
+    threadMessageWhere,
+    threadMessageArgs,
+    excludedFolderIds
+  );
+
   const messagesRows =
     threadIds.length > 0
       ? (db
@@ -1754,6 +1807,7 @@ export async function listThreads(params: {
               m.messageId,
               m.inReplyTo,
               m."references" as "references",
+              m.xForwardedMessageId,
               m.subject,
               m.fromAddr,
               m.toAddr,
@@ -1777,11 +1831,12 @@ export async function listThreads(params: {
               EXISTS(SELECT 1 FROM attachments a WHERE a.messageId = m.id AND a.inline = 1)
                 as hasInlineAttachments
             FROM messages m
-            WHERE m.accountId = ? AND m.threadId IN (${threadIds.map(() => "?").join(",")})
+            WHERE ${threadMessageWhere}
+              AND m.threadId IN (${threadIds.map(() => "?").join(",")})
             ORDER BY m.dateValue DESC
           `
           )
-          .all(accountId, ...threadIds) as any[])
+          .all(...threadMessageArgs, ...threadIds) as any[])
       : [];
 
   const items: Message[] = messagesRows.map((row) => {
@@ -1796,6 +1851,7 @@ export async function listThreads(params: {
       messageId: row.messageId ?? undefined,
       inReplyTo: row.inReplyTo ?? undefined,
       references: parseReferences(row.references),
+      xForwardedMessageId: row.xForwardedMessageId ?? undefined,
       subject: row.subject,
       from: row.fromAddr,
       to: row.toAddr,
@@ -1831,7 +1887,8 @@ export async function listThreads(params: {
     groupBy,
     fields,
     badges,
-    attachmentsOnly
+    attachmentsOnly,
+    excludedFolderIds
   });
 
   const hasMore = offset + threadRows.length < threadTotal;
@@ -1908,6 +1965,7 @@ export async function listThreadMessages(params: {
       messageId: row.messageId ?? undefined,
       inReplyTo: row.inReplyTo ?? undefined,
       references: parseReferences(row.references),
+      xForwardedMessageId: row.xForwardedMessageId ?? undefined,
       subject: row.subject,
       from: row.fromAddr,
       to: row.toAddr,
@@ -2015,10 +2073,10 @@ export async function upsertMessages(
 
   const insertMessage = db.prepare(`
     INSERT OR REPLACE INTO messages (
-      id, accountId, folderId, threadId, parentId, messageId, inReplyTo, "references",
+      id, accountId, folderId, threadId, parentId, messageId, inReplyTo, "references", xForwardedMessageId,
       subject, fromAddr, fromEmail, toAddr, ccAddr, bccAddr, mailboxPath, imapUid, preview, date, dateValue,
       body, htmlBody, priority, hasSource, unread, flags, seen, answered, flagged, deleted, draft, recent
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   const insertFts = db.prepare(`
     INSERT INTO message_fts (messageId, subject, fromAddr, toAddr, ccAddr, bccAddr, body, preview)
@@ -2048,6 +2106,7 @@ export async function upsertMessages(
         message.messageId ?? null,
         message.inReplyTo ?? null,
         message.references ? JSON.stringify(message.references) : null,
+        message.xForwardedMessageId ?? null,
         message.subject,
         message.from,
         fromEmail,
@@ -2130,6 +2189,7 @@ export async function getMessageById(accountId: string, messageId: string) {
     messageId: row.messageId ?? undefined,
     inReplyTo: row.inReplyTo ?? undefined,
     references: parseReferences(row.references),
+    xForwardedMessageId: row.xForwardedMessageId ?? undefined,
     subject: row.subject,
     from: row.fromAddr,
     to: row.toAddr,

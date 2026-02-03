@@ -56,6 +56,7 @@ import {
   buildQuotedHtmlPartsFromText,
   escapeHtml
 } from "@/lib/html";
+import { CALENDAR_INVITE_FLAG, withCalendarInviteFlag } from "@/lib/messageFlags";
 import ThreadJsonModal from "./mailclient/message/ThreadJsonModal";
 import ThreadView from "./mailclient/message/ThreadView";
 import TopBar from "./mailclient/TopBar";
@@ -106,8 +107,9 @@ function getImapFlagBadges(message: Message) {
           message.draft ? "\\Draft" : null,
           message.recent ? "\\Recent" : null
         ].filter(Boolean);
+  const hasForwardedHeader = Boolean(message.xForwardedMessageId?.trim());
   const seen = new Set<string>();
-  return (rawFlags as string[])
+  const badges = (rawFlags as string[])
     .map((flag) => flag.trim())
     .filter((flag) => {
       if (!flag) return false;
@@ -119,9 +121,12 @@ function getImapFlagBadges(message: Message) {
     .map((flag) => {
       const lower = flag.toLowerCase();
       const isForwarded = lower === "$forwarded" || lower === "forwarded";
+      const isCalendarInvite = lower === CALENDAR_INVITE_FLAG;
       if (lower === "\\recent" && (message.seen || message.draft)) return null;
       const label = isForwarded
         ? "Forwarded"
+        : isCalendarInvite
+        ? "Calendar Invite"
         : lower === "\\recent"
         ? "New"
         : flag.startsWith("\\")
@@ -136,9 +141,14 @@ function getImapFlagBadges(message: Message) {
       if (lower === "\\recent") kind = "new";
       if (lower === "pinned") kind = "pinned";
       if (isForwarded) kind = "forwarded";
+      if (isCalendarInvite) kind = "calendar";
       return { label, kind };
     })
     .filter(Boolean) as { label: string; kind: string }[];
+  if (hasForwardedHeader && !badges.some((badge) => badge.kind === "forwarded")) {
+    badges.unshift({ label: "Forwarded", kind: "forwarded" });
+  }
+  return badges;
 }
 
 type ExceptionEntry = {
@@ -165,6 +175,11 @@ const NOTICE_TIMEOUTS: Record<InAppNoticeType, number> = {
 
 function makeClientId() {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
+function buildNotificationUrl(messageId?: string | null) {
+  if (!messageId) return "/";
+  return `/?${new URLSearchParams({ messageId }).toString()}`;
 }
 
 function getExceptionSummary(message: string) {
@@ -264,6 +279,7 @@ export default function MailClient() {
   const [pendingMessageActions, setPendingMessageActions] = useState<Set<string>>(new Set());
   const [inAppNotices, setInAppNotices] = useState<InAppNotice[]>([]);
   const [searchScope, setSearchScope] = useState<"folder" | "all">("folder");
+  const [includeSentInEverywhere, setIncludeSentInEverywhere] = useState(false);
   const [lastFolderId, setLastFolderId] = useState("");
   const [composeOpen, setComposeOpen] = useState(false);
   const [composeView, setComposeView] = useState<"inline" | "modal" | "minimized">("inline");
@@ -371,6 +387,7 @@ export default function MailClient() {
     flagged: false,
     todo: false,
     pinned: false,
+    calendar: false,
     attachments: false
   });
   const [relatedContext, setRelatedContext] = useState<{
@@ -385,6 +402,7 @@ export default function MailClient() {
   const [mailCheckMode, setMailCheckMode] = useState<"idle" | "polling">("polling");
   const [streamMode, setStreamMode] = useState<"stream" | "polling" | "idle">("polling");
   const pendingJumpMessageIdRef = useRef<string | null>(null);
+  const pendingJumpRefreshKeyRef = useRef("");
   const lastUidNextRef = useRef<Record<string, number>>({});
   const lastUidNextByFolderRef = useRef<Record<string, number>>({});
   const lastNotifiedUidRef = useRef<Record<string, number>>({});
@@ -404,30 +422,72 @@ export default function MailClient() {
     undefined
   );
   const inboxFolderRef = useRef<Folder | null>(null);
+  const trimmedQuery = query.trim();
+  const relatedQueryId = useMemo(() => {
+    const match = trimmedQuery.match(/^related:(.+)$/i);
+    return match?.[1]?.trim() ?? "";
+  }, [trimmedQuery]);
+  const isRelatedSearch = relatedQueryId.length > 0;
+  const searchFieldKey = useMemo(() => {
+    if (!trimmedQuery || isRelatedSearch) return "";
+    return Object.entries(searchFields)
+      .filter(([, enabled]) => enabled)
+      .map(([key]) => key)
+      .join(",");
+  }, [isRelatedSearch, searchFields, trimmedQuery]);
+  const everywhereExclusionKey = useMemo(
+    () =>
+      folders
+        .filter((folder) => {
+          if (folder.accountId !== activeAccountId) return false;
+          const special = (folder.specialUse ?? "").toLowerCase();
+          if (special === "\\trash" || special === "\\junk" || special === "\\spam") return true;
+          if (!includeSentInEverywhere && special === "\\sent") return true;
+          return false;
+        })
+        .map((folder) => folder.id)
+        .sort()
+        .join(","),
+    [activeAccountId, folders, includeSentInEverywhere]
+  );
   const messagesKey = useMemo(
     () =>
-      `${activeAccountId}|${searchScope}|${activeFolderId}|${query.trim()}|${groupBy}|${Object.entries(
-        searchFields
-      )
-        .filter(([, enabled]) => enabled)
-        .map(([key]) => key)
-        .join(",")}|${Object.entries(searchBadges)
+      `${activeAccountId}|${searchScope}|${everywhereExclusionKey}|${activeFolderId}|${trimmedQuery}|${groupBy}|${searchFieldKey}|${Object.entries(searchBadges)
         .filter(([, enabled]) => enabled)
         .map(([key]) => key)
         .join(",")}`,
-    [activeAccountId, activeFolderId, groupBy, query, searchBadges, searchFields, searchScope]
+    [
+      activeAccountId,
+      activeFolderId,
+      everywhereExclusionKey,
+      groupBy,
+      trimmedQuery,
+      searchFieldKey,
+      searchBadges,
+      searchScope
+    ]
   );
   currentKeyRef.current = messagesKey;
-
-  const relatedQueryId = useMemo(() => {
-    const match = query.trim().match(/^related:(.+)$/i);
-    return match?.[1]?.trim() ?? "";
-  }, [query]);
-  const isRelatedSearch = relatedQueryId.length > 0;
 
   const accountFolders = useMemo(
     () => folders.filter((folder) => folder.accountId === activeAccountId),
     [activeAccountId, folders]
+  );
+  const sentFolderBySpecialUse = useMemo(
+    () => accountFolders.find((folder) => (folder.specialUse ?? "").toLowerCase() === "\\sent") ?? null,
+    [accountFolders]
+  );
+  const excludedEverywhereFolderIds = useMemo(
+    () =>
+      accountFolders
+        .filter((folder) => {
+          const special = (folder.specialUse ?? "").toLowerCase();
+          if (special === "\\trash" || special === "\\junk" || special === "\\spam") return true;
+          if (!includeSentInEverywhere && special === "\\sent") return true;
+          return false;
+        })
+        .map((folder) => folder.id),
+    [accountFolders, includeSentInEverywhere]
   );
   const folderTree = useMemo(() => buildFolderTree(accountFolders), [accountFolders]);
   const folderById = useMemo(
@@ -510,6 +570,15 @@ export default function MailClient() {
     selectionStore.setActiveId(target.id);
     startTransition(() => setActiveMessageId(target.id));
     return true;
+  };
+  const clearNotificationDeepLink = (messageId?: string | null) => {
+    if (typeof window === "undefined") return;
+    const url = new URL(window.location.href);
+    const current = url.searchParams.get("messageId");
+    if (!current) return;
+    if (messageId && current !== messageId) return;
+    url.searchParams.delete("messageId");
+    window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
   };
   const listLoading = loadingMessages || refreshingMessages;
   const selectedSearchFields = useMemo(() => {
@@ -614,14 +683,19 @@ export default function MailClient() {
   );
 
   const searchFieldsLabel = useMemo(() => {
-    const order = ["sender", "participants", "subject", "body"] as const;
-    const allEnabled = order.every((key) => searchFields[key]);
+    const order = ["sender", "participants", "subject", "body", "attachments"] as const;
+    const allEnabled =
+      searchFields.participants &&
+      searchFields.subject &&
+      searchFields.body &&
+      searchFields.attachments;
     if (allEnabled) return "Fields: All";
     const labels: Record<string, string> = {
       sender: "Sender",
       participants: "Participants",
       subject: "Subject",
-      body: "Body"
+      body: "Body",
+      attachments: "Attachment names"
     };
     const selected = order.filter((key) => searchFields[key]);
     const effective = selected.includes("participants")
@@ -631,12 +705,13 @@ export default function MailClient() {
     return `Fields: ${effective.map((key) => labels[key]).join(", ")}`;
   }, [searchFields]);
   const searchBadgesLabel = useMemo(() => {
-    const order = ["unread", "flagged", "todo", "pinned", "attachments"] as const;
+    const order = ["unread", "flagged", "todo", "pinned", "calendar", "attachments"] as const;
     const labels: Record<string, string> = {
       unread: "Unread",
       flagged: "Flagged",
       todo: "To-Do",
       pinned: "Pinned",
+      calendar: "Calendar",
       attachments: "Attachments"
     };
     const selected = order.filter((key) => searchBadges[key]);
@@ -646,25 +721,26 @@ export default function MailClient() {
   const searchActive = useMemo(() => {
     const hasQuery = query.trim().length > 0;
     const hasBadges = Object.values(searchBadges).some(Boolean);
-    const allEnabled = (["sender", "participants", "subject", "body", "attachments"] as const).every(
-      (key) => searchFields[key]
-    );
-    return hasQuery || hasBadges || !allEnabled;
-  }, [query, searchBadges, searchFields]);
+    return hasQuery || hasBadges || searchScope === "all";
+  }, [query, searchBadges, searchScope]);
   const searchCriteriaLabel = useMemo(() => {
     const parts: string[] = [];
-    if (query.trim().length > 0) {
-      parts.push(`"${query.trim()}"`);
+    const trimmedQuery = query.trim();
+    if (trimmedQuery.length > 0) {
+      parts.push(`"${trimmedQuery}"`);
     }
     const fields = selectedSearchFields;
-    if (fields.length > 0) {
+    if (trimmedQuery.length > 0 && fields.length > 0) {
       parts.push(`in ${fields.join(", ")}`);
     }
     if (selectedSearchBadges.length > 0) {
       parts.push(`filter ${selectedSearchBadges.join(", ")}`);
     }
+    if (searchScope === "all") {
+      parts.push("everywhere");
+    }
     return parts.join(" · ");
-  }, [query, selectedSearchBadges, selectedSearchFields]);
+  }, [query, searchScope, selectedSearchBadges, selectedSearchFields]);
   const relatedNotice = useMemo(() => {
     if (!isRelatedSearch) return "";
     const subject = relatedContext?.subject?.trim();
@@ -678,6 +754,7 @@ export default function MailClient() {
       flagged: false,
       todo: false,
       pinned: false,
+      calendar: false,
       attachments: false
     });
     setSearchFields({
@@ -797,17 +874,26 @@ export default function MailClient() {
     return Notification.permission;
   };
 
-  const showNotification = async (title: string, body: string, tag: string) => {
+  const showNotification = async (
+    title: string,
+    body: string,
+    tag: string,
+    opts?: { messageId?: string | null; url?: string }
+  ) => {
     if (typeof window === "undefined" || !("Notification" in window)) return;
     const permission = await ensureNotificationPermission();
     console.info("[noctua] notification permission", permission);
     if (permission !== "granted") return;
-    const options = {
+    const targetUrl = opts?.url ?? buildNotificationUrl(opts?.messageId);
+    const notificationOptions = {
       body,
       tag,
       icon: "/icon.png",
       badge: "/favicon.png",
-      data: { url: "/" }
+      data: {
+        url: targetUrl,
+        messageId: opts?.messageId ?? null
+      }
     };
     try {
       if ("serviceWorker" in navigator) {
@@ -817,17 +903,25 @@ export default function MailClient() {
           (await navigator.serviceWorker.ready);
         if (registration?.active) {
           console.info("[noctua] showNotification via service worker", title, body);
-          await registration.showNotification(title, options);
+          await registration.showNotification(title, notificationOptions);
           return;
         }
       }
       console.info("[noctua] showNotification via Notification()", title, body);
-      new Notification(title, options);
+      const notification = new Notification(title, notificationOptions);
+      notification.onclick = () => {
+        window.focus();
+        window.location.assign(targetUrl);
+      };
     } catch (error) {
       console.warn("[noctua] notification failed", error);
       try {
         console.info("[noctua] fallback Notification()", title, body);
-        new Notification(title, options);
+        const fallback = new Notification(title, notificationOptions);
+        fallback.onclick = () => {
+          window.focus();
+          window.location.assign(targetUrl);
+        };
       } catch (fallbackError) {
         console.warn("[noctua] notification fallback failed", fallbackError);
       }
@@ -2369,45 +2463,48 @@ export default function MailClient() {
     setSendingMail(true);
     try {
       const { text, html, attachments } = buildComposePayload();
-          const replyMessageId = composeReplyMessage?.messageId ?? undefined;
-          const replyReferences = replyMessageId
+      const replyHeaders = composeReplyHeaders ?? {
+        inReplyTo: composeReplyMessage?.messageId ?? undefined,
+        references:
+          composeReplyMessage?.messageId
             ? [
-                ...(composeReplyMessage?.references ?? []),
-                ...(composeReplyMessage?.inReplyTo ? [composeReplyMessage.inReplyTo] : []),
-                replyMessageId
+                ...(composeReplyMessage.references ?? []),
+                ...(composeReplyMessage.inReplyTo ? [composeReplyMessage.inReplyTo] : []),
+                composeReplyMessage.messageId
               ]
-            : undefined;
-          const replyFromValue = getAccountFromValue(currentAccount);
-          const replyToHeader =
-            composeMode === "reply" || composeMode === "replyAll"
-              ? replyFromValue
-              : "";
-          const normalizedReplyTo =
-            replyToHeader &&
-            replyFromValue &&
-            replyToHeader.trim().toLowerCase() === replyFromValue.trim().toLowerCase()
-              ? ""
-              : replyToHeader;
-          const res = await apiFetch("/api/smtp", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              accountId: activeAccountId,
-              to: composeTo,
-              cc: composeCc,
-              bcc: composeBcc,
-              subject: composeSubject,
-              text,
-              html,
-              attachments,
-              inReplyTo:
-                composeMode === "reply" || composeMode === "replyAll" ? replyMessageId : undefined,
-              references:
-                composeMode === "reply" || composeMode === "replyAll" ? replyReferences : undefined,
-              replyTo: normalizedReplyTo,
-              xForwardedMessageId: composeMode === "forward" ? composeReplyMessage?.messageId : undefined
-            })
-          });
+            : undefined,
+        xForwardedMessageId: composeReplyMessage?.messageId ?? undefined
+      };
+      const shouldThreadCompose =
+        composeMode === "reply" || composeMode === "replyAll" || composeMode === "forward";
+      const replyFromValue = getAccountFromValue(currentAccount);
+      const replyToHeader =
+        composeMode === "reply" || composeMode === "replyAll" ? replyFromValue : "";
+      const normalizedReplyTo =
+        replyToHeader &&
+        replyFromValue &&
+        replyToHeader.trim().toLowerCase() === replyFromValue.trim().toLowerCase()
+          ? ""
+          : replyToHeader;
+      const res = await apiFetch("/api/smtp", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          accountId: activeAccountId,
+          to: composeTo,
+          cc: composeCc,
+          bcc: composeBcc,
+          subject: composeSubject,
+          text,
+          html,
+          attachments,
+          inReplyTo: shouldThreadCompose ? replyHeaders.inReplyTo : undefined,
+          references: shouldThreadCompose ? replyHeaders.references : undefined,
+          replyTo: normalizedReplyTo,
+          xForwardedMessageId:
+            composeMode === "forward" ? replyHeaders.xForwardedMessageId : undefined
+        })
+      });
       if (res.ok) {
         if (composeReplyMessage) {
           const threadId =
@@ -3373,6 +3470,41 @@ export default function MailClient() {
       });
   }, []);
 
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const messageId = new URL(window.location.href).searchParams.get("messageId");
+    if (!messageId) return;
+    pendingJumpMessageIdRef.current = messageId;
+    pendingJumpRefreshKeyRef.current = "";
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !("serviceWorker" in navigator)) return;
+    const handleServiceWorkerMessage = (event: MessageEvent) => {
+      const payload = event.data as { type?: string; messageId?: string | null } | null;
+      if (payload?.type !== "noctua:notification-open") return;
+      const messageId = typeof payload.messageId === "string" ? payload.messageId : "";
+      if (!messageId) return;
+      pendingJumpMessageIdRef.current = messageId;
+      pendingJumpRefreshKeyRef.current = "";
+      if (jumpToMessageId(messageId)) {
+        pendingJumpMessageIdRef.current = null;
+        clearNotificationDeepLink(messageId);
+        return;
+      }
+      const inbox = inboxFolderRef.current;
+      if (inbox) {
+        setSearchScope("folder");
+        setActiveFolderId(inbox.id);
+      }
+      void refreshMailboxData();
+    };
+    navigator.serviceWorker.addEventListener("message", handleServiceWorkerMessage);
+    return () => {
+      navigator.serviceWorker.removeEventListener("message", handleServiceWorkerMessage);
+    };
+  }, [messageByMessageId]);
+
   const loadInitialData = useCallback(
     async (skipAuthCheck = false) => {
       try {
@@ -3488,38 +3620,41 @@ export default function MailClient() {
       lastRequestRef.current = { key: requestKey, page: messagesPage };
       try {
         setLoadingMessages(true);
-      const pageSize = searchScope === "all" ? 600 : 300;
-      const params = new URLSearchParams({
-        accountId: activeAccountId,
-        page: String(messagesPage),
-        pageSize: String(pageSize),
-        groupBy
-      });
-      if (!isRelatedSearch) {
-        params.set("fields", selectedSearchFields.join(","));
-      }
+        const pageSize = searchScope === "all" ? 600 : 300;
+        const params = new URLSearchParams({
+          accountId: activeAccountId,
+          page: String(messagesPage),
+          pageSize: String(pageSize),
+          groupBy
+        });
+        const trimmedQuery = query.trim();
+        if (!isRelatedSearch && trimmedQuery) {
+          params.set("fields", selectedSearchFields.join(","));
+        }
         if (searchBadges.attachments) {
           params.set("attachments", "1");
         }
         if (selectedSearchBadges.length > 0) {
           params.set("badges", selectedSearchBadges.join(","));
         }
-      const trimmedQuery = query.trim();
-      if (!isRelatedSearch && searchScope === "folder" && activeFolderId) {
-        params.set("folderId", activeFolderId);
-      }
-      let endpoint = trimmedQuery ? "/api/search" : "/api/messages";
-      if (isRelatedSearch) {
-        endpoint = "/api/related";
-        params.set("relatedId", relatedQueryId);
-      } else if (supportsThreads) {
-        endpoint = "/api/threads";
-      } else if (trimmedQuery) {
-        params.set("q", trimmedQuery);
-      }
-      if (trimmedQuery && endpoint === "/api/threads") {
-        params.set("q", trimmedQuery);
-      }
+        if (!isRelatedSearch && searchScope === "folder" && activeFolderId) {
+          params.set("folderId", activeFolderId);
+        }
+        if (searchScope === "all" && excludedEverywhereFolderIds.length > 0) {
+          params.set("excludeFolderIds", excludedEverywhereFolderIds.join(","));
+        }
+        let endpoint = trimmedQuery ? "/api/search" : "/api/messages";
+        if (isRelatedSearch) {
+          endpoint = "/api/related";
+          params.set("relatedId", relatedQueryId);
+        } else if (supportsThreads) {
+          endpoint = "/api/threads";
+        } else if (trimmedQuery) {
+          params.set("q", trimmedQuery);
+        }
+        if (trimmedQuery && endpoint === "/api/threads") {
+          params.set("q", trimmedQuery);
+        }
         const messagesRes = await apiFetch(`${endpoint}?${params.toString()}`);
         if (messagesRes.ok) {
           const data = (await messagesRes.json()) as {
@@ -3844,8 +3979,21 @@ export default function MailClient() {
     if (!pending) return;
     if (jumpToMessageId(pending)) {
       pendingJumpMessageIdRef.current = null;
+      pendingJumpRefreshKeyRef.current = "";
+      clearNotificationDeepLink(pending);
+      return;
     }
-  }, [messageByMessageId]);
+    if (authState !== "ok") return;
+    const refreshKey = `${activeAccountId}:${pending}`;
+    if (pendingJumpRefreshKeyRef.current === refreshKey) return;
+    pendingJumpRefreshKeyRef.current = refreshKey;
+    const inbox = inboxFolderRef.current;
+    if (inbox) {
+      setSearchScope("folder");
+      setActiveFolderId(inbox.id);
+    }
+    void refreshMailboxData();
+  }, [activeAccountId, authState, messageByMessageId]);
 
   // Collapse all messages in the active thread except the selected one
   useEffect(() => {
@@ -4189,6 +4337,7 @@ export default function MailClient() {
 
   const refreshMailboxData = async () => {
     setRefreshingMessages(true);
+    const trimmedQuery = query.trim();
     const pageSize = searchScope === "all" ? 600 : 300;
     const params = new URLSearchParams({
       accountId: activeAccountId,
@@ -4196,7 +4345,7 @@ export default function MailClient() {
       pageSize: String(pageSize),
       groupBy
     });
-    if (!isRelatedSearch) {
+    if (!isRelatedSearch && trimmedQuery) {
       params.set("fields", selectedSearchFields.join(","));
     }
     if (searchBadges.attachments) {
@@ -4205,9 +4354,11 @@ export default function MailClient() {
     if (selectedSearchBadges.length > 0) {
       params.set("badges", selectedSearchBadges.join(","));
     }
-    const trimmedQuery = query.trim();
     if (!isRelatedSearch && searchScope === "folder" && activeFolderId) {
       params.set("folderId", activeFolderId);
+    }
+    if (searchScope === "all" && excludedEverywhereFolderIds.length > 0) {
+      params.set("excludeFolderIds", excludedEverywhereFolderIds.join(","));
     }
     let endpoint = trimmedQuery ? "/api/search" : "/api/messages";
     if (isRelatedSearch) {
@@ -4676,7 +4827,9 @@ export default function MailClient() {
         const title = message.subject || "(no subject)";
         const body = message.from ? `From: ${message.from}` : "New message received";
         console.info("[noctua] new mail", message);
-        await showNotification(title, body, `mail-${message.messageId ?? message.uid}`);
+        await showNotification(title, body, `mail-${message.messageId ?? message.uid}`, {
+          messageId: message.messageId ?? null
+        });
         pushNotice({
           type: "info",
           title,
@@ -4691,7 +4844,7 @@ export default function MailClient() {
           .map((item) => item.subject || "(no subject)")
           .join(" • ");
         console.info("[noctua] new mail batch", unique);
-        await showNotification(title, preview, "mail-batch");
+        await showNotification(title, preview, "mail-batch", { url: "/" });
         pushNotice({
           type: "info",
           title,
@@ -4888,7 +5041,11 @@ export default function MailClient() {
               ) {
                 return msg;
               }
-              const flags = data.flags ?? msg.flags ?? [];
+              const flags = withCalendarInviteFlag(data.flags ?? msg.flags ?? [], {
+                attachments: msg.attachments,
+                textBody: msg.body,
+                htmlBody: msg.htmlBody
+              });
               const lower = flags.map((f) => f.toLowerCase());
               const seen = lower.includes("\\seen");
               return {
@@ -5123,6 +5280,8 @@ export default function MailClient() {
         state={{
           query,
           searchScope,
+          includeSentInEverywhere,
+          sentFolderName: sentFolderBySpecialUse?.name ?? null,
           searchFields,
           searchBadges,
           darkMode,
@@ -5141,6 +5300,7 @@ export default function MailClient() {
         actions={{
           setQuery,
           setSearchScope,
+          setIncludeSentInEverywhere,
           setSearchFields,
           setSearchBadges,
           clearSearch,

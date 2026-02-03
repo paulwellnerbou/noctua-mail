@@ -1,5 +1,6 @@
 import type { Account, Attachment, Folder, Message } from "@/lib/data";
 import { getLatestMessageUid } from "@/lib/db";
+import { withCalendarInviteFlag } from "@/lib/messageFlags";
 import tls from "tls";
 import { getImapLogger, logImapOp } from "@/lib/mail/imapLogger";
 
@@ -239,6 +240,18 @@ async function parseImapMessage(
       ? referencesHeader.split(/\s+/).filter(Boolean)
       : undefined;
   const xForwardedMessageId = headerValue("x-forwarded-message-id");
+  const messageFlags = withCalendarInviteFlag(flags, {
+    attachments,
+    textBody: body,
+    htmlBody,
+    headerValues: [
+      headerValue("content-type"),
+      headerValue("content-class"),
+      headerValue("method"),
+      headerValue("x-ms-exchange-calendar-series-id"),
+      headerValue("x-ms-exchange-calendar-series-instance-id")
+    ]
+  });
   return {
     id: `imap-${account.id}-${safeMailbox}-${message.uid}`,
     threadId: parsed.inReplyTo ?? parsed.messageId ?? `imap-thread-${message.uid}`,
@@ -264,7 +277,7 @@ async function parseImapMessage(
     source,
     hasSource: true,
     attachments,
-    flags,
+    flags: messageFlags,
     seen,
     answered,
     flagged,

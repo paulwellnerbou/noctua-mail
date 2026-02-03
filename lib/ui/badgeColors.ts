@@ -8,6 +8,7 @@ export const badgeColors = {
   unread: "gray" as BadgeColor,
   new: "blue" as BadgeColor,
   attachment: "gray" as BadgeColor,
+  calendarInvite: "indigo" as BadgeColor,
   threadIndicator: "blue" as BadgeColor,
   compose: "indigo" as BadgeColor,
   recent: "blue" as BadgeColor,
@@ -26,6 +27,7 @@ const flagColorMap: Record<string, BadgeColor> = {
   draft: "violet",
   new: "blue",
   forwarded: "blue",
+  calendar: "indigo",
   recent: "blue",
   custom: "gray"
 };

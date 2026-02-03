@@ -1,6 +1,7 @@
 import { useState } from "react";
 import type React from "react";
 import {
+  CalendarDays,
   Check,
   Copy,
   Edit3,
@@ -354,7 +355,7 @@ export default function ThreadMessageCard({
   return (
     <Card
       asChild
-      size="2"
+      size="1"
       variant="surface"
       className={`${styles.card} ${menuOpen ? styles.cardMenuOpen : ""} ${
         pendingMessageActions.has(message.id) ? styles.cardDisabled : ""
@@ -392,6 +393,7 @@ export default function ThreadMessageCard({
                       variant="soft"
                       color={getFlagBadgeColor(badge.kind)}
                     >
+                      {badge.kind === "calendar" && <CalendarDays size={12} />}
                       {badge.kind === "pinned" && <Pin size={12} />}
                       {badge.label}
                     </Badge>

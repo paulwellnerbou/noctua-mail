@@ -16,6 +16,10 @@ export async function GET(request: Request) {
   const fields = searchParams.get("fields")?.split(",").filter(Boolean) ?? [];
   const folderId = searchParams.get("folderId");
   const badges = searchParams.get("badges")?.split(",").filter(Boolean);
+  const excludedFolderIdsParam = searchParams.get("excludeFolderIds");
+  const excludedFolderIds = excludedFolderIdsParam
+    ? excludedFolderIdsParam.split(",").map((value) => value.trim()).filter(Boolean)
+    : undefined;
   const attachmentsOnly = searchParams.get("attachments") === "1";
   const query = searchParams.get("q");
 
@@ -28,7 +32,8 @@ export async function GET(request: Request) {
     fields,
     query,
     badges,
-    attachmentsOnly
+    attachmentsOnly,
+    excludedFolderIds
   });
 
   return NextResponse.json({

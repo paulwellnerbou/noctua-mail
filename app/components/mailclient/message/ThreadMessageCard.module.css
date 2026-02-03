@@ -20,7 +20,7 @@
 .header {
   display: flex;
   flex-direction: column;
-  gap: var(--space-3);
+  gap: var(--space-4);
 }
 
 .topRow {
@@ -28,6 +28,7 @@
   align-items: flex-start;
   justify-content: space-between;
   gap: var(--space-4);
+  margin-bottom: var(--space-2);
 }
 
 .topRowLead {
@@ -52,6 +53,7 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  min-height: calc(var(--line-height-1) + var(--space-1));
   cursor: pointer;
   color: inherit;
 }
@@ -88,7 +90,6 @@
 
 .caret {
   color: var(--gray-11);
-  margin-top: 2px;
   width: 14px;
   height: 14px;
   display: inline-flex;

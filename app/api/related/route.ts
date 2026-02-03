@@ -18,6 +18,10 @@ export async function GET(request: Request) {
   const pageSize = Math.max(1, Math.min(1000, Number(searchParams.get("pageSize") ?? "300") || 300));
   const groupBy = searchParams.get("groupBy") ?? "date";
   const badges = searchParams.get("badges")?.split(",").filter(Boolean);
+  const excludedFolderIdsParam = searchParams.get("excludeFolderIds");
+  const excludedFolderIds = excludedFolderIdsParam
+    ? excludedFolderIdsParam.split(",").map((value) => value.trim()).filter(Boolean)
+    : undefined;
   const attachmentsOnly = searchParams.get("attachments") === "1";
 
   const data = await listRelatedMessages({
@@ -27,7 +31,8 @@ export async function GET(request: Request) {
     pageSize,
     groupBy,
     badges,
-    attachmentsOnly
+    attachmentsOnly,
+    excludedFolderIds
   });
 
   return NextResponse.json({

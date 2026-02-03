@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type React from "react";
 import type { Message } from "@/lib/data";
+import { CALENDAR_INVITE_FLAG, hasMessageFlag } from "@/lib/messageFlags";
 import { Text } from "@radix-ui/themes";
 import * as Collapsible from "@radix-ui/react-collapsible";
 import { CaretRightIcon } from "@radix-ui/react-icons";
@@ -573,6 +574,7 @@ export default function MessageCardList({
                 message.hasAttachments ??
                 (message.attachments?.some((att) => !att.inline) ?? false)
               }
+              showCalendarInviteIcon={hasMessageFlag(message.flags, CALENDAR_INVITE_FLAG)}
               showNewBadge={
                 !Boolean(message.seen) &&
                 Boolean(message.recent) &&

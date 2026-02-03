@@ -1,8 +1,22 @@
 import Image from "next/image";
+import { useEffect, useRef, useState } from "react";
 
 import type React from "react";
-import { Edit3, FileText, Moon, RefreshCw, Settings, Sun, Trash2, X } from "lucide-react";
-import { Badge, Button, DropdownMenu, IconButton, Select, TextField } from "@radix-ui/themes";
+import {
+  CheckSquare2,
+  ChevronDown,
+  Edit3,
+  FileText,
+  Folder,
+  Moon,
+  RefreshCw,
+  Settings,
+  Square,
+  Sun,
+  Trash2,
+  X
+} from "lucide-react";
+import { Badge, Button, DropdownMenu, IconButton, TextField } from "@radix-ui/themes";
 import { badgeColors } from "@/lib/ui/badgeColors";
 import type { Account, Folder, Message } from "@/lib/data";
 import styles from "./TopBar.module.css";
@@ -20,6 +34,7 @@ type SearchBadges = {
   flagged: boolean;
   todo: boolean;
   pinned: boolean;
+  calendar: boolean;
   attachments: boolean;
 };
 
@@ -29,6 +44,8 @@ type TopBarProps = {
   state: {
     query: string;
     searchScope: "folder" | "all";
+    includeSentInEverywhere: boolean;
+    sentFolderName: string | null;
     searchFields: SearchFields;
     searchBadges: SearchBadges;
     darkMode: boolean;
@@ -50,6 +67,7 @@ type TopBarProps = {
   actions: {
     setQuery: React.Dispatch<React.SetStateAction<string>>;
     setSearchScope: React.Dispatch<React.SetStateAction<"folder" | "all">>;
+    setIncludeSentInEverywhere: React.Dispatch<React.SetStateAction<boolean>>;
     setSearchFields: React.Dispatch<React.SetStateAction<SearchFields>>;
     setSearchBadges: React.Dispatch<React.SetStateAction<SearchBadges>>;
     clearSearch: () => void;
@@ -69,6 +87,8 @@ export default function TopBar({ state, ui, actions }: TopBarProps) {
   const {
     query,
     searchScope,
+    includeSentInEverywhere,
+    sentFolderName,
     searchFields,
     searchBadges,
     darkMode,
@@ -86,6 +106,7 @@ export default function TopBar({ state, ui, actions }: TopBarProps) {
   const {
     setQuery,
     setSearchScope,
+    setIncludeSentInEverywhere,
     setSearchFields,
     setSearchBadges,
     clearSearch,
@@ -100,6 +121,30 @@ export default function TopBar({ state, ui, actions }: TopBarProps) {
     syncAccount
   } = actions;
   const { searchFieldsLabel, searchBadgesLabel } = ui;
+  const fieldsLabelMeasureRef = useRef<HTMLSpanElement | null>(null);
+  const badgesLabelMeasureRef = useRef<HTMLSpanElement | null>(null);
+  const [fieldsButtonWidth, setFieldsButtonWidth] = useState<number | null>(null);
+  const [badgesButtonWidth, setBadgesButtonWidth] = useState<number | null>(null);
+
+  const clampFilterButtonWidth = (width: number) => {
+    const min = 116;
+    const max = 220;
+    return Math.min(max, Math.max(min, width));
+  };
+
+  useEffect(() => {
+    const measured = fieldsLabelMeasureRef.current?.offsetWidth ?? 0;
+    if (!measured) return;
+    // Add button chrome (left/right padding, borders, focus ring spacing).
+    setFieldsButtonWidth(clampFilterButtonWidth(Math.ceil(measured) + 34));
+  }, [searchFieldsLabel]);
+
+  useEffect(() => {
+    const measured = badgesLabelMeasureRef.current?.offsetWidth ?? 0;
+    if (!measured) return;
+    // Add button chrome (left/right padding, borders, focus ring spacing).
+    setBadgesButtonWidth(clampFilterButtonWidth(Math.ceil(measured) + 34));
+  }, [searchBadgesLabel]);
 
   const handleScopeChange = (next: string) => {
     const nextScope = next as "folder" | "all";
@@ -119,6 +164,37 @@ export default function TopBar({ state, ui, actions }: TopBarProps) {
       messages.find((message) => message.accountId === accountId)?.id ?? messages[0]?.id ?? ""
     );
   };
+  const scopeLabel = searchScope === "all" ? "Everywhere" : "Current folder";
+  const folderById = new Map(accountFolders.map((folder) => [folder.id, folder]));
+  const currentFolderId =
+    searchScope === "folder" ? activeFolderId : lastFolderId || accountFolders[0]?.id || "";
+  const currentFolder = currentFolderId ? folderById.get(currentFolderId) ?? null : null;
+  const currentFolderPath = (() => {
+    if (!currentFolder) return "";
+    const parts = [currentFolder.name];
+    let parentId = currentFolder.parentId ?? null;
+    while (parentId) {
+      const parent = folderById.get(parentId);
+      if (!parent) break;
+      parts.unshift(parent.name);
+      parentId = parent.parentId ?? null;
+    }
+    return parts.join("/");
+  })();
+  const menuCheckboxLabel = (
+    checked: boolean,
+    label: string,
+    options?: { indented?: boolean }
+  ) => (
+    <span
+      className={`${styles.menuCheckboxLabel}${options?.indented ? ` ${styles.menuCheckboxLabelIndented}` : ""}`}
+    >
+      <span className={styles.menuCheckboxIcon} aria-hidden>
+        {checked ? <CheckSquare2 size={14} /> : <Square size={14} />}
+      </span>
+      {label}
+    </span>
+  );
 
   return (
     <header className={styles.topBar}>
@@ -163,18 +239,53 @@ export default function TopBar({ state, ui, actions }: TopBarProps) {
           </TextField.Root>
         </div>
         <div className={styles.searchFilters}>
-          <Select.Root
-            size="2"
-            value={searchScope}
-            disabled={isRelatedSearch}
-            onValueChange={handleScopeChange}
-          >
-            <Select.Trigger className={styles.select} color="gray" variant="surface" />
-            <Select.Content position="popper">
-              <Select.Item value="folder">Current folder</Select.Item>
-              <Select.Item value="all">Everywhere</Select.Item>
-            </Select.Content>
-          </Select.Root>
+          <DropdownMenu.Root>
+            <DropdownMenu.Trigger>
+              <Button
+                size="2"
+                variant="surface"
+                color="gray"
+                disabled={isRelatedSearch}
+                className={`${styles.select} ${styles.scopeButton}`}
+                title={scopeLabel}
+              >
+                {scopeLabel}
+                <ChevronDown size={14} />
+              </Button>
+            </DropdownMenu.Trigger>
+            <DropdownMenu.Content className={styles.searchMenuContent}>
+              <DropdownMenu.RadioGroup value={searchScope} onValueChange={handleScopeChange}>
+                <DropdownMenu.RadioItem value="folder">
+                  <span className={styles.scopeMenuRow}>
+                    {menuCheckboxLabel(searchScope === "folder", "Current folder:")}
+                    {currentFolder ? (
+                      <Badge size="1" variant="soft" color={badgeColors.folder}>
+                        <span className={styles.scopeFolderBadge} title={currentFolderPath}>
+                          <Folder size={12} />
+                          {currentFolder.name}
+                        </span>
+                      </Badge>
+                    ) : null}
+                  </span>
+                </DropdownMenu.RadioItem>
+                <DropdownMenu.RadioItem value="all">
+                  {menuCheckboxLabel(searchScope === "all", "Everywhere")}
+                </DropdownMenu.RadioItem>
+              </DropdownMenu.RadioGroup>
+              {sentFolderName ? (
+                <DropdownMenu.CheckboxItem
+                  checked={includeSentInEverywhere}
+                  disabled={searchScope !== "all"}
+                  onSelect={(event) => event.preventDefault()}
+                  onCheckedChange={(checked) => setIncludeSentInEverywhere(checked === true)}
+                >
+                  {menuCheckboxLabel(includeSentInEverywhere, `Include ${sentFolderName}`, {
+                    indented: true
+                  })}
+                </DropdownMenu.CheckboxItem>
+              ) : null}
+            </DropdownMenu.Content>
+          </DropdownMenu.Root>
           <DropdownMenu.Root>
             <DropdownMenu.Trigger>
               <Button
@@ -184,11 +295,12 @@ export default function TopBar({ state, ui, actions }: TopBarProps) {
                 disabled={isRelatedSearch}
                 className={styles.filterButton}
                 title={searchFieldsLabel}
+                style={fieldsButtonWidth ? { width: `${fieldsButtonWidth}px` } : undefined}
               >
-                {searchFieldsLabel}
+                <span className={styles.filterButtonLabel}>{searchFieldsLabel}</span>
               </Button>
             </DropdownMenu.Trigger>
-            <DropdownMenu.Content>
+            <DropdownMenu.Content className={styles.searchMenuContent}>
               <DropdownMenu.Label>Search in</DropdownMenu.Label>
               <DropdownMenu.Separator />
               {(
@@ -197,7 +309,7 @@ export default function TopBar({ state, ui, actions }: TopBarProps) {
                   ["participants", "Participants"],
                   ["subject", "Subject"],
                   ["body", "Body"],
-                  ["attachments", "Attachments"]
+                  ["attachments", "Attachment names"]
                 ] as const
               ).map(([key, label]) => (
                 <DropdownMenu.CheckboxItem
@@ -213,7 +325,7 @@ export default function TopBar({ state, ui, actions }: TopBarProps) {
                     }))
                   }
                 >
-                  {label}
+                  {menuCheckboxLabel(searchFields[key], label)}
                 </DropdownMenu.CheckboxItem>
               ))}
             </DropdownMenu.Content>
@@ -227,19 +339,19 @@ export default function TopBar({ state, ui, actions }: TopBarProps) {
                 disabled={isRelatedSearch}
                 className={styles.filterButton}
                 title={searchBadgesLabel}
+                style={badgesButtonWidth ? { width: `${badgesButtonWidth}px` } : undefined}
               >
-                {searchBadgesLabel}
+                <span className={styles.filterButtonLabel}>{searchBadgesLabel}</span>
               </Button>
             </DropdownMenu.Trigger>
-            <DropdownMenu.Content>
-              <DropdownMenu.Label>Badges</DropdownMenu.Label>
-              <DropdownMenu.Separator />
+            <DropdownMenu.Content className={styles.searchMenuContent}>
               {(
                 [
                   ["unread", "Unread"],
                   ["flagged", "Flagged"],
                   ["todo", "To-Do"],
                   ["pinned", "Pinned"],
+                  ["calendar", "Calendar"],
                   ["attachments", "Attachments"]
                 ] as const
               ).map(([key, label]) => (
@@ -254,11 +366,19 @@ export default function TopBar({ state, ui, actions }: TopBarProps) {
                     }))
                   }
                 >
-                  {label}
+                  {menuCheckboxLabel(searchBadges[key], label)}
                 </DropdownMenu.CheckboxItem>
               ))}
             </DropdownMenu.Content>
           </DropdownMenu.Root>
+          <span className={styles.filterLabelMeasure} aria-hidden>
+            <span ref={fieldsLabelMeasureRef} className={styles.filterLabelMeasureText}>
+              {searchFieldsLabel}
+            </span>
+            <span ref={badgesLabelMeasureRef} className={styles.filterLabelMeasureText}>
+              {searchBadgesLabel}
+            </span>
+          </span>
         </div>
       </div>
       <div className={styles.actionRow}>
