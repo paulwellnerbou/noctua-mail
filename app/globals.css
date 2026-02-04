@@ -233,7 +233,7 @@ a {
 }
 
 .inapp-notice {
-  width: min(400px, calc(100vw - 24px));
+  width: min(470px, calc(100vw - 24px));
   padding: 10px 10px 10px 12px;
   border: 1px solid var(--border);
   background: var(--surface-2);

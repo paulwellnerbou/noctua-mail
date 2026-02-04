@@ -38,6 +38,7 @@ type ListRowItem = {
   type: "row";
   key: string;
   groupKey: string;
+  isFirstInGroup: boolean;
   message: Message;
   depth: number;
   threadGroupId: string;
@@ -269,6 +270,7 @@ export default function MessageTable({
     groupedMessages.forEach((group) => {
       items.push({ type: "group", key: group.key, group });
       if (group.items.length === 0 || collapsedGroups[group.key]) return;
+      let isFirstRow = true;
 
       if (supportsThreads) {
         const entries = buildThreadGroupEntries({
@@ -312,6 +314,7 @@ export default function MessageTable({
               type: "row",
               key: message.id,
               groupKey: group.key,
+              isFirstInGroup: isFirstRow,
               message,
               depth,
               threadGroupId,
@@ -324,6 +327,7 @@ export default function MessageTable({
               fromText: fromDisplay.text,
               fromTooltip: fromDisplay.tooltip
             });
+            if (isFirstRow) isFirstRow = false;
           });
         });
         return;
@@ -340,6 +344,7 @@ export default function MessageTable({
           type: "row",
           key: message.id,
           groupKey: group.key,
+          isFirstInGroup: isFirstRow,
           message,
           depth: 0,
           threadGroupId,
@@ -352,6 +357,7 @@ export default function MessageTable({
           fromText: fromDisplay.text,
           fromTooltip: fromDisplay.tooltip
         });
+        if (isFirstRow) isFirstRow = false;
       });
     });
     return items;
@@ -518,8 +524,10 @@ export default function MessageTable({
           const effectiveActive =
             message.id === activeMessageId || Boolean(optimistic?.active);
           const isDisabled = pendingMessageActions.has(message.id);
+          const showRowDivider = index > 0 && !item.isFirstInGroup;
           const rowClassName = [
             styles.row,
+            showRowDivider ? styles.rowDivider : "",
             effectiveActive ? styles.rowActive : "",
             item.depth > 0 ? styles.threadChild : "",
             activeThreadKey === item.threadGroupId &&

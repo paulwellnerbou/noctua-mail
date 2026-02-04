@@ -65,6 +65,8 @@ import { getImapFlagBadges, hasHtmlContent } from "@/lib/ui/messageView";
 import ThreadJsonModal from "./mailclient/message/ThreadJsonModal";
 import ThreadView from "./mailclient/message/ThreadView";
 import TopBar from "./mailclient/TopBar";
+import { useMessageDeleteActions } from "./mailclient/useMessageDeleteActions";
+import { useMessageMoveActions, type UndoMoveTarget } from "./mailclient/useMessageMoveActions";
 import type { Account, AccountSettings, Attachment, Folder, Message } from "@/lib/data";
 import { accounts as seedAccounts, folders as seedFolders, messages as seedMessages } from "@/lib/data";
 import AccountSettingsModal from "./AccountSettingsModal";
@@ -93,11 +95,6 @@ type ExceptionEntry = {
 
 type NoticeInput = Omit<InAppNotice, "id" | "expiresAt"> & {
   durationMs?: number | null;
-};
-
-type UndoMoveTarget = {
-  messageId: string;
-  restoreFolderId: string;
 };
 
 const NOTICE_TIMEOUTS: Record<InAppNoticeType, number> = {
@@ -2491,171 +2488,55 @@ export default function MailClient() {
     }
   };
 
-  const handleDeleteMessage = async (
-    message: Message,
-    options?: { allowThreadDeletion?: boolean }
-  ) => {
-    const allowThreadDeletion = options?.allowThreadDeletion ?? true;
-    const deleteSingle = async (target: Message) => {
-      const res = await apiFetch("/api/message/delete", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ accountId: activeAccountId, messageId: target.id })
-      });
-      if (!res.ok) {
-        const errorMessage = await readErrorMessage(res);
-        throw new Error(errorMessage || "Failed to delete message.");
-      }
-      const data = (await res.json()) as {
-        action: "deleted" | "moved";
-        trashFolderId?: string | null;
-      };
-      setMessages((prev) => {
-        if (data.action === "deleted") {
-          return prev.filter((item) => item.id !== target.id);
-        }
-        if (data.action === "moved") {
-          if (searchScope === "all" && data.trashFolderId) {
-            return prev.map((item) =>
-              item.id === target.id
-                ? { ...item, folderId: data.trashFolderId!, recent: false }
-                : item
-            );
-          }
-          return prev.filter((item) => item.id !== target.id);
-        }
-        return prev;
-      });
-      if (activeMessageId === target.id) {
-        setActiveMessageId("");
-      }
-      return data;
-    };
-    const threadId = message.threadId ?? message.messageId ?? message.id;
-    const threadItems = supportsThreads
-      ? threadScopeMessages.filter(
-          (item) => item.accountId === activeAccountId && item.threadId === threadId
-        )
-      : [];
-    const isCollapsedThread =
-      allowThreadDeletion &&
-      supportsThreads &&
-      collapsedThreads[threadId] &&
-      threadItems.length > 1;
-    const targets = isCollapsedThread ? threadItems : [message];
-    const targetIds = new Set(targets.map((item) => item.id));
-    const activeWasDeleted = activeMessageId && targetIds.has(activeMessageId);
-    let nextActiveId = activeWasDeleted
-      ? (() => {
-          const indices = visibleMessages
-            .map((item, index) => (targetIds.has(item.message.id) ? index : -1))
-            .filter((idx) => idx >= 0);
-          if (indices.length === 0) return "";
-          const maxIndex = Math.max(...indices);
-          const minIndex = Math.min(...indices);
-          for (let i = maxIndex + 1; i < visibleMessages.length; i += 1) {
-            const candidate = visibleMessages[i]?.message?.id;
-            if (candidate && !targetIds.has(candidate)) return candidate;
-          }
-          for (let i = minIndex - 1; i >= 0; i -= 1) {
-            const candidate = visibleMessages[i]?.message?.id;
-            if (candidate && !targetIds.has(candidate)) return candidate;
-          }
-          return "";
-        })()
-      : "";
-    if (activeWasDeleted && !nextActiveId) {
-      const threadRoot = visibleMessages.find((item) => item.threadId === threadId)?.message.id;
-      if (threadRoot && !targetIds.has(threadRoot)) {
-        nextActiveId = threadRoot;
-      }
-    }
-    if (activeWasDeleted && !nextActiveId) {
-      const fallback = sortedMessages.find((msg) => !targetIds.has(msg.id));
-      if (fallback) nextActiveId = fallback.id;
-    }
-    if (isCollapsedThread) {
-      const confirmed = window.confirm("Delete entire thread?");
-      if (!confirmed) return;
-    }
-    const undoTargets: UndoMoveTarget[] = [];
-    let movedToTrashCount = 0;
-    let permanentlyDeletedCount = 0;
-    try {
-      setPendingMessageActions((prev) => new Set([...prev, ...targets.map((t) => t.id)]));
-      for (const target of targets) {
-        const result = await deleteSingle(target);
-        if (result.action === "moved") {
-          movedToTrashCount += 1;
-          if (result.trashFolderId) {
-            undoTargets.push({
-              messageId: target.id,
-              restoreFolderId: target.folderId
-            });
-          }
-        } else {
-          permanentlyDeletedCount += 1;
-        }
-      }
-      if (activeWasDeleted) {
-        if (nextActiveId) {
-          setActiveMessageId(nextActiveId);
-          selectionStore.setSelection(new Set([nextActiveId]), nextActiveId);
-          lastSelectedIdRef.current = nextActiveId;
-        } else {
-          setActiveMessageId("");
-          selectionStore.clearSelection();
-        }
-      }
-      await refreshFolders();
-      if (movedToTrashCount > 0) {
-        pushNotice({
-          type: "success",
-          title:
-            movedToTrashCount === 1
-              ? "Moved message to Trash."
-              : `Moved ${movedToTrashCount} messages to Trash.`,
-          description:
-            permanentlyDeletedCount > 0
-              ? permanentlyDeletedCount === 1
-                ? "1 message was deleted permanently."
-                : `${permanentlyDeletedCount} messages were deleted permanently.`
-              : undefined,
-          actionLabel: undoTargets.length > 0 ? "Undo" : undefined,
-          onAction:
-            undoTargets.length > 0
-              ? () =>
-                  undoMoveOperation(
-                    undoTargets,
-                    activeAccountId,
-                    undoTargets.length === 1 ? "Message restored." : "Messages restored."
-                  )
-              : undefined,
-          durationMs: undoTargets.length > 0 ? 12000 : NOTICE_TIMEOUTS.success
-        });
-      } else if (permanentlyDeletedCount > 0) {
-        pushNotice({
-          type: "success",
-          title:
-            permanentlyDeletedCount === 1
-              ? "Message deleted permanently."
-              : `${permanentlyDeletedCount} messages deleted permanently.`
-        });
-      }
-    } catch (error) {
-      if (error instanceof Error && error.message) {
-        reportError(error.message);
-      } else {
-        reportError("Failed to delete message.");
-      }
-    } finally {
-      setPendingMessageActions((prev) => {
-        const next = new Set(prev);
-        targets.forEach((item) => next.delete(item.id));
-        return next;
-      });
-    }
-  };
+  const { handleMoveMessages, moveMessagesToFolder } = useMessageMoveActions({
+    activeAccountId,
+    activeMessageId,
+    activeFolderId,
+    searchScope,
+    messages,
+    selectionStore,
+    folderById,
+    lastSelectedIdRef,
+    setMessages,
+    setPendingMessageActions,
+    setActiveMessageId,
+    apiFetch,
+    readErrorMessage,
+    reportError,
+    pushNotice,
+    undoMoveOperation,
+    noticeSuccessTimeout: NOTICE_TIMEOUTS.success
+  });
+
+  const { handleDeleteMessage, handleDeleteMessagesByIds } = useMessageDeleteActions({
+    activeAccountId,
+    activeMessageId,
+    supportsThreads,
+    collapsedThreads,
+    searchScope,
+    folders,
+    messages,
+    threadScopeMessages,
+    visibleMessages,
+    sortedMessages,
+    isTrashFolder,
+    moveMessagesToFolder,
+    selectionStore,
+    lastSelectedIdRef,
+    setMessages,
+    setPendingMessageActions,
+    setActiveMessageId,
+    refreshFolders: () => refreshFolders(),
+    apiFetch,
+    readErrorMessage,
+    reportError,
+    pushNotice,
+    undoMoveOperation,
+    noticeSuccessTimeout: NOTICE_TIMEOUTS.success
+  });
+
+  const getMessageSubjectForNotice = (message?: Message | null) =>
+    message?.subject?.trim() || "(no subject)";
 
   const handleArchiveMessage = async (message: Message) => {
     const undoTarget: UndoMoveTarget = {
@@ -2690,6 +2571,7 @@ export default function MailClient() {
       pushNotice({
         type: "success",
         title: "Message archived.",
+        description: getMessageSubjectForNotice(message),
         actionLabel: data.archiveFolderId ? "Undo" : undefined,
         onAction:
           data.archiveFolderId
@@ -2735,6 +2617,7 @@ export default function MailClient() {
       pushNotice({
         type: "success",
         title: "Message marked as spam.",
+        description: getMessageSubjectForNotice(message),
         actionLabel: data.junkFolderId ? "Undo" : undefined,
         onAction:
           data.junkFolderId
@@ -3021,96 +2904,6 @@ export default function MailClient() {
     }
   };
 
-  const handleMoveMessages = async (destinationFolderId: string, messageIds?: string[]) => {
-    const selected = selectionStore.getIds();
-    const ids =
-      messageIds && messageIds.length > 0
-        ? messageIds
-        : selected.size > 0
-          ? Array.from(selected)
-          : activeMessageId
-            ? [activeMessageId]
-            : [];
-    if (!ids.length) return;
-    const idSet = new Set(ids);
-    const undoTargets: UndoMoveTarget[] = messages
-      .filter((item) => item.accountId === activeAccountId && idSet.has(item.id))
-      .map((item) => ({
-        messageId: item.id,
-        restoreFolderId: item.folderId
-      }));
-    try {
-      setPendingMessageActions((prev) => new Set([...prev, ...ids]));
-      const res = await apiFetch("/api/message/move", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          accountId: activeAccountId,
-          messageIds: ids,
-          destinationFolderId
-        })
-      });
-      if (!res.ok) {
-        reportError(await readErrorMessage(res));
-        return;
-      }
-      const data = (await res.json()) as {
-        ok: boolean;
-        destinationFolderId: string;
-        destinationMailbox?: string;
-      };
-      setMessages((prev) =>
-        prev
-          .map((item) => {
-            if (!ids.includes(item.id)) return item;
-            const updated = {
-              ...item,
-              folderId: data.destinationFolderId,
-              mailboxPath: data.destinationMailbox ?? item.mailboxPath
-            };
-            return updated;
-          })
-          .filter((item) => {
-            if (searchScope === "folder" && activeFolderId && item.folderId !== activeFolderId) {
-              return false;
-            }
-            return true;
-          })
-      );
-      if (ids.includes(activeMessageId) && searchScope === "folder" && activeFolderId !== destinationFolderId) {
-        setActiveMessageId("");
-      }
-      clearSelection();
-      const destinationName = folderById.get(destinationFolderId)?.name ?? "folder";
-      pushNotice({
-        type: "success",
-        title:
-          ids.length === 1
-            ? `Moved message to ${destinationName}.`
-            : `Moved ${ids.length} messages to ${destinationName}.`,
-        actionLabel: undoTargets.length > 0 ? "Undo" : undefined,
-        onAction:
-          undoTargets.length > 0
-            ? () =>
-                undoMoveOperation(
-                  undoTargets,
-                  activeAccountId,
-                  undoTargets.length === 1 ? "Move undone." : "Moves undone."
-                )
-            : undefined,
-        durationMs: undoTargets.length > 0 ? 12000 : NOTICE_TIMEOUTS.success
-      });
-    } catch {
-      reportError("Failed to move messages.");
-    } finally {
-      setPendingMessageActions((prev) => {
-        const next = new Set(prev);
-        ids.forEach((id) => next.delete(id));
-        return next;
-      });
-    }
-  };
-
   const buildDragPreview = (dragMessages: Message[]) => {
     if (dragImageRef.current) {
       document.body.removeChild(dragImageRef.current);
@@ -3233,7 +3026,7 @@ export default function MailClient() {
       return Boolean(target.closest("input, textarea, select"));
     };
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== "Delete") return;
+      if (event.key !== "Delete" && event.key !== "Backspace") return;
       if (isTypingTarget(event.target)) return;
       const selected = selectionStore.getIds();
       const ids =
@@ -3244,19 +3037,26 @@ export default function MailClient() {
             : [];
       if (ids.length === 0) return;
       event.preventDefault();
-      void (async () => {
-        for (const id of ids) {
-          const message =
-            threadScopeMessages.find((item) => item.id === id) ??
-            messages.find((item) => item.id === id);
-          if (!message) continue;
-          await handleDeleteMessage(message);
-        }
-      })();
+      if (ids.length > 1) {
+        void handleDeleteMessagesByIds(ids);
+        return;
+      }
+      const message =
+        threadScopeMessages.find((item) => item.id === ids[0]) ??
+        messages.find((item) => item.id === ids[0]);
+      if (!message) return;
+      void handleDeleteMessage(message);
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [activeMessageId, handleDeleteMessage, messages, selectionStore, threadScopeMessages]);
+  }, [
+    activeMessageId,
+    handleDeleteMessage,
+    handleDeleteMessagesByIds,
+    messages,
+    selectionStore,
+    threadScopeMessages
+  ]);
   const scrubSource = (source?: string) => {
     if (!source) return "";
     return source.replace(/([A-Za-z0-9+/=]{200,})/g, "[base64 omitted]");

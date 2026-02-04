@@ -97,14 +97,18 @@ export default function MessageListHeader({ state, actions }: MessageListHeaderP
     startTransition(() => toggleAllGroups());
   };
   const collapseViewSwitcher = listWidth < 720;
+  const title =
+    searchScope === "folder" && activeFolderName
+      ? collapseViewSwitcher
+        ? activeFolderName
+        : `Messages in ${activeFolderName}`
+      : "Messages";
 
   return (
     <div className={styles.header}>
       <div className={styles.titleBlock}>
         <Text as="span" size="3" weight="bold">
-          {searchScope === "folder" && activeFolderName
-            ? `Messages in ${activeFolderName}`
-            : "Messages"}
+          {title}
         </Text>
         <span className={styles.meta}>
           <Text as="span" size="1" color="gray">

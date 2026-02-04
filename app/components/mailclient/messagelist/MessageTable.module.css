@@ -24,6 +24,18 @@
   align-items: center;
   transition: background 0.12s ease, border-color 0.12s ease;
   height: 44px;
+  position: relative;
+}
+
+.rowDivider::before {
+  content: "";
+  position: absolute;
+  left: var(--radius-sm);
+  right: var(--radius-sm);
+  top: 0;
+  height: 1px;
+  background: var(--gray-5);
+  pointer-events: none;
 }
 
 .rowHeader {
@@ -50,6 +62,13 @@
 .row:focus-within {
   background: var(--gray-3);
   border-color: var(--gray-5);
+}
+
+.rowDivider.row:hover::before,
+.rowDivider.row:focus-within::before,
+.rowDivider.rowActive::before,
+.rowDivider.rowSelected::before {
+  opacity: 0;
 }
 
 .rowActive:hover {

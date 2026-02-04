@@ -21,7 +21,10 @@ type MailPayload = {
 };
 
 function buildMailOptions(account: Account, mail: MailPayload) {
-  const fromValue = account.name ? `"${account.name}" <${account.email}>` : account.email;
+  const fromValue = {
+    name: account.name,
+    address: account.email
+  };
   const attachments = mail.attachments?.map((attachment) => ({
     filename: attachment.filename,
     content: attachment.content,

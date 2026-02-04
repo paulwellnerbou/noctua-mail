@@ -279,15 +279,22 @@ export default function MessageWindowPage() {
     [pendingMessageActions, safeMessage]
   );
   const noop = () => {};
+  const renderState = (message: string, color: "gray" | "red" = "gray") => (
+    <div className={styles.state}>
+      <Text size="2" color={color}>
+        {message}
+      </Text>
+    </div>
+  );
 
   return (
     <div className={styles.page}>
       {missingParams ? (
-        <Text size="2" color="red">Missing accountId or messageId.</Text>
+        renderState("Missing accountId or messageId.", "red")
       ) : status === "loading" ? (
-        <Text size="2" color="gray">Loading message…</Text>
+        renderState("Loading message…")
       ) : status === "error" || !safeMessage ? (
-        <Text size="2" color="red">{error || "Failed to load message."}</Text>
+        renderState(error || "Failed to load message.", "red")
       ) : (
         <>
           {actionError && (

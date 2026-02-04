@@ -1,5 +1,6 @@
 import type { Message } from "@/lib/data";
 import { Text } from "@radix-ui/themes";
+import { hasHtmlContent } from "@/lib/ui/messageView";
 import ThreadMessageCard from "./ThreadMessageCard";
 import type { ThreadMessageCardProps } from "./ThreadMessageCard";
 import styles from "./ThreadView.module.css";
@@ -27,6 +28,10 @@ export default function ThreadView({
     <>
       {activeMessage ? (
         (() => {
+          const hasMessageContent = (message?: Message | null) => {
+            if (!message) return false;
+            return (message.body ?? "").trim().length > 0 || hasHtmlContent(message.htmlBody);
+          };
           const activeThreadId =
             activeMessage.threadId ?? activeMessage.messageId ?? activeMessage.id;
           const hasFullThread =
@@ -36,10 +41,24 @@ export default function ThreadView({
             activeThreadId &&
             threadContentLoading === activeThreadId &&
             !hasFullThread;
+          const activeMessageFromThread =
+            activeThread.find((item) => item.id === activeMessage.id) ?? activeMessage;
+          const showMessageContentLoading =
+            activeThreadId &&
+            threadContentLoading === activeThreadId &&
+            !showThreadLoading &&
+            !hasMessageContent(activeMessageFromThread);
           if (showThreadLoading) {
             return (
               <Text size="2" color="gray" className={styles.loading}>
                 Loading thread…
+              </Text>
+            );
+          }
+          if (showMessageContentLoading) {
+            return (
+              <Text size="2" color="gray" className={styles.loading}>
+                Loading message content…
               </Text>
             );
           }

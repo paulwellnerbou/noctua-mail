@@ -5,3 +5,11 @@
   flex-direction: column;
   overflow: hidden;
 }
+
+.state {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-4);
+}
