@@ -3026,8 +3026,14 @@ export default function MailClient() {
     flat: { message: Message; depth: number }[],
     target: Message
   ) => {
-    const ids = flat.map((item) => item.message.id);
-    selectionStore.setSelection(new Set(ids), target.id);
+    const hasTarget = flat.some((item) => item.message.id === target.id);
+    const effectiveTarget = hasTarget ? target : (flat[0]?.message ?? target);
+    selectionStore.setSelection(new Set([effectiveTarget.id]), effectiveTarget.id);
+    if (!hasTarget) {
+      lastSelectedIdRef.current = effectiveTarget.id;
+      handleSelectMessage(effectiveTarget, { preserveSelection: true });
+      return;
+    }
     lastSelectedIdRef.current = target.id;
     handleSelectMessage(target, { preserveSelection: true });
   };
