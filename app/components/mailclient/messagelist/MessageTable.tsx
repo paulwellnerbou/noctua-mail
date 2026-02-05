@@ -86,6 +86,7 @@ type MessageTableProps = {
     activeFolderId: string;
     messageById: Map<string, Message>;
     sortDir: "asc" | "desc";
+    userEmail?: string;
   };
   refs: {
     scrollRef: React.RefObject<HTMLDivElement | null>;
@@ -150,7 +151,8 @@ export default function MessageTable({
     searchScope,
     activeFolderId,
     messageById,
-    sortDir
+    sortDir,
+    userEmail
   } = state;
   const { scrollRef } = refs;
   const {
@@ -294,7 +296,7 @@ export default function MessageTable({
             showThreadFolderBadges
           } = entry;
           const collapsedThreadFrom =
-            isCollapsed && threadSize > 1 ? getCollapsedThreadFromDisplay(fullFlat) : null;
+            isCollapsed && threadSize > 1 ? getCollapsedThreadFromDisplay(fullFlat, userEmail) : null;
           flat.forEach(({ message, depth }, index) => {
             const folderIds =
               index === 0 && isCollapsed && threadSize > 1
@@ -306,10 +308,12 @@ export default function MessageTable({
                       message.folderId !== activeFolderId)
                   ? [message.folderId]
                   : [];
+            // For expanded threads (depth > 0 or index > 0), pass isInExpandedThread=true
+            const isInExpandedThread = !isCollapsed || index > 0;
             const fromDisplay =
               index === 0 && collapsedThreadFrom
                 ? collapsedThreadFrom
-                : getMessageFromDisplay(message.from);
+                : getMessageFromDisplay(message.from, message.to, userEmail, isInExpandedThread);
             items.push({
               type: "row",
               key: message.id,
@@ -339,7 +343,8 @@ export default function MessageTable({
         searchScope,
         activeFolderId
       }).forEach(({ message, threadGroupId, folderIds }) => {
-        const fromDisplay = getMessageFromDisplay(message.from);
+        // Single messages should show "To:" if from user (pass true to enable)
+        const fromDisplay = getMessageFromDisplay(message.from, message.to, userEmail, true);
         items.push({
           type: "row",
           key: message.id,
@@ -371,7 +376,8 @@ export default function MessageTable({
     activeFolderId,
     buildThreadTree,
     flattenThread,
-    getThreadLatestDate
+    getThreadLatestDate,
+    userEmail
   ]);
 
   const { offsets, totalHeight } = useMemo(() => {
@@ -431,7 +437,7 @@ export default function MessageTable({
               setSortDir(sortDir === "asc" ? "desc" : "asc");
             }}
           >
-            From
+            From/To
           </button>
         </div>
         <div className={styles.cellSubject}>

@@ -40,6 +40,7 @@ import ComposeModal from "./mailclient/composition/ComposeModal";
 import MessageCardList from "./mailclient/messagelist/MessageCardList";
 import MessageListHeader from "./mailclient/messagelist/MessageListHeader";
 import MessageListPane from "./mailclient/messagelist/MessageListPane";
+import MessageThreadList from "./mailclient/messagelist/MessageThreadList";
 import listMetaStyles from "./mailclient/messagelist/MessageListMeta.module.css";
 import listPaneStyles from "./mailclient/messagelist/MessageListPane.module.css";
 import { createSelectionStore } from "./mailclient/messagelist/selectionStore";
@@ -159,7 +160,7 @@ export default function MailClient() {
   const [selectedExceptionId, setSelectedExceptionId] = useState<string | null>(null);
   const [processPanelOpen, setProcessPanelOpen] = useState(false);
   const [exceptionPanelOpen, setExceptionPanelOpen] = useState(false);
-  const [messageView, setMessageView] = useState<"card" | "table" | "compact">("compact");
+  const [messageView, setMessageView] = useState<"card" | "table" | "compact" | "threads">("compact");
   const clientId = useMemo(() => {
     if (typeof window === "undefined") return "";
     const key = "noctuaClientId";
@@ -5236,7 +5237,8 @@ export default function MailClient() {
                   searchScope,
                   activeFolderId,
                   messageById,
-                  sortDir
+                  sortDir,
+                  userEmail: currentAccount?.email
                 }}
                 actions={{
                   setSortKey,
@@ -5268,7 +5270,47 @@ export default function MailClient() {
                 }}
                 refs={{ scrollRef: listPaneRef }}
               />
-            
+            ) : deferredMessageView === "threads" ? (
+              <MessageThreadList
+                state={{
+                  groupedMessages,
+                  collapsedGroups,
+                  collapsedThreads,
+                  supportsThreads,
+                  includeThreadAcrossFolders,
+                  searchScope,
+                  activeFolderId,
+                  messageById,
+                  selectionStore,
+                  draggingMessageIds,
+                  pendingMessageActions,
+                  userEmail: currentAccount?.email
+                }}
+                actions={{
+                  setCollapsedGroups,
+                  setCollapsedThreads,
+                  handleMessageDragStart,
+                  handleMessageDragEnd,
+                  handleRowClick,
+                  handleSelectMessage,
+                  selectRangeTo,
+                  toggleMessageSelection,
+                  selectCollapsedThread,
+                  handleDeleteMessage
+                }}
+                helpers={{
+                  buildThreadTree,
+                  flattenThread,
+                  getThreadLatestDate,
+                  getGroupLabel,
+                  renderFolderBadges,
+                  handleShowRelated,
+                  isPinnedMessage,
+                  isTrashFolder,
+                  renderMessageMenu
+                }}
+                refs={{ scrollRef: listPaneRef }}
+              />
             ) : (
               <MessageCardList
                 state={{
@@ -5284,7 +5326,8 @@ export default function MailClient() {
                   draggingMessageIds,
                   pendingMessageActions,
                   isCompactView,
-                  listIsNarrow
+                  listIsNarrow,
+                  userEmail: currentAccount?.email
                 }}
                 actions={{
                   setCollapsedGroups,

@@ -12,6 +12,7 @@ type ThreadNode = { message: Message; children: ThreadNode[]; threadSize: number
 export type FromDisplayInfo = {
   text: string;
   tooltip: string;
+  isFromUser?: boolean;
 };
 
 const EMAIL_PATTERN = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i;
@@ -47,18 +48,68 @@ const extractPrimaryEmail = (value: string) => {
   return directMatch?.[0]?.toLowerCase() ?? null;
 };
 
-export function getMessageFromDisplay(fromValue: string): FromDisplayInfo {
+const isMessageFromUser = (fromValue: string, userEmail?: string): boolean => {
+  if (!userEmail) return false;
+  const messageEmail = extractPrimaryEmail(fromValue);
+  const normalizedUserEmail = userEmail.trim().toLowerCase();
+  return messageEmail === normalizedUserEmail;
+};
+
+const extractToDisplay = (toValue: string): string => {
+  if (!toValue) return "";
+
+  // Split by comma to handle multiple recipients
+  const recipients = toValue.split(",").map(r => r.trim()).filter(Boolean);
+
+  if (recipients.length === 0) return "";
+
+  // Extract display names or emails for each recipient
+  const displayNames = recipients.map(recipient => {
+    const displayName = extractDisplayName(recipient);
+    if (displayName) return displayName;
+    const email = extractPrimaryEmail(recipient);
+    return email || recipient;
+  });
+
+  return displayNames.join(", ");
+};
+
+export function getMessageFromDisplay(
+  fromValue: string,
+  toValue?: string,
+  userEmail?: string,
+  isInExpandedThread?: boolean
+): FromDisplayInfo {
   const normalized = normalizeFromValue(fromValue);
   if (!normalized) return { text: "", tooltip: "" };
+
+  const isFromUser = isMessageFromUser(normalized, userEmail);
+
+  // For single messages or messages in expanded threads: show "To: ..." if from user
+  // isInExpandedThread = false means it's a collapsed thread header (show "Me")
+  // isInExpandedThread = true means it's an expanded thread or single message (show "To: ...")
+  if (isFromUser && isInExpandedThread && toValue) {
+    const toDisplay = extractToDisplay(toValue);
+    return {
+      text: toDisplay ? `To: ${toDisplay}` : "To: (no recipients)",
+      tooltip: toValue || "",
+      isFromUser: true
+    };
+  }
+
   const displayName = extractDisplayName(normalized);
+  const displayText = isFromUser ? "Me" : (displayName || normalized);
+
   return {
-    text: displayName || normalized,
-    tooltip: normalized
+    text: displayText,
+    tooltip: normalized,
+    isFromUser
   };
 }
 
 export function getCollapsedThreadFromDisplay(
-  fullFlat: Array<{ message: Message; depth: number }>
+  fullFlat: Array<{ message: Message; depth: number }>,
+  userEmail?: string
 ): FromDisplayInfo {
   const seen = new Set<string>();
   const fromTexts: string[] = [];
@@ -66,7 +117,8 @@ export function getCollapsedThreadFromDisplay(
   fullFlat.forEach(({ message }) => {
     const normalized = normalizeFromValue(message.from ?? "");
     if (!normalized) return;
-    const entry = getMessageFromDisplay(normalized);
+    // For collapsed threads, just replace with "Me", don't show "To:"
+    const entry = getMessageFromDisplay(normalized, undefined, userEmail, true);
     const key = extractPrimaryEmail(normalized) ?? entry.text.toLowerCase();
     if (seen.has(key)) return;
     seen.add(key);

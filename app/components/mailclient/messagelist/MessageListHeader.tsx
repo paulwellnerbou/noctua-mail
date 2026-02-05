@@ -18,7 +18,7 @@ type MessageListHeaderProps = {
     listLoading: boolean;
     loadingMessages: boolean;
     hasMoreMessages: boolean;
-    messageView: "card" | "table" | "compact";
+    messageView: "card" | "table" | "compact" | "threads";
     groupBy: "none" | "date" | "week" | "sender" | "domain" | "year" | "folder";
     threadsEnabled: boolean;
     threadsAllowed: boolean;
@@ -27,7 +27,7 @@ type MessageListHeaderProps = {
   };
   actions: {
     setMessagesPage: React.Dispatch<React.SetStateAction<number>>;
-    setMessageView: React.Dispatch<React.SetStateAction<"card" | "table" | "compact">>;
+    setMessageView: React.Dispatch<React.SetStateAction<"card" | "table" | "compact" | "threads">>;
     setGroupBy: React.Dispatch<
       React.SetStateAction<"none" | "date" | "week" | "sender" | "domain" | "year" | "folder">
     >;
@@ -77,7 +77,7 @@ export default function MessageListHeader({ state, actions }: MessageListHeaderP
   };
 
   const handleViewChange = (value: string) => {
-    const next = value as "card" | "table" | "compact";
+    const next = value as "card" | "table" | "compact" | "threads";
     setLocalView(next);
     scheduleCommit(viewFrameRef, () => setMessageView(next));
   };
@@ -149,6 +149,7 @@ export default function MessageListHeader({ state, actions }: MessageListHeaderP
               <Select.Item value="compact">View: Compact</Select.Item>
               <Select.Item value="card">View: Cards</Select.Item>
               <Select.Item value="table">View: Table</Select.Item>
+              <Select.Item value="threads">View: Threads</Select.Item>
             </Select.Content>
           </Select.Root>
         ) : (
@@ -161,6 +162,7 @@ export default function MessageListHeader({ state, actions }: MessageListHeaderP
             <SegmentedControl.Item value="compact">Compact</SegmentedControl.Item>
             <SegmentedControl.Item value="card">Cards</SegmentedControl.Item>
             <SegmentedControl.Item value="table">Table</SegmentedControl.Item>
+            <SegmentedControl.Item value="threads">Threads</SegmentedControl.Item>
           </SegmentedControl.Root>
         )}
         <div className={styles.rightActions}>

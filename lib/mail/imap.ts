@@ -214,7 +214,9 @@ async function parseImapMessage(
     return previewText.slice(0, 120);
   };
   const hasQpArtifacts = /=([0-9A-F]{2})/i.test(body);
-  const previewSource = hasQpArtifacts && htmlBody ? htmlToText(htmlBody) : body;
+  const hasTextBody = body.trim().length > 0;
+  const previewSource =
+    htmlBody && (hasQpArtifacts || !hasTextBody) ? htmlToText(htmlBody) : body;
   const preview = buildPreview(previewSource);
   const attachments: Attachment[] = (parsed.attachments ?? []).map((att: any, index: number) => {
     const content = att.content as Buffer;
