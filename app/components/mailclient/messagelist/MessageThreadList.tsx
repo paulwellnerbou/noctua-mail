@@ -176,6 +176,8 @@ export default function MessageThreadList({
 
   const listRef = useRef<HTMLDivElement | null>(null);
   const lastGroupToggleRef = useRef<{ key: string; open: boolean; at: number } | null>(null);
+  const lastThreadToggleRef = useRef<{ key: string; open: boolean; at: number } | null>(null);
+  const lastNestedToggleRef = useRef<{ key: string; open: boolean; at: number } | null>(null);
   const [scrollState, setScrollState] = useState({ scrollTop: 0, height: 0 });
   const [collapsedNestedMessages, setCollapsedNestedMessages] = useState<Record<string, boolean>>({});
 
@@ -510,10 +512,45 @@ export default function MessageThreadList({
         const message = item.message;
         const isSelected = selectedMessageIds.has(message.id);
         const isDragging = draggingMessageIds.has(message.id);
-        const shouldAnimateRow =
-          lastToggle?.open &&
-          lastToggle.key === item.groupKey &&
-          now - lastToggle.at < 220;
+
+        // Check if row should animate due to group, thread, or nested message expansion
+        const lastGroupToggle = lastToggle;
+        const lastThreadToggle = lastThreadToggleRef.current;
+        const lastNestedToggle = lastNestedToggleRef.current;
+
+        const animateFromGroup =
+          lastGroupToggle?.open &&
+          lastGroupToggle.key === item.groupKey &&
+          now - lastGroupToggle.at < 220;
+
+        const animateFromThread =
+          lastThreadToggle?.open &&
+          lastThreadToggle.key === item.threadGroupId &&
+          item.depth > 0 &&
+          now - lastThreadToggle.at < 220;
+
+        const animateFromNested = (() => {
+          if (!lastNestedToggle?.open || item.depth === 0) return false;
+          if (now - lastNestedToggle.at >= 220) return false;
+
+          const expandedId = lastNestedToggle.key;
+          const flatIndex = item.fullFlat.findIndex(e => e.message.id === message.id);
+          const expandedIndex = item.fullFlat.findIndex(e => e.message.id === expandedId);
+          if (expandedIndex === -1 || flatIndex <= expandedIndex) return false;
+
+          const expandedDepth = item.fullFlat[expandedIndex].depth;
+          if (item.depth <= expandedDepth) return false;
+
+          // Check if expanded message is an ancestor (no message at <= expandedDepth between them)
+          for (let i = expandedIndex + 1; i < flatIndex; i++) {
+            if (item.fullFlat[i].depth <= expandedDepth) {
+              return false;
+            }
+          }
+          return true;
+        })();
+
+        const shouldAnimateRow = animateFromGroup || animateFromThread || animateFromNested;
         const isActive = message.id === activeMessageId;
         const isDisabled = pendingMessageActions.has(message.id);
 
@@ -545,6 +582,12 @@ export default function MessageThreadList({
                 title={item.isCollapsed ? "Expand thread" : "Collapse thread"}
                 onClick={(event) => {
                   event.stopPropagation();
+                  const willOpen = item.isCollapsed;
+                  lastThreadToggleRef.current = {
+                    key: item.threadGroupId,
+                    open: willOpen,
+                    at: Date.now()
+                  };
                   setCollapsedThreads((prev) => ({
                     ...prev,
                     [item.threadGroupId]: !item.isCollapsed
@@ -598,6 +641,12 @@ export default function MessageThreadList({
               title={item.isNestedCollapsed ? "Expand" : "Collapse"}
               onClick={(event) => {
                 event.stopPropagation();
+                const willOpen = item.isNestedCollapsed;
+                lastNestedToggleRef.current = {
+                  key: message.id,
+                  open: willOpen,
+                  at: Date.now()
+                };
                 setCollapsedNestedMessages((prev) => ({
                   ...prev,
                   [message.id]: !item.isNestedCollapsed

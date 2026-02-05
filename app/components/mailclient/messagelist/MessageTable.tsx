@@ -551,16 +551,19 @@ export default function MessageTable({
           return (
             <div
               key={`row-${item.key}`}
-              className={`${styles.virtualItem} ${rowClassName} ${
+              className={`${styles.virtualItem} ${
                 shouldAnimateRow ? styles.rowEnter : ""
               }`}
               style={{ transform: `translateY(${top}px)`, height: rowHeight }}
-              role="button"
-              tabIndex={0}
-              draggable
-              onDragStart={(event) => handleMessageDragStart(event, message)}
-              onDragEnd={handleMessageDragEnd}
-              onPointerDown={(event) => {
+            >
+              <div
+                className={rowClassName}
+                role="button"
+                tabIndex={0}
+                draggable
+                onDragStart={(event) => handleMessageDragStart(event, message)}
+                onDragEnd={handleMessageDragEnd}
+                onPointerDown={(event) => {
                 if (isDisabled) return;
                 if (event.button !== 0) return;
                 const target = event.target as HTMLElement | null;
@@ -755,6 +758,7 @@ export default function MessageTable({
                   <Search size={14} />
                 </IconButton>
                 {renderMessageMenu(message, "table")}
+              </div>
               </div>
             </div>
           );

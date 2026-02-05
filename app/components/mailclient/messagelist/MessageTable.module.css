@@ -111,19 +111,16 @@
   will-change: transform;
 }
 
-.rowEnter {
-  animation: rowEnterFade 200ms ease-out;
-  will-change: opacity, filter;
+.rowEnter > * {
+  animation: rowEnterFade 180ms ease-out;
 }
 
 @keyframes rowEnterFade {
   from {
     opacity: 0;
-    filter: blur(2px);
   }
   to {
     opacity: 1;
-    filter: blur(0);
   }
 }
 
