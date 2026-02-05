@@ -179,9 +179,10 @@ function MessageRow({
     if (isDisabled) return;
     if (event.button !== 0) return;
     const target = event.target as HTMLElement | null;
+    const isRowControl = Boolean(target?.closest('[data-no-row-select="true"]'));
     const isCheckbox = Boolean(target?.closest('[role="checkbox"]'));
     const isInteractive = Boolean(target?.closest("button, a, input, select, textarea"));
-    if (isInteractive && !isCheckbox) return;
+    if (isRowControl || (isInteractive && !isCheckbox)) return;
     const isToggle = event.metaKey || event.ctrlKey;
     const isRange = event.shiftKey;
     if (isCheckbox) {
@@ -309,10 +310,14 @@ function MessageRow({
         <div className={styles.subject} onClick={onSubjectClick}>
           {showThreadCaret && (
             <span
+              data-no-row-select="true"
               className={`${styles.threadCaret} ${
                 isThreadCaretOpen ? styles.threadCaretOpen : ""
               }`}
               title={isThreadCaretOpen ? "Collapse thread" : "Expand thread"}
+              onPointerDown={(event) => {
+                event.stopPropagation();
+              }}
               onClick={(event) => {
                 event.stopPropagation();
                 onThreadCaretClick?.(event);

@@ -146,10 +146,10 @@ export default function MessageListHeader({ state, actions }: MessageListHeaderP
           >
             <Select.Trigger className={styles.viewSelectTrigger} color="gray" />
             <Select.Content position="popper">
+              <Select.Item value="threads">View: Threads</Select.Item>
               <Select.Item value="compact">View: Compact</Select.Item>
               <Select.Item value="card">View: Cards</Select.Item>
               <Select.Item value="table">View: Table</Select.Item>
-              <Select.Item value="threads">View: Threads</Select.Item>
             </Select.Content>
           </Select.Root>
         ) : (
@@ -159,10 +159,10 @@ export default function MessageListHeader({ state, actions }: MessageListHeaderP
             onValueChange={handleViewChange}
             className={styles.segmented}
           >
+            <SegmentedControl.Item value="threads">Threads</SegmentedControl.Item>
             <SegmentedControl.Item value="compact">Compact</SegmentedControl.Item>
             <SegmentedControl.Item value="card">Cards</SegmentedControl.Item>
             <SegmentedControl.Item value="table">Table</SegmentedControl.Item>
-            <SegmentedControl.Item value="threads">Threads</SegmentedControl.Item>
           </SegmentedControl.Root>
         )}
         <div className={styles.rightActions}>

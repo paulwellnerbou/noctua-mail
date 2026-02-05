@@ -559,8 +559,8 @@ export default function MessageThreadList({
         const isActive = message.id === activeMessageId;
         const isDisabled = pendingMessageActions.has(message.id);
 
-        const rowClassName = [
-          styles.row,
+        const rowContainerClassName = [
+          styles.messageRowContainer,
           isActive ? styles.rowActive : "",
           activeThreadKey === item.threadGroupId && message.id !== activeMessage?.id
             ? styles.threadSibling
@@ -669,17 +669,19 @@ export default function MessageThreadList({
             className={`${styles.virtualItem} ${shouldAnimateRow ? styles.rowEnter : ""}`}
             style={{ transform: `translateY(${top}px)`, height: rowHeight }}
           >
-            <div className={styles.messageRowContainer}>
+            <div className={rowContainerClassName}>
               {threadMarkers}
               <div
-                className={rowClassName}
+                className={styles.row}
                 role="button"
                 tabIndex={0}
                 draggable
                 onDragStart={(event) => handleMessageDragStart(event, message)}
                 onDragEnd={handleMessageDragEnd}
                 onClick={(event) => {
+                  const hasSelectionModifier = event.shiftKey || event.metaKey || event.ctrlKey;
                   if (
+                    !hasSelectionModifier &&
                     supportsThreads &&
                     item.threadSize > 1 &&
                     item.depth === 0 &&

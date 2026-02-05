@@ -406,7 +406,7 @@ function normalizeAccountSettings(settings?: AccountSettings) {
   }
   if (!next.layout) next.layout = {};
   if (!next.layout.defaultView) {
-    next.layout.defaultView = "card";
+    next.layout.defaultView = "threads";
   }
   if (!next.signatures) next.signatures = [];
   if (next.defaultSignatureId === undefined) {

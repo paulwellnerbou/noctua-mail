@@ -124,6 +124,8 @@ function getExceptionDetail(message: string) {
   return detail || null;
 }
 
+const THREAD_COLLAPSE_SETTLE_MS = 220;
+
 export default function MailClient() {
   const [accounts, setAccounts] = useState<Account[]>(seedAccounts);
   const [folders, setFolders] = useState<Folder[]>(seedFolders);
@@ -160,7 +162,7 @@ export default function MailClient() {
   const [selectedExceptionId, setSelectedExceptionId] = useState<string | null>(null);
   const [processPanelOpen, setProcessPanelOpen] = useState(false);
   const [exceptionPanelOpen, setExceptionPanelOpen] = useState(false);
-  const [messageView, setMessageView] = useState<"card" | "table" | "compact" | "threads">("compact");
+  const [messageView, setMessageView] = useState<"card" | "table" | "compact" | "threads">("threads");
   const clientId = useMemo(() => {
     if (typeof window === "undefined") return "";
     const key = "noctuaClientId";
@@ -1460,7 +1462,12 @@ export default function MailClient() {
     currentAccount?.settings?.threading?.includeAcrossFolders ?? true;
   useEffect(() => {
     const preferred = currentAccount?.settings?.layout?.defaultView;
-    if (preferred === "card" || preferred === "table" || preferred === "compact") {
+    if (
+      preferred === "card" ||
+      preferred === "table" ||
+      preferred === "compact" ||
+      preferred === "threads"
+    ) {
       setMessageView(preferred);
     }
   }, [currentAccount?.settings?.layout?.defaultView]);
@@ -3765,12 +3772,42 @@ export default function MailClient() {
     });
   }, [activeMessage, threadMessages]);
 
+  const scrollActiveMessageIntoView = useCallback((behavior: ScrollBehavior) => {
+    if (!activeMessageId) return false;
+    const target = messageRefs.current.get(activeMessageId);
+    if (!target) return false;
+    target.scrollIntoView({ behavior, block: "start" });
+    return true;
+  }, [activeMessageId]);
+  const collapsedMessagesRef = useRef(collapsedMessages);
+  const threadMessagesRef = useRef(threadMessages);
+  useEffect(() => {
+    collapsedMessagesRef.current = collapsedMessages;
+    threadMessagesRef.current = threadMessages;
+  }, [collapsedMessages, threadMessages]);
+
   useEffect(() => {
     if (!activeMessageId) return;
-    const target = messageRefs.current.get(activeMessageId);
-    if (!target) return;
-    target.scrollIntoView({ behavior: "smooth", block: "start" });
-  }, [activeMessageId]);
+    const hasExpandedSibling = threadMessagesRef.current.some(
+      (message) => message.id !== activeMessageId && !collapsedMessagesRef.current[message.id]
+    );
+    let frame = 0;
+    let settleTimer = 0;
+    const doScroll = () => {
+      frame = window.requestAnimationFrame(() => {
+        scrollActiveMessageIntoView("smooth");
+      });
+    };
+    if (hasExpandedSibling) {
+      settleTimer = window.setTimeout(doScroll, THREAD_COLLAPSE_SETTLE_MS);
+    } else {
+      doScroll();
+    }
+    return () => {
+      if (frame) window.cancelAnimationFrame(frame);
+      if (settleTimer) window.clearTimeout(settleTimer);
+    };
+  }, [activeMessageId, scrollActiveMessageIntoView]);
 
   useEffect(() => {
     const pane = listPaneRef.current;

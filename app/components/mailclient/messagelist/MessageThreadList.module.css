@@ -14,21 +14,24 @@
   display: flex;
   height: 100%;
   position: relative;
-  border-radius: 6px;
-  background: var(--gray-1);
-  transition: background 0.12s ease;
+  border-radius: var(--radius-sm);
+  border: 1px solid transparent;
+  background: transparent;
+  transition: background 0.12s ease, border-color 0.12s ease;
 }
 
 :global(.dark) .messageRowContainer {
-  background: var(--gray-2);
+  background: transparent;
 }
 
 .messageRowContainer:hover {
   background: var(--gray-3);
+  border-color: var(--gray-5);
 }
 
 :global(.dark) .messageRowContainer:hover {
-  background: var(--gray-4);
+  background: var(--gray-3);
+  border-color: var(--gray-5);
 }
 
 .threadMarker {
@@ -113,7 +116,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 12px 8px 0;
+  padding: 8px 4px 8px 0;
   cursor: pointer;
   user-select: none;
   flex: 1;
@@ -121,28 +124,22 @@
   min-width: 0;
 }
 
-.rowActive .messageRowContainer {
-  background: var(--accent-3);
+.row:first-child {
+  padding-left: 4px;
 }
 
-:global(.dark) .rowActive .messageRowContainer {
-  background: var(--accent-4);
+.rowActive {
+  background: var(--gray-3);
+  border-color: var(--gray-12);
 }
 
-.rowActive .messageRowContainer:hover {
-  background: var(--accent-4);
+.rowActive:hover {
+  border-color: var(--gray-12);
 }
 
-:global(.dark) .rowActive .messageRowContainer:hover {
-  background: var(--accent-5);
-}
-
-.rowSelected .messageRowContainer {
-  background: var(--blue-3);
-}
-
-:global(.dark) .rowSelected .messageRowContainer {
-  background: var(--blue-4);
+.rowSelected {
+  background: var(--gray-3);
+  border-color: var(--gray-5);
 }
 
 .rowUnread {
@@ -155,15 +152,12 @@
 
 .rowDisabled {
   opacity: 0.6;
-  cursor: not-allowed;
+  pointer-events: none;
 }
 
-.threadSibling .messageRowContainer {
-  background: var(--accent-2);
-}
-
-:global(.dark) .threadSibling .messageRowContainer {
-  background: var(--accent-3);
+.threadSibling {
+  background: color-mix(in srgb, var(--gray-2) 60%, transparent);
+  border-color: var(--gray-5);
 }
 
 .rowEnter > * {

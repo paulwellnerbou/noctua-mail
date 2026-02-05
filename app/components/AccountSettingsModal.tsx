@@ -575,18 +575,19 @@ export default function AccountSettingsModal({
                     <Grid columns="2" gap="3">
                       <Field label="Default layout">
                         <Select.Root
-                          value={editingAccount.settings?.layout?.defaultView ?? "card"}
+                          value={editingAccount.settings?.layout?.defaultView ?? "threads"}
                           onValueChange={(value) =>
                             onUpdateSettings({
                               layout: {
                                 ...(editingAccount.settings?.layout ?? {}),
-                                defaultView: value as "card" | "table" | "compact"
+                                defaultView: value as "card" | "table" | "compact" | "threads"
                               }
                             })
                           }
                         >
                           <Select.Trigger style={{ width: "100%" }} />
                           <Select.Content position="popper">
+                            <Select.Item value="threads">Thread view</Select.Item>
                             <Select.Item value="card">Card view</Select.Item>
                             <Select.Item value="table">Table view</Select.Item>
                             <Select.Item value="compact">Compact view</Select.Item>
