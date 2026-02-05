@@ -315,6 +315,7 @@ export default function MailClient() {
   });
   const [searchBadges, setSearchBadges] = useState({
     unread: false,
+    unanswered: false,
     flagged: false,
     todo: false,
     pinned: false,
@@ -640,9 +641,10 @@ export default function MailClient() {
     return `Fields: ${effective.map((key) => labels[key]).join(", ")}`;
   }, [searchFields]);
   const searchBadgesLabel = useMemo(() => {
-    const order = ["unread", "flagged", "todo", "pinned", "calendar", "attachments"] as const;
+    const order = ["unread", "unanswered", "flagged", "todo", "pinned", "calendar", "attachments"] as const;
     const labels: Record<string, string> = {
       unread: "Unread",
+      unanswered: "Unanswered",
       flagged: "Flagged",
       todo: "To-Do",
       pinned: "Pinned",
@@ -686,6 +688,7 @@ export default function MailClient() {
     setQuery("");
     setSearchBadges({
       unread: false,
+      unanswered: false,
       flagged: false,
       todo: false,
       pinned: false,
@@ -1540,10 +1543,12 @@ export default function MailClient() {
       groups.get(key)!.push(message);
     });
     const meta = groupMeta.length ? groupMeta : computeGroupMeta(base);
-    const pinnedItems = groups.get("Pinned") ?? [];
-    const orderedMeta = pinnedItems.length
+    // Keep the Pinned header count aligned with non-threaded grouping:
+    // count pinned messages only, not every message inside pinned threads.
+    const pinnedCount = base.filter((message) => isPinnedMessage(message)).length;
+    const orderedMeta = pinnedCount > 0
       ? [
-          { key: "Pinned", label: "Pinned", count: pinnedItems.length },
+          { key: "Pinned", label: "Pinned", count: pinnedCount },
           ...meta.filter((group) => group.key !== "Pinned")
         ]
       : meta;
@@ -4617,6 +4622,7 @@ export default function MailClient() {
         });
         pushNotice({
           type: "info",
+          icon: "mail",
           title,
           description: body,
           messageId: message.messageId ?? undefined,
@@ -4632,6 +4638,7 @@ export default function MailClient() {
         await showNotification(title, preview, "mail-batch", { url: "/" });
         pushNotice({
           type: "info",
+          icon: "mail",
           title,
           description: preview,
           ids: unique.map((item) => item.messageId ?? undefined).filter(Boolean) as string[],
@@ -5303,6 +5310,7 @@ export default function MailClient() {
                   flattenThread,
                   getThreadLatestDate,
                   getGroupLabel,
+                  renderUnreadDot,
                   renderFolderBadges,
                   handleShowRelated,
                   isPinnedMessage,

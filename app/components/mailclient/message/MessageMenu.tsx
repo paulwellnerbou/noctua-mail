@@ -2,13 +2,14 @@ import type React from "react";
 import { Fragment } from "react";
 import {
   Archive,
-  Check,
+  CheckSquare,
   Download,
   Edit3,
   FileText,
   Flag,
   Forward,
   Mail,
+  MailCheck,
   MailOpen,
   MoreVertical,
   Pin,
@@ -18,6 +19,7 @@ import {
   Reply,
   ReplyAll,
   ShieldOff,
+  Square,
   Trash2
 } from "lucide-react";
 import { DropdownMenu, IconButton } from "@radix-ui/themes";
@@ -202,7 +204,9 @@ export default function MessageMenu({
                   message.flags?.some((flag) => flag.toLowerCase() === "to-do")
                     ? "Mark as Done"
                     : "Mark as To-Do",
-                  <Check size={14} />,
+                  message.flags?.some((flag) => flag.toLowerCase() === "to-do")
+                    ? <CheckSquare size={14} />
+                    : <Square size={14} />,
                   () => toggleTodoFlag(message),
                   isDisabled("todo")
                 )
@@ -211,7 +215,7 @@ export default function MessageMenu({
               ? buildItem(
                   "answered",
                   message.answered ? "Unmark answered" : "Mark answered",
-                  <Check size={14} />,
+                  <MailCheck size={14} />,
                   () => updateFlagState(message, "answered", !message.answered),
                   isDisabled("answered")
                 )

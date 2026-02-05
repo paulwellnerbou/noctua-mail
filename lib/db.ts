@@ -928,6 +928,9 @@ function applyBadgeFilters(where: string, args: any[], badges?: string[] | null)
   if (normalized.includes("unread")) {
     where += " AND m.unread = 1";
   }
+  if (normalized.includes("unanswered")) {
+    where += " AND COALESCE(m.answered, 0) = 0";
+  }
   if (normalized.includes("flagged")) {
     where += " AND m.flagged = 1";
   }

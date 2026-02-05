@@ -2,16 +2,19 @@ import {
   AlertCircle,
   CheckCircle2,
   Info,
+  Mail,
   TriangleAlert,
   X,
   type LucideIcon
 } from "lucide-react";
 
 export type InAppNoticeType = "info" | "success" | "warning" | "error";
+export type InAppNoticeIcon = "mail";
 
 export type InAppNotice = {
   id: string;
   type: InAppNoticeType;
+  icon?: InAppNoticeIcon;
   title: string;
   description?: string;
   messageId?: string;
@@ -37,6 +40,9 @@ const ICON_BY_TYPE: Record<InAppNoticeType, LucideIcon> = {
   warning: TriangleAlert,
   error: AlertCircle
 };
+const ICON_BY_NAME: Record<InAppNoticeIcon, LucideIcon> = {
+  mail: Mail
+};
 
 export default function InAppNoticeStack({ state, actions }: InAppNoticeStackProps) {
   const { inAppNotices } = state;
@@ -57,7 +63,7 @@ export default function InAppNoticeStack({ state, actions }: InAppNoticeStackPro
     <div className="inapp-notice-stack">
       {inAppNotices.map((notice) => {
         const openable = Boolean(notice.messageId || (notice.ids && notice.ids.length > 0));
-        const TypeIcon = ICON_BY_TYPE[notice.type];
+        const TypeIcon = notice.icon ? ICON_BY_NAME[notice.icon] : ICON_BY_TYPE[notice.type];
         return (
           <div
             key={notice.id}

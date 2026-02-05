@@ -113,7 +113,7 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 12px;
+  padding: 8px 12px 8px 0;
   cursor: pointer;
   user-select: none;
   flex: 1;
@@ -282,14 +282,6 @@
   align-items: center;
   gap: 4px;
   flex-shrink: 0;
-  opacity: 0;
+  opacity: 1;
   transition: opacity 0.12s ease;
-}
-
-.row:hover .cellActions {
-  opacity: 1;
-}
-
-.rowActive .cellActions {
-  opacity: 1;
 }

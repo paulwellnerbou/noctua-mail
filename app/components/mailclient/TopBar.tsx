@@ -31,6 +31,7 @@ type SearchFields = {
 
 type SearchBadges = {
   unread: boolean;
+  unanswered: boolean;
   flagged: boolean;
   todo: boolean;
   pinned: boolean;
@@ -348,6 +349,7 @@ export default function TopBar({ state, ui, actions }: TopBarProps) {
               {(
                 [
                   ["unread", "Unread"],
+                  ["unanswered", "Unanswered"],
                   ["flagged", "Flagged"],
                   ["todo", "To-Do"],
                   ["pinned", "Pinned"],

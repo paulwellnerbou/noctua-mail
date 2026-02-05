@@ -301,8 +301,8 @@ export default function MessageCardList({
         searchScope,
         activeFolderId
       }).forEach(({ message, threadGroupId, folderIds }) => {
-        // Single messages should show "To:" if from user (pass true to enable)
-        const fromDisplay = getMessageFromDisplay(message.from, message.to, userEmail, true);
+        // When thread mode is disabled, keep sender-style display (no collapsed-thread participant substitution).
+        const fromDisplay = getMessageFromDisplay(message.from, message.to, userEmail, false);
         items.push({
           type: "row",
           key: message.id,

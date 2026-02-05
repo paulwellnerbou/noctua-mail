@@ -13,6 +13,7 @@ import {
   getCollapsedThreadFromDisplay,
   getMessageFromDisplay
 } from "./threadGroupUtils";
+import { getMessageListDateDisplay } from "./messageDateDisplay";
 import { useSelectionSnapshot, type SelectionStore } from "./selectionStore";
 import groupStyles from "./MessageCardList.module.css";
 import styles from "./MessageThreadList.module.css";
@@ -115,6 +116,7 @@ type MessageThreadListProps = {
     ) => Array<{ message: Message; depth: number }>;
     getThreadLatestDate: (node: ThreadNode) => number;
     getGroupLabel: (group: MessageGroup) => React.ReactNode;
+    renderUnreadDot: (message: Message) => React.ReactNode;
     renderFolderBadges: (folderIds: string[]) => React.ReactNode;
     handleShowRelated: (message: Message) => void;
     isPinnedMessage: (message: Message) => boolean;
@@ -167,6 +169,7 @@ export default function MessageThreadList({
     flattenThread,
     getThreadLatestDate,
     getGroupLabel,
+    renderUnreadDot,
     renderFolderBadges,
     handleShowRelated,
     isPinnedMessage,
@@ -390,7 +393,8 @@ export default function MessageThreadList({
         searchScope,
         activeFolderId
       }).forEach(({ message, threadGroupId, folderIds }) => {
-        const fromDisplay = getMessageFromDisplay(message.from, message.to, userEmail, true);
+        // When thread mode is disabled, keep sender-style display (no collapsed-thread participant substitution).
+        const fromDisplay = getMessageFromDisplay(message.from, message.to, userEmail, false);
         items.push({
           type: "row",
           key: message.id,
@@ -510,6 +514,7 @@ export default function MessageThreadList({
         }
 
         const message = item.message;
+        const dateDisplay = getMessageListDateDisplay(message.dateValue, message.date);
         const isSelected = selectedMessageIds.has(message.id);
         const isDragging = draggingMessageIds.has(message.id);
 
@@ -734,13 +739,14 @@ export default function MessageThreadList({
                 </span>
 
                 <span className={styles.cellSubject}>
-                  {renderFolderBadges(item.folderIds)}
+                  {renderUnreadDot(message)}
                   <span className={styles.cellSubjectText}>{message.subject}</span>
+                  {renderFolderBadges(item.folderIds)}
                 </span>
 
                 <span className={styles.cellDate}>
-                  <Text as="span" size="1">
-                    {message.date}
+                  <Text as="span" size="1" title={dateDisplay.tooltip}>
+                    {dateDisplay.text}
                   </Text>
                 </span>
 

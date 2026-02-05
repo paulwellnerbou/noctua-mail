@@ -7,6 +7,7 @@ import { badgeColors } from "@/lib/ui/badgeColors";
 import type { Message } from "@/lib/data";
 import badgeStyles from "../message/MessageBadge.module.css";
 import commonStyles from "./MessageListCommon.module.css";
+import { getMessageListDateDisplay } from "./messageDateDisplay";
 import styles from "./MessageRow.module.css";
 
 type MessageRowProps = {
@@ -156,6 +157,7 @@ function MessageRow({
   const fromLine = fromText && fromText.trim() ? fromText : message.from;
   const fromLineTooltip =
     fromTooltip && fromTooltip.trim() ? fromTooltip : message.from;
+  const dateDisplay = getMessageListDateDisplay(message.dateValue, message.date);
 
   const handleCheckboxClick = (event: React.MouseEvent<HTMLButtonElement>) => {
     event.stopPropagation();
@@ -266,8 +268,8 @@ function MessageRow({
               New
             </Badge>
           )}
-          <Text as="span" size="1" className={dateClassName}>
-            {message.date}
+          <Text as="span" size="1" className={dateClassName} title={dateDisplay.tooltip}>
+            {dateDisplay.text}
           </Text>
           {isCompactView ? (
             <>
