@@ -51,6 +51,7 @@ type ListRowItem = {
   isLastInDepth: boolean;
   hasChildren: boolean;
   isNestedCollapsed: boolean;
+  ancestorStopsHere: boolean[];
 };
 
 type ListItem = ListGroupItem | ListRowItem;
@@ -307,6 +308,31 @@ export default function MessageThreadList({
             }
           });
 
+          // Build ancestor paths and determine which ancestors stop vertical lines
+          const ancestorStopsHere = new Map<number, boolean[]>();
+          visibleFlat.forEach(({ message, depth }, index) => {
+            const stops: boolean[] = [];
+
+            // Build the ancestor path by walking backwards through visibleFlat
+            const ancestors: number[] = [];
+            for (let d = depth - 1; d >= 0; d--) {
+              // Find the closest message before this one at depth d
+              for (let i = index - 1; i >= 0; i--) {
+                if (visibleFlat[i].depth === d) {
+                  ancestors.unshift(i);
+                  break;
+                }
+              }
+            }
+
+            // For each ancestor at depth d, check if it's the last child
+            ancestors.forEach((ancestorIndex, d) => {
+              stops[d] = isLastChildOfParent.get(ancestorIndex) ?? false;
+            });
+
+            ancestorStopsHere.set(index, stops);
+          });
+
           visibleFlat.forEach(({ message, depth }, index) => {
             const folderIds =
               index === 0 && isCollapsed && threadSize > 1
@@ -327,6 +353,7 @@ export default function MessageThreadList({
             const isLastInDepth = isLastChildOfParent.get(index) ?? false;
             const hasChildren = childrenMap.has(message.id) && (childrenMap.get(message.id)?.size ?? 0) > 0;
             const isNestedCollapsed = collapsedNestedMessages[message.id] ?? false;
+            const stops = ancestorStopsHere.get(index) ?? [];
 
             items.push({
               type: "row",
@@ -346,7 +373,8 @@ export default function MessageThreadList({
               fromTooltip: fromDisplay.tooltip,
               isLastInDepth,
               hasChildren,
-              isNestedCollapsed
+              isNestedCollapsed,
+              ancestorStopsHere: stops
             });
             if (isFirstRow) isFirstRow = false;
           });
@@ -379,7 +407,8 @@ export default function MessageThreadList({
           fromTooltip: fromDisplay.tooltip,
           isLastInDepth: true,
           hasChildren: false,
-          isNestedCollapsed: false
+          isNestedCollapsed: false,
+          ancestorStopsHere: []
         });
         if (isFirstRow) isFirstRow = false;
       });
@@ -532,6 +561,8 @@ export default function MessageThreadList({
         for (let d = 0; d < item.depth; d++) {
           const isLast = d === item.depth - 1;
           const shouldUseCorner = isLast && item.isLastInDepth;
+          // Marker at position d should check if ancestor at depth d+1 is the last child
+          const hideVerticalLine = !isLast && (item.ancestorStopsHere[d + 1] ?? false);
 
           if (isLast) {
             // Last marker shows the horizontal connector
@@ -548,7 +579,9 @@ export default function MessageThreadList({
             threadMarkers.push(
               <div
                 key={`marker-${d}`}
-                className={styles.threadMarker}
+                className={`${styles.threadMarker} ${
+                  hideVerticalLine ? styles.threadMarkerNoVertical : ""
+                }`}
               />
             );
           }

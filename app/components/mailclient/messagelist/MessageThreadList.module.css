@@ -104,6 +104,11 @@
   bottom: 50%;
 }
 
+/* Hide vertical line when ancestor stopped at this depth */
+.threadMarkerNoVertical::before {
+  display: none;
+}
+
 .row {
   display: flex;
   align-items: center;
