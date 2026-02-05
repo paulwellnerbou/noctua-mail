@@ -1050,6 +1050,7 @@ export default function MailClient() {
     !isDraftsFolder(activeFolderId) &&
     !isThreadExcludedFolder(activeFolderId);
   const supportsThreads = threadsEnabled && threadsAllowed;
+  const preferToDisplay = isDraftsFolder(activeFolderId) || isSentFolder(activeFolderId);
   const draftsFolder = useMemo(
     () =>
       folders.find(
@@ -5288,6 +5289,7 @@ export default function MailClient() {
                   activeFolderId,
                   messageById,
                   sortDir,
+                  preferToDisplay,
                   userEmail: currentAccount?.email
                 }}
                 actions={{
@@ -5334,6 +5336,7 @@ export default function MailClient() {
                   selectionStore,
                   draggingMessageIds,
                   pendingMessageActions,
+                  preferToDisplay,
                   userEmail: currentAccount?.email
                 }}
                 actions={{
@@ -5378,6 +5381,7 @@ export default function MailClient() {
                   pendingMessageActions,
                   isCompactView,
                   listIsNarrow,
+                  preferToDisplay,
                   userEmail: currentAccount?.email
                 }}
                 actions={{

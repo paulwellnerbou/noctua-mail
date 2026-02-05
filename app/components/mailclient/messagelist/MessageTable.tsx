@@ -87,6 +87,7 @@ type MessageTableProps = {
     activeFolderId: string;
     messageById: Map<string, Message>;
     sortDir: "asc" | "desc";
+    preferToDisplay: boolean;
     userEmail?: string;
   };
   refs: {
@@ -153,6 +154,7 @@ export default function MessageTable({
     activeFolderId,
     messageById,
     sortDir,
+    preferToDisplay,
     userEmail
   } = state;
   const { scrollRef } = refs;
@@ -297,7 +299,9 @@ export default function MessageTable({
             showThreadFolderBadges
           } = entry;
           const collapsedThreadFrom =
-            isCollapsed && threadSize > 1 ? getCollapsedThreadFromDisplay(fullFlat, userEmail) : null;
+            isCollapsed && threadSize > 1
+              ? getCollapsedThreadFromDisplay(fullFlat, userEmail, preferToDisplay)
+              : null;
           flat.forEach(({ message, depth }, index) => {
             const folderIds =
               index === 0 && isCollapsed && threadSize > 1
@@ -314,7 +318,13 @@ export default function MessageTable({
             const fromDisplay =
               index === 0 && collapsedThreadFrom
                 ? collapsedThreadFrom
-                : getMessageFromDisplay(message.from, message.to, userEmail, isInExpandedThread);
+                : getMessageFromDisplay(
+                    message.from,
+                    { to: message.to, cc: message.cc, bcc: message.bcc },
+                    userEmail,
+                    isInExpandedThread,
+                    preferToDisplay
+                  );
             items.push({
               type: "row",
               key: message.id,
@@ -345,7 +355,13 @@ export default function MessageTable({
         activeFolderId
       }).forEach(({ message, threadGroupId, folderIds }) => {
         // When thread mode is disabled, keep sender-style display (no collapsed-thread participant substitution).
-        const fromDisplay = getMessageFromDisplay(message.from, message.to, userEmail, false);
+        const fromDisplay = getMessageFromDisplay(
+          message.from,
+          { to: message.to, cc: message.cc, bcc: message.bcc },
+          userEmail,
+          false,
+          preferToDisplay
+        );
         items.push({
           type: "row",
           key: message.id,
@@ -378,7 +394,8 @@ export default function MessageTable({
     buildThreadTree,
     flattenThread,
     getThreadLatestDate,
-    userEmail
+    userEmail,
+    preferToDisplay
   ]);
 
   const { offsets, totalHeight } = useMemo(() => {

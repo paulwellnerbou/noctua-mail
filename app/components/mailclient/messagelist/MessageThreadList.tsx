@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type React from "react";
-import { GitBranch, Trash2 } from "lucide-react";
+import { CalendarDays, GitBranch, Paperclip, Trash2 } from "lucide-react";
 import { Badge, IconButton, Text } from "@radix-ui/themes";
 import { CaretRightIcon } from "@radix-ui/react-icons";
 import * as Collapsible from "@radix-ui/react-collapsible";
 import { badgeColors } from "@/lib/ui/badgeColors";
 import type { Message } from "@/lib/data";
+import { CALENDAR_INVITE_FLAG, hasMessageFlag } from "@/lib/messageFlags";
 import badgeStyles from "../message/MessageBadge.module.css";
 import {
   buildFlatEntries,
@@ -87,6 +88,7 @@ type MessageThreadListProps = {
     selectionStore: SelectionStore;
     draggingMessageIds: Set<string>;
     pendingMessageActions: Set<string>;
+    preferToDisplay: boolean;
     userEmail?: string;
   };
   refs: {
@@ -147,6 +149,7 @@ export default function MessageThreadList({
     selectionStore,
     draggingMessageIds,
     pendingMessageActions,
+    preferToDisplay,
     userEmail
   } = state;
   const { scrollRef } = refs;
@@ -254,7 +257,9 @@ export default function MessageThreadList({
             showThreadFolderBadges
           } = entry;
           const collapsedThreadFrom =
-            isCollapsed && threadSize > 1 ? getCollapsedThreadFromDisplay(fullFlat, userEmail) : null;
+            isCollapsed && threadSize > 1
+              ? getCollapsedThreadFromDisplay(fullFlat, userEmail, preferToDisplay)
+              : null;
 
           // Build a map of children for each message
           const childrenMap = new Map<string, Set<string>>();
@@ -353,7 +358,13 @@ export default function MessageThreadList({
             const fromDisplay =
               index === 0 && collapsedThreadFrom
                 ? collapsedThreadFrom
-                : getMessageFromDisplay(message.from, message.to, userEmail, isInExpandedThread);
+                : getMessageFromDisplay(
+                    message.from,
+                    { to: message.to, cc: message.cc, bcc: message.bcc },
+                    userEmail,
+                    isInExpandedThread,
+                    preferToDisplay
+                  );
 
             const isLastInDepth = isLastChildOfParent.get(index) ?? false;
             const hasChildren = childrenMap.has(message.id) && (childrenMap.get(message.id)?.size ?? 0) > 0;
@@ -394,7 +405,13 @@ export default function MessageThreadList({
         activeFolderId
       }).forEach(({ message, threadGroupId, folderIds }) => {
         // When thread mode is disabled, keep sender-style display (no collapsed-thread participant substitution).
-        const fromDisplay = getMessageFromDisplay(message.from, message.to, userEmail, false);
+        const fromDisplay = getMessageFromDisplay(
+          message.from,
+          { to: message.to, cc: message.cc, bcc: message.bcc },
+          userEmail,
+          false,
+          preferToDisplay
+        );
         items.push({
           type: "row",
           key: message.id,
@@ -432,6 +449,7 @@ export default function MessageThreadList({
     flattenThread,
     getThreadLatestDate,
     userEmail,
+    preferToDisplay,
     collapsedNestedMessages
   ]);
 
@@ -744,6 +762,31 @@ export default function MessageThreadList({
                   {renderUnreadDot(message)}
                   <span className={styles.cellSubjectText}>{message.subject}</span>
                   {renderFolderBadges(item.folderIds)}
+                  {(message.hasAttachments ??
+                    (message.attachments?.some((att) => !att.inline) ?? false)) && (
+                    <Badge
+                      size="1"
+                      variant="soft"
+                      color={badgeColors.attachment}
+                      className={badgeStyles.badge}
+                      title="Attachments"
+                      aria-label="Attachments"
+                    >
+                      <Paperclip size={12} />
+                    </Badge>
+                  )}
+                  {hasMessageFlag(message.flags, CALENDAR_INVITE_FLAG) && (
+                    <Badge
+                      size="1"
+                      variant="soft"
+                      color={badgeColors.calendarInvite}
+                      className={badgeStyles.badge}
+                      title="Calendar invite"
+                      aria-label="Calendar invite"
+                    >
+                      <CalendarDays size={12} />
+                    </Badge>
+                  )}
                 </span>
 
                 <span className={styles.cellDate}>

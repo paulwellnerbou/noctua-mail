@@ -15,6 +15,12 @@ export type FromDisplayInfo = {
   isFromUser?: boolean;
 };
 
+type RecipientFields = {
+  to?: string;
+  cc?: string;
+  bcc?: string;
+};
+
 const EMAIL_PATTERN = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i;
 
 const normalizeFromValue = (value: string) => value.replace(/\s+/g, " ").trim();
@@ -55,44 +61,74 @@ const isMessageFromUser = (fromValue: string, userEmail?: string): boolean => {
   return messageEmail === normalizedUserEmail;
 };
 
-const extractToDisplay = (toValue: string): string => {
-  if (!toValue) return "";
+const splitRecipients = (value?: string) =>
+  (value ?? "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
 
-  // Split by comma to handle multiple recipients
-  const recipients = toValue.split(",").map(r => r.trim()).filter(Boolean);
+const recipientDisplayValue = (recipient: string) => {
+  const displayName = extractDisplayName(recipient);
+  if (displayName) return displayName;
+  const email = extractPrimaryEmail(recipient);
+  return email || recipient;
+};
 
-  if (recipients.length === 0) return "";
-
-  // Extract display names or emails for each recipient
-  const displayNames = recipients.map(recipient => {
-    const displayName = extractDisplayName(recipient);
-    if (displayName) return displayName;
-    const email = extractPrimaryEmail(recipient);
-    return email || recipient;
+const extractRecipientsDisplay = (fields?: RecipientFields): string => {
+  if (!fields) return "";
+  const seen = new Set<string>();
+  const displayValues: string[] = [];
+  [fields.to, fields.cc, fields.bcc].forEach((value) => {
+    splitRecipients(value).forEach((recipient) => {
+      const display = recipientDisplayValue(recipient);
+      const key = extractPrimaryEmail(recipient) ?? display.toLowerCase();
+      if (seen.has(key)) return;
+      seen.add(key);
+      displayValues.push(display);
+    });
   });
+  return displayValues.join(", ");
+};
 
-  return displayNames.join(", ");
+const recipientTooltip = (fields?: RecipientFields): string => {
+  if (!fields) return "";
+  return [fields.to, fields.cc, fields.bcc]
+    .map((value) => value?.trim())
+    .filter(Boolean)
+    .join(", ");
 };
 
 export function getMessageFromDisplay(
   fromValue: string,
-  toValue?: string,
+  recipients?: RecipientFields,
   userEmail?: string,
-  isInExpandedThread?: boolean
+  isInExpandedThread?: boolean,
+  forceRecipientDisplay?: boolean
 ): FromDisplayInfo {
   const normalized = normalizeFromValue(fromValue);
-  if (!normalized) return { text: "", tooltip: "" };
+  if (!normalized && !forceRecipientDisplay) return { text: "", tooltip: "" };
 
-  const isFromUser = isMessageFromUser(normalized, userEmail);
+  const isFromUser = normalized ? isMessageFromUser(normalized, userEmail) : false;
+
+  if (forceRecipientDisplay) {
+    const recipientsDisplay = extractRecipientsDisplay(recipients);
+    return {
+      text: recipientsDisplay || "(no recipients)",
+      tooltip: recipientTooltip(recipients),
+      isFromUser
+    };
+  }
+
+  if (!normalized) return { text: "", tooltip: "" };
 
   // For single messages or messages in expanded threads: show "To: ..." if from user
   // isInExpandedThread = false means it's a collapsed thread header (show "Me")
   // isInExpandedThread = true means it's an expanded thread or single message (show "To: ...")
-  if (isFromUser && isInExpandedThread && toValue) {
-    const toDisplay = extractToDisplay(toValue);
+  if (isFromUser && isInExpandedThread && recipients) {
+    const recipientsDisplay = extractRecipientsDisplay(recipients);
     return {
-      text: toDisplay ? `To: ${toDisplay}` : "To: (no recipients)",
-      tooltip: toValue || "",
+      text: recipientsDisplay ? `To: ${recipientsDisplay}` : "To: (no recipients)",
+      tooltip: recipientTooltip(recipients),
       isFromUser: true
     };
   }
@@ -109,17 +145,25 @@ export function getMessageFromDisplay(
 
 export function getCollapsedThreadFromDisplay(
   fullFlat: Array<{ message: Message; depth: number }>,
-  userEmail?: string
+  userEmail?: string,
+  forceRecipientDisplay?: boolean
 ): FromDisplayInfo {
   const seen = new Set<string>();
   const fromTexts: string[] = [];
   const fromTooltips: string[] = [];
   fullFlat.forEach(({ message }) => {
     const normalized = normalizeFromValue(message.from ?? "");
-    if (!normalized) return;
-    // For collapsed threads, just replace with "Me", don't show "To:"
-    const entry = getMessageFromDisplay(normalized, undefined, userEmail, true);
-    const key = extractPrimaryEmail(normalized) ?? entry.text.toLowerCase();
+    if (!normalized && !forceRecipientDisplay) return;
+    const entry = getMessageFromDisplay(
+      normalized,
+      { to: message.to, cc: message.cc, bcc: message.bcc },
+      userEmail,
+      true,
+      forceRecipientDisplay
+    );
+    const key = forceRecipientDisplay
+      ? entry.text.toLowerCase()
+      : extractPrimaryEmail(normalized) ?? entry.text.toLowerCase();
     if (seen.has(key)) return;
     seen.add(key);
     fromTexts.push(entry.text);
