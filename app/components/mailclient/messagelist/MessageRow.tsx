@@ -1,6 +1,6 @@
 import { memo, useEffect, useRef, useState } from "react";
 import type React from "react";
-import { CalendarDays, GitBranch, Paperclip, Search, Trash2 } from "lucide-react";
+import { CalendarDays, GitBranch, MoveRight, Paperclip, Search, Trash2 } from "lucide-react";
 import { Badge, Checkbox, IconButton, Text } from "@radix-ui/themes";
 import { CaretRightIcon } from "@radix-ui/react-icons";
 import { badgeColors } from "@/lib/ui/badgeColors";
@@ -43,6 +43,7 @@ type MessageRowProps = {
   renderSelectIndicators: React.ReactNode;
   fromText?: string;
   fromTooltip?: string;
+  showRecipientIcon?: boolean;
   folderBadges: React.ReactNode;
   folderBadgeKey?: string;
   showFolderBadgesInSubjectMeta: boolean;
@@ -88,6 +89,7 @@ function MessageRow({
   renderSelectIndicators,
   fromText,
   fromTooltip,
+  showRecipientIcon = false,
   folderBadges,
   folderBadgeKey,
   showFolderBadgesInSubjectMeta,
@@ -261,7 +263,14 @@ function MessageRow({
           className={`${styles.from} ${!message.seen ? styles.unreadText : ""}`}
           title={fromLineTooltip}
         >
-          {fromLine}
+          <span className={styles.fromContent}>
+            {showRecipientIcon && (
+              <span className={styles.recipientIcon} title="Recipients" aria-label="Recipients">
+                <MoveRight size={12} />
+              </span>
+            )}
+            <span className={styles.fromText}>{fromLine}</span>
+          </span>
         </Text>
         <div className={actionsClassName}>
           {showNewBadge && (
@@ -406,6 +415,7 @@ const areEqual = (prev: MessageRowProps, next: MessageRowProps) =>
   prev.showFolderBadgesInMeta === next.showFolderBadgesInMeta &&
   prev.fromText === next.fromText &&
   prev.fromTooltip === next.fromTooltip &&
+  prev.showRecipientIcon === next.showRecipientIcon &&
   prev.showAttachmentIcon === next.showAttachmentIcon &&
   prev.showCalendarInviteIcon === next.showCalendarInviteIcon &&
   prev.showNewBadge === next.showNewBadge &&

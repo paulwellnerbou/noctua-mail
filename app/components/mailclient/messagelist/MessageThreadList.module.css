@@ -244,6 +244,24 @@
   white-space: nowrap;
   font-size: 13px;
   flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.cellFromText {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.recipientIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--gray-10);
+  flex: 0 0 auto;
 }
 
 .cellSubject {

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type React from "react";
-import { GitBranch, Search, Trash2 } from "lucide-react";
+import { GitBranch, MoveRight, Search, Trash2 } from "lucide-react";
 import { Badge, Checkbox, IconButton, Text } from "@radix-ui/themes";
 import * as Collapsible from "@radix-ui/react-collapsible";
 import { CaretRightIcon } from "@radix-ui/react-icons";
@@ -51,6 +51,7 @@ type ListRowItem = {
   folderIds: string[];
   fromText: string;
   fromTooltip: string;
+  showRecipientIcon: boolean;
 };
 
 type ListItem = ListGroupItem | ListRowItem;
@@ -340,7 +341,8 @@ export default function MessageTable({
               fullFlat,
               folderIds,
               fromText: fromDisplay.text,
-              fromTooltip: fromDisplay.tooltip
+              fromTooltip: fromDisplay.tooltip,
+              showRecipientIcon: Boolean(fromDisplay.showRecipientIcon)
             });
             if (isFirstRow) isFirstRow = false;
           });
@@ -377,7 +379,8 @@ export default function MessageTable({
           fullFlat: [{ message, depth: 0 }],
           folderIds,
           fromText: fromDisplay.text,
-          fromTooltip: fromDisplay.tooltip
+          fromTooltip: fromDisplay.tooltip,
+          showRecipientIcon: Boolean(fromDisplay.showRecipientIcon)
         });
         if (isFirstRow) isFirstRow = false;
       });
@@ -706,7 +709,14 @@ export default function MessageTable({
                     <CaretRightIcon />
                   </span>
                 )}
-                <span title={item.fromTooltip}>{item.fromText}</span>
+                {item.showRecipientIcon && (
+                  <span className={styles.recipientIcon} title="Recipients" aria-label="Recipients">
+                    <MoveRight size={12} />
+                  </span>
+                )}
+                <span className={styles.cellFromText} title={item.fromTooltip}>
+                  {item.fromText}
+                </span>
               </span>
               <span
                 className={styles.cellSubject}

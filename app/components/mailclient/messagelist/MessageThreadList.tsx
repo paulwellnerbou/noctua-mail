@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type React from "react";
-import { CalendarDays, GitBranch, Paperclip, Trash2 } from "lucide-react";
+import { CalendarDays, GitBranch, MoveRight, Paperclip, Trash2 } from "lucide-react";
 import { Badge, IconButton, Text } from "@radix-ui/themes";
 import { CaretRightIcon } from "@radix-ui/react-icons";
 import * as Collapsible from "@radix-ui/react-collapsible";
@@ -50,6 +50,7 @@ type ListRowItem = {
   folderIds: string[];
   fromText: string;
   fromTooltip: string;
+  showRecipientIcon: boolean;
   isLastInDepth: boolean;
   hasChildren: boolean;
   isNestedCollapsed: boolean;
@@ -387,6 +388,7 @@ export default function MessageThreadList({
               folderIds,
               fromText: fromDisplay.text,
               fromTooltip: fromDisplay.tooltip,
+              showRecipientIcon: Boolean(fromDisplay.showRecipientIcon),
               isLastInDepth,
               hasChildren,
               isNestedCollapsed,
@@ -428,6 +430,7 @@ export default function MessageThreadList({
           folderIds,
           fromText: fromDisplay.text,
           fromTooltip: fromDisplay.tooltip,
+          showRecipientIcon: Boolean(fromDisplay.showRecipientIcon),
           isLastInDepth: true,
           hasChildren: false,
           isNestedCollapsed: false,
@@ -755,7 +758,16 @@ export default function MessageThreadList({
                 )}
 
                 <span className={styles.cellFrom} title={item.fromTooltip}>
-                  {item.fromText}
+                  {item.showRecipientIcon && (
+                    <span
+                      className={styles.recipientIcon}
+                      title="Recipients"
+                      aria-label="Recipients"
+                    >
+                      <MoveRight size={12} />
+                    </span>
+                  )}
+                  <span className={styles.cellFromText}>{item.fromText}</span>
                 </span>
 
                 <span className={styles.cellSubject}>

@@ -118,6 +118,29 @@
   text-overflow: ellipsis;
 }
 
+.fromContent {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.recipientIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--gray-10);
+  flex: 0 0 auto;
+}
+
+.fromText {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .actions {
   display: inline-flex;
   align-items: center;

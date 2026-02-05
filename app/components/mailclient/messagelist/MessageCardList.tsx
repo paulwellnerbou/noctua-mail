@@ -46,6 +46,7 @@ type ListRowItem = {
   folderIds: string[];
   fromText: string;
   fromTooltip: string;
+  showRecipientIcon: boolean;
 };
 
 type ListItem = ListGroupItem | ListRowItem;
@@ -297,7 +298,8 @@ export default function MessageCardList({
               fullFlat,
               folderIds,
               fromText: fromDisplay.text,
-              fromTooltip: fromDisplay.tooltip
+              fromTooltip: fromDisplay.tooltip,
+              showRecipientIcon: Boolean(fromDisplay.showRecipientIcon)
             });
             if (isFirstRow) isFirstRow = false;
           });
@@ -334,7 +336,8 @@ export default function MessageCardList({
           fullFlat: [{ message, depth: 0 }],
           folderIds,
           fromText: fromDisplay.text,
-          fromTooltip: fromDisplay.tooltip
+          fromTooltip: fromDisplay.tooltip,
+          showRecipientIcon: Boolean(fromDisplay.showRecipientIcon)
         });
         if (isFirstRow) isFirstRow = false;
       });
@@ -587,6 +590,7 @@ export default function MessageCardList({
               renderSelectIndicators={renderSelectIndicators(message)}
               fromText={item.fromText}
               fromTooltip={item.fromTooltip}
+              showRecipientIcon={item.showRecipientIcon}
               folderBadges={renderFolderBadges(item.folderIds)}
               folderBadgeKey={folderBadgeKey}
               showFolderBadgesInSubjectMeta

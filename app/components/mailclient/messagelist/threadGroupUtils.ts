@@ -13,6 +13,7 @@ export type FromDisplayInfo = {
   text: string;
   tooltip: string;
   isFromUser?: boolean;
+  showRecipientIcon?: boolean;
 };
 
 type RecipientFields = {
@@ -115,7 +116,8 @@ export function getMessageFromDisplay(
     return {
       text: recipientsDisplay || "(no recipients)",
       tooltip: recipientTooltip(recipients),
-      isFromUser
+      isFromUser,
+      showRecipientIcon: true
     };
   }
 
@@ -127,9 +129,10 @@ export function getMessageFromDisplay(
   if (isFromUser && isInExpandedThread && recipients) {
     const recipientsDisplay = extractRecipientsDisplay(recipients);
     return {
-      text: recipientsDisplay ? `To: ${recipientsDisplay}` : "To: (no recipients)",
+      text: recipientsDisplay || "(no recipients)",
       tooltip: recipientTooltip(recipients),
-      isFromUser: true
+      isFromUser: true,
+      showRecipientIcon: true
     };
   }
 
@@ -139,7 +142,8 @@ export function getMessageFromDisplay(
   return {
     text: displayText,
     tooltip: normalized,
-    isFromUser
+    isFromUser,
+    showRecipientIcon: false
   };
 }
 
@@ -154,13 +158,15 @@ export function getCollapsedThreadFromDisplay(
   fullFlat.forEach(({ message }) => {
     const normalized = normalizeFromValue(message.from ?? "");
     if (!normalized && !forceRecipientDisplay) return;
-    const entry = getMessageFromDisplay(
-      normalized,
-      { to: message.to, cc: message.cc, bcc: message.bcc },
-      userEmail,
-      true,
-      forceRecipientDisplay
-    );
+    const entry = forceRecipientDisplay
+      ? getMessageFromDisplay(
+          normalized,
+          { to: message.to, cc: message.cc, bcc: message.bcc },
+          userEmail,
+          true,
+          true
+        )
+      : getMessageFromDisplay(normalized, undefined, userEmail, true, false);
     const key = forceRecipientDisplay
       ? entry.text.toLowerCase()
       : extractPrimaryEmail(normalized) ?? entry.text.toLowerCase();
