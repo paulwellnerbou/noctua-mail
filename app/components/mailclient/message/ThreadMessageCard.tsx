@@ -2,8 +2,6 @@ import { useState } from "react";
 import type React from "react";
 import {
   CalendarDays,
-  Check,
-  Copy,
   Edit3,
   Image as ImageIcon,
   Paperclip,
@@ -24,6 +22,7 @@ import HtmlMessage from "../../HtmlMessage";
 import QuoteRenderer from "../../QuoteRenderer";
 import FolderBadges from "../folder/FolderBadges";
 import CalendarEventPreview from "./CalendarEventPreview";
+import MessageRecipientMetaField from "./MessageRecipientMetaField";
 
 type MessageTab = "html" | "text" | "markdown" | "source";
 
@@ -42,6 +41,7 @@ type ThreadMessageCardProps = {
   setSearchScope: React.Dispatch<React.SetStateAction<"folder" | "all">>;
   setActiveFolderId: React.Dispatch<React.SetStateAction<string>>;
   getImapFlagBadges: (message: Message) => ImapFlagBadge[];
+  togglePinnedFlag: (message: Message) => void;
   isDraftMessage: (message: Message) => boolean;
   openCompose: (mode: ComposeMode, message?: Message) => void;
   renderQuickActions: (
@@ -70,8 +70,6 @@ type ThreadMessageCardProps = {
   renderSourcePanel: (messageId: string) => React.ReactNode;
   handleSelectMessage: (message: Message) => void;
   messageByMessageId: Map<string, Message>;
-  copyStatus: Record<string, boolean>;
-  triggerCopy: (key: string, value: string) => void;
   getPrimaryEmail: (value?: string) => string | null;
   extractEmails: (value?: string) => string[];
 };
@@ -87,6 +85,7 @@ export default function ThreadMessageCard({
   setSearchScope,
   setActiveFolderId,
   getImapFlagBadges,
+  togglePinnedFlag,
   isDraftMessage,
   openCompose,
   renderQuickActions,
@@ -107,15 +106,13 @@ export default function ThreadMessageCard({
   renderSourcePanel,
   handleSelectMessage,
   messageByMessageId,
-  copyStatus,
-  triggerCopy,
   getPrimaryEmail,
   extractEmails
 }: ThreadMessageCardProps) {
-  const [toExpanded, setToExpanded] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const toValue = message.to ?? "";
-  const showToToggle = toValue.length > 120;
+  const ccValue = message.cc ?? "";
+  const bccValue = message.bcc ?? "";
   const priorityColor = getPriorityBadgeColor(message.priority);
   const isCollapsed = Boolean(collapsedMessages[message.id]);
   const hasHtml = hasHtmlContent(message.htmlBody);
@@ -388,20 +385,43 @@ export default function ThreadMessageCard({
                   </span>
                 </Collapsible.Trigger>
                 <div className={styles.badges}>
-                  {getImapFlagBadges(message).map((badge) => (
-                    <Badge
-                      key={`${badge.kind}-${badge.label}`}
-                      size="1"
-                      variant="soft"
-                      color={getFlagBadgeColor(badge.kind)}
-                      className={badge.kind === "calendar" ? badgeStyles.badge : undefined}
-                      title={badge.label}
-                    >
-                      {badge.kind === "calendar" && <CalendarDays size={12} />}
-                      {badge.kind === "pinned" && <Pin size={12} />}
-                      {badge.kind !== "calendar" && badge.label}
-                    </Badge>
-                  ))}
+                  {getImapFlagBadges(message).map((badge) =>
+                    badge.kind === "pinned" ? (
+                      <Badge
+                        key={`${badge.kind}-${badge.label}`}
+                        size="1"
+                        variant="soft"
+                        color={getFlagBadgeColor(badge.kind)}
+                        asChild
+                      >
+                        <button
+                          type="button"
+                          className={styles.flagBadgeButton}
+                          title="Unpin message"
+                          aria-label="Unpin message"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            togglePinnedFlag(message);
+                          }}
+                        >
+                          <Pin size={12} />
+                          {badge.label}
+                        </button>
+                      </Badge>
+                    ) : (
+                      <Badge
+                        key={`${badge.kind}-${badge.label}`}
+                        size="1"
+                        variant="soft"
+                        color={getFlagBadgeColor(badge.kind)}
+                        className={badge.kind === "calendar" ? badgeStyles.badge : undefined}
+                        title={badge.label}
+                      >
+                        {badge.kind === "calendar" && <CalendarDays size={12} />}
+                        {badge.kind !== "calendar" && badge.label}
+                      </Badge>
+                    )
+                  )}
                   <FolderBadges
                     folderIds={folderBadgeIds}
                     folderNameById={folderNameById}
@@ -475,68 +495,36 @@ export default function ThreadMessageCard({
                 <span className={styles.subjectText}>{message.subject}</span>
               </div>
               <div className={`${styles.metaLine} ${styles.metaSplit}`}>
-                <div className={`${styles.metaSegment} ${styles.metaSegmentFrom}`}>
-                  <span className={styles.metaLabel}>From:</span>
-                  <span className={styles.metaValue}>{message.from}</span>
-                  {getPrimaryEmail(message.from) && (
-                    <IconButton
-                      size="1"
-                      variant="ghost"
-                      color="gray"
-                      className={`${copyStatus[`from-${message.id}`] ? styles.copyOk : ""}`}
-                      title="Copy email"
-                      aria-label="Copy email"
-                      onClick={() =>
-                        triggerCopy(`from-${message.id}`, getPrimaryEmail(message.from) ?? "")
-                      }
-                    >
-                      {copyStatus[`from-${message.id}`] ? <Check size={12} /> : <Copy size={12} />}
-                    </IconButton>
-                  )}
-                </div>
+                <MessageRecipientMetaField
+                  label="From"
+                  value={message.from}
+                  copyValue={getPrimaryEmail(message.from) ?? ""}
+                  variant="segment"
+                  className={styles.metaSegmentFrom}
+                />
                 <div className={`${styles.metaSegment} ${styles.metaSegmentDate}`}>
                   <span className={styles.metaLabel}>Date:</span>
                   <span className={styles.metaValue}>{message.date}</span>
                 </div>
               </div>
-              <div className={`${styles.metaLine} ${styles.metaLineTo}`}>
-                <span className={styles.metaLabel}>To:</span>
-                <div className={styles.toWrapper}>
-                  <span
-                    className={`${styles.metaValue} ${styles.toValue} ${
-                      toExpanded ? styles.toValueExpanded : ""
-                    }`}
-                  >
-                    {toValue}
-                    {extractEmails(message.to).length > 0 && (
-                      <IconButton
-                        size="1"
-                        variant="ghost"
-                        color="gray"
-                        className={`${styles.toCopy} ${
-                          copyStatus[`to-${message.id}`] ? styles.copyOk : ""
-                        }`}
-                        title="Copy emails"
-                        aria-label="Copy emails"
-                        onClick={() =>
-                          triggerCopy(`to-${message.id}`, extractEmails(message.to).join(", "))
-                        }
-                      >
-                        {copyStatus[`to-${message.id}`] ? <Check size={12} /> : <Copy size={12} />}
-                      </IconButton>
-                    )}
-                  </span>
-                  {showToToggle && (
-                    <button
-                      className={styles.moreButton}
-                      type="button"
-                      onClick={() => setToExpanded((prev) => !prev)}
-                    >
-                      {toExpanded ? "less..." : "more..."}
-                    </button>
-                  )}
-                </div>
-              </div>
+              <MessageRecipientMetaField
+                label="To"
+                value={toValue}
+                copyValue={extractEmails(message.to).join(", ")}
+                expandable
+              />
+              <MessageRecipientMetaField
+                label="Cc"
+                value={ccValue}
+                copyValue={extractEmails(ccValue).join(", ")}
+                hideWhenEmpty
+              />
+              <MessageRecipientMetaField
+                label="Bcc"
+                value={bccValue}
+                copyValue={extractEmails(bccValue).join(", ")}
+                hideWhenEmpty
+              />
               {(() => {
                 const refId =
                   message.inReplyTo ??

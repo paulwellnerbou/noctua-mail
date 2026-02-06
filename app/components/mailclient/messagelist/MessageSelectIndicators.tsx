@@ -4,19 +4,39 @@ import styles from "./MessageListCommon.module.css";
 type MessageSelectIndicatorsProps = {
   isPinned: boolean;
   isDraft: boolean;
+  onPinnedClick?: () => void;
 };
 
 export default function MessageSelectIndicators({
   isPinned,
-  isDraft
+  isDraft,
+  onPinnedClick
 }: MessageSelectIndicatorsProps) {
   if (!isPinned && !isDraft) return null;
   return (
-    <span className={styles.selectIcons} aria-hidden="true">
+    <span className={styles.selectIcons}>
       {isPinned && (
-        <span className={`${styles.selectIcon} ${styles.selectIconPinned}`} title="Pinned">
-          <Pin size={12} />
-        </span>
+        onPinnedClick ? (
+          <button
+            type="button"
+            className={`${styles.selectIcon} ${styles.selectIconPinned} ${styles.selectIconButton}`}
+            title="Unpin message"
+            aria-label="Unpin message"
+            onPointerDown={(event) => {
+              event.stopPropagation();
+            }}
+            onClick={(event) => {
+              event.stopPropagation();
+              onPinnedClick();
+            }}
+          >
+            <Pin size={12} />
+          </button>
+        ) : (
+          <span className={`${styles.selectIcon} ${styles.selectIconPinned}`} title="Pinned">
+            <Pin size={12} />
+          </span>
+        )
       )}
       {isDraft && (
         <span className={`${styles.selectIcon} ${styles.selectIconDraft}`} title="Draft">

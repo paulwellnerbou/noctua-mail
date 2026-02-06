@@ -230,7 +230,7 @@ export default function TopBar({ state, ui, actions }: TopBarProps) {
                 <IconButton
                   size="1"
                   variant="ghost"
-                  onClick={() => setQuery("")}
+                  onClick={() => (isRelatedSearch ? clearSearch() : setQuery(""))}
                   aria-label="Clear search"
                   title="Clear search"
                 >

@@ -155,7 +155,6 @@ function HtmlMessage({
     hostEl.style.setProperty("--zoom", String(zoom));
     hostEl.style.setProperty("--font-scale", String(fontScale));
     hostEl.style.fontSize = "100%";
-    const textColor = darkMode ? "#f2f0ea" : "#1a1a1a";
     const blockquoteBorder = darkMode ? "#8aa7d4" : "#1847d5";
     const linkColor = darkMode ? "#b8d5ff" : "#1847d5";
     let injectedCss = "";
@@ -173,7 +172,9 @@ function HtmlMessage({
       .map((href) => stylesheetCache.get(href))
       .filter(Boolean)
       .join("\n");
-    const hostTextColor = hasExplicitColor ? "" : `color: ${textColor};`;
+    const hostTextColor = hasExplicitColor
+      ? ""
+      : "color: var(--mail-view-fg, var(--text, #1a1a1a));";
     root.innerHTML = `
       <style>
         :host { display: block; width: 100%; ${hostTextColor} color-scheme: ${

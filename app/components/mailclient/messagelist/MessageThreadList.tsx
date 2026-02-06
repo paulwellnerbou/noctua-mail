@@ -11,8 +11,10 @@ import badgeStyles from "../message/MessageBadge.module.css";
 import {
   buildFlatEntries,
   buildThreadGroupEntries,
+  getDisplaySeenForThreadRow,
   getCollapsedThreadFromDisplay,
-  getMessageFromDisplay
+  getMessageFromDisplay,
+  isCollapsedThreadRootRow
 } from "./threadGroupUtils";
 import { getMessageListDateDisplay } from "./messageDateDisplay";
 import { useSelectionSnapshot, type SelectionStore } from "./selectionStore";
@@ -98,12 +100,12 @@ type MessageThreadListProps = {
   actions: {
     setCollapsedGroups: React.Dispatch<React.SetStateAction<Record<string, boolean>>>;
     setCollapsedThreads: React.Dispatch<React.SetStateAction<Record<string, boolean>>>;
-    handleMessageDragStart: (event: React.DragEvent, message: Message) => void;
+    handleMessageDragStart: (event: React.DragEvent, message: Message, threadMessageIds?: string[]) => void;
     handleMessageDragEnd: () => void;
     handleRowClick: (event: React.MouseEvent, message: Message) => void;
     handleSelectMessage: (message: Message) => void;
     selectRangeTo: (messageId: string) => void;
-    toggleMessageSelection: (messageId: string, replace?: boolean) => void;
+    toggleMessageSelection: (messageId: string, replace?: boolean, setActive?: boolean) => void;
     selectCollapsedThread: (
       flat: Array<{ message: Message; depth: number }>,
       target: Message
@@ -119,10 +121,12 @@ type MessageThreadListProps = {
     ) => Array<{ message: Message; depth: number }>;
     getThreadLatestDate: (node: ThreadNode) => number;
     getGroupLabel: (group: MessageGroup) => React.ReactNode;
-    renderUnreadDot: (message: Message) => React.ReactNode;
+    renderUnreadDot: (
+      message: Message,
+      options?: { seen?: boolean; threadMessages?: Message[] }
+    ) => React.ReactNode;
     renderFolderBadges: (folderIds: string[]) => React.ReactNode;
     handleShowRelated: (message: Message) => void;
-    isPinnedMessage: (message: Message) => boolean;
     isTrashFolder: (folderId?: string) => boolean;
     renderMessageMenu: (
       message: Message,
@@ -176,7 +180,6 @@ export default function MessageThreadList({
     renderUnreadDot,
     renderFolderBadges,
     handleShowRelated,
-    isPinnedMessage,
     isTrashFolder,
     renderMessageMenu
   } = helpers;
@@ -589,6 +592,23 @@ export default function MessageThreadList({
           item.depth === 0 &&
           item.threadSize > 1 &&
           isActiveThread;
+        const isCollapsedThreadRoot = isCollapsedThreadRootRow({
+          isCollapsed: item.isCollapsed,
+          threadSize: item.threadSize,
+          depth: item.depth,
+          threadIndex: item.threadIndex
+        });
+        const displaySeen = getDisplaySeenForThreadRow({
+          messageSeen: Boolean(message.seen),
+          isCollapsed: item.isCollapsed,
+          threadSize: item.threadSize,
+          depth: item.depth,
+          threadIndex: item.threadIndex,
+          fullFlat: item.fullFlat
+        });
+        const threadMessages = isCollapsedThreadRoot
+          ? item.fullFlat.map((entry) => entry.message)
+          : [message];
 
         const rowContainerClassName = [
           styles.messageRowContainer,
@@ -599,7 +619,7 @@ export default function MessageThreadList({
           message.id !== activeMessage?.id
             ? styles.threadSibling
             : "",
-          !message.seen ? styles.rowUnread : "",
+          !displaySeen ? styles.rowUnread : "",
           isSelected ? styles.rowSelected : "",
           isDragging ? styles.rowDragging : "",
           isDisabled ? styles.rowDisabled : ""
@@ -710,34 +730,22 @@ export default function MessageThreadList({
                 role="button"
                 tabIndex={0}
                 draggable
-                onDragStart={(event) => handleMessageDragStart(event, message)}
+                onDragStart={(event) => {
+                  const threadIds =
+                    isCollapsedThreadRoot
+                      ? item.fullFlat.map((entry) => entry.message.id)
+                      : undefined;
+                  handleMessageDragStart(event, message, threadIds);
+                }}
                 onDragEnd={handleMessageDragEnd}
                 onClick={(event) => {
                   const hasSelectionModifier = event.shiftKey || event.metaKey || event.ctrlKey;
                   if (
                     !hasSelectionModifier &&
                     supportsThreads &&
-                    item.threadSize > 1 &&
-                    item.depth === 0 &&
-                    item.threadIndex === 0 &&
-                    item.isCollapsed
+                    isCollapsedThreadRoot
                   ) {
-                    if (item.isPinnedGroup) {
-                      const pinnedTarget =
-                        item.fullFlat.find((entry) =>
-                          isPinnedMessage(entry.message)
-                        )?.message ?? item.fullFlat[0].message;
-                      selectCollapsedThread(item.fullFlat, pinnedTarget);
-                    } else {
-                      const latestTarget = item.fullFlat.reduce(
-                        (acc, entry) =>
-                          entry.message.dateValue > acc.message.dateValue
-                            ? entry
-                            : acc,
-                        item.fullFlat[0]
-                      ).message;
-                      selectCollapsedThread(item.fullFlat, latestTarget);
-                    }
+                    selectCollapsedThread(item.fullFlat, message);
                     return;
                   }
                   handleRowClick(event, message);
@@ -784,7 +792,10 @@ export default function MessageThreadList({
                 </span>
 
                 <span className={styles.cellSubject}>
-                  {renderUnreadDot(message)}
+                  {renderUnreadDot(message, {
+                    seen: displaySeen,
+                    threadMessages
+                  })}
                   <span className={styles.cellSubjectText}>{message.subject}</span>
                   {renderFolderBadges(item.folderIds)}
                   {(message.hasAttachments ??

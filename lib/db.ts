@@ -34,6 +34,7 @@ async function getDb() {
     }
     dbInstance = new DatabaseCtor(getDbPath());
     dbInstance.exec("PRAGMA journal_mode = WAL;");
+    dbInstance.exec("PRAGMA busy_timeout = 15000;");
     dbInstance.exec("PRAGMA foreign_keys = ON;");
   }
   if (!initialized && dbInstance) {
@@ -797,22 +798,25 @@ function buildGroupLabel(key: string, groupBy: string) {
 
 function buildFtsQuery(raw?: string | null) {
   if (!raw) return null;
-  const cleaned = raw
+  const tokens = raw
     .trim()
-    .replace(/[^\p{L}\p{N}@._+\-]+/gu, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-  if (!cleaned) return null;
-  return cleaned
-    .split(" ")
+    .split(/\s+/)
+    .map((token) => token.trim())
+    .filter(Boolean)
     .map((token) => {
       const escaped = token.replace(/"/g, '""');
-      if (/[^\p{L}\p{N}@._+]/u.test(token)) {
-        return `"${escaped}"`;
+      if (/^[\p{L}\p{N}]+$/u.test(token)) {
+        return `${escaped}*`;
       }
-      return `${escaped}*`;
+      if (/[\p{L}\p{N}]/u.test(token)) {
+        return `"${escaped}"*`;
+      }
+      return null;
     })
-    .join(" AND ");
+    .filter((token): token is string => Boolean(token));
+
+  if (tokens.length === 0) return null;
+  return tokens.join(" AND ");
 }
 
 function normalizeSearchFields(fields?: string[] | null) {
@@ -2235,12 +2239,39 @@ export async function getMessageIdsByMessageIds(accountId: string, messageIds: s
   return map;
 }
 
+export async function getFolderIdsByMessageIds(accountId: string, messageIds: string[]) {
+  if (messageIds.length === 0) return new Map<string, string>();
+  const db = await getDb();
+  const rows = db
+    .prepare(
+      `SELECT id, folderId
+       FROM messages
+       WHERE accountId = ? AND id IN (${messageIds.map(() => "?").join(",")})`
+    )
+    .all(accountId, ...messageIds) as Array<{
+    id: string;
+    folderId: string;
+  }>;
+  const map = new Map<string, string>();
+  rows.forEach((row) => {
+    if (row.id && row.folderId) {
+      map.set(row.id, row.folderId);
+    }
+  });
+  return map;
+}
+
 export async function upsertMessages(
   accountId: string,
   folderId: string | null,
   nextMessages: Message[],
   replaceExisting = false
 ) {
+  const UPSERT_BATCH_SIZE = 200;
+  const yieldToEventLoop = () =>
+    new Promise<void>((resolve) => {
+      setTimeout(resolve, 0);
+    });
   const db = await getDb();
   const deleteSql = folderId
     ? `DELETE FROM messages WHERE accountId = ? AND folderId = ?`
@@ -2281,15 +2312,25 @@ export async function upsertMessages(
   `);
   const deleteFts = db.prepare(`DELETE FROM message_fts WHERE messageId = ?`);
   const deleteMessages = db.prepare(deleteSql);
-
-  db.transaction(() => {
-    if (replaceExisting) {
-      deleteAttachmentsByScope.run(...deleteArgs);
-      deleteFtsByScope.run(...deleteArgs);
-      deleteMessages.run(...deleteArgs);
-    }
-    nextMessages.forEach((message) => {
-      if (!replaceExisting) {
+  const existingScopeThreadIds =
+    replaceExisting && folderId
+      ? new Set(
+          (
+            db
+              .prepare(
+                `SELECT DISTINCT threadId
+                 FROM messages
+                 WHERE accountId = ? AND folderId = ?`
+              )
+              .all(accountId, folderId) as Array<{ threadId: string | null }>
+          )
+            .map((row) => row.threadId)
+            .filter((id): id is string => Boolean(id))
+        )
+      : null;
+  const upsertBatch = db.transaction((batch: Message[], shouldDeleteAttachments: boolean) => {
+    batch.forEach((message) => {
+      if (shouldDeleteAttachments) {
         deleteAttachmentsForMessage.run(message.id);
       }
       const emailMatch = message.from.match(/<([^>]+)>/);
@@ -2352,9 +2393,39 @@ export async function upsertMessages(
         );
       });
     });
-  })();
+  });
 
   if (replaceExisting) {
+    db.transaction(() => {
+      deleteAttachmentsByScope.run(...deleteArgs);
+      deleteFtsByScope.run(...deleteArgs);
+      deleteMessages.run(...deleteArgs);
+    })();
+  }
+
+  const shouldDeleteAttachments = !replaceExisting;
+  for (let start = 0; start < nextMessages.length; start += UPSERT_BATCH_SIZE) {
+    const batch = nextMessages.slice(start, start + UPSERT_BATCH_SIZE);
+    if (batch.length === 0) continue;
+    upsertBatch(batch, shouldDeleteAttachments);
+    if (start + UPSERT_BATCH_SIZE < nextMessages.length) {
+      await yieldToEventLoop();
+    }
+  }
+
+  if (replaceExisting) {
+    if (folderId) {
+      const affectedThreadIds = new Set<string>(existingScopeThreadIds ?? []);
+      nextMessages.forEach((message) => {
+        if (message.threadId) {
+          affectedThreadIds.add(message.threadId);
+        }
+      });
+      if (affectedThreadIds.size > 0) {
+        await recomputeThreadsForAccount(accountId, Array.from(affectedThreadIds));
+      }
+      return;
+    }
     await recomputeThreadsForAccount(accountId);
   } else {
     const affected = Array.from(

@@ -2,6 +2,28 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Button } from "@radix-ui/themes";
+import {
+  AArrowDown,
+  AArrowUp,
+  ArrowDown,
+  ArrowLeft,
+  ArrowRight,
+  ArrowUp,
+  Bold as BoldIcon,
+  Columns3,
+  Italic as ItalicIcon,
+  Link2 as LinkIcon,
+  List as ListIcon,
+  ListOrdered,
+  ListX,
+  Minus,
+  Plus,
+  Rows3,
+  Strikethrough as StrikethroughIcon,
+  Table2 as TableIcon,
+  Trash2,
+  Underline as UnderlineIcon
+} from "lucide-react";
 import { LexicalComposer } from "@lexical/react/LexicalComposer";
 import { RichTextPlugin } from "@lexical/react/LexicalRichTextPlugin";
 import { ContentEditable } from "@lexical/react/LexicalContentEditable";
@@ -21,10 +43,13 @@ import {
   $isElementNode,
   $isRangeSelection,
   $isTextNode,
+  COMMAND_PRIORITY_LOW,
+  SELECTION_CHANGE_COMMAND,
   FORMAT_TEXT_COMMAND
 } from "lexical";
 import { $generateHtmlFromNodes, $generateNodesFromDOM } from "@lexical/html";
 import { TRANSFORMERS } from "@lexical/markdown";
+import { $getSelectionStyleValueForProperty, $patchStyleText } from "@lexical/selection";
 import {
   ListItemNode,
   ListNode,
@@ -35,7 +60,19 @@ import {
 import { HeadingNode, QuoteNode } from "@lexical/rich-text";
 import { CodeHighlightNode, CodeNode } from "@lexical/code";
 import { AutoLinkNode, LinkNode, TOGGLE_LINK_COMMAND } from "@lexical/link";
-import { TableCellNode, TableNode, TableRowNode } from "@lexical/table";
+import {
+  $deleteTableColumnAtSelection,
+  $deleteTableRowAtSelection,
+  $findTableNode,
+  $getTableCellNodeFromLexicalNode,
+  $insertTableColumnAtSelection,
+  $insertTableRowAtSelection,
+  $isTableSelection,
+  INSERT_TABLE_COMMAND,
+  TableCellNode,
+  TableNode,
+  TableRowNode
+} from "@lexical/table";
 import { $createImageNode, ImageNode } from "./lexical/ImageNode";
 
 type ComposeEditorProps = {
@@ -55,8 +92,100 @@ const theme = {
   }
 };
 
+const FONT_SIZE_STEPS = [10, 11, 12, 13, 14, 16, 18, 20, 24, 28, 32, 36, 42, 48, 56, 64, 72];
+const DEFAULT_FONT_SIZE = 14;
+
+function parseFontSize(fontSize: string | null | undefined) {
+  if (!fontSize) return null;
+  const parsed = Number.parseFloat(fontSize);
+  if (!Number.isFinite(parsed) || parsed <= 0) return null;
+  return parsed;
+}
+
+function getNextFontSize(current: number, direction: "increase" | "decrease") {
+  if (direction === "increase") {
+    const next = FONT_SIZE_STEPS.find((value) => value > current);
+    return next ?? FONT_SIZE_STEPS[FONT_SIZE_STEPS.length - 1];
+  }
+  const previous = [...FONT_SIZE_STEPS].reverse().find((value) => value < current);
+  return previous ?? FONT_SIZE_STEPS[0];
+}
+
+type ToolbarBadgePosition = "top-right" | "bottom-right" | "top-left" | "bottom-left";
+
+function ComposeToolbarIcon({
+  base,
+  badges
+}: {
+  base: React.ReactNode;
+  badges?: Array<{ icon: React.ReactNode; position: ToolbarBadgePosition }>;
+}) {
+  return (
+    <span className="compose-toolbar-icon" aria-hidden="true">
+      <span className="compose-toolbar-icon-base">{base}</span>
+      {badges?.map((badge, index) => (
+        <span
+          key={`${badge.position}-${index}`}
+          className={`compose-toolbar-icon-badge compose-toolbar-icon-badge--${badge.position}`}
+        >
+          {badge.icon}
+        </span>
+      ))}
+    </span>
+  );
+}
+
 function ComposeToolbar({ toolbarRef }: { toolbarRef: React.Ref<HTMLDivElement> }) {
   const [editor] = useLexicalComposerContext();
+  const [isTableFocused, setIsTableFocused] = useState(false);
+  const isTableFocusedRef = useRef(false);
+
+  const syncTableFocusState = useCallback(() => {
+    const selection = $getSelection();
+    let nextFocused = false;
+    if ($isTableSelection(selection)) {
+      nextFocused = true;
+    } else if ($isRangeSelection(selection)) {
+      nextFocused = Boolean(
+        $getTableCellNodeFromLexicalNode(selection.anchor.getNode()) ||
+          $getTableCellNodeFromLexicalNode(selection.focus.getNode())
+      );
+    }
+    if (isTableFocusedRef.current === nextFocused) return;
+    isTableFocusedRef.current = nextFocused;
+    setIsTableFocused(nextFocused);
+  }, []);
+
+  useEffect(() => {
+    const unregisterUpdate = editor.registerUpdateListener(({ editorState }) => {
+      editorState.read(syncTableFocusState);
+    });
+    const unregisterSelectionChange = editor.registerCommand(
+      SELECTION_CHANGE_COMMAND,
+      () => {
+        editor.getEditorState().read(syncTableFocusState);
+        return false;
+      },
+      COMMAND_PRIORITY_LOW
+    );
+    return () => {
+      unregisterUpdate();
+      unregisterSelectionChange();
+    };
+  }, [editor, syncTableFocusState]);
+
+  const runTableAction = (
+    action: (context: { anchorCell: TableCellNode | null; focusCell: TableCellNode | null }) => void
+  ) => {
+    editor.update(() => {
+      const selection = $getSelection();
+      if (!$isRangeSelection(selection) && !$isTableSelection(selection)) return;
+      const anchorCell = $getTableCellNodeFromLexicalNode(selection.anchor.getNode());
+      const focusCell = $getTableCellNodeFromLexicalNode(selection.focus.getNode());
+      if (!anchorCell && !focusCell) return;
+      action({ anchorCell, focusCell });
+    });
+  };
 
   const toggleLink = () => {
     const url = window.prompt("Enter URL");
@@ -68,50 +197,193 @@ function ComposeToolbar({ toolbarRef }: { toolbarRef: React.Ref<HTMLDivElement> 
     editor.dispatchCommand(TOGGLE_LINK_COMMAND, url.trim());
   };
 
+  const adjustTextSize = (direction: "increase" | "decrease") => {
+    editor.update(() => {
+      const selection = $getSelection();
+      if (!$isRangeSelection(selection)) return;
+      const current = parseFontSize(
+        $getSelectionStyleValueForProperty(selection, "font-size", `${DEFAULT_FONT_SIZE}px`)
+      );
+      const next = getNextFontSize(current ?? DEFAULT_FONT_SIZE, direction);
+      $patchStyleText(selection, {
+        "font-size": `${next}px`
+      });
+    });
+  };
+
+  const insertTable = () => {
+    editor.dispatchCommand(INSERT_TABLE_COMMAND, {
+      rows: "2",
+      columns: "2",
+      includeHeaders: false
+    });
+  };
+
   const toolbarButtons: Array<{
     title: string;
-    label: string;
+    icon: React.ReactNode;
     onClick: () => void;
+    requiresTableFocus?: boolean;
   }> = [
     {
       title: "Bold",
-      label: "B",
+      icon: <ComposeToolbarIcon base={<BoldIcon size={14} />} />,
       onClick: () => editor.dispatchCommand(FORMAT_TEXT_COMMAND, "bold")
     },
     {
       title: "Italic",
-      label: "I",
+      icon: <ComposeToolbarIcon base={<ItalicIcon size={14} />} />,
       onClick: () => editor.dispatchCommand(FORMAT_TEXT_COMMAND, "italic")
     },
     {
       title: "Underline",
-      label: "U",
+      icon: <ComposeToolbarIcon base={<UnderlineIcon size={14} />} />,
       onClick: () => editor.dispatchCommand(FORMAT_TEXT_COMMAND, "underline")
     },
     {
       title: "Strikethrough",
-      label: "S",
+      icon: <ComposeToolbarIcon base={<StrikethroughIcon size={14} />} />,
       onClick: () => editor.dispatchCommand(FORMAT_TEXT_COMMAND, "strikethrough")
     },
     {
+      title: "Increase text size",
+      icon: <ComposeToolbarIcon base={<AArrowUp size={14} />} />,
+      onClick: () => adjustTextSize("increase")
+    },
+    {
+      title: "Decrease text size",
+      icon: <ComposeToolbarIcon base={<AArrowDown size={14} />} />,
+      onClick: () => adjustTextSize("decrease")
+    },
+    {
       title: "Bulleted list",
-      label: "• List",
+      icon: <ComposeToolbarIcon base={<ListIcon size={14} />} />,
       onClick: () => editor.dispatchCommand(INSERT_UNORDERED_LIST_COMMAND, undefined)
     },
     {
       title: "Numbered list",
-      label: "1. List",
+      icon: <ComposeToolbarIcon base={<ListOrdered size={14} />} />,
       onClick: () => editor.dispatchCommand(INSERT_ORDERED_LIST_COMMAND, undefined)
     },
     {
       title: "Remove list",
-      label: "List ×",
+      icon: <ComposeToolbarIcon base={<ListX size={14} />} />,
       onClick: () => editor.dispatchCommand(REMOVE_LIST_COMMAND, undefined)
     },
     {
       title: "Link",
-      label: "Link",
+      icon: <ComposeToolbarIcon base={<LinkIcon size={14} />} />,
       onClick: toggleLink
+    },
+    {
+      title: "Insert table",
+      icon: (
+        <ComposeToolbarIcon
+          base={<TableIcon size={14} />}
+          badges={[{ icon: <Plus size={8} />, position: "top-right" }]}
+        />
+      ),
+      onClick: insertTable
+    },
+    {
+      title: "Insert row above",
+      icon: (
+        <ComposeToolbarIcon
+          base={<Rows3 size={14} />}
+          badges={[
+            { icon: <Plus size={8} />, position: "top-right" },
+            { icon: <ArrowUp size={8} />, position: "bottom-right" }
+          ]}
+        />
+      ),
+      onClick: () => runTableAction(() => $insertTableRowAtSelection(false)),
+      requiresTableFocus: true
+    },
+    {
+      title: "Insert row below",
+      icon: (
+        <ComposeToolbarIcon
+          base={<Rows3 size={14} />}
+          badges={[
+            { icon: <Plus size={8} />, position: "top-right" },
+            { icon: <ArrowDown size={8} />, position: "bottom-right" }
+          ]}
+        />
+      ),
+      onClick: () => runTableAction(() => $insertTableRowAtSelection(true)),
+      requiresTableFocus: true
+    },
+    {
+      title: "Delete row",
+      icon: (
+        <ComposeToolbarIcon
+          base={<Rows3 size={14} />}
+          badges={[{ icon: <Minus size={8} />, position: "top-right" }]}
+        />
+      ),
+      onClick: () => runTableAction(() => $deleteTableRowAtSelection()),
+      requiresTableFocus: true
+    },
+    {
+      title: "Insert column left",
+      icon: (
+        <ComposeToolbarIcon
+          base={<Columns3 size={14} />}
+          badges={[
+            { icon: <Plus size={8} />, position: "top-right" },
+            { icon: <ArrowLeft size={8} />, position: "bottom-right" }
+          ]}
+        />
+      ),
+      onClick: () => runTableAction(() => $insertTableColumnAtSelection(false)),
+      requiresTableFocus: true
+    },
+    {
+      title: "Insert column right",
+      icon: (
+        <ComposeToolbarIcon
+          base={<Columns3 size={14} />}
+          badges={[
+            { icon: <Plus size={8} />, position: "top-right" },
+            { icon: <ArrowRight size={8} />, position: "bottom-right" }
+          ]}
+        />
+      ),
+      onClick: () => runTableAction(() => $insertTableColumnAtSelection(true)),
+      requiresTableFocus: true
+    },
+    {
+      title: "Delete column",
+      icon: (
+        <ComposeToolbarIcon
+          base={<Columns3 size={14} />}
+          badges={[{ icon: <Minus size={8} />, position: "top-right" }]}
+        />
+      ),
+      onClick: () => runTableAction(() => $deleteTableColumnAtSelection()),
+      requiresTableFocus: true
+    },
+    {
+      title: "Delete table",
+      icon: (
+        <ComposeToolbarIcon
+          base={<TableIcon size={14} />}
+          badges={[{ icon: <Trash2 size={8} />, position: "top-right" }]}
+        />
+      ),
+      onClick: () =>
+        runTableAction(({ anchorCell, focusCell }) => {
+          const cell = anchorCell ?? focusCell;
+          if (!cell) return;
+          const tableNode = $findTableNode(cell);
+          if (!tableNode) return;
+          tableNode.remove();
+          if ($getRoot().getChildrenSize() > 0) return;
+          const paragraph = $createParagraphNode();
+          $getRoot().append(paragraph);
+          paragraph.select();
+        }),
+      requiresTableFocus: true
     }
   ];
 
@@ -126,9 +398,11 @@ function ComposeToolbar({ toolbarRef }: { toolbarRef: React.Ref<HTMLDivElement> 
           color="gray"
           className="compose-toolbar-button"
           title={item.title}
+          aria-label={item.title}
           onClick={item.onClick}
+          disabled={Boolean(item.requiresTableFocus && !isTableFocused)}
         >
-          {item.label}
+          {item.icon}
         </Button>
       ))}
     </div>
@@ -309,7 +583,7 @@ export default function ComposeEditor({
         <HistoryPlugin />
         <ListPlugin />
         <LinkPlugin />
-        <TablePlugin />
+        <TablePlugin hasHorizontalScroll />
         <MarkdownShortcutPlugin transformers={TRANSFORMERS} />
         <OnChangePlugin
           onChange={(editorState, editor) => {

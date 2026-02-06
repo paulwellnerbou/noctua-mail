@@ -9,7 +9,7 @@ export type SelectionStore = {
   getSnapshot: () => SelectionSnapshot;
   subscribe: (listener: () => void) => () => void;
   setSelection: (ids: Set<string>, activeId?: string | null) => void;
-  toggle: (id: string, replace?: boolean) => void;
+  toggle: (id: string, replace?: boolean, setActive?: boolean) => void;
   clearSelection: () => void;
   setActiveId: (id: string | null) => void;
   getIds: () => Set<string>;
@@ -40,7 +40,7 @@ export const createSelectionStore = (
     setSelection: (ids, activeId = snapshot.activeId) => {
       setSnapshot({ ids: new Set(ids), activeId });
     },
-    toggle: (id, replace = false) => {
+    toggle: (id, replace = false, setActive = true) => {
       const nextIds = replace ? new Set<string>() : new Set(snapshot.ids);
       if (replace) {
         nextIds.add(id);
@@ -49,7 +49,7 @@ export const createSelectionStore = (
       } else {
         nextIds.add(id);
       }
-      setSnapshot({ ids: nextIds, activeId: id });
+      setSnapshot({ ids: nextIds, activeId: setActive ? id : snapshot.activeId });
     },
     clearSelection: () => {
       setSnapshot({ ids: new Set(), activeId: snapshot.activeId });

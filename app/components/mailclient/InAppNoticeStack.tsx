@@ -1,3 +1,4 @@
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   AlertCircle,
   CheckCircle2,
@@ -44,9 +45,54 @@ const ICON_BY_NAME: Record<InAppNoticeIcon, LucideIcon> = {
   mail: Mail
 };
 
+const DISMISS_ANIMATION_DURATION = 200; // ms
+
 export default function InAppNoticeStack({ state, actions }: InAppNoticeStackProps) {
   const { inAppNotices } = state;
   const { onOpenNotice, onDismissNotice } = actions;
+  const [dismissingIds, setDismissingIds] = useState<Set<string>>(new Set());
+  const dismissingIdsRef = useRef<Set<string>>(new Set());
+  const dismissAnimationTimersRef = useRef<Map<string, number>>(new Map());
+
+  const handleDismiss = useCallback((noticeId: string) => {
+    if (dismissingIdsRef.current.has(noticeId)) return;
+    const nextDismissingIds = new Set(dismissingIdsRef.current);
+    nextDismissingIds.add(noticeId);
+    dismissingIdsRef.current = nextDismissingIds;
+    setDismissingIds(nextDismissingIds);
+
+    const timer = window.setTimeout(() => {
+      onDismissNotice(noticeId);
+      dismissAnimationTimersRef.current.delete(noticeId);
+      const next = new Set(dismissingIdsRef.current);
+      next.delete(noticeId);
+      dismissingIdsRef.current = next;
+      setDismissingIds(next);
+    }, DISMISS_ANIMATION_DURATION);
+
+    dismissAnimationTimersRef.current.set(noticeId, timer);
+  }, [onDismissNotice]);
+
+  useEffect(() => {
+    const expireTimers = inAppNotices
+      .filter((notice) => typeof notice.expiresAt === "number")
+      .map((notice) =>
+        window.setTimeout(() => {
+          handleDismiss(notice.id);
+        }, Math.max(0, (notice.expiresAt as number) - Date.now()))
+      );
+    return () => {
+      expireTimers.forEach((timer) => window.clearTimeout(timer));
+    };
+  }, [handleDismiss, inAppNotices]);
+
+  useEffect(() => {
+    const timersRef = dismissAnimationTimersRef;
+    return () => {
+      timersRef.current.forEach((timer) => window.clearTimeout(timer));
+      timersRef.current.clear();
+    };
+  }, []);
 
   if (inAppNotices.length === 0) return null;
 
@@ -55,7 +101,7 @@ export default function InAppNoticeStack({ state, actions }: InAppNoticeStackPro
     try {
       await notice.onAction();
     } finally {
-      onDismissNotice(notice.id);
+      handleDismiss(notice.id);
     }
   };
 
@@ -64,10 +110,11 @@ export default function InAppNoticeStack({ state, actions }: InAppNoticeStackPro
       {inAppNotices.map((notice) => {
         const openable = Boolean(notice.messageId || (notice.ids && notice.ids.length > 0));
         const TypeIcon = notice.icon ? ICON_BY_NAME[notice.icon] : ICON_BY_TYPE[notice.type];
+        const isDismissing = dismissingIds.has(notice.id);
         return (
           <div
             key={notice.id}
-            className={`inapp-notice inapp-notice-${notice.type} ${openable ? "openable" : ""}`}
+            className={`inapp-notice inapp-notice-${notice.type} ${openable ? "openable" : ""} ${isDismissing ? "dismissing" : ""}`}
             role={openable ? "button" : undefined}
             tabIndex={openable ? 0 : -1}
             onClick={() => {
@@ -110,7 +157,7 @@ export default function InAppNoticeStack({ state, actions }: InAppNoticeStackPro
                 className="icon-button ghost notice-dismiss"
                 onClick={(event) => {
                   event.stopPropagation();
-                  onDismissNotice(notice.id);
+                  handleDismiss(notice.id);
                 }}
                 aria-label="Dismiss notification"
                 title="Dismiss"

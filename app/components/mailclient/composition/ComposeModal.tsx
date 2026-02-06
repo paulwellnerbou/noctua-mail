@@ -16,6 +16,7 @@ type ComposeModalProps = {
     composeSubject: string;
     composeShowBcc: boolean;
     composeOpenedAt: string;
+    activeAccountId: string | null;
     composeDraftId: string | null;
     composeOpen: boolean;
     composeFieldsReset: number;
@@ -25,10 +26,6 @@ type ComposeModalProps = {
     sendingMail: boolean;
     discardingDraft: boolean;
     composeDragActive: boolean;
-    recipientOptions: string[];
-    recipientActiveIndex: number;
-    recipientLoading: boolean;
-    recipientFocus: "to" | "cc" | "bcc" | null;
     fromValue: string;
     composeSize: { width: number; height: number | null };
   };
@@ -55,15 +52,13 @@ type ComposeModalProps = {
     setComposeResizing: React.Dispatch<React.SetStateAction<boolean>>;
     handleSendMail: () => void;
     handleDiscardDraft: () => void;
-    setRecipientQuery: React.Dispatch<React.SetStateAction<string>>;
-    setRecipientFocus: React.Dispatch<React.SetStateAction<"to" | "cc" | "bcc" | null>>;
-    setRecipientActiveIndex: React.Dispatch<React.SetStateAction<number>>;
     applyRecipientSelection: (
       current: string,
       selection: string,
       setter: React.Dispatch<React.SetStateAction<string>>,
       focusAfter?: "to" | "cc" | "bcc" | null
     ) => string;
+    loadRecipientOptions: (query: string, signal: AbortSignal) => Promise<string[]>;
     markComposeDirty: () => void;
     popInCompose: () => void;
     minimizeCompose: () => void;
@@ -99,6 +94,7 @@ export default function ComposeModal({
     composeSubject,
     composeShowBcc,
     composeOpenedAt,
+    activeAccountId,
     composeDraftId,
     composeOpen,
     composeFieldsReset,
@@ -108,10 +104,6 @@ export default function ComposeModal({
     sendingMail,
     discardingDraft,
     composeDragActive,
-    recipientOptions,
-    recipientActiveIndex,
-    recipientLoading,
-    recipientFocus,
     fromValue,
     composeSize
   } = state;
@@ -127,10 +119,8 @@ export default function ComposeModal({
     setComposeResizing,
     handleSendMail,
     handleDiscardDraft,
-    setRecipientQuery,
-    setRecipientFocus,
-    setRecipientActiveIndex,
     applyRecipientSelection,
+    loadRecipientOptions,
     markComposeDirty,
     popInCompose,
     minimizeCompose
@@ -229,19 +219,14 @@ export default function ComposeModal({
             composeBcc={composeBcc}
             composeShowBcc={composeShowBcc}
             composeOpenedAt={composeOpenedAt}
-            recipientOptions={recipientOptions}
-            recipientActiveIndex={recipientActiveIndex}
-            recipientLoading={recipientLoading}
-            recipientFocus={recipientFocus}
+            activeAccountId={activeAccountId}
             setComposeSubject={setComposeSubject}
             setComposeTo={setComposeTo}
             setComposeCc={setComposeCc}
             setComposeBcc={setComposeBcc}
             setComposeShowBcc={setComposeShowBcc}
-            setRecipientQuery={setRecipientQuery}
-            setRecipientFocus={setRecipientFocus}
-            setRecipientActiveIndex={setRecipientActiveIndex}
             applyRecipientSelection={applyRecipientSelection}
+            loadRecipientOptions={loadRecipientOptions}
             getComposeToken={getComposeToken}
             markComposeDirty={markComposeDirty}
           />
@@ -278,7 +263,7 @@ export default function ComposeModal({
                 variant="soft"
                 color="red"
                 onClick={handleDiscardDraft}
-                disabled={discardingDraft}
+                disabled={discardingDraft || draftSaving}
               >
                 Discard Draft
               </Button>

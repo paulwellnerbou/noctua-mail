@@ -4,6 +4,17 @@
   --surface: #ffffff;
   --surface-2: #f0efe9;
   --surface-3: #e6e4dc;
+  --input-bg: var(--surface);
+  --input-fg: var(--text);
+  --mail-view-bg: var(--surface);
+  --mail-view-fg: var(--text);
+  --list-row-hover-bg: var(--gray-3);
+  --list-row-hover-border: var(--gray-5);
+  --list-row-selected-bg: var(--gray-4);
+  --list-row-selected-border: var(--gray-6);
+  --list-row-active-bg: color-mix(in srgb, var(--accent-a3) 40%, var(--gray-3));
+  --list-row-active-border: var(--accent-9);
+  --list-row-focus-ring: var(--accent-8);
   --text: #1a1a1a;
   --muted: #5d5b55;
   --border: #d8d5cc;
@@ -24,6 +35,13 @@
   --surface: #2d313b;
   --surface-2: #363b47;
   --surface-3: #404656;
+  --list-row-hover-bg: var(--gray-4);
+  --list-row-hover-border: var(--gray-6);
+  --list-row-selected-bg: var(--gray-6);
+  --list-row-selected-border: var(--gray-7);
+  --list-row-active-bg: color-mix(in srgb, var(--accent-a4) 52%, var(--gray-4));
+  --list-row-active-border: var(--accent-8);
+  --list-row-focus-ring: var(--accent-8);
   --text: #f2f0ea;
   --muted: #c8c2b6;
   --border: #4b5264;
@@ -168,9 +186,9 @@ a {
 }
 
 .auth-error {
-  color: #d93025;
-  background: rgba(217, 48, 37, 0.08);
-  border: 1px solid rgba(217, 48, 37, 0.25);
+  color: var(--red-11);
+  background: var(--red-a3);
+  border: 1px solid var(--red-a6);
   padding: 8px 10px;
   border-radius: 8px;
 }
@@ -247,6 +265,11 @@ a {
   pointer-events: auto;
   animation: riseIn 0.2s ease both;
   transition: transform 0.14s ease;
+}
+
+.inapp-notice.dismissing {
+  animation: riseOut 0.2s ease both;
+  pointer-events: none;
 }
 
 .inapp-notice.openable {
@@ -545,6 +568,8 @@ a {
   line-height: 1.5;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
+  background: var(--input-bg);
+  color: var(--input-fg);
 }
 
 .compose-row {
@@ -564,10 +589,21 @@ a {
 
 .compose-input-wrap .rt-TextFieldRoot {
   width: 100%;
+  --text-field-background-color: var(--input-bg);
+  background: var(--input-bg);
+  color: var(--input-fg);
 }
 
 .compose-grid-row .rt-TextFieldRoot {
   width: 100%;
+  --text-field-background-color: var(--input-bg);
+  background: var(--input-bg);
+  color: var(--input-fg);
+}
+
+.compose-input-wrap .rt-TextFieldInput,
+.compose-grid-row .rt-TextFieldInput {
+  color: var(--input-fg);
 }
 
 .compose-suggestions {
@@ -646,15 +682,8 @@ a {
   padding: 8px 10px;
   border-radius: var(--radius-md);
   border: 1px solid var(--gray-a6);
-  background: var(--gray-1);
-  color: var(--gray-12);
-}
-
-.dark .compose-line > input,
-.dark .compose-subject > input,
-.dark .compose-grid-row > input {
-  background: var(--gray-2);
-  color: var(--gray-12);
+  background: var(--input-bg);
+  color: var(--input-fg);
 }
 
 .compose-line input[readonly] {
@@ -749,16 +778,10 @@ a {
     monospace;
   font-size: 14px;
   line-height: 1.5;
-  background: var(--gray-1);
-  color: var(--gray-12);
+  background: var(--input-bg);
+  color: var(--input-fg);
   border: 1px solid var(--gray-a6);
   border-radius: var(--radius-md);
-}
-
-.dark .compose-body textarea,
-.dark .compose-writing.text > textarea {
-  background: var(--gray-2);
-  color: var(--gray-12);
 }
 
 .compose-editor {
@@ -769,7 +792,7 @@ a {
   min-height: 0;
   border: 1px solid var(--gray-a6);
   border-radius: var(--radius-sm);
-  background: var(--gray-1);
+  background: var(--input-bg);
   padding: 10px 12px;
   overflow: auto;
   --font-scale: 1;
@@ -788,6 +811,54 @@ a {
 .compose-toolbar .compose-toolbar-button {
   padding: 4px 6px;
   font-size: 11px;
+  line-height: 1;
+}
+
+.compose-toolbar-icon {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+}
+
+.compose-toolbar-icon-base {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.compose-toolbar-icon-badge {
+  position: absolute;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: var(--gray-1);
+  box-shadow: 0 0 0 1px var(--gray-a7);
+}
+
+.compose-toolbar-icon-badge--top-right {
+  top: -4px;
+  right: -4px;
+}
+
+.compose-toolbar-icon-badge--bottom-right {
+  bottom: -4px;
+  right: -4px;
+}
+
+.compose-toolbar-icon-badge--top-left {
+  top: -4px;
+  left: -4px;
+}
+
+.compose-toolbar-icon-badge--bottom-left {
+  bottom: -4px;
+  left: -4px;
 }
 
 .compose-editor-input {
@@ -797,7 +868,7 @@ a {
   font-family: "Sora", system-ui, -apple-system, sans-serif;
   font-size: 14px;
   line-height: 1.6;
-  color: var(--text);
+  color: var(--input-fg);
 }
 
 .compose-editor img {
@@ -988,7 +1059,7 @@ a {
 }
 
 .compose-draft-status.error {
-  color: #b94b4b;
+  color: var(--red-11);
 }
 
 .compose-draft {
@@ -1039,8 +1110,8 @@ a {
   font-family: var(--font-body, "IBM Plex Sans", system-ui, sans-serif);
   font-size: 13px;
   line-height: 1.6;
-  color: var(--text);
-  background: var(--surface);
+  color: var(--mail-view-fg);
+  background: var(--mail-view-bg);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   padding: 16px;
@@ -1058,12 +1129,12 @@ a {
 }
 
 .markdown-view a {
-  color: #1a0dab;
+  color: var(--accent);
   text-decoration: underline;
 }
 
 .markdown-view a:hover {
-  color: #0b57d0;
+  color: var(--accent);
 }
 
 .markdown-view code {
@@ -1084,7 +1155,7 @@ a {
   margin: 10px 0;
   padding-left: 12px;
   border-left: 3px solid var(--accent);
-  color: var(--text);
+  color: var(--mail-view-fg);
 }
 
 .markdown-view blockquote blockquote {
@@ -1093,8 +1164,8 @@ a {
 }
 
 .markdown-view blockquote blockquote blockquote {
-  border-left-color: #52b788;
-  background: linear-gradient(90deg, rgba(82, 183, 136, 0.1), transparent);
+  border-left-color: var(--green-9);
+  background: linear-gradient(90deg, var(--green-a2), transparent);
 }
 
 
@@ -1215,7 +1286,8 @@ a {
   display: block;
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  background: var(--surface);
+  background: var(--mail-view-bg);
+  color: var(--mail-view-fg);
   padding: 16px;
   overflow-x: auto;
   overflow-y: auto;
@@ -1259,14 +1331,14 @@ a {
 }
 
 .quote-level-3 {
-  border-left-color: #52b788;
-  background: linear-gradient(90deg, rgba(82, 183, 136, 0.1), transparent);
+  border-left-color: var(--green-9);
+  background: linear-gradient(90deg, var(--green-a2), transparent);
 }
 
 .quote-block p {
   margin: 6px 0;
   font-size: 13px;
-  color: var(--text);
+  color: var(--mail-view-fg);
 }
 
 .text-line {
@@ -1314,6 +1386,17 @@ a {
   }
 }
 
+@keyframes riseOut {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(8px) scale(0.95);
+  }
+}
+
 
 .bottom-bar {
   display: flex;
@@ -1356,8 +1439,8 @@ a {
 }
 
 .bottom-error {
-  color: #ffb4a2;
-  background: rgba(255, 140, 120, 0.12);
+  color: var(--red-11);
+  background: var(--red-a3);
   padding: 2px 6px;
   border-radius: var(--radius-sm);
 }

@@ -50,7 +50,7 @@ Simple, secure authentication using your existing IMAP credentials. No separate 
 
 ### 🔍 Powerful Search
 - **Full-text search** powered by SQLite FTS5
-- **Field filtering** – Search by `from:`, `to:`, `subject:`, and more
+- **Field filtering** – Search by `from:` (even `from:me`), `to:`, `subject:`, and more
 - **Related mail search** – Find connected conversations with `related:<mail-id>`
 - **Search across all folders** – Or narrow down to specific folders
 

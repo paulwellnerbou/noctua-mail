@@ -8,6 +8,7 @@ import {
 } from "@/lib/db";
 import { appendImapMessage, deleteImapMessage, syncImapMessage } from "@/lib/mail/imap";
 import { buildRawMessage } from "@/lib/mail/smtp";
+import { saveMessageSource } from "@/lib/storage";
 import type { Folder } from "@/lib/data";
 import { requireSessionOr401 } from "@/lib/auth";
 
@@ -139,6 +140,9 @@ export async function POST(request: Request) {
   if (uid) {
     const message = await syncImapMessage(account, draftsMailbox, uid, clientId);
     if (message) {
+      if (message.source) {
+        await saveMessageSource(account.id, message.id, message.source);
+      }
       await upsertMessages(account.id, null, [message], false);
       messageId = message.id;
     }

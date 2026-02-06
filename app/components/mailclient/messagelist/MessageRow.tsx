@@ -14,6 +14,7 @@ type MessageRowProps = {
   message: Message;
   isCompactView: boolean;
   listIsNarrow: boolean;
+  displaySeen?: boolean;
   isActive: boolean;
   isThreadChild: boolean;
   isThreadSibling: boolean;
@@ -60,6 +61,7 @@ function MessageRow({
   message,
   isCompactView,
   listIsNarrow,
+  displaySeen,
   isActive,
   isThreadChild,
   isThreadSibling,
@@ -106,6 +108,7 @@ function MessageRow({
   const clearTimerRef = useRef<number | null>(null);
   const effectiveSelected = optimisticSelected ?? isSelected;
   const effectiveActive = isActive || optimisticActive;
+  const seen = displaySeen ?? Boolean(message.seen);
   const rowClassName = [
     styles.row,
     isCompactView ? styles.rowCompact : "",
@@ -140,7 +143,7 @@ function MessageRow({
   const previewClassName = [
     styles.preview,
     isCompactView ? styles.previewCompact : "",
-    !message.seen ? styles.unreadText : ""
+    !seen ? styles.unreadText : ""
   ]
     .filter(Boolean)
     .join(" ");
@@ -230,7 +233,7 @@ function MessageRow({
       data-dragging={isDragging}
       data-thread-child={isThreadChild}
       data-thread-sibling={isThreadSibling}
-      data-unread={!message.seen}
+      data-unread={!seen}
       data-disabled={isDisabled}
       data-active-thread-root={showCollapsedActive}
       role="button"
@@ -260,7 +263,7 @@ function MessageRow({
         <Text
           as="span"
           size="1"
-          className={`${styles.from} ${!message.seen ? styles.unreadText : ""}`}
+          className={`${styles.from} ${!seen ? styles.unreadText : ""}`}
           title={fromLineTooltip}
         >
           <span className={styles.fromContent}>
@@ -338,7 +341,7 @@ function MessageRow({
           <Text
             as="span"
             size={isCompactView ? "1" : "2"}
-            className={`${styles.subjectText} ${!message.seen ? styles.unreadText : ""}`}
+            className={`${styles.subjectText} ${!seen ? styles.unreadText : ""}`}
           >
             {message.subject}
           </Text>

@@ -56,6 +56,33 @@ function mailboxPathFromFolderId(folderId: string, accountId: string) {
   return folderId;
 }
 
+function isDbLockedError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error ?? "");
+  return /database is locked|sqlite_busy/i.test(message);
+}
+
+function sleep(ms: number) {
+  return new Promise<void>((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+async function withDbLockRetry<T>(fn: () => Promise<T>, attempts = 5) {
+  let delayMs = 120;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      return await fn();
+    } catch (error) {
+      if (!isDbLockedError(error) || attempt === attempts) {
+        throw error;
+      }
+      await sleep(delayMs);
+      delayMs *= 2;
+    }
+  }
+  throw new Error("Database write retry exhausted.");
+}
+
 export async function POST(request: Request) {
   const session = requireSessionOr401(request);
   if (session instanceof NextResponse) return session;
@@ -89,21 +116,23 @@ export async function POST(request: Request) {
   if (isInTrash) {
     await deleteImapMessage(account, currentMailbox, message.imapUid, clientId);
     const attachmentIds = await getAttachmentIds(message.id);
-    await deleteMessageById(payload.accountId, message.id);
+    await withDbLockRetry(() => deleteMessageById(payload.accountId, message.id));
     await deleteMessageFiles(payload.accountId, message.id, attachmentIds);
     return NextResponse.json({ ok: true, action: "deleted" });
   }
 
   await moveImapMessage(account, currentMailbox, message.imapUid, trashMailbox, clientId);
   if (trashFolder) {
-    await updateMessageFolder(payload.accountId, message.id, trashFolder.id, trashMailbox);
+    await withDbLockRetry(() =>
+      updateMessageFolder(payload.accountId, message.id, trashFolder.id, trashMailbox)
+    );
   }
   if (message.flags && message.flags.length > 0) {
     const cleaned = message.flags.filter(
       (flag) => flag.toLowerCase() !== "\\recent"
     );
     if (cleaned.length !== message.flags.length) {
-      await updateMessageFlags(payload.accountId, message.id, cleaned);
+      await withDbLockRetry(() => updateMessageFlags(payload.accountId, message.id, cleaned));
     }
   }
   return NextResponse.json({

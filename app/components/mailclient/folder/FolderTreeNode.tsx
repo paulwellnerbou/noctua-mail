@@ -1,6 +1,6 @@
 import { useState } from "react";
 import type React from "react";
-import { MoreVertical } from "lucide-react";
+import { Folder as FolderIcon, MoreVertical } from "lucide-react";
 import { Badge, DropdownMenu, IconButton } from "@radix-ui/themes";
 import { CaretRightIcon } from "@radix-ui/react-icons";
 import { badgeColors } from "@/lib/ui/badgeColors";
@@ -38,7 +38,6 @@ type FolderTreeNodeProps = {
   };
   helpers: {
     hasFolderMatch: (folder: Folder) => boolean;
-    isSystemFolder: (folder: Folder) => boolean;
     folderPathLabel: (folder: Folder) => string;
   };
 };
@@ -75,11 +74,12 @@ export default function FolderTreeNode({
     syncAccount,
     folderSpecialIcon
   } = actions;
-  const { hasFolderMatch, isSystemFolder, folderPathLabel } = helpers;
+  const { hasFolderMatch, folderPathLabel } = helpers;
+  const [isMenuOpen, setIsMenuOpen] = useState(false);
 
   const isCollapsed = collapsedFolders[folder.id] ?? false;
   const hasChildren = (folderTree.get(folder.id) ?? []).length > 0;
-  const isSystem = isSystemFolder(folder);
+  const specialIcon = folderSpecialIcon(folder);
   if (folderQueryText && !forceShow && !hasFolderMatch(folder)) {
     return null;
   }
@@ -93,7 +93,6 @@ export default function FolderTreeNode({
   const folderTitle = `${fullPath} (${totalCount} Messages, ${unreadCount} Unread)`;
   const isDeleting = deletingFolderIds.has(folder.id);
   const isSyncingFolder = syncingFolders.has(folder.id);
-  const [isMenuOpen, setIsMenuOpen] = useState(false);
 
   return (
     <div
@@ -171,16 +170,9 @@ export default function FolderTreeNode({
         >
           {hasChildren ? <CaretRightIcon /> : ""}
         </span>
-        {folderSpecialIcon(folder) ? (
-          <span className={styles.treeIcon} aria-hidden>
-            {folderSpecialIcon(folder)}
-          </span>
-        ) : (
-          <span
-            className={`${styles.treeDot} ${isSystem ? styles.treeDotSystem : ""}`}
-            aria-hidden
-          />
-        )}
+        <span className={styles.treeIcon} aria-hidden>
+          {specialIcon ?? <FolderIcon size={14} />}
+        </span>
         <span className={`${styles.treeName} ${folder.unreadCount ? styles.treeNameUnread : ""}`}>
           <span className={styles.treeNameText}>{folder.name}</span>
           {isSyncingFolder && <span className={styles.treeSyncSpinner} aria-hidden="true" />}

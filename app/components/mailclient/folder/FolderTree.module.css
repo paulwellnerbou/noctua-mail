@@ -46,6 +46,13 @@
 .folderSearchInput {
   width: 100%;
   min-width: 0;
+  --text-field-background-color: var(--input-bg);
+  background: var(--input-bg);
+  color: var(--input-fg);
+}
+
+.folderSearchInput :global(.rt-TextFieldInput) {
+  color: var(--input-fg);
 }
 
 .treeNode {
@@ -109,30 +116,6 @@
 .treeCaret :global(svg) {
   width: 15px;
   height: 15px;
-}
-
-.treeDot {
-  width: 8px;
-  height: 8px;
-  border-radius: 999px;
-  background: var(--accent-9);
-  border: 1px solid var(--accent-9);
-  box-sizing: border-box;
-  transition: transform 0.2s ease;
-}
-
-.treeDotSystem {
-  background: var(--accent-9);
-  border-color: var(--accent-9);
-}
-
-.treeRow:hover .treeDot {
-  background: var(--accent-9);
-  border-color: var(--accent-9);
-}
-
-.treeRowActive .treeDot {
-  transform: scale(1.1);
 }
 
 .treeIcon {

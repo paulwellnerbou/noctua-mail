@@ -201,6 +201,45 @@ export type FlatMessageEntry = {
   folderIds: string[];
 };
 
+export function isCollapsedThreadRootRow(params: {
+  isCollapsed: boolean;
+  threadSize: number;
+  depth: number;
+  threadIndex: number;
+}) {
+  const { isCollapsed, threadSize, depth, threadIndex } = params;
+  return isCollapsed && threadSize > 1 && depth === 0 && threadIndex === 0;
+}
+
+export function getDisplaySeenForThreadRow(params: {
+  messageSeen: boolean;
+  isCollapsed: boolean;
+  threadSize: number;
+  depth: number;
+  threadIndex: number;
+  fullFlat: Array<{ message: Message; depth: number }>;
+}) {
+  const {
+    messageSeen,
+    isCollapsed,
+    threadSize,
+    depth,
+    threadIndex,
+    fullFlat
+  } = params;
+  if (
+    !isCollapsedThreadRootRow({
+      isCollapsed,
+      threadSize,
+      depth,
+      threadIndex
+    })
+  ) {
+    return Boolean(messageSeen);
+  }
+  return fullFlat.every((entry) => Boolean(entry.message.seen));
+}
+
 export function buildThreadGroupEntries(params: {
   group: MessageGroup;
   collapsedThreads: Record<string, boolean>;

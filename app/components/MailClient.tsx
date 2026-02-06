@@ -211,7 +211,6 @@ export default function MailClient() {
   const [showJson, setShowJson] = useState(false);
   const [omitBody, setOmitBody] = useState(true);
   const [copyOk, setCopyOk] = useState(false);
-  const [copyStatus, setCopyStatus] = useState<Record<string, boolean>>({});
   const [collapsedMessages, setCollapsedMessages] = useState<Record<string, boolean>>({});
   const [messageFontScale, setMessageFontScale] = useState<Record<string, number>>({});
   const [authState, setAuthState] = useState<"loading" | "ok" | "unauth">("loading");
@@ -261,13 +260,7 @@ export default function MailClient() {
     headerHtml: string;
     bodyHtml: string;
   } | null>(null);
-  const [recipientOptions, setRecipientOptions] = useState<string[]>([]);
   const recipientCacheRef = useRef<Record<string, string[]>>({});
-  const [recipientQuery, setRecipientQuery] = useState("");
-  const [recipientLoading, setRecipientLoading] = useState(false);
-  const [recipientFocus, setRecipientFocus] = useState<"to" | "cc" | "bcc" | null>(null);
-  const [recipientActiveIndex, setRecipientActiveIndex] = useState(0);
-  const recipientFetchRef = useRef<AbortController | null>(null);
   const [composeSize, setComposeSize] = useState<{ width: number; height: number | null }>({
     width: 980,
     height: null
@@ -370,6 +363,11 @@ export default function MailClient() {
     undefined
   );
   const inboxFolderRef = useRef<Folder | null>(null);
+  const relatedRestoreRef = useRef<{
+    queryId: string;
+    scope: "folder" | "all";
+    folderId: string;
+  } | null>(null);
   const trimmedQuery = query.trim();
   const relatedQueryId = useMemo(() => {
     const match = trimmedQuery.match(/^related:(.+)$/i);
@@ -400,7 +398,7 @@ export default function MailClient() {
   );
   const messagesKey = useMemo(
     () =>
-      `${activeAccountId}|${searchScope}|${everywhereExclusionKey}|${activeFolderId}|${trimmedQuery}|${groupBy}|${searchFieldKey}|${Object.entries(searchBadges)
+      `${activeAccountId}|${searchScope}|${everywhereExclusionKey}|${activeFolderId}|${trimmedQuery}|${groupBy}|${threadsEnabled ? "threads-on" : "threads-off"}|${searchFieldKey}|${Object.entries(searchBadges)
         .filter(([, enabled]) => enabled)
         .map(([key]) => key)
         .join(",")}`,
@@ -410,6 +408,7 @@ export default function MailClient() {
       everywhereExclusionKey,
       groupBy,
       trimmedQuery,
+      threadsEnabled,
       searchFieldKey,
       searchBadges,
       searchScope
@@ -547,10 +546,6 @@ export default function MailClient() {
         .map(([key]) => key),
     [searchBadges]
   );
-  const selectedSearchFieldLabels = useMemo(
-    () => selectedSearchFields.map((key) => getSearchFieldLabel(key)),
-    [selectedSearchFields]
-  );
   const selectedSearchBadgeLabels = useMemo(
     () => selectedSearchBadges.map((key) => getSearchBadgeLabel(key)),
     [selectedSearchBadges]
@@ -604,8 +599,12 @@ export default function MailClient() {
     return () => clearInterval(interval);
   }, [draftSavedAt]);
 
-  const toggleMessageSelection = useCallback((messageId: string, replace = false) => {
-    selectionStore.toggle(messageId, replace);
+  const toggleMessageSelection = useCallback((
+    messageId: string,
+    replace = false,
+    setActive = true
+  ) => {
+    selectionStore.toggle(messageId, replace, setActive);
     lastSelectedIdRef.current = messageId;
   }, [selectionStore]);
 
@@ -642,7 +641,6 @@ export default function MailClient() {
 
   const handleRowClick = useCallback(
     (event: React.MouseEvent, message: Message) => {
-      selectionStore.setActiveId(message.id);
       if (event.shiftKey) {
         event.preventDefault();
         selectRangeTo(message.id);
@@ -650,7 +648,7 @@ export default function MailClient() {
       }
       if (event.metaKey || event.ctrlKey) {
         event.preventDefault();
-        toggleMessageSelection(message.id);
+        toggleMessageSelection(message.id, false, false);
         return;
       }
       handleSelectMessage(message);
@@ -672,6 +670,10 @@ export default function MailClient() {
     if (effective.length === 0) return "Fields: All";
     return `Fields: ${effective.map((key) => getSearchFieldLabel(key)).join(", ")}`;
   }, [searchFields]);
+  const searchFieldsCriteriaLabel = useMemo(
+    () => searchFieldsLabel.replace(/^Fields:\s*/, ""),
+    [searchFieldsLabel]
+  );
   const searchBadgesLabel = useMemo(() => {
     const selected = SEARCH_BADGE_ORDER.filter((key) => searchBadges[key]);
     if (selected.length === 0) return "Filter: Any";
@@ -688,8 +690,8 @@ export default function MailClient() {
     if (trimmedQuery.length > 0) {
       parts.push(`"${trimmedQuery}"`);
     }
-    if (trimmedQuery.length > 0 && selectedSearchFieldLabels.length > 0) {
-      parts.push(`in ${selectedSearchFieldLabels.join(", ")}`);
+    if (trimmedQuery.length > 0 && searchFieldsCriteriaLabel.length > 0) {
+      parts.push(`in ${searchFieldsCriteriaLabel}`);
     }
     if (selectedSearchBadgeLabels.length > 0) {
       parts.push(`filter ${selectedSearchBadgeLabels.join(", ")}`);
@@ -698,15 +700,15 @@ export default function MailClient() {
       parts.push("everywhere");
     }
     return parts.join(" · ");
-  }, [query, searchScope, selectedSearchBadgeLabels, selectedSearchFieldLabels]);
+  }, [query, searchFieldsCriteriaLabel, searchScope, selectedSearchBadgeLabels]);
   const searchCriteriaBadges = useMemo(() => {
     const badges: { key: string; label: string }[] = [];
     const trimmedQuery = query.trim();
     if (trimmedQuery.length > 0) {
       badges.push({ key: "query", label: `"${trimmedQuery}"` });
     }
-    if (trimmedQuery.length > 0 && selectedSearchFieldLabels.length > 0) {
-      badges.push({ key: "fields", label: `in ${selectedSearchFieldLabels.join(", ")}` });
+    if (trimmedQuery.length > 0 && searchFieldsCriteriaLabel.length > 0) {
+      badges.push({ key: "fields", label: `in ${searchFieldsCriteriaLabel}` });
     }
     if (selectedSearchBadges.length > 0) {
       selectedSearchBadges.forEach((key) => {
@@ -720,7 +722,7 @@ export default function MailClient() {
       badges.push({ key: "all", label: "All messages" });
     }
     return badges;
-  }, [query, searchScope, selectedSearchBadges, selectedSearchFieldLabels]);
+  }, [query, searchFieldsCriteriaLabel, searchScope, selectedSearchBadges]);
   const relatedNotice = useMemo(() => {
     if (!isRelatedSearch) return "";
     const subject = relatedContext?.subject?.trim();
@@ -728,6 +730,10 @@ export default function MailClient() {
     return `Showing related mails for ${label} (based on subject similarity, sender/recipient overlap, and conversation references).`;
   }, [isRelatedSearch, relatedContext, relatedQueryId]);
   const clearSearch = () => {
+    const relatedRestore =
+      isRelatedSearch && relatedRestoreRef.current?.queryId === relatedQueryId
+        ? relatedRestoreRef.current
+        : null;
     setQuery("");
     setSearchBadges({
       unread: false,
@@ -745,6 +751,13 @@ export default function MailClient() {
       body: true,
       attachments: true
     });
+    if (relatedRestore?.scope === "folder") {
+      setSearchScope("folder");
+      setActiveFolderId(relatedRestore.folderId || accountFolders[0]?.id || "");
+    } else if (isRelatedSearch) {
+      setSearchScope("all");
+      setActiveFolderId("");
+    }
   };
   const pushNotice = useCallback((input: NoticeInput) => {
     const { durationMs, ...notice } = input;
@@ -830,18 +843,6 @@ export default function MailClient() {
     }
     return withRequestPath(`Request failed (${res.status})`);
   }, []);
-  useEffect(() => {
-    const timers = inAppNotices
-      .filter((notice) => typeof notice.expiresAt === "number")
-      .map((notice) =>
-        window.setTimeout(() => {
-          setInAppNotices((prev) => prev.filter((item) => item.id !== notice.id));
-        }, Math.max(0, (notice.expiresAt as number) - Date.now()))
-      );
-    return () => {
-      timers.forEach((timer) => window.clearTimeout(timer));
-    };
-  }, [inAppNotices]);
   const latestException = exceptionEntries[0] ?? null;
   const selectedException = useMemo(() => {
     if (exceptionEntries.length === 0) return null;
@@ -1050,16 +1051,37 @@ export default function MailClient() {
     <MessageSelectIndicators
       isPinned={isPinnedMessage(message)}
       isDraft={Boolean(message.draft)}
+      onPinnedClick={() => togglePinnedFlag(message)}
     />
   );
 
-  const renderUnreadDot = (message: Message) => (
-    <UnreadDot
-      seen={Boolean(message.seen)}
-      disabled={pendingMessageActions.has(message.id)}
-      onToggle={() => updateFlagState(message, "seen", !message.seen)}
-    />
-  );
+  const renderUnreadDot = (
+    message: Message,
+    options?: { seen?: boolean; threadMessages?: Message[] }
+  ) => {
+    const displaySeen = options?.seen ?? Boolean(message.seen);
+    const targets = Array.from(
+      new Map(
+        (options?.threadMessages?.length ? options.threadMessages : [message]).map((target) => [
+          target.id,
+          target
+        ])
+      ).values()
+    );
+    const isDisabled = targets.some((target) => pendingMessageActions.has(target.id));
+    return (
+      <UnreadDot
+        seen={displaySeen}
+        disabled={isDisabled}
+        onToggle={() => {
+          const nextSeen = !displaySeen;
+          void Promise.all(
+            targets.map((target) => updateFlagState(target, "seen", nextSeen))
+          );
+        }}
+      />
+    );
+  };
 
   const getWeekGroup = (value: number) => {
     const date = new Date(value);
@@ -1158,30 +1180,41 @@ export default function MailClient() {
   const applyRecipientSelection = (
     value: string,
     suggestion: string,
-    setValue: (next: string) => void,
-    focusAfter: "to" | "cc" | "bcc" | null = null
+    setValue: (next: string) => void
   ) => {
     const parts = value.split(/[;,]/);
     parts[parts.length - 1] = ` ${suggestion}`.trim();
     const joined = parts.map((part) => part.trim()).filter(Boolean).join(", ");
     const nextValue = joined ? `${joined}, ` : `${suggestion}, `;
     setValue(nextValue);
-    setRecipientQuery("");
-    setRecipientFocus(focusAfter);
     return nextValue;
   };
-
-  const triggerCopy = async (key: string, value: string) => {
-    try {
-      await navigator.clipboard.writeText(value);
-      setCopyStatus((prev) => ({ ...prev, [key]: true }));
-      window.setTimeout(() => {
-        setCopyStatus((prev) => ({ ...prev, [key]: false }));
-      }, 1200);
-    } catch {
-      // ignore
-    }
-  };
+  const loadRecipientOptions = useCallback(
+    async (query: string, signal: AbortSignal) => {
+      if (!activeAccountId) return [];
+      const trimmedQuery = query.trim();
+      if (!trimmedQuery) {
+        const cached = recipientCacheRef.current[activeAccountId];
+        if (cached) return cached;
+      }
+      const params = new URLSearchParams({
+        accountId: activeAccountId,
+        limit: "20"
+      });
+      if (trimmedQuery) {
+        params.set("q", trimmedQuery);
+      }
+      const res = await apiFetch(`/api/compose/recipients?${params.toString()}`, { signal });
+      if (!res.ok) return [];
+      const data = (await res.json()) as { recipients?: string[] };
+      const list = data.recipients ?? [];
+      if (!trimmedQuery && list.length) {
+        recipientCacheRef.current[activeAccountId] = list;
+      }
+      return list;
+    },
+    [activeAccountId, apiFetch]
+  );
 
   const uniqueEmails = (entries: string[]) => {
     const seen = new Set<string>();
@@ -1371,6 +1404,9 @@ export default function MailClient() {
         html = html?.split(attachment.dataUrl).join(`cid:${attachment.cid}`);
       });
     }
+    if (html) {
+      html = normalizeOutboundTableMarkup(html);
+    }
     if (useHtml) {
       let textFromHtml = "";
       if (html) {
@@ -1451,6 +1487,28 @@ export default function MailClient() {
       .replace(/\n{3,}/g, "\n\n")
       .replace(/[ \t]{2,}/g, " ")
       .trim();
+
+  function normalizeOutboundTableMarkup(value: string): string {
+    if (!value.trim()) return value;
+    try {
+      const parser = new DOMParser();
+      const document = parser.parseFromString(value, "text/html");
+      let changed = false;
+      document.querySelectorAll("table").forEach((table) => {
+        table.style.borderCollapse = "collapse";
+        table.style.borderSpacing = "0";
+        table.setAttribute("cellspacing", "0");
+        changed = true;
+      });
+      document.querySelectorAll("td > p, th > p").forEach((paragraph) => {
+        paragraph.style.margin = "0";
+        changed = true;
+      });
+      return changed ? document.body.innerHTML : value;
+    } catch {
+      return value;
+    }
+  }
 
   const normalizeHtmlDerivedText = (value: string): string =>
     value
@@ -1662,17 +1720,6 @@ export default function MailClient() {
         });
         return changed ? next : prev;
       });
-      setCopyStatus((prev) => {
-        let changed = false;
-        const next = { ...prev };
-        unique.forEach((id) => {
-          if (id in next) {
-            delete next[id];
-            changed = true;
-          }
-        });
-        return changed ? next : prev;
-      });
     },
     [evictMessagesFromThreadCache]
   );
@@ -1692,9 +1739,13 @@ export default function MailClient() {
     });
     return selected;
   }, [includeThreadAcrossFoldersForList, threadRelatedMessages, sortedMessages]);
+  const listScopeMessages = useMemo(
+    () => (supportsThreads ? threadScopeMessages : sortedMessages),
+    [sortedMessages, supportsThreads, threadScopeMessages]
+  );
 
   const groupedMessages = useMemo(() => {
-    const base = [...threadScopeMessages].sort((a, b) => b.dateValue - a.dateValue);
+    const base = [...listScopeMessages].sort((a, b) => b.dateValue - a.dateValue);
     const groups = new Map<string, Message[]>();
     const threadGroupKey = new Map<string, string>();
 
@@ -1744,7 +1795,7 @@ export default function MailClient() {
       count: group.count,
       items: groups.get(group.key) ?? []
     }));
-  }, [groupMeta, threadScopeMessages, supportsThreads]);
+  }, [groupMeta, listScopeMessages, supportsThreads]);
 
   const visibleMessages = useMemo(() => {
     const list: { message: Message; depth: number; threadId: string }[] = [];
@@ -2482,20 +2533,6 @@ export default function MailClient() {
       </div>
       {composeTab === "text" && (
         <>
-          {composeMode !== "new" && composeQuotedText && (
-            <div className="compose-quoted-toolbar">
-              <Button
-                type="button"
-                size="1"
-                color="gray"
-                variant={composeIncludeOriginal ? "solid" : "soft"}
-                title="Toggle original message"
-                onClick={toggleIncludeOriginal}
-              >
-                Include original
-              </Button>
-            </div>
-          )}
           <div className="compose-writing text">
             <textarea
               key={`text-body-${composeEditorReset}`}
@@ -2548,6 +2585,20 @@ export default function MailClient() {
               }}
             />
           </div>
+          {composeMode !== "new" && composeQuotedText && (
+            <div className="compose-quoted-toolbar">
+              <Button
+                type="button"
+                size="1"
+                color="gray"
+                variant={composeIncludeOriginal ? "solid" : "soft"}
+                title="Toggle original message"
+                onClick={toggleIncludeOriginal}
+              >
+                Include original
+              </Button>
+            </div>
+          )}
         </>
       )}
       {composeTab === "html" && (
@@ -3011,6 +3062,11 @@ export default function MailClient() {
     isDraftMessage(message) || Boolean(message.draft);
 
   const handleShowRelated = (message: Message) => {
+    relatedRestoreRef.current = {
+      queryId: message.id,
+      scope: searchScope,
+      folderId: activeFolderId
+    };
     if (searchScope === "folder" && activeFolderId) {
       setLastFolderId(activeFolderId);
     }
@@ -3171,6 +3227,9 @@ export default function MailClient() {
     }
   };
 
+  const updateFlagStateRef = useRef(updateFlagState);
+  updateFlagStateRef.current = updateFlagState;
+
   const updateThreadCacheWithFlags = (messageId: string, flags: string[]) => {
     const nextSeen = flags.some((f) => f.toLowerCase() === "\\seen");
     setThreadContentById((prev) => {
@@ -3298,12 +3357,18 @@ export default function MailClient() {
     return ghost;
   };
 
-  const handleMessageDragStart = (event: React.DragEvent, message: Message) => {
+  const handleMessageDragStart = (
+    event: React.DragEvent,
+    message: Message,
+    threadMessageIds?: string[]
+  ) => {
     const selected = selectionStore.getIds();
     const ids =
       selected.size > 0 && selected.has(message.id)
         ? Array.from(selected)
-        : [message.id];
+        : threadMessageIds && threadMessageIds.length > 0
+          ? threadMessageIds
+          : [message.id];
     const items = messages.filter((item) => ids.includes(item.id));
     const ghost = buildDragPreview(items);
     event.dataTransfer.effectAllowed = "move";
@@ -3410,8 +3475,46 @@ export default function MailClient() {
       if (target.isContentEditable) return true;
       return Boolean(target.closest("input, textarea, select"));
     };
+    const resolveMessageById = (id: string) =>
+      threadScopeMessages.find((item) => item.id === id) ??
+      messages.find((item) => item.id === id);
+    const toggleReadStatusByIds = async (messageIds: string[], forcedSeen?: boolean) => {
+      const uniqueIds = Array.from(new Set(messageIds));
+      if (uniqueIds.length === 0) return;
+      const targets = uniqueIds
+        .map((id) => resolveMessageById(id))
+        .filter((message): message is Message => Boolean(message));
+      if (targets.length === 0) return;
+      await Promise.all(
+        targets.map((message) =>
+          updateFlagStateRef.current(
+            message,
+            "seen",
+            forcedSeen ?? !Boolean(message.seen)
+          )
+        )
+      );
+    };
+    const getCollapsedRootThreadMessages = (selectedIds: string[]) => {
+      if (selectedIds.length !== 1) return null;
+      const selectedId = selectedIds[0];
+      const selectedVisible = visibleMessages.find((item) => item.message.id === selectedId);
+      if (!selectedVisible || selectedVisible.depth !== 0) return null;
+      const isThreadCollapsed = collapsedThreads[selectedVisible.threadId] ?? true;
+      if (!isThreadCollapsed) return null;
+      const threadMessages = threadScopeMessages.filter((item) => {
+        const key = item.threadId ?? item.messageId ?? item.id;
+        return key === selectedVisible.threadId;
+      });
+      if (threadMessages.length <= 1) return null;
+      return threadMessages;
+    };
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== "Delete" && event.key !== "Backspace") return;
+      const key = event.key.toLowerCase();
+      const isDeleteKey = event.key === "Delete" || event.key === "Backspace";
+      const isToggleReadKey =
+        key === "r" && !event.metaKey && !event.ctrlKey && !event.altKey;
+      if (!isDeleteKey && !isToggleReadKey) return;
       if (isTypingTarget(event.target)) return;
       const selected = selectionStore.getIds();
       const ids =
@@ -3421,14 +3524,26 @@ export default function MailClient() {
             ? [activeMessageId]
             : [];
       if (ids.length === 0) return;
+      if (isToggleReadKey) {
+        event.preventDefault();
+        const collapsedRootThreadMessages = getCollapsedRootThreadMessages(ids);
+        if (collapsedRootThreadMessages) {
+          const nextSeen = !collapsedRootThreadMessages.some((message) => !message.seen);
+          void toggleReadStatusByIds(
+            collapsedRootThreadMessages.map((message) => message.id),
+            nextSeen
+          );
+          return;
+        }
+        void toggleReadStatusByIds(ids);
+        return;
+      }
       event.preventDefault();
       if (ids.length > 1) {
         void handleDeleteMessagesByIds(ids);
         return;
       }
-      const message =
-        threadScopeMessages.find((item) => item.id === ids[0]) ??
-        messages.find((item) => item.id === ids[0]);
+      const message = resolveMessageById(ids[0]);
       if (!message) return;
       void handleDeleteMessage(message);
     };
@@ -3436,11 +3551,13 @@ export default function MailClient() {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [
     activeMessageId,
+    collapsedThreads,
     handleDeleteMessage,
     handleDeleteMessagesByIds,
     messages,
     selectionStore,
-    threadScopeMessages
+    threadScopeMessages,
+    visibleMessages
   ]);
   const scrubSource = (source?: string) => {
     if (!source) return "";
@@ -3541,7 +3658,15 @@ export default function MailClient() {
   useEffect(() => {
     if (!isRelatedSearch) {
       setRelatedContext(null);
+      relatedRestoreRef.current = null;
       return;
+    }
+    if (!relatedRestoreRef.current || relatedRestoreRef.current.queryId !== relatedQueryId) {
+      relatedRestoreRef.current = {
+        queryId: relatedQueryId,
+        scope: searchScope,
+        folderId: activeFolderId
+      };
     }
     if (searchScope !== "all") {
       if (searchScope === "folder" && activeFolderId) {
@@ -3550,7 +3675,7 @@ export default function MailClient() {
       setSearchScope("all");
       setActiveFolderId("");
     }
-  }, [activeFolderId, isRelatedSearch, searchScope]);
+  }, [activeFolderId, isRelatedSearch, relatedQueryId, searchScope]);
 
   useEffect(() => {
     syncStateRef.current = { isSyncing, syncingFolders };
@@ -4217,6 +4342,19 @@ export default function MailClient() {
     }
   }, [accountFolders, activeAccountId, activeFolderId, searchScope]);
 
+  const prevFolderSelectionKeyRef = useRef(`${searchScope}:${activeFolderId}`);
+  useEffect(() => {
+    const selectionKey = `${searchScope}:${activeFolderId}`;
+    if (prevFolderSelectionKeyRef.current === selectionKey) return;
+    prevFolderSelectionKeyRef.current = selectionKey;
+    if (searchScope !== "folder" || !activeFolderId || !threadsEnabled) return;
+    const folder = folders.find((item) => item.id === activeFolderId);
+    const special = (folder?.specialUse ?? "").toLowerCase();
+    if (special === "\\sent") {
+      setThreadsEnabled(false);
+    }
+  }, [activeFolderId, searchScope, threadsEnabled, folders]);
+
   useEffect(() => {
     clearSelection();
   }, [activeFolderId, activeAccountId, searchScope]);
@@ -4250,52 +4388,6 @@ export default function MailClient() {
       firstField?.focus();
     }, 0);
   }, [composeOpen, composeView]);
-
-  useEffect(() => {
-    if (!composeOpen || !activeAccountId) return;
-    let active = true;
-    const loadRecipients = async () => {
-      try {
-        recipientFetchRef.current?.abort();
-        const controller = new AbortController();
-        recipientFetchRef.current = controller;
-        setRecipientLoading(true);
-        const params = new URLSearchParams({
-          accountId: activeAccountId,
-          limit: "20"
-        });
-        if (recipientQuery.trim()) {
-          params.set("q", recipientQuery.trim());
-        }
-        const res = await apiFetch(`/api/compose/recipients?${params.toString()}`, {
-          signal: controller.signal
-        });
-        if (!res.ok) return;
-        const data = (await res.json()) as { recipients?: string[] };
-        if (!active) return;
-        const list = data.recipients ?? [];
-        if (!recipientQuery.trim() && list.length) {
-          recipientCacheRef.current[activeAccountId] = list;
-        }
-        setRecipientOptions(list);
-        setRecipientActiveIndex(0);
-      } catch {
-        // ignore autocomplete failures
-      } finally {
-        if (active) setRecipientLoading(false);
-      }
-    };
-    const cached = recipientCacheRef.current[activeAccountId];
-    if (!recipientQuery.trim() && cached) {
-      setRecipientOptions(cached);
-      return;
-    }
-    const timer = window.setTimeout(loadRecipients, 180);
-    return () => {
-      active = false;
-      window.clearTimeout(timer);
-    };
-  }, [composeOpen, activeAccountId, recipientQuery]);
 
   useEffect(() => {
     if (!composeResizing || composeView !== "modal") return;
@@ -4720,6 +4812,56 @@ export default function MailClient() {
     }
   };
 
+  const waitForSyncJob = async (jobId: string) => {
+    const startedAt = Date.now();
+    const timeoutMs = 1000 * 60 * 10;
+    while (Date.now() - startedAt < timeoutMs) {
+      const statusRes = await apiFetch(`/api/sync/status?jobId=${encodeURIComponent(jobId)}`);
+      if (!statusRes.ok) {
+        throw new Error(await readErrorMessage(statusRes));
+      }
+      const data = (await statusRes.json()) as {
+        ok: boolean;
+        job?: {
+          status?: "running" | "done" | "failed";
+          error?: string;
+        };
+      };
+      const status = data.job?.status;
+      if (status === "done") {
+        return;
+      }
+      if (status === "failed") {
+        throw new Error(data.job?.error || "Sync job failed.");
+      }
+      await new Promise<void>((resolve) => {
+        window.setTimeout(resolve, 300);
+      });
+    }
+    throw new Error("Sync timed out.");
+  };
+
+  const runSyncJob = async (payload: {
+    accountId: string;
+    folderId?: string;
+    fullSync?: boolean;
+    mode?: "full" | "recent" | "new";
+  }) => {
+    const syncRes = await apiFetch("/api/sync", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload)
+    });
+    if (!syncRes.ok) {
+      throw new Error(await readErrorMessage(syncRes));
+    }
+    const data = (await syncRes.json()) as { ok: boolean; jobId?: string };
+    if (!data.jobId) {
+      throw new Error("Sync job did not return a job id.");
+    }
+    await waitForSyncJob(data.jobId);
+  };
+
   const syncFolderWithBackground = async (
     folderId: string,
     awaitDeep = false,
@@ -4730,20 +4872,7 @@ export default function MailClient() {
     const selectionKey = currentKeyRef.current;
     setSyncingFolders((prev) => new Set(prev).add(folderId));
     try {
-      const syncRes = await apiFetch("/api/sync", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ accountId: activeAccountId, folderId, mode })
-      });
-      if (!syncRes.ok) {
-        reportError(await readErrorMessage(syncRes));
-        setSyncingFolders((prev) => {
-          const next = new Set(prev);
-          next.delete(folderId);
-          return next;
-        });
-        return;
-      }
+      await runSyncJob({ accountId: activeAccountId, folderId, mode });
       if (
         allowRefresh &&
         currentKeyRef.current === selectionKey &&
@@ -4752,8 +4881,8 @@ export default function MailClient() {
       ) {
         await refreshMailboxData();
       }
-    } catch {
-      reportError("Sync failed due to a network error.");
+    } catch (error) {
+      reportError(error instanceof Error ? error.message : "Sync failed due to a network error.");
       setSyncingFolders((prev) => {
         const next = new Set(prev);
         next.delete(folderId);
@@ -4773,15 +4902,7 @@ export default function MailClient() {
 
     const deepSync = (async () => {
       try {
-        const deepRes = await apiFetch("/api/sync", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ accountId: activeAccountId, folderId, fullSync: true })
-        });
-        if (!deepRes.ok) {
-          reportError(await readErrorMessage(deepRes));
-          return;
-        }
+        await runSyncJob({ accountId: activeAccountId, folderId, fullSync: true });
         if (
           allowRefresh &&
           currentKeyRef.current === selectionKey &&
@@ -4790,8 +4911,10 @@ export default function MailClient() {
         ) {
           await refreshMailboxData();
         }
-      } catch {
-        reportError("Background sync failed due to a network error.");
+      } catch (error) {
+        reportError(
+          error instanceof Error ? error.message : "Background sync failed due to a network error."
+        );
       } finally {
         setSyncingFolders((prev) => {
           const next = new Set(prev);
@@ -4850,15 +4973,7 @@ export default function MailClient() {
     if (accountFolders.length === 0) {
       setIsSyncing(true);
       try {
-        const syncRes = await apiFetch("/api/sync", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ accountId: activeAccountId, fullSync: true, mode: "full" })
-        });
-        if (!syncRes.ok) {
-          reportError(await readErrorMessage(syncRes));
-          return;
-        }
+        await runSyncJob({ accountId: activeAccountId, fullSync: true, mode: "full" });
         const accountList = await syncNewlyDetectedFolders(knownFolderIds, "full");
         const findInboxInList = (list: Folder[]) => {
           const bySpecial = list.find(
@@ -4875,8 +4990,8 @@ export default function MailClient() {
         if (currentKeyRef.current === selectionKey) {
           await refreshMailboxData();
         }
-      } catch {
-        reportError("Sync failed due to a network error.");
+      } catch (error) {
+        reportError(error instanceof Error ? error.message : "Sync failed due to a network error.");
       } finally {
         setIsSyncing(false);
       }
@@ -5780,7 +5895,6 @@ export default function MailClient() {
                   renderUnreadDot,
                   renderSelectIndicators,
                   renderFolderBadges,
-                  isPinnedMessage,
                   isTrashFolder,
                   renderMessageMenu,
                   handleShowRelated
@@ -5824,7 +5938,6 @@ export default function MailClient() {
                   renderUnreadDot,
                   renderFolderBadges,
                   handleShowRelated,
-                  isPinnedMessage,
                   isTrashFolder,
                   renderMessageMenu
                 }}
@@ -5872,7 +5985,6 @@ export default function MailClient() {
                   renderQuickActions,
                   renderMessageMenu,
                   handleShowRelated,
-                  isPinnedMessage,
                   isTrashFolder
                 }}
                 refs={{ scrollRef: listPaneRef }}
@@ -5928,6 +6040,7 @@ export default function MailClient() {
                       composeCc,
                       composeBcc,
                       composeShowBcc,
+                      activeAccountId,
                       composeDraftId,
                       composeOpen,
                       composeFieldsReset: composeEditorReset,
@@ -5937,10 +6050,6 @@ export default function MailClient() {
                       sendingMail,
                       discardingDraft,
                       composeDragActive,
-                      recipientOptions,
-                      recipientActiveIndex,
-                      recipientLoading,
-                      recipientFocus,
                       fromValue: getAccountFromValue(currentAccount)
                     }}
                     ui={{ composeMessageField }}
@@ -5955,10 +6064,8 @@ export default function MailClient() {
                       setComposeView,
                       handleSendMail,
                       handleDiscardDraft,
-                      setRecipientQuery,
-                      setRecipientFocus,
-                      setRecipientActiveIndex,
                       applyRecipientSelection,
+                      loadRecipientOptions,
                       markComposeDirty: () => {
                         composeDirtyRef.current = true;
                       }
@@ -6015,6 +6122,7 @@ export default function MailClient() {
                       setSearchScope,
                       setActiveFolderId,
                       getImapFlagBadges,
+                      togglePinnedFlag,
                       isDraftMessage,
                       openCompose,
                       renderQuickActions,
@@ -6035,8 +6143,6 @@ export default function MailClient() {
                       renderSourcePanel,
                       handleSelectMessage,
                       messageByMessageId,
-                      copyStatus,
-                      triggerCopy,
                       getPrimaryEmail,
                       extractEmails
                     }}
@@ -6079,6 +6185,7 @@ export default function MailClient() {
           composeSubject,
           composeShowBcc,
           composeOpenedAt,
+          activeAccountId,
           composeDraftId,
           composeOpen,
           composeFieldsReset: composeEditorReset,
@@ -6088,10 +6195,6 @@ export default function MailClient() {
           sendingMail,
           discardingDraft,
           composeDragActive,
-          recipientOptions,
-          recipientActiveIndex,
-          recipientLoading,
-          recipientFocus,
           fromValue: getAccountFromValue(currentAccount),
           composeSize
         }}
@@ -6108,10 +6211,8 @@ export default function MailClient() {
           setComposeResizing,
           handleSendMail,
           handleDiscardDraft,
-          setRecipientQuery,
-          setRecipientFocus,
-          setRecipientActiveIndex,
           applyRecipientSelection,
+          loadRecipientOptions,
           markComposeDirty: () => {
             composeDirtyRef.current = true;
           },

@@ -1,6 +1,9 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  typedRoutes: false
+  typedRoutes: false,
+  images: {
+    qualities: [75, 85]
+  }
 };
 
 export default nextConfig;

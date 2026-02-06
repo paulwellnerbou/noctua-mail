@@ -1,4 +1,4 @@
-import { startTransition, useState } from "react";
+import { startTransition, useEffect, useState } from "react";
 import type React from "react";
 import { Button, Text, TextField } from "@radix-ui/themes";
 
@@ -12,25 +12,20 @@ type ComposeFieldsProps = {
   composeBcc: string;
   composeShowBcc: boolean;
   composeOpenedAt?: string;
+  activeAccountId: string | null;
   fromValue?: string;
-  recipientOptions: string[];
-  recipientActiveIndex: number;
-  recipientLoading: boolean;
-  recipientFocus: RecipientFocus;
   setComposeSubject: React.Dispatch<React.SetStateAction<string>>;
   setComposeTo: React.Dispatch<React.SetStateAction<string>>;
   setComposeCc: React.Dispatch<React.SetStateAction<string>>;
   setComposeBcc: React.Dispatch<React.SetStateAction<string>>;
   setComposeShowBcc: React.Dispatch<React.SetStateAction<boolean>>;
-  setRecipientQuery: React.Dispatch<React.SetStateAction<string>>;
-  setRecipientFocus: React.Dispatch<React.SetStateAction<RecipientFocus>>;
-  setRecipientActiveIndex: React.Dispatch<React.SetStateAction<number>>;
   applyRecipientSelection: (
     current: string,
     selection: string,
     setter: React.Dispatch<React.SetStateAction<string>>,
     focusAfter?: RecipientFocus
   ) => string;
+  loadRecipientOptions: (query: string, signal: AbortSignal) => Promise<string[]>;
   getComposeToken: (value: string) => string;
   markComposeDirty: () => void;
 };
@@ -78,6 +73,8 @@ function RecipientField({
   toggleTitle,
   onToggle
 }: RecipientFieldProps) {
+  const [showSuggestions, setShowSuggestions] = useState(false);
+
   return (
     <div className="compose-grid-row">
       <Text size="2" weight="medium" className="label">
@@ -93,37 +90,47 @@ function RecipientField({
             onChange={(event) => {
               onChangeValue(event.target.value);
               setRecipientQuery(getComposeToken(event.target.value));
+              setShowSuggestions(true);
             }}
             onFocus={() => {
               setRecipientFocus(focusKey);
               setRecipientQuery(getComposeToken(value));
+              setShowSuggestions(false);
             }}
             onBlur={() => {
+              setShowSuggestions(false);
               setTimeout(() => {
                 setRecipientFocus((current) => (current === focusKey ? null : current));
               }, 150);
             }}
             onKeyDown={(event) => {
-              if (!recipientOptions.length) return;
               if (event.key === "ArrowDown") {
                 event.preventDefault();
+                if (!showSuggestions) {
+                  setShowSuggestions(true);
+                  return;
+                }
+                if (!recipientOptions.length) return;
                 setRecipientActiveIndex((prev) => Math.min(prev + 1, recipientOptions.length - 1));
               }
               if (event.key === "ArrowUp") {
+                if (!recipientOptions.length) return;
                 event.preventDefault();
                 setRecipientActiveIndex((prev) => Math.max(prev - 1, 0));
               }
               if (event.key === "Enter" && recipientFocus === focusKey) {
+                if (!recipientOptions.length) return;
                 event.preventDefault();
                 const pick = recipientOptions[recipientActiveIndex];
                 if (pick) {
+                  setShowSuggestions(false);
                   onPickRecipient(value, pick);
                 }
               }
             }}
             placeholder={placeholder}
           />
-          {recipientFocus === focusKey && recipientOptions.length > 0 && (
+          {recipientFocus === focusKey && showSuggestions && recipientOptions.length > 0 && (
             <div className="compose-suggestions">
               {recipientOptions.map((option, index) => (
                 <button
@@ -132,6 +139,7 @@ function RecipientField({
                   className={`compose-suggestion ${index === recipientActiveIndex ? "active" : ""}`}
                   onMouseDown={(event) => {
                     event.preventDefault();
+                    setShowSuggestions(false);
                     onPickRecipient(value, option);
                   }}
                 >
@@ -166,21 +174,15 @@ export default function ComposeFields({
   composeCc,
   composeBcc,
   composeShowBcc,
-  composeOpenedAt,
+  activeAccountId,
   fromValue,
-  recipientOptions,
-  recipientActiveIndex,
-  recipientLoading,
-  recipientFocus,
   setComposeSubject,
   setComposeTo,
   setComposeCc,
   setComposeBcc,
   setComposeShowBcc,
-  setRecipientQuery,
-  setRecipientFocus,
-  setRecipientActiveIndex,
   applyRecipientSelection,
+  loadRecipientOptions,
   getComposeToken,
   markComposeDirty
 }: ComposeFieldsProps) {
@@ -188,6 +190,45 @@ export default function ComposeFields({
   const [localTo, setLocalTo] = useState(composeTo);
   const [localCc, setLocalCc] = useState(composeCc);
   const [localBcc, setLocalBcc] = useState(composeBcc);
+  const [recipientOptions, setRecipientOptions] = useState<string[]>([]);
+  const [recipientQuery, setRecipientQuery] = useState("");
+  const [recipientLoading, setRecipientLoading] = useState(false);
+  const [recipientFocus, setRecipientFocus] = useState<RecipientFocus>(null);
+  const [recipientActiveIndex, setRecipientActiveIndex] = useState(0);
+
+  useEffect(() => {
+    if (!activeAccountId) {
+      setRecipientOptions([]);
+      setRecipientLoading(false);
+      setRecipientActiveIndex(0);
+      return;
+    }
+    if (!recipientFocus) {
+      setRecipientLoading(false);
+      return;
+    }
+    let active = true;
+    const controller = new AbortController();
+    const timer = window.setTimeout(async () => {
+      try {
+        setRecipientLoading(true);
+        const list = await loadRecipientOptions(recipientQuery.trim(), controller.signal);
+        if (!active) return;
+        setRecipientOptions(list);
+        setRecipientActiveIndex(0);
+      } catch {
+        if (!active || controller.signal.aborted) return;
+        setRecipientOptions([]);
+      } finally {
+        if (active) setRecipientLoading(false);
+      }
+    }, 180);
+    return () => {
+      active = false;
+      controller.abort();
+      window.clearTimeout(timer);
+    };
+  }, [activeAccountId, recipientFocus, recipientQuery, loadRecipientOptions]);
 
   const commitSubject = (next: string) => {
     markComposeDirty();
@@ -221,7 +262,6 @@ export default function ComposeFields({
   const toggleLabel = composeShowBcc ? "Hide Cc/Bcc" : "Show Cc and Bcc";
   const toggleTitle = composeShowBcc ? "Hide Cc and Bcc" : "Show Cc and Bcc";
   const showFrom = variant === "inline";
-  const showDate = variant === "modal";
   const subjectRow = (
     <div className="compose-grid-row">
       <Text size="2" weight="medium" className="label">
@@ -251,16 +291,6 @@ export default function ComposeFields({
         value={fromValue ?? ""}
         readOnly
       />
-    </div>
-  );
-  const dateRow = (
-    <div className="compose-grid-row">
-      <Text size="2" weight="medium" className="label">
-        Date:
-      </Text>
-      <Text size="2" className="compose-static">
-        {composeOpenedAt || "Now"}
-      </Text>
     </div>
   );
 
@@ -333,7 +363,6 @@ export default function ComposeFields({
         />
       )}
       {subjectRow}
-      {showDate && dateRow}
     </div>
   );
 }

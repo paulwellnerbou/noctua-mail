@@ -9,8 +9,10 @@ import MessageRow from "./MessageRow";
 import {
   buildFlatEntries,
   buildThreadGroupEntries,
+  getDisplaySeenForThreadRow,
   getCollapsedThreadFromDisplay,
-  getMessageFromDisplay
+  getMessageFromDisplay,
+  isCollapsedThreadRootRow
 } from "./threadGroupUtils";
 import { useSelectionSnapshot, type SelectionStore } from "./selectionStore";
 import styles from "./MessageCardList.module.css";
@@ -92,12 +94,12 @@ type MessageCardListProps = {
   actions: {
     setCollapsedGroups: React.Dispatch<React.SetStateAction<Record<string, boolean>>>;
     setCollapsedThreads: React.Dispatch<React.SetStateAction<Record<string, boolean>>>;
-    handleMessageDragStart: (event: React.DragEvent, message: Message) => void;
+    handleMessageDragStart: (event: React.DragEvent, message: Message, threadMessageIds?: string[]) => void;
     handleMessageDragEnd: () => void;
     handleRowClick: (event: React.MouseEvent, message: Message) => void;
     handleSelectMessage: (message: Message) => void;
     selectRangeTo: (messageId: string) => void;
-    toggleMessageSelection: (messageId: string, replace?: boolean) => void;
+    toggleMessageSelection: (messageId: string, replace?: boolean, setActive?: boolean) => void;
     selectCollapsedThread: (
       flat: Array<{ message: Message; depth: number }>,
       target: Message
@@ -113,7 +115,10 @@ type MessageCardListProps = {
     ) => Array<{ message: Message; depth: number }>;
     getThreadLatestDate: (node: ThreadNode) => number;
     getGroupLabel: (group: MessageGroup) => React.ReactNode;
-    renderUnreadDot: (message: Message) => React.ReactNode;
+    renderUnreadDot: (
+      message: Message,
+      options?: { seen?: boolean; threadMessages?: Message[] }
+    ) => React.ReactNode;
     renderSelectIndicators: (message: Message) => React.ReactNode;
     renderFolderBadges: (folderIds: string[]) => React.ReactNode;
     renderQuickActions: (message: Message) => React.ReactNode;
@@ -123,7 +128,6 @@ type MessageCardListProps = {
       onOpenChange?: (open: boolean) => void
     ) => React.ReactNode;
     handleShowRelated: (message: Message) => void;
-    isPinnedMessage: (message: Message) => boolean;
     isTrashFolder: (folderId?: string) => boolean;
   };
 };
@@ -178,7 +182,6 @@ export default function MessageCardList({
     renderQuickActions,
     renderMessageMenu,
     handleShowRelated,
-    isPinnedMessage,
     isTrashFolder
   } = helpers;
 
@@ -456,6 +459,23 @@ export default function MessageCardList({
           isActiveThread;
         const showCompactDivider =
           isCompactView && index > 0 && !item.isFirstInGroup;
+        const isCollapsedThreadRoot = isCollapsedThreadRootRow({
+          isCollapsed: item.isCollapsed,
+          threadSize: item.threadSize,
+          depth: item.depth,
+          threadIndex: item.threadIndex
+        });
+        const displaySeen = getDisplaySeenForThreadRow({
+          messageSeen: Boolean(message.seen),
+          isCollapsed: item.isCollapsed,
+          threadSize: item.threadSize,
+          depth: item.depth,
+          threadIndex: item.threadIndex,
+          fullFlat: item.fullFlat
+        });
+        const threadMessages = isCollapsedThreadRoot
+          ? item.fullFlat.map((entry) => entry.message)
+          : [message];
 
         return (
           <div
@@ -467,6 +487,7 @@ export default function MessageCardList({
               message={message}
               isCompactView={isCompactView}
               listIsNarrow={listIsNarrow}
+              displaySeen={displaySeen}
               isActive={message.id === activeMessageId}
               isThreadChild={item.depth > 0}
               isThreadSibling={
@@ -493,29 +514,8 @@ export default function MessageCardList({
               threadSize={item.threadSize}
               showCompactDivider={showCompactDivider}
               onRowClick={(event) => {
-                if (
-                  supportsThreads &&
-                  item.threadSize > 1 &&
-                  item.depth === 0 &&
-                  item.threadIndex === 0 &&
-                  item.isCollapsed
-                ) {
-                  if (item.isPinnedGroup) {
-                    const pinnedTarget =
-                      item.fullFlat.find((entry) =>
-                        isPinnedMessage(entry.message)
-                      )?.message ?? item.fullFlat[0].message;
-                    selectCollapsedThread(item.fullFlat, pinnedTarget);
-                  } else {
-                    const latestTarget = item.fullFlat.reduce(
-                      (acc, entry) =>
-                        entry.message.dateValue > acc.message.dateValue
-                          ? entry
-                          : acc,
-                      item.fullFlat[0]
-                    ).message;
-                    selectCollapsedThread(item.fullFlat, latestTarget);
-                  }
+                if (supportsThreads && isCollapsedThreadRoot) {
+                  selectCollapsedThread(item.fullFlat, message);
                   return;
                 }
                 handleRowClick(event, message);
@@ -535,40 +535,25 @@ export default function MessageCardList({
                   handleSelectMessage(message);
                 }
               }}
-              onDragStart={(event) => handleMessageDragStart(event, message)}
+              onDragStart={(event) => {
+                const threadIds =
+                  isCollapsedThreadRoot
+                    ? item.fullFlat.map((entry) => entry.message.id)
+                    : undefined;
+                handleMessageDragStart(event, message, threadIds);
+              }}
               onDragEnd={handleMessageDragEnd}
               onCheckboxChange={(shiftKey) => {
                 if (shiftKey) {
                   selectRangeTo(message.id);
                 } else {
-                  toggleMessageSelection(message.id);
+                  toggleMessageSelection(message.id, false, false);
                 }
               }}
               onSubjectClick={(event) => {
                 event.stopPropagation();
-                if (
-                  supportsThreads &&
-                  item.threadSize > 1 &&
-                  item.depth === 0 &&
-                  item.threadIndex === 0 &&
-                  item.isCollapsed
-                ) {
-                  if (item.isPinnedGroup) {
-                    const pinnedTarget =
-                      item.fullFlat.find((entry) =>
-                        isPinnedMessage(entry.message)
-                      )?.message ?? item.fullFlat[0].message;
-                    selectCollapsedThread(item.fullFlat, pinnedTarget);
-                  } else {
-                    const latestTarget = item.fullFlat.reduce(
-                      (acc, entry) =>
-                        entry.message.dateValue > acc.message.dateValue
-                          ? entry
-                          : acc,
-                      item.fullFlat[0]
-                    ).message;
-                    selectCollapsedThread(item.fullFlat, latestTarget);
-                  }
+                if (supportsThreads && isCollapsedThreadRoot) {
+                  selectCollapsedThread(item.fullFlat, message);
                 } else {
                   handleSelectMessage(message);
                 }
@@ -586,7 +571,10 @@ export default function MessageCardList({
                   ? "Delete permanently"
                   : "Move to Trash"
               }
-              renderUnreadDot={renderUnreadDot(message)}
+              renderUnreadDot={renderUnreadDot(message, {
+                seen: displaySeen,
+                threadMessages
+              })}
               renderSelectIndicators={renderSelectIndicators(message)}
               fromText={item.fromText}
               fromTooltip={item.fromTooltip}
@@ -606,7 +594,7 @@ export default function MessageCardList({
               })()}
               showCalendarInviteIcon={hasMessageFlag(message.flags, CALENDAR_INVITE_FLAG)}
               showNewBadge={
-                !Boolean(message.seen) &&
+                !displaySeen &&
                 Boolean(message.recent) &&
                 !Boolean(message.draft)
               }

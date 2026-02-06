@@ -50,6 +50,15 @@
   color: var(--gray-12);
 }
 
+.selectIconButton {
+  cursor: pointer;
+}
+
+.selectIconButton:focus-visible {
+  outline: 2px solid var(--accent-8);
+  outline-offset: 1px;
+}
+
 .selectIconPinned {
   color: var(--yellow-11);
 }

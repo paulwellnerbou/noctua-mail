@@ -2,18 +2,6 @@ import type React from "react";
 import type { Folder } from "@/lib/data";
 import FolderTreeNode from "./FolderTreeNode";
 
-const SYSTEM_FOLDER_NAMES = new Set([
-  "Inbox",
-  "Pinned",
-  "Unread",
-  "Drafts",
-  "Sent",
-  "Archive",
-  "Trash",
-  "Junk",
-  "Spam"
-]);
-
 type FolderTreeProps = {
   state: {
     rootFolders: Folder[];
@@ -67,18 +55,6 @@ export default function FolderTree({ state, actions }: FolderTreeProps) {
     return children.some((child) => hasFolderMatch(child));
   };
 
-  const isSystemFolder = (folder: Folder) => {
-    const special = (folder.specialUse ?? "").toLowerCase();
-    if (
-      ["\\inbox", "\\sent", "\\drafts", "\\trash", "\\junk", "\\spam", "\\archive"].includes(
-        special
-      )
-    ) {
-      return true;
-    }
-    return SYSTEM_FOLDER_NAMES.has(folder.name);
-  };
-
   const folderPathLabel = (folder: Folder) => {
     const parts = [folder.name];
     let parentId = folder.parentId ?? null;
@@ -112,7 +88,7 @@ export default function FolderTree({ state, actions }: FolderTreeProps) {
             messageCountByFolder
           }}
           actions={actions}
-          helpers={{ hasFolderMatch, isSystemFolder, folderPathLabel }}
+          helpers={{ hasFolderMatch, folderPathLabel }}
         />
       ))}
     </>

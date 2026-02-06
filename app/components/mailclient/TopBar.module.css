@@ -66,6 +66,13 @@
 .searchInput {
   width: 100%;
   min-width: 200px;
+  --text-field-background-color: var(--input-bg);
+  background: var(--input-bg);
+  color: var(--input-fg);
+}
+
+.searchInput :global(.rt-TextFieldInput) {
+  color: var(--input-fg);
 }
 
 .select {

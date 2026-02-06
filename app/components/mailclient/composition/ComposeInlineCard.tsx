@@ -16,6 +16,7 @@ type ComposeInlineCardProps = {
     composeCc: string;
     composeBcc: string;
     composeShowBcc: boolean;
+    activeAccountId: string | null;
     composeDraftId: string | null;
     composeOpen: boolean;
     composeFieldsReset: number;
@@ -25,10 +26,6 @@ type ComposeInlineCardProps = {
     sendingMail: boolean;
     discardingDraft: boolean;
     composeDragActive: boolean;
-    recipientOptions: string[];
-    recipientActiveIndex: number;
-    recipientLoading: boolean;
-    recipientFocus: "to" | "cc" | "bcc" | null;
     fromValue: string;
   };
   ui: {
@@ -45,15 +42,13 @@ type ComposeInlineCardProps = {
     setComposeView: React.Dispatch<React.SetStateAction<"inline" | "modal" | "minimized">>;
     handleSendMail: () => void;
     handleDiscardDraft: () => void;
-    setRecipientQuery: React.Dispatch<React.SetStateAction<string>>;
-    setRecipientFocus: React.Dispatch<React.SetStateAction<"to" | "cc" | "bcc" | null>>;
-    setRecipientActiveIndex: React.Dispatch<React.SetStateAction<number>>;
     applyRecipientSelection: (
       current: string,
       selection: string,
       setter: React.Dispatch<React.SetStateAction<string>>,
       focusAfter?: "to" | "cc" | "bcc" | null
     ) => string;
+    loadRecipientOptions: (query: string, signal: AbortSignal) => Promise<string[]>;
     markComposeDirty: () => void;
   };
   helpers: {
@@ -82,6 +77,7 @@ export default function ComposeInlineCard({
     composeCc,
     composeBcc,
     composeShowBcc,
+    activeAccountId,
     composeDraftId,
     composeOpen,
     composeFieldsReset,
@@ -91,10 +87,6 @@ export default function ComposeInlineCard({
     sendingMail,
     discardingDraft,
     composeDragActive,
-    recipientOptions,
-    recipientActiveIndex,
-    recipientLoading,
-    recipientFocus,
     fromValue
   } = state;
   const {
@@ -108,10 +100,8 @@ export default function ComposeInlineCard({
     setComposeView,
     handleSendMail,
     handleDiscardDraft,
-    setRecipientQuery,
-    setRecipientFocus,
-    setRecipientActiveIndex,
     applyRecipientSelection,
+    loadRecipientOptions,
     markComposeDirty
   } = actions;
   const { getComposeToken, formatRelativeTime } = helpers;
@@ -174,20 +164,15 @@ export default function ComposeInlineCard({
             composeCc={composeCc}
             composeBcc={composeBcc}
             composeShowBcc={composeShowBcc}
+            activeAccountId={activeAccountId}
             fromValue={fromValue}
-            recipientOptions={recipientOptions}
-            recipientActiveIndex={recipientActiveIndex}
-            recipientLoading={recipientLoading}
-            recipientFocus={recipientFocus}
             setComposeSubject={setComposeSubject}
             setComposeTo={setComposeTo}
             setComposeCc={setComposeCc}
             setComposeBcc={setComposeBcc}
             setComposeShowBcc={setComposeShowBcc}
-            setRecipientQuery={setRecipientQuery}
-            setRecipientFocus={setRecipientFocus}
-            setRecipientActiveIndex={setRecipientActiveIndex}
             applyRecipientSelection={applyRecipientSelection}
+            loadRecipientOptions={loadRecipientOptions}
             getComposeToken={getComposeToken}
             markComposeDirty={markComposeDirty}
           />
@@ -225,7 +210,7 @@ export default function ComposeInlineCard({
               variant="soft"
               color="red"
               onClick={handleDiscardDraft}
-              disabled={discardingDraft}
+              disabled={discardingDraft || draftSaving}
             >
               Discard Draft
             </Button>

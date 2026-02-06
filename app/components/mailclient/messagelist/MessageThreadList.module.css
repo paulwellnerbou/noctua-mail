@@ -17,7 +17,7 @@
   border-radius: var(--radius-sm);
   border: 1px solid transparent;
   background: transparent;
-  transition: background 0.12s ease, border-color 0.12s ease;
+  transition: background 0.12s ease, border-color 0.12s ease, box-shadow 0.12s ease;
 }
 
 .rowDivider::before {
@@ -37,18 +37,9 @@
   opacity: 0;
 }
 
-:global(.dark) .messageRowContainer {
-  background: transparent;
-}
-
 .messageRowContainer:hover {
-  background: var(--gray-3);
-  border-color: var(--gray-5);
-}
-
-:global(.dark) .messageRowContainer:hover {
-  background: var(--gray-3);
-  border-color: var(--gray-5);
+  background: var(--list-row-hover-bg);
+  border-color: var(--list-row-hover-border);
 }
 
 .threadMarker {
@@ -146,17 +137,35 @@
 }
 
 .rowActive {
-  background: var(--gray-3);
-  border-color: var(--gray-12);
+  background: var(--list-row-active-bg);
+  border-color: var(--list-row-active-border);
+  box-shadow: inset 0 0 0 1px var(--list-row-active-border);
+}
+
+.messageRowContainer:focus-within {
+  box-shadow: inset 0 0 0 1px var(--list-row-focus-ring);
 }
 
 .rowActive:hover {
-  border-color: var(--gray-12);
+  background: var(--list-row-active-bg);
+  border-color: var(--list-row-active-border);
+  box-shadow: inset 0 0 0 1px var(--list-row-active-border);
 }
 
 .rowSelected {
-  background: var(--gray-3);
-  border-color: var(--gray-5);
+  background: var(--list-row-selected-bg);
+  border-color: var(--list-row-selected-border);
+}
+
+.rowSelected:hover {
+  background: var(--list-row-selected-bg);
+  border-color: var(--list-row-selected-border);
+}
+
+.rowActive.rowSelected {
+  background: var(--list-row-selected-bg);
+  border-color: var(--list-row-active-border);
+  box-shadow: inset 0 0 0 1px var(--list-row-active-border);
 }
 
 .rowUnread {
@@ -175,6 +184,17 @@
 .threadSibling {
   background: color-mix(in srgb, var(--gray-2) 60%, transparent);
   border-color: var(--gray-5);
+}
+
+.threadSibling.rowSelected {
+  background: var(--list-row-selected-bg);
+  border-color: var(--list-row-selected-border);
+}
+
+.threadSibling.rowActive.rowSelected {
+  background: var(--list-row-selected-bg);
+  border-color: var(--list-row-active-border);
+  box-shadow: inset 0 0 0 1px var(--list-row-active-border);
 }
 
 .rowEnter > * {
