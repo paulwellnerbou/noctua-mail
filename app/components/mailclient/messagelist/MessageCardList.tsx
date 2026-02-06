@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type React from "react";
 import type { Message } from "@/lib/data";
-import { CALENDAR_INVITE_FLAG, hasMessageFlag } from "@/lib/messageFlags";
+import { CALENDAR_INVITE_FLAG, hasMessageFlag, isCalendarAttachment } from "@/lib/messageFlags";
 import { Text } from "@radix-ui/themes";
 import * as Collapsible from "@radix-ui/react-collapsible";
 import { CaretRightIcon } from "@radix-ui/react-icons";
@@ -597,10 +597,13 @@ export default function MessageCardList({
               showFolderBadgesInMeta={false}
               quickActions={renderQuickActions(message)}
               messageMenu={renderMessageMenu(message, isCompactView ? "table" : "list")}
-              showAttachmentIcon={
-                message.hasAttachments ??
-                (message.attachments?.some((att) => !att.inline) ?? false)
-              }
+              showAttachmentIcon={(() => {
+                const nonInlineAttachments = message.attachments?.filter((att) => !att.inline) ?? [];
+                if (nonInlineAttachments.length === 0) return false;
+                // Don't show attachment icon if all non-inline attachments are calendar events
+                const allCalendar = nonInlineAttachments.every(isCalendarAttachment);
+                return !allCalendar;
+              })()}
               showCalendarInviteIcon={hasMessageFlag(message.flags, CALENDAR_INVITE_FLAG)}
               showNewBadge={
                 !Boolean(message.seen) &&

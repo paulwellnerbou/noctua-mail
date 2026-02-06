@@ -15,6 +15,7 @@ import { Badge, Button, Card, IconButton, Tabs } from "@radix-ui/themes";
 import { CaretRightIcon } from "@radix-ui/react-icons";
 import * as Collapsible from "@radix-ui/react-collapsible";
 import { badgeColors, getFlagBadgeColor, getPriorityBadgeColor } from "@/lib/ui/badgeColors";
+import { isCalendarAttachment } from "@/lib/messageFlags";
 import type { Message } from "@/lib/data";
 import badgeStyles from "./MessageBadge.module.css";
 import styles from "./ThreadMessageCard.module.css";
@@ -393,10 +394,12 @@ export default function ThreadMessageCard({
                       size="1"
                       variant="soft"
                       color={getFlagBadgeColor(badge.kind)}
+                      className={badge.kind === "calendar" ? badgeStyles.badge : undefined}
+                      title={badge.label}
                     >
                       {badge.kind === "calendar" && <CalendarDays size={12} />}
                       {badge.kind === "pinned" && <Pin size={12} />}
-                      {badge.label}
+                      {badge.kind !== "calendar" && badge.label}
                     </Badge>
                   ))}
                   <FolderBadges
@@ -415,17 +418,24 @@ export default function ThreadMessageCard({
                       Priority: {message.priority}
                     </Badge>
                   )}
-                  {(message.hasAttachments ?? (message.attachments?.length ?? 0) > 0) && (
-                    <Badge
-                      size="1"
-                      variant="soft"
-                      color={badgeColors.attachment}
-                      className={badgeStyles.badge}
-                      title="Attachments"
-                    >
-                      <Paperclip size={12} />
-                    </Badge>
-                  )}
+                  {(() => {
+                    const nonInlineAttachments = message.attachments?.filter((att) => !att.inline) ?? [];
+                    if (nonInlineAttachments.length === 0) return null;
+                    // Don't show attachment badge if all non-inline attachments are calendar events
+                    const allCalendar = nonInlineAttachments.every(isCalendarAttachment);
+                    if (allCalendar) return null;
+                    return (
+                      <Badge
+                        size="1"
+                        variant="soft"
+                        color={badgeColors.attachment}
+                        className={badgeStyles.badge}
+                        title="Attachments"
+                      >
+                        <Paperclip size={12} />
+                      </Badge>
+                    );
+                  })()}
                   {(message.hasInlineAttachments ??
                     message.attachments?.some((item) => item.inline)) && (
                     <Badge

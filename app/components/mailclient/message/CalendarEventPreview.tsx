@@ -105,6 +105,11 @@ export default function CalendarEventPreview({ attachments }: { attachments: Att
   const loading = !hasCurrentResult;
   const hasError = hasCurrentResult && result.error;
 
+  const downloadFilename = (() => {
+    const name = attachment.filename || "invite.ics";
+    return name.toLowerCase().endsWith(".ics") ? name : `${name}.ics`;
+  })();
+
   return (
     <section className={styles.preview}>
       <div className={styles.header}>
@@ -112,9 +117,19 @@ export default function CalendarEventPreview({ attachments }: { attachments: Att
           <CalendarDays size={14} />
           <span>Calendar Event</span>
         </div>
-        <Badge size="1" variant="soft" color="indigo">
-          {attachment.filename || "invite.ics"}
-        </Badge>
+        <a
+          href={attachment.url ?? attachment.dataUrl ?? "#"}
+          style={{ textDecoration: "none" }}
+          onClick={(event) => {
+            if (!attachment.url && !attachment.dataUrl) {
+              event.preventDefault();
+            }
+          }}
+        >
+          <Badge size="1" variant="soft" color="indigo" style={{ cursor: "pointer" }}>
+            {downloadFilename}
+          </Badge>
+        </a>
       </div>
       {loading ? (
         <p className={styles.meta}>Loading event preview…</p>

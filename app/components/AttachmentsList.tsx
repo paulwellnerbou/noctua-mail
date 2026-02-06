@@ -12,6 +12,7 @@ import {
 } from "lucide-react";
 import type { Attachment } from "@/lib/data";
 import { openDetachedWindow } from "@/lib/ui/openDetachedWindow";
+import { isCalendarAttachment } from "@/lib/messageFlags";
 
 const PREVIEW_MIME_PREFIXES = ["image/", "text/"];
 const PREVIEW_MIME_TYPES = new Set([
@@ -79,12 +80,15 @@ export default function AttachmentsList({
   attachments: Attachment[];
   onRemove?: (id: string) => void;
 }) {
-  if (!attachments.length) return null;
+  // Filter out calendar attachments as they're shown in CalendarEventPreview
+  const nonCalendarAttachments = attachments.filter((att) => !isCalendarAttachment(att));
+
+  if (!nonCalendarAttachments.length) return null;
   return (
     <div className="attachments">
       <h4>Attachments</h4>
       <div className="attachment-list">
-        {attachments.map((file) => {
+        {nonCalendarAttachments.map((file) => {
           const FileIcon = getFileIcon(file.contentType, file.filename);
           const showImagePreview = isImage(file.contentType) && (file.url || file.dataUrl);
           return (
@@ -110,7 +114,7 @@ export default function AttachmentsList({
                 <span className="attachment-name">
                   {file.filename}{" "}
                   <span className="attachment-meta">
-                    ({Math.round(file.size / 1024)} KB)
+                    ({file.contentType || "unknown"}, {Math.round(file.size / 1024)} KB)
                   </span>
                 </span>
               </a>
