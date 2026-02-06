@@ -1,3 +1,4 @@
+import React from "react";
 import type { Message } from "@/lib/data";
 import { Text } from "@radix-ui/themes";
 import { hasHtmlContent } from "@/lib/ui/messageView";
@@ -13,6 +14,8 @@ type ThreadViewProps = {
   threadContentById: Record<string, Message[]>;
   threadContentLoading: string | null;
   messageCardProps: Omit<ThreadMessageCardProps, "message">;
+  composeReplyMessageId: string | null;
+  renderComposeInlineCard: (() => React.ReactNode) | null;
 };
 
 export default function ThreadView({
@@ -22,7 +25,9 @@ export default function ThreadView({
   supportsThreads,
   threadContentById,
   threadContentLoading,
-  messageCardProps
+  messageCardProps,
+  composeReplyMessageId,
+  renderComposeInlineCard
 }: ThreadViewProps) {
   return (
     <>
@@ -63,11 +68,13 @@ export default function ThreadView({
             );
           }
           return activeThread.map((message) => (
-            <ThreadMessageCard
-              key={message.id}
-              message={message}
-              {...messageCardProps}
-            />
+            <React.Fragment key={message.id}>
+              <ThreadMessageCard
+                message={message}
+                {...messageCardProps}
+              />
+              {composeReplyMessageId === message.id && renderComposeInlineCard?.()}
+            </React.Fragment>
           ));
         })()
       ) : showComposeInline ? null : (

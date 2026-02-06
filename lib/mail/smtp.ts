@@ -7,6 +7,7 @@ type MailPayload = {
   subject: string;
   text: string;
   html?: string;
+  messageId?: string;
   inReplyTo?: string;
   references?: string[];
   replyTo?: string;
@@ -38,6 +39,7 @@ function buildMailOptions(account: Account, mail: MailPayload) {
     cc: mail.cc,
     bcc: mail.bcc,
     replyTo: mail.replyTo,
+    messageId: mail.messageId,
     inReplyTo: mail.inReplyTo,
     references: mail.references,
     subject: mail.subject,

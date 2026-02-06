@@ -232,6 +232,8 @@ export default function MailClient() {
   const [composeBcc, setComposeBcc] = useState("");
   const [composeSubject, setComposeSubject] = useState("");
   const [composeBody, setComposeBody] = useState("");
+  const composeBodyDebounceRef = useRef<NodeJS.Timeout | null>(null);
+  const composeBodyLastUpdateRef = useRef<number>(0);
   const [composeHtml, setComposeHtml] = useState("");
   const [composeHtmlText, setComposeHtmlText] = useState("");
   const [composeOpenedAt, setComposeOpenedAt] = useState("");
@@ -284,6 +286,7 @@ export default function MailClient() {
   );
   const composeDragDepthRef = useRef(0);
   const composeAttachmentInputRef = useRef<HTMLInputElement | null>(null);
+  const composeCardRef = useRef<HTMLDivElement | null>(null);
   const [sendingMail, setSendingMail] = useState(false);
   const messageRefs = useRef<Map<string, HTMLElement>>(new Map());
   const listPaneRef = useRef<HTMLDivElement | null>(null);
@@ -307,6 +310,7 @@ export default function MailClient() {
   const [draftSavedAt, setDraftSavedAt] = useState<number | null>(null);
   const [draftSaveError, setDraftSaveError] = useState<string | null>(null);
   const [discardingDraft, setDiscardingDraft] = useState(false);
+  const [, setRelativeTimeCounter] = useState(0);
   const draftSaveTimerRef = useRef<number | null>(null);
   const lastDraftHashRef = useRef<string>("");
   const composeBaselineHashRef = useRef<string | null>(null);
@@ -339,6 +343,9 @@ export default function MailClient() {
   const streamSourceRef = useRef<EventSource | null>(null);
   const pollTimerRef = useRef<number | null>(null);
   const pollInFlightRef = useRef(false);
+  const recomputePollTimerRef = useRef<number | null>(null);
+  const recomputePollInFlightRef = useRef(false);
+  const recomputeJobIdRef = useRef<string | null>(null);
   const [mailCheckMode, setMailCheckMode] = useState<"idle" | "polling">("polling");
   const [streamMode, setStreamMode] = useState<"stream" | "polling" | "idle">("polling");
   const pendingJumpMessageIdRef = useRef<string | null>(null);
@@ -579,6 +586,24 @@ export default function MailClient() {
     selectionStore.setActiveId(activeMessageId);
   }, [activeMessageId, selectionStore]);
 
+  // Cleanup debounce timer on unmount
+  useEffect(() => {
+    return () => {
+      if (composeBodyDebounceRef.current) {
+        clearTimeout(composeBodyDebounceRef.current);
+      }
+    };
+  }, []);
+
+  // Update relative time display every second
+  useEffect(() => {
+    if (!draftSavedAt) return;
+    const interval = setInterval(() => {
+      setRelativeTimeCounter((prev) => prev + 1);
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [draftSavedAt]);
+
   const toggleMessageSelection = useCallback((messageId: string, replace = false) => {
     selectionStore.toggle(messageId, replace);
     lastSelectedIdRef.current = messageId;
@@ -760,6 +785,29 @@ export default function MailClient() {
     if (res.status === 401) {
       setAuthState("unauth");
     }
+    const responsePath = (() => {
+      if (!res.url) return null;
+      try {
+        const url = new URL(res.url);
+        return `${url.pathname}${url.search}`;
+      } catch {
+        return null;
+      }
+    })();
+    const withRequestPath = (message: string) => {
+      if (!responsePath) return message;
+      const normalized = message.trim();
+      if (!normalized) return message;
+      const statusOnly = normalized === String(res.status);
+      const statusPrefix = normalized.startsWith(`${res.status}`);
+      const statusTextOnly =
+        res.statusText && normalized.toLowerCase() === res.statusText.toLowerCase();
+      const requestFailedOnly = normalized === `Request failed (${res.status})`;
+      if (statusOnly || statusPrefix || statusTextOnly || requestFailedOnly) {
+        return `${normalized} ${responsePath}`.trim();
+      }
+      return message;
+    };
     try {
       const data = (await res.json()) as {
         message?: string;
@@ -770,17 +818,17 @@ export default function MailClient() {
       const parts = [data?.message, data?.error, data?.details, data?.stack].filter(
         (value) => value && typeof value === "string"
       ) as string[];
-      if (parts.length) return parts.join("\n");
+      if (parts.length) return withRequestPath(parts.join("\n"));
     } catch {
       // ignore
     }
     try {
       const text = await res.text();
-      if (text) return text.slice(0, 2000);
+      if (text) return withRequestPath(text.slice(0, 2000));
     } catch {
       // ignore
     }
-    return `Request failed (${res.status})`;
+    return withRequestPath(`Request failed (${res.status})`);
   }, []);
   useEffect(() => {
     const timers = inAppNotices
@@ -1300,9 +1348,10 @@ export default function MailClient() {
       : null;
   };
 
-  const buildComposePayload = () => {
+  const buildComposePayload = (options?: { preferText?: boolean }) => {
+    const useHtml = composeTab === "html" && !options?.preferText;
     let html: string | undefined;
-    if (composeTab === "html") {
+    if (useHtml) {
       const baseHtml = composeHtml.trim();
       const quoted = composeIncludeOriginal ? composeQuotedHtml.trim() : "";
       html =
@@ -1322,7 +1371,7 @@ export default function MailClient() {
         html = html?.split(attachment.dataUrl).join(`cid:${attachment.cid}`);
       });
     }
-    if (composeTab === "html") {
+    if (useHtml) {
       let textFromHtml = "";
       if (html) {
         try {
@@ -1333,8 +1382,15 @@ export default function MailClient() {
       }
       return { text: textFromHtml, html, attachments: composeAttachments };
     }
-    let textBody = composeBody.trim();
+    // Read from ref to get latest value, fallback to state
+    const currentBody = composeTextRef.current?.value || composeBody;
+    let textBody = currentBody.trim();
+    // Remove quoted text if it's included in the textarea value
     if (composeIncludeOriginal && composeQuotedText) {
+      const suffix = `\n\n${composeQuotedText}`;
+      if (textBody.endsWith(suffix.trim())) {
+        textBody = textBody.slice(0, -(suffix.trim().length));
+      }
       textBody = `${textBody}${textBody ? "\n\n" : ""}${composeQuotedText}`.trim();
     }
     return { text: textBody, html: undefined, attachments: composeAttachments };
@@ -1751,6 +1807,16 @@ export default function MailClient() {
     hideThreadView || (composeOpen && composeMode === "new")
       ? undefined
       : filteredMessages.find((message) => message.id === activeMessageId);
+
+  // Scroll to compose form when replying to a message in thread view
+  useEffect(() => {
+    if (showComposeInline && composeReplyMessage && composeCardRef.current) {
+      // Use setTimeout to ensure the DOM has been updated
+      setTimeout(() => {
+        composeCardRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }, 100);
+    }
+  }, [showComposeInline, composeReplyMessage?.id]);
   const threadForest = useMemo(() => buildThreadTree(threadScopeMessages), [threadScopeMessages]);
 
   const activeThread = useMemo(() => {
@@ -1871,6 +1937,7 @@ export default function MailClient() {
       setComposeDraftId(null);
     }
     setComposeTab("html");
+    composeLastEditedRef.current = "html";
 
     if (!message) {
       setComposeTo("");
@@ -1899,6 +1966,11 @@ export default function MailClient() {
     const ccEmails = extractEmails(message.cc ?? "");
     const bccEmails = extractEmails(message.bcc ?? "");
 
+    // Check if replying to a message sent by the current user
+    const isSentByCurrentUser = fromEmails.some(
+      (email) => email.toLowerCase() === accountEmail.toLowerCase()
+    );
+
     const prefersHtml = hasHtmlContent(message.htmlBody);
     const replyMessageId = message.messageId ?? undefined;
     const replyReferences = replyMessageId
@@ -1919,9 +1991,20 @@ export default function MailClient() {
       setComposeStripImages(stripImages);
       setComposeIncludeOriginal(true);
       setComposeQuoteHtml(true);
-      setComposeTo(
-        fromRecipient ? fromRecipient : uniqueEmails(fromEmails).join(", ")
-      );
+
+      // When replying to own message, use first recipient instead of sender
+      if (isSentByCurrentUser) {
+        const firstToRecipient = message.to ? getDisplayRecipient(message.to.split(",")[0].trim()) : "";
+        const firstCcRecipient = message.cc ? getDisplayRecipient(message.cc.split(",")[0].trim()) : "";
+        const firstBccRecipient = message.bcc ? getDisplayRecipient(message.bcc.split(",")[0].trim()) : "";
+        const replyTo = firstToRecipient || firstCcRecipient || firstBccRecipient || "";
+        setComposeTo(replyTo);
+      } else {
+        setComposeTo(
+          fromRecipient ? fromRecipient : uniqueEmails(fromEmails).join(", ")
+        );
+      }
+
       setComposeCc("");
       setComposeBcc("");
       setComposeSubject(prefixSubject("Re", message.subject));
@@ -1937,6 +2020,7 @@ export default function MailClient() {
         setComposeQuotedText(formatQuotedBody(message.body ?? "", replyHeader).trimStart());
         setComposeQuotedParts(replyParts);
         setComposeTab("html");
+        composeLastEditedRef.current = "html";
       } else {
         // Build an HTML quote from the original text instead of using "0"
         const replyParts = buildQuotedHtmlPartsFromText(message.body ?? "", replyHeader);
@@ -1948,6 +2032,7 @@ export default function MailClient() {
         setComposeQuotedText("");
         setComposeQuotedParts(replyParts);
         setComposeTab("text");
+        composeLastEditedRef.current = "text";
       }
     } else if (mode === "replyAll") {
       setComposeReplyMessage(message);
@@ -1959,14 +2044,34 @@ export default function MailClient() {
       setComposeStripImages(stripImages);
       setComposeIncludeOriginal(true);
       setComposeQuoteHtml(true);
-      const toList = uniqueRecipients(
-        fromRecipient ? [fromRecipient] : fromEmails
-      );
-      const ccList = uniqueEmails(
-        [...toEmails, ...ccEmails, ...bccEmails].filter(
-          (email) => email.toLowerCase() !== accountEmail.toLowerCase()
-        )
-      ).filter((email) => !toList.includes(email));
+
+      // When replying all to own message, include self in recipients
+      let toList: string[];
+      let ccList: string[];
+
+      if (isSentByCurrentUser) {
+        // Replying all to own message: keep original recipients, include self
+        toList = uniqueRecipients(
+          toEmails.map((email) => {
+            const match = (message.to ?? "").split(",").find((recipient) =>
+              recipient.toLowerCase().includes(email.toLowerCase())
+            );
+            return match ? getDisplayRecipient(match.trim()) : email;
+          }).filter(Boolean)
+        );
+        ccList = uniqueEmails([...ccEmails, ...bccEmails]);
+      } else {
+        // Normal reply all: sender in To, others in Cc (excluding self)
+        toList = uniqueRecipients(
+          fromRecipient ? [fromRecipient] : fromEmails
+        );
+        ccList = uniqueEmails(
+          [...toEmails, ...ccEmails, ...bccEmails].filter(
+            (email) => email.toLowerCase() !== accountEmail.toLowerCase()
+          )
+        ).filter((email) => !toList.includes(email));
+      }
+
       setComposeTo(toList.join(", "));
       setComposeCc(ccList.join(", "));
       setComposeBcc("");
@@ -1983,6 +2088,7 @@ export default function MailClient() {
         setComposeQuotedText(formatQuotedBody(message.body ?? "", replyHeader).trimStart());
         setComposeQuotedParts(replyParts);
         setComposeTab("html");
+        composeLastEditedRef.current = "html";
       } else {
         const replyParts = buildQuotedHtmlPartsFromText(message.body ?? "", replyHeader);
         const replySource = assembleQuotedHtml(replyParts, true);
@@ -1993,6 +2099,7 @@ export default function MailClient() {
         setComposeQuotedText("");
         setComposeQuotedParts(replyParts);
         setComposeTab("text");
+        composeLastEditedRef.current = "text";
       }
     } else if (mode === "forward") {
       setComposeReplyMessage(message);
@@ -2021,6 +2128,7 @@ export default function MailClient() {
         setComposeQuotedText(formatQuotedBody(message.body ?? "", forwardHeader).trimStart());
         setComposeQuotedParts(forwardParts);
         setComposeTab("html");
+        composeLastEditedRef.current = "html";
       } else {
         const forwardParts = buildQuotedHtmlPartsFromText(message.body ?? "", forwardHeader);
         const forwardSource = assembleQuotedHtml(forwardParts, true);
@@ -2031,6 +2139,7 @@ export default function MailClient() {
         setComposeQuotedText("");
         setComposeQuotedParts(forwardParts);
         setComposeTab("text");
+        composeLastEditedRef.current = "text";
       }
     } else {
       if (mode === "editAsNew") {
@@ -2050,11 +2159,15 @@ export default function MailClient() {
       setComposeBody(normalizeHtmlDerivedText(message.body ?? ""));
       const rawHtml = message.htmlBody ?? "";
       const nextHtml = typeof rawHtml === "string" && rawHtml.trim() === "0" ? "" : rawHtml;
+      const hasDraftHtml = hasHtmlContent(nextHtml);
       setComposeHtml(nextHtml);
       setComposeHtmlText(stripHtml(nextHtml));
       setComposeQuotedHtml("");
       setComposeQuotedText("");
       setComposeQuotedParts(null);
+      const nextTab: "text" | "html" = hasDraftHtml ? "html" : "text";
+      setComposeTab(nextTab);
+      composeLastEditedRef.current = nextTab;
       if (!asNew) {
         const initialHash = JSON.stringify({
           to: message.to ?? "",
@@ -2275,17 +2388,21 @@ export default function MailClient() {
   const switchComposeTab = (nextTab: "text" | "html") => {
     if (nextTab === composeTab) return;
     if (nextTab === "html") {
+      composeEditorInitRef.current = false;
       if (composeLastEditedRef.current === "text") {
-        const nextHtml = composeBody ? `<p>${escapeHtml(composeBody).replace(/\n/g, "<br>")}</p>` : "";
+        const currentBody = composeTextRef.current?.value || composeBody;
+        const nextHtml = currentBody ? `<p>${escapeHtml(currentBody).replace(/\n/g, "<br>")}</p>` : "";
         setComposeHtml(nextHtml);
         setComposeHtmlText(stripHtml(nextHtml));
+        setComposeBody(currentBody);
       }
       setComposeTab("html");
       return;
     }
     if (composeLastEditedRef.current === "html") {
       const nextText = composeHtmlText || stripHtml(composeHtml);
-      if (nextText.trim().length > 0 || composeBody.trim().length === 0) {
+      const currentBody = composeTextRef.current?.value || composeBody;
+      if (nextText.trim().length > 0 || currentBody.trim().length === 0) {
         setComposeBody(nextText);
       }
     }
@@ -2381,27 +2498,53 @@ export default function MailClient() {
           )}
           <div className="compose-writing text">
             <textarea
+              key={`text-body-${composeEditorReset}`}
               id="compose-text-body"
               name="compose_body"
               ref={composeTextRef}
-              value={
+              defaultValue={
                 `${composeBody}${
                   composeIncludeOriginal && composeQuotedText ? `\n\n${composeQuotedText}` : ""
                 }`
               }
               onChange={(event) => {
                 composeDirtyRef.current = true;
-                let nextValue = event.target.value;
-                if (composeIncludeOriginal && composeQuotedText) {
-                  const suffix = `\n\n${composeQuotedText}`;
-                  if (nextValue.endsWith(suffix)) {
-                    setComposeBody(nextValue.slice(0, -suffix.length));
-                    composeLastEditedRef.current = "text";
-                    return;
-                  }
-                }
-                setComposeBody(nextValue);
                 composeLastEditedRef.current = "text";
+
+                const now = Date.now();
+                const timeSinceLastUpdate = now - composeBodyLastUpdateRef.current;
+                const nextValue = event.target.value;
+
+                const updateState = () => {
+                  if (composeIncludeOriginal && composeQuotedText) {
+                    const suffix = `\n\n${composeQuotedText}`;
+                    if (nextValue.endsWith(suffix)) {
+                      setComposeBody(nextValue.slice(0, -suffix.length));
+                    } else {
+                      setComposeBody(nextValue);
+                    }
+                  } else {
+                    setComposeBody(nextValue);
+                  }
+                  composeBodyLastUpdateRef.current = now;
+                };
+
+                // Throttle: if it's been more than 10 seconds since last update, update immediately
+                if (timeSinceLastUpdate >= 10000) {
+                  if (composeBodyDebounceRef.current) {
+                    clearTimeout(composeBodyDebounceRef.current);
+                    composeBodyDebounceRef.current = null;
+                  }
+                  updateState();
+                } else {
+                  // Otherwise, debounce with a 2 second delay
+                  if (composeBodyDebounceRef.current) {
+                    clearTimeout(composeBodyDebounceRef.current);
+                  }
+                  composeBodyDebounceRef.current = setTimeout(() => {
+                    updateState();
+                  }, 2000);
+                }
               }}
             />
           </div>
@@ -2416,7 +2559,7 @@ export default function MailClient() {
             onChange={(nextHtml, nextText) => {
               setComposeHtml(nextHtml);
               setComposeHtmlText(nextText);
-              if (composeMode === "edit" && !composeEditorInitRef.current) {
+              if (!composeEditorInitRef.current) {
                 composeEditorInitRef.current = true;
                 return;
               }
@@ -2610,6 +2753,12 @@ export default function MailClient() {
         }
         await refreshFolders();
         if (sentFolder && activeFolderId === sentFolder.id && searchScope === "folder") {
+          await refreshMailboxData();
+        }
+        if (
+          composeReplyMessage &&
+          (!sentFolder || activeFolderId !== sentFolder.id || searchScope !== "folder")
+        ) {
           await refreshMailboxData();
         }
         pushNotice({
@@ -3853,7 +4002,8 @@ export default function MailClient() {
 
   useEffect(() => {
     if (!composeOpen || sendingMail) return;
-    const { text, html, attachments } = buildComposePayload();
+    const preferText = composeTab === "html" && composeLastEditedRef.current === "text";
+    const { text, html, attachments } = buildComposePayload({ preferText });
     const hasContent = [
       composeTo,
       composeCc,
@@ -4767,8 +4917,24 @@ export default function MailClient() {
   };
   syncAccountRef.current = syncAccount;
 
+  const stopRecomputePoll = useCallback(() => {
+    if (recomputePollTimerRef.current) {
+      window.clearTimeout(recomputePollTimerRef.current);
+      recomputePollTimerRef.current = null;
+    }
+    recomputePollInFlightRef.current = false;
+    recomputeJobIdRef.current = null;
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      stopRecomputePoll();
+    };
+  }, [stopRecomputePoll]);
+
   const recomputeThreads = async () => {
     if (!activeAccountId) return;
+    stopRecomputePoll();
     setIsRecomputingThreads(true);
     try {
       const res = await apiFetch("/api/threads/recompute", {
@@ -4778,12 +4944,62 @@ export default function MailClient() {
       });
       if (!res.ok) {
         reportError(await readErrorMessage(res));
+        setIsRecomputingThreads(false);
         return;
       }
-      await refreshMailboxData();
+      const data = (await res.json()) as { jobId?: string };
+      if (!data?.jobId) {
+        reportError("Thread recompute did not return a job id.");
+        setIsRecomputingThreads(false);
+        return;
+      }
+      const jobId = data.jobId;
+      recomputeJobIdRef.current = jobId;
+
+      const pollOnce = async () => {
+        if (recomputePollInFlightRef.current) return;
+        if (recomputeJobIdRef.current !== jobId) return;
+        recomputePollInFlightRef.current = true;
+        try {
+          const statusRes = await apiFetch(
+            `/api/threads/recompute/status?jobId=${encodeURIComponent(jobId)}`
+          );
+          if (!statusRes.ok) {
+            reportError(await readErrorMessage(statusRes));
+            stopRecomputePoll();
+            setIsRecomputingThreads(false);
+            return;
+          }
+          const statusData = (await statusRes.json()) as {
+            job?: { status?: string; error?: string };
+          };
+          const status = statusData?.job?.status;
+          if (status === "done") {
+            stopRecomputePoll();
+            setIsRecomputingThreads(false);
+            await refreshMailboxData();
+            return;
+          }
+          if (status === "failed") {
+            reportError(statusData?.job?.error || "Thread recompute failed.");
+            stopRecomputePoll();
+            setIsRecomputingThreads(false);
+            return;
+          }
+        } catch {
+          reportError("Failed to check thread recompute status.");
+          stopRecomputePoll();
+          setIsRecomputingThreads(false);
+          return;
+        } finally {
+          recomputePollInFlightRef.current = false;
+        }
+        recomputePollTimerRef.current = window.setTimeout(pollOnce, 1000);
+      };
+
+      void pollOnce();
     } catch {
       reportError("Thread recompute failed due to a network error.");
-    } finally {
       setIsRecomputingThreads(false);
     }
   };
@@ -5700,105 +5916,134 @@ export default function MailClient() {
             setThreadContentLoading(null);
           }}
         >
-            {showComposeInline && (
-              <ComposeInlineCard
-                state={{
-                  composeMode,
-                  composeSubject,
-                  composeTo,
-                  composeCc,
-                  composeBcc,
-                  composeShowBcc,
-                  composeDraftId,
-                  composeOpen,
-                  composeFieldsReset: composeEditorReset,
-                  draftSaving,
-                  draftSaveError,
-                  draftSavedAt,
-                  sendingMail,
-                  discardingDraft,
-                  composeDragActive,
-                  recipientOptions,
-                  recipientActiveIndex,
-                  recipientLoading,
-                  recipientFocus,
-                  fromValue: getAccountFromValue(currentAccount)
-                }}
-                ui={{ composeMessageField }}
-                actions={{
-                  popOutCompose,
-                  setComposeSubject,
-                  setComposeTo,
-                  setComposeCc,
-                  setComposeBcc,
-                  setComposeShowBcc,
-                  setComposeOpen,
-                  setComposeView,
-                  handleSendMail,
-                  handleDiscardDraft,
-                  setRecipientQuery,
-                  setRecipientFocus,
-                  setRecipientActiveIndex,
-                  applyRecipientSelection,
-                  markComposeDirty: () => {
-                    composeDirtyRef.current = true;
-                  }
-                }}
-                helpers={{
-                  getComposeToken,
-                  formatRelativeTime
-                }}
-                dragHandlers={{
-                  handleComposeDragEnter,
-                  handleComposeDragLeave,
-                  handleComposeDragOver,
-                  handleComposeDrop
-                }}
-              />
-            )}
-            <ThreadView
-              showComposeInline={showComposeInline}
-              activeMessage={activeMessage ?? null}
-              activeThread={activeThread}
-              supportsThreads={supportsThreads}
-              threadContentById={threadContentById}
-              threadContentLoading={threadContentLoading}
-              messageCardProps={{
-                messageRefs,
-                pendingMessageActions,
-                includeThreadAcrossFolders,
-                activeFolderId,
-                threadPathById,
-                folderNameById,
-                setSearchScope,
-                setActiveFolderId,
-                getImapFlagBadges,
-                isDraftMessage,
-                openCompose,
-                renderQuickActions,
-                renderMessageMenu,
-                collapsedMessages,
-                setCollapsedMessages,
-                messageTabs,
-                setMessageTabs,
-                fetchSource,
-                setMessageFontScale,
-                messageFontScale,
-                adjustMessageZoom,
-                resetMessageZoom,
-                messageZoom,
-                darkMode,
-                hasHtmlContent,
-                renderMarkdownPanel,
-                renderSourcePanel,
-                handleSelectMessage,
-                messageByMessageId,
-                copyStatus,
-                triggerCopy,
-                getPrimaryEmail,
-                extractEmails
-              }}
-            />
+            {(() => {
+              // Render function for ComposeInlineCard with ref
+              const renderComposeCard = () => (
+                <div ref={composeCardRef}>
+                  <ComposeInlineCard
+                    state={{
+                      composeMode,
+                      composeSubject,
+                      composeTo,
+                      composeCc,
+                      composeBcc,
+                      composeShowBcc,
+                      composeDraftId,
+                      composeOpen,
+                      composeFieldsReset: composeEditorReset,
+                      draftSaving,
+                      draftSaveError,
+                      draftSavedAt,
+                      sendingMail,
+                      discardingDraft,
+                      composeDragActive,
+                      recipientOptions,
+                      recipientActiveIndex,
+                      recipientLoading,
+                      recipientFocus,
+                      fromValue: getAccountFromValue(currentAccount)
+                    }}
+                    ui={{ composeMessageField }}
+                    actions={{
+                      popOutCompose,
+                      setComposeSubject,
+                      setComposeTo,
+                      setComposeCc,
+                      setComposeBcc,
+                      setComposeShowBcc,
+                      setComposeOpen,
+                      setComposeView,
+                      handleSendMail,
+                      handleDiscardDraft,
+                      setRecipientQuery,
+                      setRecipientFocus,
+                      setRecipientActiveIndex,
+                      applyRecipientSelection,
+                      markComposeDirty: () => {
+                        composeDirtyRef.current = true;
+                      }
+                    }}
+                    helpers={{
+                      getComposeToken,
+                      formatRelativeTime
+                    }}
+                    dragHandlers={{
+                      handleComposeDragEnter,
+                      handleComposeDragLeave,
+                      handleComposeDragOver,
+                      handleComposeDrop
+                    }}
+                  />
+                </div>
+              );
+
+              // Check if reply message is in current thread
+              const replyMessageInThread = composeReplyMessage
+                ? activeThread.some((msg) => msg.id === composeReplyMessage.id)
+                : false;
+
+              // Show at top for: new message, edit draft, or reply to message not in thread
+              const showComposeAtTop =
+                showComposeInline &&
+                (!composeReplyMessage || composeMode === "edit" || !replyMessageInThread);
+
+              return (
+                <>
+                  {showComposeAtTop && renderComposeCard()}
+                  <ThreadView
+                    showComposeInline={showComposeInline}
+                    activeMessage={activeMessage ?? null}
+                    activeThread={activeThread}
+                    supportsThreads={supportsThreads}
+                    threadContentById={threadContentById}
+                    threadContentLoading={threadContentLoading}
+                    composeReplyMessageId={
+                      showComposeInline && replyMessageInThread && composeReplyMessage
+                        ? composeReplyMessage.id
+                        : null
+                    }
+                    renderComposeInlineCard={
+                      showComposeInline && replyMessageInThread ? renderComposeCard : null
+                    }
+                    messageCardProps={{
+                      messageRefs,
+                      pendingMessageActions,
+                      includeThreadAcrossFolders,
+                      activeFolderId,
+                      threadPathById,
+                      folderNameById,
+                      setSearchScope,
+                      setActiveFolderId,
+                      getImapFlagBadges,
+                      isDraftMessage,
+                      openCompose,
+                      renderQuickActions,
+                      renderMessageMenu,
+                      collapsedMessages,
+                      setCollapsedMessages,
+                      messageTabs,
+                      setMessageTabs,
+                      fetchSource,
+                      setMessageFontScale,
+                      messageFontScale,
+                      adjustMessageZoom,
+                      resetMessageZoom,
+                      messageZoom,
+                      darkMode,
+                      hasHtmlContent,
+                      renderMarkdownPanel,
+                      renderSourcePanel,
+                      handleSelectMessage,
+                      messageByMessageId,
+                      copyStatus,
+                      triggerCopy,
+                      getPrimaryEmail,
+                      extractEmails
+                    }}
+                  />
+                </>
+              );
+            })()}
         </MessageViewPane>
       </section>
 

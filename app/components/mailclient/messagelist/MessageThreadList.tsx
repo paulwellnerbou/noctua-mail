@@ -579,11 +579,24 @@ export default function MessageThreadList({
         const shouldAnimateRow = animateFromGroup || animateFromThread || animateFromNested;
         const isActive = message.id === activeMessageId;
         const isDisabled = pendingMessageActions.has(message.id);
+        const showRowDivider = index > 0 && !item.isFirstInGroup;
+        const isActiveThread =
+          Boolean(activeMessageId) &&
+          item.fullFlat.some((entry) => entry.message.id === activeMessageId);
+        const showCollapsedActive =
+          item.isCollapsed &&
+          item.threadIndex === 0 &&
+          item.depth === 0 &&
+          item.threadSize > 1 &&
+          isActiveThread;
 
         const rowContainerClassName = [
           styles.messageRowContainer,
-          isActive ? styles.rowActive : "",
-          activeThreadKey === item.threadGroupId && message.id !== activeMessage?.id
+          showRowDivider ? styles.rowDivider : "",
+          isActive || showCollapsedActive ? styles.rowActive : "",
+          !showCollapsedActive &&
+          activeThreadKey === item.threadGroupId &&
+          message.id !== activeMessage?.id
             ? styles.threadSibling
             : "",
           !message.seen ? styles.rowUnread : "",

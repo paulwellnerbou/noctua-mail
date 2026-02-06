@@ -20,6 +20,23 @@
   transition: background 0.12s ease, border-color 0.12s ease;
 }
 
+.rowDivider::before {
+  content: "";
+  position: absolute;
+  left: var(--radius-sm);
+  right: var(--radius-sm);
+  top: -1px;
+  height: 1px;
+  background: var(--gray-5);
+  pointer-events: none;
+}
+
+.rowDivider:hover::before,
+.rowDivider.rowActive::before,
+.rowDivider.rowSelected::before {
+  opacity: 0;
+}
+
 :global(.dark) .messageRowContainer {
   background: transparent;
 }
@@ -242,7 +259,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 13px;
+  font-size: 12px;
   flex-shrink: 0;
   display: inline-flex;
   align-items: center;
@@ -270,7 +287,7 @@
   gap: 6px;
   flex: 1;
   min-width: 0;
-  font-size: 13px;
+  font-size: 12px;
 }
 
 .cellSubjectText {

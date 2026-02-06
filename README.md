@@ -1,6 +1,13 @@
+
 # 🦉 Noctua Mail
 
-A modern, fast web-based mail client (IMAP/SMTP) built with Bun, TypeScript, and Next.js.
+<img src="my-assets/icon.svg" alt="Noctua logo" width="120" style="float: right;"/>
+
+A fast web-based mail client (IMAP/SMTP) built with Bun, TypeScript, and Next.js.
+
+I am trying to combine the advantages of GMail, Thunderbird and Spark, step by step, keeping full IMAP compatibility using IMAP (custom) properties and relying on standard email headers for all features.
+
+A working WebCal integration is planned, I need it, and it will be the first thing I will be working on after the mail client is stable and usable for daily use.
 
 ![noctua-mail.png](doc/noctua-mail.png)
 
@@ -27,19 +34,18 @@ Simple, secure authentication using your existing IMAP credentials. No separate 
 ### 📧 Email Management
 - **IMAP sync** – Full folder and message synchronization
 - **SMTP support** – Send and reply to emails
-- **Multiple accounts** – Manage several email accounts with dedicated settings UI
+- **Multiple accounts** – Manage several email accounts
 - **Rich message viewing** – HTML, Text, Markdown, and Source views
 - **Attachments** – Inline display and downloadable files
 - **Calendar invites** – Display ICS details (full calendar support in progress 📅)
 
-### 🎨 Modern UI
+### 🎨 UI
 - **Three-pane layout** – Folders, message list, and message view
-- **Radix UI components** – Beautiful, accessible interface
 - **Dark mode** 🌙 – Easy on the eyes
-- **Installable PWA** 📱 – Install as a native app on desktop and mobile
+- **Installable PWA** 📱 – Install as a native app on desktop
 - **OS notifications** 🔔 – Get notified of new emails
 - **Responsive design** – Resizable panes with independent scrolling
-- **Per-message text scaling** – Adjust font size for individual messages
+- **Per-message text scaling** – Adjust font size (or zoom for HTML) for individual messages
 - **Virtualized lists** ⚡ – Blazing-fast display of thousands of emails
 
 ### 🔍 Powerful Search
@@ -126,21 +132,9 @@ NOCTUA_DATA_DIR=../noctua-data  # Default: .data/
 
 ---
 
-## 📁 Project Structure
-
-```
-noctua-mail/
-├── app/          # Next.js UI and API routes
-├── lib/          # Core logic (IMAP/SMTP, storage, search, database)
-├── public/       # Static assets
-└── .data/        # Local data storage (created on first run)
-```
-
----
-
 ## ℹ️ Current Limitations
 
-- **Desktop-optimized** – While installable as a PWA, the UI is currently optimized for desktop/laptop use. Mobile-responsive layout is planned for a future release.
+- **Desktop-optimized** – While installable as a PWA, the UI is currently optimized for desktop use. Mails for mobile devices are better managed in a real app instead of a browser based webmail client. Mobile support will be improved over time, but it is not the primary focus.
 
 ---
 
@@ -161,8 +155,8 @@ This project is licensed under the [Elastic License 2.0](LICENSE).
 
 Contributions are welcome! Feel free to open issues or submit pull requests.
 
-The code is primarily written by AI agents (Claude, Codex, GitHub Copilot). I don't strive for a clean code base, but I do welcome improvements and optimizations.
+The code is primarily written by AI agents (Claude, Codex, GitHub Copilot, Antigravity). I don't strive for a clean code base, but a working product. I do welcome improvements and optimizations.
 
 ---
 
-Built with ❤️ and 🤖 by [Paul Wellner Bou](https://wellnerbou.de)
+Built with ❤️ and 🤖 by [Paul Wellner Bou](https://paul.wellnerbou.de)

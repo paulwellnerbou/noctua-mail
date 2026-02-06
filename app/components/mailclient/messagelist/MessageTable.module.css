@@ -18,7 +18,7 @@
   width: 100%;
   box-sizing: border-box;
   max-width: 100%;
-  overflow: hidden;
+  overflow: visible;
   cursor: pointer;
   font-size: 12px;
   align-items: center;
@@ -32,7 +32,7 @@
   position: absolute;
   left: var(--radius-sm);
   right: var(--radius-sm);
-  top: 0;
+  top: -1px;
   height: 1px;
   background: var(--gray-5);
   pointer-events: none;
@@ -43,7 +43,8 @@
   text-transform: uppercase;
   letter-spacing: 0.1em;
   color: var(--gray-11);
-  height: 44px;
+  height: 32px;
+  padding: 4px 10px;
 }
 
 .sortButton {
@@ -58,21 +59,15 @@
 }
 
 .rowActive,
-.row:hover,
 .row:focus-within {
   background: var(--gray-3);
   border-color: var(--gray-5);
 }
 
-.rowDivider.row:hover::before,
 .rowDivider.row:focus-within::before,
 .rowDivider.rowActive::before,
 .rowDivider.rowSelected::before {
   opacity: 0;
-}
-
-.rowActive:hover {
-  border-color: var(--gray-12);
 }
 
 .rowActive {
@@ -180,7 +175,7 @@
   display: flex;
   align-items: center;
   justify-content: flex-end;
-  min-width: 0;
+  min-width: 96px;
   gap: 8px;
 }
 

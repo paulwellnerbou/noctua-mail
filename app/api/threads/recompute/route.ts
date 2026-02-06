@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { recomputeThreadIdsForAccount, recomputeThreadsForAccount } from "@/lib/db";
 import { requireSessionOr401 } from "@/lib/auth";
+import { startThreadRecomputeJob } from "@/lib/threadRecomputeJobs";
 
 export async function POST(request: Request) {
   const auth = await requireSessionOr401(request);
@@ -12,7 +12,12 @@ export async function POST(request: Request) {
   if (!accountId) {
     return NextResponse.json({ ok: false, message: "Missing accountId" }, { status: 400 });
   }
-  await recomputeThreadIdsForAccount(accountId);
-  await recomputeThreadsForAccount(accountId);
-  return NextResponse.json({ ok: true });
+  const job = startThreadRecomputeJob(accountId);
+  if (job.status === "failed") {
+    return NextResponse.json(
+      { ok: false, message: job.error || "Failed to start thread recompute." },
+      { status: 500 }
+    );
+  }
+  return NextResponse.json({ ok: true, jobId: job.id, status: job.status }, { status: 202 });
 }

@@ -483,7 +483,9 @@ export default function MessageTable({
             Date
           </button>
         </div>
-        <div className={styles.cellActions} aria-hidden="true" />
+        <div className={styles.cellActions} aria-hidden="true">
+          {"\u00A0"}
+        </div>
       </div>
       <div
         ref={listRef}

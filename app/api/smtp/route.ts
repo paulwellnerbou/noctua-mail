@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { randomUUID } from "crypto";
 import { getAccounts, getFolders } from "@/lib/db";
 import { appendImapMessage } from "@/lib/mail/imap";
 import { sendSmtpMessage } from "@/lib/mail/smtp";
@@ -19,6 +20,12 @@ const SENT_NAMES = [
   "envoyés",
   "gesendete nachrichten"
 ];
+
+function buildMessageId(address: string) {
+  const domain = address.split("@")[1]?.trim();
+  const safeDomain = domain && domain.length > 0 ? domain : "noctua.local";
+  return `<${randomUUID()}@${safeDomain}>`;
+}
 
 function folderMailboxPath(folder: Folder, accountId: string) {
   if (folder.id.startsWith(`${accountId}:`)) {
@@ -103,6 +110,7 @@ export async function POST(request: Request) {
         cid?: string;
       }[] ?? [];
 
+  const messageId = buildMessageId(account.email);
   const result = await sendSmtpMessage(account, {
     to: payload.to,
     cc: payload.cc,
@@ -110,6 +118,7 @@ export async function POST(request: Request) {
     subject: payload.subject,
     text: payload.text,
     html: payload.html,
+    messageId,
     inReplyTo: payload.inReplyTo,
     references: payload.references,
     replyTo: payload.replyTo,
