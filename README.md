@@ -1,13 +1,13 @@
 # 🦉 Noctua Mail
 
-A modern, fast web-based mail client built with Bun, TypeScript, and Next.js. Noctua Mail delivers a polished email experience with intelligent threading, powerful search, and seamless IMAP/SMTP support.
+A modern, fast web-based mail client (IMAP/SMTP) built with Bun, TypeScript, and Next.js.
 
 ![noctua-mail.png](doc/noctua-mail.png)
 
 ## ✨ Key Features
 
 ### 🔗 Related Mails
-Discover connections across your inbox with AI-powered related mail suggestions. When viewing any email, instantly find related messages based on:
+Discover connections across your inbox with related mails. When viewing any email, instantly find related messages based on:
 - **Subject similarity** – Find conversations on similar topics
 - **Sender/Recipient overlap** – Track communications with the same people
 - **Thread references** – Follow email chains using In-Reply-To and References headers
@@ -18,7 +18,7 @@ Access via the "Show related" option in the message action menu or search with `
 Unified conversation threading that works **across all folders**. Whether emails are in Inbox, Sent, or any other folder, Noctua Mail intelligently groups them into cohesive threads. Collapse and expand conversations with ease, maintaining context no matter where messages are stored.
 
 ### 🔐 IMAP-Only Authentication
-Simple, secure authentication using your existing IMAP credentials. No separate user accounts to manage – just connect with your email server credentials and start using Noctua Mail immediately.
+Simple, secure authentication using your existing IMAP credentials. No separate user accounts and no stored passwords to manage – just connect with your email server credentials and start using Noctua Mail immediately.
 
 ---
 
@@ -161,6 +161,8 @@ This project is licensed under the [Elastic License 2.0](LICENSE).
 
 Contributions are welcome! Feel free to open issues or submit pull requests.
 
+The code is primarily written by AI agents (Claude, Codex, GitHub Copilot). I don't strive for a clean code base, but I do welcome improvements and optimizations.
+
 ---
 
-Built with 🦉 by [Paul Wellner Bou](https://wellnerbou.de)
+Built with ❤️ and 🤖 by [Paul Wellner Bou](https://wellnerbou.de)
