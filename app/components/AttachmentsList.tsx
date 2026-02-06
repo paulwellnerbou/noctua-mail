@@ -1,4 +1,15 @@
-import { Eye, X } from "lucide-react";
+import {
+  Eye,
+  X,
+  FileText,
+  FileImage,
+  FileVideo,
+  FileAudio,
+  FileArchive,
+  FileSpreadsheet,
+  FileCode,
+  File
+} from "lucide-react";
 import type { Attachment } from "@/lib/data";
 import { openDetachedWindow } from "@/lib/ui/openDetachedWindow";
 
@@ -17,6 +28,50 @@ const canPreview = (contentType?: string) => {
   return PREVIEW_MIME_PREFIXES.some((prefix) => lower.startsWith(prefix));
 };
 
+const isImage = (contentType?: string) => {
+  return contentType?.toLowerCase().startsWith("image/") ?? false;
+};
+
+const getFileIcon = (contentType?: string, filename?: string) => {
+  if (!contentType && !filename) return File;
+
+  const lower = contentType?.toLowerCase() || "";
+  const ext = filename?.split(".").pop()?.toLowerCase() || "";
+
+  // Images
+  if (lower.startsWith("image/")) return FileImage;
+
+  // PDFs and Documents
+  if (lower === "application/pdf" || ext === "pdf") return FileText;
+  if (lower.includes("word") || lower.includes("document") ||
+      ["doc", "docx", "odt", "rtf"].includes(ext)) return FileText;
+
+  // Spreadsheets
+  if (lower.includes("spreadsheet") || lower.includes("excel") ||
+      ["xls", "xlsx", "ods", "csv"].includes(ext)) return FileSpreadsheet;
+
+  // Archives
+  if (lower.includes("zip") || lower.includes("archive") ||
+      ["zip", "rar", "7z", "tar", "gz", "bz2"].includes(ext)) return FileArchive;
+
+  // Audio
+  if (lower.startsWith("audio/") ||
+      ["mp3", "wav", "ogg", "flac", "m4a"].includes(ext)) return FileAudio;
+
+  // Video
+  if (lower.startsWith("video/") ||
+      ["mp4", "avi", "mov", "mkv", "webm"].includes(ext)) return FileVideo;
+
+  // Code
+  if (lower.includes("javascript") || lower.includes("json") ||
+      ["js", "ts", "jsx", "tsx", "json", "html", "css", "py", "java", "c", "cpp"].includes(ext)) return FileCode;
+
+  // Text files
+  if (lower.startsWith("text/") || ["txt", "md"].includes(ext)) return FileText;
+
+  return File;
+};
+
 export default function AttachmentsList({
   attachments,
   onRemove
@@ -29,29 +84,36 @@ export default function AttachmentsList({
     <div className="attachments">
       <h4>Attachments</h4>
       <div className="attachment-list">
-        {attachments.map((file) => (
-          <div key={file.id} className="attachment-item">
-            <a
-              className="attachment-link"
-              href={file.url ?? file.dataUrl ?? "#"}
-              download
-              onClick={(event) => {
-                if (!file.url && !file.dataUrl) {
-                  event.preventDefault();
-                }
-              }}
-            >
-              <span className="attachment-name">{file.filename}</span>
-              <span className="attachment-meta">
-                <span
-                  className="attachment-mime"
-                  title={file.contentType || "Unknown"}
-                >
-                  {file.contentType || "Unknown"}
-                </span>{" "}
-                · {Math.round(file.size / 1024)} KB
-              </span>
-            </a>
+        {attachments.map((file) => {
+          const FileIcon = getFileIcon(file.contentType, file.filename);
+          const showImagePreview = isImage(file.contentType) && (file.url || file.dataUrl);
+          return (
+            <div key={file.id} className="attachment-item">
+              <div className="attachment-icon-wrapper">
+                <FileIcon size={16} className="attachment-icon" />
+                {showImagePreview && (
+                  <div className="attachment-image-preview">
+                    <img src={file.url ?? file.dataUrl} alt={file.filename} />
+                  </div>
+                )}
+              </div>
+              <a
+                className="attachment-link"
+                href={file.url ?? file.dataUrl ?? "#"}
+                download
+                onClick={(event) => {
+                  if (!file.url && !file.dataUrl) {
+                    event.preventDefault();
+                  }
+                }}
+              >
+                <span className="attachment-name">
+                  {file.filename}{" "}
+                  <span className="attachment-meta">
+                    ({Math.round(file.size / 1024)} KB)
+                  </span>
+                </span>
+              </a>
             {canPreview(file.contentType) && (file.url || file.dataUrl) && (
               <a
                 className="icon-button ghost attachment-preview"
@@ -83,7 +145,8 @@ export default function AttachmentsList({
               </button>
             )}
           </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );

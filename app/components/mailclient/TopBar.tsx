@@ -18,6 +18,7 @@ import {
 } from "lucide-react";
 import { Badge, Button, DropdownMenu, IconButton, TextField } from "@radix-ui/themes";
 import { badgeColors } from "@/lib/ui/badgeColors";
+import { SEARCH_BADGE_OPTIONS, SEARCH_FIELD_OPTIONS } from "@/lib/ui/searchFilters";
 import type { Account, Folder, Message } from "@/lib/data";
 import styles from "./TopBar.module.css";
 
@@ -304,15 +305,7 @@ export default function TopBar({ state, ui, actions }: TopBarProps) {
             <DropdownMenu.Content className={styles.searchMenuContent}>
               <DropdownMenu.Label>Search in</DropdownMenu.Label>
               <DropdownMenu.Separator />
-              {(
-                [
-                  ["sender", "Sender"],
-                  ["participants", "Participants"],
-                  ["subject", "Subject"],
-                  ["body", "Body"],
-                  ["attachments", "Attachment names"]
-                ] as const
-              ).map(([key, label]) => (
+              {SEARCH_FIELD_OPTIONS.map(([key, label]) => (
                 <DropdownMenu.CheckboxItem
                   key={key}
                   checked={searchFields[key]}
@@ -346,17 +339,7 @@ export default function TopBar({ state, ui, actions }: TopBarProps) {
               </Button>
             </DropdownMenu.Trigger>
             <DropdownMenu.Content className={styles.searchMenuContent}>
-              {(
-                [
-                  ["unread", "Unread"],
-                  ["unanswered", "Unanswered"],
-                  ["flagged", "Flagged"],
-                  ["todo", "To-Do"],
-                  ["pinned", "Pinned"],
-                  ["calendar", "Calendar"],
-                  ["attachments", "Attachments"]
-                ] as const
-              ).map(([key, label]) => (
+              {SEARCH_BADGE_OPTIONS.map(([key, label]) => (
                 <DropdownMenu.CheckboxItem
                   key={key}
                   checked={searchBadges[key]}

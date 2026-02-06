@@ -69,6 +69,7 @@ type UseMessageMoveActionsOptions = {
     successTitle?: string
   ) => Promise<void>;
   noticeSuccessTimeout: number;
+  onMoveComplete?: (messageIds: string[]) => void;
 };
 
 export function useMessageMoveActions({
@@ -88,7 +89,8 @@ export function useMessageMoveActions({
   reportError,
   pushNotice,
   undoMoveOperation,
-  noticeSuccessTimeout
+  noticeSuccessTimeout,
+  onMoveComplete
 }: UseMessageMoveActionsOptions) {
   const getMessageSubjectForNotice = useCallback(
     (message?: Message | null) => message?.subject?.trim() || "(no subject)",
@@ -208,6 +210,9 @@ export function useMessageMoveActions({
             durationMs: undoTargets.length > 0 ? 12000 : noticeSuccessTimeout
           });
         }
+        if (onMoveComplete) {
+          onMoveComplete(uniqueIds);
+        }
         return {
           ids: uniqueIds,
           undoTargets,
@@ -248,7 +253,8 @@ export function useMessageMoveActions({
       setActiveMessageId,
       setMessages,
       setPendingMessageActions,
-      undoMoveOperation
+      undoMoveOperation,
+      onMoveComplete
     ]
   );
 

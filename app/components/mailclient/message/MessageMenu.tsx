@@ -18,6 +18,7 @@ import {
   RefreshCw,
   Reply,
   ReplyAll,
+  Shield,
   ShieldOff,
   Square,
   Trash2
@@ -63,6 +64,7 @@ type MessageMenuProps = {
   togglePinnedFlag: (message: Message) => void;
   toggleTodoFlag: (message: Message) => void;
   handleMarkSpam: (message: Message) => void;
+  handleMarkNotSpam: (message: Message) => void;
   handleArchiveMessage: (message: Message) => void;
   handleDeleteMessage: (message: Message, options?: { allowThreadDeletion?: boolean }) => void;
   handleDownloadEml: (message: Message) => void;
@@ -71,6 +73,7 @@ type MessageMenuProps = {
   handleOpenHtmlInNewWindow: (message: Message) => void;
   onShowRelated: (message: Message) => void;
   isTrashFolder: (folderId?: string) => boolean;
+  isSpamFolder: (folderId?: string) => boolean;
   onOpenChange?: (open: boolean) => void;
 };
 
@@ -86,6 +89,7 @@ export default function MessageMenu({
   togglePinnedFlag,
   toggleTodoFlag,
   handleMarkSpam,
+  handleMarkNotSpam,
   handleArchiveMessage,
   handleDeleteMessage,
   handleDownloadEml,
@@ -94,10 +98,12 @@ export default function MessageMenu({
   handleOpenHtmlInNewWindow,
   onShowRelated,
   isTrashFolder,
+  isSpamFolder,
   onOpenChange
 }: MessageMenuProps) {
   const showDeleteInMenu = origin !== "table";
   const allowThreadDeletion = origin !== "thread";
+  const inSpamFolder = isSpamFolder(message.folderId);
   const isVisible = (action: MessageMenuAction, defaultValue = true) =>
     actionVisibility?.[action] ?? defaultValue;
   const isDisabled = (action: MessageMenuAction, defaultValue = false) =>
@@ -225,9 +231,9 @@ export default function MessageMenu({
             isVisible("spam")
               ? buildItem(
                   "spam",
-                  "Mark as Spam",
-                  <ShieldOff size={14} />,
-                  () => handleMarkSpam(message),
+                  inSpamFolder ? "Mark as not Spam" : "Mark as Spam",
+                  inSpamFolder ? <Shield size={14} /> : <ShieldOff size={14} />,
+                  () => (inSpamFolder ? handleMarkNotSpam(message) : handleMarkSpam(message)),
                   isDisabled("spam")
                 )
               : null,

@@ -45,7 +45,7 @@ import listMetaStyles from "./mailclient/messagelist/MessageListMeta.module.css"
 import listPaneStyles from "./mailclient/messagelist/MessageListPane.module.css";
 import { createSelectionStore } from "./mailclient/messagelist/selectionStore";
 import threadStyles from "./mailclient/message/ThreadMessageCard.module.css";
-import { Button, Card, DropdownMenu, Flex, IconButton, Tabs, Text } from "@radix-ui/themes";
+import { Badge, Button, Card, DropdownMenu, Flex, IconButton, Tabs, Text } from "@radix-ui/themes";
 import MessageSelectIndicators from "./mailclient/messagelist/MessageSelectIndicators";
 import MessageTable from "./mailclient/messagelist/MessageTable";
 import UnreadDot from "./mailclient/messagelist/UnreadDot";
@@ -63,6 +63,12 @@ import {
 import { withCalendarInviteFlag } from "@/lib/messageFlags";
 import { openDetachedWindow } from "@/lib/ui/openDetachedWindow";
 import { getImapFlagBadges, hasHtmlContent } from "@/lib/ui/messageView";
+import {
+  SEARCH_BADGE_ORDER,
+  SEARCH_FIELD_ORDER,
+  getSearchBadgeLabel,
+  getSearchFieldLabel
+} from "@/lib/ui/searchFilters";
 import ThreadJsonModal from "./mailclient/message/ThreadJsonModal";
 import ThreadView from "./mailclient/message/ThreadView";
 import TopBar from "./mailclient/TopBar";
@@ -523,8 +529,7 @@ export default function MailClient() {
     const fields = Object.entries(searchFields)
       .filter(([, enabled]) => enabled)
       .map(([key]) => key);
-    const baseAll = ["sender", "participants", "subject", "body", "attachments"] as const;
-    if (fields.length === 0) return baseAll;
+    if (fields.length === 0) return SEARCH_FIELD_ORDER;
     const adjusted = fields.includes("participants") ? fields.filter((field) => field !== "sender") : fields;
     return adjusted;
   }, [searchFields]);
@@ -534,6 +539,14 @@ export default function MailClient() {
         .filter(([, enabled]) => enabled)
         .map(([key]) => key),
     [searchBadges]
+  );
+  const selectedSearchFieldLabels = useMemo(
+    () => selectedSearchFields.map((key) => getSearchFieldLabel(key)),
+    [selectedSearchFields]
+  );
+  const selectedSearchBadgeLabels = useMemo(
+    () => selectedSearchBadges.map((key) => getSearchBadgeLabel(key)),
+    [selectedSearchBadges]
   );
 
   const selectRangeTo = useCallback((messageId: string) => {
@@ -621,41 +634,23 @@ export default function MailClient() {
   );
 
   const searchFieldsLabel = useMemo(() => {
-    const order = ["sender", "participants", "subject", "body", "attachments"] as const;
     const allEnabled =
       searchFields.participants &&
       searchFields.subject &&
       searchFields.body &&
       searchFields.attachments;
     if (allEnabled) return "Fields: All";
-    const labels: Record<string, string> = {
-      sender: "Sender",
-      participants: "Participants",
-      subject: "Subject",
-      body: "Body",
-      attachments: "Attachment names"
-    };
-    const selected = order.filter((key) => searchFields[key]);
+    const selected = SEARCH_FIELD_ORDER.filter((key) => searchFields[key]);
     const effective = selected.includes("participants")
       ? selected.filter((key) => key !== "sender")
       : selected;
     if (effective.length === 0) return "Fields: All";
-    return `Fields: ${effective.map((key) => labels[key]).join(", ")}`;
+    return `Fields: ${effective.map((key) => getSearchFieldLabel(key)).join(", ")}`;
   }, [searchFields]);
   const searchBadgesLabel = useMemo(() => {
-    const order = ["unread", "unanswered", "flagged", "todo", "pinned", "calendar", "attachments"] as const;
-    const labels: Record<string, string> = {
-      unread: "Unread",
-      unanswered: "Unanswered",
-      flagged: "Flagged",
-      todo: "To-Do",
-      pinned: "Pinned",
-      calendar: "Calendar",
-      attachments: "Attachments"
-    };
-    const selected = order.filter((key) => searchBadges[key]);
+    const selected = SEARCH_BADGE_ORDER.filter((key) => searchBadges[key]);
     if (selected.length === 0) return "Filter: Any";
-    return `Filter: ${selected.map((key) => labels[key]).join(", ")}`;
+    return `Filter: ${selected.map((key) => getSearchBadgeLabel(key)).join(", ")}`;
   }, [searchBadges]);
   const searchActive = useMemo(() => {
     const hasQuery = query.trim().length > 0;
@@ -668,18 +663,39 @@ export default function MailClient() {
     if (trimmedQuery.length > 0) {
       parts.push(`"${trimmedQuery}"`);
     }
-    const fields = selectedSearchFields;
-    if (trimmedQuery.length > 0 && fields.length > 0) {
-      parts.push(`in ${fields.join(", ")}`);
+    if (trimmedQuery.length > 0 && selectedSearchFieldLabels.length > 0) {
+      parts.push(`in ${selectedSearchFieldLabels.join(", ")}`);
     }
-    if (selectedSearchBadges.length > 0) {
-      parts.push(`filter ${selectedSearchBadges.join(", ")}`);
+    if (selectedSearchBadgeLabels.length > 0) {
+      parts.push(`filter ${selectedSearchBadgeLabels.join(", ")}`);
     }
     if (searchScope === "all") {
       parts.push("everywhere");
     }
     return parts.join(" · ");
-  }, [query, searchScope, selectedSearchBadges, selectedSearchFields]);
+  }, [query, searchScope, selectedSearchBadgeLabels, selectedSearchFieldLabels]);
+  const searchCriteriaBadges = useMemo(() => {
+    const badges: { key: string; label: string }[] = [];
+    const trimmedQuery = query.trim();
+    if (trimmedQuery.length > 0) {
+      badges.push({ key: "query", label: `"${trimmedQuery}"` });
+    }
+    if (trimmedQuery.length > 0 && selectedSearchFieldLabels.length > 0) {
+      badges.push({ key: "fields", label: `in ${selectedSearchFieldLabels.join(", ")}` });
+    }
+    if (selectedSearchBadges.length > 0) {
+      selectedSearchBadges.forEach((key) => {
+        badges.push({ key: `badge-${key}`, label: getSearchBadgeLabel(key) });
+      });
+    }
+    if (searchScope === "all") {
+      badges.push({ key: "scope", label: "Everywhere" });
+    }
+    if (badges.length === 0) {
+      badges.push({ key: "all", label: "All messages" });
+    }
+    return badges;
+  }, [query, searchScope, selectedSearchBadges, selectedSearchFieldLabels]);
   const relatedNotice = useMemo(() => {
     if (!isRelatedSearch) return "";
     const subject = relatedContext?.subject?.trim();
@@ -899,6 +915,7 @@ export default function MailClient() {
           return;
         }
       }
+      evictMessageCaches(targets.map((target) => target.messageId));
       await refreshFolders();
       if (accountId === activeAccountId) {
         await refreshMailboxData();
@@ -1025,7 +1042,9 @@ export default function MailClient() {
     const folder = folders.find((item) => item.id === folderId);
     if (!folder) return false;
     const special = (folder.specialUse ?? "").toLowerCase();
-    return special === "\\junk" || special === "\\spam";
+    if (special === "\\junk" || special === "\\spam") return true;
+    const name = folder.name.toLowerCase();
+    return name.includes("junk") || name.includes("spam");
   };
 
   const isSentFolder = (folderId?: string | null) => {
@@ -1498,6 +1517,109 @@ export default function MailClient() {
       return next;
     });
   }, []);
+  const evictMessagesFromThreadCache = useCallback((messageIds: string[]) => {
+    if (messageIds.length === 0) return;
+    const idSet = new Set(messageIds);
+    setThreadContentById((prev) => {
+      let changed = false;
+      const next: Record<string, Message[]> = { ...prev };
+      Object.entries(prev).forEach(([threadId, items]) => {
+        const filtered = items.filter((item) => !idSet.has(item.id));
+        if (filtered.length === items.length) return;
+        changed = true;
+        if (filtered.length === 0) {
+          delete next[threadId];
+        } else {
+          next[threadId] = filtered;
+        }
+      });
+      if (!changed) return prev;
+      threadCacheOrderRef.current = threadCacheOrderRef.current.filter((id) => id in next);
+      return next;
+    });
+  }, []);
+  const evictMessageCaches = useCallback(
+    (messageIds: string[]) => {
+      if (messageIds.length === 0) return;
+      const unique = Array.from(new Set(messageIds));
+      const idSet = new Set(unique);
+      evictMessagesFromThreadCache(unique);
+      setThreadRelatedMessages((prev) => {
+        if (!prev.some((item) => idSet.has(item.id))) return prev;
+        return prev.filter((item) => !idSet.has(item.id));
+      });
+      setLoadingSource((prev) => {
+        let changed = false;
+        const next = { ...prev };
+        unique.forEach((id) => {
+          if (id in next) {
+            delete next[id];
+            changed = true;
+          }
+        });
+        return changed ? next : prev;
+      });
+      sourceFetchRef.current = new Map(
+        Array.from(sourceFetchRef.current.entries()).filter(([id]) => !idSet.has(id))
+      );
+      setMessageTabs((prev) => {
+        let changed = false;
+        const next = { ...prev };
+        unique.forEach((id) => {
+          if (id in next) {
+            delete next[id];
+            changed = true;
+          }
+        });
+        return changed ? next : prev;
+      });
+      setMessageFontScale((prev) => {
+        let changed = false;
+        const next = { ...prev };
+        unique.forEach((id) => {
+          if (id in next) {
+            delete next[id];
+            changed = true;
+          }
+        });
+        return changed ? next : prev;
+      });
+      setMessageZoom((prev) => {
+        let changed = false;
+        const next = { ...prev };
+        unique.forEach((id) => {
+          if (id in next) {
+            delete next[id];
+            changed = true;
+          }
+        });
+        return changed ? next : prev;
+      });
+      setCollapsedMessages((prev) => {
+        let changed = false;
+        const next = { ...prev };
+        unique.forEach((id) => {
+          if (id in next) {
+            delete next[id];
+            changed = true;
+          }
+        });
+        return changed ? next : prev;
+      });
+      setCopyStatus((prev) => {
+        let changed = false;
+        const next = { ...prev };
+        unique.forEach((id) => {
+          if (id in next) {
+            delete next[id];
+            changed = true;
+          }
+        });
+        return changed ? next : prev;
+      });
+    },
+    [evictMessagesFromThreadCache]
+  );
   const threadScopeMessages = useMemo(() => {
     if (!includeThreadAcrossFoldersForList) {
       return sortedMessages;
@@ -1633,12 +1755,15 @@ export default function MailClient() {
 
   const activeThread = useMemo(() => {
     if (!activeMessage) return [];
-    if (isThreadExcludedFolder(activeMessage.folderId)) {
-      return [activeMessage];
-    }
     const activeThreadId =
       activeMessage.threadId ?? activeMessage.messageId ?? activeMessage.id;
     const fullThread = activeThreadId ? threadContentById[activeThreadId] : undefined;
+    const inExcludedFolder = isThreadExcludedFolder(activeMessage.folderId);
+    if (inExcludedFolder) {
+      const sameFolder =
+        fullThread?.filter((item) => item.folderId === activeMessage.folderId) ?? [];
+      return sameFolder.length > 0 ? sameFolder : [activeMessage];
+    }
     let localFlat: Message[] = [];
     const findRoot = (
       nodes: ThreadNode[],
@@ -2519,7 +2644,8 @@ export default function MailClient() {
     reportError,
     pushNotice,
     undoMoveOperation,
-    noticeSuccessTimeout: NOTICE_TIMEOUTS.success
+    noticeSuccessTimeout: NOTICE_TIMEOUTS.success,
+    onMoveComplete: evictMessageCaches
   });
 
   const { handleDeleteMessage, handleDeleteMessagesByIds } = useMessageDeleteActions({
@@ -2546,7 +2672,8 @@ export default function MailClient() {
     reportError,
     pushNotice,
     undoMoveOperation,
-    noticeSuccessTimeout: NOTICE_TIMEOUTS.success
+    noticeSuccessTimeout: NOTICE_TIMEOUTS.success,
+    onMessagesRemoved: evictMessageCaches
   });
 
   const getMessageSubjectForNotice = (message?: Message | null) =>
@@ -2571,6 +2698,7 @@ export default function MailClient() {
         action: "moved";
         archiveFolderId?: string | null;
       };
+      evictMessageCaches([message.id]);
       setMessages((prev) => {
         if (searchScope === "all" && data.archiveFolderId) {
           return prev.map((item) =>
@@ -2603,6 +2731,7 @@ export default function MailClient() {
       messageId: message.id,
       restoreFolderId: message.folderId
     };
+    setPendingMessageActions((prev) => new Set(prev).add(message.id));
     try {
       const res = await apiFetch("/api/message/spam", {
         method: "POST",
@@ -2616,11 +2745,24 @@ export default function MailClient() {
       const data = (await res.json()) as {
         action: "moved";
         junkFolderId?: string | null;
+        junkMailbox?: string;
+        flags?: string[];
       };
+      evictMessageCaches([message.id]);
       setMessages((prev) => {
         if (searchScope === "all" && data.junkFolderId) {
           return prev.map((item) =>
-            item.id === message.id ? { ...item, folderId: data.junkFolderId! } : item
+            item.id === message.id
+              ? {
+                  ...item,
+                  folderId: data.junkFolderId!,
+                  mailboxPath: data.junkMailbox ?? item.mailboxPath,
+                  flags: data.flags ?? item.flags,
+                  recent: data.flags
+                    ? data.flags.some((flag) => flag.toLowerCase() === "\\recent")
+                    : item.recent
+                }
+              : item
           );
         }
         return prev.filter((item) => item.id !== message.id);
@@ -2641,6 +2783,78 @@ export default function MailClient() {
       });
     } catch {
       reportError("Failed to mark message as spam.");
+    } finally {
+      setPendingMessageActions((prev) => {
+        const next = new Set(prev);
+        next.delete(message.id);
+        return next;
+      });
+    }
+  };
+
+  const handleMarkNotSpam = async (message: Message) => {
+    const undoTarget: UndoMoveTarget = {
+      messageId: message.id,
+      restoreFolderId: message.folderId
+    };
+    setPendingMessageActions((prev) => new Set(prev).add(message.id));
+    try {
+      const res = await apiFetch("/api/message/not-spam", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ accountId: activeAccountId, messageId: message.id })
+      });
+      if (!res.ok) {
+        reportError(await readErrorMessage(res));
+        return;
+      }
+      const data = (await res.json()) as {
+        action: "moved";
+        inboxFolderId?: string | null;
+        inboxMailbox?: string;
+        flags?: string[];
+      };
+      evictMessageCaches([message.id]);
+      setMessages((prev) => {
+        if (searchScope === "all" && data.inboxFolderId) {
+          return prev.map((item) =>
+            item.id === message.id
+              ? {
+                  ...item,
+                  folderId: data.inboxFolderId!,
+                  mailboxPath: data.inboxMailbox ?? item.mailboxPath,
+                  flags: data.flags ?? item.flags,
+                  recent: data.flags
+                    ? data.flags.some((flag) => flag.toLowerCase() === "\\recent")
+                    : item.recent
+                }
+              : item
+          );
+        }
+        return prev.filter((item) => item.id !== message.id);
+      });
+      if (activeMessageId === message.id) {
+        setActiveMessageId("");
+      }
+      pushNotice({
+        type: "success",
+        title: "Message marked as not spam.",
+        description: getMessageSubjectForNotice(message),
+        actionLabel: data.inboxFolderId ? "Undo" : undefined,
+        onAction:
+          data.inboxFolderId
+            ? () => undoMoveOperation([undoTarget], activeAccountId, "Not-spam action undone.")
+            : undefined,
+        durationMs: data.inboxFolderId ? 12000 : NOTICE_TIMEOUTS.success
+      });
+    } catch {
+      reportError("Failed to mark message as not spam.");
+    } finally {
+      setPendingMessageActions((prev) => {
+        const next = new Set(prev);
+        next.delete(message.id);
+        return next;
+      });
     }
   };
 
@@ -2689,6 +2903,7 @@ export default function MailClient() {
       togglePinnedFlag={togglePinnedFlag}
       toggleTodoFlag={toggleTodoFlag}
       handleMarkSpam={handleMarkSpam}
+      handleMarkNotSpam={handleMarkNotSpam}
       handleArchiveMessage={handleArchiveMessage}
       handleDeleteMessage={handleDeleteMessage}
       handleDownloadEml={handleDownloadEml}
@@ -2697,6 +2912,7 @@ export default function MailClient() {
       handleOpenHtmlInNewWindow={handleOpenHtmlInNewWindow}
       onShowRelated={handleShowRelated}
       isTrashFolder={isTrashFolder}
+      isSpamFolder={isSpamFolder}
       onOpenChange={onOpenChange}
     />
   );
@@ -3615,7 +3831,9 @@ export default function MailClient() {
         }
         const data = (await res.json()) as { items?: Message[] };
         const items = Array.isArray(data?.items) ? data.items : [];
-        const filtered = items.filter((item) => !isThreadExcludedFolder(item.folderId));
+        const filtered = items.filter(
+          (item) => item.folderId === activeFolderId || !isThreadExcludedFolder(item.folderId)
+        );
         upsertThreadCache(threadId, filtered);
       } catch {
         // ignore
@@ -3626,6 +3844,7 @@ export default function MailClient() {
     loadThreadContent();
   }, [
     activeAccountId,
+    activeFolderId,
     activeMessage,
     groupBy,
     supportsThreads,
@@ -4637,7 +4856,14 @@ export default function MailClient() {
         }
         return;
       }
-      const unique = eligibleByUid.filter((item) => {
+      // Filter out messages sent by me
+      const accountEmail = currentAccount?.email?.toLowerCase() ?? "";
+      const notFromMe = eligibleByUid.filter((item) => {
+        if (!accountEmail) return true;
+        const fromEmails = extractEmails(item.from);
+        return !fromEmails.some((email) => email.toLowerCase() === accountEmail);
+      });
+      const unique = notFromMe.filter((item) => {
         const key = item.messageId || `uid:${item.uid}`;
         if (notifiedKeysRef.current.has(key)) return false;
         notifiedKeysRef.current.add(key);
@@ -5245,13 +5471,36 @@ export default function MailClient() {
                   gap="3"
                   className={listMetaStyles.searchRow}
                 >
-                  <Flex align="center" gap="2">
+                  <Flex align="center" gap="2" className={listMetaStyles.searchSummary}>
                     <Search size={12} />
-                    <Text size="1" color="gray">
-                      {isRelatedSearch
-                        ? relatedNotice
-                        : `Searching ${searchCriteriaLabel || "all messages"}`}
-                    </Text>
+                    {isRelatedSearch ? (
+                      <Text size="1" color="gray">
+                        {relatedNotice}
+                      </Text>
+                    ) : (
+                      <>
+                        <Text size="1" color="gray">
+                          Searching
+                        </Text>
+                        <div
+                          className={listMetaStyles.searchCriteria}
+                          aria-label={searchCriteriaLabel || "all messages"}
+                          title={searchCriteriaLabel || "All messages"}
+                        >
+                          {searchCriteriaBadges.map((badge) => (
+                            <Badge
+                              key={badge.key}
+                              size="1"
+                              variant="soft"
+                              color="gray"
+                              className={listMetaStyles.searchBadge}
+                            >
+                              {badge.label}
+                            </Badge>
+                          ))}
+                        </div>
+                      </>
+                    )}
                   </Flex>
                   <IconButton
                     size="1"

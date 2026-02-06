@@ -1106,25 +1106,66 @@ a {
 .attachment-list {
   display: flex;
   flex-direction: column;
-  gap: 6px;
 }
 
 .attachment-item {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 8px 10px;
-  border-radius: var(--radius-sm);
-  border: 1px solid var(--border);
-  background: var(--surface-2);
+  gap: 8px;
+  padding: 6px 0;
   font-size: 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.attachment-item:last-child {
+  border-bottom: none;
+}
+
+.attachment-item:hover {
+  background: var(--surface-1);
+  margin: 0 -8px;
+  padding-left: 8px;
+  padding-right: 8px;
+}
+
+.attachment-icon-wrapper {
+  position: relative;
+  flex-shrink: 0;
+}
+
+.attachment-icon {
+  flex-shrink: 0;
+  color: var(--muted);
+}
+
+.attachment-image-preview {
+  display: none;
+  position: absolute;
+  left: 100%;
+  top: 50%;
+  transform: translateY(-50%);
+  margin-left: 12px;
+  z-index: 1000;
+  background: var(--background);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 4px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  pointer-events: none;
+}
+
+.attachment-icon-wrapper:hover .attachment-image-preview {
+  display: block;
+}
+
+.attachment-image-preview img {
+  max-width: 300px;
+  max-height: 200px;
+  display: block;
+  border-radius: var(--radius-sm);
 }
 
 .attachment-link {
-  display: flex;
-  align-items: center;
-  gap: 8px;
   min-width: 0;
   flex: 1;
   color: inherit;
@@ -1136,6 +1177,7 @@ a {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  display: block;
 }
 
 .compose-attachments {
@@ -1160,15 +1202,6 @@ a {
 .attachment-meta {
   color: var(--muted);
   font-size: 11px;
-}
-
-.attachment-mime {
-  display: inline-block;
-  max-width: 320px;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  vertical-align: bottom;
 }
 
 .attachment-preview {

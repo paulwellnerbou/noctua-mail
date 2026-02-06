@@ -10,15 +10,7 @@ import { moveImapMessage, updateImapFlags } from "@/lib/mail/imap";
 import type { Folder } from "@/lib/data";
 import { requireSessionOr401 } from "@/lib/auth";
 
-const JUNK_NAMES = [
-  "junk",
-  "spam",
-  "junk email",
-  "junk e-mail",
-  "bulk",
-  "spam mail",
-  "spam messages"
-];
+const NONJUNK_KEYWORD = "NONJUNK";
 
 const normalizeKeyword = (value: string) => value.replace(/[\s-]/g, "").toLowerCase();
 const isNonJunkKeyword = (value: string) => normalizeKeyword(value) === "nonjunk";
@@ -30,25 +22,14 @@ function folderMailboxPath(folder: Folder, accountId: string) {
   return folder.name;
 }
 
-function findJunkFolder(folders: Folder[], accountId: string) {
+function findInboxFolder(folders: Folder[], accountId: string) {
   const candidates = folders.filter((folder) => folder.accountId === accountId);
-  const bySpecial = candidates.find((folder) => {
-    const special = (folder.specialUse ?? "").toLowerCase();
-    return special === "\\junk" || special === "\\spam";
-  });
+  const bySpecial = candidates.find(
+    (folder) => (folder.specialUse ?? "").toLowerCase() === "\\inbox"
+  );
   if (bySpecial) return bySpecial;
-  const byName = candidates.find((folder) =>
-    JUNK_NAMES.includes(folder.name.trim().toLowerCase())
-  );
+  const byName = candidates.find((folder) => folder.name.trim().toLowerCase() === "inbox");
   if (byName) return byName;
-  const byId = candidates.find((folder) =>
-    JUNK_NAMES.some((name) => folder.id.toLowerCase().includes(name))
-  );
-  if (byId) return byId;
-  const byPartial = candidates.find((folder) =>
-    folder.name.toLowerCase().includes("junk") || folder.name.toLowerCase().includes("spam")
-  );
-  if (byPartial) return byPartial;
   return null;
 }
 
@@ -82,8 +63,10 @@ export async function POST(request: Request) {
   }
 
   const folders = await getFolders(payload.accountId);
-  const junkFolder = findJunkFolder(folders, payload.accountId);
-  const junkMailbox = junkFolder ? folderMailboxPath(junkFolder, payload.accountId) : "Junk";
+  const inboxFolder = findInboxFolder(folders, payload.accountId);
+  const inboxMailbox = inboxFolder
+    ? folderMailboxPath(inboxFolder, payload.accountId)
+    : "INBOX";
   const currentMailbox =
     message.mailboxPath || mailboxPathFromFolderId(message.folderId, payload.accountId);
 
@@ -94,23 +77,36 @@ export async function POST(request: Request) {
       await updateImapFlags(account, currentMailbox, message.imapUid, flag, false, clientId);
     }
   }
+  await updateImapFlags(
+    account,
+    currentMailbox,
+    message.imapUid,
+    NONJUNK_KEYWORD,
+    true,
+    clientId
+  );
 
-  await moveImapMessage(account, currentMailbox, message.imapUid, junkMailbox, clientId);
-  if (junkFolder) {
-    await updateMessageFolder(payload.accountId, message.id, junkFolder.id, junkMailbox);
+  await moveImapMessage(account, currentMailbox, message.imapUid, inboxMailbox, clientId);
+  if (inboxFolder) {
+    await updateMessageFolder(payload.accountId, message.id, inboxFolder.id, inboxMailbox);
   }
 
   const cleanedFlags = existingFlags.filter(
     (flag) => !isNonJunkKeyword(flag) && flag.toLowerCase() !== "\\recent"
   );
-  if (cleanedFlags.length !== existingFlags.length) {
-    await updateMessageFlags(payload.accountId, message.id, cleanedFlags);
+  const nextFlags = [...cleanedFlags, NONJUNK_KEYWORD];
+  const flagsChanged =
+    nextFlags.length !== existingFlags.length ||
+    nextFlags.some((flag, index) => flag !== existingFlags[index]);
+  if (flagsChanged) {
+    await updateMessageFlags(payload.accountId, message.id, nextFlags);
   }
+
   return NextResponse.json({
     ok: true,
     action: "moved",
-    junkFolderId: junkFolder?.id ?? null,
-    junkMailbox,
-    flags: cleanedFlags.length !== existingFlags.length ? cleanedFlags : existingFlags
+    inboxFolderId: inboxFolder?.id ?? null,
+    inboxMailbox,
+    flags: nextFlags
   });
 }

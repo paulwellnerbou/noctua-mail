@@ -61,6 +61,7 @@ type UseMessageDeleteActionsOptions = {
     successTitle?: string
   ) => Promise<void>;
   noticeSuccessTimeout: number;
+  onMessagesRemoved?: (messageIds: string[]) => void;
 };
 
 export function useMessageDeleteActions({
@@ -87,7 +88,8 @@ export function useMessageDeleteActions({
   reportError,
   pushNotice,
   undoMoveOperation,
-  noticeSuccessTimeout
+  noticeSuccessTimeout,
+  onMessagesRemoved
 }: UseMessageDeleteActionsOptions) {
   const getMessageSubjectForNotice = useCallback(
     (message?: Message | null) => message?.subject?.trim() || "(no subject)",
@@ -258,6 +260,7 @@ export function useMessageDeleteActions({
       const undoTargets: UndoMoveTarget[] = [];
       let movedToTrashCount = 0;
       let permanentlyDeletedCount = 0;
+      const removedIds: string[] = [];
       const trashFolderId = findTrashFolderId();
       const moveTargets = targets.filter((target) => {
         if (trashFolderId && target.folderId === trashFolderId) return false;
@@ -281,6 +284,7 @@ export function useMessageDeleteActions({
           if (!moveResult) return;
           movedToTrashCount += moveResult.ids.length;
           undoTargets.push(...moveResult.undoTargets);
+          removedIds.push(...moveResult.ids);
         }
         for (const target of hardDeleteTargets) {
           const result = await deleteSingleMessagePermanently(target);
@@ -295,6 +299,7 @@ export function useMessageDeleteActions({
               });
             }
           }
+          removedIds.push(target.id);
         }
         if (activeWasDeleted) {
           if (nextActiveId) {
@@ -310,6 +315,9 @@ export function useMessageDeleteActions({
         }
         await refreshFolders();
         pushDeleteNotice(movedToTrashCount, permanentlyDeletedCount, undoTargets, singleSubject);
+        if (onMessagesRemoved && removedIds.length > 0) {
+          onMessagesRemoved(removedIds);
+        }
       } catch (error) {
         if (error instanceof Error && error.message) {
           reportError(error.message);
@@ -338,7 +346,8 @@ export function useMessageDeleteActions({
       resolveDeleteNextActiveId,
       selectionStore,
       setActiveMessageId,
-      setPendingMessageActions
+      setPendingMessageActions,
+      onMessagesRemoved
     ]
   );
 
