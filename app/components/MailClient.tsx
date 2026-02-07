@@ -131,6 +131,7 @@ function getExceptionDetail(message: string) {
 }
 
 const THREAD_COLLAPSE_SETTLE_MS = 220;
+const SYNC_STATUS_POLL_INTERVAL_MS = 1000;
 
 export default function MailClient() {
   const [accounts, setAccounts] = useState<Account[]>(seedAccounts);
@@ -3510,8 +3511,9 @@ export default function MailClient() {
       return threadMessages;
     };
     const handleKeyDown = (event: KeyboardEvent) => {
-      const key = event.key.toLowerCase();
-      const isDeleteKey = event.key === "Delete" || event.key === "Backspace";
+      const rawKey = typeof event.key === "string" ? event.key : "";
+      const key = rawKey.toLowerCase();
+      const isDeleteKey = rawKey === "Delete" || rawKey === "Backspace";
       const isToggleReadKey =
         key === "r" && !event.metaKey && !event.ctrlKey && !event.altKey;
       if (!isDeleteKey && !isToggleReadKey) return;
@@ -4835,7 +4837,7 @@ export default function MailClient() {
         throw new Error(data.job?.error || "Sync job failed.");
       }
       await new Promise<void>((resolve) => {
-        window.setTimeout(resolve, 300);
+        window.setTimeout(resolve, SYNC_STATUS_POLL_INTERVAL_MS);
       });
     }
     throw new Error("Sync timed out.");

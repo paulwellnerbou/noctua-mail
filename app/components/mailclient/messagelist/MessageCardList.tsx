@@ -223,7 +223,7 @@ export default function MessageCardList({
     };
   }, [scrollRef]);
 
-  const rowHeight = isCompactView ? 60 : 120;
+  const rowHeight = isCompactView ? 60 : 100;
   const groupHeight = isCompactView ? 28 : 32;
   const { ids: selectedMessageIds, activeId: activeMessageId } =
     useSelectionSnapshot(selectionStore);
