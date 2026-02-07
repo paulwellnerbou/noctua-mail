@@ -22,7 +22,7 @@ export default function FolderPane({ state, actions, children }: FolderPaneProps
   const { setFolderQuery, syncAccount, recomputeThreads } = actions;
 
   return (
-    <aside className="pane" style={{ width: leftWidth }}>
+    <aside className={`pane ${styles.pane}`} style={{ width: leftWidth }}>
       <div className={styles.folderPanel}>
         <div className={styles.treeRail}>
           <div className={styles.treeHeader}>

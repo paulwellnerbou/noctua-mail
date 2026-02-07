@@ -356,6 +356,7 @@ export default function MailClient() {
   const lastDeleteReconcileAtRef = useRef<Record<string, number>>({});
   const pendingInboxSyncRef = useRef(false);
   const swRegistrationRef = useRef<ServiceWorkerRegistration | null>(null);
+  const threadPreferenceByFolderRef = useRef<Record<string, boolean>>({});
   const syncStateRef = useRef<{ isSyncing: boolean; syncingFolders: Set<string> }>({
     isSyncing: false,
     syncingFolders: new Set()
@@ -4346,14 +4347,29 @@ export default function MailClient() {
 
   const prevFolderSelectionKeyRef = useRef(`${searchScope}:${activeFolderId}`);
   useEffect(() => {
+    if (searchScope !== "folder" || !activeFolderId) return;
+    const folder = folders.find((item) => item.id === activeFolderId);
+    const special = (folder?.specialUse ?? "").toLowerCase();
+    if (special === "\\sent") return;
+    threadPreferenceByFolderRef.current[activeFolderId] = threadsEnabled;
+  }, [activeFolderId, folders, searchScope, threadsEnabled]);
+
+  useEffect(() => {
     const selectionKey = `${searchScope}:${activeFolderId}`;
     if (prevFolderSelectionKeyRef.current === selectionKey) return;
     prevFolderSelectionKeyRef.current = selectionKey;
-    if (searchScope !== "folder" || !activeFolderId || !threadsEnabled) return;
+    if (searchScope !== "folder" || !activeFolderId) return;
     const folder = folders.find((item) => item.id === activeFolderId);
     const special = (folder?.specialUse ?? "").toLowerCase();
     if (special === "\\sent") {
-      setThreadsEnabled(false);
+      if (threadsEnabled) {
+        setThreadsEnabled(false);
+      }
+      return;
+    }
+    const savedPreference = threadPreferenceByFolderRef.current[activeFolderId];
+    if (typeof savedPreference === "boolean" && savedPreference !== threadsEnabled) {
+      setThreadsEnabled(savedPreference);
     }
   }, [activeFolderId, searchScope, threadsEnabled, folders]);
 

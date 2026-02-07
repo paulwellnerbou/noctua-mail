@@ -1,14 +1,14 @@
 .pane {
   padding: 18px 10px;
   border-right: 1px solid var(--gray-5);
-  background: var(--gray-2);
+  background: var(--gray-1);
   flex-shrink: 0;
   overflow-y: auto;
   scrollbar-gutter: stable;
 }
 
 :global(.dark) .pane {
-  background: var(--gray-3);
+  background: var(--gray-2);
 }
 
 .list {

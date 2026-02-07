@@ -1,3 +1,11 @@
+.pane {
+  background: var(--gray-1);
+}
+
+:global(.dark) .pane {
+  background: var(--gray-2);
+}
+
 .folderPanel {
   display: flex;
   flex-direction: column;
