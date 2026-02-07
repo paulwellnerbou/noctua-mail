@@ -21,6 +21,13 @@
   overflow: visible;
 }
 
+.rowExternalState {
+  border: none;
+  background: transparent;
+  box-shadow: none;
+  border-radius: 0;
+}
+
 .rowDivider::before {
   content: "";
   position: absolute;
@@ -54,9 +61,17 @@
   box-shadow: inset 0 0 0 1px var(--list-row-focus-ring);
 }
 
+.rowExternalState:focus-within {
+  box-shadow: none;
+}
+
 .row:focus-visible {
   outline: 2px solid var(--list-row-focus-ring);
   outline-offset: 2px;
+}
+
+.rowExternalState:focus-visible {
+  outline: none;
 }
 
 .rowSelected {
@@ -83,6 +98,12 @@
 .row:hover {
   border-color: var(--list-row-hover-border);
   background: var(--list-row-hover-bg);
+}
+
+.rowExternalState:hover {
+  border-color: transparent;
+  background: transparent;
+  box-shadow: none;
 }
 
 .rowActive:hover {
@@ -185,6 +206,10 @@
   font-size: 13px;
   font-weight: 400;
   margin-bottom: 0;
+}
+
+.subjectRowExternalCaret {
+  padding-left: 1em;
 }
 
 .subject {

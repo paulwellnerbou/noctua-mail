@@ -9,6 +9,7 @@ import type { Message } from "@/lib/data";
 import { CALENDAR_INVITE_FLAG, hasMessageFlag } from "@/lib/messageFlags";
 import badgeStyles from "../message/MessageBadge.module.css";
 import {
+  buildVisibleThreadRows,
   buildFlatEntries,
   buildThreadGroupEntries,
   getDisplaySeenForThreadRow,
@@ -18,6 +19,7 @@ import {
 } from "./threadGroupUtils";
 import { getMessageListDateDisplay } from "./messageDateDisplay";
 import { useSelectionSnapshot, type SelectionStore } from "./selectionStore";
+import ThreadMarkers from "./ThreadMarkers";
 import groupStyles from "./MessageCardList.module.css";
 import styles from "./MessageThreadList.module.css";
 
@@ -264,90 +266,20 @@ export default function MessageThreadList({
             isCollapsed && threadSize > 1
               ? getCollapsedThreadFromDisplay(fullFlat, userEmail, preferToDisplay)
               : null;
-
-          // Build a map of children for each message
-          const childrenMap = new Map<string, Set<string>>();
-          flat.forEach(({ message, depth }, index) => {
-            if (index === 0) return;
-            // Find parent (previous message with lower depth)
-            for (let i = index - 1; i >= 0; i--) {
-              if (flat[i].depth < depth) {
-                const parentId = flat[i].message.id;
-                if (!childrenMap.has(parentId)) {
-                  childrenMap.set(parentId, new Set());
-                }
-                childrenMap.get(parentId)!.add(message.id);
-                break;
-              }
-            }
+          const visibleRows = buildVisibleThreadRows({
+            flat,
+            collapsedNestedMessages
           });
 
-          // Filter out children of collapsed messages
-          const visibleFlat = flat.filter(({ message }, index) => {
-            if (index === 0) return true;
-            // Check if any ancestor is collapsed
-            for (let i = index - 1; i >= 0; i--) {
-              const ancestor = flat[i];
-              if (ancestor.depth < flat[index].depth) {
-                if (collapsedNestedMessages[ancestor.message.id]) {
-                  return false;
-                }
-              }
-            }
-            return true;
-          });
-
-          // Determine which messages are the last child of their parent
-          const isLastChildOfParent = new Map<number, boolean>();
-          visibleFlat.forEach(({ message, depth }, index) => {
-            if (depth === 0) {
-              // For root messages, check if there's a next root message
-              const hasNextRoot = visibleFlat.slice(index + 1).some(item => item.depth === 0);
-              isLastChildOfParent.set(index, !hasNextRoot);
-            } else {
-              // Find the next sibling (same depth, same parent)
-              let hasNextSibling = false;
-              for (let i = index + 1; i < visibleFlat.length; i++) {
-                if (visibleFlat[i].depth < depth) {
-                  // Reached a shallower level, no more siblings
-                  break;
-                }
-                if (visibleFlat[i].depth === depth) {
-                  // Found a sibling
-                  hasNextSibling = true;
-                  break;
-                }
-              }
-              isLastChildOfParent.set(index, !hasNextSibling);
-            }
-          });
-
-          // Build ancestor paths and determine which ancestors stop vertical lines
-          const ancestorStopsHere = new Map<number, boolean[]>();
-          visibleFlat.forEach(({ message, depth }, index) => {
-            const stops: boolean[] = [];
-
-            // Build the ancestor path by walking backwards through visibleFlat
-            const ancestors: number[] = [];
-            for (let d = depth - 1; d >= 0; d--) {
-              // Find the closest message before this one at depth d
-              for (let i = index - 1; i >= 0; i--) {
-                if (visibleFlat[i].depth === d) {
-                  ancestors.unshift(i);
-                  break;
-                }
-              }
-            }
-
-            // For each ancestor at depth d, check if it's the last child
-            ancestors.forEach((ancestorIndex, d) => {
-              stops[d] = isLastChildOfParent.get(ancestorIndex) ?? false;
-            });
-
-            ancestorStopsHere.set(index, stops);
-          });
-
-          visibleFlat.forEach(({ message, depth }, index) => {
+          visibleRows.forEach((row, index) => {
+            const {
+              message,
+              depth,
+              isLastInDepth,
+              hasChildren,
+              isNestedCollapsed,
+              ancestorStopsHere
+            } = row;
             const folderIds =
               index === 0 && isCollapsed && threadSize > 1
                 ? showThreadFolderBadges
@@ -370,11 +302,6 @@ export default function MessageThreadList({
                     preferToDisplay
                   );
 
-            const isLastInDepth = isLastChildOfParent.get(index) ?? false;
-            const hasChildren = childrenMap.has(message.id) && (childrenMap.get(message.id)?.size ?? 0) > 0;
-            const isNestedCollapsed = collapsedNestedMessages[message.id] ?? false;
-            const stops = ancestorStopsHere.get(index) ?? [];
-
             items.push({
               type: "row",
               key: message.id,
@@ -395,7 +322,7 @@ export default function MessageThreadList({
               isLastInDepth,
               hasChildren,
               isNestedCollapsed,
-              ancestorStopsHere: stops
+              ancestorStopsHere
             });
             if (isFirstRow) isFirstRow = false;
           });
@@ -627,20 +554,23 @@ export default function MessageThreadList({
           .filter(Boolean)
           .join(" ");
 
-        // Render thread markers for nested messages
-        const threadMarkers = [];
-
-        // For root messages (depth 0) that are thread starters, add caret
-        if (item.depth === 0 && item.threadIndex === 0 && item.threadSize > 1) {
-          threadMarkers.push(
-            <div key="root-caret" className={styles.rootCaretContainer}>
-              <span
-                className={`${styles.threadCaret} ${
-                  item.isCollapsed ? "" : styles.threadCaretOpen
-                }`}
-                title={item.isCollapsed ? "Expand thread" : "Collapse thread"}
-                onClick={(event) => {
-                  event.stopPropagation();
+        return (
+          <div
+            key={`row-${item.key}`}
+            className={`${styles.virtualItem} ${shouldAnimateRow ? styles.rowEnter : ""}`}
+            style={{ transform: `translateY(${top}px)`, height: rowHeight }}
+          >
+            <div className={rowContainerClassName}>
+              <ThreadMarkers
+                depth={item.depth}
+                threadIndex={item.threadIndex}
+                threadSize={item.threadSize}
+                isCollapsed={item.isCollapsed}
+                isLastInDepth={item.isLastInDepth}
+                hasChildren={item.hasChildren}
+                isNestedCollapsed={item.isNestedCollapsed}
+                ancestorStopsHere={item.ancestorStopsHere}
+                onToggleThread={() => {
                   const willOpen = item.isCollapsed;
                   lastThreadToggleRef.current = {
                     key: item.threadGroupId,
@@ -652,79 +582,19 @@ export default function MessageThreadList({
                     [item.threadGroupId]: !item.isCollapsed
                   }));
                 }}
-              >
-                <CaretRightIcon />
-              </span>
-            </div>
-          );
-        }
-
-        // For nested messages (depth > 0), add parent markers and connectors
-        for (let d = 0; d < item.depth; d++) {
-          const isLast = d === item.depth - 1;
-          const shouldUseCorner = isLast && item.isLastInDepth;
-          // Marker at position d should check if ancestor at depth d+1 is the last child
-          const hideVerticalLine = !isLast && (item.ancestorStopsHere[d + 1] ?? false);
-
-          if (isLast) {
-            // Last marker shows the horizontal connector
-            threadMarkers.push(
-              <div
-                key={`marker-${d}`}
-                className={`${styles.threadMarkerWithCaret} ${
-                  shouldUseCorner ? styles.threadMarkerLast : ""
-                }`}
+                onToggleNested={() => {
+                  const willOpen = item.isNestedCollapsed;
+                  lastNestedToggleRef.current = {
+                    key: message.id,
+                    open: willOpen,
+                    at: Date.now()
+                  };
+                  setCollapsedNestedMessages((prev) => ({
+                    ...prev,
+                    [message.id]: !item.isNestedCollapsed
+                  }));
+                }}
               />
-            );
-          } else {
-            // Parent markers only show vertical lines
-            threadMarkers.push(
-              <div
-                key={`marker-${d}`}
-                className={`${styles.threadMarker} ${
-                  hideVerticalLine ? styles.threadMarkerNoVertical : ""
-                }`}
-              />
-            );
-          }
-        }
-
-        // Add caret after markers for nested messages with children
-        if (item.depth > 0 && item.hasChildren) {
-          threadMarkers.push(
-            <span
-              key="nested-caret"
-              className={`${styles.nestedThreadCaret} ${
-                item.isNestedCollapsed ? "" : styles.nestedThreadCaretOpen
-              }`}
-              title={item.isNestedCollapsed ? "Expand" : "Collapse"}
-              onClick={(event) => {
-                event.stopPropagation();
-                const willOpen = item.isNestedCollapsed;
-                lastNestedToggleRef.current = {
-                  key: message.id,
-                  open: willOpen,
-                  at: Date.now()
-                };
-                setCollapsedNestedMessages((prev) => ({
-                  ...prev,
-                  [message.id]: !item.isNestedCollapsed
-                }));
-              }}
-            >
-              <CaretRightIcon />
-            </span>
-          );
-        }
-
-        return (
-          <div
-            key={`row-${item.key}`}
-            className={`${styles.virtualItem} ${shouldAnimateRow ? styles.rowEnter : ""}`}
-            style={{ transform: `translateY(${top}px)`, height: rowHeight }}
-          >
-            <div className={rowContainerClassName}>
-              {threadMarkers}
               <div
                 className={styles.row}
                 role="button"

@@ -150,3 +150,15 @@
   right: 0;
   will-change: transform;
 }
+
+.compactThreadRow {
+  display: flex;
+  align-items: stretch;
+  height: 100%;
+  width: 100%;
+}
+
+.compactThreadRow > :last-child {
+  flex: 1 1 auto;
+  min-width: 0;
+}

@@ -13,6 +13,8 @@ import styles from "./MessageRow.module.css";
 type MessageRowProps = {
   message: Message;
   isCompactView: boolean;
+  useExternalStateStyles?: boolean;
+  subjectLeftPaddingForExternalCaret?: boolean;
   listIsNarrow: boolean;
   displaySeen?: boolean;
   isActive: boolean;
@@ -60,6 +62,8 @@ type MessageRowProps = {
 function MessageRow({
   message,
   isCompactView,
+  useExternalStateStyles = false,
+  subjectLeftPaddingForExternalCaret = false,
   listIsNarrow,
   displaySeen,
   isActive,
@@ -112,13 +116,14 @@ function MessageRow({
   const rowClassName = [
     styles.row,
     isCompactView ? styles.rowCompact : "",
-    showCompactDivider ? styles.rowDivider : "",
-    isThreadSibling ? styles.rowThreadSibling : "",
-    effectiveActive && !showCollapsedActive ? styles.rowActive : "",
-    effectiveSelected ? styles.rowSelected : "",
-    isDragging ? styles.rowDragging : "",
-    isDisabled ? styles.rowDisabled : "",
-    showCollapsedActive ? styles.rowActiveThreadRoot : ""
+    useExternalStateStyles ? styles.rowExternalState : "",
+    !useExternalStateStyles && showCompactDivider ? styles.rowDivider : "",
+    !useExternalStateStyles && isThreadSibling ? styles.rowThreadSibling : "",
+    !useExternalStateStyles && effectiveActive && !showCollapsedActive ? styles.rowActive : "",
+    !useExternalStateStyles && effectiveSelected ? styles.rowSelected : "",
+    !useExternalStateStyles && isDragging ? styles.rowDragging : "",
+    !useExternalStateStyles && isDisabled ? styles.rowDisabled : "",
+    !useExternalStateStyles && showCollapsedActive ? styles.rowActiveThreadRoot : ""
   ]
     .filter(Boolean)
     .join(" ");
@@ -136,7 +141,8 @@ function MessageRow({
     .join(" ");
   const subjectClassName = [
     styles.subjectRow,
-    isCompactView ? styles.subjectRowCompact : ""
+    isCompactView ? styles.subjectRowCompact : "",
+    subjectLeftPaddingForExternalCaret ? styles.subjectRowExternalCaret : ""
   ]
     .filter(Boolean)
     .join(" ");
@@ -401,6 +407,8 @@ function MessageRow({
 const areEqual = (prev: MessageRowProps, next: MessageRowProps) =>
   prev.message === next.message &&
   prev.isCompactView === next.isCompactView &&
+  prev.useExternalStateStyles === next.useExternalStateStyles &&
+  prev.subjectLeftPaddingForExternalCaret === next.subjectLeftPaddingForExternalCaret &&
   prev.listIsNarrow === next.listIsNarrow &&
   prev.isActive === next.isActive &&
   prev.isThreadChild === next.isThreadChild &&

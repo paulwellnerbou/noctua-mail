@@ -201,6 +201,15 @@ export type FlatMessageEntry = {
   folderIds: string[];
 };
 
+export type VisibleThreadRow = {
+  message: Message;
+  depth: number;
+  isLastInDepth: boolean;
+  hasChildren: boolean;
+  isNestedCollapsed: boolean;
+  ancestorStopsHere: boolean[];
+};
+
 export function isCollapsedThreadRootRow(params: {
   isCollapsed: boolean;
   threadSize: number;
@@ -306,4 +315,83 @@ export function buildFlatEntries(params: {
         : [];
     return { message, threadGroupId, folderIds };
   });
+}
+
+export function buildVisibleThreadRows(params: {
+  flat: Array<{ message: Message; depth: number }>;
+  collapsedNestedMessages: Record<string, boolean>;
+}): VisibleThreadRow[] {
+  const { flat, collapsedNestedMessages } = params;
+  if (flat.length === 0) return [];
+
+  const childrenMap = new Map<string, Set<string>>();
+  flat.forEach(({ message, depth }, index) => {
+    if (index === 0) return;
+    for (let i = index - 1; i >= 0; i--) {
+      if (flat[i].depth < depth) {
+        const parentId = flat[i].message.id;
+        if (!childrenMap.has(parentId)) {
+          childrenMap.set(parentId, new Set());
+        }
+        childrenMap.get(parentId)!.add(message.id);
+        break;
+      }
+    }
+  });
+
+  const visibleFlat = flat.filter((_, index) => {
+    if (index === 0) return true;
+    const depth = flat[index].depth;
+    for (let i = index - 1; i >= 0; i--) {
+      if (flat[i].depth < depth && collapsedNestedMessages[flat[i].message.id]) {
+        return false;
+      }
+    }
+    return true;
+  });
+
+  const isLastChildOfParent = new Map<number, boolean>();
+  visibleFlat.forEach(({ depth }, index) => {
+    if (depth === 0) {
+      const hasNextRoot = visibleFlat.slice(index + 1).some((item) => item.depth === 0);
+      isLastChildOfParent.set(index, !hasNextRoot);
+      return;
+    }
+    let hasNextSibling = false;
+    for (let i = index + 1; i < visibleFlat.length; i++) {
+      if (visibleFlat[i].depth < depth) break;
+      if (visibleFlat[i].depth === depth) {
+        hasNextSibling = true;
+        break;
+      }
+    }
+    isLastChildOfParent.set(index, !hasNextSibling);
+  });
+
+  const ancestorStopsHere = new Map<number, boolean[]>();
+  visibleFlat.forEach(({ depth }, index) => {
+    const stops: boolean[] = [];
+    const ancestors: number[] = [];
+    for (let d = depth - 1; d >= 0; d--) {
+      for (let i = index - 1; i >= 0; i--) {
+        if (visibleFlat[i].depth === d) {
+          ancestors.unshift(i);
+          break;
+        }
+      }
+    }
+    ancestors.forEach((ancestorIndex, d) => {
+      stops[d] = isLastChildOfParent.get(ancestorIndex) ?? false;
+    });
+    ancestorStopsHere.set(index, stops);
+  });
+
+  return visibleFlat.map(({ message, depth }, index) => ({
+    message,
+    depth,
+    isLastInDepth: isLastChildOfParent.get(index) ?? false,
+    hasChildren: (childrenMap.get(message.id)?.size ?? 0) > 0,
+    isNestedCollapsed: collapsedNestedMessages[message.id] ?? false,
+    ancestorStopsHere: ancestorStopsHere.get(index) ?? []
+  }));
 }
