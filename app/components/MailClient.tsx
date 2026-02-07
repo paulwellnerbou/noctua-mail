@@ -165,6 +165,7 @@ export default function MailClient() {
   const [editingAccount, setEditingAccount] = useState<Account | null>(null);
   const [isSyncing, setIsSyncing] = useState(false);
   const [isRecomputingThreads, setIsRecomputingThreads] = useState(false);
+  const [isRecomputingCategories, setIsRecomputingCategories] = useState(false);
   const [leftWidth, setLeftWidth] = useState(270);
   const [listWidth, setListWidth] = useState(840);
   const [dragging, setDragging] = useState<"left" | "list" | null>(null);
@@ -311,6 +312,7 @@ export default function MailClient() {
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [refreshingMessages, setRefreshingMessages] = useState(false);
   const [messageListError, setMessageListError] = useState<string | null>(null);
+  const filteredSearchRefreshTimerRef = useRef<number | null>(null);
   const lastRequestRef = useRef<{ key: string; page: number } | null>(null);
   const currentKeyRef = useRef("");
   const [loadingSource, setLoadingSource] = useState<Record<string, boolean>>({});
@@ -344,9 +346,11 @@ export default function MailClient() {
     unanswered: false,
     flagged: false,
     todo: false,
-    pinned: false,
     calendar: false,
-    attachments: false
+    attachments: false,
+    newsletter: false,
+    notification: false,
+    transactional: false
   });
   const [relatedContext, setRelatedContext] = useState<{
     id: string;
@@ -360,6 +364,9 @@ export default function MailClient() {
   const recomputePollTimerRef = useRef<number | null>(null);
   const recomputePollInFlightRef = useRef(false);
   const recomputeJobIdRef = useRef<string | null>(null);
+  const categoryRecomputePollTimerRef = useRef<number | null>(null);
+  const categoryRecomputePollInFlightRef = useRef(false);
+  const categoryRecomputeJobIdRef = useRef<string | null>(null);
   const [mailCheckMode, setMailCheckMode] = useState<"idle" | "polling">("polling");
   const [streamMode, setStreamMode] = useState<"stream" | "polling" | "idle">("polling");
   const pendingJumpMessageIdRef = useRef<string | null>(null);
@@ -572,6 +579,8 @@ export default function MailClient() {
     () => selectedSearchBadges.map((key) => getSearchBadgeLabel(key)),
     [selectedSearchBadges]
   );
+  const hasFilteredSearchCriteria =
+    isRelatedSearch || trimmedQuery.length > 0 || selectedSearchBadges.length > 0;
 
   const selectRangeTo = useCallback((messageId: string) => {
     const lastSelected = lastSelectedIdRef.current;
@@ -608,6 +617,9 @@ export default function MailClient() {
     return () => {
       if (composeBodyDebounceRef.current) {
         clearTimeout(composeBodyDebounceRef.current);
+      }
+      if (filteredSearchRefreshTimerRef.current !== null) {
+        window.clearTimeout(filteredSearchRefreshTimerRef.current);
       }
     };
   }, []);
@@ -762,9 +774,11 @@ export default function MailClient() {
       unanswered: false,
       flagged: false,
       todo: false,
-      pinned: false,
       calendar: false,
-      attachments: false
+      attachments: false,
+      newsletter: false,
+      notification: false,
+      transactional: false
     });
     setSearchFields({
       sender: true,
@@ -1067,13 +1081,14 @@ export default function MailClient() {
     }));
   };
 
-  const isPinnedMessage = (message: Message) =>
-    message.flags?.some((flag) => flag.toLowerCase() === "pinned") ?? false;
+  const isFlaggedMessage = (message: Message) =>
+    Boolean(message.flagged) ||
+    (message.flags?.some((flag) => flag.toLowerCase() === "\\flagged") ?? false);
   const renderSelectIndicators = (message: Message) => (
     <MessageSelectIndicators
-      isPinned={isPinnedMessage(message)}
+      isFlagged={isFlaggedMessage(message)}
       isDraft={Boolean(message.draft)}
-      onPinnedClick={() => togglePinnedFlag(message)}
+      onFlaggedClick={() => toggleFlaggedFlag(message)}
     />
   );
 
@@ -1775,10 +1790,10 @@ export default function MailClient() {
       buildThreadTree(base).forEach((root) => {
         const flat = flattenThread(root, 0);
         if (!flat.length) return;
-        const hasPinned = flat.some(({ message }) => isPinnedMessage(message));
-        if (hasPinned) {
+        const hasFlagged = flat.some(({ message }) => isFlaggedMessage(message));
+        if (hasFlagged) {
           flat.forEach(({ message }) => {
-            threadGroupKey.set(message.id, "Pinned");
+            threadGroupKey.set(message.id, "Flagged");
           });
           return;
         }
@@ -1795,20 +1810,20 @@ export default function MailClient() {
     base.forEach((message) => {
       const key = supportsThreads
         ? threadGroupKey.get(message.id) ?? message.groupKey ?? "Other"
-        : isPinnedMessage(message)
-          ? "Pinned"
+        : isFlaggedMessage(message)
+          ? "Flagged"
           : message.groupKey ?? "Other";
       if (!groups.has(key)) groups.set(key, []);
       groups.get(key)!.push(message);
     });
     const meta = groupMeta.length ? groupMeta : computeGroupMeta(base);
-    // Keep the Pinned header count aligned with non-threaded grouping:
-    // count pinned messages only, not every message inside pinned threads.
-    const pinnedCount = base.filter((message) => isPinnedMessage(message)).length;
-    const orderedMeta = pinnedCount > 0
+    // Keep the Flagged header count aligned with non-threaded grouping:
+    // count flagged messages only, not every message inside flagged threads.
+    const flaggedCount = base.filter((message) => isFlaggedMessage(message)).length;
+    const orderedMeta = flaggedCount > 0
       ? [
-          { key: "Pinned", label: "Pinned", count: pinnedCount },
-          ...meta.filter((group) => group.key !== "Pinned")
+          { key: "Flagged", label: "Flagged", count: flaggedCount },
+          ...meta.filter((group) => group.key !== "Flagged")
         ]
       : meta;
     return orderedMeta.map((group) => ({
@@ -3173,7 +3188,6 @@ export default function MailClient() {
       pendingMessageActions={pendingMessageActions}
       openCompose={openCompose}
       updateFlagState={updateFlagState}
-      togglePinnedFlag={togglePinnedFlag}
       toggleTodoFlag={toggleTodoFlag}
       handleMarkSpam={handleMarkSpam}
       handleMarkNotSpam={handleMarkNotSpam}
@@ -3245,6 +3259,7 @@ export default function MailClient() {
           })
         );
       }
+      queueFilteredSearchRefresh();
     } catch {
       reportError("Failed to update message flag.");
     }
@@ -3290,6 +3305,7 @@ export default function MailClient() {
         )
       );
       updateThreadCacheWithFlags(message.id, data.flags);
+      queueFilteredSearchRefresh();
     } catch {
       reportError("Failed to update message keyword.");
     }
@@ -3363,51 +3379,14 @@ export default function MailClient() {
         )
       );
       updateThreadCacheWithFlags(message.id, data.flags);
+      queueFilteredSearchRefresh();
     } catch {
       reportError("Failed to update To-Do flag.");
     }
   };
 
-  const togglePinnedFlag = async (message: Message) => {
-    const hasPinned =
-      message.flags?.some((flag) => flag.toLowerCase() === "pinned") ?? false;
-    try {
-      const res = await apiFetch("/api/message/flags", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          accountId: activeAccountId,
-          messageId: message.id,
-          keyword: "Pinned",
-          value: !hasPinned
-        })
-      });
-      if (!res.ok) {
-        reportError(await readErrorMessage(res));
-        return;
-      }
-      const data = (await res.json()) as { flags: string[] };
-      setMessages((prev) =>
-        prev.map((item) =>
-          item.id === message.id
-            ? {
-                ...item,
-                flags: data.flags,
-                seen: data.flags.some((f) => f.toLowerCase() === "\\seen"),
-                answered: data.flags.some((f) => f.toLowerCase() === "\\answered"),
-                flagged: data.flags.some((f) => f.toLowerCase() === "\\flagged"),
-                deleted: data.flags.some((f) => f.toLowerCase() === "\\deleted"),
-                draft: data.flags.some((f) => f.toLowerCase() === "\\draft"),
-                recent: data.flags.some((f) => f.toLowerCase() === "\\recent"),
-                unread: !data.flags.some((f) => f.toLowerCase() === "\\seen")
-              }
-            : item
-        )
-      );
-      updateThreadCacheWithFlags(message.id, data.flags);
-    } catch {
-      reportError("Failed to update Pinned flag.");
-    }
+  const toggleFlaggedFlag = async (message: Message) => {
+    await updateFlagState(message, "flagged", !isFlaggedMessage(message));
   };
 
   const buildDragPreview = (dragMessages: Message[]) => {
@@ -3512,14 +3491,14 @@ export default function MailClient() {
     );
     handleSelectMessage(latest.message, { preserveSelection: true });
   };
-  const activatePinnedInThread = (flat: { message: Message; depth: number }[]) => {
+  const activateFlaggedInThread = (flat: { message: Message; depth: number }[]) => {
     if (!flat.length) return;
-    const pinned = flat.find((item) => isPinnedMessage(item.message));
-    if (!pinned) {
+    const flagged = flat.find((item) => isFlaggedMessage(item.message));
+    if (!flagged) {
       activateLatestInThread(flat);
       return;
     }
-    handleSelectMessage(pinned.message, { preserveSelection: true });
+    handleSelectMessage(flagged.message, { preserveSelection: true });
   };
   const selectCollapsedThread = (
     flat: { message: Message; depth: number }[],
@@ -4784,6 +4763,15 @@ export default function MailClient() {
     }
   };
 
+  const queueFilteredSearchRefresh = () => {
+    if (!hasFilteredSearchCriteria) return;
+    if (filteredSearchRefreshTimerRef.current !== null) return;
+    filteredSearchRefreshTimerRef.current = window.setTimeout(() => {
+      filteredSearchRefreshTimerRef.current = null;
+      void refreshMailboxData();
+    }, 120);
+  };
+
   const handleNoticeOpen = (notice: InAppNotice) => {
     const jumpTarget = notice.messageId ?? notice.ids?.[0];
     if (jumpTarget) {
@@ -5125,11 +5113,21 @@ export default function MailClient() {
     recomputeJobIdRef.current = null;
   }, []);
 
+  const stopCategoryRecomputePoll = useCallback(() => {
+    if (categoryRecomputePollTimerRef.current) {
+      window.clearTimeout(categoryRecomputePollTimerRef.current);
+      categoryRecomputePollTimerRef.current = null;
+    }
+    categoryRecomputePollInFlightRef.current = false;
+    categoryRecomputeJobIdRef.current = null;
+  }, []);
+
   useEffect(() => {
     return () => {
       stopRecomputePoll();
+      stopCategoryRecomputePoll();
     };
-  }, [stopRecomputePoll]);
+  }, [stopRecomputePoll, stopCategoryRecomputePoll]);
 
   const recomputeThreads = async () => {
     if (!activeAccountId) return;
@@ -5200,6 +5198,78 @@ export default function MailClient() {
     } catch {
       reportError("Thread recompute failed due to a network error.");
       setIsRecomputingThreads(false);
+    }
+  };
+
+  const recomputeCategories = async () => {
+    if (!activeAccountId) return;
+    stopCategoryRecomputePoll();
+    setIsRecomputingCategories(true);
+    try {
+      const res = await apiFetch("/api/categories/recompute", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ accountId: activeAccountId })
+      });
+      if (!res.ok) {
+        reportError(await readErrorMessage(res));
+        setIsRecomputingCategories(false);
+        return;
+      }
+      const data = (await res.json()) as { jobId?: string };
+      if (!data?.jobId) {
+        reportError("Category recompute did not return a job id.");
+        setIsRecomputingCategories(false);
+        return;
+      }
+      const jobId = data.jobId;
+      categoryRecomputeJobIdRef.current = jobId;
+
+      const pollOnce = async () => {
+        if (categoryRecomputePollInFlightRef.current) return;
+        if (categoryRecomputeJobIdRef.current !== jobId) return;
+        categoryRecomputePollInFlightRef.current = true;
+        try {
+          const statusRes = await apiFetch(
+            `/api/categories/recompute/status?jobId=${encodeURIComponent(jobId)}`
+          );
+          if (!statusRes.ok) {
+            reportError(await readErrorMessage(statusRes));
+            stopCategoryRecomputePoll();
+            setIsRecomputingCategories(false);
+            return;
+          }
+          const statusData = (await statusRes.json()) as {
+            job?: { status?: string; error?: string };
+          };
+          const status = statusData?.job?.status;
+          if (status === "done") {
+            stopCategoryRecomputePoll();
+            setIsRecomputingCategories(false);
+            await refreshMailboxData();
+            return;
+          }
+          if (status === "failed") {
+            reportError(statusData?.job?.error || "Category recompute failed.");
+            stopCategoryRecomputePoll();
+            setIsRecomputingCategories(false);
+            return;
+          }
+        } catch {
+          reportError("Failed to check category recompute status.");
+          stopCategoryRecomputePoll();
+          setIsRecomputingCategories(false);
+          return;
+        } finally {
+          categoryRecomputePollInFlightRef.current = false;
+        }
+        categoryRecomputePollTimerRef.current = window.setTimeout(pollOnce, 1000);
+      };
+
+      void pollOnce();
+    } catch {
+      reportError("Category recompute failed due to a network error.");
+      setIsRecomputingCategories(false);
     }
   };
 
@@ -5852,12 +5922,14 @@ export default function MailClient() {
             leftWidth,
             folderQuery,
             accountFolderCount: accountFolders.length,
-            isRecomputingThreads
+            isRecomputingThreads,
+            isRecomputingCategories
           }}
           actions={{
             setFolderQuery,
             syncAccount,
-            recomputeThreads
+            recomputeThreads,
+            recomputeCategories
           }}
         >
           <FolderTree
@@ -6061,7 +6133,8 @@ export default function MailClient() {
                   selectRangeTo,
                   toggleMessageSelection,
                   selectCollapsedThread,
-                  handleDeleteMessage
+                  handleDeleteMessage,
+                  toggleFlaggedFlag
                 }}
                 helpers={{
                   buildThreadTree,
@@ -6105,7 +6178,8 @@ export default function MailClient() {
                   selectRangeTo,
                   toggleMessageSelection,
                   selectCollapsedThread,
-                  handleDeleteMessage
+                  handleDeleteMessage,
+                  toggleFlaggedFlag
                 }}
                 helpers={{
                   buildThreadTree,
@@ -6255,7 +6329,7 @@ export default function MailClient() {
                       setSearchScope,
                       setActiveFolderId,
                       getImapFlagBadges,
-                      togglePinnedFlag,
+                      toggleFlaggedFlag,
                       isDraftMessage,
                       openCompose,
                       renderQuickActions,

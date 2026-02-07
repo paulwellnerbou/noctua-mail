@@ -62,7 +62,6 @@ export function getImapFlagBadges(message: Message): ImapFlagBadge[] {
       if (lower === "\\deleted") kind = "deleted";
       if (lower === "\\draft") kind = "draft";
       if (lower === "\\recent") kind = "new";
-      if (lower === "pinned") kind = "pinned";
       if (isForwarded) kind = "forwarded";
       if (isCalendarInvite) kind = "calendar";
       return { label, kind };
@@ -71,5 +70,17 @@ export function getImapFlagBadges(message: Message): ImapFlagBadge[] {
   if (hasForwardedHeader && !badges.some((badge) => badge.kind === "forwarded")) {
     badges.unshift({ label: "Forwarded", kind: "forwarded" });
   }
+
+  // Add category badge if message is categorized
+  if (message.category) {
+    const categoryLabels: Record<string, string> = {
+      newsletter: "📰 Newsletter",
+      notification: "🔔 Notification",
+      transactional: "🧾 Transactional"
+    };
+    const label = categoryLabels[message.category] || message.category;
+    badges.push({ label, kind: `category-${message.category}` });
+  }
+
   return badges;
 }

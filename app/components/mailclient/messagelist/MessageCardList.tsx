@@ -46,7 +46,7 @@ type ListRowItem = {
   threadGroupId: string;
   threadSize: number;
   isCollapsed: boolean;
-  isPinnedGroup: boolean;
+  isFlaggedGroup: boolean;
   threadIndex: number;
   fullFlat: Array<{ message: Message; depth: number }>;
   folderIds: string[];
@@ -113,6 +113,7 @@ type MessageCardListProps = {
       target: Message
     ) => void;
     handleDeleteMessage: (message: Message) => void;
+    toggleFlaggedFlag: (message: Message) => void;
   };
   helpers: {
     buildThreadTree: (items: Message[]) => ThreadNode[];
@@ -175,7 +176,8 @@ export default function MessageCardList({
     selectRangeTo,
     toggleMessageSelection,
     selectCollapsedThread,
-    handleDeleteMessage
+    handleDeleteMessage,
+    toggleFlaggedFlag
   } = actions;
 
 
@@ -351,7 +353,7 @@ export default function MessageCardList({
               threadGroupId,
               threadSize,
               isCollapsed,
-              isPinnedGroup: group.key === "Pinned",
+              isFlaggedGroup: group.key === "Flagged",
               threadIndex: index,
               fullFlat,
               folderIds,
@@ -393,7 +395,7 @@ export default function MessageCardList({
           threadGroupId,
           threadSize: 1,
           isCollapsed: false,
-          isPinnedGroup: false,
+          isFlaggedGroup: false,
           threadIndex: 0,
           fullFlat: [{ message, depth: 0 }],
           folderIds,
@@ -463,7 +465,7 @@ export default function MessageCardList({
         const top = offsets[index] ?? 0;
         if (item.type === "group") {
           const group = item.group;
-          const isPinned = group.key === "Pinned";
+          const isFlagged = group.key === "Flagged";
           const isCollapsed = collapsedGroups[group.key];
           const count =
             group.items.length === 0 ? 0 : group.count ?? group.items.length;
@@ -489,7 +491,7 @@ export default function MessageCardList({
                 <button
                   type="button"
                   className={`${styles.groupTitle} ${styles.groupToggle} ${
-                    isPinned ? styles.groupTitlePinned : ""
+                    isFlagged ? styles.groupTitleFlagged : ""
                   }`}
                 >
                   <span className={styles.groupCaret}>
@@ -610,6 +612,32 @@ export default function MessageCardList({
           isNestedCollapsed: item.isNestedCollapsed,
           fullFlat: item.fullFlat
         });
+
+        // Calculate badge union for collapsed threads
+        const threadBadgeUnion = isCollapsedThreadRoot
+          ? (() => {
+              const categories = new Set<string>();
+              let hasFlagged = false;
+              let hasAttachments = false;
+              let hasCalendar = false;
+              item.fullFlat.forEach(({ message: msg }) => {
+                if (msg.category) categories.add(msg.category);
+                if (msg.flagged) hasFlagged = true;
+                const nonInlineAttachments = msg.attachments?.filter((att) => !att.inline) ?? [];
+                if (nonInlineAttachments.length > 0) {
+                  const allCalendar = nonInlineAttachments.every(isCalendarAttachment);
+                  if (!allCalendar) hasAttachments = true;
+                }
+                if (hasMessageFlag(msg.flags, CALENDAR_INVITE_FLAG)) hasCalendar = true;
+              });
+              return {
+                threadCategories: Array.from(categories),
+                threadHasFlagged: hasFlagged,
+                threadHasAttachments: hasAttachments,
+                threadHasCalendar: hasCalendar
+              };
+            })()
+          : { threadCategories: undefined, threadHasFlagged: undefined, threadHasAttachments: undefined, threadHasCalendar: undefined };
 
         return (
           <div
@@ -776,6 +804,20 @@ export default function MessageCardList({
                   Boolean(message.recent) &&
                   !Boolean(message.draft)
                 }
+                categoryIcon={(() => {
+                  const categoryIcons: Record<string, string> = {
+                    newsletter: "📰",
+                    marketing: "🏷️",
+                    notification: "🔔",
+                    transactional: "🧾"
+                  };
+                  return message.category ? categoryIcons[message.category] : undefined;
+                })()}
+                toggleFlaggedFlag={toggleFlaggedFlag}
+                threadCategories={threadBadgeUnion.threadCategories}
+                threadHasFlagged={threadBadgeUnion.threadHasFlagged}
+                threadHasAttachments={threadBadgeUnion.threadHasAttachments}
+                threadHasCalendar={threadBadgeUnion.threadHasCalendar}
               />
             </div>
           </div>

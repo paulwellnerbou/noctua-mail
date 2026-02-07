@@ -4,6 +4,7 @@ import tls from "tls";
 import { getAccounts, getFolders, getMailboxState, saveMailboxState } from "@/lib/db";
 import { getImapLogger, logImapOp } from "@/lib/mail/imapLogger";
 import { registerStream } from "@/lib/mail/imapStreamRegistry";
+import { normalizeImapFlags } from "@/lib/messageFlags";
 import { requireSessionOr401 } from "@/lib/auth";
 
 type EnvelopeAddress = { name?: string | null; mailbox?: string | null; host?: string | null };
@@ -300,7 +301,11 @@ export async function GET(request: Request) {
         client.on("flags", (info) => {
           const uid = info?.uid;
           if (!uid) return;
-          send("flags:update", { folderId: folder.id, uid, flags: Array.from(info.flags ?? []) });
+          send("flags:update", {
+            folderId: folder.id,
+            uid,
+            flags: normalizeImapFlags(Array.from(info.flags ?? []))
+          });
         });
 
         const idleLoop = async () => {

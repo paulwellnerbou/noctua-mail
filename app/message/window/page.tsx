@@ -188,15 +188,6 @@ export default function MessageWindowPage() {
     [runMessageFlagRequest]
   );
 
-  const togglePinnedFlag = useCallback(
-    async (target: Message) => {
-      const hasPinned =
-        target.flags?.some((flag) => flag.toLowerCase() === "pinned") ?? false;
-      await runMessageFlagRequest(target, { keyword: "Pinned", value: !hasPinned });
-    },
-    [runMessageFlagRequest]
-  );
-
   const handleOpenHtmlInNewWindow = useCallback((target: Message) => {
     const params = new URLSearchParams({
       accountId: target.accountId,
@@ -308,6 +299,8 @@ export default function MessageWindowPage() {
               supportsThreads={false}
               threadContentById={{}}
               threadContentLoading={null}
+              composeReplyMessageId={null}
+              renderComposeInlineCard={null}
               messageCardProps={{
                 messageRefs,
                 pendingMessageActions,
@@ -319,6 +312,9 @@ export default function MessageWindowPage() {
                 setSearchScope: noop as React.Dispatch<React.SetStateAction<"folder" | "all">>,
                 setActiveFolderId: noop as React.Dispatch<React.SetStateAction<string>>,
                 getImapFlagBadges,
+                toggleFlaggedFlag: (target) => {
+                  void updateFlagState(target, "flagged", !Boolean(target.flagged));
+                },
                 isDraftMessage: (target) => Boolean(target.draft),
                 openCompose: noop as (mode: ComposeMode, message?: Message) => void,
                 renderQuickActions: (target) => (
@@ -357,9 +353,9 @@ export default function MessageWindowPage() {
                     pendingMessageActions={pendingMessageActions}
                     openCompose={noop}
                     updateFlagState={updateFlagState}
-                    togglePinnedFlag={togglePinnedFlag}
                     toggleTodoFlag={noop}
                     handleMarkSpam={noop}
+                    handleMarkNotSpam={noop}
                     handleArchiveMessage={noop}
                     handleDeleteMessage={noop}
                     handleDownloadEml={handleDownloadEml}
@@ -368,6 +364,7 @@ export default function MessageWindowPage() {
                     handleOpenHtmlInNewWindow={handleOpenHtmlInNewWindow}
                     onShowRelated={noop}
                     isTrashFolder={() => false}
+                    isSpamFolder={() => false}
                     onOpenChange={onOpenChange}
                   />
                 ),
@@ -389,8 +386,6 @@ export default function MessageWindowPage() {
                 messageByMessageId: new Map(
                   safeMessage.messageId ? [[safeMessage.messageId, safeMessage]] : []
                 ),
-                copyStatus,
-                triggerCopy,
                 getPrimaryEmail,
                 extractEmails
               }}

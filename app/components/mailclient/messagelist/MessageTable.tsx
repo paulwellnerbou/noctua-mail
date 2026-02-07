@@ -47,7 +47,7 @@ type ListRowItem = {
   threadGroupId: string;
   threadSize: number;
   isCollapsed: boolean;
-  isPinnedGroup: boolean;
+  isFlaggedGroup: boolean;
   threadIndex: number;
   fullFlat: Array<{ message: Message; depth: number }>;
   folderIds: string[];
@@ -343,7 +343,7 @@ export default function MessageTable({
               threadGroupId,
               threadSize,
               isCollapsed,
-              isPinnedGroup: group.key === "Pinned",
+              isFlaggedGroup: group.key === "Flagged",
               threadIndex: index,
               fullFlat,
               folderIds,
@@ -381,7 +381,7 @@ export default function MessageTable({
           threadGroupId,
           threadSize: 1,
           isCollapsed: false,
-          isPinnedGroup: false,
+          isFlaggedGroup: false,
           threadIndex: 0,
           fullFlat: [{ message, depth: 0 }],
           folderIds,
@@ -504,7 +504,7 @@ export default function MessageTable({
           const top = offsets[index] ?? 0;
           if (item.type === "group") {
             const group = item.group;
-            const isPinned = group.key === "Pinned";
+            const isFlagged = group.key === "Flagged";
             const isCollapsed = collapsedGroups[group.key];
             const count =
               group.items.length === 0 ? 0 : group.count ?? group.items.length;
@@ -530,7 +530,7 @@ export default function MessageTable({
                   <button
                     type="button"
                     className={`${groupStyles.groupTitle} ${groupStyles.groupToggle} ${
-                      isPinned ? groupStyles.groupTitlePinned : ""
+                      isFlagged ? groupStyles.groupTitleFlagged : ""
                     }`}
                   >
                     <span className={groupStyles.groupCaret}>

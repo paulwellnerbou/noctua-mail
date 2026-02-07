@@ -8,18 +8,20 @@ type FolderPaneProps = {
     folderQuery: string;
     accountFolderCount: number;
     isRecomputingThreads: boolean;
+    isRecomputingCategories: boolean;
   };
   actions: {
     setFolderQuery: React.Dispatch<React.SetStateAction<string>>;
     syncAccount: (folderId?: string, mode?: "new" | "full") => void;
     recomputeThreads: () => void;
+    recomputeCategories: () => void;
   };
   children?: React.ReactNode;
 };
 
 export default function FolderPane({ state, actions, children }: FolderPaneProps) {
-  const { leftWidth, folderQuery, accountFolderCount, isRecomputingThreads } = state;
-  const { setFolderQuery, syncAccount, recomputeThreads } = actions;
+  const { leftWidth, folderQuery, accountFolderCount, isRecomputingThreads, isRecomputingCategories } = state;
+  const { setFolderQuery, syncAccount, recomputeThreads, recomputeCategories } = actions;
 
   return (
     <aside className={`pane ${styles.pane}`} style={{ width: leftWidth }}>
@@ -52,6 +54,12 @@ export default function FolderPane({ state, actions, children }: FolderPaneProps
                     disabled={isRecomputingThreads}
                   >
                     Recompute Threads
+                  </DropdownMenu.Item>
+                  <DropdownMenu.Item
+                    onSelect={() => recomputeCategories()}
+                    disabled={isRecomputingCategories}
+                  >
+                    Recompute Categories
                   </DropdownMenu.Item>
                 </DropdownMenu.Content>
               </DropdownMenu.Root>

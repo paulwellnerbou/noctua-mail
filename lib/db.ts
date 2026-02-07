@@ -14,7 +14,7 @@ import type {
 import { accounts as seedAccounts, folders as seedFolders } from "./data";
 import { decodeSecret, encodeSecret, shouldStorePasswordInDb } from "./secret";
 import { applyCachedCredentials } from "./credentials";
-import { CALENDAR_INVITE_FLAG } from "./messageFlags";
+import { CALENDAR_INVITE_FLAG, normalizeImapFlags } from "./messageFlags";
 import { randomUUID } from "crypto";
 
 let dbInstance: any | null = null;
@@ -217,6 +217,20 @@ function initSchema(db: any) {
   ensureColumn("mailbox_state", "highestUid", "INTEGER");
   ensureColumn("mailbox_state", "supportsQresync", "INTEGER");
 
+  // Email categorization columns
+  ensureColumn("messages", "category", "TEXT");
+  ensureColumn("messages", "categoryScore", "REAL");
+
+  // Create index for category after column exists
+  try {
+    db.exec(`
+      CREATE INDEX IF NOT EXISTS idx_messages_category
+        ON messages(accountId, category, dateValue DESC)
+    `);
+  } catch {
+    // ignore if index already exists or column doesn't exist yet
+  }
+
   const ensureFtsSchema = () => {
     const expected = [
       "messageId",
@@ -249,6 +263,59 @@ function initSchema(db: any) {
   };
 
   ensureFtsSchema();
+  const normalizeLegacyCustomFlagKeyword = () => {
+    const rows = db
+      .prepare(
+        `SELECT id, flags
+         FROM messages
+         WHERE flags IS NOT NULL
+           AND lower(flags) LIKE '%"pinned"%'`
+      )
+      .all() as Array<{ id: string; flags: string }>;
+    if (rows.length === 0) return;
+    const updateFlags = db.prepare(
+      `UPDATE messages
+       SET flags = ?,
+           seen = ?,
+           answered = ?,
+           flagged = ?,
+           deleted = ?,
+           draft = ?,
+           recent = ?,
+           unread = ?
+       WHERE id = ?`
+    );
+    db.transaction((items: Array<{ id: string; flags: string }>) => {
+      items.forEach((row) => {
+        let parsedFlags: string[] | null = null;
+        try {
+          const parsed = JSON.parse(row.flags);
+          parsedFlags = Array.isArray(parsed) ? parsed.map(String) : null;
+        } catch {
+          parsedFlags = null;
+        }
+        if (!parsedFlags) return;
+        const hasLegacyCustomFlagKeyword = parsedFlags.some(
+          (flag) => String(flag).trim().toLowerCase() === "pinned"
+        );
+        if (!hasLegacyCustomFlagKeyword) return;
+        const normalized = normalizeImapFlags(parsedFlags);
+        const system = deriveSystemFlagState(normalized);
+        updateFlags.run(
+          JSON.stringify(normalized),
+          system.seen,
+          system.answered,
+          system.flagged,
+          system.deleted,
+          system.draft,
+          system.recent,
+          system.unread,
+          row.id
+        );
+      });
+    })(rows);
+  };
+  normalizeLegacyCustomFlagKeyword();
 
   const accountCount = db.prepare(`SELECT COUNT(*) as count FROM accounts`).get() as {
     count: number;
@@ -927,6 +994,31 @@ function extractEmailsFromText(value?: string | null) {
   return matches ? Array.from(new Set(matches)) : [];
 }
 
+type MessageSystemFlagState = {
+  seen: number;
+  answered: number;
+  flagged: number;
+  deleted: number;
+  draft: number;
+  recent: number;
+  unread: number;
+};
+
+function deriveSystemFlagState(flags: string[]): MessageSystemFlagState {
+  const hasFlag = (flag: string) =>
+    flags.some((value) => value.toLowerCase() === flag.toLowerCase());
+  const seen = hasFlag("\\Seen");
+  return {
+    seen: seen ? 1 : 0,
+    answered: hasFlag("\\Answered") ? 1 : 0,
+    flagged: hasFlag("\\Flagged") ? 1 : 0,
+    deleted: hasFlag("\\Deleted") ? 1 : 0,
+    draft: hasFlag("\\Draft") ? 1 : 0,
+    recent: hasFlag("\\Recent") ? 1 : 0,
+    unread: seen ? 0 : 1
+  };
+}
+
 function applyBadgeFilters(where: string, args: any[], badges?: string[] | null) {
   const normalized = (badges ?? []).map((badge) => badge.toLowerCase());
   if (normalized.includes("unread")) {
@@ -942,13 +1034,22 @@ function applyBadgeFilters(where: string, args: any[], badges?: string[] | null)
     where += " AND m.flags IS NOT NULL AND lower(m.flags) LIKE ?";
     args.push('%"to-do"%');
   }
-  if (normalized.includes("pinned")) {
-    where += " AND m.flags IS NOT NULL AND lower(m.flags) LIKE ?";
-    args.push('%"pinned"%');
-  }
   if (normalized.includes("calendar")) {
     where += " AND m.flags IS NOT NULL AND lower(m.flags) LIKE ?";
     args.push(`%"${CALENDAR_INVITE_FLAG}"%`);
+  }
+  // Category filters
+  if (normalized.includes("newsletter")) {
+    where += " AND m.category = ?";
+    args.push("newsletter");
+  }
+  if (normalized.includes("notification")) {
+    where += " AND m.category = ?";
+    args.push("notification");
+  }
+  if (normalized.includes("transactional")) {
+    where += " AND m.category = ?";
+    args.push("transactional");
   }
   return where;
 }
@@ -961,6 +1062,34 @@ function applyExcludedFolderFilters(where: string, args: any[], excludedFolderId
   where += ` AND m.folderId NOT IN (${normalized.map(() => "?").join(",")})`;
   args.push(...normalized);
   return where;
+}
+
+const RELATED_TRASH_SPECIAL_USES = new Set(["\\trash"]);
+const RELATED_SPAM_SPECIAL_USES = new Set(["\\junk", "\\spam"]);
+const RELATED_TRASH_KEYWORDS = ["trash", "deleted", "bin", "wastebasket", "papierkorb"];
+const RELATED_SPAM_KEYWORDS = ["junk", "spam", "bulk"];
+
+function getRelatedExcludedFolderIds(db: any, accountId: string) {
+  const folders = db
+    .prepare(`SELECT id, name, specialUse FROM folders WHERE accountId = ?`)
+    .all(accountId) as Array<{ id: string; name?: string | null; specialUse?: string | null }>;
+  return folders
+    .filter((folder) => {
+      const special = (folder.specialUse ?? "").trim().toLowerCase();
+      if (RELATED_TRASH_SPECIAL_USES.has(special) || RELATED_SPAM_SPECIAL_USES.has(special)) {
+        return true;
+      }
+      const name = (folder.name ?? "").trim().toLowerCase();
+      const id = folder.id.toLowerCase();
+      const trashMatch = RELATED_TRASH_KEYWORDS.some(
+        (keyword) => name.includes(keyword) || id.includes(keyword)
+      );
+      if (trashMatch) return true;
+      return RELATED_SPAM_KEYWORDS.some(
+        (keyword) => name.includes(keyword) || id.includes(keyword)
+      );
+    })
+    .map((folder) => folder.id);
 }
 
 function groupsFromRows(
@@ -1408,7 +1537,10 @@ export async function listRelatedMessages(params: {
 
   let where = `m.accountId = ? AND (${clauses.join(" OR ")})`;
   where = applyBadgeFilters(where, args, badges);
-  where = applyExcludedFolderFilters(where, args, excludedFolderIds);
+  const effectiveExcludedFolderIds = Array.from(
+    new Set([...(excludedFolderIds ?? []), ...getRelatedExcludedFolderIds(db, accountId)])
+  );
+  where = applyExcludedFolderFilters(where, args, effectiveExcludedFolderIds);
   const attachmentsFilter = attachmentsOnly ?? badges?.includes("attachments");
   if (attachmentsFilter) {
     where += " AND EXISTS (SELECT 1 FROM attachments a WHERE a.messageId = m.id AND a.inline = 0)";
@@ -1562,7 +1694,9 @@ export async function listRelatedMessages(params: {
       flagged: Boolean(row.flagged),
       deleted: Boolean(row.deleted),
       draft: Boolean(row.draft),
-      recent: Boolean(row.recent)
+      recent: Boolean(row.recent),
+      category: row.category ?? undefined,
+      categoryScore: typeof row.categoryScore === 'number' ? row.categoryScore : undefined
     };
     (message as any).groupKey = buildGroupKey(message, groupBy);
     return message;
@@ -1750,6 +1884,8 @@ export async function listMessages(params: {
         m.deleted,
         m.draft,
         m.recent,
+        m.category,
+        m.categoryScore,
         EXISTS(SELECT 1 FROM attachments a WHERE a.messageId = m.id AND a.inline = 0)
           as hasAttachments,
         EXISTS(SELECT 1 FROM attachments a WHERE a.messageId = m.id AND a.inline = 1)
@@ -1797,7 +1933,9 @@ export async function listMessages(params: {
       flagged: Boolean(row.flagged),
       deleted: Boolean(row.deleted),
       draft: Boolean(row.draft),
-      recent: Boolean(row.recent)
+      recent: Boolean(row.recent),
+      category: row.category ?? undefined,
+      categoryScore: typeof row.categoryScore === 'number' ? row.categoryScore : undefined
     };
     (message as any).groupKey = buildGroupKey(message, groupBy);
     return message;
@@ -2027,6 +2165,8 @@ export async function listThreads(params: {
               m.deleted,
               m.draft,
               m.recent,
+              m.category,
+              m.categoryScore,
               EXISTS(SELECT 1 FROM attachments a WHERE a.messageId = m.id AND a.inline = 0)
                 as hasAttachments,
               EXISTS(SELECT 1 FROM attachments a WHERE a.messageId = m.id AND a.inline = 1)
@@ -2075,7 +2215,9 @@ export async function listThreads(params: {
       flagged: Boolean(row.flagged),
       deleted: Boolean(row.deleted),
       draft: Boolean(row.draft),
-      recent: Boolean(row.recent)
+      recent: Boolean(row.recent),
+      category: row.category ?? undefined,
+      categoryScore: typeof row.categoryScore === 'number' ? row.categoryScore : undefined
     };
     (message as any).groupKey = buildGroupKey(message, groupBy);
     return message;
@@ -2187,7 +2329,9 @@ export async function listThreadMessages(params: {
       flagged: Boolean(row.flagged),
       deleted: Boolean(row.deleted),
       draft: Boolean(row.draft),
-      recent: Boolean(row.recent)
+      recent: Boolean(row.recent),
+      category: row.category ?? undefined,
+      categoryScore: typeof row.categoryScore === 'number' ? row.categoryScore : undefined
     };
     (message as any).groupKey = buildGroupKey(message, groupBy);
     return message;
@@ -2303,8 +2447,9 @@ export async function upsertMessages(
     INSERT OR REPLACE INTO messages (
       id, accountId, folderId, threadId, parentId, messageId, inReplyTo, "references", xForwardedMessageId,
       subject, fromAddr, fromEmail, toAddr, ccAddr, bccAddr, mailboxPath, imapUid, preview, date, dateValue,
-      body, htmlBody, priority, hasSource, unread, flags, seen, answered, flagged, deleted, draft, recent
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      body, htmlBody, priority, hasSource, unread, flags, seen, answered, flagged, deleted, draft, recent,
+      category, categoryScore
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   const insertFts = db.prepare(`
     INSERT INTO message_fts (messageId, subject, fromAddr, toAddr, ccAddr, bccAddr, body, preview)
@@ -2333,6 +2478,24 @@ export async function upsertMessages(
       if (shouldDeleteAttachments) {
         deleteAttachmentsForMessage.run(message.id);
       }
+      const normalizedFlags = normalizeImapFlags(message.flags);
+      const hasRawFlags = Array.isArray(message.flags);
+      const normalizedSystemFlags = deriveSystemFlagState(normalizedFlags);
+      const seen = hasRawFlags ? Boolean(normalizedSystemFlags.seen) : Boolean(message.seen);
+      const answered = hasRawFlags
+        ? Boolean(normalizedSystemFlags.answered)
+        : Boolean(message.answered);
+      const flagged = hasRawFlags
+        ? Boolean(normalizedSystemFlags.flagged)
+        : Boolean(message.flagged);
+      const deleted = hasRawFlags ? Boolean(normalizedSystemFlags.deleted) : Boolean(message.deleted);
+      const draft = hasRawFlags ? Boolean(normalizedSystemFlags.draft) : Boolean(message.draft);
+      const recent = hasRawFlags ? Boolean(normalizedSystemFlags.recent) : Boolean(message.recent);
+      const unread = hasRawFlags
+        ? Boolean(normalizedSystemFlags.unread)
+        : typeof message.unread === "boolean"
+          ? message.unread
+          : !seen;
       const emailMatch = message.from.match(/<([^>]+)>/);
       const fromEmail = emailMatch ? emailMatch[1] : null;
       insertMessage.run(
@@ -2360,14 +2523,16 @@ export async function upsertMessages(
         message.htmlBody ?? null,
         message.priority ?? null,
         message.hasSource ? 1 : 0,
-        message.unread ? 1 : 0,
-        message.flags ? JSON.stringify(message.flags) : null,
-        message.seen ? 1 : 0,
-        message.answered ? 1 : 0,
-        message.flagged ? 1 : 0,
-        message.deleted ? 1 : 0,
-        message.draft ? 1 : 0,
-        message.recent ? 1 : 0
+        unread ? 1 : 0,
+        message.flags ? JSON.stringify(normalizedFlags) : null,
+        seen ? 1 : 0,
+        answered ? 1 : 0,
+        flagged ? 1 : 0,
+        deleted ? 1 : 0,
+        draft ? 1 : 0,
+        recent ? 1 : 0,
+        message.category ?? null,
+        message.categoryScore ?? null
       );
       deleteFts.run(message.id);
       insertFts.run(
@@ -2486,7 +2651,9 @@ export async function getMessageById(accountId: string, messageId: string) {
     flagged: Boolean(row.flagged),
     deleted: Boolean(row.deleted),
     draft: Boolean(row.draft),
-    recent: Boolean(row.recent)
+    recent: Boolean(row.recent),
+    category: row.category ?? undefined,
+    categoryScore: typeof row.categoryScore === 'number' ? row.categoryScore : undefined
   } as Message;
 }
 
@@ -2604,8 +2771,8 @@ export async function updateMessageFlags(
   flags: string[]
 ) {
   const db = await getDb();
-  const hasFlag = (flag: string) =>
-    flags.some((value) => value.toLowerCase() === flag.toLowerCase());
+  const normalizedFlags = normalizeImapFlags(flags);
+  const system = deriveSystemFlagState(normalizedFlags);
   db.prepare(
     `UPDATE messages
      SET flags = ?,
@@ -2618,14 +2785,14 @@ export async function updateMessageFlags(
          unread = ?
      WHERE accountId = ? AND id = ?`
   ).run(
-    JSON.stringify(flags),
-    hasFlag("\\Seen") ? 1 : 0,
-    hasFlag("\\Answered") ? 1 : 0,
-    hasFlag("\\Flagged") ? 1 : 0,
-    hasFlag("\\Deleted") ? 1 : 0,
-    hasFlag("\\Draft") ? 1 : 0,
-    hasFlag("\\Recent") ? 1 : 0,
-    hasFlag("\\Seen") ? 0 : 1,
+    JSON.stringify(normalizedFlags),
+    system.seen,
+    system.answered,
+    system.flagged,
+    system.deleted,
+    system.draft,
+    system.recent,
+    system.unread,
     accountId,
     messageId
   );
@@ -2758,4 +2925,68 @@ export async function updateMessagesFolderPrefix(
          mailboxPath = REPLACE(mailboxPath, ?, ?)
      WHERE accountId = ? AND folderId LIKE ?`
   ).run(oldFull, newFull, oldPrefix, newPrefix, accountId, `${oldFull}%`);
+}
+
+export async function recomputeCategoriesForAccount(accountId: string) {
+  console.log(`[RECOMPUTE CATEGORIES] Starting for account ${accountId}`);
+
+  const { classifyEmail, getCategorizationConfig } = await import("@/lib/mail/categorization");
+  const { getMessageSource } = await import("@/lib/storage");
+  const mailparser = await import("mailparser");
+
+  const db = await getDb();
+
+  // Get all message IDs that have source available
+  const messageIds = db
+    .prepare(`SELECT id FROM messages WHERE accountId = ? AND hasSource = 1`)
+    .all(accountId) as Array<{ id: string }>;
+
+  console.log(`[RECOMPUTE CATEGORIES] Found ${messageIds.length} messages with hasSource=1`);
+
+  if (messageIds.length === 0) {
+    console.log(`No messages with source found for account ${accountId}`);
+    return;
+  }
+
+  console.log(`Recomputing categories for ${messageIds.length} messages...`);
+
+  const config = getCategorizationConfig();
+  const updateStmt = db.prepare(
+    `UPDATE messages SET category = ?, categoryScore = ? WHERE accountId = ? AND id = ?`
+  );
+
+  let processed = 0;
+  let categorized = 0;
+
+  for (const { id } of messageIds) {
+    try {
+      const source = await getMessageSource(accountId, id);
+      if (!source) continue;
+
+      const parsed = await mailparser.simpleParser(source);
+      const headers = parsed.headers ?? new Map();
+
+      const classification = classifyEmail(parsed, headers, config);
+
+      updateStmt.run(
+        classification.category || null,
+        classification.confidence || null,
+        accountId,
+        id
+      );
+
+      if (classification.category) {
+        categorized++;
+      }
+
+      processed++;
+      if (processed % 100 === 0) {
+        console.log(`Processed ${processed}/${messageIds.length} messages, ${categorized} categorized`);
+      }
+    } catch (error) {
+      console.error(`Failed to recompute category for message ${id}:`, error);
+    }
+  }
+
+  console.log(`Finished: ${processed}/${messageIds.length} processed, ${categorized} categorized`);
 }

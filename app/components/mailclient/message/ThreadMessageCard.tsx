@@ -3,9 +3,9 @@ import type React from "react";
 import {
   CalendarDays,
   Edit3,
+  Flag,
   Image as ImageIcon,
   Paperclip,
-  Pin,
   ZoomIn,
   ZoomOut
 } from "lucide-react";
@@ -23,6 +23,7 @@ import QuoteRenderer from "../../QuoteRenderer";
 import FolderBadges from "../folder/FolderBadges";
 import CalendarEventPreview from "./CalendarEventPreview";
 import MessageRecipientMetaField from "./MessageRecipientMetaField";
+import CategoryBadge from "../CategoryBadge";
 
 type MessageTab = "html" | "text" | "markdown" | "source";
 
@@ -41,7 +42,7 @@ type ThreadMessageCardProps = {
   setSearchScope: React.Dispatch<React.SetStateAction<"folder" | "all">>;
   setActiveFolderId: React.Dispatch<React.SetStateAction<string>>;
   getImapFlagBadges: (message: Message) => ImapFlagBadge[];
-  togglePinnedFlag: (message: Message) => void;
+  toggleFlaggedFlag: (message: Message) => void;
   isDraftMessage: (message: Message) => boolean;
   openCompose: (mode: ComposeMode, message?: Message) => void;
   renderQuickActions: (
@@ -85,7 +86,7 @@ export default function ThreadMessageCard({
   setSearchScope,
   setActiveFolderId,
   getImapFlagBadges,
-  togglePinnedFlag,
+  toggleFlaggedFlag,
   isDraftMessage,
   openCompose,
   renderQuickActions,
@@ -386,7 +387,7 @@ export default function ThreadMessageCard({
                 </Collapsible.Trigger>
                 <div className={styles.badges}>
                   {getImapFlagBadges(message).map((badge) =>
-                    badge.kind === "pinned" ? (
+                    badge.kind === "flagged" ? (
                       <Badge
                         key={`${badge.kind}-${badge.label}`}
                         size="1"
@@ -397,17 +398,23 @@ export default function ThreadMessageCard({
                         <button
                           type="button"
                           className={styles.flagBadgeButton}
-                          title="Unpin message"
-                          aria-label="Unpin message"
+                          title="Unflag message"
+                          aria-label="Unflag message"
                           onClick={(event) => {
                             event.stopPropagation();
-                            togglePinnedFlag(message);
+                            toggleFlaggedFlag(message);
                           }}
                         >
-                          <Pin size={12} />
+                          <Flag size={12} />
                           {badge.label}
                         </button>
                       </Badge>
+                    ) : badge.kind.startsWith("category-") ? (
+                      <CategoryBadge
+                        key={`${badge.kind}-${badge.label}`}
+                        category={badge.kind.replace("category-", "") as any}
+                        showText={true}
+                      />
                     ) : (
                       <Badge
                         key={`${badge.kind}-${badge.label}`}

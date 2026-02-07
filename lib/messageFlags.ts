@@ -1,6 +1,7 @@
 import type { Attachment } from "@/lib/data";
 
 export const CALENDAR_INVITE_FLAG = "calendar-invite";
+const LEGACY_CUSTOM_FLAGGED_KEYWORD = "pinned";
 
 const CALENDAR_MIME_HINTS = [
   "text/calendar",
@@ -59,6 +60,22 @@ export function hasMessageFlag(flags: string[] | null | undefined, flag: string)
   return (flags ?? []).some((item) => item.toLowerCase() === target);
 }
 
+export function normalizeImapFlags(flags: string[] | null | undefined) {
+  const seen = new Set<string>();
+  const normalized: string[] = [];
+  for (const rawFlag of flags ?? []) {
+    const trimmed = rawFlag?.trim();
+    if (!trimmed) continue;
+    const mapped =
+      trimmed.toLowerCase() === LEGACY_CUSTOM_FLAGGED_KEYWORD ? "\\Flagged" : trimmed;
+    const key = mapped.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    normalized.push(mapped);
+  }
+  return normalized;
+}
+
 export function detectCalendarInvite(input: CalendarInviteDetectionInput) {
   if ((input.attachments ?? []).some(isCalendarAttachment)) return true;
   const headerBlob = (input.headerValues ?? []).map(normalize).filter(Boolean).join(" ");
@@ -74,13 +91,7 @@ export function withCalendarInviteFlag(
   flags: string[] | null | undefined,
   detectionInput: CalendarInviteDetectionInput
 ) {
-  const seen = new Set<string>();
-  const deduped = (flags ?? []).filter((flag) => {
-    const normalized = flag.toLowerCase();
-    if (seen.has(normalized)) return false;
-    seen.add(normalized);
-    return true;
-  });
+  const deduped = normalizeImapFlags(flags);
   if (detectCalendarInvite(detectionInput) && !hasMessageFlag(deduped, CALENDAR_INVITE_FLAG)) {
     deduped.push(CALENDAR_INVITE_FLAG);
   }

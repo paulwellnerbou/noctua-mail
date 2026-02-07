@@ -28,7 +28,7 @@
   border: 1px solid var(--gray-7);
 }
 
-.groupTitlePinned {
+.groupTitleFlagged {
   color: var(--yellow-11);
 }
 

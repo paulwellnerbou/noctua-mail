@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type React from "react";
-import { CalendarDays, GitBranch, MoveRight, Paperclip, Trash2 } from "lucide-react";
+import { CalendarDays, Flag, GitBranch, MoveRight, Paperclip, Trash2 } from "lucide-react";
 import { Badge, IconButton, Text } from "@radix-ui/themes";
 import { CaretRightIcon } from "@radix-ui/react-icons";
 import * as Collapsible from "@radix-ui/react-collapsible";
-import { badgeColors } from "@/lib/ui/badgeColors";
+import { badgeColors, getFlagBadgeColor } from "@/lib/ui/badgeColors";
 import type { Message } from "@/lib/data";
-import { CALENDAR_INVITE_FLAG, hasMessageFlag } from "@/lib/messageFlags";
+import { CALENDAR_INVITE_FLAG, hasMessageFlag, isCalendarAttachment } from "@/lib/messageFlags";
 import badgeStyles from "../message/MessageBadge.module.css";
+import CategoryBadge from "../CategoryBadge";
 import {
   buildVisibleThreadRows,
   buildFlatEntries,
@@ -49,7 +50,7 @@ type ListRowItem = {
   threadGroupId: string;
   threadSize: number;
   isCollapsed: boolean;
-  isPinnedGroup: boolean;
+  isFlaggedGroup: boolean;
   threadIndex: number;
   fullFlat: Array<{ message: Message; depth: number }>;
   folderIds: string[];
@@ -114,6 +115,7 @@ type MessageThreadListProps = {
       target: Message
     ) => void;
     handleDeleteMessage: (message: Message) => void;
+    toggleFlaggedFlag: (message: Message) => void;
   };
   helpers: {
     buildThreadTree: (items: Message[]) => ThreadNode[];
@@ -172,7 +174,8 @@ export default function MessageThreadList({
     selectRangeTo,
     toggleMessageSelection,
     selectCollapsedThread,
-    handleDeleteMessage
+    handleDeleteMessage,
+    toggleFlaggedFlag
   } = actions;
 
   const {
@@ -334,7 +337,7 @@ export default function MessageThreadList({
               threadGroupId,
               threadSize,
               isCollapsed,
-              isPinnedGroup: group.key === "Pinned",
+              isFlaggedGroup: group.key === "Flagged",
               threadIndex: index,
               fullFlat,
               folderIds,
@@ -376,7 +379,7 @@ export default function MessageThreadList({
           threadGroupId,
           threadSize: 1,
           isCollapsed: false,
-          isPinnedGroup: false,
+          isFlaggedGroup: false,
           threadIndex: 0,
           fullFlat: [{ message, depth: 0 }],
           folderIds,
@@ -445,7 +448,7 @@ export default function MessageThreadList({
         const top = offsets[index] ?? 0;
         if (item.type === "group") {
           const group = item.group;
-          const isPinned = group.key === "Pinned";
+          const isFlagged = group.key === "Flagged";
           const isCollapsed = collapsedGroups[group.key];
           const count =
             group.items.length === 0 ? 0 : group.count ?? group.items.length;
@@ -471,7 +474,7 @@ export default function MessageThreadList({
                 <button
                   type="button"
                   className={`${groupStyles.groupTitle} ${groupStyles.groupToggle} ${
-                    isPinned ? groupStyles.groupTitlePinned : ""
+                    isFlagged ? groupStyles.groupTitleFlagged : ""
                   }`}
                 >
                   <span className={groupStyles.groupCaret}>
@@ -565,6 +568,32 @@ export default function MessageThreadList({
           isNestedCollapsed: item.isNestedCollapsed,
           fullFlat: item.fullFlat
         });
+
+        // Calculate badge union for collapsed threads
+        const threadBadgeUnion = isCollapsedThreadRoot
+          ? (() => {
+              const categories = new Set<string>();
+              let hasFlagged = false;
+              let hasAttachments = false;
+              let hasCalendar = false;
+              item.fullFlat.forEach(({ message: msg }) => {
+                if (msg.category) categories.add(msg.category);
+                if (msg.flagged) hasFlagged = true;
+                const nonInlineAttachments = msg.attachments?.filter((att) => !att.inline) ?? [];
+                if (nonInlineAttachments.length > 0) {
+                  const allCalendar = nonInlineAttachments.every(isCalendarAttachment);
+                  if (!allCalendar) hasAttachments = true;
+                }
+                if (hasMessageFlag(msg.flags, CALENDAR_INVITE_FLAG)) hasCalendar = true;
+              });
+              return {
+                threadCategories: Array.from(categories),
+                threadHasFlagged: hasFlagged,
+                threadHasAttachments: hasAttachments,
+                threadHasCalendar: hasCalendar
+              };
+            })()
+          : { threadCategories: [], threadHasFlagged: false, threadHasAttachments: false, threadHasCalendar: false };
 
         const rowContainerClassName = [
           styles.messageRowContainer,
@@ -701,8 +730,15 @@ export default function MessageThreadList({
                   })}
                   <span className={styles.cellSubjectText}>{message.subject}</span>
                   {renderFolderBadges(item.folderIds)}
-                  {(message.hasAttachments ??
-                    (message.attachments?.some((att) => !att.inline) ?? false)) && (
+                  {(threadBadgeUnion.threadHasAttachments ||
+                    (() => {
+                      const nonInlineAttachments =
+                        message.attachments?.filter((att) => !att.inline) ?? [];
+                      if (nonInlineAttachments.length === 0) return false;
+                      // Don't show attachment icon if all non-inline attachments are calendar events
+                      const allCalendar = nonInlineAttachments.every(isCalendarAttachment);
+                      return !allCalendar;
+                    })()) && (
                     <Badge
                       size="1"
                       variant="soft"
@@ -714,7 +750,8 @@ export default function MessageThreadList({
                       <Paperclip size={12} />
                     </Badge>
                   )}
-                  {hasMessageFlag(message.flags, CALENDAR_INVITE_FLAG) && (
+                  {(threadBadgeUnion.threadHasCalendar ||
+                    hasMessageFlag(message.flags, CALENDAR_INVITE_FLAG)) && (
                     <Badge
                       size="1"
                       variant="soft"
@@ -724,6 +761,39 @@ export default function MessageThreadList({
                       aria-label="Calendar invite"
                     >
                       <CalendarDays size={12} />
+                    </Badge>
+                  )}
+                  {threadBadgeUnion.threadCategories.length > 0
+                    ? threadBadgeUnion.threadCategories.map((category) => (
+                        <CategoryBadge
+                          key={category}
+                          category={category as any}
+                          showText={false}
+                        />
+                      ))
+                    : message.category && (
+                        <CategoryBadge category={message.category as any} showText={false} />
+                      )}
+                  {(threadBadgeUnion.threadHasFlagged || message.flagged) && (
+                    <Badge
+                      size="1"
+                      variant="soft"
+                      color={getFlagBadgeColor("flagged")}
+                      className={badgeStyles.badge}
+                      asChild
+                    >
+                      <button
+                        type="button"
+                        className={styles.flagBadgeButton}
+                        title="Unflag message"
+                        aria-label="Unflag message"
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          toggleFlaggedFlag(message);
+                        }}
+                      >
+                        <Flag size={12} />
+                      </button>
                     </Badge>
                   )}
                 </span>

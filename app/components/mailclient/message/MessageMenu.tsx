@@ -12,7 +12,6 @@ import {
   MailCheck,
   MailOpen,
   MoreVertical,
-  Pin,
   SquareArrowOutUpRight,
   Search,
   RefreshCw,
@@ -36,7 +35,6 @@ type MessageMenuAction =
   | "editAsNew"
   | "markRead"
   | "flag"
-  | "pin"
   | "todo"
   | "answered"
   | "spam"
@@ -61,7 +59,6 @@ type MessageMenuProps = {
     flag: "seen" | "answered" | "flagged" | "draft" | "deleted",
     value: boolean
   ) => void;
-  togglePinnedFlag: (message: Message) => void;
   toggleTodoFlag: (message: Message) => void;
   handleMarkSpam: (message: Message) => void;
   handleMarkNotSpam: (message: Message) => void;
@@ -86,7 +83,6 @@ export default function MessageMenu({
   pendingMessageActions,
   openCompose,
   updateFlagState,
-  togglePinnedFlag,
   toggleTodoFlag,
   handleMarkSpam,
   handleMarkNotSpam,
@@ -191,17 +187,6 @@ export default function MessageMenu({
                   <Flag size={14} />,
                   () => updateFlagState(message, "flagged", !message.flagged),
                   isDisabled("flag")
-                )
-              : null,
-            isVisible("pin")
-              ? buildItem(
-                  "pin",
-                  message.flags?.some((flag) => flag.toLowerCase() === "pinned")
-                    ? "Unpin"
-                    : "Pin",
-                  <Pin size={14} />,
-                  () => togglePinnedFlag(message),
-                  isDisabled("pin")
                 )
               : null,
             isVisible("todo")

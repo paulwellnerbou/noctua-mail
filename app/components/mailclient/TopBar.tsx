@@ -4,6 +4,8 @@ import type React from "react";
 import {
   CheckSquare2,
   ChevronDown,
+  Circle,
+  CircleDot,
   Edit3,
   FileText,
   Folder as FolderIcon,
@@ -34,9 +36,11 @@ type SearchBadges = {
   unanswered: boolean;
   flagged: boolean;
   todo: boolean;
-  pinned: boolean;
   calendar: boolean;
   attachments: boolean;
+  newsletter: boolean;
+  notification: boolean;
+  transactional: boolean;
 };
 
 type ComposeMode = "new" | "reply" | "replyAll" | "forward" | "edit" | "editAsNew";
@@ -168,6 +172,15 @@ export default function TopBar({ state, ui, actions }: TopBarProps) {
     >
       <span className={styles.menuCheckboxIcon} aria-hidden>
         {checked ? <CheckSquare2 size={14} /> : <Square size={14} />}
+      </span>
+      {label}
+    </span>
+  );
+
+  const menuRadioLabel = (checked: boolean, label: string) => (
+    <span className={styles.menuCheckboxLabel}>
+      <span className={styles.menuCheckboxIcon} aria-hidden>
+        {checked ? <CircleDot size={14} /> : <Circle size={14} />}
       </span>
       {label}
     </span>
@@ -312,7 +325,7 @@ export default function TopBar({ state, ui, actions }: TopBarProps) {
               </Button>
             </DropdownMenu.Trigger>
             <DropdownMenu.Content className={styles.searchMenuContent}>
-              {SEARCH_BADGE_OPTIONS.map(([key, label]) => (
+              {SEARCH_BADGE_OPTIONS.filter(([key]) => !["newsletter", "notification", "transactional"].includes(key)).map(([key, label]) => (
                 <DropdownMenu.CheckboxItem
                   key={key}
                   checked={searchBadges[key]}
@@ -327,6 +340,27 @@ export default function TopBar({ state, ui, actions }: TopBarProps) {
                   {menuCheckboxLabel(searchBadges[key], label)}
                 </DropdownMenu.CheckboxItem>
               ))}
+              <DropdownMenu.Separator />
+              {SEARCH_BADGE_OPTIONS.filter(([key]) => ["newsletter", "notification", "transactional"].includes(key)).map(([key, label]) => {
+                const isSelected = searchBadges[key];
+                return (
+                  <DropdownMenu.Item
+                    key={key}
+                    onSelect={(event) => {
+                      event.preventDefault();
+                      // Toggle selection or switch to this category
+                      setSearchBadges((prev) => ({
+                        ...prev,
+                        newsletter: key === "newsletter" ? !prev.newsletter : false,
+                        notification: key === "notification" ? !prev.notification : false,
+                        transactional: key === "transactional" ? !prev.transactional : false
+                      }));
+                    }}
+                  >
+                    {menuRadioLabel(isSelected, label)}
+                  </DropdownMenu.Item>
+                );
+              })}
             </DropdownMenu.Content>
           </DropdownMenu.Root>
         </div>

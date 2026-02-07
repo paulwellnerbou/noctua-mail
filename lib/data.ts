@@ -98,6 +98,8 @@ export type Message = {
   deleted?: boolean;
   draft?: boolean;
   recent?: boolean;
+  category?: string | null;
+  categoryScore?: number | null;
   groupKey?: string;
 };
 

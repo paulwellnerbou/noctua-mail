@@ -22,14 +22,17 @@ const flagColorMap: Record<string, BadgeColor> = {
   seen: "gray",
   answered: "green",
   flagged: "amber",
-  pinned: "yellow",
   deleted: "red",
   draft: "violet",
   new: "blue",
   forwarded: "blue",
   calendar: "indigo",
   recent: "blue",
-  custom: "gray"
+  custom: "gray",
+  // Category badges
+  "category-newsletter": "purple",
+  "category-notification": "cyan",
+  "category-transactional": "teal"
 };
 
 export function getFlagBadgeColor(kind: string): BadgeColor {

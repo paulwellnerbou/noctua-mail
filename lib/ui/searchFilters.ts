@@ -11,9 +11,11 @@ export const SEARCH_BADGE_OPTIONS = [
   ["unanswered", "Unanswered"],
   ["flagged", "Flagged"],
   ["todo", "To-Do"],
-  ["pinned", "Pinned"],
   ["calendar", "Calendar"],
-  ["attachments", "Attachments"]
+  ["attachments", "Attachments"],
+  ["newsletter", "📰 Newsletters"],
+  ["notification", "🔔 Notifications"],
+  ["transactional", "🧾 Transactional"]
 ] as const;
 
 type SearchFieldKey = (typeof SEARCH_FIELD_OPTIONS)[number][0];

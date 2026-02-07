@@ -1,14 +1,15 @@
 import { memo, useEffect, useRef, useState } from "react";
 import type React from "react";
-import { CalendarDays, GitBranch, MoveRight, Paperclip, Search, Trash2 } from "lucide-react";
+import { CalendarDays, Flag, GitBranch, MoveRight, Paperclip, Search, Trash2 } from "lucide-react";
 import { Badge, Checkbox, IconButton, Text } from "@radix-ui/themes";
 import { CaretRightIcon } from "@radix-ui/react-icons";
-import { badgeColors } from "@/lib/ui/badgeColors";
+import { badgeColors, getFlagBadgeColor } from "@/lib/ui/badgeColors";
 import type { Message } from "@/lib/data";
 import badgeStyles from "../message/MessageBadge.module.css";
 import commonStyles from "./MessageListCommon.module.css";
 import { getMessageListDateDisplay } from "./messageDateDisplay";
 import styles from "./MessageRow.module.css";
+import CategoryBadge from "../CategoryBadge";
 
 type MessageRowProps = {
   message: Message;
@@ -41,6 +42,7 @@ type MessageRowProps = {
   onSubjectClick: (event: React.MouseEvent) => void;
   onDelete: (event: React.MouseEvent) => void;
   onShowRelated: (event: React.MouseEvent) => void;
+  toggleFlaggedFlag: (message: Message) => void;
   deleteTitle: string;
   renderUnreadDot: React.ReactNode;
   renderSelectIndicators: React.ReactNode;
@@ -57,6 +59,11 @@ type MessageRowProps = {
   showCalendarInviteIcon: boolean;
   showNewBadge: boolean;
   showCompactDivider?: boolean;
+  categoryIcon?: string;
+  threadCategories?: string[];
+  threadHasFlagged?: boolean;
+  threadHasAttachments?: boolean;
+  threadHasCalendar?: boolean;
 };
 
 function MessageRow({
@@ -90,6 +97,7 @@ function MessageRow({
   onSubjectClick,
   onDelete,
   onShowRelated,
+  toggleFlaggedFlag,
   deleteTitle,
   renderUnreadDot,
   renderSelectIndicators,
@@ -105,7 +113,12 @@ function MessageRow({
   showAttachmentIcon,
   showCalendarInviteIcon,
   showNewBadge,
-  showCompactDivider
+  showCompactDivider,
+  categoryIcon,
+  threadCategories,
+  threadHasFlagged,
+  threadHasAttachments,
+  threadHasCalendar
 }: MessageRowProps) {
   const [optimisticSelected, setOptimisticSelected] = useState<boolean | null>(null);
   const [optimisticActive, setOptimisticActive] = useState(false);
@@ -344,7 +357,8 @@ function MessageRow({
           showFolderBadgesInSubjectMeta ||
           showThreadIndicator ||
           showAttachmentIcon ||
-          showCalendarInviteIcon
+          showCalendarInviteIcon ||
+          categoryIcon
         ) && (
           <div className={styles.subjectMeta}>
             {showFolderBadgesInSubjectMeta && folderBadges}
@@ -359,7 +373,7 @@ function MessageRow({
                 <span>{threadSize}</span>
               </Badge>
             )}
-            {showAttachmentIcon && (
+            {(threadHasAttachments ?? showAttachmentIcon) && (
               <Badge
                 size="1"
                 variant="soft"
@@ -371,7 +385,7 @@ function MessageRow({
                 <Paperclip size={12} />
               </Badge>
             )}
-            {showCalendarInviteIcon && (
+            {(threadHasCalendar ?? showCalendarInviteIcon) && (
               <Badge
                 size="1"
                 variant="soft"
@@ -381,6 +395,39 @@ function MessageRow({
                 aria-label="Calendar invite"
               >
                 <CalendarDays size={12} />
+              </Badge>
+            )}
+            {threadCategories && threadCategories.length > 0
+              ? threadCategories.map((category) => (
+                  <CategoryBadge
+                    key={category}
+                    category={category as any}
+                    showText={false}
+                  />
+                ))
+              : message.category && (
+                  <CategoryBadge category={message.category as any} showText={false} />
+                )}
+            {(threadHasFlagged ?? message.flagged) && (
+              <Badge
+                size="1"
+                variant="soft"
+                color={getFlagBadgeColor("flagged")}
+                className={badgeStyles.badge}
+                asChild
+              >
+                <button
+                  type="button"
+                  className={styles.flagBadgeButton}
+                  title="Unflag message"
+                  aria-label="Unflag message"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    toggleFlaggedFlag(message);
+                  }}
+                >
+                  <Flag size={12} />
+                </button>
               </Badge>
             )}
           </div>
@@ -421,6 +468,7 @@ const areEqual = (prev: MessageRowProps, next: MessageRowProps) =>
   prev.showNewBadge === next.showNewBadge &&
   prev.showCompactDivider === next.showCompactDivider &&
   prev.deleteTitle === next.deleteTitle &&
-  prev.folderBadgeKey === next.folderBadgeKey;
+  prev.folderBadgeKey === next.folderBadgeKey &&
+  prev.categoryIcon === next.categoryIcon;
 
 export default memo(MessageRow, areEqual);

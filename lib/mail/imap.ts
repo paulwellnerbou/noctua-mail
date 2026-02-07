@@ -2,6 +2,7 @@ import type { Account, Attachment, Folder, Message } from "@/lib/data";
 import { getLatestMessageUid } from "@/lib/db";
 import { extractHtmlBody } from "@/lib/html";
 import { withCalendarInviteFlag } from "@/lib/messageFlags";
+import { classifyEmail, getCategorizationConfig } from "@/lib/mail/categorization";
 import tls from "tls";
 import { getImapLogger, logImapOp } from "@/lib/mail/imapLogger";
 
@@ -293,6 +294,19 @@ async function parseImapMessage(
       headerValue("x-ms-exchange-calendar-series-instance-id")
     ]
   });
+
+  // Classify email into categories
+  const config = getCategorizationConfig();
+  const classification = classifyEmail(parsed, parsed.headers ?? new Map(), config);
+
+  // Debug logging - remove once verified working
+  console.log('[CATEGORIZATION]', {
+    subject: subject.substring(0, 50),
+    category: classification.category,
+    confidence: classification.confidence,
+    signals: classification.signals
+  });
+
   return {
     id: `imap-${account.id}-${safeMailbox}-${message.uid}`,
     threadId: parsed.inReplyTo ?? parsed.messageId ?? `imap-thread-${message.uid}`,
@@ -325,7 +339,9 @@ async function parseImapMessage(
     deleted,
     draft,
     recent,
-    unread: !seen
+    unread: !seen,
+    category: classification.category,
+    categoryScore: classification.confidence
   } as Message;
 }
 
