@@ -1,5 +1,4 @@
 import Image from "next/image";
-import { useEffect, useRef, useState } from "react";
 
 import type React from "react";
 import {
@@ -123,30 +122,6 @@ export default function TopBar({ state, ui, actions }: TopBarProps) {
     syncAccount
   } = actions;
   const { searchFieldsLabel, searchBadgesLabel } = ui;
-  const fieldsLabelMeasureRef = useRef<HTMLSpanElement | null>(null);
-  const badgesLabelMeasureRef = useRef<HTMLSpanElement | null>(null);
-  const [fieldsButtonWidth, setFieldsButtonWidth] = useState<number | null>(null);
-  const [badgesButtonWidth, setBadgesButtonWidth] = useState<number | null>(null);
-
-  const clampFilterButtonWidth = (width: number) => {
-    const min = 116;
-    const max = 220;
-    return Math.min(max, Math.max(min, width));
-  };
-
-  useEffect(() => {
-    const measured = fieldsLabelMeasureRef.current?.offsetWidth ?? 0;
-    if (!measured) return;
-    // Add button chrome (left/right padding, borders, focus ring spacing).
-    setFieldsButtonWidth(clampFilterButtonWidth(Math.ceil(measured) + 34));
-  }, [searchFieldsLabel]);
-
-  useEffect(() => {
-    const measured = badgesLabelMeasureRef.current?.offsetWidth ?? 0;
-    if (!measured) return;
-    // Add button chrome (left/right padding, borders, focus ring spacing).
-    setBadgesButtonWidth(clampFilterButtonWidth(Math.ceil(measured) + 34));
-  }, [searchBadgesLabel]);
 
   const handleScopeChange = (next: string) => {
     const nextScope = next as "folder" | "all";
@@ -297,7 +272,6 @@ export default function TopBar({ state, ui, actions }: TopBarProps) {
                 disabled={isRelatedSearch}
                 className={styles.filterButton}
                 title={searchFieldsLabel}
-                style={fieldsButtonWidth ? { width: `${fieldsButtonWidth}px` } : undefined}
               >
                 <span className={styles.filterButtonLabel}>{searchFieldsLabel}</span>
               </Button>
@@ -333,7 +307,6 @@ export default function TopBar({ state, ui, actions }: TopBarProps) {
                 disabled={isRelatedSearch}
                 className={styles.filterButton}
                 title={searchBadgesLabel}
-                style={badgesButtonWidth ? { width: `${badgesButtonWidth}px` } : undefined}
               >
                 <span className={styles.filterButtonLabel}>{searchBadgesLabel}</span>
               </Button>
@@ -356,14 +329,6 @@ export default function TopBar({ state, ui, actions }: TopBarProps) {
               ))}
             </DropdownMenu.Content>
           </DropdownMenu.Root>
-          <span className={styles.filterLabelMeasure} aria-hidden>
-            <span ref={fieldsLabelMeasureRef} className={styles.filterLabelMeasureText}>
-              {searchFieldsLabel}
-            </span>
-            <span ref={badgesLabelMeasureRef} className={styles.filterLabelMeasureText}>
-              {searchBadgesLabel}
-            </span>
-          </span>
         </div>
       </div>
       <div className={styles.actionRow}>

@@ -204,15 +204,6 @@ export default function MessageTable({
   const clearTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
-    if (!optimisticRow) return;
-    const matchesSelected = selectedMessageIds.has(optimisticRow.id) === optimisticRow.selected;
-    const matchesActive = !optimisticRow.active || activeMessageId === optimisticRow.id;
-    if (matchesSelected && matchesActive) {
-      setOptimisticRow(null);
-    }
-  }, [activeMessageId, optimisticRow, selectedMessageIds]);
-
-  useEffect(() => {
     return () => {
       if (clearTimerRef.current !== null) {
         window.clearTimeout(clearTimerRef.current);
@@ -233,7 +224,13 @@ export default function MessageTable({
 
 
   const listRef = useRef<HTMLDivElement | null>(null);
+  const [lastGroupToggle, setLastGroupToggle] = useState<{
+    key: string;
+    open: boolean;
+    at: number;
+  } | null>(null);
   const [scrollState, setScrollState] = useState({ scrollTop: 0, height: 0 });
+  const [animationClock, setAnimationClock] = useState(0);
 
   useEffect(() => {
     const scrollEl = scrollRef.current;
@@ -268,9 +265,16 @@ export default function MessageTable({
     };
   }, [scrollRef]);
 
+  useEffect(() => {
+    if (!animationClock) return;
+    const timer = window.setTimeout(() => setAnimationClock(0), 220);
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [animationClock]);
+
   const rowHeight = 44;
   const groupHeight = 32;
-  const lastGroupToggleRef = useRef<{ key: string; open: boolean; at: number } | null>(null);
   const activeThreadKey =
     activeMessage?.threadId ?? activeMessage?.messageId ?? activeMessage?.id;
 
@@ -498,8 +502,6 @@ export default function MessageTable({
         {visibleItems.map((item, offsetIndex) => {
           const index = startIndex + offsetIndex;
           const top = offsets[index] ?? 0;
-          const lastToggle = lastGroupToggleRef.current;
-          const now = Date.now();
           if (item.type === "group") {
             const group = item.group;
             const isPinned = group.key === "Pinned";
@@ -515,7 +517,9 @@ export default function MessageTable({
                 open={!isCollapsed}
                 onOpenChange={(open) => {
                   if (isEmpty) return;
-                  lastGroupToggleRef.current = { key: group.key, open, at: Date.now() };
+                  const at = Date.now();
+                  setLastGroupToggle({ key: group.key, open, at });
+                  setAnimationClock(at);
                   setCollapsedGroups((prev) => ({
                     ...prev,
                     [group.key]: !open
@@ -546,9 +550,10 @@ export default function MessageTable({
           const isSelected = selectedMessageIds.has(message.id);
           const isDragging = draggingMessageIds.has(message.id);
           const shouldAnimateRow =
-            lastToggle?.open &&
-            lastToggle.key === item.groupKey &&
-            now - lastToggle.at < 220;
+            animationClock > 0 &&
+            lastGroupToggle?.open &&
+            lastGroupToggle.key === item.groupKey &&
+            animationClock - lastGroupToggle.at < 220;
           const optimistic =
             optimisticRow && optimisticRow.id === message.id
               ? optimisticRow

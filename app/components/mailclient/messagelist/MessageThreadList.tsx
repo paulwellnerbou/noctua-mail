@@ -13,6 +13,7 @@ import {
   buildFlatEntries,
   buildThreadGroupEntries,
   getDisplaySeenForThreadRow,
+  getThreadMessagesForThreadRow,
   getCollapsedThreadFromDisplay,
   getMessageFromDisplay,
   isCollapsedThreadRootRow
@@ -187,10 +188,23 @@ export default function MessageThreadList({
   } = helpers;
 
   const listRef = useRef<HTMLDivElement | null>(null);
-  const lastGroupToggleRef = useRef<{ key: string; open: boolean; at: number } | null>(null);
-  const lastThreadToggleRef = useRef<{ key: string; open: boolean; at: number } | null>(null);
-  const lastNestedToggleRef = useRef<{ key: string; open: boolean; at: number } | null>(null);
+  const [lastGroupToggle, setLastGroupToggle] = useState<{
+    key: string;
+    open: boolean;
+    at: number;
+  } | null>(null);
+  const [lastThreadToggle, setLastThreadToggle] = useState<{
+    key: string;
+    open: boolean;
+    at: number;
+  } | null>(null);
+  const [lastNestedToggle, setLastNestedToggle] = useState<{
+    key: string;
+    open: boolean;
+    at: number;
+  } | null>(null);
   const [scrollState, setScrollState] = useState({ scrollTop: 0, height: 0 });
+  const [animationClock, setAnimationClock] = useState(0);
   const [collapsedNestedMessages, setCollapsedNestedMessages] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
@@ -225,6 +239,14 @@ export default function MessageThreadList({
       window.removeEventListener("resize", onScroll);
     };
   }, [scrollRef]);
+
+  useEffect(() => {
+    if (!animationClock) return;
+    const timer = window.setTimeout(() => setAnimationClock(0), 220);
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [animationClock]);
 
   const rowHeight = 40;
   const groupHeight = 28;
@@ -411,8 +433,6 @@ export default function MessageThreadList({
         );
   const visibleItems =
     startIndex <= endIndex ? listItems.slice(startIndex, endIndex + 1) : [];
-  const lastToggle = lastGroupToggleRef.current;
-  const now = Date.now();
 
   return (
     <div
@@ -438,7 +458,9 @@ export default function MessageThreadList({
               open={!isCollapsed}
               onOpenChange={(open) => {
                 if (isEmpty) return;
-                lastGroupToggleRef.current = { key: group.key, open, at: Date.now() };
+                const at = Date.now();
+                setLastGroupToggle({ key: group.key, open, at });
+                setAnimationClock(at);
                 setCollapsedGroups((prev) => ({
                   ...prev,
                   [group.key]: !open
@@ -470,24 +492,22 @@ export default function MessageThreadList({
         const isDragging = draggingMessageIds.has(message.id);
 
         // Check if row should animate due to group, thread, or nested message expansion
-        const lastGroupToggle = lastToggle;
-        const lastThreadToggle = lastThreadToggleRef.current;
-        const lastNestedToggle = lastNestedToggleRef.current;
-
         const animateFromGroup =
+          animationClock > 0 &&
           lastGroupToggle?.open &&
           lastGroupToggle.key === item.groupKey &&
-          now - lastGroupToggle.at < 220;
+          animationClock - lastGroupToggle.at < 220;
 
         const animateFromThread =
+          animationClock > 0 &&
           lastThreadToggle?.open &&
           lastThreadToggle.key === item.threadGroupId &&
           item.depth > 0 &&
-          now - lastThreadToggle.at < 220;
+          animationClock - lastThreadToggle.at < 220;
 
         const animateFromNested = (() => {
-          if (!lastNestedToggle?.open || item.depth === 0) return false;
-          if (now - lastNestedToggle.at >= 220) return false;
+          if (!animationClock || !lastNestedToggle?.open || item.depth === 0) return false;
+          if (animationClock - lastNestedToggle.at >= 220) return false;
 
           const expandedId = lastNestedToggle.key;
           const flatIndex = item.fullFlat.findIndex(e => e.message.id === message.id);
@@ -527,15 +547,24 @@ export default function MessageThreadList({
         });
         const displaySeen = getDisplaySeenForThreadRow({
           messageSeen: Boolean(message.seen),
+          messageId: message.id,
           isCollapsed: item.isCollapsed,
           threadSize: item.threadSize,
           depth: item.depth,
           threadIndex: item.threadIndex,
+          isNestedCollapsed: item.isNestedCollapsed,
           fullFlat: item.fullFlat
         });
-        const threadMessages = isCollapsedThreadRoot
-          ? item.fullFlat.map((entry) => entry.message)
-          : [message];
+        const threadMessages = getThreadMessagesForThreadRow({
+          message,
+          messageId: message.id,
+          isCollapsed: item.isCollapsed,
+          threadSize: item.threadSize,
+          depth: item.depth,
+          threadIndex: item.threadIndex,
+          isNestedCollapsed: item.isNestedCollapsed,
+          fullFlat: item.fullFlat
+        });
 
         const rowContainerClassName = [
           styles.messageRowContainer,
@@ -572,11 +601,13 @@ export default function MessageThreadList({
                 ancestorStopsHere={item.ancestorStopsHere}
                 onToggleThread={() => {
                   const willOpen = item.isCollapsed;
-                  lastThreadToggleRef.current = {
+                  const at = Date.now();
+                  setLastThreadToggle({
                     key: item.threadGroupId,
                     open: willOpen,
-                    at: Date.now()
-                  };
+                    at
+                  });
+                  setAnimationClock(at);
                   setCollapsedThreads((prev) => ({
                     ...prev,
                     [item.threadGroupId]: !item.isCollapsed
@@ -584,11 +615,13 @@ export default function MessageThreadList({
                 }}
                 onToggleNested={() => {
                   const willOpen = item.isNestedCollapsed;
-                  lastNestedToggleRef.current = {
+                  const at = Date.now();
+                  setLastNestedToggle({
                     key: message.id,
                     open: willOpen,
-                    at: Date.now()
-                  };
+                    at
+                  });
+                  setAnimationClock(at);
                   setCollapsedNestedMessages((prev) => ({
                     ...prev,
                     [message.id]: !item.isNestedCollapsed

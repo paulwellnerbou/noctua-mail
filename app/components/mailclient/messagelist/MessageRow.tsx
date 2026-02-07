@@ -211,18 +211,6 @@ function MessageRow({
   };
 
   useEffect(() => {
-    if (optimisticSelected === null && !optimisticActive) return;
-    if (optimisticSelected !== null && optimisticSelected !== isSelected) return;
-    if (optimisticActive && !isActive) return;
-    if (clearTimerRef.current !== null) {
-      window.clearTimeout(clearTimerRef.current);
-      clearTimerRef.current = null;
-    }
-    setOptimisticSelected(null);
-    setOptimisticActive(false);
-  }, [isActive, isSelected, optimisticActive, optimisticSelected]);
-
-  useEffect(() => {
     return () => {
       if (clearTimerRef.current !== null) {
         window.clearTimeout(clearTimerRef.current);
@@ -410,6 +398,7 @@ const areEqual = (prev: MessageRowProps, next: MessageRowProps) =>
   prev.useExternalStateStyles === next.useExternalStateStyles &&
   prev.subjectLeftPaddingForExternalCaret === next.subjectLeftPaddingForExternalCaret &&
   prev.listIsNarrow === next.listIsNarrow &&
+  prev.displaySeen === next.displaySeen &&
   prev.isActive === next.isActive &&
   prev.isThreadChild === next.isThreadChild &&
   prev.isThreadSibling === next.isThreadSibling &&

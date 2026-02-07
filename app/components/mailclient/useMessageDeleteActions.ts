@@ -32,6 +32,12 @@ type DeleteNoticeInput = {
   durationMs?: number | null;
 };
 
+type ConfirmThreadDeleteInput = {
+  messageCount: number;
+  moveToTrashCount: number;
+  permanentDeleteCount: number;
+};
+
 type UseMessageDeleteActionsOptions = {
   activeAccountId: string;
   activeMessageId: string;
@@ -55,6 +61,7 @@ type UseMessageDeleteActionsOptions = {
   readErrorMessage: (res: Response) => Promise<string>;
   reportError: (message: string) => void;
   pushNotice: (input: DeleteNoticeInput) => void;
+  confirmThreadDelete: (input: ConfirmThreadDeleteInput) => Promise<boolean>;
   undoMoveOperation: (
     targets: UndoMoveTarget[],
     accountId: string,
@@ -87,10 +94,19 @@ export function useMessageDeleteActions({
   readErrorMessage,
   reportError,
   pushNotice,
+  confirmThreadDelete,
   undoMoveOperation,
   noticeSuccessTimeout,
   onMessagesRemoved
 }: UseMessageDeleteActionsOptions) {
+  const isPermanentDeleteTarget = useCallback(
+    (target: Message, trashFolderId: string | null) => {
+      if (trashFolderId && target.folderId === trashFolderId) return true;
+      return isTrashFolder(target.folderId);
+    },
+    [isTrashFolder]
+  );
+
   const getMessageSubjectForNotice = useCallback(
     (message?: Message | null) => message?.subject?.trim() || "(no subject)",
     []
@@ -262,11 +278,12 @@ export function useMessageDeleteActions({
       let permanentlyDeletedCount = 0;
       const removedIds: string[] = [];
       const trashFolderId = findTrashFolderId();
-      const moveTargets = targets.filter((target) => {
-        if (trashFolderId && target.folderId === trashFolderId) return false;
-        return !isTrashFolder(target.folderId);
-      });
-      const hardDeleteTargets = targets.filter((target) => !moveTargets.includes(target));
+      const hardDeleteTargets = targets.filter((target) =>
+        isPermanentDeleteTarget(target, trashFolderId)
+      );
+      const moveTargets = targets.filter(
+        (target) => !isPermanentDeleteTarget(target, trashFolderId)
+      );
       try {
         setPendingMessageActions((prev) => new Set([...prev, ...targets.map((t) => t.id)]));
         if (moveTargets.length > 0) {
@@ -337,7 +354,7 @@ export function useMessageDeleteActions({
       deleteSingleMessagePermanently,
       findTrashFolderId,
       getMessageSubjectForNotice,
-      isTrashFolder,
+      isPermanentDeleteTarget,
       lastSelectedIdRef,
       moveMessagesToFolder,
       pushDeleteNotice,
@@ -367,7 +384,16 @@ export function useMessageDeleteActions({
         threadItems.length > 1;
       const targets = isCollapsedThread ? threadItems : [message];
       if (isCollapsedThread) {
-        const confirmed = window.confirm("Delete entire thread?");
+        const trashFolderId = findTrashFolderId();
+        const permanentDeleteCount = targets.filter((target) =>
+          isPermanentDeleteTarget(target, trashFolderId)
+        ).length;
+        const moveToTrashCount = targets.length - permanentDeleteCount;
+        const confirmed = await confirmThreadDelete({
+          messageCount: threadItems.length,
+          moveToTrashCount,
+          permanentDeleteCount
+        });
         if (!confirmed) return;
       }
       await runDeleteTransaction(targets, {
@@ -375,7 +401,16 @@ export function useMessageDeleteActions({
         threadIdForFallback: threadId
       });
     },
-    [activeAccountId, collapsedThreads, runDeleteTransaction, supportsThreads, threadScopeMessages]
+    [
+      activeAccountId,
+      collapsedThreads,
+      confirmThreadDelete,
+      findTrashFolderId,
+      isPermanentDeleteTarget,
+      runDeleteTransaction,
+      supportsThreads,
+      threadScopeMessages
+    ]
   );
 
   const handleDeleteMessagesByIds = useCallback(

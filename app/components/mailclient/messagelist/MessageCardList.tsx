@@ -11,6 +11,7 @@ import {
   buildFlatEntries,
   buildThreadGroupEntries,
   getDisplaySeenForThreadRow,
+  getThreadMessagesForThreadRow,
   getCollapsedThreadFromDisplay,
   getMessageFromDisplay,
   isCollapsedThreadRootRow
@@ -194,10 +195,23 @@ export default function MessageCardList({
 
 
   const listRef = useRef<HTMLDivElement | null>(null);
-  const lastGroupToggleRef = useRef<{ key: string; open: boolean; at: number } | null>(null);
-  const lastThreadToggleRef = useRef<{ key: string; open: boolean; at: number } | null>(null);
-  const lastNestedToggleRef = useRef<{ key: string; open: boolean; at: number } | null>(null);
+  const [lastGroupToggle, setLastGroupToggle] = useState<{
+    key: string;
+    open: boolean;
+    at: number;
+  } | null>(null);
+  const [lastThreadToggle, setLastThreadToggle] = useState<{
+    key: string;
+    open: boolean;
+    at: number;
+  } | null>(null);
+  const [lastNestedToggle, setLastNestedToggle] = useState<{
+    key: string;
+    open: boolean;
+    at: number;
+  } | null>(null);
   const [scrollState, setScrollState] = useState({ scrollTop: 0, height: 0 });
+  const [animationClock, setAnimationClock] = useState(0);
   const [collapsedNestedMessages, setCollapsedNestedMessages] = useState<Record<string, boolean>>(
     {}
   );
@@ -234,6 +248,14 @@ export default function MessageCardList({
       window.removeEventListener("resize", onScroll);
     };
   }, [scrollRef]);
+
+  useEffect(() => {
+    if (!animationClock) return;
+    const timer = window.setTimeout(() => setAnimationClock(0), 220);
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [animationClock]);
 
   const rowHeight = isCompactView ? 60 : 100;
   const groupHeight = isCompactView ? 28 : 32;
@@ -429,10 +451,6 @@ export default function MessageCardList({
         );
   const visibleItems =
     startIndex <= endIndex ? listItems.slice(startIndex, endIndex + 1) : [];
-  const lastGroupToggle = lastGroupToggleRef.current;
-  const lastThreadToggle = lastThreadToggleRef.current;
-  const lastNestedToggle = lastNestedToggleRef.current;
-  const now = Date.now();
 
   return (
     <div
@@ -458,7 +476,9 @@ export default function MessageCardList({
               open={!isCollapsed}
               onOpenChange={(open) => {
                 if (isEmpty) return;
-                lastGroupToggleRef.current = { key: group.key, open, at: Date.now() };
+                const at = Date.now();
+                setLastGroupToggle({ key: group.key, open, at });
+                setAnimationClock(at);
                 setCollapsedGroups((prev) => ({
                   ...prev,
                   [group.key]: !open
@@ -492,18 +512,22 @@ export default function MessageCardList({
         const isSelected = selectedMessageIds.has(message.id);
         const isDragging = draggingMessageIds.has(message.id);
         const animateFromGroup =
+          animationClock > 0 &&
           lastGroupToggle?.open &&
           lastGroupToggle.key === item.groupKey &&
-          now - lastGroupToggle.at < 220;
+          animationClock - lastGroupToggle.at < 220;
         const animateFromThread =
+          animationClock > 0 &&
           isCompactView &&
           lastThreadToggle?.open &&
           lastThreadToggle.key === item.threadGroupId &&
           item.depth > 0 &&
-          now - lastThreadToggle.at < 220;
+          animationClock - lastThreadToggle.at < 220;
         const animateFromNested = (() => {
-          if (!isCompactView || !lastNestedToggle?.open || item.depth === 0) return false;
-          if (now - lastNestedToggle.at >= 220) return false;
+          if (!animationClock || !isCompactView || !lastNestedToggle?.open || item.depth === 0) {
+            return false;
+          }
+          if (animationClock - lastNestedToggle.at >= 220) return false;
           const expandedId = lastNestedToggle.key;
           const flatIndex = item.fullFlat.findIndex((entry) => entry.message.id === message.id);
           const expandedIndex = item.fullFlat.findIndex(
@@ -535,10 +559,12 @@ export default function MessageCardList({
           isCompactView && index > 0 && !item.isFirstInGroup;
         const displaySeen = getDisplaySeenForThreadRow({
           messageSeen: Boolean(message.seen),
+          messageId: message.id,
           isCollapsed: item.isCollapsed,
           threadSize: item.threadSize,
           depth: item.depth,
           threadIndex: item.threadIndex,
+          isNestedCollapsed: item.isNestedCollapsed,
           fullFlat: item.fullFlat
         });
         const useCompactThreadContainer = isCompactView && supportsThreads;
@@ -574,9 +600,16 @@ export default function MessageCardList({
           depth: item.depth,
           threadIndex: item.threadIndex
         });
-        const threadMessages = isCollapsedThreadRoot
-          ? item.fullFlat.map((entry) => entry.message)
-          : [message];
+        const threadMessages = getThreadMessagesForThreadRow({
+          message,
+          messageId: message.id,
+          isCollapsed: item.isCollapsed,
+          threadSize: item.threadSize,
+          depth: item.depth,
+          threadIndex: item.threadIndex,
+          isNestedCollapsed: item.isNestedCollapsed,
+          fullFlat: item.fullFlat
+        });
 
         return (
           <div
@@ -598,11 +631,13 @@ export default function MessageCardList({
                   ancestorStopsHere={item.ancestorStopsHere}
                   onToggleThread={() => {
                     const willOpen = item.isCollapsed;
-                    lastThreadToggleRef.current = {
+                    const at = Date.now();
+                    setLastThreadToggle({
                       key: item.threadGroupId,
                       open: willOpen,
-                      at: Date.now()
-                    };
+                      at
+                    });
+                    setAnimationClock(at);
                     setCollapsedThreads((prev) => ({
                       ...prev,
                       [item.threadGroupId]: !item.isCollapsed
@@ -610,11 +645,13 @@ export default function MessageCardList({
                   }}
                   onToggleNested={() => {
                     const willOpen = item.isNestedCollapsed;
-                    lastNestedToggleRef.current = {
+                    const at = Date.now();
+                    setLastNestedToggle({
                       key: message.id,
                       open: willOpen,
-                      at: Date.now()
-                    };
+                      at
+                    });
+                    setAnimationClock(at);
                     setCollapsedNestedMessages((prev) => ({
                       ...prev,
                       [message.id]: !item.isNestedCollapsed

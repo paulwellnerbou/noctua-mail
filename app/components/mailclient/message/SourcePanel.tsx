@@ -10,28 +10,32 @@ type SourcePanelProps = {
 };
 
 export default function SourcePanel({ messageId, fetchSource, scrubSource }: SourcePanelProps) {
-  const [source, setSource] = useState("");
-  const [status, setStatus] = useState<"idle" | "loading" | "loaded" | "error">("idle");
+  const [sourceState, setSourceState] = useState<{
+    messageId: string;
+    source: string;
+    status: "loaded" | "error";
+  } | null>(null);
   const [copyOk, setCopyOk] = useState(false);
 
   useEffect(() => {
     let active = true;
-    setStatus("loading");
     void fetchSource(messageId).then((data) => {
       if (!active) return;
       if (data === null) {
         console.warn("[noctua] source fetch returned null", { messageId });
-        setStatus("error");
+        setSourceState({ messageId, source: "", status: "error" });
         return;
       }
-      setSource(data || "");
-      setStatus("loaded");
+      setSourceState({ messageId, source: data || "", status: "loaded" });
     });
     return () => {
       active = false;
       console.info("[noctua] source panel cleanup", { messageId });
     };
   }, [messageId, fetchSource]);
+  const status =
+    sourceState && sourceState.messageId === messageId ? sourceState.status : "loading";
+  const source = sourceState && sourceState.messageId === messageId ? sourceState.source : "";
 
   return (
     <div className={styles.sourceBlock}>

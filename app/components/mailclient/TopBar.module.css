@@ -122,31 +122,14 @@
 
 .filterButton {
   max-width: 220px;
-  min-width: 0;
+  min-width: 116px;
   overflow: hidden;
-  transition: width 180ms ease;
 }
 
 .filterButtonLabel {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.filterLabelMeasure {
-  position: absolute;
-  visibility: hidden;
-  pointer-events: none;
-  height: 0;
-  overflow: hidden;
-  white-space: nowrap;
-}
-
-.filterLabelMeasureText {
-  display: inline-block;
-  font-size: 14px;
-  font-weight: 500;
-  letter-spacing: normal;
 }
 
 .actionRow {
