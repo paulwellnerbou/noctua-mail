@@ -1416,6 +1416,10 @@ a {
   display: flex;
   align-items: center;
   gap: 8px;
+  cursor: default;
+}
+
+.bottom-section[data-interactive="true"] {
   cursor: pointer;
 }
 

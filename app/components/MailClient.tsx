@@ -28,7 +28,6 @@ import ComposeEditor from "./ComposeEditor";
 import HtmlMessage from "./HtmlMessage";
 import LoginOverlay from "./auth/LoginOverlay";
 import FolderPane from "./mailclient/folder/FolderPane";
-import FolderBadges from "./mailclient/folder/FolderBadges";
 import FolderTree from "./mailclient/folder/FolderTree";
 import InAppNoticeStack, {
   type InAppNotice,
@@ -37,25 +36,20 @@ import InAppNoticeStack, {
 import ComposeInlineCard from "./mailclient/composition/ComposeInlineCard";
 import ComposeMinimized from "./mailclient/composition/ComposeMinimized";
 import ComposeModal from "./mailclient/composition/ComposeModal";
-import MessageCardList from "./mailclient/messagelist/MessageCardList";
 import MessageListHeader from "./mailclient/messagelist/MessageListHeader";
 import MessageListPane from "./mailclient/messagelist/MessageListPane";
-import MessageThreadList from "./mailclient/messagelist/MessageThreadList";
+import MessageListView from "./mailclient/messagelist/MessageListView";
 import listMetaStyles from "./mailclient/messagelist/MessageListMeta.module.css";
 import listPaneStyles from "./mailclient/messagelist/MessageListPane.module.css";
 import type { MessageGroupMeta } from "./mailclient/messagelist/listModel";
-import {
-  clearListSelection,
-  resolveCollapsedThreadSelectionTarget,
-  selectRangeToMessage,
-  toggleListMessageSelection
-} from "./mailclient/messagelist/listSelection";
 import { createSelectionStore } from "./mailclient/messagelist/selectionStore";
 import {
   mergeCollapsedGroupsWithMeta,
   mergeCollapsedThreadsWithMessages,
   useMessageListDerivedState
 } from "./mailclient/messagelist/listState";
+import { useMessageListHelpers } from "./mailclient/messagelist/useMessageListHelpers";
+import { useMessageListSelectionController } from "./mailclient/messagelist/useMessageListSelectionController";
 import {
   buildThreadTree,
   flattenThread,
@@ -74,9 +68,6 @@ import {
   Tabs,
   Text
 } from "@radix-ui/themes";
-import MessageSelectIndicators from "./mailclient/messagelist/MessageSelectIndicators";
-import MessageTable from "./mailclient/messagelist/MessageTable";
-import UnreadDot from "./mailclient/messagelist/UnreadDot";
 import MessageMenu from "./mailclient/message/MessageMenu";
 import MessageQuickActions from "./mailclient/message/MessageQuickActions";
 import MessageViewPane from "./mailclient/message/MessageViewPane";
@@ -144,6 +135,54 @@ import type {
   SyncNotificationMessage,
   SyncJobResult
 } from "./mailclient/types";
+import { formatMessageDate, normalizeAccountDateFormat } from "@/lib/dateFormatting";
+
+type BottomStatusTone = "normal" | "muted" | "error";
+
+type BottomStatusSectionProps = {
+  label: string;
+  value: string;
+  tone?: BottomStatusTone;
+  onActivate?: () => void;
+  alignRight?: boolean;
+};
+
+function BottomStatusSection({
+  label,
+  value,
+  tone = "normal",
+  onActivate,
+  alignRight = false
+}: BottomStatusSectionProps) {
+  const interactive = Boolean(onActivate);
+  const valueClassName =
+    tone === "error" ? "bottom-error" : tone === "muted" ? "bottom-muted" : "bottom-item";
+  const className = ["bottom-section", alignRight ? "bottom-right" : ""].filter(Boolean).join(" ");
+  const activate = () => {
+    if (onActivate) onActivate();
+  };
+  const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (!interactive) return;
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      activate();
+    }
+  };
+
+  return (
+    <div
+      className={className}
+      data-interactive={interactive ? "true" : "false"}
+      role={interactive ? "button" : undefined}
+      tabIndex={interactive ? 0 : undefined}
+      onClick={interactive ? activate : undefined}
+      onKeyDown={handleKeyDown}
+    >
+      <span className="bottom-label">{label}</span>
+      <span className={valueClassName}>{value}</span>
+    </div>
+  );
+}
 
 export default function MailClient() {
   const [accounts, setAccounts] = useState<Account[]>(seedAccounts);
@@ -572,36 +611,6 @@ export default function MailClient() {
   const hasFilteredSearchCriteria =
     isRelatedSearch || trimmedQuery.length > 0 || selectedSearchBadges.length > 0;
 
-  const selectRangeTo = (messageId: string) => {
-    selectRangeToMessage({
-      messageId,
-      lastSelectedId: lastSelectedIdRef.current,
-      indexMap: visibleIndexByIdRef.current,
-      visibleMessages: visibleMessagesRef.current,
-      selectionStore,
-      setLastSelectedId: (id) => {
-        lastSelectedIdRef.current = id;
-      }
-    });
-  };
-
-  const clearSelection = () => {
-    clearListSelection({
-      selectionStore,
-      setLastSelectedId: (id) => {
-        lastSelectedIdRef.current = id;
-      }
-    });
-  };
-
-  const setLastSelectedIdRef = useCallback((id: string | null) => {
-    lastSelectedIdRef.current = id;
-  }, []);
-
-  useEffect(() => {
-    selectionStore.setActiveId(activeMessageId);
-  }, [activeMessageId, selectionStore]);
-
   // Cleanup debounce timer on unmount
   useEffect(() => {
     return () => {
@@ -622,70 +631,6 @@ export default function MailClient() {
     }, 1000);
     return () => clearInterval(interval);
   }, [draftSavedAt]);
-
-  const toggleMessageSelection = useCallback((
-    messageId: string,
-    replace = false,
-    setActive = true
-  ) => {
-    toggleListMessageSelection({
-      messageId,
-      replace,
-      setActive,
-      selectionStore,
-      setLastSelectedId: (id) => {
-        lastSelectedIdRef.current = id;
-      }
-    });
-  }, [selectionStore]);
-
-  const getThreadSelectionKey = (message?: Message | null) =>
-    message ? message.threadId ?? message.messageId ?? message.id : "";
-
-  const handleSelectMessage = useCallback(
-    (message: Message, options?: { preserveSelection?: boolean }) => {
-      const currentMessage = activeMessageId ? messageById.get(activeMessageId) ?? null : null;
-      const nextThreadKey = getThreadSelectionKey(message);
-      const currentThreadKey = getThreadSelectionKey(currentMessage);
-      const shouldAutoMinimizeComposer =
-        composeOpen &&
-        composeView === "inline" &&
-        (composeMode === "new" || composeMode === "reply" || composeMode === "replyAll") &&
-        nextThreadKey !== currentThreadKey;
-      if (shouldAutoMinimizeComposer) {
-        setComposeView("minimized");
-      }
-      if (!options?.preserveSelection) {
-        const current = selectionStore.getIds();
-        if (!(current.size === 1 && current.has(message.id))) {
-          selectionStore.setSelection(new Set([message.id]), message.id);
-        } else {
-          selectionStore.setActiveId(message.id);
-        }
-        lastSelectedIdRef.current = message.id;
-      }
-      selectionStore.setActiveId(message.id);
-      startTransition(() => setActiveMessageId(message.id));
-    },
-    [activeMessageId, composeMode, composeOpen, composeView, messageById, selectionStore]
-  );
-
-  const handleRowClick = useCallback(
-    (event: React.MouseEvent, message: Message) => {
-      if (event.shiftKey) {
-        event.preventDefault();
-        selectRangeTo(message.id);
-        return;
-      }
-      if (event.metaKey || event.ctrlKey) {
-        event.preventDefault();
-        toggleMessageSelection(message.id, false, false);
-        return;
-      }
-      handleSelectMessage(message);
-    },
-    [handleSelectMessage, selectRangeTo, toggleMessageSelection]
-  );
 
   const searchFieldsLabel = useMemo(() => {
     const allEnabled =
@@ -1063,42 +1008,6 @@ export default function MailClient() {
     if (diff < day * 2) return "Yesterday";
     if (diff < day * 7) return "This Week";
     return "Older";
-  };
-
-  const renderSelectIndicators = (message: Message) => (
-    <MessageSelectIndicators
-      isFlagged={isFlaggedMessage(message)}
-      isDraft={Boolean(message.draft)}
-      onFlaggedClick={() => toggleFlaggedFlag(message)}
-    />
-  );
-
-  const renderUnreadDot = (
-    message: Message,
-    options?: { seen?: boolean; threadMessages?: Message[] }
-  ) => {
-    const displaySeen = options?.seen ?? Boolean(message.seen);
-    const targets = Array.from(
-      new Map(
-        (options?.threadMessages?.length ? options.threadMessages : [message]).map((target) => [
-          target.id,
-          target
-        ])
-      ).values()
-    );
-    const isDisabled = targets.some((target) => pendingMessageActions.has(target.id));
-    return (
-      <UnreadDot
-        seen={displaySeen}
-        disabled={isDisabled}
-        onToggle={() => {
-          const nextSeen = !displaySeen;
-          void Promise.all(
-            targets.map((target) => updateFlagState(target, "seen", nextSeen))
-          );
-        }}
-      />
-    );
   };
 
   const getWeekGroup = (value: number) => {
@@ -1529,6 +1438,9 @@ export default function MailClient() {
     accountSignatures.find((signature) => signature.id === composeSignatureId) ?? null;
   const includeThreadAcrossFolders =
     currentAccount?.settings?.threading?.includeAcrossFolders ?? true;
+  const accountDateFormat = normalizeAccountDateFormat(
+    currentAccount?.settings?.appearance?.dateFormat
+  );
   useEffect(() => {
     const preferred = currentAccount?.settings?.layout?.defaultView;
     if (
@@ -1686,6 +1598,45 @@ export default function MailClient() {
     preferToDisplay,
     setCollapsedGroups
   });
+
+  const handleBeforeSelectMessage = useCallback(
+    (nextMessage: Message, currentMessage: Message | null) => {
+      const nextThreadKey = nextMessage.threadId ?? nextMessage.messageId ?? nextMessage.id;
+      const currentThreadKey = currentMessage
+        ? currentMessage.threadId ?? currentMessage.messageId ?? currentMessage.id
+        : "";
+      const shouldAutoMinimizeComposer =
+        composeOpen &&
+        composeView === "inline" &&
+        (composeMode === "new" || composeMode === "reply" || composeMode === "replyAll") &&
+        nextThreadKey !== currentThreadKey;
+      if (shouldAutoMinimizeComposer) {
+        setComposeView("minimized");
+      }
+    },
+    [composeMode, composeOpen, composeView]
+  );
+
+  const {
+    setLastSelectedIdRef,
+    selectRangeTo,
+    clearSelection,
+    toggleMessageSelection,
+    handleSelectMessage,
+    handleRowClick,
+    selectCollapsedThread
+  } = useMessageListSelectionController({
+    selectionStore,
+    lastSelectedIdRef,
+    visibleIndexByIdRef,
+    visibleMessagesRef,
+    activeMessageId,
+    setActiveMessageId,
+    messageById,
+    isFlaggedMessage,
+    onBeforeSelectMessage: handleBeforeSelectMessage
+  });
+
   const showComposeInline = composeOpen && composeView === "inline";
   const showComposeModal = composeOpen && composeView === "modal";
   const showComposeMinimized = composeOpen && composeView === "minimized";
@@ -1867,6 +1818,11 @@ export default function MailClient() {
           replyMessageId
         ]
       : undefined;
+    const formattedMessageDate = formatMessageDate(
+      message.dateValue,
+      message.date,
+      accountDateFormat
+    );
 
     if (mode === "reply") {
       setComposeReplyMessage(message);
@@ -1895,7 +1851,7 @@ export default function MailClient() {
       setComposeCc("");
       setComposeBcc("");
       setComposeSubject(prefixSubject("Re", message.subject));
-      const replyHeader = `On ${message.date}, ${message.from} wrote:`;
+      const replyHeader = `On ${formattedMessageDate}, ${message.from} wrote:`;
       const hasValidHtml = prefersHtml && hasHtmlContent(message.htmlBody);
       if (hasValidHtml && message.htmlBody) {
         const replyParts = buildQuotedHtmlPartsFromHtml(message.htmlBody, replyHeader, stripImages);
@@ -1963,7 +1919,7 @@ export default function MailClient() {
       setComposeCc(ccList.join(", "));
       setComposeBcc("");
       setComposeSubject(prefixSubject("Re", message.subject));
-      const replyHeader = `On ${message.date}, ${message.from} wrote:`;
+      const replyHeader = `On ${formattedMessageDate}, ${message.from} wrote:`;
       const hasValidHtml = prefersHtml && hasHtmlContent(message.htmlBody);
       if (hasValidHtml && message.htmlBody) {
         const replyParts = buildQuotedHtmlPartsFromHtml(message.htmlBody, replyHeader, stripImages);
@@ -2003,7 +1959,7 @@ export default function MailClient() {
       setComposeCc("");
       setComposeBcc("");
       setComposeSubject(prefixSubject("Fwd", message.subject));
-      const forwardHeader = `Forwarded message from ${message.from} on ${message.date}:`;
+      const forwardHeader = `Forwarded message from ${message.from} on ${formattedMessageDate}:`;
       const hasValidHtml = prefersHtml && hasHtmlContent(message.htmlBody);
       if (hasValidHtml && message.htmlBody) {
         const forwardParts = buildQuotedHtmlPartsFromHtml(message.htmlBody, forwardHeader, stripImages);
@@ -3351,21 +3307,6 @@ export default function MailClient() {
     if (composeMode === "new") return;
     setComposeOpen(false);
   }, [activeFolderId]);
-  const selectCollapsedThread = (
-    flat: { message: Message; depth: number }[],
-    target: Message,
-    options?: { isFlaggedGroup?: boolean }
-  ) => {
-    const effectiveTarget = resolveCollapsedThreadSelectionTarget({
-      flat,
-      target,
-      isFlaggedMessage,
-      options
-    });
-    selectionStore.setSelection(new Set([effectiveTarget.id]), effectiveTarget.id);
-    lastSelectedIdRef.current = effectiveTarget.id;
-    handleSelectMessage(effectiveTarget, { preserveSelection: true });
-  };
 
   useEffect(() => {
     const isTypingTarget = (target: EventTarget | null) => {
@@ -4269,28 +4210,25 @@ export default function MailClient() {
 
   useEffect(() => {
     clearSelection();
-  }, [activeFolderId, activeAccountId, searchScope]);
+  }, [activeFolderId, activeAccountId, searchScope, clearSelection]);
 
-  const folderNameById = (id: string) =>
-    folders.find((folder) => folder.id === id)?.name ?? id;
-  const threadPathById = (id: string) => id.replace(`${activeAccountId}:`, "");
-  const renderFolderBadges = (folderIds: string[]) => (
-    <FolderBadges
-      folderIds={folderIds}
-      threadPathById={threadPathById}
-      folderNameById={folderNameById}
-      onSelectFolder={(folderId) => {
-        setSearchScope("folder");
-        setActiveFolderId(folderId);
-      }}
-    />
-  );
-  const getGroupLabel = (group: { key: string; label?: string }) => {
-    if (groupBy === "folder") {
-      return threadPathById(group.key);
-    }
-    return group.label ?? group.key;
-  };
+  const {
+    folderNameById,
+    threadPathById,
+    renderSelectIndicators,
+    renderUnreadDot,
+    renderFolderBadges,
+    getGroupLabel
+  } = useMessageListHelpers({
+    groupBy,
+    activeAccountId,
+    folders,
+    pendingMessageActions,
+    toggleFlaggedFlag,
+    updateFlagState,
+    setSearchScope,
+    setActiveFolderId
+  });
 
   useEffect(() => {
     if (!composeOpen) return;
@@ -5631,6 +5569,17 @@ export default function MailClient() {
       return next;
     });
   };
+  const processStatusItems = [
+    isSyncing ? "Mailbox sync" : "",
+    isRecomputingThreads ? "Recomputing threads…" : "",
+    syncingFolders.size > 0 ? `Folder sync… (${syncingFolders.size})` : ""
+  ].filter(Boolean);
+  const processStatusValue = processStatusItems.length > 0 ? processStatusItems.join(" · ") : "Idle";
+  const processStatusTone: BottomStatusTone = processStatusItems.length > 0 ? "normal" : "muted";
+  const mailCheckStatusValue = mailCheckMode === "idle" ? "Idle" : "Polling";
+  const mailCheckStatusTone: BottomStatusTone = mailCheckMode === "idle" ? "muted" : "normal";
+  const exceptionStatusValue = latestException ? errorSummary ?? "Error" : "None";
+  const exceptionStatusTone: BottomStatusTone = latestException ? "error" : "muted";
 
   if (authState === "unauth") {
     return (
@@ -5908,145 +5857,58 @@ export default function MailClient() {
                 </Text>
               </Card>
             )}
-            {deferredMessageView === "table" ? (
-              <MessageTable
-                state={{
-                  groupedMessages,
-                  visibleMessages,
-                  selectionStore,
-                  draggingMessageIds,
-                  collapsedGroups,
-                  collapsedThreads,
-                  pendingMessageActions,
-                  supportsThreads,
-                  includeThreadAcrossFolders,
-                  searchScope,
-                  activeFolderId,
-                  messageById,
-                  sortDir,
-                  preferToDisplay,
-                  userEmail: currentAccount?.email
-                }}
-                actions={{
-                  setSortKey,
-                  setSortDir,
-                  setCollapsedGroups,
-                  setCollapsedThreads,
-                  setLastSelectedIdRef,
-                  handleMessageDragStart,
-                  handleMessageDragEnd,
-                  handleRowClick,
-                  handleSelectMessage,
-                  toggleMessageSelection,
-                  selectRangeTo,
-                  selectCollapsedThread,
-                  handleDeleteMessage
-                }}
-                helpers={{
-                  buildThreadTree,
-                  flattenThread,
-                  getThreadLatestDate,
-                  getGroupLabel,
-                  renderUnreadDot,
-                  renderSelectIndicators,
-                  renderFolderBadges,
-                  isTrashFolder,
-                  renderMessageMenu,
-                  handleShowRelated
-                }}
-                refs={{ scrollRef: listPaneRef }}
-              />
-            ) : deferredMessageView === "threads" ? (
-              <MessageThreadList
-                state={{
-                  groupedMessages,
-                  collapsedGroups,
-                  collapsedThreads,
-                  supportsThreads,
-                  includeThreadAcrossFolders,
-                  searchScope,
-                  activeFolderId,
-                  messageById,
-                  selectionStore,
-                  draggingMessageIds,
-                  pendingMessageActions,
-                  preferToDisplay,
-                  userEmail: currentAccount?.email
-                }}
-                actions={{
-                  setCollapsedGroups,
-                  setCollapsedThreads,
-                  handleMessageDragStart,
-                  handleMessageDragEnd,
-                  handleRowClick,
-                  handleSelectMessage,
-                  selectRangeTo,
-                  toggleMessageSelection,
-                  selectCollapsedThread,
-                  handleDeleteMessage,
-                  toggleFlaggedFlag
-                }}
-                helpers={{
-                  buildThreadTree,
-                  flattenThread,
-                  getThreadLatestDate,
-                  getGroupLabel,
-                  renderUnreadDot,
-                  renderFolderBadges,
-                  handleShowRelated,
-                  isTrashFolder,
-                  renderMessageMenu
-                }}
-                refs={{ scrollRef: listPaneRef }}
-              />
-            ) : (
-              <MessageCardList
-                state={{
-                  groupedMessages,
-                  collapsedGroups,
-                  collapsedThreads,
-                  supportsThreads,
-                  includeThreadAcrossFolders,
-                  searchScope,
-                  activeFolderId,
-                  messageById,
-                  selectionStore,
-                  draggingMessageIds,
-                  pendingMessageActions,
-                  isCompactView,
-                  listIsNarrow,
-                  preferToDisplay,
-                  userEmail: currentAccount?.email
-                }}
-                actions={{
-                  setCollapsedGroups,
-                  setCollapsedThreads,
-                  handleMessageDragStart,
-                  handleMessageDragEnd,
-                  handleRowClick,
-                  handleSelectMessage,
-                  selectRangeTo,
-                  toggleMessageSelection,
-                  selectCollapsedThread,
-                  handleDeleteMessage,
-                  toggleFlaggedFlag
-                }}
-                helpers={{
-                  buildThreadTree,
-                  flattenThread,
-                  getThreadLatestDate,
-                  getGroupLabel,
-                  renderUnreadDot,
-                  renderSelectIndicators,
-                  renderFolderBadges,
-                  renderQuickActions,
-                  renderMessageMenu,
-                  handleShowRelated,
-                  isTrashFolder
-                }}
-                refs={{ scrollRef: listPaneRef }}
-              />
-            )}
+            <MessageListView
+              view={deferredMessageView}
+              state={{
+                groupedMessages,
+                visibleMessages,
+                selectionStore,
+                draggingMessageIds,
+                collapsedGroups,
+                collapsedThreads,
+                pendingMessageActions,
+                supportsThreads,
+                includeThreadAcrossFolders,
+                searchScope,
+                activeFolderId,
+                messageById,
+                sortDir,
+                listIsNarrow,
+                preferToDisplay,
+                userEmail: currentAccount?.email,
+                dateFormat: accountDateFormat
+              }}
+              actions={{
+                setSortKey,
+                setSortDir,
+                setCollapsedGroups,
+                setCollapsedThreads,
+                setLastSelectedIdRef,
+                handleMessageDragStart,
+                handleMessageDragEnd,
+                handleRowClick,
+                handleSelectMessage,
+                toggleMessageSelection,
+                selectRangeTo,
+                selectCollapsedThread,
+                handleDeleteMessage,
+                toggleFlaggedFlag
+              }}
+              helpers={{
+                buildThreadTree,
+                flattenThread,
+                getThreadLatestDate,
+                getGroupLabel,
+                renderUnreadDot,
+                renderSelectIndicators,
+                renderFolderBadges,
+                renderQuickActions,
+                renderMessageMenu,
+                handleShowRelated,
+                isTrashFolder
+              }}
+              refs={{ scrollRef: listPaneRef }}
+            />
             {filteredMessages.length === 0 && !listLoading && (
               <div
                 className={`${listPaneStyles.empty} ${
@@ -6201,7 +6063,8 @@ export default function MailClient() {
                       handleSelectMessage,
                       messageByMessageId,
                       getPrimaryEmail,
-                      extractEmails
+                      extractEmails,
+                      dateFormat: accountDateFormat
                     }}
                   />
                 </>
@@ -6305,53 +6168,24 @@ export default function MailClient() {
         onCopyOk={setCopyOk}
       />
       <div className="bottom-bar">
-        <div
-          className="bottom-section"
-          role="button"
-          tabIndex={0}
-          onClick={() => setProcessPanelOpen((open) => !open)}
-          onKeyDown={(event) => {
-            if (event.key === "Enter" || event.key === " ") {
-              event.preventDefault();
-              setProcessPanelOpen((open) => !open);
-            }
-          }}
-        >
-          <span className="bottom-label">Processes</span>
-          {isSyncing && <span className="bottom-item">Mailbox sync</span>}
-          {isRecomputingThreads && <span className="bottom-item">Recomputing threads…</span>}
-          {syncingFolders.size > 0 && (
-            <span className="bottom-item">Folder sync… ({syncingFolders.size})</span>
-          )}
-          {!isSyncing && syncingFolders.size === 0 && !isRecomputingThreads && (
-            <span className="bottom-muted">Idle</span>
-          )}
-        </div>
-        <div className="bottom-section">
-          <span className="bottom-label">Mail check</span>
-          <span className="bottom-item">
-            {mailCheckMode === "idle" ? "IDLE" : "Polling"}
-          </span>
-        </div>
-        <div
-          className="bottom-section bottom-right"
-          role="button"
-          tabIndex={0}
-          onClick={toggleExceptionPanel}
-          onKeyDown={(event) => {
-            if (event.key === "Enter" || event.key === " ") {
-              event.preventDefault();
-              toggleExceptionPanel();
-            }
-          }}
-        >
-          <span className="bottom-label">Exceptions</span>
-          {latestException ? (
-            <span className="bottom-error">{errorSummary}</span>
-          ) : (
-            <span className="bottom-muted">None</span>
-          )}
-        </div>
+        <BottomStatusSection
+          label="Processes"
+          value={processStatusValue}
+          tone={processStatusTone}
+          onActivate={() => setProcessPanelOpen((open) => !open)}
+        />
+        <BottomStatusSection
+          label="Mail check"
+          value={mailCheckStatusValue}
+          tone={mailCheckStatusTone}
+        />
+        <BottomStatusSection
+          label="Exceptions"
+          value={exceptionStatusValue}
+          tone={exceptionStatusTone}
+          alignRight
+          onActivate={toggleExceptionPanel}
+        />
         {processPanelOpen && (
           <div className="bottom-popover bottom-popover-left">
             <div className="popover-title">Processes</div>

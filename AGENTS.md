@@ -17,6 +17,8 @@ VERY IMPORTANT:
 - `bun run build` builds the production bundle.
 - `bun run start` serves the production build.
 - `bun run lint` runs Next.js/ESLint checks.
+- `bun test` runs all tests.
+- `bun test app/components/mailclient/messagelist/listBehavior.test.ts` runs the message list behavior regression tests only.
 
 This project uses bun:sqlite for database access, so bun is required for running and building.
 

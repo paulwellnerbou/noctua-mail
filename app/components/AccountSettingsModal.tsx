@@ -13,7 +13,11 @@ import {
   TextArea,
   TextField
 } from "@radix-ui/themes";
-import type { Account, AccountSettings } from "@/lib/data";
+import type { Account, AccountDateFormat, AccountSettings } from "@/lib/data";
+import {
+  ACCOUNT_DATE_FORMAT_OPTIONS,
+  normalizeAccountDateFormat
+} from "@/lib/dateFormatting";
 
 type ManageTab = "account" | "signatures" | "preferences";
 
@@ -591,6 +595,41 @@ export default function AccountSettingsModal({
                             <Select.Item value="card">Card view</Select.Item>
                             <Select.Item value="table">Table view</Select.Item>
                             <Select.Item value="compact">Compact view</Select.Item>
+                          </Select.Content>
+                        </Select.Root>
+                      </Field>
+                    </Grid>
+                  </Flex>
+
+                  <Flex direction="column" gap="3">
+                    <Text size="3" weight="medium">
+                      Appearance
+                    </Text>
+                    <Grid columns="2" gap="3">
+                      <Field
+                        label="Date format"
+                        hint="Used in message list and message view."
+                      >
+                        <Select.Root
+                          value={normalizeAccountDateFormat(
+                            editingAccount.settings?.appearance?.dateFormat
+                          )}
+                          onValueChange={(value) =>
+                            onUpdateSettings({
+                              appearance: {
+                                ...(editingAccount.settings?.appearance ?? {}),
+                                dateFormat: value as AccountDateFormat
+                              }
+                            })
+                          }
+                        >
+                          <Select.Trigger style={{ width: "100%" }} />
+                          <Select.Content position="popper">
+                            {ACCOUNT_DATE_FORMAT_OPTIONS.map((option) => (
+                              <Select.Item key={option.value} value={option.value}>
+                                {option.label}
+                              </Select.Item>
+                            ))}
                           </Select.Content>
                         </Select.Root>
                       </Field>

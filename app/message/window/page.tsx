@@ -4,7 +4,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type React from "react";
 import { useSearchParams } from "next/navigation";
 import { Text } from "@radix-ui/themes";
-import type { Folder, Message } from "@/lib/data";
+import { normalizeAccountDateFormat } from "@/lib/dateFormatting";
+import type { Account, AccountDateFormat, Folder, Message } from "@/lib/data";
 import { getImapFlagBadges, hasHtmlContent } from "@/lib/ui/messageView";
 import { openDetachedWindow } from "@/lib/ui/openDetachedWindow";
 import MessageMenu from "@/app/components/mailclient/message/MessageMenu";
@@ -36,6 +37,7 @@ export default function MessageWindowPage() {
   const [folders, setFolders] = useState<Folder[]>([]);
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [error, setError] = useState("");
+  const [dateFormat, setDateFormat] = useState<AccountDateFormat>("locale");
   const [actionError, setActionError] = useState("");
   const [copyStatus, setCopyStatus] = useState<Record<string, boolean>>({});
   const [pendingMessageActions, setPendingMessageActions] = useState<Set<string>>(new Set());
@@ -57,12 +59,13 @@ export default function MessageWindowPage() {
     };
     void (async () => {
       try {
-        const [messageRes, foldersRes] = await Promise.all([
+        const [messageRes, foldersRes, accountsRes] = await Promise.all([
           fetch(
             `/api/message?accountId=${encodeURIComponent(accountId)}&messageId=${encodeURIComponent(messageId)}`,
             { credentials: "include" }
           ),
-          fetch("/api/folders", { credentials: "include" })
+          fetch("/api/folders", { credentials: "include" }),
+          fetch("/api/accounts", { credentials: "include" })
         ]);
         if (!active) return;
         if (!messageRes.ok) {
@@ -81,8 +84,14 @@ export default function MessageWindowPage() {
         const foldersData = foldersRes.ok
           ? (((await foldersRes.json()) as Folder[]) ?? [])
           : [];
+        const accountsData = accountsRes.ok
+          ? (((await accountsRes.json()) as Account[]) ?? [])
+          : [];
         setMessage(nextMessage);
         setFolders(foldersData.filter((folder) => folder.accountId === nextMessage.accountId));
+        const currentAccount =
+          accountsData.find((account) => account.id === nextMessage.accountId) ?? null;
+        setDateFormat(normalizeAccountDateFormat(currentAccount?.settings?.appearance?.dateFormat));
         setCollapsedMessages({ [nextMessage.id]: false });
         setStatus("ready");
       } catch {
@@ -387,7 +396,8 @@ export default function MessageWindowPage() {
                   safeMessage.messageId ? [[safeMessage.messageId, safeMessage]] : []
                 ),
                 getPrimaryEmail,
-                extractEmails
+                extractEmails,
+                dateFormat
               }}
             />
           </MessageViewPane>

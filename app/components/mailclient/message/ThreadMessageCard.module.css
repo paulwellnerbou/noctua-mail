@@ -128,7 +128,7 @@
 
 .metaLine {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   gap: var(--space-2);
   flex-wrap: wrap;
   font-size: 12px;
@@ -161,13 +161,13 @@
 
 .metaSegment {
   display: inline-flex;
-  align-items: center;
+  align-items: flex-start;
   gap: var(--space-2);
   min-width: 0;
 }
 
 .metaSegmentFrom {
-  flex: 1 1 320px;
+  flex: 1 1 0;
 }
 
 .metaSegmentDate {
@@ -201,7 +201,7 @@
 }
 
 .toCopy {
-  margin-left: var(--space-2);
+  margin-left: var(--space-0);
   vertical-align: middle;
   display: inline-flex;
 }
@@ -287,6 +287,12 @@
   font-size: 11px;
   letter-spacing: 0.08em;
   text-transform: uppercase;
+}
+
+.messageTabsRoot :global(.rt-BaseTabListTriggerInner) {
+  inset: 0;
+  padding: 0;
+  border-radius: 0;
 }
 
 .zoomControls {

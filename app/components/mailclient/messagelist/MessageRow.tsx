@@ -4,7 +4,7 @@ import { CalendarDays, Flag, GitBranch, MoveRight, Paperclip, Search, Trash2 } f
 import { Badge, Checkbox, IconButton, Text } from "@radix-ui/themes";
 import { CaretRightIcon } from "@radix-ui/react-icons";
 import { badgeColors, getFlagBadgeColor } from "@/lib/ui/badgeColors";
-import type { Message } from "@/lib/data";
+import type { AccountDateFormat, Message } from "@/lib/data";
 import badgeStyles from "../message/MessageBadge.module.css";
 import commonStyles from "./MessageListCommon.module.css";
 import { getMessageListDateDisplay } from "./messageDateDisplay";
@@ -65,6 +65,7 @@ type MessageRowProps = {
   threadHasFlagged?: boolean;
   threadHasAttachments?: boolean;
   threadHasCalendar?: boolean;
+  dateFormat?: AccountDateFormat;
 };
 
 function MessageRow({
@@ -120,7 +121,8 @@ function MessageRow({
   threadCategories,
   threadHasFlagged,
   threadHasAttachments,
-  threadHasCalendar
+  threadHasCalendar,
+  dateFormat
 }: MessageRowProps) {
   const [optimisticSelected, setOptimisticSelected] = useState<boolean | null>(null);
   const [optimisticActive, setOptimisticActive] = useState(false);
@@ -183,7 +185,7 @@ function MessageRow({
   const fromLine = fromText && fromText.trim() ? fromText : message.from;
   const fromLineTooltip =
     fromTooltip && fromTooltip.trim() ? fromTooltip : message.from;
-  const dateDisplay = getMessageListDateDisplay(message.dateValue, message.date);
+  const dateDisplay = getMessageListDateDisplay(message.dateValue, message.date, dateFormat);
 
   const handleCheckboxClick = (event: React.MouseEvent<HTMLButtonElement>) => {
     event.stopPropagation();

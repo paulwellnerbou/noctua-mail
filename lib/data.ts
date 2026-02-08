@@ -21,6 +21,8 @@ export type Account = {
   };
 };
 
+export type AccountDateFormat = "locale" | "mdy" | "dmy" | "ymd";
+
 export type AccountSettings = {
   sync?: {
     maxIdleSessions?: number;
@@ -31,6 +33,9 @@ export type AccountSettings = {
   };
   layout?: {
     defaultView?: "card" | "table" | "compact" | "threads";
+  };
+  appearance?: {
+    dateFormat?: AccountDateFormat;
   };
   signatures?: {
     id: string;

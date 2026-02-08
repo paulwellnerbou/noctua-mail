@@ -15,6 +15,7 @@ import { accounts as seedAccounts, folders as seedFolders } from "./data";
 import { decodeSecret, encodeSecret, shouldStorePasswordInDb } from "./secret";
 import { applyCachedCredentials } from "./credentials";
 import { CALENDAR_INVITE_FLAG, normalizeImapFlags } from "./messageFlags";
+import { normalizeAccountDateFormat } from "./dateFormatting";
 import { randomUUID } from "crypto";
 
 let dbInstance: any | null = null;
@@ -173,6 +174,12 @@ function initSchema(db: any) {
       ON messages(accountId, dateValue DESC);
     CREATE INDEX IF NOT EXISTS idx_messages_thread
       ON messages(threadId);
+    CREATE INDEX IF NOT EXISTS idx_messages_account_thread_date
+      ON messages(accountId, threadId, dateValue DESC);
+    CREATE INDEX IF NOT EXISTS idx_messages_account_flagged_thread
+      ON messages(accountId, flagged, threadId);
+    CREATE INDEX IF NOT EXISTS idx_threads_account_latest
+      ON threads(accountId, latestDateValue DESC);
     CREATE INDEX IF NOT EXISTS idx_attachments_message
       ON attachments(messageId);
   `);
@@ -476,6 +483,8 @@ function normalizeAccountSettings(settings?: AccountSettings) {
   if (!next.layout.defaultView) {
     next.layout.defaultView = "threads";
   }
+  if (!next.appearance) next.appearance = {};
+  next.appearance.dateFormat = normalizeAccountDateFormat(next.appearance.dateFormat);
   if (!next.signatures) next.signatures = [];
   if (next.defaultSignatureId === undefined) {
     next.defaultSignatureId = "";
@@ -2074,7 +2083,9 @@ export async function listThreads(params: {
     where += " AND EXISTS (SELECT 1 FROM attachments a WHERE a.messageId = m.id AND a.inline = 0)";
   }
 
-  const threadFilterSql = `SELECT DISTINCT m.threadId FROM messages m WHERE ${where}`;
+  const normalizedExcludedFolderIds = Array.from(
+    new Set((excludedFolderIds ?? []).map((value) => value.trim()).filter(Boolean))
+  );
   const shouldPrioritizeFlaggedThreads =
     !hasQuery &&
     !hasIdQuery &&
@@ -2083,70 +2094,152 @@ export async function listThreads(params: {
     inTerms.length === 0 &&
     (badges?.length ?? 0) === 0 &&
     !attachmentsFilter;
-  const flaggedOrderArgs: any[] = [];
-  let threadOrderSql = "t.latestDateValue DESC";
-  if (shouldPrioritizeFlaggedThreads) {
-    let flaggedWhere = "mf.accountId = ? AND mf.threadId = t.threadId AND mf.flagged = 1";
-    flaggedOrderArgs.push(accountId);
-    flaggedWhere = applyExcludedFolderFilters(
-      flaggedWhere,
-      flaggedOrderArgs,
-      excludedFolderIds,
-      "mf"
+  const isUnfilteredThreadList =
+    !folderId &&
+    !hasQuery &&
+    !hasIdQuery &&
+    fromTerms.length === 0 &&
+    toTerms.length === 0 &&
+    inTerms.length === 0 &&
+    (badges?.length ?? 0) === 0 &&
+    !attachmentsFilter &&
+    normalizedExcludedFolderIds.length === 0;
+
+  let threadRows: any[] = [];
+  let threadTotal = 0;
+  let total = 0;
+  let baseCount = 0;
+
+  if (isUnfilteredThreadList) {
+    if (shouldPrioritizeFlaggedThreads) {
+      threadRows = db
+        .prepare(
+          `
+          SELECT t.*
+          FROM threads t
+          LEFT JOIN (
+            SELECT DISTINCT m.threadId
+            FROM messages m
+            WHERE m.accountId = ? AND m.flagged = 1
+          ) flaggedThreads
+            ON flaggedThreads.threadId = t.threadId
+          WHERE t.accountId = ?
+          ORDER BY
+            CASE WHEN flaggedThreads.threadId IS NULL THEN 0 ELSE 1 END DESC,
+            t.latestDateValue DESC
+          LIMIT ? OFFSET ?
+        `
+        )
+        .all(accountId, accountId, pageSize, offset) as any[];
+    } else {
+      threadRows = db
+        .prepare(
+          `
+          SELECT t.*
+          FROM threads t
+          WHERE t.accountId = ?
+          ORDER BY t.latestDateValue DESC
+          LIMIT ? OFFSET ?
+        `
+        )
+        .all(accountId, pageSize, offset) as any[];
+    }
+
+    const threadTotalRow = db
+      .prepare(`SELECT COUNT(*) as count FROM threads WHERE accountId = ?`)
+      .get(accountId) as { count: number } | undefined;
+    threadTotal = threadTotalRow?.count ?? 0;
+
+    const totalRow = db
+      .prepare(
+        `SELECT COALESCE(SUM(messageCount), 0) as count FROM threads WHERE accountId = ?`
+      )
+      .get(accountId) as { count: number } | undefined;
+    total = totalRow?.count ?? 0;
+    baseCount = threadRows.reduce(
+      (sum, row) => sum + (typeof row.messageCount === "number" ? row.messageCount : 0),
+      0
     );
-    threadOrderSql = `CASE WHEN EXISTS (SELECT 1 FROM messages mf WHERE ${flaggedWhere}) THEN 1 ELSE 0 END DESC, t.latestDateValue DESC`;
+  } else {
+    const threadFilterSql = `SELECT DISTINCT m.threadId FROM messages m WHERE ${where}`;
+    const flaggedOrderArgs: any[] = [];
+    let flaggedJoinSql = "";
+    let threadOrderSql = "t.latestDateValue DESC";
+    if (shouldPrioritizeFlaggedThreads) {
+      let flaggedWhere = "mf.accountId = ? AND mf.flagged = 1";
+      flaggedOrderArgs.push(accountId);
+      flaggedWhere = applyExcludedFolderFilters(
+        flaggedWhere,
+        flaggedOrderArgs,
+        excludedFolderIds,
+        "mf"
+      );
+      flaggedJoinSql = `
+        LEFT JOIN (
+          SELECT DISTINCT mf.threadId
+          FROM messages mf
+          WHERE ${flaggedWhere}
+        ) flaggedThreads
+          ON flaggedThreads.threadId = t.threadId
+      `;
+      threadOrderSql =
+        "CASE WHEN flaggedThreads.threadId IS NULL THEN 0 ELSE 1 END DESC, t.latestDateValue DESC";
+    }
+
+    threadRows = db
+      .prepare(
+        `
+        SELECT t.*
+        FROM threads t
+        ${flaggedJoinSql}
+        WHERE t.accountId = ?
+          AND t.threadId IN (${threadFilterSql})
+        ORDER BY ${threadOrderSql}
+        LIMIT ? OFFSET ?
+      `
+      )
+      .all(...flaggedOrderArgs, accountId, ...args, pageSize, offset) as any[];
+
+    const threadTotalRow = db
+      .prepare(
+        `
+        SELECT COUNT(*) as count
+        FROM threads t
+        WHERE t.accountId = ?
+          AND t.threadId IN (${threadFilterSql})
+      `
+      )
+      .get(accountId, ...args) as { count: number };
+    threadTotal = threadTotalRow?.count ?? 0;
+
+    total = await getTotalCount({
+      accountId,
+      folderId,
+      query: query ?? undefined,
+      fields,
+      badges,
+      attachmentsOnly,
+      excludedFolderIds
+    });
+
+    const threadIdsForBaseCount = threadRows.map((row) => row.threadId);
+    const baseCountRow =
+      threadIdsForBaseCount.length > 0
+        ? (db
+            .prepare(
+              `
+              SELECT COUNT(*) as count
+              FROM messages m
+              WHERE ${where}
+                AND m.threadId IN (${threadIdsForBaseCount.map(() => "?").join(",")})
+            `
+            )
+            .get(...args, ...threadIdsForBaseCount) as { count: number })
+        : { count: 0 };
+    baseCount = baseCountRow?.count ?? 0;
   }
 
-  const threadRows = db
-    .prepare(
-      `
-      SELECT t.*
-      FROM threads t
-      WHERE t.accountId = ?
-        AND t.threadId IN (${threadFilterSql})
-      ORDER BY ${threadOrderSql}
-      LIMIT ? OFFSET ?
-    `
-    )
-    .all(accountId, ...args, ...flaggedOrderArgs, pageSize, offset) as any[];
-
   const threadIds = threadRows.map((row) => row.threadId);
-  const threadTotalRow = db
-    .prepare(
-      `
-      SELECT COUNT(*) as count
-      FROM threads t
-      WHERE t.accountId = ?
-        AND t.threadId IN (${threadFilterSql})
-    `
-    )
-    .get(accountId, ...args) as { count: number };
-  const threadTotal = threadTotalRow?.count ?? 0;
-
-  const total = await getTotalCount({
-    accountId,
-    folderId,
-    query: query ?? undefined,
-    fields,
-    badges,
-    attachmentsOnly,
-    excludedFolderIds
-  });
-
-  const baseCountRow =
-    threadIds.length > 0
-      ? (db
-          .prepare(
-            `
-            SELECT COUNT(*) as count
-            FROM messages m
-            WHERE ${where}
-              AND m.threadId IN (${threadIds.map(() => "?").join(",")})
-          `
-          )
-          .get(...args, ...threadIds) as { count: number })
-      : { count: 0 };
-  const baseCount = baseCountRow?.count ?? 0;
 
   const threadMessageArgs: any[] = [accountId];
   let threadMessageWhere = "m.accountId = ?";

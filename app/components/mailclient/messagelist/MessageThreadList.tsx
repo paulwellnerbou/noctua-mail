@@ -3,7 +3,7 @@ import type React from "react";
 import { CalendarDays, Flag, GitBranch, MoveRight, Paperclip, Trash2 } from "lucide-react";
 import { Badge, IconButton, Text } from "@radix-ui/themes";
 import { badgeColors, getFlagBadgeColor } from "@/lib/ui/badgeColors";
-import type { Message } from "@/lib/data";
+import type { AccountDateFormat, Message } from "@/lib/data";
 import { CALENDAR_INVITE_FLAG, hasMessageFlag, isCalendarAttachment } from "@/lib/messageFlags";
 import badgeStyles from "../message/MessageBadge.module.css";
 import CategoryBadge from "../CategoryBadge";
@@ -44,6 +44,7 @@ type MessageThreadListProps = {
     pendingMessageActions: Set<string>;
     preferToDisplay: boolean;
     userEmail?: string;
+    dateFormat?: AccountDateFormat;
   };
   refs: {
     scrollRef: React.RefObject<HTMLDivElement | null>;
@@ -108,7 +109,8 @@ export default function MessageThreadList({
     draggingMessageIds,
     pendingMessageActions,
     preferToDisplay,
-    userEmail
+    userEmail,
+    dateFormat
   } = state;
   const { scrollRef } = refs;
 
@@ -257,7 +259,11 @@ export default function MessageThreadList({
       }}
       renderRow={({ item, index }) => {
         const message = item.message;
-        const dateDisplay = getMessageListDateDisplay(message.dateValue, message.date);
+        const dateDisplay = getMessageListDateDisplay(
+          message.dateValue,
+          message.date,
+          dateFormat
+        );
         const isDragging = draggingMessageIds.has(message.id);
         const isActive = message.id === activeMessageId;
         const isDisabled = pendingMessageActions.has(message.id);

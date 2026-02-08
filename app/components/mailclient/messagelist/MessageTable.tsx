@@ -4,7 +4,7 @@ import { GitBranch, MoveRight, Search, Trash2 } from "lucide-react";
 import { Badge, Checkbox, IconButton, Text } from "@radix-ui/themes";
 import { CaretRightIcon } from "@radix-ui/react-icons";
 import { badgeColors } from "@/lib/ui/badgeColors";
-import type { Message } from "@/lib/data";
+import type { AccountDateFormat, Message } from "@/lib/data";
 import badgeStyles from "../message/MessageBadge.module.css";
 import {
   buildMessageListItems,
@@ -47,6 +47,7 @@ type MessageTableProps = {
     sortDir: "asc" | "desc";
     preferToDisplay: boolean;
     userEmail?: string;
+    dateFormat?: AccountDateFormat;
   };
   refs: {
     scrollRef: React.RefObject<HTMLDivElement | null>;
@@ -116,7 +117,8 @@ export default function MessageTable({
     messageById,
     sortDir,
     preferToDisplay,
-    userEmail
+    userEmail,
+    dateFormat
   } = state;
   const { scrollRef } = refs;
   const {
@@ -324,7 +326,11 @@ export default function MessageTable({
         }
         renderRow={({ item, index }) => {
           const message = item.message;
-          const dateDisplay = getMessageListDateDisplay(message.dateValue, message.date);
+          const dateDisplay = getMessageListDateDisplay(
+            message.dateValue,
+            message.date,
+            dateFormat
+          );
           const {
             isThreadSelectionRoot,
             threadSelectionIds,

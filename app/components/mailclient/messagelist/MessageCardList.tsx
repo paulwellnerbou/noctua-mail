@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type React from "react";
-import type { Message } from "@/lib/data";
+import type { AccountDateFormat, Message } from "@/lib/data";
 import { CALENDAR_INVITE_FLAG, hasMessageFlag, isCalendarAttachment } from "@/lib/messageFlags";
 import MessageRow from "./MessageRow";
 import {
@@ -43,6 +43,7 @@ type MessageCardListProps = {
     listIsNarrow: boolean;
     preferToDisplay: boolean;
     userEmail?: string;
+    dateFormat?: AccountDateFormat;
   };
   refs: {
     scrollRef: React.RefObject<HTMLDivElement | null>;
@@ -111,7 +112,8 @@ export default function MessageCardList({
     isCompactView,
     listIsNarrow,
     preferToDisplay,
-    userEmail
+    userEmail,
+    dateFormat
   } = state;
   const { scrollRef } = refs;
 
@@ -531,6 +533,7 @@ export default function MessageCardList({
               threadHasFlagged={threadBadgeUnion?.threadHasFlagged}
               threadHasAttachments={threadBadgeUnion?.threadHasAttachments}
               threadHasCalendar={threadBadgeUnion?.threadHasCalendar}
+              dateFormat={dateFormat}
             />
           </div>
         );

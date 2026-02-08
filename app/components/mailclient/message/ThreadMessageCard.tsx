@@ -14,7 +14,8 @@ import { CaretRightIcon } from "@radix-ui/react-icons";
 import * as Collapsible from "@radix-ui/react-collapsible";
 import { badgeColors, getFlagBadgeColor, getPriorityBadgeColor } from "@/lib/ui/badgeColors";
 import { isCalendarAttachment } from "@/lib/messageFlags";
-import type { Message } from "@/lib/data";
+import { getMessageDateDisplay } from "@/lib/dateFormatting";
+import type { AccountDateFormat, Message } from "@/lib/data";
 import badgeStyles from "./MessageBadge.module.css";
 import styles from "./ThreadMessageCard.module.css";
 import AttachmentsList from "../../AttachmentsList";
@@ -73,6 +74,7 @@ type ThreadMessageCardProps = {
   messageByMessageId: Map<string, Message>;
   getPrimaryEmail: (value?: string) => string | null;
   extractEmails: (value?: string) => string[];
+  dateFormat?: AccountDateFormat;
 };
 
 export default function ThreadMessageCard({
@@ -108,7 +110,8 @@ export default function ThreadMessageCard({
   handleSelectMessage,
   messageByMessageId,
   getPrimaryEmail,
-  extractEmails
+  extractEmails,
+  dateFormat
 }: ThreadMessageCardProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const toValue = message.to ?? "";
@@ -122,6 +125,7 @@ export default function ThreadMessageCard({
   const fontScale = messageFontScale[message.id] ?? 1;
   const zoomValue = messageZoom[message.id] ?? 1;
   const folderBadgeIds = message.folderId ? [message.folderId] : [];
+  const dateDisplay = getMessageDateDisplay(message.dateValue, message.date, dateFormat);
 
   const handleFolderBadgeSelect = (folderId: string) => {
     if (includeThreadAcrossFolders || folderId !== activeFolderId) {
@@ -163,8 +167,8 @@ export default function ThreadMessageCard({
 
   const renderTabsBar = (tabs: { value: MessageTab; label: string }[], currentTab: MessageTab) => (
     <div className={styles.tabsBar}>
-      <Tabs.Root value={currentTab} onValueChange={handleTabChange}>
-        <Tabs.List className={styles.tabsList}>
+      <Tabs.Root value={currentTab} onValueChange={handleTabChange} className={styles.messageTabsRoot}>
+        <Tabs.List size="1" className={styles.tabsList}>
           {tabs.map((tab) => (
             <Tabs.Trigger key={tab.value} value={tab.value} className={styles.tabTrigger}>
               {tab.label}
@@ -511,7 +515,9 @@ export default function ThreadMessageCard({
                 />
                 <div className={`${styles.metaSegment} ${styles.metaSegmentDate}`}>
                   <span className={styles.metaLabel}>Date:</span>
-                  <span className={styles.metaValue}>{message.date}</span>
+                  <span className={styles.metaValue} title={dateDisplay.tooltip}>
+                    {dateDisplay.text}
+                  </span>
                 </div>
               </div>
               <MessageRecipientMetaField

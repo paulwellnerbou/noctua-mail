@@ -88,6 +88,20 @@ bun run dev
 
 Open [http://localhost:3654](http://localhost:3654) in your browser.
 
+### Testing
+
+Run all tests:
+
+```bash
+bun test
+```
+
+Run only the message list behavior regression tests:
+
+```bash
+bun test app/components/mailclient/messagelist/listBehavior.test.ts
+```
+
 ---
 
 ## ⚙️ Configuration
