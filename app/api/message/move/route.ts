@@ -57,14 +57,20 @@ export async function POST(request: Request) {
     if (typeof message.imapUid !== "number" || !message.mailboxPath) continue;
 
     try {
-      await moveImapMessage(
+      const destinationUid = await moveImapMessage(
         account,
         message.mailboxPath,
         message.imapUid,
         destinationMailbox,
         clientId
       );
-      await updateMessageFolder(accountId, message.id, destinationFolderId, destinationMailbox);
+      await updateMessageFolder(
+        accountId,
+        message.id,
+        destinationFolderId,
+        destinationMailbox,
+        destinationUid
+      );
     } catch (error) {
       return NextResponse.json(
         { ok: false, message: (error as Error).message ?? "Failed to move message" },

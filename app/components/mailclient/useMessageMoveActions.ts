@@ -57,6 +57,7 @@ type UseMessageMoveActionsOptions = {
   folderById: Map<string, { name: string }>;
   lastSelectedIdRef: React.MutableRefObject<string | null>;
   setMessages: React.Dispatch<React.SetStateAction<Message[]>>;
+  shouldKeepMessageInResults?: (message: Message) => boolean;
   setPendingMessageActions: React.Dispatch<React.SetStateAction<Set<string>>>;
   setActiveMessageId: React.Dispatch<React.SetStateAction<string>>;
   apiFetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
@@ -82,6 +83,7 @@ export function useMessageMoveActions({
   folderById,
   lastSelectedIdRef,
   setMessages,
+  shouldKeepMessageInResults,
   setPendingMessageActions,
   setActiveMessageId,
   apiFetch,
@@ -155,35 +157,56 @@ export function useMessageMoveActions({
           return null;
         }
         const data = (await res.json()) as MoveApiResponse;
-        setMessages((prev) =>
-          prev
-            .map((item) => {
-              if (!idSet.has(item.id)) return item;
-              return {
-                ...item,
-                folderId: data.destinationFolderId,
-                mailboxPath: data.destinationMailbox ?? item.mailboxPath
-              };
-            })
-            .filter((item) => {
-              if (
-                searchScope === "folder" &&
-                activeFolderId &&
-                idSet.has(item.id) &&
-                item.folderId !== activeFolderId
-              ) {
-                return false;
-              }
-              return true;
-            })
-        );
+        setMessages((prev) => {
+          let changed = false;
+          const next: Message[] = [];
+          prev.forEach((item) => {
+            if (!idSet.has(item.id)) {
+              next.push(item);
+              return;
+            }
+            const updated: Message = {
+              ...item,
+              folderId: data.destinationFolderId,
+              mailboxPath: data.destinationMailbox ?? item.mailboxPath
+            };
+            const keep = shouldKeepMessageInResults
+              ? shouldKeepMessageInResults(updated)
+              : !(
+                  searchScope === "folder" &&
+                  activeFolderId &&
+                  updated.folderId !== activeFolderId
+                );
+            changed = true;
+            if (!keep) return;
+            next.push(updated);
+          });
+          return changed ? next : prev;
+        });
         if (
           updateActiveMessage &&
-          idSet.has(activeMessageId) &&
-          searchScope === "folder" &&
-          activeFolderId !== destinationFolderId
+          idSet.has(activeMessageId)
         ) {
-          setActiveMessageId("");
+          const activeMessage = messages.find((item) => item.id === activeMessageId);
+          const activeUpdated = activeMessage
+            ? {
+                ...activeMessage,
+                folderId: data.destinationFolderId,
+                mailboxPath: data.destinationMailbox ?? activeMessage.mailboxPath
+              }
+            : null;
+          const activeStillVisible = activeUpdated
+            ? shouldKeepMessageInResults
+              ? shouldKeepMessageInResults(activeUpdated)
+              : !(
+                  searchScope === "folder" &&
+                  activeFolderId &&
+                  activeUpdated.folderId !== activeFolderId
+                )
+            : false;
+          if (!activeStillVisible) {
+            setActiveMessageId("");
+          }
         }
         if (clearSelectionOnSuccess) {
           clearSelectionState();
@@ -250,6 +273,7 @@ export function useMessageMoveActions({
       reportError,
       searchScope,
       selectionStore,
+      shouldKeepMessageInResults,
       setActiveMessageId,
       setMessages,
       setPendingMessageActions,

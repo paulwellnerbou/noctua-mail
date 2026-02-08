@@ -39,6 +39,7 @@ type MessageRowProps = {
   onDragStart: (event: React.DragEvent) => void;
   onDragEnd: () => void;
   onCheckboxChange: (shiftKey: boolean) => void;
+  checkboxState?: boolean | "indeterminate";
   onSubjectClick: (event: React.MouseEvent) => void;
   onDelete: (event: React.MouseEvent) => void;
   onShowRelated: (event: React.MouseEvent) => void;
@@ -94,6 +95,7 @@ function MessageRow({
   onDragStart,
   onDragEnd,
   onCheckboxChange,
+  checkboxState,
   onSubjectClick,
   onDelete,
   onShowRelated,
@@ -209,10 +211,15 @@ function MessageRow({
     if (isRowControl || (isInteractive && !isCheckbox)) return;
     const isToggle = event.metaKey || event.ctrlKey;
     const isRange = event.shiftKey;
+    const currentCheckboxState = checkboxState ?? isSelected;
     if (isCheckbox) {
-      setOptimisticSelected(!isSelected);
+      setOptimisticSelected(
+        currentCheckboxState === "indeterminate" ? true : !currentCheckboxState
+      );
     } else if (isToggle) {
-      setOptimisticSelected(!isSelected);
+      setOptimisticSelected(
+        currentCheckboxState === "indeterminate" ? true : !currentCheckboxState
+      );
     } else {
       setOptimisticSelected(true);
     }
@@ -261,7 +268,7 @@ function MessageRow({
           {renderSelectIndicators}
           <Checkbox
             size="1"
-            checked={effectiveSelected}
+            checked={checkboxState ?? effectiveSelected}
             aria-label="Select message"
             onClick={handleCheckboxClick}
             disabled={isDisabled}
@@ -467,6 +474,7 @@ const areEqual = (prev: MessageRowProps, next: MessageRowProps) =>
   prev.showCalendarInviteIcon === next.showCalendarInviteIcon &&
   prev.showNewBadge === next.showNewBadge &&
   prev.showCompactDivider === next.showCompactDivider &&
+  prev.checkboxState === next.checkboxState &&
   prev.deleteTitle === next.deleteTitle &&
   prev.folderBadgeKey === next.folderBadgeKey &&
   prev.categoryIcon === next.categoryIcon;

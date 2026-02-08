@@ -1,4 +1,5 @@
 import type { Message } from "@/lib/data";
+import type { ThreadNode } from "./threadTree";
 
 type MessageGroup = {
   key: string;
@@ -6,8 +7,6 @@ type MessageGroup = {
   items: Message[];
   count?: number;
 };
-
-type ThreadNode = { message: Message; children: ThreadNode[]; threadSize: number };
 
 export type FromDisplayInfo = {
   text: string;
@@ -220,7 +219,7 @@ export function isCollapsedThreadRootRow(params: {
   return isCollapsed && threadSize > 1 && depth === 0 && threadIndex === 0;
 }
 
-const getThreadSubtreeEntries = (
+export const getThreadSubtreeEntries = (
   fullFlat: Array<{ message: Message; depth: number }>,
   messageId: string
 ) => {
@@ -235,6 +234,21 @@ const getThreadSubtreeEntries = (
   }
   return subtree;
 };
+
+export function getThreadSubtreeMessageIds(
+  fullFlat: Array<{ message: Message; depth: number }>,
+  messageId: string
+) {
+  return getThreadSubtreeEntries(fullFlat, messageId).map((entry) => entry.message.id);
+}
+
+export function hasThreadSubtreeChildren(
+  fullFlat: Array<{ message: Message; depth: number }>,
+  messageId: string
+) {
+  const subtree = getThreadSubtreeEntries(fullFlat, messageId);
+  return subtree.length > 1;
+}
 
 export function getDisplaySeenForThreadRow(params: {
   messageSeen: boolean;

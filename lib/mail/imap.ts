@@ -541,7 +541,7 @@ export async function moveImapMessage(
   uid: number,
   destination: string,
   clientId?: string
-) {
+): Promise<number | null> {
   let ImapFlow: typeof import("imapflow").ImapFlow;
   try {
     ({ ImapFlow } = await import("imapflow"));
@@ -559,11 +559,16 @@ export async function moveImapMessage(
     await logImapOp("mailboxOpen", { mailbox: mailboxPath, ...logContext }, () =>
       client.mailboxOpen(mailboxPath)
     );
-    await logImapOp(
+    const result = await logImapOp(
       "messageMove",
       { mailbox: mailboxPath, uid, destination, ...logContext },
       () => client.messageMove(uid, destination, { uid: true })
     );
+    const destinationUid =
+      result && typeof result === "object" && result.uidMap instanceof Map
+        ? result.uidMap.get(uid)
+        : undefined;
+    return typeof destinationUid === "number" ? destinationUid : null;
   } finally {
     try {
       await logImapOp("logout", { ...logContext }, () => client.logout());

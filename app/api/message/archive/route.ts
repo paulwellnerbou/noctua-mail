@@ -73,9 +73,21 @@ export async function POST(request: Request) {
   const currentMailbox =
     message.mailboxPath || mailboxPathFromFolderId(message.folderId, payload.accountId);
 
-  await moveImapMessage(account, currentMailbox, message.imapUid, archiveMailbox, clientId);
+  const destinationUid = await moveImapMessage(
+    account,
+    currentMailbox,
+    message.imapUid,
+    archiveMailbox,
+    clientId
+  );
   if (archiveFolder) {
-    await updateMessageFolder(payload.accountId, message.id, archiveFolder.id, archiveMailbox);
+    await updateMessageFolder(
+      payload.accountId,
+      message.id,
+      archiveFolder.id,
+      archiveMailbox,
+      destinationUid
+    );
   }
   return NextResponse.json({
     ok: true,

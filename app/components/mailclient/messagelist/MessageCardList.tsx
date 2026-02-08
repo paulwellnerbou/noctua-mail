@@ -1,82 +1,30 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type React from "react";
 import type { Message } from "@/lib/data";
 import { CALENDAR_INVITE_FLAG, hasMessageFlag, isCalendarAttachment } from "@/lib/messageFlags";
-import { Text } from "@radix-ui/themes";
-import * as Collapsible from "@radix-ui/react-collapsible";
-import { CaretRightIcon } from "@radix-ui/react-icons";
 import MessageRow from "./MessageRow";
 import {
-  buildVisibleThreadRows,
-  buildFlatEntries,
-  buildThreadGroupEntries,
-  getDisplaySeenForThreadRow,
-  getThreadMessagesForThreadRow,
-  getCollapsedThreadFromDisplay,
-  getMessageFromDisplay,
-  isCollapsedThreadRootRow
-} from "./threadGroupUtils";
+  buildMessageListItems,
+  type MessageGroup,
+  type ThreadNode
+} from "./listModel";
 import { useSelectionSnapshot, type SelectionStore } from "./selectionStore";
 import ThreadMarkers from "./ThreadMarkers";
+import MessageListRenderer from "./MessageListRenderer";
+import {
+  getDragThreadMessageIds,
+  getThreadRowDisplayMeta,
+  getThreadRowSelectionMeta,
+  handleCollapsedThreadRootClick,
+  handleMessageRowKeyDown,
+  handleRowCheckboxChange,
+  hasSelectionModifier,
+  isRowAnimatedFromGroupToggle,
+  isRowAnimatedFromNestedToggle
+} from "./listInteractions";
+import { getCollapsedThreadBadgeUnion } from "./threadBadgeUnion";
 import styles from "./MessageCardList.module.css";
 import threadRowStyles from "./MessageThreadList.module.css";
-
-type MessageGroup = {
-  key: string;
-  label?: string;
-  items: Message[];
-  count?: number;
-};
-
-type ThreadNode = { message: Message; children: ThreadNode[]; threadSize: number };
-
-type ListGroupItem = {
-  type: "group";
-  key: string;
-  group: MessageGroup;
-};
-
-type ListRowItem = {
-  type: "row";
-  key: string;
-  groupKey: string;
-  isFirstInGroup: boolean;
-  message: Message;
-  depth: number;
-  threadGroupId: string;
-  threadSize: number;
-  isCollapsed: boolean;
-  isFlaggedGroup: boolean;
-  threadIndex: number;
-  fullFlat: Array<{ message: Message; depth: number }>;
-  folderIds: string[];
-  fromText: string;
-  fromTooltip: string;
-  showRecipientIcon: boolean;
-  isLastInDepth: boolean;
-  hasChildren: boolean;
-  isNestedCollapsed: boolean;
-  ancestorStopsHere: boolean[];
-};
-
-type ListItem = ListGroupItem | ListRowItem;
-
-const OVERSCAN_COUNT = 8;
-
-const findStartIndex = (offsets: number[], value: number) => {
-  if (offsets.length === 0) return 0;
-  let lo = 0;
-  let hi = offsets.length - 1;
-  while (lo <= hi) {
-    const mid = Math.floor((lo + hi) / 2);
-    if (offsets[mid] <= value) {
-      lo = mid + 1;
-    } else {
-      hi = mid - 1;
-    }
-  }
-  return Math.max(0, lo - 1);
-};
 
 type MessageCardListProps = {
   state: {
@@ -195,9 +143,6 @@ export default function MessageCardList({
     handleShowRelated,
     isTrashFolder
   } = helpers;
-
-
-  const listRef = useRef<HTMLDivElement | null>(null);
   const [lastGroupToggle, setLastGroupToggle] = useState<{
     key: string;
     open: boolean;
@@ -213,44 +158,10 @@ export default function MessageCardList({
     open: boolean;
     at: number;
   } | null>(null);
-  const [scrollState, setScrollState] = useState({ scrollTop: 0, height: 0 });
   const [animationClock, setAnimationClock] = useState(0);
   const [collapsedNestedMessages, setCollapsedNestedMessages] = useState<Record<string, boolean>>(
     {}
   );
-
-  useEffect(() => {
-    const scrollEl = scrollRef.current;
-    if (!scrollEl) return;
-    let frame = 0;
-    const update = () => {
-      frame = 0;
-      const containerTop = listRef.current
-        ? listRef.current.getBoundingClientRect().top -
-          scrollEl.getBoundingClientRect().top +
-          scrollEl.scrollTop
-        : 0;
-      const nextTop = Math.max(0, scrollEl.scrollTop - containerTop);
-      const nextHeight = scrollEl.clientHeight;
-      setScrollState((prev) =>
-        prev.scrollTop === nextTop && prev.height === nextHeight
-          ? prev
-          : { scrollTop: nextTop, height: nextHeight }
-      );
-    };
-    const onScroll = () => {
-      if (frame) return;
-      frame = window.requestAnimationFrame(update);
-    };
-    update();
-    scrollEl.addEventListener("scroll", onScroll);
-    window.addEventListener("resize", onScroll);
-    return () => {
-      if (frame) window.cancelAnimationFrame(frame);
-      scrollEl.removeEventListener("scroll", onScroll);
-      window.removeEventListener("resize", onScroll);
-    };
-  }, [scrollRef]);
 
   useEffect(() => {
     if (!animationClock) return;
@@ -268,257 +179,75 @@ export default function MessageCardList({
   const activeThreadKey =
     activeMessage?.threadId ?? activeMessage?.messageId ?? activeMessage?.id;
 
-  const listItems = useMemo(() => {
-    const items: ListItem[] = [];
-    groupedMessages.forEach((group) => {
-      items.push({ type: "group", key: group.key, group });
-      if (group.items.length === 0 || collapsedGroups[group.key]) return;
-      let isFirstRow = true;
-
-      if (supportsThreads) {
-        const entries = buildThreadGroupEntries({
-          group,
-          collapsedThreads,
-          includeThreadAcrossFolders,
-          searchScope,
-          activeFolderId,
-          buildThreadTree,
-          flattenThread,
-          getThreadLatestDate
-        });
-        entries.forEach((entry) => {
-          const {
-            threadGroupId,
-            threadSize,
-            isCollapsed,
-            fullFlat,
-            flat,
-            threadFolderIds,
-            showThreadFolderBadges
-          } = entry;
-          const collapsedThreadFrom =
-            isCollapsed && threadSize > 1
-              ? getCollapsedThreadFromDisplay(fullFlat, userEmail, preferToDisplay)
-              : null;
-          const visibleRows = isCompactView
-            ? buildVisibleThreadRows({
-                flat,
-                collapsedNestedMessages
-              })
-            : flat.map(({ message, depth }) => ({
-                message,
-                depth,
-                isLastInDepth: true,
-                hasChildren: false,
-                isNestedCollapsed: false,
-                ancestorStopsHere: []
-              }));
-          visibleRows.forEach((row, index) => {
-            const {
-              message,
-              depth,
-              isLastInDepth,
-              hasChildren,
-              isNestedCollapsed,
-              ancestorStopsHere
-            } = row;
-            const folderIds =
-              index === 0 && isCollapsed && threadSize > 1
-                ? showThreadFolderBadges
-                  ? threadFolderIds
-                  : []
-                : searchScope === "all" ||
-                    (includeThreadAcrossFolders &&
-                      message.folderId !== activeFolderId)
-                  ? [message.folderId]
-                  : [];
-            // For expanded threads (depth > 0 or index > 0), pass isInExpandedThread=true
-            const isInExpandedThread = !isCollapsed || index > 0;
-            const fromDisplay =
-              index === 0 && collapsedThreadFrom
-                ? collapsedThreadFrom
-                : getMessageFromDisplay(
-                    message.from,
-                    { to: message.to, cc: message.cc, bcc: message.bcc },
-                    userEmail,
-                    isInExpandedThread,
-                    preferToDisplay
-                  );
-            items.push({
-              type: "row",
-              key: message.id,
-              groupKey: group.key,
-              isFirstInGroup: isFirstRow,
-              message,
-              depth,
-              threadGroupId,
-              threadSize,
-              isCollapsed,
-              isFlaggedGroup: group.key === "Flagged",
-              threadIndex: index,
-              fullFlat,
-              folderIds,
-              fromText: fromDisplay.text,
-              fromTooltip: fromDisplay.tooltip,
-              showRecipientIcon: Boolean(fromDisplay.showRecipientIcon),
-              isLastInDepth,
-              hasChildren,
-              isNestedCollapsed,
-              ancestorStopsHere
-            });
-            if (isFirstRow) isFirstRow = false;
-          });
-        });
-        return;
-      }
-
-      buildFlatEntries({
-        group,
+  const listItems = useMemo(
+    () =>
+      buildMessageListItems({
+        groupedMessages,
+        collapsedGroups,
+        collapsedThreads,
+        supportsThreads,
         includeThreadAcrossFolders,
         searchScope,
-        activeFolderId
-      }).forEach(({ message, threadGroupId, folderIds }) => {
-        // When thread mode is disabled, keep sender-style display (no collapsed-thread participant substitution).
-        const fromDisplay = getMessageFromDisplay(
-          message.from,
-          { to: message.to, cc: message.cc, bcc: message.bcc },
-          userEmail,
-          false,
-          preferToDisplay
-        );
-        items.push({
-          type: "row",
-          key: message.id,
-          groupKey: group.key,
-          isFirstInGroup: isFirstRow,
-          message,
-          depth: 0,
-          threadGroupId,
-          threadSize: 1,
-          isCollapsed: false,
-          isFlaggedGroup: false,
-          threadIndex: 0,
-          fullFlat: [{ message, depth: 0 }],
-          folderIds,
-          fromText: fromDisplay.text,
-          fromTooltip: fromDisplay.tooltip,
-          showRecipientIcon: Boolean(fromDisplay.showRecipientIcon),
-          isLastInDepth: true,
-          hasChildren: false,
-          isNestedCollapsed: false,
-          ancestorStopsHere: []
-        });
-        if (isFirstRow) isFirstRow = false;
-      });
-    });
-    return items;
-  }, [
-    groupedMessages,
-    collapsedGroups,
-    collapsedThreads,
-    supportsThreads,
-    includeThreadAcrossFolders,
-    searchScope,
-    activeFolderId,
-    buildThreadTree,
-    flattenThread,
-    getThreadLatestDate,
-    userEmail,
-    preferToDisplay,
-    isCompactView,
-    collapsedNestedMessages
-  ]);
-
-  const { offsets, totalHeight } = useMemo(() => {
-    const nextOffsets: number[] = [];
-    let total = 0;
-    listItems.forEach((item) => {
-      nextOffsets.push(total);
-      total += item.type === "group" ? groupHeight : rowHeight;
-    });
-    return { offsets: nextOffsets, totalHeight: total };
-  }, [groupHeight, rowHeight, listItems]);
-
-  const viewportHeight = scrollState.height || 720;
-  const viewportTop = Math.max(0, scrollState.scrollTop);
-  const startIndex =
-    listItems.length === 0
-      ? 0
-      : Math.max(0, findStartIndex(offsets, viewportTop) - OVERSCAN_COUNT);
-  const endIndex =
-    listItems.length === 0
-      ? -1
-      : Math.min(
-          listItems.length - 1,
-          findStartIndex(offsets, viewportTop + viewportHeight) + OVERSCAN_COUNT
-        );
-  const visibleItems =
-    startIndex <= endIndex ? listItems.slice(startIndex, endIndex + 1) : [];
+        activeFolderId,
+        buildThreadTree,
+        flattenThread,
+        getThreadLatestDate,
+        userEmail,
+        preferToDisplay,
+        mode: isCompactView ? "nested" : "flat",
+        collapsedNestedMessages
+      }),
+    [
+      groupedMessages,
+      collapsedGroups,
+      collapsedThreads,
+      supportsThreads,
+      includeThreadAcrossFolders,
+      searchScope,
+      activeFolderId,
+      buildThreadTree,
+      flattenThread,
+      getThreadLatestDate,
+      userEmail,
+      preferToDisplay,
+      isCompactView,
+      collapsedNestedMessages
+    ]
+  );
 
   return (
-    <div
-      ref={listRef}
+    <MessageListRenderer
+      items={listItems}
+      scrollRef={scrollRef}
       className={styles.virtualList}
-      style={{ height: totalHeight }}
-    >
-      {visibleItems.map((item, offsetIndex) => {
-        const index = startIndex + offsetIndex;
-        const top = offsets[index] ?? 0;
-        if (item.type === "group") {
-          const group = item.group;
-          const isFlagged = group.key === "Flagged";
-          const isCollapsed = collapsedGroups[group.key];
-          const count =
-            group.items.length === 0 ? 0 : group.count ?? group.items.length;
-          const isEmpty = group.items.length === 0;
-          return (
-            <Collapsible.Root
-              key={`group-${group.key}`}
-              className={styles.virtualItem}
-              style={{ transform: `translateY(${top}px)`, height: groupHeight }}
-              open={!isCollapsed}
-              onOpenChange={(open) => {
-                if (isEmpty) return;
-                const at = Date.now();
-                setLastGroupToggle({ key: group.key, open, at });
-                setAnimationClock(at);
-                setCollapsedGroups((prev) => ({
-                  ...prev,
-                  [group.key]: !open
-                }));
-              }}
-            >
-              <Collapsible.Trigger asChild disabled={isEmpty}>
-                <button
-                  type="button"
-                  className={`${styles.groupTitle} ${styles.groupToggle} ${
-                    isFlagged ? styles.groupTitleFlagged : ""
-                  }`}
-                >
-                  <span className={styles.groupCaret}>
-                    {isEmpty ? "" : <CaretRightIcon />}
-                  </span>
-                  <Text as="span" size="1">
-                    {getGroupLabel(group)} · {count}
-                  </Text>
-                </button>
-              </Collapsible.Trigger>
-            </Collapsible.Root>
-          );
-        }
-
+      rowHeight={rowHeight}
+      groupHeight={groupHeight}
+      collapsedGroups={collapsedGroups}
+      getGroupLabel={getGroupLabel}
+      onGroupOpenChange={(groupKey, open) => {
+        const at = Date.now();
+        setLastGroupToggle({ key: groupKey, open, at });
+        setAnimationClock(at);
+        setCollapsedGroups((prev) => ({
+          ...prev,
+          [groupKey]: !open
+        }));
+      }}
+      classNames={{
+        virtualItem: styles.virtualItem,
+        groupTitle: styles.groupTitle,
+        groupToggle: styles.groupToggle,
+        groupTitleFlagged: styles.groupTitleFlagged,
+        groupCaret: styles.groupCaret,
+        rowEnter: styles.rowEnter
+      }}
+      isRowAnimated={({ item }) => {
         const message = item.message;
-        const isActive = message.id === activeMessageId;
-        const isThreadSibling =
-          activeThreadKey === item.threadGroupId &&
-          message.id !== activeMessage?.id;
-        const isSelected = selectedMessageIds.has(message.id);
-        const isDragging = draggingMessageIds.has(message.id);
-        const animateFromGroup =
-          animationClock > 0 &&
-          lastGroupToggle?.open &&
-          lastGroupToggle.key === item.groupKey &&
-          animationClock - lastGroupToggle.at < 220;
+        const animateFromGroup = isRowAnimatedFromGroupToggle({
+          animationClock,
+          lastGroupToggle,
+          groupKey: item.groupKey
+        });
         const animateFromThread =
           animationClock > 0 &&
           isCompactView &&
@@ -526,28 +255,41 @@ export default function MessageCardList({
           lastThreadToggle.key === item.threadGroupId &&
           item.depth > 0 &&
           animationClock - lastThreadToggle.at < 220;
-        const animateFromNested = (() => {
-          if (!animationClock || !isCompactView || !lastNestedToggle?.open || item.depth === 0) {
-            return false;
-          }
-          if (animationClock - lastNestedToggle.at >= 220) return false;
-          const expandedId = lastNestedToggle.key;
-          const flatIndex = item.fullFlat.findIndex((entry) => entry.message.id === message.id);
-          const expandedIndex = item.fullFlat.findIndex(
-            (entry) => entry.message.id === expandedId
-          );
-          if (expandedIndex === -1 || flatIndex <= expandedIndex) return false;
-          const expandedDepth = item.fullFlat[expandedIndex].depth;
-          if (item.depth <= expandedDepth) return false;
-          for (let i = expandedIndex + 1; i < flatIndex; i++) {
-            if (item.fullFlat[i].depth <= expandedDepth) {
-              return false;
-            }
-          }
-          return true;
-        })();
-        const shouldAnimateRow = animateFromGroup || animateFromThread || animateFromNested;
+        const animateFromNested =
+          isCompactView &&
+          isRowAnimatedFromNestedToggle({
+            animationClock,
+            lastNestedToggle,
+            messageId: message.id,
+            itemDepth: item.depth,
+            fullFlat: item.fullFlat
+          });
+        return animateFromGroup || animateFromThread || animateFromNested;
+      }}
+      renderRow={({ item, index }) => {
+        const message = item.message;
+        const isActive = message.id === activeMessageId;
+        const isThreadSibling =
+          activeThreadKey === item.threadGroupId &&
+          message.id !== activeMessage?.id;
+        const isDragging = draggingMessageIds.has(message.id);
         const folderBadgeKey = item.folderIds.length ? item.folderIds.join("|") : "";
+        const {
+          isThreadSelectionRoot,
+          threadSelectionIds,
+          isThreadSelectionAllSelected,
+          isThreadSelectionPartiallySelected,
+          isSelected,
+          rowSelected,
+          checkboxState,
+          showThreadSelectionActive
+        } = getThreadRowSelectionMeta({
+          item,
+          supportsThreads,
+          selectedMessageIds,
+          activeMessageId: activeMessageId ?? null,
+          includeSubThreadRoots: isCompactView
+        });
         const isActiveThread =
           !!activeMessageId &&
           item.fullFlat.some((entry) => entry.message.id === activeMessageId);
@@ -558,17 +300,11 @@ export default function MessageCardList({
           item.depth === 0 &&
           item.threadSize > 1 &&
           isActiveThread;
+        const showRootActive = showCollapsedActive || showThreadSelectionActive;
         const showCompactDivider =
           isCompactView && index > 0 && !item.isFirstInGroup;
-        const displaySeen = getDisplaySeenForThreadRow({
-          messageSeen: Boolean(message.seen),
-          messageId: message.id,
-          isCollapsed: item.isCollapsed,
-          threadSize: item.threadSize,
-          depth: item.depth,
-          threadIndex: item.threadIndex,
-          isNestedCollapsed: item.isNestedCollapsed,
-          fullFlat: item.fullFlat
+        const { isCollapsedThreadRoot, displaySeen, threadMessages } = getThreadRowDisplayMeta({
+          item
         });
         const useCompactThreadContainer = isCompactView && supportsThreads;
         const hasExternalThreadCaret =
@@ -582,14 +318,14 @@ export default function MessageCardList({
               ? styles.compactThreadRow
               : "",
           useCompactThreadContainer && showCompactDivider ? threadRowStyles.rowDivider : "",
-          useCompactThreadContainer && (isActive || showCollapsedActive)
+          useCompactThreadContainer && (isActive || showRootActive)
             ? threadRowStyles.rowActive
             : "",
-          useCompactThreadContainer && !showCollapsedActive && isThreadSibling
+          useCompactThreadContainer && !showRootActive && isThreadSibling
             ? threadRowStyles.threadSibling
             : "",
           useCompactThreadContainer && !displaySeen ? threadRowStyles.rowUnread : "",
-          useCompactThreadContainer && isSelected ? threadRowStyles.rowSelected : "",
+          useCompactThreadContainer && rowSelected ? threadRowStyles.rowSelected : "",
           useCompactThreadContainer && isDragging ? threadRowStyles.rowDragging : "",
           useCompactThreadContainer && pendingMessageActions.has(message.id)
             ? threadRowStyles.rowDisabled
@@ -597,238 +333,209 @@ export default function MessageCardList({
         ]
           .filter(Boolean)
           .join(" ");
-        const isCollapsedThreadRoot = isCollapsedThreadRootRow({
-          isCollapsed: item.isCollapsed,
-          threadSize: item.threadSize,
-          depth: item.depth,
-          threadIndex: item.threadIndex
-        });
-        const threadMessages = getThreadMessagesForThreadRow({
-          message,
-          messageId: message.id,
-          isCollapsed: item.isCollapsed,
-          threadSize: item.threadSize,
-          depth: item.depth,
-          threadIndex: item.threadIndex,
-          isNestedCollapsed: item.isNestedCollapsed,
+
+        // Calculate badge union for collapsed threads
+        const threadBadgeUnion = getCollapsedThreadBadgeUnion({
+          isCollapsedThreadRoot,
           fullFlat: item.fullFlat
         });
 
-        // Calculate badge union for collapsed threads
-        const threadBadgeUnion = isCollapsedThreadRoot
-          ? (() => {
-              const categories = new Set<string>();
-              let hasFlagged = false;
-              let hasAttachments = false;
-              let hasCalendar = false;
-              item.fullFlat.forEach(({ message: msg }) => {
-                if (msg.category) categories.add(msg.category);
-                if (msg.flagged) hasFlagged = true;
-                const nonInlineAttachments = msg.attachments?.filter((att) => !att.inline) ?? [];
-                if (nonInlineAttachments.length > 0) {
-                  const allCalendar = nonInlineAttachments.every(isCalendarAttachment);
-                  if (!allCalendar) hasAttachments = true;
-                }
-                if (hasMessageFlag(msg.flags, CALENDAR_INVITE_FLAG)) hasCalendar = true;
-              });
-              return {
-                threadCategories: Array.from(categories),
-                threadHasFlagged: hasFlagged,
-                threadHasAttachments: hasAttachments,
-                threadHasCalendar: hasCalendar
-              };
-            })()
-          : { threadCategories: undefined, threadHasFlagged: undefined, threadHasAttachments: undefined, threadHasCalendar: undefined };
-
         return (
-          <div
-            key={`row-${item.key}`}
-            className={`${styles.virtualItem} ${shouldAnimateRow ? styles.rowEnter : ""}`}
-            style={{ transform: `translateY(${top}px)`, height: rowHeight }}
-          >
-            <div className={compactThreadRowClassName}>
-              {isCompactView && supportsThreads && (
-                <ThreadMarkers
-                  depth={item.depth}
-                  threadIndex={item.threadIndex}
-                  threadSize={item.threadSize}
-                  isCollapsed={item.isCollapsed}
-                  compactRootLayout={isCompactView}
-                  isLastInDepth={item.isLastInDepth}
-                  hasChildren={item.hasChildren}
-                  isNestedCollapsed={item.isNestedCollapsed}
-                  ancestorStopsHere={item.ancestorStopsHere}
-                  onToggleThread={() => {
-                    const willOpen = item.isCollapsed;
-                    const at = Date.now();
-                    setLastThreadToggle({
-                      key: item.threadGroupId,
-                      open: willOpen,
-                      at
-                    });
-                    setAnimationClock(at);
-                    setCollapsedThreads((prev) => ({
-                      ...prev,
-                      [item.threadGroupId]: !item.isCollapsed
-                    }));
-                  }}
-                  onToggleNested={() => {
-                    const willOpen = item.isNestedCollapsed;
-                    const at = Date.now();
-                    setLastNestedToggle({
-                      key: message.id,
-                      open: willOpen,
-                      at
-                    });
-                    setAnimationClock(at);
-                    setCollapsedNestedMessages((prev) => ({
-                      ...prev,
-                      [message.id]: !item.isNestedCollapsed
-                    }));
-                  }}
-                />
-              )}
-              <MessageRow
-                message={message}
-                isCompactView={isCompactView}
-                useExternalStateStyles={useCompactThreadContainer}
-                subjectLeftPaddingForExternalCaret={hasExternalThreadCaret}
-                listIsNarrow={listIsNarrow}
-                displaySeen={displaySeen}
-                isActive={isActive}
-                isThreadChild={item.depth > 0}
-                isThreadSibling={isThreadSibling}
-                isSelected={isSelected}
-                isDragging={isDragging}
-                isDisabled={pendingMessageActions.has(message.id)}
-                showCollapsedActive={showCollapsedActive}
-                paddingLeft={isCompactView ? undefined : 14 + item.depth * 10}
-                showThreadCaret={
-                  !isCompactView && item.threadIndex === 0 && item.threadSize > 1
-                }
-                isThreadCaretOpen={!item.isCollapsed}
-                onThreadCaretClick={() => {
+          <div className={compactThreadRowClassName}>
+            {isCompactView && supportsThreads && (
+              <ThreadMarkers
+                depth={item.depth}
+                threadIndex={item.threadIndex}
+                threadSize={item.threadSize}
+                isCollapsed={item.isCollapsed}
+                compactRootLayout={isCompactView}
+                isLastInDepth={item.isLastInDepth}
+                hasChildren={item.hasChildren}
+                isNestedCollapsed={item.isNestedCollapsed}
+                ancestorStopsHere={item.ancestorStopsHere}
+                onToggleThread={() => {
+                  const willOpen = item.isCollapsed;
+                  const at = Date.now();
+                  setLastThreadToggle({
+                    key: item.threadGroupId,
+                    open: willOpen,
+                    at
+                  });
+                  setAnimationClock(at);
                   setCollapsedThreads((prev) => ({
                     ...prev,
                     [item.threadGroupId]: !item.isCollapsed
                   }));
                 }}
-                onRowPointerDown={() => {
-                  handleSelectMessage(message);
+                onToggleNested={() => {
+                  const willOpen = item.isNestedCollapsed;
+                  const at = Date.now();
+                  setLastNestedToggle({
+                    key: message.id,
+                    open: willOpen,
+                    at
+                  });
+                  setAnimationClock(at);
+                  setCollapsedNestedMessages((prev) => ({
+                    ...prev,
+                    [message.id]: !item.isNestedCollapsed
+                  }));
                 }}
-                showThreadIndicator={item.threadSize > 1 && item.threadIndex === 0}
-                threadSize={item.threadSize}
-                showCompactDivider={showCompactDivider}
-                onRowClick={(event) => {
-                  if (supportsThreads && isCollapsedThreadRoot) {
-                    selectCollapsedThread(item.fullFlat, message, {
-                      isFlaggedGroup: item.isFlaggedGroup
-                    });
-                    return;
-                  }
-                  handleRowClick(event, message);
-                }}
-                onRowKeyDown={(event) => {
-                  if (event.key === " ") {
-                    event.preventDefault();
-                    if (event.shiftKey) {
-                      selectRangeTo(message.id);
-                    } else {
-                      toggleMessageSelection(message.id);
-                    }
-                    return;
-                  }
-                  if (event.key === "Enter") {
-                    event.preventDefault();
-                    handleSelectMessage(message);
-                  }
-                }}
-                onDragStart={(event) => {
-                  const threadIds =
-                    isCollapsedThreadRoot
-                      ? item.fullFlat.map((entry) => entry.message.id)
-                      : undefined;
-                  handleMessageDragStart(event, message, threadIds);
-                }}
-                onDragEnd={handleMessageDragEnd}
-                onCheckboxChange={(shiftKey) => {
-                  if (shiftKey) {
-                    selectRangeTo(message.id);
-                  } else {
-                    toggleMessageSelection(message.id, false, false);
-                  }
-                }}
-                onSubjectClick={(event) => {
-                  event.stopPropagation();
-                  if (supportsThreads && isCollapsedThreadRoot) {
-                    selectCollapsedThread(item.fullFlat, message, {
-                      isFlaggedGroup: item.isFlaggedGroup
-                    });
-                  } else {
-                    handleSelectMessage(message);
-                  }
-                }}
-                onDelete={(event) => {
-                  event.stopPropagation();
-                  handleDeleteMessage(message);
-                }}
-                onShowRelated={(event) => {
-                  event.stopPropagation();
-                  handleShowRelated(message);
-                }}
-                deleteTitle={
-                  isTrashFolder(message.folderId)
-                    ? "Delete permanently"
-                    : "Move to Trash"
-                }
-                renderUnreadDot={renderUnreadDot(message, {
-                  seen: displaySeen,
-                  threadMessages
-                })}
-                renderSelectIndicators={renderSelectIndicators(message)}
-                fromText={item.fromText}
-                fromTooltip={item.fromTooltip}
-                showRecipientIcon={item.showRecipientIcon}
-                folderBadges={renderFolderBadges(item.folderIds)}
-                folderBadgeKey={folderBadgeKey}
-                showFolderBadgesInSubjectMeta
-                showFolderBadgesInMeta={false}
-                quickActions={renderQuickActions(message)}
-                messageMenu={renderMessageMenu(message, isCompactView ? "table" : "list")}
-                showAttachmentIcon={(() => {
-                  const nonInlineAttachments =
-                    message.attachments?.filter((att) => !att.inline) ?? [];
-                  if (nonInlineAttachments.length === 0) return false;
-                  // Don't show attachment icon if all non-inline attachments are calendar events
-                  const allCalendar = nonInlineAttachments.every(isCalendarAttachment);
-                  return !allCalendar;
-                })()}
-                showCalendarInviteIcon={hasMessageFlag(message.flags, CALENDAR_INVITE_FLAG)}
-                showNewBadge={
-                  !displaySeen &&
-                  Boolean(message.recent) &&
-                  !Boolean(message.draft)
-                }
-                categoryIcon={(() => {
-                  const categoryIcons: Record<string, string> = {
-                    newsletter: "📰",
-                    marketing: "🏷️",
-                    notification: "🔔",
-                    transactional: "🧾"
-                  };
-                  return message.category ? categoryIcons[message.category] : undefined;
-                })()}
-                toggleFlaggedFlag={toggleFlaggedFlag}
-                threadCategories={threadBadgeUnion.threadCategories}
-                threadHasFlagged={threadBadgeUnion.threadHasFlagged}
-                threadHasAttachments={threadBadgeUnion.threadHasAttachments}
-                threadHasCalendar={threadBadgeUnion.threadHasCalendar}
               />
-            </div>
+            )}
+            <MessageRow
+              message={message}
+              isCompactView={isCompactView}
+              useExternalStateStyles={useCompactThreadContainer}
+              subjectLeftPaddingForExternalCaret={hasExternalThreadCaret}
+              listIsNarrow={listIsNarrow}
+              displaySeen={displaySeen}
+              isActive={isActive || showRootActive}
+              isThreadChild={item.depth > 0}
+              isThreadSibling={isThreadSibling}
+              isSelected={rowSelected}
+              isDragging={isDragging}
+              isDisabled={pendingMessageActions.has(message.id)}
+              showCollapsedActive={showRootActive}
+              paddingLeft={isCompactView ? undefined : 14 + item.depth * 10}
+              showThreadCaret={
+                !isCompactView && item.threadIndex === 0 && item.threadSize > 1
+              }
+              isThreadCaretOpen={!item.isCollapsed}
+              onThreadCaretClick={() => {
+                setCollapsedThreads((prev) => ({
+                  ...prev,
+                  [item.threadGroupId]: !item.isCollapsed
+                }));
+              }}
+              onRowPointerDown={() => {
+                handleSelectMessage(message);
+              }}
+              showThreadIndicator={item.threadSize > 1 && item.threadIndex === 0}
+              threadSize={item.threadSize}
+              showCompactDivider={showCompactDivider}
+              onRowClick={(event) => {
+                handleCollapsedThreadRootClick({
+                  event,
+                  supportsThreads,
+                  isCollapsedThreadRoot,
+                  fullFlat: item.fullFlat,
+                  message,
+                  isFlaggedGroup: item.isFlaggedGroup,
+                  selectCollapsedThread,
+                  onDefault: () => handleRowClick(event, message)
+                });
+              }}
+              onRowKeyDown={(event) => {
+                handleMessageRowKeyDown({
+                  event,
+                  messageId: message.id,
+                  onSelect: () => handleSelectMessage(message),
+                  selectRangeTo,
+                  toggleMessageSelection
+                });
+              }}
+              onDragStart={(event) => {
+                const threadIds = getDragThreadMessageIds({
+                  isCollapsedThreadRoot,
+                  fullFlat: item.fullFlat
+                });
+                handleMessageDragStart(event, message, threadIds);
+              }}
+              onDragEnd={handleMessageDragEnd}
+              onCheckboxChange={(shiftKey) => {
+                handleRowCheckboxChange({
+                  shiftKey,
+                  messageId: message.id,
+                  isThreadSelectionRoot,
+                  selectedMessageIds,
+                  threadSelectionIds,
+                  isThreadSelectionAllSelected,
+                  selectionStore,
+                  selectRangeTo,
+                  toggleMessageSelection
+                });
+              }}
+              checkboxState={checkboxState}
+              onSubjectClick={(event) => {
+                event.stopPropagation();
+                handleCollapsedThreadRootClick({
+                  event,
+                  supportsThreads,
+                  isCollapsedThreadRoot,
+                  fullFlat: item.fullFlat,
+                  message,
+                  isFlaggedGroup: item.isFlaggedGroup,
+                  selectCollapsedThread,
+                  onDefault: () => {
+                    if (hasSelectionModifier(event)) {
+                      handleRowClick(event, message);
+                    } else {
+                      handleSelectMessage(message);
+                    }
+                  }
+                });
+              }}
+              onDelete={(event) => {
+                event.stopPropagation();
+                handleDeleteMessage(message);
+              }}
+              onShowRelated={(event) => {
+                event.stopPropagation();
+                handleShowRelated(message);
+              }}
+              deleteTitle={
+                isTrashFolder(message.folderId)
+                  ? "Delete permanently"
+                  : "Move to Trash"
+              }
+              renderUnreadDot={renderUnreadDot(message, {
+                seen: displaySeen,
+                threadMessages
+              })}
+              renderSelectIndicators={renderSelectIndicators(message)}
+              fromText={item.fromText}
+              fromTooltip={item.fromTooltip}
+              showRecipientIcon={item.showRecipientIcon}
+              folderBadges={renderFolderBadges(item.folderIds)}
+              folderBadgeKey={folderBadgeKey}
+              showFolderBadgesInSubjectMeta
+              showFolderBadgesInMeta={false}
+              quickActions={renderQuickActions(message)}
+              messageMenu={renderMessageMenu(message, isCompactView ? "table" : "list")}
+              showAttachmentIcon={(() => {
+                const nonInlineAttachments =
+                  message.attachments?.filter((att) => !att.inline) ?? [];
+                if (nonInlineAttachments.length === 0) return false;
+                // Don't show attachment icon if all non-inline attachments are calendar events
+                const allCalendar = nonInlineAttachments.every(isCalendarAttachment);
+                return !allCalendar;
+              })()}
+              showCalendarInviteIcon={hasMessageFlag(message.flags, CALENDAR_INVITE_FLAG)}
+              showNewBadge={
+                !displaySeen &&
+                Boolean(message.recent) &&
+                !Boolean(message.draft)
+              }
+              categoryIcon={(() => {
+                const categoryIcons: Record<string, string> = {
+                  newsletter: "📰",
+                  marketing: "🏷️",
+                  notification: "🔔",
+                  transactional: "🧾"
+                };
+                return message.category ? categoryIcons[message.category] : undefined;
+              })()}
+              toggleFlaggedFlag={toggleFlaggedFlag}
+              threadCategories={threadBadgeUnion?.threadCategories}
+              threadHasFlagged={threadBadgeUnion?.threadHasFlagged}
+              threadHasAttachments={threadBadgeUnion?.threadHasAttachments}
+              threadHasCalendar={threadBadgeUnion?.threadHasCalendar}
+            />
           </div>
         );
-      })}
-    </div>
+      }}
+    />
   );
 
 }

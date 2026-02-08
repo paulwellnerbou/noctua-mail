@@ -121,10 +121,22 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: true, action: "deleted" });
   }
 
-  await moveImapMessage(account, currentMailbox, message.imapUid, trashMailbox, clientId);
+  const destinationUid = await moveImapMessage(
+    account,
+    currentMailbox,
+    message.imapUid,
+    trashMailbox,
+    clientId
+  );
   if (trashFolder) {
     await withDbLockRetry(() =>
-      updateMessageFolder(payload.accountId, message.id, trashFolder.id, trashMailbox)
+      updateMessageFolder(
+        payload.accountId,
+        message.id,
+        trashFolder.id,
+        trashMailbox,
+        destinationUid
+      )
     );
   }
   if (message.flags && message.flags.length > 0) {

@@ -95,9 +95,21 @@ export async function POST(request: Request) {
     }
   }
 
-  await moveImapMessage(account, currentMailbox, message.imapUid, junkMailbox, clientId);
+  const destinationUid = await moveImapMessage(
+    account,
+    currentMailbox,
+    message.imapUid,
+    junkMailbox,
+    clientId
+  );
   if (junkFolder) {
-    await updateMessageFolder(payload.accountId, message.id, junkFolder.id, junkMailbox);
+    await updateMessageFolder(
+      payload.accountId,
+      message.id,
+      junkFolder.id,
+      junkMailbox,
+      destinationUid
+    );
   }
 
   const cleanedFlags = existingFlags.filter(

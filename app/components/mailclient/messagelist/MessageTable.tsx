@@ -2,78 +2,33 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type React from "react";
 import { GitBranch, MoveRight, Search, Trash2 } from "lucide-react";
 import { Badge, Checkbox, IconButton, Text } from "@radix-ui/themes";
-import * as Collapsible from "@radix-ui/react-collapsible";
 import { CaretRightIcon } from "@radix-ui/react-icons";
 import { badgeColors } from "@/lib/ui/badgeColors";
 import type { Message } from "@/lib/data";
 import badgeStyles from "../message/MessageBadge.module.css";
 import {
-  buildFlatEntries,
-  buildThreadGroupEntries,
-  getDisplaySeenForThreadRow,
-  getCollapsedThreadFromDisplay,
-  getMessageFromDisplay,
-  isCollapsedThreadRootRow
-} from "./threadGroupUtils";
+  buildMessageListItems,
+  type MessageGroup,
+  type ThreadNode
+} from "./listModel";
 import { getMessageListDateDisplay } from "./messageDateDisplay";
 import { useSelectionSnapshot, type SelectionStore } from "./selectionStore";
+import MessageListRenderer from "./MessageListRenderer";
+import {
+  getDragThreadMessageIds,
+  getThreadRowDisplayMeta,
+  getThreadRowSelectionMeta,
+  handleCollapsedThreadRootClick,
+  handleMessageRowKeyDown,
+  handleRowCheckboxChange,
+  hasSelectionModifier,
+  isRowAnimatedFromGroupToggle
+} from "./listInteractions";
 import groupStyles from "./MessageCardList.module.css";
 import styles from "./MessageTable.module.css";
 
 type SortKey = "date" | "from" | "subject";
 
-type MessageGroup = {
-  key: string;
-  label?: string;
-  items: Message[];
-  count?: number;
-};
-
-type ThreadNode = { message: Message; children: ThreadNode[]; threadSize: number };
-
-type ListGroupItem = {
-  type: "group";
-  key: string;
-  group: MessageGroup;
-};
-
-type ListRowItem = {
-  type: "row";
-  key: string;
-  groupKey: string;
-  isFirstInGroup: boolean;
-  message: Message;
-  depth: number;
-  threadGroupId: string;
-  threadSize: number;
-  isCollapsed: boolean;
-  isFlaggedGroup: boolean;
-  threadIndex: number;
-  fullFlat: Array<{ message: Message; depth: number }>;
-  folderIds: string[];
-  fromText: string;
-  fromTooltip: string;
-  showRecipientIcon: boolean;
-};
-
-type ListItem = ListGroupItem | ListRowItem;
-
-const OVERSCAN_COUNT = 8;
-
-const findStartIndex = (offsets: number[], value: number) => {
-  if (offsets.length === 0) return 0;
-  let lo = 0;
-  let hi = offsets.length - 1;
-  while (lo <= hi) {
-    const mid = Math.floor((lo + hi) / 2);
-    if (offsets[mid] <= value) {
-      lo = mid + 1;
-    } else {
-      hi = mid - 1;
-    }
-  }
-  return Math.max(0, lo - 1);
-};
 
 type MessageTableProps = {
   state: {
@@ -222,49 +177,12 @@ export default function MessageTable({
     }, 350);
   };
 
-
-
-  const listRef = useRef<HTMLDivElement | null>(null);
   const [lastGroupToggle, setLastGroupToggle] = useState<{
     key: string;
     open: boolean;
     at: number;
   } | null>(null);
-  const [scrollState, setScrollState] = useState({ scrollTop: 0, height: 0 });
   const [animationClock, setAnimationClock] = useState(0);
-
-  useEffect(() => {
-    const scrollEl = scrollRef.current;
-    if (!scrollEl) return;
-    let frame = 0;
-    const update = () => {
-      frame = 0;
-      const containerTop = listRef.current
-        ? listRef.current.getBoundingClientRect().top -
-          scrollEl.getBoundingClientRect().top +
-          scrollEl.scrollTop
-        : 0;
-      const nextTop = Math.max(0, scrollEl.scrollTop - containerTop);
-      const nextHeight = scrollEl.clientHeight;
-      setScrollState((prev) =>
-        prev.scrollTop === nextTop && prev.height === nextHeight
-          ? prev
-          : { scrollTop: nextTop, height: nextHeight }
-      );
-    };
-    const onScroll = () => {
-      if (frame) return;
-      frame = window.requestAnimationFrame(update);
-    };
-    update();
-    scrollEl.addEventListener("scroll", onScroll);
-    window.addEventListener("resize", onScroll);
-    return () => {
-      if (frame) window.cancelAnimationFrame(frame);
-      scrollEl.removeEventListener("scroll", onScroll);
-      window.removeEventListener("resize", onScroll);
-    };
-  }, [scrollRef]);
 
   useEffect(() => {
     if (!animationClock) return;
@@ -279,161 +197,38 @@ export default function MessageTable({
   const activeThreadKey =
     activeMessage?.threadId ?? activeMessage?.messageId ?? activeMessage?.id;
 
-  const listItems = useMemo(() => {
-    const items: ListItem[] = [];
-    groupedMessages.forEach((group) => {
-      items.push({ type: "group", key: group.key, group });
-      if (group.items.length === 0 || collapsedGroups[group.key]) return;
-      let isFirstRow = true;
-
-      if (supportsThreads) {
-        const entries = buildThreadGroupEntries({
-          group,
-          collapsedThreads,
-          includeThreadAcrossFolders,
-          searchScope,
-          activeFolderId,
-          buildThreadTree,
-          flattenThread,
-          getThreadLatestDate
-        });
-        entries.forEach((entry) => {
-          const {
-            threadGroupId,
-            threadSize,
-            isCollapsed,
-            fullFlat,
-            flat,
-            threadFolderIds,
-            showThreadFolderBadges
-          } = entry;
-          const collapsedThreadFrom =
-            isCollapsed && threadSize > 1
-              ? getCollapsedThreadFromDisplay(fullFlat, userEmail, preferToDisplay)
-              : null;
-          flat.forEach(({ message, depth }, index) => {
-            const folderIds =
-              index === 0 && isCollapsed && threadSize > 1
-                ? showThreadFolderBadges
-                  ? threadFolderIds
-                  : []
-                : searchScope === "all" ||
-                    (includeThreadAcrossFolders &&
-                      message.folderId !== activeFolderId)
-                  ? [message.folderId]
-                  : [];
-            // For expanded threads (depth > 0 or index > 0), pass isInExpandedThread=true
-            const isInExpandedThread = !isCollapsed || index > 0;
-            const fromDisplay =
-              index === 0 && collapsedThreadFrom
-                ? collapsedThreadFrom
-                : getMessageFromDisplay(
-                    message.from,
-                    { to: message.to, cc: message.cc, bcc: message.bcc },
-                    userEmail,
-                    isInExpandedThread,
-                    preferToDisplay
-                  );
-            items.push({
-              type: "row",
-              key: message.id,
-              groupKey: group.key,
-              isFirstInGroup: isFirstRow,
-              message,
-              depth,
-              threadGroupId,
-              threadSize,
-              isCollapsed,
-              isFlaggedGroup: group.key === "Flagged",
-              threadIndex: index,
-              fullFlat,
-              folderIds,
-              fromText: fromDisplay.text,
-              fromTooltip: fromDisplay.tooltip,
-              showRecipientIcon: Boolean(fromDisplay.showRecipientIcon)
-            });
-            if (isFirstRow) isFirstRow = false;
-          });
-        });
-        return;
-      }
-
-      buildFlatEntries({
-        group,
+  const listItems = useMemo(
+    () =>
+      buildMessageListItems({
+        groupedMessages,
+        collapsedGroups,
+        collapsedThreads,
+        supportsThreads,
         includeThreadAcrossFolders,
         searchScope,
-        activeFolderId
-      }).forEach(({ message, threadGroupId, folderIds }) => {
-        // When thread mode is disabled, keep sender-style display (no collapsed-thread participant substitution).
-        const fromDisplay = getMessageFromDisplay(
-          message.from,
-          { to: message.to, cc: message.cc, bcc: message.bcc },
-          userEmail,
-          false,
-          preferToDisplay
-        );
-        items.push({
-          type: "row",
-          key: message.id,
-          groupKey: group.key,
-          isFirstInGroup: isFirstRow,
-          message,
-          depth: 0,
-          threadGroupId,
-          threadSize: 1,
-          isCollapsed: false,
-          isFlaggedGroup: false,
-          threadIndex: 0,
-          fullFlat: [{ message, depth: 0 }],
-          folderIds,
-          fromText: fromDisplay.text,
-          fromTooltip: fromDisplay.tooltip,
-          showRecipientIcon: Boolean(fromDisplay.showRecipientIcon)
-        });
-        if (isFirstRow) isFirstRow = false;
-      });
-    });
-    return items;
-  }, [
-    groupedMessages,
-    collapsedGroups,
-    collapsedThreads,
-    supportsThreads,
-    includeThreadAcrossFolders,
-    searchScope,
-    activeFolderId,
-    buildThreadTree,
-    flattenThread,
-    getThreadLatestDate,
-    userEmail,
-    preferToDisplay
-  ]);
-
-  const { offsets, totalHeight } = useMemo(() => {
-    const nextOffsets: number[] = [];
-    let total = 0;
-    listItems.forEach((item) => {
-      nextOffsets.push(total);
-      total += item.type === "group" ? groupHeight : rowHeight;
-    });
-    return { offsets: nextOffsets, totalHeight: total };
-  }, [groupHeight, rowHeight, listItems]);
-
-  const viewportHeight = scrollState.height || 720;
-  const viewportTop = Math.max(0, scrollState.scrollTop);
-  const startIndex =
-    listItems.length === 0
-      ? 0
-      : Math.max(0, findStartIndex(offsets, viewportTop) - OVERSCAN_COUNT);
-  const endIndex =
-    listItems.length === 0
-      ? -1
-      : Math.min(
-          listItems.length - 1,
-          findStartIndex(offsets, viewportTop + viewportHeight) + OVERSCAN_COUNT
-        );
-  const visibleItems =
-    startIndex <= endIndex ? listItems.slice(startIndex, endIndex + 1) : [];
+        activeFolderId,
+        buildThreadTree,
+        flattenThread,
+        getThreadLatestDate,
+        userEmail,
+        preferToDisplay,
+        mode: "flat"
+      }),
+    [
+      groupedMessages,
+      collapsedGroups,
+      collapsedThreads,
+      supportsThreads,
+      includeThreadAcrossFolders,
+      searchScope,
+      activeFolderId,
+      buildThreadTree,
+      flattenThread,
+      getThreadLatestDate,
+      userEmail,
+      preferToDisplay
+    ]
+  );
 
   return (
     <div className={styles.table}>
@@ -495,97 +290,78 @@ export default function MessageTable({
           {"\u00A0"}
         </div>
       </div>
-      <div
-        ref={listRef}
+      <MessageListRenderer
+        items={listItems}
+        scrollRef={scrollRef}
         className={styles.virtualList}
-        style={{ height: totalHeight }}
-      >
-        {visibleItems.map((item, offsetIndex) => {
-          const index = startIndex + offsetIndex;
-          const top = offsets[index] ?? 0;
-          if (item.type === "group") {
-            const group = item.group;
-            const isFlagged = group.key === "Flagged";
-            const isCollapsed = collapsedGroups[group.key];
-            const count =
-              group.items.length === 0 ? 0 : group.count ?? group.items.length;
-            const isEmpty = group.items.length === 0;
-            return (
-              <Collapsible.Root
-                key={`group-${group.key}`}
-                className={styles.virtualItem}
-                style={{ transform: `translateY(${top}px)`, height: groupHeight }}
-                open={!isCollapsed}
-                onOpenChange={(open) => {
-                  if (isEmpty) return;
-                  const at = Date.now();
-                  setLastGroupToggle({ key: group.key, open, at });
-                  setAnimationClock(at);
-                  setCollapsedGroups((prev) => ({
-                    ...prev,
-                    [group.key]: !open
-                  }));
-                }}
-              >
-                <Collapsible.Trigger asChild disabled={isEmpty}>
-                  <button
-                    type="button"
-                    className={`${groupStyles.groupTitle} ${groupStyles.groupToggle} ${
-                      isFlagged ? groupStyles.groupTitleFlagged : ""
-                    }`}
-                  >
-                    <span className={groupStyles.groupCaret}>
-                      {isEmpty ? "" : <CaretRightIcon />}
-                    </span>
-                    <Text as="span" size="1">
-                      {getGroupLabel(group)} · {count}
-                    </Text>
-                  </button>
-                </Collapsible.Trigger>
-              </Collapsible.Root>
-            );
-          }
-
+        rowHeight={rowHeight}
+        groupHeight={groupHeight}
+        collapsedGroups={collapsedGroups}
+        getGroupLabel={getGroupLabel}
+        onGroupOpenChange={(groupKey, open) => {
+          const at = Date.now();
+          setLastGroupToggle({ key: groupKey, open, at });
+          setAnimationClock(at);
+          setCollapsedGroups((prev) => ({
+            ...prev,
+            [groupKey]: !open
+          }));
+        }}
+        classNames={{
+          virtualItem: styles.virtualItem,
+          groupTitle: groupStyles.groupTitle,
+          groupToggle: groupStyles.groupToggle,
+          groupTitleFlagged: groupStyles.groupTitleFlagged,
+          groupCaret: groupStyles.groupCaret,
+          rowEnter: styles.rowEnter
+        }}
+        isRowAnimated={({ item }) =>
+          isRowAnimatedFromGroupToggle({
+            animationClock,
+            lastGroupToggle,
+            groupKey: item.groupKey
+          })
+        }
+        renderRow={({ item, index }) => {
           const message = item.message;
           const dateDisplay = getMessageListDateDisplay(message.dateValue, message.date);
-          const isSelected = selectedMessageIds.has(message.id);
+          const {
+            isThreadSelectionRoot,
+            threadSelectionIds,
+            isThreadSelectionAllSelected,
+            isThreadSelectionPartiallySelected,
+            rowSelected,
+            checkboxState,
+            showThreadSelectionActive
+          } = getThreadRowSelectionMeta({
+            item,
+            supportsThreads,
+            selectedMessageIds,
+            activeMessageId: activeMessageId ?? null,
+            includeSubThreadRoots: true
+          });
           const isDragging = draggingMessageIds.has(message.id);
-          const shouldAnimateRow =
-            animationClock > 0 &&
-            lastGroupToggle?.open &&
-            lastGroupToggle.key === item.groupKey &&
-            animationClock - lastGroupToggle.at < 220;
           const optimistic =
             optimisticRow && optimisticRow.id === message.id
               ? optimisticRow
               : null;
-          const effectiveSelected = optimistic ? optimistic.selected : isSelected;
+          const effectiveSelected = optimistic ? optimistic.selected : rowSelected;
+          const effectiveCheckboxState: boolean | "indeterminate" = optimistic
+            ? optimistic.selected
+            : checkboxState;
           const effectiveActive =
-            message.id === activeMessageId || Boolean(optimistic?.active);
+            message.id === activeMessageId || showThreadSelectionActive || Boolean(optimistic?.active);
           const isDisabled = pendingMessageActions.has(message.id);
           const showRowDivider = index > 0 && !item.isFirstInGroup;
-          const isCollapsedThreadRoot = isCollapsedThreadRootRow({
-            isCollapsed: item.isCollapsed,
-            threadSize: item.threadSize,
-            depth: item.depth,
-            threadIndex: item.threadIndex
+          const { isCollapsedThreadRoot, displaySeen, threadMessages } = getThreadRowDisplayMeta({
+            item
           });
-          const displaySeen = getDisplaySeenForThreadRow({
-            messageSeen: Boolean(message.seen),
-            isCollapsed: item.isCollapsed,
-            threadSize: item.threadSize,
-            depth: item.depth,
-            threadIndex: item.threadIndex,
-            fullFlat: item.fullFlat
-          });
-          const threadMessages = isCollapsedThreadRoot
-            ? item.fullFlat.map((entry) => entry.message)
-            : [message];
           const rowClassName = [
             styles.row,
             showRowDivider ? styles.rowDivider : "",
             effectiveActive ? styles.rowActive : "",
             item.depth > 0 ? styles.threadChild : "",
+            !showThreadSelectionActive &&
             activeThreadKey === item.threadGroupId &&
             message.id !== activeMessage?.id
               ? styles.threadSibling
@@ -600,26 +376,19 @@ export default function MessageTable({
 
           return (
             <div
-              key={`row-${item.key}`}
-              className={`${styles.virtualItem} ${
-                shouldAnimateRow ? styles.rowEnter : ""
-              }`}
-              style={{ transform: `translateY(${top}px)`, height: rowHeight }}
-            >
-              <div
-                className={rowClassName}
-                role="button"
-                tabIndex={0}
-                draggable
-                onDragStart={(event) => {
-                  const threadIds =
-                    isCollapsedThreadRoot
-                      ? item.fullFlat.map((entry) => entry.message.id)
-                      : undefined;
-                  handleMessageDragStart(event, message, threadIds);
-                }}
-                onDragEnd={handleMessageDragEnd}
-                onPointerDown={(event) => {
+              className={rowClassName}
+              role="button"
+              tabIndex={0}
+              draggable
+              onDragStart={(event) => {
+                const threadIds = getDragThreadMessageIds({
+                  isCollapsedThreadRoot,
+                  fullFlat: item.fullFlat
+                });
+                handleMessageDragStart(event, message, threadIds);
+              }}
+              onDragEnd={handleMessageDragEnd}
+              onPointerDown={(event) => {
                 if (isDisabled) return;
                 if (event.button !== 0) return;
                 const target = event.target as HTMLElement | null;
@@ -633,7 +402,12 @@ export default function MessageTable({
                 const isRange = event.shiftKey;
                 setOptimisticRow({
                   id: message.id,
-                  selected: isCheckbox || isToggle ? !isSelected : true,
+                  selected:
+                    isCheckbox || isToggle
+                      ? isThreadSelectionRoot && isThreadSelectionPartiallySelected
+                        ? true
+                        : !rowSelected
+                      : true,
                   active: !isCheckbox && !isToggle && !isRange
                 });
                 scheduleClear();
@@ -642,161 +416,173 @@ export default function MessageTable({
                 }
               }}
               onClick={(event) => {
-                if (supportsThreads && isCollapsedThreadRoot) {
-                  selectCollapsedThread(item.fullFlat, message, {
-                    isFlaggedGroup: item.isFlaggedGroup
-                  });
-                  return;
-                }
-                handleRowClick(event, message);
+                handleCollapsedThreadRootClick({
+                  event,
+                  supportsThreads,
+                  isCollapsedThreadRoot,
+                  fullFlat: item.fullFlat,
+                  message,
+                  isFlaggedGroup: item.isFlaggedGroup,
+                  selectCollapsedThread,
+                  onDefault: () => handleRowClick(event, message)
+                });
               }}
               onKeyDown={(event) => {
-                if (event.key === " ") {
-                  event.preventDefault();
-                  if (event.shiftKey) {
-                    selectRangeTo(message.id);
-                  } else {
-                    toggleMessageSelection(message.id);
-                  }
-                  return;
-                }
-                if (event.key === "Enter") {
-                  event.preventDefault();
-                  handleSelectMessage(message);
-                }
+                handleMessageRowKeyDown({
+                  event,
+                  messageId: message.id,
+                  onSelect: () => handleSelectMessage(message),
+                  selectRangeTo,
+                  toggleMessageSelection
+                });
               }}
             >
-              <span className={styles.cellSelect}>
-                {renderUnreadDot(message, {
-                  seen: displaySeen,
-                  threadMessages
-                })}
-                {renderSelectIndicators(message)}
-                <Checkbox
-                  size="1"
-                  checked={effectiveSelected}
-                  aria-label="Select message"
-                  disabled={isDisabled}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    if (event.shiftKey) {
-                      selectRangeTo(message.id);
-                    } else {
-                      toggleMessageSelection(message.id, false, false);
-                    }
-                  }}
-                />
-              </span>
-              <span
-                className={styles.cellFrom}
-                style={{ paddingLeft: `${item.depth * 14}px` }}
-              >
-                {item.threadIndex === 0 && item.threadSize > 1 ? (
-                  <>
-                    <span
-                      data-no-row-select="true"
-                      className={`${styles.threadCaret} ${
-                        item.isCollapsed ? "" : styles.threadCaretOpen
-                      }`}
-                      title={item.isCollapsed ? "Expand thread" : "Collapse thread"}
-                      onPointerDown={(event) => {
-                        event.stopPropagation();
-                      }}
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        setCollapsedThreads((prev) => ({
-                          ...prev,
-                          [item.threadGroupId]: !item.isCollapsed
-                        }));
-                      }}
-                    >
+                <span className={styles.cellSelect}>
+                  {renderUnreadDot(message, {
+                    seen: displaySeen,
+                    threadMessages
+                  })}
+                  {renderSelectIndicators(message)}
+                  <Checkbox
+                    size="1"
+                    checked={effectiveCheckboxState}
+                    aria-label="Select message"
+                    disabled={isDisabled}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      handleRowCheckboxChange({
+                        shiftKey: event.shiftKey,
+                        messageId: message.id,
+                        isThreadSelectionRoot,
+                        selectedMessageIds,
+                        threadSelectionIds,
+                        isThreadSelectionAllSelected,
+                        selectionStore,
+                        selectRangeTo,
+                        toggleMessageSelection,
+                        setLastSelectedIdRef
+                      });
+                    }}
+                  />
+                </span>
+                <span
+                  className={styles.cellFrom}
+                  style={{ paddingLeft: `${item.depth * 14}px` }}
+                >
+                  {item.threadIndex === 0 && item.threadSize > 1 ? (
+                    <>
+                      <span
+                        data-no-row-select="true"
+                        className={`${styles.threadCaret} ${
+                          item.isCollapsed ? "" : styles.threadCaretOpen
+                        }`}
+                        title={item.isCollapsed ? "Expand thread" : "Collapse thread"}
+                        onPointerDown={(event) => {
+                          event.stopPropagation();
+                        }}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          setCollapsedThreads((prev) => ({
+                            ...prev,
+                            [item.threadGroupId]: !item.isCollapsed
+                          }));
+                        }}
+                      >
+                        <CaretRightIcon />
+                      </span>
+                      <Badge
+                        size="1"
+                        variant="soft"
+                        color={badgeColors.threadIndicator}
+                        className={`${badgeStyles.badge} ${styles.threadIndicatorInline}`}
+                      >
+                        <GitBranch size={12} />
+                        <span>{item.threadSize}</span>
+                      </Badge>
+                    </>
+                  ) : (
+                    <span className={`${styles.threadCaret} ${styles.threadCaretSpacer}`}>
                       <CaretRightIcon />
                     </span>
-                    <Badge
-                      size="1"
-                      variant="soft"
-                      color={badgeColors.threadIndicator}
-                      className={`${badgeStyles.badge} ${styles.threadIndicatorInline}`}
-                    >
-                      <GitBranch size={12} />
-                      <span>{item.threadSize}</span>
-                    </Badge>
-                  </>
-                ) : (
-                  <span className={`${styles.threadCaret} ${styles.threadCaretSpacer}`}>
-                    <CaretRightIcon />
+                  )}
+                  {item.showRecipientIcon && (
+                    <span className={styles.recipientIcon} title="Recipients" aria-label="Recipients">
+                      <MoveRight size={12} />
+                    </span>
+                  )}
+                  <span className={styles.cellFromText} title={item.fromTooltip}>
+                    {item.fromText}
                   </span>
-                )}
-                {item.showRecipientIcon && (
-                  <span className={styles.recipientIcon} title="Recipients" aria-label="Recipients">
-                    <MoveRight size={12} />
-                  </span>
-                )}
-                <span className={styles.cellFromText} title={item.fromTooltip}>
-                  {item.fromText}
                 </span>
-              </span>
-              <span
-                className={styles.cellSubject}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  if (supportsThreads && isCollapsedThreadRoot) {
-                    selectCollapsedThread(item.fullFlat, message, {
-                      isFlaggedGroup: item.isFlaggedGroup
+                <span
+                  className={styles.cellSubject}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    handleCollapsedThreadRootClick({
+                      event,
+                      supportsThreads,
+                      isCollapsedThreadRoot,
+                      fullFlat: item.fullFlat,
+                      message,
+                      isFlaggedGroup: item.isFlaggedGroup,
+                      selectCollapsedThread,
+                      onDefault: () => {
+                        if (hasSelectionModifier(event)) {
+                          handleRowClick(event, message);
+                        } else {
+                          handleSelectMessage(message);
+                        }
+                      }
                     });
-                  } else {
-                    handleSelectMessage(message);
-                  }
-                }}
-              >
-                {renderFolderBadges(item.folderIds)}
-                <span className={styles.cellSubjectText}>{message.subject}</span>
-              </span>
-              <span className={styles.cellDate}>
-                <Text as="span" size="1" title={dateDisplay.tooltip}>
-                  {dateDisplay.text}
-                </Text>
-              </span>
-              <div className={styles.cellActions}>
-                <IconButton
-                  size="1"
-                  variant="ghost"
-                  color="gray"
-                  title={
-                    isTrashFolder(message.folderId)
-                      ? "Delete permanently"
-                      : "Move to Trash"
-                  }
-                  aria-label="Delete"
-                  disabled={pendingMessageActions.has(message.id)}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    handleDeleteMessage(message);
                   }}
                 >
-                  <Trash2 size={14} />
-                </IconButton>
-                <IconButton
-                  size="1"
-                  variant="ghost"
-                  color="gray"
-                  title="Show related"
-                  aria-label="Show related"
-                  disabled={pendingMessageActions.has(message.id)}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    handleShowRelated(message);
-                  }}
-                >
-                  <Search size={14} />
-                </IconButton>
-                {renderMessageMenu(message, "table")}
+                  {renderFolderBadges(item.folderIds)}
+                  <span className={styles.cellSubjectText}>{message.subject}</span>
+                </span>
+                <span className={styles.cellDate}>
+                  <Text as="span" size="1" title={dateDisplay.tooltip}>
+                    {dateDisplay.text}
+                  </Text>
+                </span>
+                <div className={styles.cellActions}>
+                  <IconButton
+                    size="1"
+                    variant="ghost"
+                    color="gray"
+                    title={
+                      isTrashFolder(message.folderId)
+                        ? "Delete permanently"
+                        : "Move to Trash"
+                    }
+                    aria-label="Delete"
+                    disabled={pendingMessageActions.has(message.id)}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      handleDeleteMessage(message);
+                    }}
+                  >
+                    <Trash2 size={14} />
+                  </IconButton>
+                  <IconButton
+                    size="1"
+                    variant="ghost"
+                    color="gray"
+                    title="Show related"
+                    aria-label="Show related"
+                    disabled={pendingMessageActions.has(message.id)}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      handleShowRelated(message);
+                    }}
+                  >
+                    <Search size={14} />
+                  </IconButton>
+                  {renderMessageMenu(message, "table")}
+                </div>
               </div>
-              </div>
-            </div>
           );
-        })}
-      </div>
+        }}
+      />
     </div>
   );
 

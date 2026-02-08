@@ -1054,12 +1054,17 @@ function applyBadgeFilters(where: string, args: any[], badges?: string[] | null)
   return where;
 }
 
-function applyExcludedFolderFilters(where: string, args: any[], excludedFolderIds?: string[] | null) {
+function applyExcludedFolderFilters(
+  where: string,
+  args: any[],
+  excludedFolderIds?: string[] | null,
+  alias = "m"
+) {
   const normalized = Array.from(
     new Set((excludedFolderIds ?? []).map((value) => value.trim()).filter(Boolean))
   );
   if (normalized.length === 0) return where;
-  where += ` AND m.folderId NOT IN (${normalized.map(() => "?").join(",")})`;
+  where += ` AND ${alias}.folderId NOT IN (${normalized.map(() => "?").join(",")})`;
   args.push(...normalized);
   return where;
 }
@@ -2070,6 +2075,27 @@ export async function listThreads(params: {
   }
 
   const threadFilterSql = `SELECT DISTINCT m.threadId FROM messages m WHERE ${where}`;
+  const shouldPrioritizeFlaggedThreads =
+    !hasQuery &&
+    !hasIdQuery &&
+    fromTerms.length === 0 &&
+    toTerms.length === 0 &&
+    inTerms.length === 0 &&
+    (badges?.length ?? 0) === 0 &&
+    !attachmentsFilter;
+  const flaggedOrderArgs: any[] = [];
+  let threadOrderSql = "t.latestDateValue DESC";
+  if (shouldPrioritizeFlaggedThreads) {
+    let flaggedWhere = "mf.accountId = ? AND mf.threadId = t.threadId AND mf.flagged = 1";
+    flaggedOrderArgs.push(accountId);
+    flaggedWhere = applyExcludedFolderFilters(
+      flaggedWhere,
+      flaggedOrderArgs,
+      excludedFolderIds,
+      "mf"
+    );
+    threadOrderSql = `CASE WHEN EXISTS (SELECT 1 FROM messages mf WHERE ${flaggedWhere}) THEN 1 ELSE 0 END DESC, t.latestDateValue DESC`;
+  }
 
   const threadRows = db
     .prepare(
@@ -2078,11 +2104,11 @@ export async function listThreads(params: {
       FROM threads t
       WHERE t.accountId = ?
         AND t.threadId IN (${threadFilterSql})
-      ORDER BY t.latestDateValue DESC
+      ORDER BY ${threadOrderSql}
       LIMIT ? OFFSET ?
     `
     )
-    .all(accountId, ...args, pageSize, offset) as any[];
+    .all(accountId, ...args, ...flaggedOrderArgs, pageSize, offset) as any[];
 
   const threadIds = threadRows.map((row) => row.threadId);
   const threadTotalRow = db
@@ -2431,6 +2457,12 @@ export async function upsertMessages(
   const deleteAttachmentsForMessage = db.prepare(
     `DELETE FROM attachments WHERE messageId = ?`
   );
+  const deleteMessageById = db.prepare(`DELETE FROM messages WHERE accountId = ? AND id = ?`);
+  const findFolderMessageDuplicates = db.prepare(
+    `SELECT id, threadId
+     FROM messages
+     WHERE accountId = ? AND folderId = ? AND messageId = ? AND id <> ?`
+  );
   const deleteFtsByScope = folderId
     ? db.prepare(
         `DELETE FROM message_fts WHERE messageId IN (SELECT id FROM messages WHERE accountId = ? AND folderId = ?)`
@@ -2473,8 +2505,25 @@ export async function upsertMessages(
             .filter((id): id is string => Boolean(id))
         )
       : null;
+  const dedupedThreadIds = new Set<string>();
   const upsertBatch = db.transaction((batch: Message[], shouldDeleteAttachments: boolean) => {
     batch.forEach((message) => {
+      if (message.messageId) {
+        const duplicates = findFolderMessageDuplicates.all(
+          accountId,
+          message.folderId,
+          message.messageId,
+          message.id
+        ) as Array<{ id: string; threadId: string | null }>;
+        duplicates.forEach((row) => {
+          deleteAttachmentsForMessage.run(row.id);
+          deleteFts.run(row.id);
+          deleteMessageById.run(accountId, row.id);
+          if (row.threadId) {
+            dedupedThreadIds.add(row.threadId);
+          }
+        });
+      }
       if (shouldDeleteAttachments) {
         deleteAttachmentsForMessage.run(message.id);
       }
@@ -2580,7 +2629,10 @@ export async function upsertMessages(
 
   if (replaceExisting) {
     if (folderId) {
-      const affectedThreadIds = new Set<string>(existingScopeThreadIds ?? []);
+      const affectedThreadIds = new Set<string>([
+        ...(existingScopeThreadIds ?? new Set<string>()),
+        ...dedupedThreadIds
+      ]);
       nextMessages.forEach((message) => {
         if (message.threadId) {
           affectedThreadIds.add(message.threadId);
@@ -2594,7 +2646,10 @@ export async function upsertMessages(
     await recomputeThreadsForAccount(accountId);
   } else {
     const affected = Array.from(
-      new Set(nextMessages.map((message) => message.threadId).filter(Boolean))
+      new Set([
+        ...nextMessages.map((message) => message.threadId).filter(Boolean),
+        ...dedupedThreadIds
+      ])
     );
     if (affected.length > 0) {
       await recomputeThreadsForAccount(accountId, affected);
@@ -2744,9 +2799,18 @@ export async function updateMessageFolder(
   accountId: string,
   messageId: string,
   folderId: string,
-  mailboxPath: string
+  mailboxPath: string,
+  imapUid?: number | null
 ) {
   const db = await getDb();
+  if (typeof imapUid === "number" && Number.isFinite(imapUid)) {
+    db.prepare(
+      `UPDATE messages
+       SET folderId = ?, mailboxPath = ?, imapUid = ?
+       WHERE accountId = ? AND id = ?`
+    ).run(folderId, mailboxPath, imapUid, accountId, messageId);
+    return;
+  }
   db.prepare(
     `UPDATE messages SET folderId = ?, mailboxPath = ? WHERE accountId = ? AND id = ?`
   ).run(folderId, mailboxPath, accountId, messageId);

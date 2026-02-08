@@ -54,6 +54,7 @@ type UseMessageDeleteActionsOptions = {
   selectionStore: SelectionStore;
   lastSelectedIdRef: React.MutableRefObject<string | null>;
   setMessages: React.Dispatch<React.SetStateAction<Message[]>>;
+  shouldKeepMessageInResults?: (message: Message) => boolean;
   setPendingMessageActions: React.Dispatch<React.SetStateAction<Set<string>>>;
   setActiveMessageId: React.Dispatch<React.SetStateAction<string>>;
   refreshFolders: () => Promise<unknown>;
@@ -87,6 +88,7 @@ export function useMessageDeleteActions({
   selectionStore,
   lastSelectedIdRef,
   setMessages,
+  shouldKeepMessageInResults,
   setPendingMessageActions,
   setActiveMessageId,
   refreshFolders,
@@ -153,20 +155,30 @@ export function useMessageDeleteActions({
           return prev.filter((item) => item.id !== target.id);
         }
         if (data.action === "moved") {
-          if (searchScope === "all" && data.trashFolderId) {
-            return prev.map((item) =>
-              item.id === target.id
-                ? { ...item, folderId: data.trashFolderId!, recent: false }
-                : item
-            );
+          if (!(searchScope === "all" && data.trashFolderId)) {
+            return prev.filter((item) => item.id !== target.id);
           }
-          return prev.filter((item) => item.id !== target.id);
+          return prev.flatMap((item) => {
+            if (item.id !== target.id) return [item];
+            const updated = { ...item, folderId: data.trashFolderId!, recent: false };
+            const keep = shouldKeepMessageInResults
+              ? shouldKeepMessageInResults(updated)
+              : true;
+            return keep ? [updated] : [];
+          });
         }
         return prev;
       });
       return data;
     },
-    [activeAccountId, apiFetch, readErrorMessage, searchScope, setMessages]
+    [
+      activeAccountId,
+      apiFetch,
+      readErrorMessage,
+      searchScope,
+      setMessages,
+      shouldKeepMessageInResults
+    ]
   );
 
   const pushDeleteNotice = useCallback(
@@ -371,10 +383,11 @@ export function useMessageDeleteActions({
   const handleDeleteMessage = useCallback(
     async (message: Message, options?: { allowThreadDeletion?: boolean }) => {
       const allowThreadDeletion = options?.allowThreadDeletion ?? true;
-      const threadId = message.threadId ?? message.messageId ?? message.id;
+      const getThreadKey = (item: Message) => item.threadId ?? item.messageId ?? item.id;
+      const threadId = getThreadKey(message);
       const threadItems = supportsThreads
         ? threadScopeMessages.filter(
-            (item) => item.accountId === activeAccountId && item.threadId === threadId
+            (item) => item.accountId === activeAccountId && getThreadKey(item) === threadId
           )
         : [];
       const isCollapsedThread =

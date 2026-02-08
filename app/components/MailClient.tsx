@@ -43,7 +43,25 @@ import MessageListPane from "./mailclient/messagelist/MessageListPane";
 import MessageThreadList from "./mailclient/messagelist/MessageThreadList";
 import listMetaStyles from "./mailclient/messagelist/MessageListMeta.module.css";
 import listPaneStyles from "./mailclient/messagelist/MessageListPane.module.css";
+import type { MessageGroupMeta } from "./mailclient/messagelist/listModel";
+import {
+  clearListSelection,
+  resolveCollapsedThreadSelectionTarget,
+  selectRangeToMessage,
+  toggleListMessageSelection
+} from "./mailclient/messagelist/listSelection";
 import { createSelectionStore } from "./mailclient/messagelist/selectionStore";
+import {
+  mergeCollapsedGroupsWithMeta,
+  mergeCollapsedThreadsWithMessages,
+  useMessageListDerivedState
+} from "./mailclient/messagelist/listState";
+import {
+  buildThreadTree,
+  flattenThread,
+  getThreadLatestDate,
+  type ThreadNode
+} from "./mailclient/messagelist/threadTree";
 import threadStyles from "./mailclient/message/ThreadMessageCard.module.css";
 import {
   AlertDialog,
@@ -70,7 +88,7 @@ import {
   buildQuotedHtmlPartsFromText,
   escapeHtml
 } from "@/lib/html";
-import { withCalendarInviteFlag } from "@/lib/messageFlags";
+import { CALENDAR_INVITE_FLAG, hasMessageFlag, withCalendarInviteFlag } from "@/lib/messageFlags";
 import { openDetachedWindow } from "@/lib/ui/openDetachedWindow";
 import { getImapFlagBadges, hasHtmlContent } from "@/lib/ui/messageView";
 import {
@@ -102,6 +120,38 @@ function buildFolderTree(items: Folder[]) {
   });
 
   return map;
+}
+
+function applyFlagsToMessage(message: Message, flags: string[]): Message {
+  const seen = hasMessageFlag(flags, "\\Seen");
+  return {
+    ...message,
+    flags,
+    seen,
+    answered: hasMessageFlag(flags, "\\Answered"),
+    flagged: hasMessageFlag(flags, "\\Flagged"),
+    deleted: hasMessageFlag(flags, "\\Deleted"),
+    draft: hasMessageFlag(flags, "\\Draft"),
+    recent: hasMessageFlag(flags, "\\Recent"),
+    unread: !seen
+  };
+}
+
+function isMessageFlagged(message: Message) {
+  return Boolean(message.flagged) || hasMessageFlag(message.flags, "\\Flagged");
+}
+
+function hasTodoFlag(message: Message) {
+  return hasMessageFlag(message.flags, "to-do");
+}
+
+function hasCalendarFlag(message: Message) {
+  return hasMessageFlag(message.flags, CALENDAR_INVITE_FLAG);
+}
+
+function hasNonInlineAttachments(message: Message) {
+  if (message.hasAttachments) return true;
+  return (message.attachments ?? []).some((attachment) => !attachment.inline);
 }
 
 type ExceptionEntry = {
@@ -227,9 +277,7 @@ export default function MailClient() {
   const [groupBy, setGroupBy] = useState<
     "none" | "date" | "week" | "sender" | "domain" | "year" | "folder"
   >("date");
-  const [groupMeta, setGroupMeta] = useState<
-    { key: string; label: string; count: number }[]
-  >([]);
+  const [groupMeta, setGroupMeta] = useState<MessageGroupMeta[]>([]);
   const [collapsedThreads, setCollapsedThreads] = useState<Record<string, boolean>>({});
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
   const selectionStoreRef = useRef<ReturnType<typeof createSelectionStore> | null>(null);
@@ -591,26 +639,26 @@ export default function MailClient() {
   const hasFilteredSearchCriteria =
     isRelatedSearch || trimmedQuery.length > 0 || selectedSearchBadges.length > 0;
 
-  const selectRangeTo = useCallback((messageId: string) => {
-    const lastSelected = lastSelectedIdRef.current;
-    const indexMap = visibleIndexByIdRef.current;
-    const visible = visibleMessagesRef.current;
-    if (!lastSelected || !indexMap.has(lastSelected) || !indexMap.has(messageId)) {
-      selectionStore.setSelection(new Set([messageId]));
-      lastSelectedIdRef.current = messageId;
-      return;
-    }
-    const start = indexMap.get(lastSelected)!;
-    const end = indexMap.get(messageId)!;
-    const [lo, hi] = start < end ? [start, end] : [end, start];
-    const ids = visible.slice(lo, hi + 1).map((item) => item.message.id);
-    selectionStore.setSelection(new Set(ids));
-    lastSelectedIdRef.current = messageId;
-  }, [selectionStore]);
+  const selectRangeTo = (messageId: string) => {
+    selectRangeToMessage({
+      messageId,
+      lastSelectedId: lastSelectedIdRef.current,
+      indexMap: visibleIndexByIdRef.current,
+      visibleMessages: visibleMessagesRef.current,
+      selectionStore,
+      setLastSelectedId: (id) => {
+        lastSelectedIdRef.current = id;
+      }
+    });
+  };
 
   const clearSelection = () => {
-    selectionStore.clearSelection();
-    lastSelectedIdRef.current = null;
+    clearListSelection({
+      selectionStore,
+      setLastSelectedId: (id) => {
+        lastSelectedIdRef.current = id;
+      }
+    });
   };
 
   const setLastSelectedIdRef = useCallback((id: string | null) => {
@@ -647,8 +695,15 @@ export default function MailClient() {
     replace = false,
     setActive = true
   ) => {
-    selectionStore.toggle(messageId, replace, setActive);
-    lastSelectedIdRef.current = messageId;
+    toggleListMessageSelection({
+      messageId,
+      replace,
+      setActive,
+      selectionStore,
+      setLastSelectedId: (id) => {
+        lastSelectedIdRef.current = id;
+      }
+    });
   }, [selectionStore]);
 
   const getThreadSelectionKey = (message?: Message | null) =>
@@ -696,7 +751,7 @@ export default function MailClient() {
       }
       handleSelectMessage(message);
     },
-    [handleSelectMessage, selectRangeTo, selectionStore, toggleMessageSelection]
+    [handleSelectMessage, selectRangeTo, toggleMessageSelection]
   );
 
   const searchFieldsLabel = useMemo(() => {
@@ -1090,9 +1145,7 @@ export default function MailClient() {
     }));
   };
 
-  const isFlaggedMessage = (message: Message) =>
-    Boolean(message.flagged) ||
-    (message.flags?.some((flag) => flag.toLowerCase() === "\\flagged") ?? false);
+  const isFlaggedMessage = (message: Message) => isMessageFlagged(message);
   const renderSelectIndicators = (message: Message) => (
     <MessageSelectIndicators
       isFlagged={isFlaggedMessage(message)}
@@ -1563,76 +1616,6 @@ export default function MailClient() {
 
   const turndownService = useMemo(() => new TurndownService(), []);
 
-  type ThreadNode = { message: Message; children: ThreadNode[]; threadSize: number };
-
-  const buildThreadTree = (items: Message[]) => {
-    const buckets = new Map<string, Message[]>();
-    items.forEach((message) => {
-      const key = message.threadId ?? message.id;
-      if (!buckets.has(key)) buckets.set(key, []);
-      buckets.get(key)!.push(message);
-    });
-    const allRoots: ThreadNode[] = [];
-    const sortNodes = (list: ThreadNode[]) => {
-      list.sort((a, b) => a.message.dateValue - b.message.dateValue);
-      list.forEach((child) => sortNodes(child.children));
-    };
-    buckets.forEach((bucket) => {
-      const nodes = new Map<string, ThreadNode>();
-      bucket.forEach((message) => {
-        nodes.set(message.id, { message, children: [], threadSize: bucket.length });
-      });
-      const roots: ThreadNode[] = [];
-      const findParentId = (message: Message) => {
-        const parentId = message.parentId;
-        if (!parentId) return null;
-        return nodes.has(parentId) ? parentId : null;
-      };
-      bucket.forEach((message) => {
-        const node = nodes.get(message.id);
-        if (!node) return;
-        const parentId = findParentId(message);
-        if (parentId && parentId !== message.id) {
-          nodes.get(parentId)!.children.push(node);
-          return;
-        }
-        roots.push(node);
-      });
-      const hasLinks = bucket.some((msg) => Boolean(findParentId(msg)));
-      if (!hasLinks && roots.length > 1) {
-        const sorted = [...roots].sort((a, b) => a.message.dateValue - b.message.dateValue);
-        const root = sorted[0];
-        root.children = sorted.slice(1);
-        roots.length = 0;
-        roots.push(root);
-      }
-      sortNodes(roots);
-      roots.forEach((root) => allRoots.push(root));
-    });
-    return allRoots;
-  };
-
-  const getThreadLatestDate = (node: ThreadNode) => {
-    let latest = node.message.dateValue;
-    node.children.forEach((child) => {
-      const childLatest = getThreadLatestDate(child);
-      if (childLatest > latest) latest = childLatest;
-    });
-    return latest;
-  };
-
-  const flattenThread = (node: ThreadNode, depth = 0, visited = new Set<string>()) => {
-    if (visited.has(node.message.id)) {
-      return [];
-    }
-    visited.add(node.message.id);
-    const items: { message: Message; depth: number }[] = [{ message: node.message, depth }];
-    node.children.forEach((child) => {
-      items.push(...flattenThread(child, depth + 1, visited));
-    });
-    return items;
-  };
-
   const currentAccount = accounts.find((account) => account.id === activeAccountId) ?? null;
   const accountSignatures = currentAccount?.settings?.signatures ?? [];
   const defaultSignatureId = currentAccount?.settings?.defaultSignatureId ?? "";
@@ -1769,133 +1752,34 @@ export default function MailClient() {
     },
     [evictMessagesFromThreadCache]
   );
-  const threadScopeMessages = useMemo(() => {
-    if (!includeThreadAcrossFoldersForList) {
-      return sortedMessages;
-    }
-    const baseMessages = [...sortedMessages, ...threadRelatedMessages].filter(
-      (message) => !isThreadExcludedFolder(message.folderId)
-    );
-    const seen = new Set<string>();
-    const selected: Message[] = [];
-    baseMessages.forEach((message) => {
-      if (seen.has(message.id)) return;
-      seen.add(message.id);
-      selected.push(message);
-    });
-    return selected;
-  }, [includeThreadAcrossFoldersForList, threadRelatedMessages, sortedMessages]);
-  const listScopeMessages = useMemo(
-    () => (supportsThreads ? threadScopeMessages : sortedMessages),
-    [sortedMessages, supportsThreads, threadScopeMessages]
-  );
-
-  const groupedMessages = useMemo(() => {
-    const base = [...listScopeMessages].sort((a, b) => b.dateValue - a.dateValue);
-    const groups = new Map<string, Message[]>();
-    const threadGroupKey = new Map<string, string>();
-
-    if (supportsThreads) {
-      buildThreadTree(base).forEach((root) => {
-        const flat = flattenThread(root, 0);
-        if (!flat.length) return;
-        const hasFlagged = flat.some(({ message }) => isFlaggedMessage(message));
-        if (hasFlagged) {
-          flat.forEach(({ message }) => {
-            threadGroupKey.set(message.id, "Flagged");
-          });
-          return;
-        }
-        const latest = flat.reduce((acc, item) =>
-          item.message.dateValue > acc.message.dateValue ? item : acc
-        );
-        const groupKey = latest.message.groupKey ?? "Other";
-        flat.forEach(({ message }) => {
-          threadGroupKey.set(message.id, groupKey);
-        });
-      });
-    }
-
-    base.forEach((message) => {
-      const key = supportsThreads
-        ? threadGroupKey.get(message.id) ?? message.groupKey ?? "Other"
-        : isFlaggedMessage(message)
-          ? "Flagged"
-          : message.groupKey ?? "Other";
-      if (!groups.has(key)) groups.set(key, []);
-      groups.get(key)!.push(message);
-    });
-    const meta = groupMeta.length ? groupMeta : computeGroupMeta(base);
-    // Keep the Flagged header count aligned with non-threaded grouping:
-    // count flagged messages only, not every message inside flagged threads.
-    const flaggedCount = base.filter((message) => isFlaggedMessage(message)).length;
-    const orderedMeta = flaggedCount > 0
-      ? [
-          { key: "Flagged", label: "Flagged", count: flaggedCount },
-          ...meta.filter((group) => group.key !== "Flagged")
-        ]
-      : meta;
-    return orderedMeta.map((group) => ({
-      key: group.key,
-      label: group.label,
-      count: group.count,
-      items: groups.get(group.key) ?? []
-    }));
-  }, [groupMeta, listScopeMessages, supportsThreads]);
-
-  const visibleMessages = useMemo(() => {
-    const list: { message: Message; depth: number; threadId: string }[] = [];
-    groupedMessages.forEach((group) => {
-      if (group.items.length === 0 || collapsedGroups[group.key]) return;
-      if (supportsThreads) {
-        buildThreadTree(group.items)
-          .sort((a, b) => getThreadLatestDate(b) - getThreadLatestDate(a))
-          .forEach((root) => {
-            const threadGroupId =
-              root.message.threadId ?? root.message.messageId ?? root.message.id;
-            const fullFlat = flattenThread(root, 0);
-            const isCollapsed = collapsedThreads[threadGroupId] ?? true;
-            const flat = isCollapsed ? [fullFlat[0]] : fullFlat;
-            flat.forEach((item) =>
-              list.push({ message: item.message, depth: item.depth, threadId: threadGroupId })
-            );
-          });
-      } else {
-        group.items.forEach((message) =>
-          list.push({
-            message,
-            depth: 0,
-            threadId: message.threadId ?? message.messageId ?? message.id
-          })
-        );
-      }
-    });
-    return list;
-  }, [groupedMessages, collapsedGroups, collapsedThreads, supportsThreads]);
-
-  const visibleIndexById = useMemo(() => {
-    const map = new Map<string, number>();
-    visibleMessages.forEach((item, index) => map.set(item.message.id, index));
-    return map;
-  }, [visibleMessages]);
-  const visibleIndexByIdRef = useRef(visibleIndexById);
-  const visibleMessagesRef = useRef(visibleMessages);
-
-  useEffect(() => {
-    visibleIndexByIdRef.current = visibleIndexById;
-    visibleMessagesRef.current = visibleMessages;
-  }, [visibleIndexById, visibleMessages]);
-
-
-
-  const toggleAllGroups = () => {
-    const anyOpen = groupedMessages.some((group) => !collapsedGroups[group.key]);
-    const next: Record<string, boolean> = {};
-    groupedMessages.forEach((group) => {
-      next[group.key] = anyOpen;
-    });
-    setCollapsedGroups(next);
-  };
+  const {
+    threadScopeMessages,
+    groupedMessages,
+    visibleMessages,
+    visibleIndexByIdRef,
+    visibleMessagesRef,
+    toggleAllGroups
+  } = useMessageListDerivedState({
+    sortedMessages,
+    threadRelatedMessages,
+    includeThreadAcrossFoldersForList,
+    isThreadExcludedFolder,
+    supportsThreads,
+    groupMeta,
+    isFlaggedMessage,
+    computeGroupMeta,
+    collapsedGroups,
+    collapsedThreads,
+    includeThreadAcrossFolders,
+    searchScope,
+    activeFolderId,
+    buildThreadTree,
+    flattenThread,
+    getThreadLatestDate,
+    userEmail: currentAccount?.email,
+    preferToDisplay,
+    setCollapsedGroups
+  });
   const showComposeInline = composeOpen && composeView === "inline";
   const showComposeModal = composeOpen && composeView === "modal";
   const showComposeMinimized = composeOpen && composeView === "minimized";
@@ -2918,6 +2802,77 @@ export default function MailClient() {
     };
   }, []);
 
+  const shouldKeepMessageInCurrentResults = useCallback(
+    (message: Message) => {
+      if (message.accountId !== activeAccountId) return false;
+      if (searchScope === "folder") {
+        if (!activeFolderId || message.folderId !== activeFolderId) return false;
+      } else if (excludedEverywhereFolderIds.includes(message.folderId)) {
+        return false;
+      }
+
+      for (const badge of selectedSearchBadges) {
+        if (badge === "unread" && !Boolean(message.unread ?? !message.seen)) {
+          return false;
+        }
+        if (badge === "unanswered" && Boolean(message.answered)) {
+          return false;
+        }
+        if (badge === "flagged" && !isMessageFlagged(message)) {
+          return false;
+        }
+        if (badge === "todo" && !hasTodoFlag(message)) {
+          return false;
+        }
+        if (badge === "calendar" && !hasCalendarFlag(message)) {
+          return false;
+        }
+        if (badge === "attachments" && !hasNonInlineAttachments(message)) {
+          return false;
+        }
+        if (badge === "newsletter" && message.category !== "newsletter") {
+          return false;
+        }
+        if (badge === "notification" && message.category !== "notification") {
+          return false;
+        }
+        if (badge === "transactional" && message.category !== "transactional") {
+          return false;
+        }
+      }
+      return true;
+    },
+    [
+      activeAccountId,
+      activeFolderId,
+      excludedEverywhereFolderIds,
+      searchScope,
+      selectedSearchBadges
+    ]
+  );
+
+  const updateMessagesWithCurrentResultPrune = useCallback(
+    (updater: (message: Message) => Message | null) => {
+      setMessages((prev) => {
+        let changed = false;
+        const next: Message[] = [];
+        prev.forEach((item) => {
+          const updated = updater(item);
+          if (updated === item) {
+            next.push(item);
+            return;
+          }
+          changed = true;
+          if (!updated) return;
+          if (!shouldKeepMessageInCurrentResults(updated)) return;
+          next.push(updated);
+        });
+        return changed ? next : prev;
+      });
+    },
+    [shouldKeepMessageInCurrentResults]
+  );
+
   const { handleMoveMessages, moveMessagesToFolder } = useMessageMoveActions({
     activeAccountId,
     activeMessageId,
@@ -2928,6 +2883,7 @@ export default function MailClient() {
     folderById,
     lastSelectedIdRef,
     setMessages,
+    shouldKeepMessageInResults: shouldKeepMessageInCurrentResults,
     setPendingMessageActions,
     setActiveMessageId,
     apiFetch,
@@ -2955,6 +2911,7 @@ export default function MailClient() {
     selectionStore,
     lastSelectedIdRef,
     setMessages,
+    shouldKeepMessageInResults: shouldKeepMessageInCurrentResults,
     setPendingMessageActions,
     setActiveMessageId,
     refreshFolders: () => refreshFolders(),
@@ -2991,15 +2948,21 @@ export default function MailClient() {
         archiveFolderId?: string | null;
       };
       evictMessageCaches([message.id]);
-      setMessages((prev) => {
+      const shouldKeepArchivedMessage =
+        searchScope === "all" &&
+        Boolean(data.archiveFolderId) &&
+        shouldKeepMessageInCurrentResults({
+          ...message,
+          folderId: data.archiveFolderId!
+        });
+      updateMessagesWithCurrentResultPrune((item) => {
+        if (item.id !== message.id) return item;
         if (searchScope === "all" && data.archiveFolderId) {
-          return prev.map((item) =>
-            item.id === message.id ? { ...item, folderId: data.archiveFolderId! } : item
-          );
+          return { ...item, folderId: data.archiveFolderId! };
         }
-        return prev.filter((item) => item.id !== message.id);
+        return null;
       });
-      if (activeMessageId === message.id) {
+      if (activeMessageId === message.id && !shouldKeepArchivedMessage) {
         setActiveMessageId("");
       }
       pushNotice({
@@ -3041,25 +3004,35 @@ export default function MailClient() {
         flags?: string[];
       };
       evictMessageCaches([message.id]);
-      setMessages((prev) => {
+      const movedSpamMessage =
+        searchScope === "all" && data.junkFolderId
+          ? applyFlagsToMessage(
+              {
+                ...message,
+                folderId: data.junkFolderId!,
+                mailboxPath: data.junkMailbox ?? message.mailboxPath
+              },
+              data.flags ?? message.flags ?? []
+            )
+          : null;
+      updateMessagesWithCurrentResultPrune((item) => {
+        if (item.id !== message.id) return item;
         if (searchScope === "all" && data.junkFolderId) {
-          return prev.map((item) =>
-            item.id === message.id
-              ? {
-                  ...item,
-                  folderId: data.junkFolderId!,
-                  mailboxPath: data.junkMailbox ?? item.mailboxPath,
-                  flags: data.flags ?? item.flags,
-                  recent: data.flags
-                    ? data.flags.some((flag) => flag.toLowerCase() === "\\recent")
-                    : item.recent
-                }
-              : item
+          return applyFlagsToMessage(
+            {
+              ...item,
+              folderId: data.junkFolderId!,
+              mailboxPath: data.junkMailbox ?? item.mailboxPath
+            },
+            data.flags ?? item.flags ?? []
           );
         }
-        return prev.filter((item) => item.id !== message.id);
+        return null;
       });
-      if (activeMessageId === message.id) {
+      if (
+        activeMessageId === message.id &&
+        (!movedSpamMessage || !shouldKeepMessageInCurrentResults(movedSpamMessage))
+      ) {
         setActiveMessageId("");
       }
       pushNotice({
@@ -3107,25 +3080,35 @@ export default function MailClient() {
         flags?: string[];
       };
       evictMessageCaches([message.id]);
-      setMessages((prev) => {
+      const movedInboxMessage =
+        searchScope === "all" && data.inboxFolderId
+          ? applyFlagsToMessage(
+              {
+                ...message,
+                folderId: data.inboxFolderId!,
+                mailboxPath: data.inboxMailbox ?? message.mailboxPath
+              },
+              data.flags ?? message.flags ?? []
+            )
+          : null;
+      updateMessagesWithCurrentResultPrune((item) => {
+        if (item.id !== message.id) return item;
         if (searchScope === "all" && data.inboxFolderId) {
-          return prev.map((item) =>
-            item.id === message.id
-              ? {
-                  ...item,
-                  folderId: data.inboxFolderId!,
-                  mailboxPath: data.inboxMailbox ?? item.mailboxPath,
-                  flags: data.flags ?? item.flags,
-                  recent: data.flags
-                    ? data.flags.some((flag) => flag.toLowerCase() === "\\recent")
-                    : item.recent
-                }
-              : item
+          return applyFlagsToMessage(
+            {
+              ...item,
+              folderId: data.inboxFolderId!,
+              mailboxPath: data.inboxMailbox ?? item.mailboxPath
+            },
+            data.flags ?? item.flags ?? []
           );
         }
-        return prev.filter((item) => item.id !== message.id);
+        return null;
       });
-      if (activeMessageId === message.id) {
+      if (
+        activeMessageId === message.id &&
+        (!movedInboxMessage || !shouldKeepMessageInCurrentResults(movedInboxMessage))
+      ) {
         setActiveMessageId("");
       }
       pushNotice({
@@ -3234,26 +3217,14 @@ export default function MailClient() {
         return;
       }
       const data = (await res.json()) as { flags: string[] };
-      const nextSeen = data.flags.some((f) => f.toLowerCase() === "\\seen");
-      setMessages((prev) =>
-        prev.map((item) =>
-          item.id === message.id
-            ? {
-                ...item,
-                flags: data.flags,
-                seen: nextSeen,
-                answered: data.flags.some((f) => f.toLowerCase() === "\\answered"),
-                flagged: data.flags.some((f) => f.toLowerCase() === "\\flagged"),
-                deleted: data.flags.some((f) => f.toLowerCase() === "\\deleted"),
-                draft: data.flags.some((f) => f.toLowerCase() === "\\draft"),
-                recent: data.flags.some((f) => f.toLowerCase() === "\\recent"),
-                unread: !nextSeen
-              }
-            : item
-        )
+      const updatedMessage = applyFlagsToMessage(message, data.flags);
+      const shouldKeepUpdatedMessage = shouldKeepMessageInCurrentResults(updatedMessage);
+      updateMessagesWithCurrentResultPrune((item) =>
+        item.id === message.id ? applyFlagsToMessage(item, data.flags) : item
       );
       updateThreadCacheWithFlags(message.id, data.flags);
       if (flag === "seen") {
+        const nextSeen = Boolean(updatedMessage.seen);
         setFolders((prev) =>
           prev.map((folder) => {
             if (folder.id !== message.folderId) return folder;
@@ -3267,6 +3238,9 @@ export default function MailClient() {
             return folder;
           })
         );
+      }
+      if (activeMessageId === message.id && !shouldKeepUpdatedMessage) {
+        setActiveMessageId("");
       }
       queueFilteredSearchRefresh();
     } catch {
@@ -3295,25 +3269,15 @@ export default function MailClient() {
         return;
       }
       const data = (await res.json()) as { flags: string[] };
-      const nextSeen = data.flags.some((f) => f.toLowerCase() === "\\seen");
-      setMessages((prev) =>
-        prev.map((item) =>
-          item.id === message.id
-            ? {
-                ...item,
-                flags: data.flags,
-                seen: nextSeen,
-                answered: data.flags.some((f) => f.toLowerCase() === "\\answered"),
-                flagged: data.flags.some((f) => f.toLowerCase() === "\\flagged"),
-                deleted: data.flags.some((f) => f.toLowerCase() === "\\deleted"),
-                draft: data.flags.some((f) => f.toLowerCase() === "\\draft"),
-                recent: data.flags.some((f) => f.toLowerCase() === "\\recent"),
-                unread: !nextSeen
-              }
-            : item
-        )
+      const updatedMessage = applyFlagsToMessage(message, data.flags);
+      const shouldKeepUpdatedMessage = shouldKeepMessageInCurrentResults(updatedMessage);
+      updateMessagesWithCurrentResultPrune((item) =>
+        item.id === message.id ? applyFlagsToMessage(item, data.flags) : item
       );
       updateThreadCacheWithFlags(message.id, data.flags);
+      if (activeMessageId === message.id && !shouldKeepUpdatedMessage) {
+        setActiveMessageId("");
+      }
       queueFilteredSearchRefresh();
     } catch {
       reportError("Failed to update message keyword.");
@@ -3324,24 +3288,13 @@ export default function MailClient() {
   updateFlagStateRef.current = updateFlagState;
 
   const updateThreadCacheWithFlags = (messageId: string, flags: string[]) => {
-    const nextSeen = flags.some((f) => f.toLowerCase() === "\\seen");
     setThreadContentById((prev) => {
       let changed = false;
       const next: Record<string, Message[]> = { ...prev };
       Object.entries(prev).forEach(([threadId, list]) => {
         const idx = list.findIndex((item) => item.id === messageId);
         if (idx < 0) return;
-        const updated = {
-          ...list[idx],
-          flags,
-          seen: nextSeen,
-          answered: flags.some((f) => f.toLowerCase() === "\\answered"),
-          flagged: flags.some((f) => f.toLowerCase() === "\\flagged"),
-          deleted: flags.some((f) => f.toLowerCase() === "\\deleted"),
-          draft: flags.some((f) => f.toLowerCase() === "\\draft"),
-          recent: flags.some((f) => f.toLowerCase() === "\\recent"),
-          unread: !nextSeen
-        };
+        const updated = applyFlagsToMessage(list[idx], flags);
         const nextList = [...list];
         nextList[idx] = updated;
         next[threadId] = nextList;
@@ -3352,8 +3305,7 @@ export default function MailClient() {
   };
 
   const toggleTodoFlag = async (message: Message) => {
-    const hasTodo =
-      message.flags?.some((flag) => flag.toLowerCase() === "to-do") ?? false;
+    const hasTodo = hasTodoFlag(message);
     try {
       const res = await apiFetch("/api/message/flags", {
         method: "POST",
@@ -3370,24 +3322,15 @@ export default function MailClient() {
         return;
       }
       const data = (await res.json()) as { flags: string[] };
-      setMessages((prev) =>
-        prev.map((item) =>
-          item.id === message.id
-            ? {
-                ...item,
-                flags: data.flags,
-                seen: data.flags.some((f) => f.toLowerCase() === "\\seen"),
-                answered: data.flags.some((f) => f.toLowerCase() === "\\answered"),
-                flagged: data.flags.some((f) => f.toLowerCase() === "\\flagged"),
-                deleted: data.flags.some((f) => f.toLowerCase() === "\\deleted"),
-                draft: data.flags.some((f) => f.toLowerCase() === "\\draft"),
-                recent: data.flags.some((f) => f.toLowerCase() === "\\recent"),
-                unread: !data.flags.some((f) => f.toLowerCase() === "\\seen")
-              }
-            : item
-        )
+      const updatedMessage = applyFlagsToMessage(message, data.flags);
+      const shouldKeepUpdatedMessage = shouldKeepMessageInCurrentResults(updatedMessage);
+      updateMessagesWithCurrentResultPrune((item) =>
+        item.id === message.id ? applyFlagsToMessage(item, data.flags) : item
       );
       updateThreadCacheWithFlags(message.id, data.flags);
+      if (activeMessageId === message.id && !shouldKeepUpdatedMessage) {
+        setActiveMessageId("");
+      }
       queueFilteredSearchRefresh();
     } catch {
       reportError("Failed to update To-Do flag.");
@@ -3419,21 +3362,30 @@ export default function MailClient() {
     threadMessageIds?: string[]
   ) => {
     const selected = selectionStore.getIds();
+    const selectedIds = Array.from(selected);
+    const hasThreadMessageIds = Boolean(threadMessageIds && threadMessageIds.length > 0);
+    // Dragging a collapsed thread root should move the whole thread even if only the root is selected.
+    const shouldUseThreadMessageIds =
+      hasThreadMessageIds &&
+      (selected.size === 0 || (selected.size === 1 && selected.has(message.id)));
     const ids =
-      selected.size > 0 && selected.has(message.id)
-        ? Array.from(selected)
-        : threadMessageIds && threadMessageIds.length > 0
-          ? threadMessageIds
+      shouldUseThreadMessageIds
+        ? threadMessageIds!
+        : selected.size > 0 && selected.has(message.id)
+          ? selectedIds
+          : hasThreadMessageIds
+            ? threadMessageIds!
           : [message.id];
-    const items = messages.filter((item) => ids.includes(item.id));
+    const uniqueIds = Array.from(new Set(ids));
+    const items = messages.filter((item) => uniqueIds.includes(item.id));
     const ghost = buildDragPreview(items);
     event.dataTransfer.effectAllowed = "move";
     event.dataTransfer.setData(
       "application/json",
-      JSON.stringify({ accountId: activeAccountId, messageIds: ids })
+      JSON.stringify({ accountId: activeAccountId, messageIds: uniqueIds })
     );
     event.dataTransfer.setDragImage(ghost, 26, 26);
-    setDraggingMessageIds(new Set(ids));
+    setDraggingMessageIds(new Set(uniqueIds));
   };
 
   const handleMessageDragEnd = () => {
@@ -3493,27 +3445,17 @@ export default function MailClient() {
     if (composeMode === "new") return;
     setComposeOpen(false);
   }, [activeFolderId]);
-  const getLatestThreadMessage = (flat: { message: Message; depth: number }[]) => {
-    if (!flat.length) return null;
-    return flat.reduce(
-      (acc, item) => (item.message.dateValue > acc.dateValue ? item.message : acc),
-      flat[0].message
-    );
-  };
-  const getLatestFlaggedThreadMessage = (flat: { message: Message; depth: number }[]) => {
-    const flagged = flat.filter((item) => isFlaggedMessage(item.message));
-    return getLatestThreadMessage(flagged);
-  };
   const selectCollapsedThread = (
     flat: { message: Message; depth: number }[],
     target: Message,
     options?: { isFlaggedGroup?: boolean }
   ) => {
-    const latest = getLatestThreadMessage(flat);
-    const latestFlagged = options?.isFlaggedGroup ? getLatestFlaggedThreadMessage(flat) : null;
-    const hasTarget = flat.some((item) => item.message.id === target.id);
-    const effectiveTarget =
-      latestFlagged ?? latest ?? (hasTarget ? target : (flat[0]?.message ?? target));
+    const effectiveTarget = resolveCollapsedThreadSelectionTarget({
+      flat,
+      target,
+      isFlaggedMessage,
+      options
+    });
     selectionStore.setSelection(new Set([effectiveTarget.id]), effectiveTarget.id);
     lastSelectedIdRef.current = effectiveTarget.id;
     handleSelectMessage(effectiveTarget, { preserveSelection: true });
@@ -3977,23 +3919,8 @@ export default function MailClient() {
               ? data.groups
               : computeGroupMeta(items);
             setGroupMeta(nextMeta);
-            setCollapsedGroups((prev) => {
-              const next: Record<string, boolean> = {};
-              nextMeta.forEach((g) => {
-                next[g.key] = prev[g.key] ?? false;
-              });
-              return next;
-            });
-            setCollapsedThreads((prev) => {
-              const next = { ...prev };
-              const threadIds = new Set(
-                items.map((message) => message.threadId ?? message.messageId ?? message.id)
-              );
-              threadIds.forEach((id) => {
-                if (!(id in next)) next[id] = true;
-              });
-              return next;
-            });
+            setCollapsedGroups((prev) => mergeCollapsedGroupsWithMeta(prev, nextMeta));
+            setCollapsedThreads((prev) => mergeCollapsedThreadsWithMessages(prev, items));
           }
           if (messagesPage === 1) {
             setActiveMessageId((prev) => {
@@ -4731,25 +4658,8 @@ export default function MailClient() {
         setRelatedContext(null);
       }
       setGroupMeta(nextMeta);
-      setCollapsedGroups((prev) => {
-        const next: Record<string, boolean> = {};
-        nextMeta.forEach((g) => {
-          next[g.key] = prev[g.key] ?? false;
-        });
-        return next;
-      });
-      setCollapsedThreads((prev) => {
-        const next = { ...prev };
-        const threadIds = new Set(
-          nextMessages.map(
-            (message) => message.threadId ?? message.messageId ?? message.id
-          )
-        );
-        threadIds.forEach((id) => {
-          if (!(id in next)) next[id] = true;
-        });
-        return next;
-      });
+      setCollapsedGroups((prev) => mergeCollapsedGroupsWithMeta(prev, nextMeta));
+      setCollapsedThreads((prev) => mergeCollapsedThreadsWithMessages(prev, nextMessages));
       setMessageListError(null);
       return true;
     } finally {
@@ -5602,35 +5512,21 @@ export default function MailClient() {
             flags?: string[];
           };
           if (!data || typeof data.uid !== "number") return;
-          setMessages((prev) =>
-            prev.map((msg) => {
-              if (
-                msg.accountId !== activeAccountId ||
-                msg.imapUid !== data.uid ||
-                (data.folderId && msg.folderId !== data.folderId)
-              ) {
-                return msg;
-              }
-              const flags = withCalendarInviteFlag(data.flags ?? msg.flags ?? [], {
-                attachments: msg.attachments,
-                textBody: msg.body,
-                htmlBody: msg.htmlBody
-              });
-              const lower = flags.map((f) => f.toLowerCase());
-              const seen = lower.includes("\\seen");
-              return {
-                ...msg,
-                flags,
-                seen,
-                answered: lower.includes("\\answered"),
-                flagged: lower.includes("\\flagged"),
-                deleted: lower.includes("\\deleted"),
-                draft: lower.includes("\\draft"),
-                recent: lower.includes("\\recent"),
-                unread: !seen
-              };
-            })
-          );
+          updateMessagesWithCurrentResultPrune((msg) => {
+            if (
+              msg.accountId !== activeAccountId ||
+              msg.imapUid !== data.uid ||
+              (data.folderId && msg.folderId !== data.folderId)
+            ) {
+              return msg;
+            }
+            const flags = withCalendarInviteFlag(data.flags ?? msg.flags ?? [], {
+              attachments: msg.attachments,
+              textBody: msg.body,
+              htmlBody: msg.htmlBody
+            });
+            return applyFlagsToMessage(msg, flags);
+          });
           const hasDeletedFlag = (data.flags ?? []).some(
             (flag) => flag.toLowerCase() === "\\deleted"
           );

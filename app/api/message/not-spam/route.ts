@@ -86,9 +86,21 @@ export async function POST(request: Request) {
     clientId
   );
 
-  await moveImapMessage(account, currentMailbox, message.imapUid, inboxMailbox, clientId);
+  const destinationUid = await moveImapMessage(
+    account,
+    currentMailbox,
+    message.imapUid,
+    inboxMailbox,
+    clientId
+  );
   if (inboxFolder) {
-    await updateMessageFolder(payload.accountId, message.id, inboxFolder.id, inboxMailbox);
+    await updateMessageFolder(
+      payload.accountId,
+      message.id,
+      inboxFolder.id,
+      inboxMailbox,
+      destinationUid
+    );
   }
 
   const cleanedFlags = existingFlags.filter(
