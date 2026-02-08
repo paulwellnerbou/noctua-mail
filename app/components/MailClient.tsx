@@ -4668,7 +4668,7 @@ export default function MailClient() {
       const data = (await statusRes.json()) as {
         ok: boolean;
         job?: {
-          status?: "running" | "done" | "failed";
+          status?: "queued" | "running" | "done" | "failed";
           error?: string;
           result?: SyncJobResult;
         };
