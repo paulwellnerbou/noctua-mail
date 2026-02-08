@@ -1,5 +1,5 @@
 import { randomUUID } from "crypto";
-import type { SyncPayload } from "@/lib/syncOperation";
+import type { SyncOperationResult, SyncPayload } from "@/lib/syncOperation";
 
 type SyncJobStatus = "running" | "done" | "failed";
 
@@ -11,9 +11,7 @@ export type SyncJob = {
   finishedAt?: number;
   error?: string;
   pid?: number;
-  result?: {
-    count: number;
-  };
+  result?: SyncOperationResult;
 };
 
 const jobs = new Map<string, SyncJob>();
@@ -50,7 +48,7 @@ export function startSyncJob(payload: SyncPayload, clientId?: string) {
       ["bun", "run", "scripts/runSyncJob.ts", childPayload],
       {
         cwd: process.cwd(),
-        stdout: "ignore",
+        stdout: "pipe",
         stderr: "pipe"
       }
     );
@@ -58,7 +56,15 @@ export function startSyncJob(payload: SyncPayload, clientId?: string) {
 
     void (async () => {
       const exitCode = await child.exited;
+      let stdoutText = "";
       let stderrText = "";
+      if (child.stdout) {
+        try {
+          stdoutText = (await new Response(child.stdout).text()).trim();
+        } catch {
+          stdoutText = "";
+        }
+      }
       if (child.stderr) {
         try {
           stderrText = (await new Response(child.stderr).text()).trim();
@@ -70,6 +76,26 @@ export function startSyncJob(payload: SyncPayload, clientId?: string) {
         job.status = "done";
         job.finishedAt = Date.now();
         job.result = { count: 0 };
+        if (!stdoutText) {
+          scheduleCleanup(job.id);
+          return;
+        }
+        try {
+          job.result = JSON.parse(stdoutText) as SyncOperationResult;
+        } catch {
+          const lines = stdoutText
+            .split(/\r?\n/)
+            .map((line) => line.trim())
+            .filter(Boolean);
+          for (let i = lines.length - 1; i >= 0; i -= 1) {
+            try {
+              job.result = JSON.parse(lines[i]) as SyncOperationResult;
+              break;
+            } catch {
+              // continue scanning older lines
+            }
+          }
+        }
       } else {
         job.status = "failed";
         job.finishedAt = Date.now();

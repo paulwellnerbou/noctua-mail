@@ -110,7 +110,8 @@ type MessageCardListProps = {
     toggleMessageSelection: (messageId: string, replace?: boolean, setActive?: boolean) => void;
     selectCollapsedThread: (
       flat: Array<{ message: Message; depth: number }>,
-      target: Message
+      target: Message,
+      options?: { isFlaggedGroup?: boolean }
     ) => void;
     handleDeleteMessage: (message: Message) => void;
     toggleFlaggedFlag: (message: Message) => void;
@@ -720,7 +721,9 @@ export default function MessageCardList({
                 showCompactDivider={showCompactDivider}
                 onRowClick={(event) => {
                   if (supportsThreads && isCollapsedThreadRoot) {
-                    selectCollapsedThread(item.fullFlat, message);
+                    selectCollapsedThread(item.fullFlat, message, {
+                      isFlaggedGroup: item.isFlaggedGroup
+                    });
                     return;
                   }
                   handleRowClick(event, message);
@@ -758,7 +761,9 @@ export default function MessageCardList({
                 onSubjectClick={(event) => {
                   event.stopPropagation();
                   if (supportsThreads && isCollapsedThreadRoot) {
-                    selectCollapsedThread(item.fullFlat, message);
+                    selectCollapsedThread(item.fullFlat, message, {
+                      isFlaggedGroup: item.isFlaggedGroup
+                    });
                   } else {
                     handleSelectMessage(message);
                   }

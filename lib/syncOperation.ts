@@ -18,7 +18,24 @@ export type SyncPayload = {
   mode?: "full" | "recent" | "new";
 };
 
-export async function runSyncOperation(payload: SyncPayload, clientId?: string) {
+export type SyncNotificationMessage = {
+  folderId: string;
+  uid: number;
+  subject: string;
+  from: string;
+  messageId?: string | null;
+  category?: string | null;
+};
+
+export type SyncOperationResult = {
+  count: number;
+  newMessages?: SyncNotificationMessage[];
+};
+
+export async function runSyncOperation(
+  payload: SyncPayload,
+  clientId?: string
+): Promise<SyncOperationResult> {
   const accounts = await getAccounts();
   const account = accounts.find((item) => item.id === payload.accountId);
 
@@ -245,5 +262,21 @@ export async function runSyncOperation(payload: SyncPayload, clientId?: string) 
   const nextFolders = [...existing.filter((folder) => folder.accountId !== account.id), ...folders];
   await saveFolders(nextFolders);
 
-  return { count: messages.length };
+  const newMessages =
+    syncMode === "new"
+      ? strippedMessages.reduce<SyncNotificationMessage[]>((acc, message) => {
+          if (typeof message.imapUid !== "number") return acc;
+          acc.push({
+            folderId: message.folderId,
+            uid: message.imapUid,
+            subject: message.subject,
+            from: message.from,
+            messageId: message.messageId ?? null,
+            category: message.category ?? null
+          });
+          return acc;
+        }, [])
+      : undefined;
+
+  return { count: messages.length, newMessages };
 }

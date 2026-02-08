@@ -110,7 +110,8 @@ type MessageTableProps = {
     selectRangeTo: (messageId: string) => void;
     selectCollapsedThread: (
       flat: Array<{ message: Message; depth: number }>,
-      target: Message
+      target: Message,
+      options?: { isFlaggedGroup?: boolean }
     ) => void;
     handleDeleteMessage: (message: Message) => void;
   };
@@ -642,7 +643,9 @@ export default function MessageTable({
               }}
               onClick={(event) => {
                 if (supportsThreads && isCollapsedThreadRoot) {
-                  selectCollapsedThread(item.fullFlat, message);
+                  selectCollapsedThread(item.fullFlat, message, {
+                    isFlaggedGroup: item.isFlaggedGroup
+                  });
                   return;
                 }
                 handleRowClick(event, message);
@@ -738,7 +741,9 @@ export default function MessageTable({
                 onClick={(event) => {
                   event.stopPropagation();
                   if (supportsThreads && isCollapsedThreadRoot) {
-                    selectCollapsedThread(item.fullFlat, message);
+                    selectCollapsedThread(item.fullFlat, message, {
+                      isFlaggedGroup: item.isFlaggedGroup
+                    });
                   } else {
                     handleSelectMessage(message);
                   }

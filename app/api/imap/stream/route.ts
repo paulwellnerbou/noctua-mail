@@ -238,14 +238,17 @@ export async function GET(request: Request) {
         ]);
 
         const fetchNew = async () => {
+          const watcher = sessions.get(folder.id);
+          if (!watcher) return;
+          const previousUidNext = watcher.lastUidNext;
           const status = await logImapOp(
             "imap.status",
             { ...logContext, mailbox },
             async () => await client.status(mailbox, { uidNext: true })
           );
-          const uidNext = status?.uidNext ?? lastUidNext;
-          if (uidNext <= lastUidNext) return;
-          const range = { uid: `${lastUidNext}:${uidNext - 1}` };
+          const uidNext = status?.uidNext ?? previousUidNext;
+          if (uidNext <= previousUidNext) return;
+          const range = { uid: `${previousUidNext}:${uidNext - 1}` };
           const items = await logImapOp(
             "imap.fetch",
             { ...logContext, mailbox, range: range.uid },
@@ -275,8 +278,8 @@ export async function GET(request: Request) {
           if (items.length) {
             send("new", { uidNext, messages: items });
           }
-          const watcher = Array.from(sessions.values()).find((c) => c.client === client);
-          if (watcher) watcher.lastUidNext = uidNext;
+          const activeWatcher = sessions.get(folder.id);
+          if (activeWatcher) activeWatcher.lastUidNext = uidNext;
           await saveMailboxState({
             accountId,
             folderId: folder.id,

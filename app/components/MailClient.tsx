@@ -149,6 +149,20 @@ function getExceptionDetail(message: string) {
 const THREAD_COLLAPSE_SETTLE_MS = 220;
 const SYNC_STATUS_POLL_INTERVAL_MS = 1000;
 
+type SyncNotificationMessage = {
+  folderId: string;
+  uid: number;
+  subject: string;
+  from: string;
+  messageId?: string | null;
+  category?: string | null;
+};
+
+type SyncJobResult = {
+  count: number;
+  newMessages?: SyncNotificationMessage[];
+};
+
 export default function MailClient() {
   const [accounts, setAccounts] = useState<Account[]>(seedAccounts);
   const [folders, setFolders] = useState<Folder[]>(seedFolders);
@@ -376,12 +390,7 @@ export default function MailClient() {
   const lastUidNextByFolderRef = useRef<Record<string, number>>({});
   const lastNotifiedUidRef = useRef<Record<string, number>>({});
   const notifiedKeysRef = useRef<Set<string>>(new Set());
-  const lastAutoSyncRef = useRef<{ at: number; accountId: string | null }>({
-    at: 0,
-    accountId: null
-  });
   const lastDeleteReconcileAtRef = useRef<Record<string, number>>({});
-  const pendingInboxSyncRef = useRef(false);
   const swRegistrationRef = useRef<ServiceWorkerRegistration | null>(null);
   const threadPreferenceByFolderRef = useRef<Record<string, boolean>>({});
   const syncStateRef = useRef<{ isSyncing: boolean; syncingFolders: Set<string> }>({
@@ -3484,36 +3493,30 @@ export default function MailClient() {
     if (composeMode === "new") return;
     setComposeOpen(false);
   }, [activeFolderId]);
-  const activateLatestInThread = (flat: { message: Message; depth: number }[]) => {
-    if (!flat.length) return;
-    const latest = flat.reduce((acc, item) =>
-      item.message.dateValue > acc.message.dateValue ? item : acc
+  const getLatestThreadMessage = (flat: { message: Message; depth: number }[]) => {
+    if (!flat.length) return null;
+    return flat.reduce(
+      (acc, item) => (item.message.dateValue > acc.dateValue ? item.message : acc),
+      flat[0].message
     );
-    handleSelectMessage(latest.message, { preserveSelection: true });
   };
-  const activateFlaggedInThread = (flat: { message: Message; depth: number }[]) => {
-    if (!flat.length) return;
-    const flagged = flat.find((item) => isFlaggedMessage(item.message));
-    if (!flagged) {
-      activateLatestInThread(flat);
-      return;
-    }
-    handleSelectMessage(flagged.message, { preserveSelection: true });
+  const getLatestFlaggedThreadMessage = (flat: { message: Message; depth: number }[]) => {
+    const flagged = flat.filter((item) => isFlaggedMessage(item.message));
+    return getLatestThreadMessage(flagged);
   };
   const selectCollapsedThread = (
     flat: { message: Message; depth: number }[],
-    target: Message
+    target: Message,
+    options?: { isFlaggedGroup?: boolean }
   ) => {
+    const latest = getLatestThreadMessage(flat);
+    const latestFlagged = options?.isFlaggedGroup ? getLatestFlaggedThreadMessage(flat) : null;
     const hasTarget = flat.some((item) => item.message.id === target.id);
-    const effectiveTarget = hasTarget ? target : (flat[0]?.message ?? target);
+    const effectiveTarget =
+      latestFlagged ?? latest ?? (hasTarget ? target : (flat[0]?.message ?? target));
     selectionStore.setSelection(new Set([effectiveTarget.id]), effectiveTarget.id);
-    if (!hasTarget) {
-      lastSelectedIdRef.current = effectiveTarget.id;
-      handleSelectMessage(effectiveTarget, { preserveSelection: true });
-      return;
-    }
-    lastSelectedIdRef.current = target.id;
-    handleSelectMessage(target, { preserveSelection: true });
+    lastSelectedIdRef.current = effectiveTarget.id;
+    handleSelectMessage(effectiveTarget, { preserveSelection: true });
   };
 
   useEffect(() => {
@@ -3727,17 +3730,6 @@ export default function MailClient() {
 
   useEffect(() => {
     syncStateRef.current = { isSyncing, syncingFolders };
-    const inbox = inboxFolderRef.current;
-    if (
-      pendingInboxSyncRef.current &&
-      inbox &&
-      !isSyncing &&
-      !syncingFolders.has(inbox.id)
-    ) {
-      pendingInboxSyncRef.current = false;
-      lastAutoSyncRef.current = { at: Date.now(), accountId: activeAccountId };
-      void syncAccountRef.current?.(inbox.id, "new");
-    }
   }, [isSyncing, syncingFolders]);
 
   useEffect(() => {
@@ -3894,7 +3886,6 @@ export default function MailClient() {
     if (!activeAccountId || !inbox) return;
     // if we already have messages for this account, skip
     if (messages.some((m) => m.accountId === activeAccountId)) return;
-    lastAutoSyncRef.current = { at: Date.now(), accountId: activeAccountId };
     void syncAccountRef.current?.(inbox.id, "new");
   }, [activeAccountId, inboxFolderRef.current]);
 
@@ -4392,7 +4383,10 @@ export default function MailClient() {
 
   const prevFolderSelectionKeyRef = useRef(`${searchScope}:${activeFolderId}`);
   useEffect(() => {
+    const selectionKey = `${searchScope}:${activeFolderId}`;
+    const selectionChanged = prevFolderSelectionKeyRef.current !== selectionKey;
     if (searchScope !== "folder" || !activeFolderId) return;
+    if (selectionChanged) return;
     const folder = folders.find((item) => item.id === activeFolderId);
     const special = (folder?.specialUse ?? "").toLowerCase();
     if (special === "\\sent") return;
@@ -4884,7 +4878,7 @@ export default function MailClient() {
     }
   };
 
-  const waitForSyncJob = async (jobId: string) => {
+  const waitForSyncJob = async (jobId: string): Promise<SyncJobResult> => {
     const startedAt = Date.now();
     const timeoutMs = 1000 * 60 * 10;
     while (Date.now() - startedAt < timeoutMs) {
@@ -4897,11 +4891,12 @@ export default function MailClient() {
         job?: {
           status?: "running" | "done" | "failed";
           error?: string;
+          result?: SyncJobResult;
         };
       };
       const status = data.job?.status;
       if (status === "done") {
-        return;
+        return data.job?.result ?? { count: 0 };
       }
       if (status === "failed") {
         throw new Error(data.job?.error || "Sync job failed.");
@@ -4918,7 +4913,7 @@ export default function MailClient() {
     folderId?: string;
     fullSync?: boolean;
     mode?: "full" | "recent" | "new";
-  }) => {
+  }): Promise<SyncJobResult> => {
     const syncRes = await apiFetch("/api/sync", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -4931,7 +4926,7 @@ export default function MailClient() {
     if (!data.jobId) {
       throw new Error("Sync job did not return a job id.");
     }
-    await waitForSyncJob(data.jobId);
+    return waitForSyncJob(data.jobId);
   };
 
   const syncFolderWithBackground = async (
@@ -4940,11 +4935,12 @@ export default function MailClient() {
     allowRefresh = true,
     mode: "recent" | "new" = "recent",
     allowDeep = true
-  ) => {
+  ): Promise<SyncJobResult | null> => {
     const selectionKey = currentKeyRef.current;
     setSyncingFolders((prev) => new Set(prev).add(folderId));
+    let syncResult: SyncJobResult;
     try {
-      await runSyncJob({ accountId: activeAccountId, folderId, mode });
+      syncResult = await runSyncJob({ accountId: activeAccountId, folderId, mode });
       if (
         allowRefresh &&
         currentKeyRef.current === selectionKey &&
@@ -4960,7 +4956,7 @@ export default function MailClient() {
         next.delete(folderId);
         return next;
       });
-      return;
+      return null;
     }
 
     if (!allowDeep) {
@@ -4969,7 +4965,7 @@ export default function MailClient() {
         next.delete(folderId);
         return next;
       });
-      return;
+      return syncResult;
     }
 
     const deepSync = (async () => {
@@ -4998,6 +4994,7 @@ export default function MailClient() {
     if (awaitDeep) {
       await deepSync;
     }
+    return syncResult;
   };
 
   const syncNewlyDetectedFolders = async (
@@ -5309,6 +5306,7 @@ export default function MailClient() {
         from?: string;
         messageId?: string | null;
         folderId?: string;
+        category?: string | null;
       }> | null | undefined
     ) => {
       if (!items || items.length === 0) return;
@@ -5319,13 +5317,14 @@ export default function MailClient() {
           from?: string;
           messageId?: string | null;
           folderId?: string;
+          category?: string | null;
         } => Boolean(item) && typeof item.uid === "number"
       );
+      if (normalized.length === 0) return;
       const eligible = normalized.filter(
         (item) => !item.folderId || !isNotificationSuppressedFolder(item.folderId)
       );
       if (eligible.length === 0) return;
-      if (normalized.length === 0) return;
       const lastNotified = lastNotifiedUidRef.current[activeAccountId] ?? null;
       const maxUid = Math.max(...normalized.map((item) => item.uid));
       if (lastNotified == null) {
@@ -5348,7 +5347,8 @@ export default function MailClient() {
         const fromEmails = extractEmails(item.from);
         return !fromEmails.some((email) => email.toLowerCase() === accountEmail);
       });
-      const unique = notFromMe.filter((item) => {
+      const notNewsletter = notFromMe.filter((item) => item.category !== "newsletter");
+      const unique = notNewsletter.filter((item) => {
         const key = item.messageId || `uid:${item.uid}`;
         if (notifiedKeysRef.current.has(key)) return false;
         notifiedKeysRef.current.add(key);
@@ -5400,21 +5400,46 @@ export default function MailClient() {
           durationMs: 12000
         });
       }
+    };
 
-      const inbox = inboxFolderRef.current;
-      if (!inbox) return;
-      const { isSyncing, syncingFolders } = syncStateRef.current;
-      const now = Date.now();
-      const canSync =
-        !isSyncing &&
-        !syncingFolders.has(inbox.id) &&
-        (lastAutoSyncRef.current.accountId !== activeAccountId ||
-          now - lastAutoSyncRef.current.at > 10000);
-      if (canSync) {
-        lastAutoSyncRef.current = { at: now, accountId: activeAccountId };
-        void syncAccountRef.current?.(inbox.id, "new");
+    const syncAndNotifyNewMessages = async (
+      items: Array<{
+        uid: number;
+        subject?: string;
+        from?: string;
+        messageId?: string | null;
+        folderId?: string;
+      }> | null | undefined
+    ) => {
+      if (!items || items.length === 0) return;
+      const normalized = items.filter(
+        (item): item is {
+          uid: number;
+          subject?: string;
+          from?: string;
+          messageId?: string | null;
+          folderId?: string;
+        } => Boolean(item) && typeof item.uid === "number"
+      );
+      if (normalized.length === 0) return;
+      const fallbackFolderId = inboxFolderRef.current?.id;
+      const foldersToSync = Array.from(
+        new Set(
+          normalized
+            .map((item) => item.folderId ?? fallbackFolderId)
+            .filter((folderId): folderId is string => Boolean(folderId))
+        )
+      );
+      if (foldersToSync.length === 0) return;
+
+      const syncedMessages: SyncNotificationMessage[] = [];
+      for (const folderId of foldersToSync) {
+        const result = await syncFolderWithBackground(folderId, false, true, "new", false);
+        if (!result?.newMessages?.length) continue;
+        syncedMessages.push(...result.newMessages);
       }
-      pendingInboxSyncRef.current = true;
+      if (syncedMessages.length === 0) return;
+      await notifyNewMessages(syncedMessages);
     };
 
     const pollOnce = async () => {
@@ -5448,7 +5473,7 @@ export default function MailClient() {
           lastUidNextRef.current[activeAccountId] = data.uidNext;
         }
         if (Array.isArray(data?.messages) && data.messages.length > 0) {
-          await notifyNewMessages(data.messages);
+          await syncAndNotifyNewMessages(data.messages);
         }
       } catch {
         reportError("Failed to check for new mail.");
@@ -5555,17 +5580,15 @@ export default function MailClient() {
             lastUidNextRef.current[activeAccountId] = data.uidNext;
           }
           if (Array.isArray(data?.messages) && data.messages.length > 0) {
-            void notifyNewMessages(data.messages);
-            const foldersToSync = new Set<string>();
-            data.messages.forEach((msg) => {
-              if (msg.folderId) foldersToSync.add(msg.folderId);
-            });
-            foldersToSync.forEach((fid) => {
-              void syncAccountRef.current?.(fid, "new");
-              if (typeof data?.uidNext === "number") {
-                lastUidNextByFolderRef.current[fid] = data.uidNext;
-              }
-            });
+            const nextUid = data?.uidNext;
+            if (typeof nextUid === "number") {
+              data.messages.forEach((msg) => {
+                if (msg.folderId) {
+                  lastUidNextByFolderRef.current[msg.folderId] = nextUid;
+                }
+              });
+            }
+            void syncAndNotifyNewMessages(data.messages);
           }
         } catch {
           // ignore parse errors

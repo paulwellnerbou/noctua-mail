@@ -112,7 +112,8 @@ type MessageThreadListProps = {
     toggleMessageSelection: (messageId: string, replace?: boolean, setActive?: boolean) => void;
     selectCollapsedThread: (
       flat: Array<{ message: Message; depth: number }>,
-      target: Message
+      target: Message,
+      options?: { isFlaggedGroup?: boolean }
     ) => void;
     handleDeleteMessage: (message: Message) => void;
     toggleFlaggedFlag: (message: Message) => void;
@@ -677,7 +678,9 @@ export default function MessageThreadList({
                     supportsThreads &&
                     isCollapsedThreadRoot
                   ) {
-                    selectCollapsedThread(item.fullFlat, message);
+                    selectCollapsedThread(item.fullFlat, message, {
+                      isFlaggedGroup: item.isFlaggedGroup
+                    });
                     return;
                   }
                   handleRowClick(event, message);
