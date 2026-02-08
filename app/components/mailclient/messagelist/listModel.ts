@@ -425,7 +425,7 @@ export function getThreadSelectionState(params: {
   const isThreadSelectionPartiallySelected =
     selectedInThreadSelectionCount > 0 && !isThreadSelectionAllSelected;
   const isThreadSelectionActive =
-    Boolean(activeMessageId) && threadSelectionIds.includes(activeMessageId);
+    Boolean(activeMessageId) && activeMessageId !== null && threadSelectionIds.includes(activeMessageId);
 
   return {
     isThreadRoot,

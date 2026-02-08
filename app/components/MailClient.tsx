@@ -106,112 +106,44 @@ import type { Account, AccountSettings, Attachment, Folder, Message } from "@/li
 import { accounts as seedAccounts, folders as seedFolders, messages as seedMessages } from "@/lib/data";
 import AccountSettingsModal from "./AccountSettingsModal";
 import AttachmentsList from "./AttachmentsList";
-
-function getThreadMessages(items: Message[], threadId: string, accountId: string) {
-  return items.filter((message) => message.threadId === threadId && message.accountId === accountId);
-}
-
-function buildFolderTree(items: Folder[]) {
-  const map = new Map<string, Folder[]>();
-  items.forEach((folder) => {
-    const key = folder.parentId ?? "root";
-    if (!map.has(key)) map.set(key, []);
-    map.get(key)?.push(folder);
-  });
-
-  return map;
-}
-
-function applyFlagsToMessage(message: Message, flags: string[]): Message {
-  const seen = hasMessageFlag(flags, "\\Seen");
-  return {
-    ...message,
-    flags,
-    seen,
-    answered: hasMessageFlag(flags, "\\Answered"),
-    flagged: hasMessageFlag(flags, "\\Flagged"),
-    deleted: hasMessageFlag(flags, "\\Deleted"),
-    draft: hasMessageFlag(flags, "\\Draft"),
-    recent: hasMessageFlag(flags, "\\Recent"),
-    unread: !seen
-  };
-}
-
-function isMessageFlagged(message: Message) {
-  return Boolean(message.flagged) || hasMessageFlag(message.flags, "\\Flagged");
-}
-
-function hasTodoFlag(message: Message) {
-  return hasMessageFlag(message.flags, "to-do");
-}
-
-function hasCalendarFlag(message: Message) {
-  return hasMessageFlag(message.flags, CALENDAR_INVITE_FLAG);
-}
-
-function hasNonInlineAttachments(message: Message) {
-  if (message.hasAttachments) return true;
-  return (message.attachments ?? []).some((attachment) => !attachment.inline);
-}
-
-type ExceptionEntry = {
-  id: string;
-  message: string;
-  timestamp: number;
-};
-
-type ThreadDeleteConfirmState = {
-  messageCount: number;
-  moveToTrashCount: number;
-  permanentDeleteCount: number;
-};
-
-type NoticeInput = Omit<InAppNotice, "id" | "expiresAt"> & {
-  durationMs?: number | null;
-};
-
-const NOTICE_TIMEOUTS: Record<InAppNoticeType, number> = {
-  info: 7000,
-  success: 6500,
-  warning: 8000,
-  error: 10000
-};
-
-function makeClientId() {
-  return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-}
-
-function buildNotificationUrl(messageId?: string | null) {
-  if (!messageId) return "/";
-  return `/?${new URLSearchParams({ messageId }).toString()}`;
-}
-
-function getExceptionSummary(message: string) {
-  return message.split("\n")[0]?.slice(0, 120) || "(no message)";
-}
-
-function getExceptionDetail(message: string) {
-  const [, ...detailLines] = message.split("\n");
-  const detail = detailLines.join("\n").trim();
-  return detail || null;
-}
-
-const THREAD_COLLAPSE_SETTLE_MS = 220;
-const SYNC_STATUS_POLL_INTERVAL_MS = 1000;
-
-type SyncNotificationMessage = {
-  folderId: string;
-  uid: number;
-  subject: string;
-  from: string;
-  messageId?: string | null;
-  category?: string | null;
-};
-
-type SyncJobResult = {
-  count: number;
-  newMessages?: SyncNotificationMessage[];
-};
+import {
+  computeGroupMeta,
+  isFlaggedMessage,
+  isThreadExcludedFolder,
+  getThreadMessages,
+  applyFlagsToMessage,
+  isMessageFlagged,
+  hasTodoFlag,
+  hasCalendarFlag,
+  hasNonInlineAttachments
+} from "./mailclient/utils/messageHelpers";
+import {
+  buildFolderTree,
+  isDraftsFolder as checkIsDraftsFolder,
+  isTrashFolder as checkIsTrashFolder,
+  isSpamFolder as checkIsSpamFolder,
+  isSentFolder as checkIsSentFolder,
+  isNotificationSuppressedFolder as checkIsNotificationSuppressedFolder
+} from "./mailclient/utils/folderHelpers";
+import {
+  makeClientId,
+  buildNotificationUrl,
+  getExceptionSummary,
+  getExceptionDetail,
+  extractEmails
+} from "./mailclient/utils/clientHelpers";
+import {
+  NOTICE_TIMEOUTS,
+  THREAD_COLLAPSE_SETTLE_MS,
+  SYNC_STATUS_POLL_INTERVAL_MS
+} from "./mailclient/constants";
+import type {
+  ExceptionEntry,
+  ThreadDeleteConfirmState,
+  NoticeInput,
+  SyncNotificationMessage,
+  SyncJobResult
+} from "./mailclient/types";
 
 export default function MailClient() {
   const [accounts, setAccounts] = useState<Account[]>(seedAccounts);
@@ -448,6 +380,7 @@ export default function MailClient() {
   const syncAccountRef = useRef<(folderId?: string, mode?: "new" | "full") => Promise<void> | undefined>(
     undefined
   );
+  const initialSyncStatusRef = useRef<Record<string, "running" | "done">>({});
   const inboxFolderRef = useRef<Folder | null>(null);
   const relatedRestoreRef = useRef<{
     queryId: string;
@@ -1132,20 +1065,6 @@ export default function MailClient() {
     return "Older";
   };
 
-  const computeGroupMeta = (items: Message[]) => {
-    const counts = new Map<string, number>();
-    items.forEach((msg) => {
-      const key = msg.groupKey ?? "Other";
-      counts.set(key, (counts.get(key) ?? 0) + 1);
-    });
-    return Array.from(counts.entries()).map(([key, count]) => ({
-      key,
-      label: key,
-      count
-    }));
-  };
-
-  const isFlaggedMessage = (message: Message) => isMessageFlagged(message);
   const renderSelectIndicators = (message: Message) => (
     <MessageSelectIndicators
       isFlagged={isFlaggedMessage(message)}
@@ -1190,53 +1109,38 @@ export default function MailClient() {
     return `Week ${week}, ${date.getFullYear()}`;
   };
 
-  const isDraftsFolder = (folderId?: string | null) => {
-    if (!folderId) return false;
-    const folder = folders.find((item) => item.id === folderId);
-    if (!folder) return false;
-    const special = (folder.specialUse ?? "").toLowerCase();
-    return special === "\\drafts";
-  };
+  // Folder helper wrappers - these don't need memoization (not passed to hooks)
+  const isDraftsFolder = (folderId?: string | null) => checkIsDraftsFolder(folderId, folders);
+  const isTrashFolder = (folderId?: string | null) => checkIsTrashFolder(folderId, folders);
+  const isSpamFolder = (folderId?: string | null) => checkIsSpamFolder(folderId, folders);
+  const isSentFolder = (folderId?: string | null) => checkIsSentFolder(folderId, folders);
+  const isNotificationSuppressedFolder = (folderId?: string | null) => checkIsNotificationSuppressedFolder(folderId, folders);
 
-  const isTrashFolder = (folderId?: string | null) => {
-    if (!folderId) return false;
-    const folder = folders.find((item) => item.id === folderId);
-    if (!folder) return false;
-    const special = (folder.specialUse ?? "").toLowerCase();
-    return special === "\\trash";
-  };
+  // Memoize Set of excluded folder IDs - only changes when folder structure changes
+  const excludedFolderIdsForThreads = useMemo(() => {
+    const ids = new Set<string>();
+    folders.forEach(folder => {
+      const special = (folder.specialUse ?? "").toLowerCase();
+      if (special === "\\trash" || special === "\\junk" || special === "\\spam") {
+        ids.add(folder.id);
+      }
+    });
+    return ids;
+  }, [folders.map(f => `${f.id}:${f.specialUse}`).join('|')]);
 
-  const isSpamFolder = (folderId?: string | null) => {
-    if (!folderId) return false;
-    const folder = folders.find((item) => item.id === folderId);
-    if (!folder) return false;
-    const special = (folder.specialUse ?? "").toLowerCase();
-    if (special === "\\junk" || special === "\\spam") return true;
-    const name = folder.name.toLowerCase();
-    return name.includes("junk") || name.includes("spam");
-  };
-
-  const isSentFolder = (folderId?: string | null) => {
-    if (!folderId) return false;
-    const folder = folders.find((item) => item.id === folderId);
-    if (!folder) return false;
-    const special = (folder.specialUse ?? "").toLowerCase();
-    return special === "\\sent";
-  };
-
-  const isNotificationSuppressedFolder = (folderId?: string | null) =>
-    isDraftsFolder(folderId) ||
-    isTrashFolder(folderId) ||
-    isSpamFolder(folderId) ||
-    isSentFolder(folderId);
-
-  const isThreadExcludedFolder = (folderId?: string | null) =>
-    Boolean(folderId && (isTrashFolder(folderId) || isSpamFolder(folderId)));
+  // CRITICAL: This IS passed to useMessageListDerivedState and MUST be stable
+  const checkIsThreadExcludedFolder = useMemo(
+    () => (folderId?: string | null) => {
+      if (!folderId) return false;
+      return excludedFolderIdsForThreads.has(folderId);
+    },
+    [excludedFolderIdsForThreads]
+  );
 
   const threadsAllowed =
     ["date", "week", "year"].includes(groupBy) &&
     !isDraftsFolder(activeFolderId) &&
-    !isThreadExcludedFolder(activeFolderId);
+    !checkIsThreadExcludedFolder(activeFolderId);
   const supportsThreads = threadsEnabled && threadsAllowed;
   const preferToDisplay = isDraftsFolder(activeFolderId) || isSentFolder(activeFolderId);
   const draftsFolder = useMemo(
@@ -1600,8 +1504,10 @@ export default function MailClient() {
         changed = true;
       });
       document.querySelectorAll("td > p, th > p").forEach((paragraph) => {
-        paragraph.style.margin = "0";
-        changed = true;
+        if (paragraph instanceof HTMLElement) {
+          paragraph.style.margin = "0";
+          changed = true;
+        }
       });
       return changed ? document.body.innerHTML : value;
     } catch {
@@ -1637,7 +1543,7 @@ export default function MailClient() {
   const includeThreadAcrossFoldersForList =
     includeThreadAcrossFolders &&
     !isDraftsFolder(activeFolderId) &&
-    !isThreadExcludedFolder(activeFolderId);
+    !checkIsThreadExcludedFolder(activeFolderId);
   const [threadRelatedMessages, setThreadRelatedMessages] = useState<Message[]>([]);
   const [threadContentById, setThreadContentById] = useState<Record<string, Message[]>>({});
   const [threadContentLoading, setThreadContentLoading] = useState<string | null>(null);
@@ -1763,7 +1669,7 @@ export default function MailClient() {
     sortedMessages,
     threadRelatedMessages,
     includeThreadAcrossFoldersForList,
-    isThreadExcludedFolder,
+    isThreadExcludedFolder: checkIsThreadExcludedFolder,
     supportsThreads,
     groupMeta,
     isFlaggedMessage,
@@ -1805,7 +1711,7 @@ export default function MailClient() {
     const activeThreadId =
       activeMessage.threadId ?? activeMessage.messageId ?? activeMessage.id;
     const fullThread = activeThreadId ? threadContentById[activeThreadId] : undefined;
-    const inExcludedFolder = isThreadExcludedFolder(activeMessage.folderId);
+    const inExcludedFolder = checkIsThreadExcludedFolder(activeMessage.folderId);
     if (inExcludedFolder) {
       const sameFolder =
         fullThread?.filter((item) => item.folderId === activeMessage.folderId) ?? [];
@@ -1842,7 +1748,7 @@ export default function MailClient() {
     };
     if (fullThread && fullThread.length > 0) {
       const filteredFull = fullThread.filter(
-        (item) => !isThreadExcludedFolder(item.folderId)
+        (item) => !checkIsThreadExcludedFolder(item.folderId)
       );
       const merged = mergeThreadItems(filteredFull, localFlat);
       const fullForest = buildThreadTree(merged);
@@ -1886,7 +1792,7 @@ export default function MailClient() {
     }
     // fallback to threadId match
     return getThreadMessages(threadScopeMessages, activeMessage.threadId, activeAccountId).filter(
-      (item) => !isThreadExcludedFolder(item.folderId)
+      (item) => !checkIsThreadExcludedFolder(item.folderId)
     );
   }, [activeAccountId, activeMessage, threadContentById, threadScopeMessages, threadForest]);
 
@@ -3824,12 +3730,33 @@ export default function MailClient() {
 
   // Initial sync on cold start (once per account)
   useEffect(() => {
-    const inbox = inboxFolderRef.current;
-    if (!activeAccountId || !inbox) return;
-    // if we already have messages for this account, skip
-    if (messages.some((m) => m.accountId === activeAccountId)) return;
-    void syncAccountRef.current?.(inbox.id, "new");
-  }, [activeAccountId, inboxFolderRef.current]);
+    const inboxId = inboxFolder?.id;
+    if (!activeAccountId || !inboxId) return;
+
+    if (messages.some((message) => message.accountId === activeAccountId)) {
+      initialSyncStatusRef.current[activeAccountId] = "done";
+      return;
+    }
+
+    const syncStatus = initialSyncStatusRef.current[activeAccountId];
+    if (syncStatus === "running" || syncStatus === "done") return;
+
+    initialSyncStatusRef.current[activeAccountId] = "running";
+    const accountId = activeAccountId;
+    const syncPromise = syncAccountRef.current?.(inboxId, "new");
+    if (!syncPromise) {
+      delete initialSyncStatusRef.current[accountId];
+      return;
+    }
+
+    void syncPromise
+      .then(() => {
+        initialSyncStatusRef.current[accountId] = "done";
+      })
+      .catch(() => {
+        delete initialSyncStatusRef.current[accountId];
+      });
+  }, [activeAccountId, inboxFolder?.id, messages]);
 
   useEffect(() => {
     setMessages([]);
@@ -3846,6 +3773,7 @@ export default function MailClient() {
   useEffect(() => {
     const loadMessages = async () => {
       if (!activeAccountId) return;
+      if (searchScope === "folder" && !isRelatedSearch && !activeFolderId) return;
       if (loadingMessages || !hasMoreMessages) return;
       if (
         lastRequestRef.current?.key === messagesKey &&
@@ -3989,7 +3917,7 @@ export default function MailClient() {
         const data = (await res.json()) as { items?: Message[] };
         const items = Array.isArray(data?.items) ? data.items : [];
         const filtered = items.filter(
-          (item) => item.folderId !== activeFolderId && !isThreadExcludedFolder(item.folderId)
+          (item) => item.folderId !== activeFolderId && !checkIsThreadExcludedFolder(item.folderId)
         );
         setThreadRelatedMessages(filtered);
       } catch {
@@ -4072,7 +4000,7 @@ export default function MailClient() {
         const data = (await res.json()) as { items?: Message[] };
         const items = Array.isArray(data?.items) ? data.items : [];
         const filtered = items.filter(
-          (item) => item.folderId === activeFolderId || !isThreadExcludedFolder(item.folderId)
+          (item) => item.folderId === activeFolderId || !checkIsThreadExcludedFolder(item.folderId)
         );
         upsertThreadCache(threadId, filtered);
       } catch {
@@ -4583,6 +4511,9 @@ export default function MailClient() {
   };
 
   const refreshMailboxData = async () => {
+    if (searchScope === "folder" && !isRelatedSearch && !activeFolderId) {
+      return false;
+    }
     setRefreshingMessages(true);
     const trimmedQuery = query.trim();
     const pageSize = searchScope === "all" ? 600 : 300;

@@ -1,0 +1,15 @@
+/**
+ * Constants for MailClient
+ */
+import type { InAppNoticeType } from "./InAppNoticeStack";
+
+export const NOTICE_TIMEOUTS: Record<InAppNoticeType, number> = {
+  info: 7000,
+  success: 6500,
+  warning: 8000,
+  error: 10000
+};
+
+export const THREAD_COLLAPSE_SETTLE_MS = 220;
+export const SYNC_STATUS_POLL_INTERVAL_MS = 1000;
+export const THREAD_CACHE_LIMIT = 50;

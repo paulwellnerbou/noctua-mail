@@ -10,7 +10,7 @@
  * Better to leave emails uncategorized than to mis-categorize important messages.
  */
 
-import type { ParsedMail } from 'mailparser';
+type ParsedMail = Awaited<ReturnType<typeof import("mailparser").simpleParser>>;
 
 export type EmailCategory = 'newsletter' | 'notification' | 'transactional';
 
