@@ -16,6 +16,7 @@ import { decodeSecret, encodeSecret, shouldStorePasswordInDb } from "./secret";
 import { applyCachedCredentials } from "./credentials";
 import { CALENDAR_INVITE_FLAG, normalizeImapFlags } from "./messageFlags";
 import { normalizeAccountDateFormat } from "./dateFormatting";
+import { withDbWriteRetry } from "./dbWriteRetry";
 import { randomUUID } from "crypto";
 
 let dbInstance: any | null = null;
@@ -438,39 +439,41 @@ export async function getAccounts() {
 }
 
 export async function saveAccounts(nextAccounts: Account[]) {
-  const db = await getDb();
-  const insert = db.prepare(`
-    INSERT OR REPLACE INTO accounts (
-      id, name, email, avatar, ownerUserId,
-      settings,
-      imapHost, imapPort, imapSecure, imapUser, imapPassword,
-      smtpHost, smtpPort, smtpSecure, smtpUser, smtpPassword
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-  db.transaction(() => {
-    db.exec(`DELETE FROM accounts`);
-    nextAccounts.forEach((account) => {
-      const settings = normalizeAccountSettings(account.settings);
-      insert.run(
-        account.id,
-        account.name,
-        account.email,
-        account.avatar,
-        account.ownerUserId ?? null,
-        settings ? JSON.stringify(settings) : null,
-        account.imap.host,
-        account.imap.port,
-        account.imap.secure ? 1 : 0,
-        account.imap.user,
-        shouldStorePasswordInDb() ? encodeSecret(account.imap.password) : "",
-        account.smtp.host,
-        account.smtp.port,
-        account.smtp.secure ? 1 : 0,
-        account.smtp.user,
-        shouldStorePasswordInDb() ? encodeSecret(account.smtp.password) : ""
-      );
-    });
-  })();
+  return withDbWriteRetry("saveAccounts", async () => {
+    const db = await getDb();
+    const insert = db.prepare(`
+      INSERT OR REPLACE INTO accounts (
+        id, name, email, avatar, ownerUserId,
+        settings,
+        imapHost, imapPort, imapSecure, imapUser, imapPassword,
+        smtpHost, smtpPort, smtpSecure, smtpUser, smtpPassword
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    db.transaction(() => {
+      db.exec(`DELETE FROM accounts`);
+      nextAccounts.forEach((account) => {
+        const settings = normalizeAccountSettings(account.settings);
+        insert.run(
+          account.id,
+          account.name,
+          account.email,
+          account.avatar,
+          account.ownerUserId ?? null,
+          settings ? JSON.stringify(settings) : null,
+          account.imap.host,
+          account.imap.port,
+          account.imap.secure ? 1 : 0,
+          account.imap.user,
+          shouldStorePasswordInDb() ? encodeSecret(account.imap.password) : "",
+          account.smtp.host,
+          account.smtp.port,
+          account.smtp.secure ? 1 : 0,
+          account.smtp.user,
+          shouldStorePasswordInDb() ? encodeSecret(account.smtp.password) : ""
+        );
+      });
+    })();
+  });
 }
 
 function normalizeAccountSettings(settings?: AccountSettings) {
@@ -508,14 +511,16 @@ export async function getUsers() {
 }
 
 export async function saveUsers(users: User[]) {
-  const db = await getDb();
-  const insert = db.prepare(
-    `INSERT OR REPLACE INTO users (id, email, role, createdAt) VALUES (?, ?, ?, ?)`
-  );
-  db.transaction(() => {
-    db.exec(`DELETE FROM users`);
-    users.forEach((u) => insert.run(u.id, u.email, u.role, u.createdAt));
-  })();
+  return withDbWriteRetry("saveUsers", async () => {
+    const db = await getDb();
+    const insert = db.prepare(
+      `INSERT OR REPLACE INTO users (id, email, role, createdAt) VALUES (?, ?, ?, ?)`
+    );
+    db.transaction(() => {
+      db.exec(`DELETE FROM users`);
+      users.forEach((u) => insert.run(u.id, u.email, u.role, u.createdAt));
+    })();
+  });
 }
 
 export async function getUserAccounts() {
@@ -525,14 +530,16 @@ export async function getUserAccounts() {
 }
 
 export async function saveUserAccounts(items: { userId: string; accountId: string }[]) {
-  const db = await getDb();
-  const insert = db.prepare(
-    `INSERT OR REPLACE INTO user_accounts (userId, accountId) VALUES (?, ?)`
-  );
-  db.transaction(() => {
-    db.exec(`DELETE FROM user_accounts`);
-    items.forEach((it) => insert.run(it.userId, it.accountId));
-  })();
+  return withDbWriteRetry("saveUserAccounts", async () => {
+    const db = await getDb();
+    const insert = db.prepare(
+      `INSERT OR REPLACE INTO user_accounts (userId, accountId) VALUES (?, ?)`
+    );
+    db.transaction(() => {
+      db.exec(`DELETE FROM user_accounts`);
+      items.forEach((it) => insert.run(it.userId, it.accountId));
+    })();
+  });
 }
 
 export async function getInviteCodes() {
@@ -551,16 +558,18 @@ export async function getInviteCodes() {
 }
 
 export async function saveInviteCodes(items: InviteCode[]) {
-  const db = await getDb();
-  const insert = db.prepare(
-    `INSERT OR REPLACE INTO invite_codes (code, role, maxUses, uses, expiresAt) VALUES (?, ?, ?, ?, ?)`
-  );
-  db.transaction(() => {
-    db.exec(`DELETE FROM invite_codes`);
-    items.forEach((it) =>
-      insert.run(it.code, it.role, it.maxUses, it.uses, it.expiresAt)
+  return withDbWriteRetry("saveInviteCodes", async () => {
+    const db = await getDb();
+    const insert = db.prepare(
+      `INSERT OR REPLACE INTO invite_codes (code, role, maxUses, uses, expiresAt) VALUES (?, ?, ?, ?, ?)`
     );
-  })();
+    db.transaction(() => {
+      db.exec(`DELETE FROM invite_codes`);
+      items.forEach((it) =>
+        insert.run(it.code, it.role, it.maxUses, it.uses, it.expiresAt)
+      );
+    })();
+  });
 }
 
 export async function getFolders(accountId?: string) {
@@ -627,28 +636,30 @@ export async function getFolders(accountId?: string) {
 }
 
 export async function saveFolders(nextFolders: Folder[]) {
-  const db = await getDb();
-  const insert = db.prepare(
-    `INSERT OR REPLACE INTO folders (id, name, parentId, accountId, count, specialUse, flags, delimiter) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-  );
-  db.transaction(() => {
-    db.exec(`DELETE FROM folders`);
-    nextFolders.forEach((folder) => {
-      insert.run(
-        folder.id,
-        folder.name,
-        folder.parentId ?? null,
-        folder.accountId,
-        folder.count,
-        folder.specialUse ?? null,
-        folder.flags ? JSON.stringify(folder.flags) : null,
-        folder.delimiter ?? null
-      );
-    });
-  })();
+  return withDbWriteRetry("saveFolders", async () => {
+    const db = await getDb();
+    const insert = db.prepare(
+      `INSERT OR REPLACE INTO folders (id, name, parentId, accountId, count, specialUse, flags, delimiter) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    );
+    db.transaction(() => {
+      db.exec(`DELETE FROM folders`);
+      nextFolders.forEach((folder) => {
+        insert.run(
+          folder.id,
+          folder.name,
+          folder.parentId ?? null,
+          folder.accountId,
+          folder.count,
+          folder.specialUse ?? null,
+          folder.flags ? JSON.stringify(folder.flags) : null,
+          folder.delimiter ?? null
+        );
+      });
+    })();
+  });
 }
 
-export async function recomputeThreadsForAccount(accountId: string, threadIds?: string[]) {
+async function recomputeThreadsForAccountInternal(accountId: string, threadIds?: string[]) {
   const db = await getDb();
   if (threadIds && threadIds.length > 0) {
     const unique = Array.from(new Set(threadIds.filter(Boolean)));
@@ -698,95 +709,103 @@ export async function recomputeThreadsForAccount(accountId: string, threadIds?: 
   ).run(accountId);
 }
 
+export async function recomputeThreadsForAccount(accountId: string, threadIds?: string[]) {
+  return withDbWriteRetry("recomputeThreadsForAccount", () =>
+    recomputeThreadsForAccountInternal(accountId, threadIds)
+  );
+}
+
 export async function recomputeThreadIdsForAccount(accountId: string) {
-  const db = await getDb();
-  const rows = db
-    .prepare(
-      `SELECT id, messageId, inReplyTo, "references", threadId, parentId, dateValue
-       FROM messages
-       WHERE accountId = ?`
-    )
-    .all(accountId) as Array<{
-    id: string;
-    messageId: string | null;
-    inReplyTo: string | null;
-    references: string | null;
-    threadId: string;
-    parentId: string | null;
-    dateValue: number;
-  }>;
-  if (rows.length === 0) return;
-  const byMessageId = new Map<string, (typeof rows)[number]>();
-  const byId = new Map<string, (typeof rows)[number]>();
-  rows.forEach((row) => {
-    byId.set(row.id, row);
-    if (row.messageId) {
-      const existing = byMessageId.get(row.messageId);
-      if (!existing || row.dateValue < existing.dateValue) {
-        byMessageId.set(row.messageId, row);
-      }
-    }
-  });
-  const parentCache = new Map<string, string | null>();
-  const resolveParentId = (msg: (typeof rows)[number]) => {
-    if (parentCache.has(msg.id)) return parentCache.get(msg.id)!;
-    let resolved: string | null = null;
-    if (msg.inReplyTo && byMessageId.has(msg.inReplyTo)) {
-      resolved = byMessageId.get(msg.inReplyTo)!.id;
-    } else {
-      const refs = parseReferences(msg.references) ?? [];
-      for (let i = refs.length - 1; i >= 0; i -= 1) {
-        const ref = refs[i];
-        if (byMessageId.has(ref)) {
-          resolved = byMessageId.get(ref)!.id;
-          break;
+  return withDbWriteRetry("recomputeThreadIdsForAccount", async () => {
+    const db = await getDb();
+    const rows = db
+      .prepare(
+        `SELECT id, messageId, inReplyTo, "references", threadId, parentId, dateValue
+         FROM messages
+         WHERE accountId = ?`
+      )
+      .all(accountId) as Array<{
+      id: string;
+      messageId: string | null;
+      inReplyTo: string | null;
+      references: string | null;
+      threadId: string;
+      parentId: string | null;
+      dateValue: number;
+    }>;
+    if (rows.length === 0) return;
+    const byMessageId = new Map<string, (typeof rows)[number]>();
+    const byId = new Map<string, (typeof rows)[number]>();
+    rows.forEach((row) => {
+      byId.set(row.id, row);
+      if (row.messageId) {
+        const existing = byMessageId.get(row.messageId);
+        if (!existing || row.dateValue < existing.dateValue) {
+          byMessageId.set(row.messageId, row);
         }
       }
-    }
-    if (resolved === msg.id) resolved = null;
-    parentCache.set(msg.id, resolved);
-    return resolved;
-  };
-  const threadCache = new Map<string, string>();
-  const resolveThreadId = (msg: (typeof rows)[number], stack: Set<string>): string => {
-    if (threadCache.has(msg.id)) return threadCache.get(msg.id)!;
-    if (stack.has(msg.id)) {
-      const fallback = msg.messageId ?? msg.threadId ?? msg.id;
-      threadCache.set(msg.id, fallback);
-      return fallback;
-    }
-    stack.add(msg.id);
-    const parentId = resolveParentId(msg);
-    let resolved: string | undefined;
-    if (parentId && byId.has(parentId)) {
-      resolved = resolveThreadId(byId.get(parentId)!, stack);
-    } else if (msg.messageId) {
-      resolved = msg.messageId;
-    } else if (msg.threadId) {
-      resolved = msg.threadId;
-    } else {
-      resolved = msg.id;
-    }
-    stack.delete(msg.id);
-    threadCache.set(msg.id, resolved);
-    return resolved;
-  };
-  const updates: Array<{ id: string; threadId: string; parentId: string | null }> = [];
-  rows.forEach((row) => {
-    const nextParentId = resolveParentId(row);
-    const nextThreadId = resolveThreadId(row, new Set());
-    if (
-      (nextThreadId && nextThreadId !== row.threadId) ||
-      (nextParentId ?? null) !== (row.parentId ?? null)
-    ) {
-      updates.push({ id: row.id, threadId: nextThreadId, parentId: nextParentId });
-    }
+    });
+    const parentCache = new Map<string, string | null>();
+    const resolveParentId = (msg: (typeof rows)[number]) => {
+      if (parentCache.has(msg.id)) return parentCache.get(msg.id)!;
+      let resolved: string | null = null;
+      if (msg.inReplyTo && byMessageId.has(msg.inReplyTo)) {
+        resolved = byMessageId.get(msg.inReplyTo)!.id;
+      } else {
+        const refs = parseReferences(msg.references) ?? [];
+        for (let i = refs.length - 1; i >= 0; i -= 1) {
+          const ref = refs[i];
+          if (byMessageId.has(ref)) {
+            resolved = byMessageId.get(ref)!.id;
+            break;
+          }
+        }
+      }
+      if (resolved === msg.id) resolved = null;
+      parentCache.set(msg.id, resolved);
+      return resolved;
+    };
+    const threadCache = new Map<string, string>();
+    const resolveThreadId = (msg: (typeof rows)[number], stack: Set<string>): string => {
+      if (threadCache.has(msg.id)) return threadCache.get(msg.id)!;
+      if (stack.has(msg.id)) {
+        const fallback = msg.messageId ?? msg.threadId ?? msg.id;
+        threadCache.set(msg.id, fallback);
+        return fallback;
+      }
+      stack.add(msg.id);
+      const parentId = resolveParentId(msg);
+      let resolved: string | undefined;
+      if (parentId && byId.has(parentId)) {
+        resolved = resolveThreadId(byId.get(parentId)!, stack);
+      } else if (msg.messageId) {
+        resolved = msg.messageId;
+      } else if (msg.threadId) {
+        resolved = msg.threadId;
+      } else {
+        resolved = msg.id;
+      }
+      stack.delete(msg.id);
+      threadCache.set(msg.id, resolved);
+      return resolved;
+    };
+    const updates: Array<{ id: string; threadId: string; parentId: string | null }> = [];
+    rows.forEach((row) => {
+      const nextParentId = resolveParentId(row);
+      const nextThreadId = resolveThreadId(row, new Set());
+      if (
+        (nextThreadId && nextThreadId !== row.threadId) ||
+        (nextParentId ?? null) !== (row.parentId ?? null)
+      ) {
+        updates.push({ id: row.id, threadId: nextThreadId, parentId: nextParentId });
+      }
+    });
+    if (updates.length === 0) return;
+    const update = db.prepare(`UPDATE messages SET threadId = ?, parentId = ? WHERE id = ?`);
+    db.transaction(() => {
+      updates.forEach((row) => update.run(row.threadId, row.parentId, row.id));
+    })();
   });
-  if (updates.length === 0) return;
-  const update = db.prepare(`UPDATE messages SET threadId = ?, parentId = ? WHERE id = ?`);
-  db.transaction(() => {
-    updates.forEach((row) => update.run(row.threadId, row.parentId, row.id));
-  })();
 }
 
 export async function getMailboxState(accountId: string, folderId: string) {
@@ -819,21 +838,23 @@ export async function getMailboxState(accountId: string, folderId: string) {
 }
 
 export async function saveMailboxState(state: MailboxState) {
-  const db = await getDb();
-  const insert = db.prepare(`
-    INSERT OR REPLACE INTO mailbox_state
-    (folderId, accountId, mailboxPath, uidValidity, highestModSeq, highestUid, supportsQresync)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-  `);
-  insert.run(
-    state.folderId,
-    state.accountId,
-    state.mailboxPath,
-    state.uidValidity ?? null,
-    state.highestModSeq ?? null,
-    state.highestUid ?? null,
-    state.supportsQresync == null ? null : state.supportsQresync ? 1 : 0
-  );
+  return withDbWriteRetry("saveMailboxState", async () => {
+    const db = await getDb();
+    const insert = db.prepare(`
+      INSERT OR REPLACE INTO mailbox_state
+      (folderId, accountId, mailboxPath, uidValidity, highestModSeq, highestUid, supportsQresync)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `);
+    insert.run(
+      state.folderId,
+      state.accountId,
+      state.mailboxPath,
+      state.uidValidity ?? null,
+      state.highestModSeq ?? null,
+      state.highestUid ?? null,
+      state.supportsQresync == null ? null : state.supportsQresync ? 1 : 0
+    );
+  });
 }
 
 function buildGroupKey(message: Message, groupBy: string) {
@@ -2530,224 +2551,226 @@ export async function upsertMessages(
   nextMessages: Message[],
   replaceExisting = false
 ) {
-  const UPSERT_BATCH_SIZE = 200;
-  const yieldToEventLoop = () =>
-    new Promise<void>((resolve) => {
-      setTimeout(resolve, 0);
-    });
-  const db = await getDb();
-  const deleteSql = folderId
-    ? `DELETE FROM messages WHERE accountId = ? AND folderId = ?`
-    : `DELETE FROM messages WHERE accountId = ?`;
-  const deleteArgs = folderId ? [accountId, folderId] : [accountId];
-  const deleteAttachmentsByScope = folderId
-    ? db.prepare(
-        `DELETE FROM attachments WHERE messageId IN (SELECT id FROM messages WHERE accountId = ? AND folderId = ?)`
-      )
-    : db.prepare(
-        `DELETE FROM attachments WHERE messageId IN (SELECT id FROM messages WHERE accountId = ?)`
-      );
-  const deleteAttachmentsForMessage = db.prepare(
-    `DELETE FROM attachments WHERE messageId = ?`
-  );
-  const deleteMessageById = db.prepare(`DELETE FROM messages WHERE accountId = ? AND id = ?`);
-  const findFolderMessageDuplicates = db.prepare(
-    `SELECT id, threadId
-     FROM messages
-     WHERE accountId = ? AND folderId = ? AND messageId = ? AND id <> ?`
-  );
-  const deleteFtsByScope = folderId
-    ? db.prepare(
-        `DELETE FROM message_fts WHERE messageId IN (SELECT id FROM messages WHERE accountId = ? AND folderId = ?)`
-      )
-    : db.prepare(
-        `DELETE FROM message_fts WHERE messageId IN (SELECT id FROM messages WHERE accountId = ?)`
-      );
-  const insertAttachment = db.prepare(
-    `INSERT OR REPLACE INTO attachments (id, messageId, filename, contentType, size, inline, cid, url)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-  );
-
-  const insertMessage = db.prepare(`
-    INSERT OR REPLACE INTO messages (
-      id, accountId, folderId, threadId, parentId, messageId, inReplyTo, "references", xForwardedMessageId,
-      subject, fromAddr, fromEmail, toAddr, ccAddr, bccAddr, mailboxPath, imapUid, preview, date, dateValue,
-      body, htmlBody, priority, hasSource, unread, flags, seen, answered, flagged, deleted, draft, recent,
-      category, categoryScore
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-  const insertFts = db.prepare(`
-    INSERT INTO message_fts (messageId, subject, fromAddr, toAddr, ccAddr, bccAddr, body, preview)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-  const deleteFts = db.prepare(`DELETE FROM message_fts WHERE messageId = ?`);
-  const deleteMessages = db.prepare(deleteSql);
-  const existingScopeThreadIds =
-    replaceExisting && folderId
-      ? new Set(
-          (
-            db
-              .prepare(
-                `SELECT DISTINCT threadId
-                 FROM messages
-                 WHERE accountId = ? AND folderId = ?`
-              )
-              .all(accountId, folderId) as Array<{ threadId: string | null }>
-          )
-            .map((row) => row.threadId)
-            .filter((id): id is string => Boolean(id))
+  return withDbWriteRetry("upsertMessages", async () => {
+    const UPSERT_BATCH_SIZE = 200;
+    const yieldToEventLoop = () =>
+      new Promise<void>((resolve) => {
+        setTimeout(resolve, 0);
+      });
+    const db = await getDb();
+    const deleteSql = folderId
+      ? `DELETE FROM messages WHERE accountId = ? AND folderId = ?`
+      : `DELETE FROM messages WHERE accountId = ?`;
+    const deleteArgs = folderId ? [accountId, folderId] : [accountId];
+    const deleteAttachmentsByScope = folderId
+      ? db.prepare(
+          `DELETE FROM attachments WHERE messageId IN (SELECT id FROM messages WHERE accountId = ? AND folderId = ?)`
         )
-      : null;
-  const dedupedThreadIds = new Set<string>();
-  const upsertBatch = db.transaction((batch: Message[], shouldDeleteAttachments: boolean) => {
-    batch.forEach((message) => {
-      if (message.messageId) {
-        const duplicates = findFolderMessageDuplicates.all(
-          accountId,
+      : db.prepare(
+          `DELETE FROM attachments WHERE messageId IN (SELECT id FROM messages WHERE accountId = ?)`
+        );
+    const deleteAttachmentsForMessage = db.prepare(
+      `DELETE FROM attachments WHERE messageId = ?`
+    );
+    const deleteMessageById = db.prepare(`DELETE FROM messages WHERE accountId = ? AND id = ?`);
+    const findFolderMessageDuplicates = db.prepare(
+      `SELECT id, threadId
+       FROM messages
+       WHERE accountId = ? AND folderId = ? AND messageId = ? AND id <> ?`
+    );
+    const deleteFtsByScope = folderId
+      ? db.prepare(
+          `DELETE FROM message_fts WHERE messageId IN (SELECT id FROM messages WHERE accountId = ? AND folderId = ?)`
+        )
+      : db.prepare(
+          `DELETE FROM message_fts WHERE messageId IN (SELECT id FROM messages WHERE accountId = ?)`
+        );
+    const insertAttachment = db.prepare(
+      `INSERT OR REPLACE INTO attachments (id, messageId, filename, contentType, size, inline, cid, url)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    );
+
+    const insertMessage = db.prepare(`
+      INSERT OR REPLACE INTO messages (
+        id, accountId, folderId, threadId, parentId, messageId, inReplyTo, "references", xForwardedMessageId,
+        subject, fromAddr, fromEmail, toAddr, ccAddr, bccAddr, mailboxPath, imapUid, preview, date, dateValue,
+        body, htmlBody, priority, hasSource, unread, flags, seen, answered, flagged, deleted, draft, recent,
+        category, categoryScore
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    const insertFts = db.prepare(`
+      INSERT INTO message_fts (messageId, subject, fromAddr, toAddr, ccAddr, bccAddr, body, preview)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    const deleteFts = db.prepare(`DELETE FROM message_fts WHERE messageId = ?`);
+    const deleteMessages = db.prepare(deleteSql);
+    const existingScopeThreadIds =
+      replaceExisting && folderId
+        ? new Set(
+            (
+              db
+                .prepare(
+                  `SELECT DISTINCT threadId
+                   FROM messages
+                   WHERE accountId = ? AND folderId = ?`
+                )
+                .all(accountId, folderId) as Array<{ threadId: string | null }>
+            )
+              .map((row) => row.threadId)
+              .filter((id): id is string => Boolean(id))
+          )
+        : null;
+    const dedupedThreadIds = new Set<string>();
+    const upsertBatch = db.transaction((batch: Message[], shouldDeleteAttachments: boolean) => {
+      batch.forEach((message) => {
+        if (message.messageId) {
+          const duplicates = findFolderMessageDuplicates.all(
+            accountId,
+            message.folderId,
+            message.messageId,
+            message.id
+          ) as Array<{ id: string; threadId: string | null }>;
+          duplicates.forEach((row) => {
+            deleteAttachmentsForMessage.run(row.id);
+            deleteFts.run(row.id);
+            deleteMessageById.run(accountId, row.id);
+            if (row.threadId) {
+              dedupedThreadIds.add(row.threadId);
+            }
+          });
+        }
+        if (shouldDeleteAttachments) {
+          deleteAttachmentsForMessage.run(message.id);
+        }
+        const normalizedFlags = normalizeImapFlags(message.flags);
+        const hasRawFlags = Array.isArray(message.flags);
+        const normalizedSystemFlags = deriveSystemFlagState(normalizedFlags);
+        const seen = hasRawFlags ? Boolean(normalizedSystemFlags.seen) : Boolean(message.seen);
+        const answered = hasRawFlags
+          ? Boolean(normalizedSystemFlags.answered)
+          : Boolean(message.answered);
+        const flagged = hasRawFlags
+          ? Boolean(normalizedSystemFlags.flagged)
+          : Boolean(message.flagged);
+        const deleted = hasRawFlags ? Boolean(normalizedSystemFlags.deleted) : Boolean(message.deleted);
+        const draft = hasRawFlags ? Boolean(normalizedSystemFlags.draft) : Boolean(message.draft);
+        const recent = hasRawFlags ? Boolean(normalizedSystemFlags.recent) : Boolean(message.recent);
+        const unread = hasRawFlags
+          ? Boolean(normalizedSystemFlags.unread)
+          : typeof message.unread === "boolean"
+            ? message.unread
+            : !seen;
+        const emailMatch = message.from.match(/<([^>]+)>/);
+        const fromEmail = emailMatch ? emailMatch[1] : null;
+        insertMessage.run(
+          message.id,
+          message.accountId,
           message.folderId,
-          message.messageId,
-          message.id
-        ) as Array<{ id: string; threadId: string | null }>;
-        duplicates.forEach((row) => {
-          deleteAttachmentsForMessage.run(row.id);
-          deleteFts.run(row.id);
-          deleteMessageById.run(accountId, row.id);
-          if (row.threadId) {
-            dedupedThreadIds.add(row.threadId);
+          message.threadId,
+          message.parentId ?? null,
+          message.messageId ?? null,
+          message.inReplyTo ?? null,
+          message.references ? JSON.stringify(message.references) : null,
+          message.xForwardedMessageId ?? null,
+          message.subject,
+          message.from,
+          fromEmail,
+          message.to,
+          message.cc ?? null,
+          message.bcc ?? null,
+          message.mailboxPath ?? null,
+          typeof message.imapUid === "number" ? message.imapUid : null,
+          message.preview,
+          message.date,
+          message.dateValue,
+          message.body,
+          message.htmlBody ?? null,
+          message.priority ?? null,
+          message.hasSource ? 1 : 0,
+          unread ? 1 : 0,
+          message.flags ? JSON.stringify(normalizedFlags) : null,
+          seen ? 1 : 0,
+          answered ? 1 : 0,
+          flagged ? 1 : 0,
+          deleted ? 1 : 0,
+          draft ? 1 : 0,
+          recent ? 1 : 0,
+          message.category ?? null,
+          message.categoryScore ?? null
+        );
+        deleteFts.run(message.id);
+        insertFts.run(
+          message.id,
+          message.subject,
+          message.from,
+          message.to,
+          message.cc ?? "",
+          message.bcc ?? "",
+          message.body,
+          message.preview
+        );
+        (message.attachments ?? []).forEach((att) => {
+          insertAttachment.run(
+            att.id,
+            message.id,
+            att.filename,
+            att.contentType,
+            att.size,
+            att.inline ? 1 : 0,
+            att.cid ?? null,
+            att.url ?? null
+          );
+        });
+      });
+    });
+
+    if (replaceExisting) {
+      db.transaction(() => {
+        deleteAttachmentsByScope.run(...deleteArgs);
+        deleteFtsByScope.run(...deleteArgs);
+        deleteMessages.run(...deleteArgs);
+      })();
+    }
+
+    const shouldDeleteAttachments = !replaceExisting;
+    for (let start = 0; start < nextMessages.length; start += UPSERT_BATCH_SIZE) {
+      const batch = nextMessages.slice(start, start + UPSERT_BATCH_SIZE);
+      if (batch.length === 0) continue;
+      upsertBatch(batch, shouldDeleteAttachments);
+      if (start + UPSERT_BATCH_SIZE < nextMessages.length) {
+        await yieldToEventLoop();
+      }
+    }
+
+    if (replaceExisting) {
+      if (folderId) {
+        const affectedThreadIds = new Set<string>([
+          ...(existingScopeThreadIds ?? new Set<string>()),
+          ...dedupedThreadIds
+        ]);
+        nextMessages.forEach((message) => {
+          if (message.threadId) {
+            affectedThreadIds.add(message.threadId);
           }
         });
-      }
-      if (shouldDeleteAttachments) {
-        deleteAttachmentsForMessage.run(message.id);
-      }
-      const normalizedFlags = normalizeImapFlags(message.flags);
-      const hasRawFlags = Array.isArray(message.flags);
-      const normalizedSystemFlags = deriveSystemFlagState(normalizedFlags);
-      const seen = hasRawFlags ? Boolean(normalizedSystemFlags.seen) : Boolean(message.seen);
-      const answered = hasRawFlags
-        ? Boolean(normalizedSystemFlags.answered)
-        : Boolean(message.answered);
-      const flagged = hasRawFlags
-        ? Boolean(normalizedSystemFlags.flagged)
-        : Boolean(message.flagged);
-      const deleted = hasRawFlags ? Boolean(normalizedSystemFlags.deleted) : Boolean(message.deleted);
-      const draft = hasRawFlags ? Boolean(normalizedSystemFlags.draft) : Boolean(message.draft);
-      const recent = hasRawFlags ? Boolean(normalizedSystemFlags.recent) : Boolean(message.recent);
-      const unread = hasRawFlags
-        ? Boolean(normalizedSystemFlags.unread)
-        : typeof message.unread === "boolean"
-          ? message.unread
-          : !seen;
-      const emailMatch = message.from.match(/<([^>]+)>/);
-      const fromEmail = emailMatch ? emailMatch[1] : null;
-      insertMessage.run(
-        message.id,
-        message.accountId,
-        message.folderId,
-        message.threadId,
-        message.parentId ?? null,
-        message.messageId ?? null,
-        message.inReplyTo ?? null,
-        message.references ? JSON.stringify(message.references) : null,
-        message.xForwardedMessageId ?? null,
-        message.subject,
-        message.from,
-        fromEmail,
-        message.to,
-        message.cc ?? null,
-        message.bcc ?? null,
-        message.mailboxPath ?? null,
-        typeof message.imapUid === "number" ? message.imapUid : null,
-        message.preview,
-        message.date,
-        message.dateValue,
-        message.body,
-        message.htmlBody ?? null,
-        message.priority ?? null,
-        message.hasSource ? 1 : 0,
-        unread ? 1 : 0,
-        message.flags ? JSON.stringify(normalizedFlags) : null,
-        seen ? 1 : 0,
-        answered ? 1 : 0,
-        flagged ? 1 : 0,
-        deleted ? 1 : 0,
-        draft ? 1 : 0,
-        recent ? 1 : 0,
-        message.category ?? null,
-        message.categoryScore ?? null
-      );
-      deleteFts.run(message.id);
-      insertFts.run(
-        message.id,
-        message.subject,
-        message.from,
-        message.to,
-        message.cc ?? "",
-        message.bcc ?? "",
-        message.body,
-        message.preview
-      );
-      (message.attachments ?? []).forEach((att) => {
-        insertAttachment.run(
-          att.id,
-          message.id,
-          att.filename,
-          att.contentType,
-          att.size,
-          att.inline ? 1 : 0,
-          att.cid ?? null,
-          att.url ?? null
-        );
-      });
-    });
-  });
-
-  if (replaceExisting) {
-    db.transaction(() => {
-      deleteAttachmentsByScope.run(...deleteArgs);
-      deleteFtsByScope.run(...deleteArgs);
-      deleteMessages.run(...deleteArgs);
-    })();
-  }
-
-  const shouldDeleteAttachments = !replaceExisting;
-  for (let start = 0; start < nextMessages.length; start += UPSERT_BATCH_SIZE) {
-    const batch = nextMessages.slice(start, start + UPSERT_BATCH_SIZE);
-    if (batch.length === 0) continue;
-    upsertBatch(batch, shouldDeleteAttachments);
-    if (start + UPSERT_BATCH_SIZE < nextMessages.length) {
-      await yieldToEventLoop();
-    }
-  }
-
-  if (replaceExisting) {
-    if (folderId) {
-      const affectedThreadIds = new Set<string>([
-        ...(existingScopeThreadIds ?? new Set<string>()),
-        ...dedupedThreadIds
-      ]);
-      nextMessages.forEach((message) => {
-        if (message.threadId) {
-          affectedThreadIds.add(message.threadId);
+        if (affectedThreadIds.size > 0) {
+          await recomputeThreadsForAccountInternal(accountId, Array.from(affectedThreadIds));
         }
-      });
-      if (affectedThreadIds.size > 0) {
-        await recomputeThreadsForAccount(accountId, Array.from(affectedThreadIds));
+        return;
       }
-      return;
+      await recomputeThreadsForAccountInternal(accountId);
+    } else {
+      const affected = Array.from(
+        new Set([
+          ...nextMessages.map((message) => message.threadId).filter(Boolean),
+          ...dedupedThreadIds
+        ])
+      );
+      if (affected.length > 0) {
+        await recomputeThreadsForAccountInternal(accountId, affected);
+      }
     }
-    await recomputeThreadsForAccount(accountId);
-  } else {
-    const affected = Array.from(
-      new Set([
-        ...nextMessages.map((message) => message.threadId).filter(Boolean),
-        ...dedupedThreadIds
-      ])
-    );
-    if (affected.length > 0) {
-      await recomputeThreadsForAccount(accountId, affected);
-    }
-  }
+  });
 }
 
 export async function getMessageById(accountId: string, messageId: string) {
@@ -2895,31 +2918,35 @@ export async function updateMessageFolder(
   mailboxPath: string,
   imapUid?: number | null
 ) {
-  const db = await getDb();
-  if (typeof imapUid === "number" && Number.isFinite(imapUid)) {
+  return withDbWriteRetry("updateMessageFolder", async () => {
+    const db = await getDb();
+    if (typeof imapUid === "number" && Number.isFinite(imapUid)) {
+      db.prepare(
+        `UPDATE messages
+         SET folderId = ?, mailboxPath = ?, imapUid = ?
+         WHERE accountId = ? AND id = ?`
+      ).run(folderId, mailboxPath, imapUid, accountId, messageId);
+      return;
+    }
     db.prepare(
-      `UPDATE messages
-       SET folderId = ?, mailboxPath = ?, imapUid = ?
-       WHERE accountId = ? AND id = ?`
-    ).run(folderId, mailboxPath, imapUid, accountId, messageId);
-    return;
-  }
-  db.prepare(
-    `UPDATE messages SET folderId = ?, mailboxPath = ? WHERE accountId = ? AND id = ?`
-  ).run(folderId, mailboxPath, accountId, messageId);
+      `UPDATE messages SET folderId = ?, mailboxPath = ? WHERE accountId = ? AND id = ?`
+    ).run(folderId, mailboxPath, accountId, messageId);
+  });
 }
 
 export async function deleteMessageById(accountId: string, messageId: string) {
-  const db = await getDb();
-  const row = db
-    .prepare(`SELECT threadId FROM messages WHERE accountId = ? AND id = ?`)
-    .get(accountId, messageId) as { threadId?: string | null } | undefined;
-  db.prepare(`DELETE FROM attachments WHERE messageId = ?`).run(messageId);
-  db.prepare(`DELETE FROM message_fts WHERE messageId = ?`).run(messageId);
-  db.prepare(`DELETE FROM messages WHERE accountId = ? AND id = ?`).run(accountId, messageId);
-  if (row?.threadId) {
-    await recomputeThreadsForAccount(accountId, [row.threadId]);
-  }
+  return withDbWriteRetry("deleteMessageById", async () => {
+    const db = await getDb();
+    const row = db
+      .prepare(`SELECT threadId FROM messages WHERE accountId = ? AND id = ?`)
+      .get(accountId, messageId) as { threadId?: string | null } | undefined;
+    db.prepare(`DELETE FROM attachments WHERE messageId = ?`).run(messageId);
+    db.prepare(`DELETE FROM message_fts WHERE messageId = ?`).run(messageId);
+    db.prepare(`DELETE FROM messages WHERE accountId = ? AND id = ?`).run(accountId, messageId);
+    if (row?.threadId) {
+      await recomputeThreadsForAccountInternal(accountId, [row.threadId]);
+    }
+  });
 }
 
 export async function updateMessageFlags(
@@ -2927,67 +2954,71 @@ export async function updateMessageFlags(
   messageId: string,
   flags: string[]
 ) {
-  const db = await getDb();
-  const normalizedFlags = normalizeImapFlags(flags);
-  const system = deriveSystemFlagState(normalizedFlags);
-  db.prepare(
-    `UPDATE messages
-     SET flags = ?,
-         seen = ?,
-         answered = ?,
-         flagged = ?,
-         deleted = ?,
-         draft = ?,
-         recent = ?,
-         unread = ?
-     WHERE accountId = ? AND id = ?`
-  ).run(
-    JSON.stringify(normalizedFlags),
-    system.seen,
-    system.answered,
-    system.flagged,
-    system.deleted,
-    system.draft,
-    system.recent,
-    system.unread,
-    accountId,
-    messageId
-  );
-  const row = db
-    .prepare(`SELECT threadId FROM messages WHERE accountId = ? AND id = ?`)
-    .get(accountId, messageId) as { threadId?: string | null } | undefined;
-  if (row?.threadId) {
-    await recomputeThreadsForAccount(accountId, [row.threadId]);
-  }
+  return withDbWriteRetry("updateMessageFlags", async () => {
+    const db = await getDb();
+    const normalizedFlags = normalizeImapFlags(flags);
+    const system = deriveSystemFlagState(normalizedFlags);
+    db.prepare(
+      `UPDATE messages
+       SET flags = ?,
+           seen = ?,
+           answered = ?,
+           flagged = ?,
+           deleted = ?,
+           draft = ?,
+           recent = ?,
+           unread = ?
+       WHERE accountId = ? AND id = ?`
+    ).run(
+      JSON.stringify(normalizedFlags),
+      system.seen,
+      system.answered,
+      system.flagged,
+      system.deleted,
+      system.draft,
+      system.recent,
+      system.unread,
+      accountId,
+      messageId
+    );
+    const row = db
+      .prepare(`SELECT threadId FROM messages WHERE accountId = ? AND id = ?`)
+      .get(accountId, messageId) as { threadId?: string | null } | undefined;
+    if (row?.threadId) {
+      await recomputeThreadsForAccountInternal(accountId, [row.threadId]);
+    }
+  });
 }
 
 export async function deleteMessagesByFolderPrefix(accountId: string, folderPrefix: string) {
-  const db = await getDb();
-  const prefix = `${accountId}:${folderPrefix}`;
-  const threadRows = db
-    .prepare(
-      `SELECT DISTINCT threadId
-       FROM messages
-       WHERE accountId = ? AND folderId LIKE ? AND threadId IS NOT NULL`
-    )
-    .all(accountId, `${prefix}%`) as Array<{ threadId: string }>;
-  if (threadRows.length === 0) {
-    return;
-  }
-  const threadIds = threadRows.map((row) => row.threadId).filter(Boolean);
-  db.prepare(
-    `DELETE FROM attachments WHERE messageId IN (SELECT id FROM messages WHERE accountId = ? AND folderId LIKE ?)`
-  ).run(accountId, `${prefix}%`);
-  db.prepare(
-    `DELETE FROM message_fts WHERE messageId IN (SELECT id FROM messages WHERE accountId = ? AND folderId LIKE ?)`
-  ).run(accountId, `${prefix}%`);
-  db.prepare(`DELETE FROM messages WHERE accountId = ? AND folderId LIKE ?`).run(
-    accountId,
-    `${prefix}%`
-  );
-  if (threadIds.length > 0) {
-    await recomputeThreadsForAccount(accountId, threadIds);
-  }
+  return withDbWriteRetry("deleteMessagesByFolderPrefix", async () => {
+    const db = await getDb();
+    const prefix = `${accountId}:${folderPrefix}`;
+    const threadRows = db
+      .prepare(
+        `SELECT DISTINCT threadId
+         FROM messages
+         WHERE accountId = ? AND folderId LIKE ? AND threadId IS NOT NULL`
+      )
+      .all(accountId, `${prefix}%`) as Array<{ threadId: string }>;
+    if (threadRows.length === 0) {
+      return;
+    }
+    const threadIds = threadRows.map((row) => row.threadId).filter(Boolean);
+    db.prepare(
+      `DELETE FROM attachments WHERE messageId IN (SELECT id FROM messages WHERE accountId = ? AND folderId LIKE ?)`
+    ).run(accountId, `${prefix}%`);
+    db.prepare(
+      `DELETE FROM message_fts WHERE messageId IN (SELECT id FROM messages WHERE accountId = ? AND folderId LIKE ?)`
+    ).run(accountId, `${prefix}%`);
+    db.prepare(`DELETE FROM messages WHERE accountId = ? AND folderId LIKE ?`).run(
+      accountId,
+      `${prefix}%`
+    );
+    if (threadIds.length > 0) {
+      await recomputeThreadsForAccountInternal(accountId, threadIds);
+    }
+  });
 }
 
 export async function listRecipientSuggestions(
@@ -3073,15 +3104,17 @@ export async function updateMessagesFolderPrefix(
   oldPrefix: string,
   newPrefix: string
 ) {
-  const db = await getDb();
-  const oldFull = `${accountId}:${oldPrefix}`;
-  const newFull = `${accountId}:${newPrefix}`;
-  db.prepare(
-    `UPDATE messages
-     SET folderId = REPLACE(folderId, ?, ?),
-         mailboxPath = REPLACE(mailboxPath, ?, ?)
-     WHERE accountId = ? AND folderId LIKE ?`
-  ).run(oldFull, newFull, oldPrefix, newPrefix, accountId, `${oldFull}%`);
+  return withDbWriteRetry("updateMessagesFolderPrefix", async () => {
+    const db = await getDb();
+    const oldFull = `${accountId}:${oldPrefix}`;
+    const newFull = `${accountId}:${newPrefix}`;
+    db.prepare(
+      `UPDATE messages
+       SET folderId = REPLACE(folderId, ?, ?),
+           mailboxPath = REPLACE(mailboxPath, ?, ?)
+       WHERE accountId = ? AND folderId LIKE ?`
+    ).run(oldFull, newFull, oldPrefix, newPrefix, accountId, `${oldFull}%`);
+  });
 }
 
 export async function recomputeCategoriesForAccount(accountId: string) {
@@ -3125,11 +3158,13 @@ export async function recomputeCategoriesForAccount(accountId: string) {
 
       const classification = classifyEmail(parsed, headers, config);
 
-      updateStmt.run(
-        classification.category || null,
-        classification.confidence || null,
-        accountId,
-        id
+      await withDbWriteRetry("recomputeCategoriesForAccount.updateCategory", () =>
+        updateStmt.run(
+          classification.category || null,
+          classification.confidence || null,
+          accountId,
+          id
+        )
       );
 
       if (classification.category) {
