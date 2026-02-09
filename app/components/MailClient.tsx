@@ -48,6 +48,7 @@ import {
   mergeCollapsedThreadsWithMessages,
   useMessageListDerivedState
 } from "./mailclient/messagelist/listState";
+import { getCollapsedRootThreadMessageIds } from "./mailclient/messagelist/listInteractions";
 import { useMessageListHelpers } from "./mailclient/messagelist/useMessageListHelpers";
 import { useMessageListSelectionController } from "./mailclient/messagelist/useMessageListSelectionController";
 import {
@@ -651,6 +652,16 @@ export default function MailClient() {
     () => searchFieldsLabel.replace(/^Fields:\s*/, ""),
     [searchFieldsLabel]
   );
+  const searchFieldsSummaryLabel = useMemo(() => {
+    const normalized = searchFieldsCriteriaLabel.trim();
+    if (!normalized || normalized.toLowerCase() === "all") return "in all fields";
+    return `in fields ${normalized}`;
+  }, [searchFieldsCriteriaLabel]);
+  const searchScopeSummaryLabel = useMemo(() => {
+    if (searchScope === "all") return "everywhere";
+    const folderName = activeFolderId ? folderById.get(activeFolderId)?.name?.trim() : "";
+    return folderName ? `in ${folderName}` : "in current folder";
+  }, [activeFolderId, folderById, searchScope]);
   const searchBadgesLabel = useMemo(() => {
     const selected = SEARCH_BADGE_ORDER.filter((key) => searchBadges[key]);
     if (selected.length === 0) return "Filter: Any";
@@ -667,39 +678,35 @@ export default function MailClient() {
     if (trimmedQuery.length > 0) {
       parts.push(`"${trimmedQuery}"`);
     }
-    if (trimmedQuery.length > 0 && searchFieldsCriteriaLabel.length > 0) {
-      parts.push(`in ${searchFieldsCriteriaLabel}`);
+    if (trimmedQuery.length > 0) {
+      parts.push(searchFieldsSummaryLabel);
     }
     if (selectedSearchBadgeLabels.length > 0) {
       parts.push(`filter ${selectedSearchBadgeLabels.join(", ")}`);
     }
-    if (searchScope === "all") {
-      parts.push("everywhere");
-    }
+    parts.push(searchScopeSummaryLabel);
     return parts.join(" · ");
-  }, [query, searchFieldsCriteriaLabel, searchScope, selectedSearchBadgeLabels]);
+  }, [query, searchFieldsSummaryLabel, searchScopeSummaryLabel, selectedSearchBadgeLabels]);
   const searchCriteriaBadges = useMemo(() => {
     const badges: { key: string; label: string }[] = [];
     const trimmedQuery = query.trim();
     if (trimmedQuery.length > 0) {
       badges.push({ key: "query", label: `"${trimmedQuery}"` });
     }
-    if (trimmedQuery.length > 0 && searchFieldsCriteriaLabel.length > 0) {
-      badges.push({ key: "fields", label: `in ${searchFieldsCriteriaLabel}` });
+    if (trimmedQuery.length > 0) {
+      badges.push({ key: "fields", label: searchFieldsSummaryLabel });
     }
     if (selectedSearchBadges.length > 0) {
       selectedSearchBadges.forEach((key) => {
         badges.push({ key: `badge-${key}`, label: getSearchBadgeLabel(key) });
       });
     }
-    if (searchScope === "all") {
-      badges.push({ key: "scope", label: "Everywhere" });
-    }
+    badges.push({ key: "scope", label: searchScopeSummaryLabel });
     if (badges.length === 0) {
       badges.push({ key: "all", label: "All messages" });
     }
     return badges;
-  }, [query, searchFieldsCriteriaLabel, searchScope, selectedSearchBadges]);
+  }, [query, searchFieldsSummaryLabel, searchScopeSummaryLabel, selectedSearchBadges]);
   const relatedNotice = useMemo(() => {
     if (!isRelatedSearch) return "";
     const subject = relatedContext?.subject?.trim();
@@ -3318,7 +3325,10 @@ export default function MailClient() {
     const resolveMessageById = (id: string) =>
       threadScopeMessages.find((item) => item.id === id) ??
       messages.find((item) => item.id === id);
-    const toggleReadStatusByIds = async (messageIds: string[], forcedSeen?: boolean) => {
+    const updateFlagStateByIds = async (
+      messageIds: string[],
+      update: { flag: "seen" | "flagged"; value: boolean }
+    ) => {
       const uniqueIds = Array.from(new Set(messageIds));
       if (uniqueIds.length === 0) return;
       const targets = uniqueIds
@@ -3327,35 +3337,32 @@ export default function MailClient() {
       if (targets.length === 0) return;
       await Promise.all(
         targets.map((message) =>
-          updateFlagStateRef.current(
-            message,
-            "seen",
-            forcedSeen ?? !Boolean(message.seen)
-          )
+          updateFlagStateRef.current(message, update.flag, update.value)
         )
       );
     };
-    const getCollapsedRootThreadMessages = (selectedIds: string[]) => {
-      if (selectedIds.length !== 1) return null;
-      const selectedId = selectedIds[0];
-      const selectedVisible = visibleMessages.find((item) => item.message.id === selectedId);
-      if (!selectedVisible || selectedVisible.depth !== 0) return null;
-      const isThreadCollapsed = collapsedThreads[selectedVisible.threadId] ?? true;
-      if (!isThreadCollapsed) return null;
-      const threadMessages = threadScopeMessages.filter((item) => {
-        const key = item.threadId ?? item.messageId ?? item.id;
-        return key === selectedVisible.threadId;
-      });
-      if (threadMessages.length <= 1) return null;
-      return threadMessages;
+    const toggleFlaggedByIds = async (messageIds: string[]) => {
+      const uniqueIds = Array.from(new Set(messageIds));
+      if (uniqueIds.length === 0) return;
+      const targets = uniqueIds
+        .map((id) => resolveMessageById(id))
+        .filter((message): message is Message => Boolean(message));
+      if (targets.length === 0) return;
+      await Promise.all(
+        targets.map((message) =>
+          updateFlagStateRef.current(message, "flagged", !isFlaggedMessage(message))
+        )
+      );
     };
     const handleKeyDown = (event: KeyboardEvent) => {
       const rawKey = typeof event.key === "string" ? event.key : "";
       const key = rawKey.toLowerCase();
       const isDeleteKey = rawKey === "Delete" || rawKey === "Backspace";
-      const isToggleReadKey =
-        key === "r" && !event.metaKey && !event.ctrlKey && !event.altKey;
-      if (!isDeleteKey && !isToggleReadKey) return;
+      const isMarkReadKey = key === "r" && !event.metaKey && !event.ctrlKey && !event.altKey;
+      const isMarkUnreadKey = key === "u" && !event.metaKey && !event.ctrlKey && !event.altKey;
+      const isFlagKey = key === "f" && !event.metaKey && !event.ctrlKey && !event.altKey;
+      const isFlagShortcut = isMarkReadKey || isMarkUnreadKey || isFlagKey;
+      if (!isDeleteKey && !isFlagShortcut) return;
       if (isTypingTarget(event.target)) return;
       const selected = selectionStore.getIds();
       const ids =
@@ -3365,18 +3372,31 @@ export default function MailClient() {
             ? [activeMessageId]
             : [];
       if (ids.length === 0) return;
-      if (isToggleReadKey) {
+      if (isFlagShortcut) {
         event.preventDefault();
-        const collapsedRootThreadMessages = getCollapsedRootThreadMessages(ids);
-        if (collapsedRootThreadMessages) {
-          const nextSeen = !collapsedRootThreadMessages.some((message) => !message.seen);
-          void toggleReadStatusByIds(
-            collapsedRootThreadMessages.map((message) => message.id),
-            nextSeen
-          );
+        if (isMarkReadKey) {
+          const collapsedRootThreadIds = getCollapsedRootThreadMessageIds({
+            selectedIds: ids,
+            visibleMessages,
+            collapsedThreads,
+            threadScopeMessages
+          });
+          const targetIds = collapsedRootThreadIds ?? ids;
+          void updateFlagStateByIds(targetIds, { flag: "seen", value: true });
           return;
         }
-        void toggleReadStatusByIds(ids);
+        if (isMarkUnreadKey) {
+          const collapsedRootThreadIds = getCollapsedRootThreadMessageIds({
+            selectedIds: ids,
+            visibleMessages,
+            collapsedThreads,
+            threadScopeMessages
+          });
+          const targetIds = collapsedRootThreadIds ?? ids;
+          void updateFlagStateByIds(targetIds, { flag: "seen", value: false });
+          return;
+        }
+        void toggleFlaggedByIds(ids);
         return;
       }
       event.preventDefault();

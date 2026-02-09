@@ -2,6 +2,7 @@ import { describe, expect, it } from "bun:test";
 import type { Message } from "@/lib/data";
 import type { ListRowItem, VisibleMessageEntry } from "./listModel";
 import {
+  getCollapsedRootThreadMessageIds,
   getDragThreadMessageIds,
   getThreadRowSelectionMeta,
   handleRowCheckboxChange
@@ -235,5 +236,61 @@ describe("collapsed-thread bulk behavior", () => {
       fullFlat
     });
     expect(nonCollapsed).toBeUndefined();
+  });
+
+  it("returns full thread ids for single selected collapsed thread root", () => {
+    const m1 = makeMessage("m1", 1000);
+    const m2 = makeMessage("m2", 2000);
+    const m3 = makeMessage("m3", 3000);
+    const ids = getCollapsedRootThreadMessageIds({
+      selectedIds: ["m1"],
+      visibleMessages: [{ message: m1, depth: 0, threadId: "thread-1" }],
+      collapsedThreads: { "thread-1": true },
+      threadScopeMessages: [m1, m2, m3]
+    });
+
+    expect(ids).toEqual(["m1", "m2", "m3"]);
+  });
+
+  it("returns null when no selected collapsed thread root qualifies", () => {
+    const m1 = makeMessage("m1", 1000);
+    const m2 = makeMessage("m2", 2000);
+
+    const expanded = getCollapsedRootThreadMessageIds({
+      selectedIds: ["m1"],
+      visibleMessages: [{ message: m1, depth: 0, threadId: "thread-1" }],
+      collapsedThreads: { "thread-1": false },
+      threadScopeMessages: [m1, m2]
+    });
+    expect(expanded).toBeNull();
+
+    const nonRoot = getCollapsedRootThreadMessageIds({
+      selectedIds: ["m2"],
+      visibleMessages: [
+        { message: m1, depth: 0, threadId: "thread-1" },
+        { message: m2, depth: 1, threadId: "thread-1" }
+      ],
+      collapsedThreads: { "thread-1": true },
+      threadScopeMessages: [m1, m2]
+    });
+    expect(nonRoot).toBeNull();
+  });
+
+  it("expands every selected collapsed thread root", () => {
+    const a1 = makeMessage("a1", 1000, { threadId: "thread-a" });
+    const a2 = makeMessage("a2", 2000, { threadId: "thread-a" });
+    const b1 = makeMessage("b1", 3000, { threadId: "thread-b" });
+    const b2 = makeMessage("b2", 4000, { threadId: "thread-b" });
+    const ids = getCollapsedRootThreadMessageIds({
+      selectedIds: ["a1", "b1"],
+      visibleMessages: [
+        { message: a1, depth: 0, threadId: "thread-a" },
+        { message: b1, depth: 0, threadId: "thread-b" }
+      ],
+      collapsedThreads: { "thread-a": true, "thread-b": true },
+      threadScopeMessages: [a1, a2, b1, b2]
+    });
+
+    expect(ids).toEqual(["a1", "b1", "a2", "b2"]);
   });
 });

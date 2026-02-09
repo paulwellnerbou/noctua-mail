@@ -1,6 +1,6 @@
 import type React from "react";
 import type { Message } from "@/lib/data";
-import type { ListRowItem } from "./listModel";
+import type { ListRowItem, VisibleMessageEntry } from "./listModel";
 import { getThreadSelectionState } from "./listModel";
 import type { SelectionStore } from "./selectionStore";
 import {
@@ -167,6 +167,38 @@ export function getDragThreadMessageIds(params: {
   const { isCollapsedThreadRoot, fullFlat } = params;
   if (!isCollapsedThreadRoot) return undefined;
   return fullFlat.map((entry) => entry.message.id);
+}
+
+export function getCollapsedRootThreadMessageIds(params: {
+  selectedIds: string[];
+  visibleMessages: VisibleMessageEntry[];
+  collapsedThreads: Record<string, boolean>;
+  threadScopeMessages: Message[];
+}) {
+  const { selectedIds, visibleMessages, collapsedThreads, threadScopeMessages } = params;
+  if (selectedIds.length === 0) return null;
+
+  const selectedSet = new Set(selectedIds);
+  const expandedIds = new Set(selectedIds);
+  let hasCollapsedRootSelection = false;
+
+  visibleMessages.forEach((item) => {
+    if (!selectedSet.has(item.message.id) || item.depth !== 0) return;
+    const isThreadCollapsed = collapsedThreads[item.threadId] ?? true;
+    if (!isThreadCollapsed) return;
+    const threadMessageIds = threadScopeMessages
+      .filter((message) => {
+        const key = message.threadId ?? message.messageId ?? message.id;
+        return key === item.threadId;
+      })
+      .map((message) => message.id);
+    if (threadMessageIds.length <= 1) return;
+    hasCollapsedRootSelection = true;
+    threadMessageIds.forEach((id) => expandedIds.add(id));
+  });
+
+  if (!hasCollapsedRootSelection) return null;
+  return Array.from(expandedIds);
 }
 
 export function getThreadRowSelectionMeta(params: {
