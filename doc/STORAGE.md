@@ -35,6 +35,8 @@ Used for high-churn mail data:
 - `mailbox_state`
 - `message_fts`
 
+Per-account DB connections are cached in-process and auto-evicted after an idle period (default: `ACCOUNT_DB_IDLE_MS=3600000`, 1 hour). The next request for that account recreates the connection automatically.
+
 ## Credentials Storage
 
 `IMAP_CREDENTIALS_STORAGE` controls where credentials live:
@@ -74,6 +76,12 @@ Credentials are never duplicated into account shard DB files.
 - There is no global/orphan sweeper job for:
   - unreferenced source/attachment files
   - stale shard DB files
+
+### Connection lifecycle cleanup
+
+- Master DB connection is process-scoped.
+- Account DB connections are closed on idle timeout (`ACCOUNT_DB_IDLE_MS`) and reopened on demand.
+- On process shutdown (`SIGINT`, `SIGTERM`, `beforeExit`), cached DB connections are closed.
 
 ## Operational Notes
 

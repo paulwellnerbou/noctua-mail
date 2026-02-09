@@ -24,6 +24,15 @@ let masterDbInstance: any | null = null;
 let masterInitialized = false;
 const accountDbInstances = new Map<string, any>();
 const accountDbInitialized = new Set<string>();
+const accountDbIdleTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const ACCOUNT_DB_IDLE_MS = (() => {
+  const raw = process.env.ACCOUNT_DB_IDLE_MS?.trim();
+  if (!raw) return 60 * 60 * 1000;
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isFinite(parsed) || parsed < 0) return 60 * 60 * 1000;
+  return parsed;
+})();
+let shutdownHooksRegistered = false;
 
 async function ensureDatabaseCtor() {
   if (DatabaseCtor) return;
@@ -43,6 +52,59 @@ function configureDb(db: any) {
 
 function ensureDbParentDir(dbPath: string) {
   mkdirSync(path.dirname(dbPath), { recursive: true });
+}
+
+function clearAccountDbIdleTimer(dbPath: string) {
+  const timer = accountDbIdleTimers.get(dbPath);
+  if (timer) {
+    clearTimeout(timer);
+    accountDbIdleTimers.delete(dbPath);
+  }
+}
+
+function closeAccountDbConnection(dbPath: string) {
+  clearAccountDbIdleTimer(dbPath);
+  const db = accountDbInstances.get(dbPath);
+  if (!db) return;
+  try {
+    db.close();
+  } catch {
+    // ignore close failures during shutdown/eviction
+  }
+  accountDbInstances.delete(dbPath);
+  accountDbInitialized.delete(dbPath);
+}
+
+function scheduleAccountDbIdleClose(dbPath: string) {
+  if (ACCOUNT_DB_IDLE_MS <= 0) return;
+  clearAccountDbIdleTimer(dbPath);
+  const timer = setTimeout(() => {
+    closeAccountDbConnection(dbPath);
+  }, ACCOUNT_DB_IDLE_MS);
+  timer.unref?.();
+  accountDbIdleTimers.set(dbPath, timer);
+}
+
+export function closeAllDbConnections() {
+  const accountPaths = Array.from(accountDbInstances.keys());
+  accountPaths.forEach((dbPath) => closeAccountDbConnection(dbPath));
+  if (masterDbInstance) {
+    try {
+      masterDbInstance.close();
+    } catch {
+      // ignore close failures during shutdown
+    }
+    masterDbInstance = null;
+    masterInitialized = false;
+  }
+}
+
+function registerDbShutdownHooks() {
+  if (shutdownHooksRegistered) return;
+  shutdownHooksRegistered = true;
+  process.once("SIGINT", closeAllDbConnections);
+  process.once("SIGTERM", closeAllDbConnections);
+  process.once("beforeExit", closeAllDbConnections);
 }
 
 function mapInviteRow(row: any): InviteCode {
@@ -249,6 +311,7 @@ function initAccountSchema(db: any) {
 }
 
 async function getDb() {
+  registerDbShutdownHooks();
   if (!masterDbInstance) {
     await ensureDatabaseCtor();
     const dbPath = getMasterDbPath();
@@ -297,6 +360,7 @@ async function getAccountDb(accountId: string) {
     initAccountSchema(accountDb);
     accountDbInitialized.add(dbPath);
   }
+  scheduleAccountDbIdleClose(dbPath);
   return accountDb;
 }
 
