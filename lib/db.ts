@@ -1,8 +1,13 @@
 const sqliteModulePromise = () => import("bun:sqlite" /* webpackIgnore: true */);
 let DatabaseCtor: any | null = null;
 import path from "path";
-import { mkdirSync } from "fs";
-import { getDefaultAccountDbPath, getMasterDbPath } from "./runtimePaths";
+import { mkdirSync, promises as fs } from "fs";
+import {
+  getAttachmentsAccountDir,
+  getDefaultAccountDbPath,
+  getMasterDbPath,
+  getSourcesAccountDir
+} from "./runtimePaths";
 import type {
   Account,
   AccountSettings,
@@ -73,6 +78,42 @@ function closeAccountDbConnection(dbPath: string) {
   }
   accountDbInstances.delete(dbPath);
   accountDbInitialized.delete(dbPath);
+}
+
+async function unlinkIfExists(filePath: string) {
+  try {
+    await fs.unlink(filePath);
+  } catch (error) {
+    const code =
+      error && typeof error === "object" && "code" in error
+        ? String((error as { code?: unknown }).code ?? "")
+        : "";
+    if (code !== "ENOENT") {
+      console.warn("[account-lifecycle] failed to delete file", { filePath, error });
+    }
+  }
+}
+
+async function cleanupAccountLifecycleArtifacts(
+  accountId: string,
+  dbPath: string,
+  deleteShardFile: boolean
+) {
+  await Promise.all([
+    fs.rm(getSourcesAccountDir(accountId), { recursive: true, force: true }).catch((error) => {
+      console.warn("[account-lifecycle] failed to delete source cache dir", { accountId, error });
+    }),
+    fs.rm(getAttachmentsAccountDir(accountId), { recursive: true, force: true }).catch((error) => {
+      console.warn("[account-lifecycle] failed to delete attachment cache dir", { accountId, error });
+    })
+  ]);
+
+  if (!deleteShardFile) return;
+  await Promise.all([
+    unlinkIfExists(dbPath),
+    unlinkIfExists(`${dbPath}-wal`),
+    unlinkIfExists(`${dbPath}-shm`)
+  ]);
 }
 
 function scheduleAccountDbIdleClose(dbPath: string) {
@@ -366,69 +407,162 @@ async function getAccountDb(accountId: string) {
 
 export type GroupMeta = { key: string; label: string; count: number };
 
-export async function getAccounts() {
-  const db = await getDb();
-  const rows = db.prepare(`SELECT * FROM accounts`).all() as any[];
-  return rows.map((row) => applyCachedCredentials({
+function resolveAccountDbPathForPersist(accountId: string, dbPath?: string | null) {
+  if (dbPath && dbPath.trim().length > 0) return dbPath;
+  return getDefaultAccountDbPath(accountId);
+}
+
+function mapAccountRow(row: any): Account {
+  return {
     id: row.id,
     name: row.name,
     email: row.email,
     avatar: row.avatar,
-      settings: normalizeAccountSettings(row.settings ? (JSON.parse(row.settings) as any) : undefined),
-      imap: {
-        host: row.imapHost,
-        port: row.imapPort,
-        secure: Boolean(row.imapSecure),
-        user: row.imapUser,
-        password: decodeSecret(row.imapPassword)
-      },
-      smtp: {
-        host: row.smtpHost,
-        port: row.smtpPort,
-        secure: Boolean(row.smtpSecure),
-        user: row.smtpUser,
-        password: decodeSecret(row.smtpPassword)
+    settings: normalizeAccountSettings(row.settings ? (JSON.parse(row.settings) as any) : undefined),
+    imap: {
+      host: row.imapHost,
+      port: row.imapPort,
+      secure: Boolean(row.imapSecure),
+      user: row.imapUser,
+      password: decodeSecret(row.imapPassword)
+    },
+    smtp: {
+      host: row.smtpHost,
+      port: row.smtpPort,
+      secure: Boolean(row.smtpSecure),
+      user: row.smtpUser,
+      password: decodeSecret(row.smtpPassword)
     },
     ownerUserId: row.ownerUserId ?? undefined
-  })) as Account[];
+  };
+}
+
+function mergeAccount(current: Account, payload: Partial<Account>): Account {
+  return {
+    ...current,
+    ...payload,
+    imap: { ...current.imap, ...(payload.imap ?? {}) },
+    smtp: { ...current.smtp, ...(payload.smtp ?? {}) },
+    settings: { ...(current.settings ?? {}), ...(payload.settings ?? {}) }
+  } as Account;
+}
+
+function persistAccountRow(db: any, account: Account, dbPath?: string | null) {
+  const settings = normalizeAccountSettings(account.settings);
+  const insert = db.prepare(`
+    INSERT OR REPLACE INTO accounts (
+      id, name, email, avatar, ownerUserId, dbPath,
+      settings,
+      imapHost, imapPort, imapSecure, imapUser, imapPassword,
+      smtpHost, smtpPort, smtpSecure, smtpUser, smtpPassword
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  insert.run(
+    account.id,
+    account.name,
+    account.email,
+    account.avatar,
+    account.ownerUserId ?? null,
+    resolveAccountDbPathForPersist(account.id, dbPath),
+    settings ? JSON.stringify(settings) : null,
+    account.imap.host,
+    account.imap.port,
+    account.imap.secure ? 1 : 0,
+    account.imap.user,
+    shouldStorePasswordInDb() ? encodeSecret(account.imap.password) : "",
+    account.smtp.host,
+    account.smtp.port,
+    account.smtp.secure ? 1 : 0,
+    account.smtp.user,
+    shouldStorePasswordInDb() ? encodeSecret(account.smtp.password) : ""
+  );
+}
+
+export async function getAccounts() {
+  const db = await getDb();
+  const rows = db.prepare(`SELECT * FROM accounts`).all() as any[];
+  return rows.map((row) => applyCachedCredentials(mapAccountRow(row))) as Account[];
 }
 
 export async function saveAccounts(nextAccounts: Account[]) {
   return withDbWriteRetry("saveAccounts", async () => {
     const db = await getDb();
-    const insert = db.prepare(`
-      INSERT OR REPLACE INTO accounts (
-        id, name, email, avatar, ownerUserId, dbPath,
-        settings,
-        imapHost, imapPort, imapSecure, imapUser, imapPassword,
-        smtpHost, smtpPort, smtpSecure, smtpUser, smtpPassword
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
+    const existingPaths = new Map<string, string | null>(
+      (
+        db.prepare(`SELECT id, dbPath FROM accounts`).all() as Array<{
+          id: string;
+          dbPath?: string | null;
+        }>
+      ).map((row) => [row.id, row.dbPath ?? null])
+    );
     db.transaction(() => {
       db.exec(`DELETE FROM accounts`);
       nextAccounts.forEach((account) => {
-        const settings = normalizeAccountSettings(account.settings);
-        insert.run(
-          account.id,
-          account.name,
-          account.email,
-          account.avatar,
-          account.ownerUserId ?? null,
-          getDefaultAccountDbPath(account.id),
-          settings ? JSON.stringify(settings) : null,
-          account.imap.host,
-          account.imap.port,
-          account.imap.secure ? 1 : 0,
-          account.imap.user,
-          shouldStorePasswordInDb() ? encodeSecret(account.imap.password) : "",
-          account.smtp.host,
-          account.smtp.port,
-          account.smtp.secure ? 1 : 0,
-          account.smtp.user,
-          shouldStorePasswordInDb() ? encodeSecret(account.smtp.password) : ""
-        );
+        persistAccountRow(db, account, existingPaths.get(account.id));
       });
     })();
+  });
+}
+
+export async function getAccountById(accountId: string) {
+  const db = await getDb();
+  const row = db.prepare(`SELECT * FROM accounts WHERE id = ?`).get(accountId) as any;
+  if (!row) return null;
+  return applyCachedCredentials(mapAccountRow(row));
+}
+
+export async function upsertAccount(account: Account) {
+  return withDbWriteRetry("upsertAccount", async () => {
+    const db = await getDb();
+    const existing = db
+      .prepare(`SELECT dbPath FROM accounts WHERE id = ?`)
+      .get(account.id) as { dbPath?: string | null } | undefined;
+    db.transaction(() => {
+      persistAccountRow(db, account, existing?.dbPath ?? null);
+    })();
+    return applyCachedCredentials(account);
+  });
+}
+
+export async function patchAccount(accountId: string, payload: Partial<Account>) {
+  return withDbWriteRetry("patchAccount", async () => {
+    const db = await getDb();
+    const row = db.prepare(`SELECT * FROM accounts WHERE id = ?`).get(accountId) as any;
+    if (!row) return null;
+    const current = mapAccountRow(row);
+    const next = mergeAccount(current, payload);
+    db.transaction(() => {
+      persistAccountRow(db, next, row.dbPath ?? null);
+    })();
+    return applyCachedCredentials(next);
+  });
+}
+
+export async function deleteAccountControlPlane(accountId: string) {
+  return withDbWriteRetry("deleteAccountControlPlane", async () => {
+    const db = await getDb();
+    const row = db
+      .prepare(`SELECT id, dbPath FROM accounts WHERE id = ?`)
+      .get(accountId) as { id?: string; dbPath?: string | null } | undefined;
+    if (!row?.id) return false;
+
+    const dbPath = resolveAccountDbPathForPersist(accountId, row.dbPath ?? null);
+    const sharedPathRow = db
+      .prepare(`SELECT COUNT(*) as count FROM accounts WHERE id <> ? AND dbPath = ?`)
+      .get(accountId, dbPath) as { count: number } | undefined;
+    const masterDbPath = path.resolve(getMasterDbPath());
+    const deleteShardFile =
+      (sharedPathRow?.count ?? 0) === 0 && path.resolve(dbPath) !== masterDbPath;
+
+    closeAccountDbConnection(dbPath);
+
+    db.transaction(() => {
+      db.prepare(`DELETE FROM user_accounts WHERE accountId = ?`).run(accountId);
+      db.prepare(`DELETE FROM accounts WHERE id = ?`).run(accountId);
+    })();
+
+    await cleanupAccountLifecycleArtifacts(accountId, dbPath, deleteShardFile);
+    return true;
   });
 }
 

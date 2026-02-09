@@ -67,15 +67,19 @@ Credentials are never duplicated into account shard DB files.
 
 ### Cleanup currently not done automatically
 
-- Account delete (`DELETE /api/accounts/[id]`) only removes account row(s) from master data.
-  - It does **not** delete:
-    - per-account shard DB file
-    - `sources/<accountId>/...`
-    - `attachments/<accountId>/...`
 - Folder-delete path removes message rows from DB but does not remove cached files for those removed messages.
 - There is no global/orphan sweeper job for:
   - unreferenced source/attachment files
   - stale shard DB files
+
+### Account delete lifecycle (current)
+
+- Account delete (`DELETE /api/accounts/[id]`) performs a control-plane flow:
+  - closes cached shard DB handle for that account
+  - transactionally deletes `user_accounts` links and `accounts` row in master DB
+  - removes account source/attachment cache directories
+  - removes the shard DB file (`.db`, `-wal`, `-shm`) when no other account row points to the same `dbPath`
+- Filesystem cleanup is best-effort; failures are logged.
 
 ### Connection lifecycle cleanup
 
