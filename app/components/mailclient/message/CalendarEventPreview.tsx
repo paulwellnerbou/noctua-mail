@@ -52,6 +52,19 @@ function formatDateRange(event: CalendarEventPreview) {
   return `${start} - ${end}`;
 }
 
+function parseHttpUrl(value?: string) {
+  if (!value) return null;
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  try {
+    const parsed = new URL(trimmed);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
+    return parsed.toString();
+  } catch {
+    return null;
+  }
+}
+
 export default function CalendarEventPreview({ attachments }: { attachments: Attachment[] }) {
   const attachment = useMemo(
     () => attachments.find((item) => isCalendarAttachment(item) && Boolean(item.url || item.dataUrl)) ?? null,
@@ -137,24 +150,34 @@ export default function CalendarEventPreview({ attachments }: { attachments: Att
         <p className={styles.meta}>Could not parse calendar event details.</p>
       ) : (
         <div className={styles.eventList}>
-          {events.slice(0, 3).map((event, index) => (
-            <article key={event.uid ?? `${attachment.id}-${index}`} className={styles.event}>
-              <h5 className={styles.eventTitle}>{event.summary || "Untitled Event"}</h5>
-              {formatDateRange(event) ? (
-                <div className={styles.metaRow}>
-                  <Clock size={12} />
-                  <span>{formatDateRange(event)}</span>
-                </div>
-              ) : null}
-              {event.location ? (
-                <div className={styles.metaRow}>
-                  <MapPin size={12} />
-                  <span>{event.location}</span>
-                </div>
-              ) : null}
-              {event.organizer ? <p className={styles.meta}>Organizer: {event.organizer}</p> : null}
-            </article>
-          ))}
+          {events.slice(0, 3).map((event, index) => {
+            const dateRange = formatDateRange(event);
+            const locationUrl = parseHttpUrl(event.location);
+            return (
+              <article key={event.uid ?? `${attachment.id}-${index}`} className={styles.event}>
+                <h5 className={styles.eventTitle}>{event.summary || "Untitled Event"}</h5>
+                {dateRange ? (
+                  <div className={styles.metaRow}>
+                    <Clock size={12} />
+                    <span>{dateRange}</span>
+                  </div>
+                ) : null}
+                {event.location ? (
+                  <div className={styles.metaRow}>
+                    <MapPin size={12} />
+                    {locationUrl ? (
+                      <a className={styles.locationLink} href={locationUrl} target="_blank" rel="noreferrer">
+                        {event.location}
+                      </a>
+                    ) : (
+                      <span>{event.location}</span>
+                    )}
+                  </div>
+                ) : null}
+                {event.organizer ? <p className={styles.meta}>Organizer: {event.organizer}</p> : null}
+              </article>
+            );
+          })}
           {events.length > 3 ? (
             <p className={styles.meta}>+{events.length - 3} more events in attachment</p>
           ) : null}
