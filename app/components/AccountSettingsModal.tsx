@@ -13,6 +13,7 @@ import {
   TextArea,
   TextField
 } from "@radix-ui/themes";
+import PasswordField from "@/app/components/PasswordField";
 import type { Account, AccountDateFormat, AccountSettings } from "@/lib/data";
 import {
   ACCOUNT_DATE_FORMAT_OPTIONS,
@@ -32,6 +33,8 @@ type Props = {
   smtpProbe: { tls?: boolean; starttls?: boolean } | null;
   imapSecurity: "tls" | "starttls" | "none";
   smtpSecurity: "tls" | "starttls" | "none";
+  onImapSecurityChange: (value: "tls" | "starttls" | "none") => void;
+  onSmtpSecurityChange: (value: "tls" | "starttls" | "none") => void;
   onClose: () => void;
   onTabChange: (tab: ManageTab) => void;
   onSave: () => void;
@@ -74,6 +77,8 @@ export default function AccountSettingsModal({
   smtpProbe,
   imapSecurity,
   smtpSecurity,
+  onImapSecurityChange,
+  onSmtpSecurityChange,
   onClose,
   onTabChange,
   onSave,
@@ -185,31 +190,7 @@ export default function AccountSettingsModal({
                         {imapProbe.starttls ? "Yes" : "No"}
                       </Text>
                     )}
-                    <Grid columns="2" gap="3">
-                      <Field label="Security">
-                        <Select.Root
-                          value={imapSecurity}
-                          onValueChange={(value) => {
-                            const next = value as "tls" | "starttls" | "none";
-                            const port = next === "tls" ? 993 : 143;
-                            onUpdateAccount({
-                              ...editingAccount,
-                              imap: { ...editingAccount.imap, secure: next === "tls", port }
-                            });
-                          }}
-                        >
-                          <Select.Trigger style={{ width: "100%" }} />
-                          <Select.Content position="popper">
-                            {(imapProbe?.tls ?? true) && (
-                              <Select.Item value="tls">TLS (implicit)</Select.Item>
-                            )}
-                            {(imapProbe?.starttls ?? true) && (
-                              <Select.Item value="starttls">STARTTLS</Select.Item>
-                            )}
-                            <Select.Item value="none">None</Select.Item>
-                          </Select.Content>
-                        </Select.Root>
-                      </Field>
+                    <Grid columns="3fr 1fr 2fr" gap="3">
                       <Field label="IMAP host">
                         <TextField.Root
                           value={editingAccount.imap.host}
@@ -236,6 +217,33 @@ export default function AccountSettingsModal({
                           }
                         />
                       </Field>
+                      <Field label="Security">
+                        <Select.Root
+                          value={imapSecurity}
+                          onValueChange={(value) => {
+                            const next = value as "tls" | "starttls" | "none";
+                            const port = next === "tls" ? 993 : 143;
+                            onImapSecurityChange(next);
+                            onUpdateAccount({
+                              ...editingAccount,
+                              imap: { ...editingAccount.imap, secure: next === "tls", port }
+                            });
+                          }}
+                        >
+                          <Select.Trigger style={{ width: "100%" }} />
+                          <Select.Content position="popper">
+                            {(imapProbe?.tls ?? true) && (
+                              <Select.Item value="tls">TLS (implicit)</Select.Item>
+                            )}
+                            {(imapProbe?.starttls ?? true) && (
+                              <Select.Item value="starttls">STARTTLS</Select.Item>
+                            )}
+                            <Select.Item value="none">None</Select.Item>
+                          </Select.Content>
+                        </Select.Root>
+                      </Field>
+                    </Grid>
+                    <Grid columns={{ initial: "1", sm: "2" }} gap="3">
                       <Field label="IMAP user">
                         <TextField.Root
                           value={editingAccount.imap.user}
@@ -248,8 +256,7 @@ export default function AccountSettingsModal({
                         />
                       </Field>
                       <Field label="IMAP password">
-                        <TextField.Root
-                          type="password"
+                        <PasswordField
                           value={editingAccount.imap.password}
                           onChange={(event) =>
                             onUpdateAccount({
@@ -279,41 +286,13 @@ export default function AccountSettingsModal({
                         {smtpDetecting ? "Detecting..." : "Detect security"}
                       </Button>
                     </Flex>
-                    <Text size="1" color="gray">
-                      Detection reads server capabilities only — it does not require
-                      authentication.
-                    </Text>
                     {smtpProbe && (
                       <Text size="1" color="gray">
                         TLS: {smtpProbe.tls ? "Yes" : "No"} · STARTTLS:{" "}
                         {smtpProbe.starttls ? "Yes" : "No"}
                       </Text>
                     )}
-                    <Grid columns="2" gap="3">
-                      <Field label="Security">
-                        <Select.Root
-                          value={smtpSecurity}
-                          onValueChange={(value) => {
-                            const next = value as "tls" | "starttls" | "none";
-                            const port = next === "tls" ? 465 : next === "starttls" ? 587 : 25;
-                            onUpdateAccount({
-                              ...editingAccount,
-                              smtp: { ...editingAccount.smtp, secure: next === "tls", port }
-                            });
-                          }}
-                        >
-                          <Select.Trigger style={{ width: "100%" }} />
-                          <Select.Content position="popper">
-                            {(smtpProbe?.tls ?? true) && (
-                              <Select.Item value="tls">TLS (implicit)</Select.Item>
-                            )}
-                            {(smtpProbe?.starttls ?? true) && (
-                              <Select.Item value="starttls">STARTTLS</Select.Item>
-                            )}
-                            <Select.Item value="none">None</Select.Item>
-                          </Select.Content>
-                        </Select.Root>
-                      </Field>
+                    <Grid columns="3fr 1fr 2fr" gap="3">
                       <Field label="SMTP host">
                         <TextField.Root
                           value={editingAccount.smtp.host}
@@ -340,6 +319,33 @@ export default function AccountSettingsModal({
                           }
                         />
                       </Field>
+                      <Field label="Security">
+                        <Select.Root
+                          value={smtpSecurity}
+                          onValueChange={(value) => {
+                            const next = value as "tls" | "starttls" | "none";
+                            const port = next === "tls" ? 465 : next === "starttls" ? 587 : 25;
+                            onSmtpSecurityChange(next);
+                            onUpdateAccount({
+                              ...editingAccount,
+                              smtp: { ...editingAccount.smtp, secure: next === "tls", port }
+                            });
+                          }}
+                        >
+                          <Select.Trigger style={{ width: "100%" }} />
+                          <Select.Content position="popper">
+                            {(smtpProbe?.tls ?? true) && (
+                              <Select.Item value="tls">TLS (implicit)</Select.Item>
+                            )}
+                            {(smtpProbe?.starttls ?? true) && (
+                              <Select.Item value="starttls">STARTTLS</Select.Item>
+                            )}
+                            <Select.Item value="none">None</Select.Item>
+                          </Select.Content>
+                        </Select.Root>
+                      </Field>
+                    </Grid>
+                    <Grid columns={{ initial: "1", sm: "2" }} gap="3">
                       <Field label="SMTP user">
                         <TextField.Root
                           value={editingAccount.smtp.user}
@@ -352,8 +358,7 @@ export default function AccountSettingsModal({
                         />
                       </Field>
                       <Field label="SMTP password">
-                        <TextField.Root
-                          type="password"
+                        <PasswordField
                           value={editingAccount.smtp.password}
                           onChange={(event) =>
                             onUpdateAccount({

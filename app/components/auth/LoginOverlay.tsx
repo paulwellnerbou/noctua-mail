@@ -325,6 +325,8 @@ export default function LoginOverlay({ onAuthenticated }: Props) {
             smtpProbe={smtpProbe}
             imapSecurity={imapSecurity}
             smtpSecurity={smtpSecurity}
+            onImapSecurityChange={setImapSecurity}
+            onSmtpSecurityChange={setSmtpSecurity}
             onClose={() => {
               setSignupOpen(false);
               setInviteOpen(false);

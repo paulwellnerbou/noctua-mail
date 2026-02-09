@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getAccounts, getFolders, saveFolders, updateMessagesFolderPrefix } from "@/lib/db";
+import { getAccounts, getFolders, saveFoldersForAccount, updateMessagesFolderPrefix } from "@/lib/db";
 import { listImapFolders, renameImapFolder } from "@/lib/mail/imap";
 import { requireSessionOr401 } from "@/lib/auth";
 
@@ -31,8 +31,6 @@ export async function POST(request: Request) {
   await renameImapFolder(account, mailboxPath, newPath, clientId);
   await updateMessagesFolderPrefix(payload.accountId, mailboxPath, newPath);
   const updated = await listImapFolders(account, clientId);
-  const existing = await getFolders();
-  const next = [...existing.filter((item) => item.accountId !== account.id), ...updated];
-  await saveFolders(next);
+  await saveFoldersForAccount(account.id, updated);
   return NextResponse.json({ ok: true, folders: updated });
 }

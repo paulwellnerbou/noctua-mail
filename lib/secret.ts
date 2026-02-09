@@ -29,6 +29,7 @@ export function shouldIncludeSessionCredentials() {
 export function encodeSecret(value: string): string {
   if (!value) return "";
   if (!STORE_IN_DB) return "";
+  if (value.startsWith("enc:")) return value;
   if (!hasKey) return value;
   try {
     const iv = crypto.randomBytes(12);
@@ -54,7 +55,26 @@ export function decodeSecret(value: string | null | undefined): string {
     const decipher = crypto.createDecipheriv("aes-256-gcm", getKey(), iv);
     decipher.setAuthTag(tag);
     const decrypted = Buffer.concat([decipher.update(data), decipher.final()]);
-    return decrypted.toString("utf8");
+    const decoded = decrypted.toString("utf8");
+    // Handle legacy accidental double-encryption by unwrapping one extra layer.
+    if (decoded.startsWith("enc:")) {
+      try {
+        const nested = Buffer.from(decoded.slice(4), "base64");
+        const nestedIv = nested.subarray(0, 12);
+        const nestedTag = nested.subarray(12, 28);
+        const nestedData = nested.subarray(28);
+        const nestedDecipher = crypto.createDecipheriv("aes-256-gcm", getKey(), nestedIv);
+        nestedDecipher.setAuthTag(nestedTag);
+        const nestedDecrypted = Buffer.concat([
+          nestedDecipher.update(nestedData),
+          nestedDecipher.final()
+        ]);
+        return nestedDecrypted.toString("utf8");
+      } catch {
+        return decoded;
+      }
+    }
+    return decoded;
   } catch {
     return "";
   }

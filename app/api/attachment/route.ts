@@ -15,7 +15,7 @@ export async function GET(request: Request) {
     return NextResponse.json({ ok: false, message: "Missing parameters" }, { status: 400 });
   }
 
-  const attachment = await getAttachmentMeta(messageId, attachmentId);
+  const attachment = await getAttachmentMeta(accountId, messageId, attachmentId);
   if (!attachment) {
     return NextResponse.json({ ok: false, message: "Attachment not found" }, { status: 404 });
   }

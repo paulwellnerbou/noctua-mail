@@ -1,10 +1,9 @@
 import { NextResponse } from "next/server";
 import {
   getAccounts,
-  getFolders,
   getMessageIdsByMessageIds,
   getThreadIdsByMessageIds,
-  saveFolders,
+  saveFoldersForAccount,
   upsertMessages
 } from "@/lib/db";
 import { saveAttachmentData, saveMessageSource } from "@/lib/storage";
@@ -186,9 +185,7 @@ export async function POST(request: Request) {
   );
   await upsertMessages(account.id, payload.folderId ?? null, strippedMessages);
 
-  const existing = await getFolders();
-  const nextFolders = [...existing.filter((folder) => folder.accountId !== account.id), ...folders];
-  await saveFolders(nextFolders);
+  await saveFoldersForAccount(account.id, folders);
 
   return NextResponse.json({ ok: true, count: messages.length });
 }

@@ -1,6 +1,8 @@
 const sqliteModulePromise = () => import("bun:sqlite" /* webpackIgnore: true */);
 let DatabaseCtor: any | null = null;
-import { getDbPath } from "./runtimePaths";
+import path from "path";
+import { mkdirSync } from "fs";
+import { getDefaultAccountDbPath, getMasterDbPath } from "./runtimePaths";
 import type {
   Account,
   AccountSettings,
@@ -11,7 +13,6 @@ import type {
   Message,
   User
 } from "./data";
-import { accounts as seedAccounts, folders as seedFolders } from "./data";
 import { decodeSecret, encodeSecret, shouldStorePasswordInDb } from "./secret";
 import { applyCachedCredentials } from "./credentials";
 import { CALENDAR_INVITE_FLAG, normalizeImapFlags } from "./messageFlags";
@@ -19,34 +20,80 @@ import { normalizeAccountDateFormat } from "./dateFormatting";
 import { withDbWriteRetry } from "./dbWriteRetry";
 import { randomUUID } from "crypto";
 
-let dbInstance: any | null = null;
-let initialized = false;
+let masterDbInstance: any | null = null;
+let masterInitialized = false;
+const accountDbInstances = new Map<string, any>();
+const accountDbInitialized = new Set<string>();
 
-async function getDb() {
-  if (!dbInstance) {
-    if (!DatabaseCtor) {
-      try {
-        const sqliteModule = await sqliteModulePromise();
-        DatabaseCtor = sqliteModule.Database as any;
-      } catch (error) {
-        throw new Error(
-          "bun:sqlite is unavailable in this runtime. Run the app with Bun (not Node)."
-        );
-      }
-    }
-    dbInstance = new DatabaseCtor(getDbPath());
-    dbInstance.exec("PRAGMA journal_mode = WAL;");
-    dbInstance.exec("PRAGMA busy_timeout = 15000;");
-    dbInstance.exec("PRAGMA foreign_keys = ON;");
+async function ensureDatabaseCtor() {
+  if (DatabaseCtor) return;
+  try {
+    const sqliteModule = await sqliteModulePromise();
+    DatabaseCtor = sqliteModule.Database as any;
+  } catch {
+    throw new Error("bun:sqlite is unavailable in this runtime. Run the app with Bun (not Node).");
   }
-  if (!initialized && dbInstance) {
-    initSchema(dbInstance);
-    initialized = true;
-  }
-  return dbInstance;
 }
 
-function initSchema(db: any) {
+function configureDb(db: any) {
+  db.exec("PRAGMA journal_mode = WAL;");
+  db.exec("PRAGMA busy_timeout = 15000;");
+  db.exec("PRAGMA foreign_keys = ON;");
+}
+
+function ensureDbParentDir(dbPath: string) {
+  mkdirSync(path.dirname(dbPath), { recursive: true });
+}
+
+function mapInviteRow(row: any): InviteCode {
+  return {
+    code: row.code,
+    role: row.role,
+    maxUses: row.maxUses === null ? null : Number(row.maxUses),
+    uses: row.uses ?? 0,
+    expiresAt: row.expiresAt === null ? null : Number(row.expiresAt)
+  };
+}
+
+function createAdminInvite(db: any): InviteCode {
+  const adminInvite: InviteCode = {
+    code: randomUUID(),
+    role: "admin",
+    maxUses: 1,
+    uses: 0,
+    expiresAt: null
+  };
+  db.prepare(`INSERT INTO invite_codes (code, role, maxUses, uses, expiresAt) VALUES (?, ?, ?, ?, ?)`).run(
+    adminInvite.code,
+    adminInvite.role,
+    adminInvite.maxUses,
+    adminInvite.uses,
+    adminInvite.expiresAt
+  );
+  return adminInvite;
+}
+
+function getUsableAdminInvite(db: any): InviteCode | null {
+  const row = db
+    .prepare(
+      `SELECT code, role, maxUses, uses, expiresAt
+       FROM invite_codes
+       WHERE role = 'admin'
+         AND (expiresAt IS NULL OR expiresAt >= ?)
+         AND (maxUses IS NULL OR uses < maxUses)
+       ORDER BY uses ASC, code ASC
+       LIMIT 1`
+    )
+    .get(Date.now()) as any;
+  if (!row) return null;
+  return mapInviteRow(row);
+}
+
+function ensureAdminInvite(db: any): InviteCode {
+  return getUsableAdminInvite(db) ?? createAdminInvite(db);
+}
+
+function initMasterSchema(db: any) {
   db.exec(`
     CREATE TABLE IF NOT EXISTS accounts (
       id TEXT PRIMARY KEY,
@@ -55,6 +102,7 @@ function initSchema(db: any) {
       avatar TEXT NOT NULL,
       ownerUserId TEXT,
       settings TEXT,
+      dbPath TEXT,
       imapHost TEXT NOT NULL,
       imapPort INTEGER NOT NULL,
       imapSecure INTEGER NOT NULL,
@@ -67,6 +115,37 @@ function initSchema(db: any) {
       smtpPassword TEXT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS users (
+      id TEXT PRIMARY KEY,
+      email TEXT NOT NULL UNIQUE,
+      role TEXT NOT NULL,
+      createdAt INTEGER NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS user_accounts (
+      userId TEXT NOT NULL,
+      accountId TEXT NOT NULL,
+      PRIMARY KEY (userId, accountId)
+    );
+
+    CREATE TABLE IF NOT EXISTS invite_codes (
+      code TEXT PRIMARY KEY,
+      role TEXT NOT NULL,
+      maxUses INTEGER,
+      uses INTEGER DEFAULT 0,
+      expiresAt INTEGER
+    );
+  `);
+
+  const userCount = db.prepare(`SELECT COUNT(*) as count FROM users`).get() as { count: number };
+  if (userCount.count === 0) {
+    const adminInvite = ensureAdminInvite(db);
+    console.info(`[noctua] Admin invite code: ${adminInvite.code}`);
+  }
+}
+
+function initAccountSchema(db: any) {
+  db.exec(`
     CREATE TABLE IF NOT EXISTS folders (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
@@ -110,7 +189,9 @@ function initSchema(db: any) {
       flagged INTEGER DEFAULT 0,
       deleted INTEGER DEFAULT 0,
       draft INTEGER DEFAULT 0,
-      recent INTEGER DEFAULT 0
+      recent INTEGER DEFAULT 0,
+      category TEXT,
+      categoryScore REAL
     );
 
     CREATE TABLE IF NOT EXISTS attachments (
@@ -145,27 +226,6 @@ function initSchema(db: any) {
       supportsQresync INTEGER
     );
 
-    CREATE TABLE IF NOT EXISTS users (
-      id TEXT PRIMARY KEY,
-      email TEXT NOT NULL UNIQUE,
-      role TEXT NOT NULL,
-      createdAt INTEGER NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS user_accounts (
-      userId TEXT NOT NULL,
-      accountId TEXT NOT NULL,
-      PRIMARY KEY (userId, accountId)
-    );
-
-    CREATE TABLE IF NOT EXISTS invite_codes (
-      code TEXT PRIMARY KEY,
-      role TEXT NOT NULL,
-      maxUses INTEGER,
-      uses INTEGER DEFAULT 0,
-      expiresAt INTEGER
-    );
-
     CREATE VIRTUAL TABLE IF NOT EXISTS message_fts
     USING fts5(messageId, subject, fromAddr, toAddr, ccAddr, bccAddr, body, preview);
 
@@ -179,234 +239,65 @@ function initSchema(db: any) {
       ON messages(accountId, threadId, dateValue DESC);
     CREATE INDEX IF NOT EXISTS idx_messages_account_flagged_thread
       ON messages(accountId, flagged, threadId);
+    CREATE INDEX IF NOT EXISTS idx_messages_category
+      ON messages(accountId, category, dateValue DESC);
     CREATE INDEX IF NOT EXISTS idx_threads_account_latest
       ON threads(accountId, latestDateValue DESC);
     CREATE INDEX IF NOT EXISTS idx_attachments_message
       ON attachments(messageId);
   `);
+}
 
-  const ensureColumn = (table: string, column: string, type: string) => {
-    try {
-      const columns = (db.prepare(`PRAGMA table_info(${table})`).all() as any[]).map(
-        (row) => row.name
-      );
-      if (!columns.includes(column)) {
-        db.exec(`ALTER TABLE ${table} ADD COLUMN "${column}" ${type}`);
-      }
-    } catch {
-      // ignore
-    }
-  };
-
-  ensureColumn("messages", "ccAddr", "TEXT");
-  ensureColumn("messages", "bccAddr", "TEXT");
-  ensureColumn("messages", "references", "TEXT");
-  ensureColumn("messages", "xForwardedMessageId", "TEXT");
-  ensureColumn("messages", "parentId", "TEXT");
-  ensureColumn("messages", "mailboxPath", "TEXT");
-  ensureColumn("messages", "imapUid", "INTEGER");
-  ensureColumn("messages", "flags", "TEXT");
-  ensureColumn("messages", "priority", "TEXT");
-  ensureColumn("messages", "seen", "INTEGER");
-  ensureColumn("messages", "answered", "INTEGER");
-  ensureColumn("messages", "flagged", "INTEGER");
-  ensureColumn("messages", "deleted", "INTEGER");
-  ensureColumn("messages", "draft", "INTEGER");
-  ensureColumn("messages", "recent", "INTEGER");
-  ensureColumn("folders", "specialUse", "TEXT");
-  ensureColumn("folders", "flags", "TEXT");
-  ensureColumn("folders", "delimiter", "TEXT");
-  ensureColumn("accounts", "settings", "TEXT");
-  ensureColumn("accounts", "imapPassword", "TEXT");
-  ensureColumn("accounts", "smtpPassword", "TEXT");
-  ensureColumn("accounts", "ownerUserId", "TEXT");
-  ensureColumn("mailbox_state", "uidValidity", "TEXT");
-  ensureColumn("mailbox_state", "highestModSeq", "TEXT");
-  ensureColumn("mailbox_state", "highestUid", "INTEGER");
-  ensureColumn("mailbox_state", "supportsQresync", "INTEGER");
-
-  // Email categorization columns
-  ensureColumn("messages", "category", "TEXT");
-  ensureColumn("messages", "categoryScore", "REAL");
-
-  // Create index for category after column exists
-  try {
-    db.exec(`
-      CREATE INDEX IF NOT EXISTS idx_messages_category
-        ON messages(accountId, category, dateValue DESC)
-    `);
-  } catch {
-    // ignore if index already exists or column doesn't exist yet
+async function getDb() {
+  if (!masterDbInstance) {
+    await ensureDatabaseCtor();
+    const dbPath = getMasterDbPath();
+    ensureDbParentDir(dbPath);
+    masterDbInstance = new DatabaseCtor(dbPath);
+    configureDb(masterDbInstance);
   }
-
-  const ensureFtsSchema = () => {
-    const expected = [
-      "messageId",
-      "subject",
-      "fromAddr",
-      "toAddr",
-      "ccAddr",
-      "bccAddr",
-      "body",
-      "preview"
-    ];
-    let columns: string[] = [];
-    try {
-      columns = (db.prepare(`PRAGMA table_info(message_fts)`).all() as any[]).map(
-        (row) => row.name
-      );
-    } catch {
-      columns = [];
-    }
-    const missing = expected.filter((col) => !columns.includes(col));
-    if (missing.length === 0) return;
-    db.exec(`DROP TABLE IF EXISTS message_fts`);
-    db.exec(
-      `CREATE VIRTUAL TABLE message_fts USING fts5(messageId, subject, fromAddr, toAddr, ccAddr, bccAddr, body, preview)`
-    );
-    db.exec(`
-      INSERT INTO message_fts (messageId, subject, fromAddr, toAddr, ccAddr, bccAddr, body, preview)
-      SELECT id, subject, fromAddr, toAddr, ccAddr, bccAddr, body, preview FROM messages
-    `);
-  };
-
-  ensureFtsSchema();
-  const normalizeLegacyCustomFlagKeyword = () => {
-    const rows = db
-      .prepare(
-        `SELECT id, flags
-         FROM messages
-         WHERE flags IS NOT NULL
-           AND lower(flags) LIKE '%"pinned"%'`
-      )
-      .all() as Array<{ id: string; flags: string }>;
-    if (rows.length === 0) return;
-    const updateFlags = db.prepare(
-      `UPDATE messages
-       SET flags = ?,
-           seen = ?,
-           answered = ?,
-           flagged = ?,
-           deleted = ?,
-           draft = ?,
-           recent = ?,
-           unread = ?
-       WHERE id = ?`
-    );
-    db.transaction((items: Array<{ id: string; flags: string }>) => {
-      items.forEach((row) => {
-        let parsedFlags: string[] | null = null;
-        try {
-          const parsed = JSON.parse(row.flags);
-          parsedFlags = Array.isArray(parsed) ? parsed.map(String) : null;
-        } catch {
-          parsedFlags = null;
-        }
-        if (!parsedFlags) return;
-        const hasLegacyCustomFlagKeyword = parsedFlags.some(
-          (flag) => String(flag).trim().toLowerCase() === "pinned"
-        );
-        if (!hasLegacyCustomFlagKeyword) return;
-        const normalized = normalizeImapFlags(parsedFlags);
-        const system = deriveSystemFlagState(normalized);
-        updateFlags.run(
-          JSON.stringify(normalized),
-          system.seen,
-          system.answered,
-          system.flagged,
-          system.deleted,
-          system.draft,
-          system.recent,
-          system.unread,
-          row.id
-        );
-      });
-    })(rows);
-  };
-  normalizeLegacyCustomFlagKeyword();
-
-  const accountCount = db.prepare(`SELECT COUNT(*) as count FROM accounts`).get() as {
-    count: number;
-  };
-  const userCount = db.prepare(`SELECT COUNT(*) as count FROM users`).get() as { count: number };
-  if (accountCount.count === 0) {
-    const insert = db.prepare(`
-      INSERT INTO accounts (
-        id, name, email, avatar,
-        ownerUserId,
-        imapHost, imapPort, imapSecure, imapUser, imapPassword,
-        smtpHost, smtpPort, smtpSecure, smtpUser, smtpPassword
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-    db.transaction(() => {
-      seedAccounts.forEach((account) => {
-        insert.run(
-          account.id,
-          account.name,
-          account.email,
-          account.avatar,
-          account.ownerUserId ?? null,
-          account.imap.host,
-          account.imap.port,
-          account.imap.secure ? 1 : 0,
-          account.imap.user,
-          shouldStorePasswordInDb() ? encodeSecret(account.imap.password) : "",
-          account.smtp.host,
-          account.smtp.port,
-          account.smtp.secure ? 1 : 0,
-          account.smtp.user,
-          shouldStorePasswordInDb() ? encodeSecret(account.smtp.password) : ""
-        );
-      });
-    })();
+  if (!masterInitialized && masterDbInstance) {
+    initMasterSchema(masterDbInstance);
+    masterInitialized = true;
   }
+  return masterDbInstance;
+}
 
-  const folderCount = db.prepare(`SELECT COUNT(*) as count FROM folders`).get() as {
-    count: number;
-  };
-  if (folderCount.count === 0 && seedFolders.length > 0) {
-    const insert = db.prepare(
-      `INSERT INTO folders (id, name, parentId, accountId, count, specialUse, flags, delimiter) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-    );
-    db.transaction(() => {
-      seedFolders.forEach((folder) => {
-        insert.run(
-          folder.id,
-          folder.name,
-          folder.parentId ?? null,
-          folder.accountId,
-          folder.count,
-          folder.specialUse ?? null,
-          folder.flags ? JSON.stringify(folder.flags) : null,
-          folder.delimiter ?? null
-        );
-      });
-    })();
+export async function initializeMasterDb() {
+  await getDb();
+}
+
+async function resolveAccountDbPath(accountId: string) {
+  const master = await getDb();
+  const row = master
+    .prepare(`SELECT id, dbPath FROM accounts WHERE id = ?`)
+    .get(accountId) as { id?: string; dbPath?: string | null } | undefined;
+  const defaultPath = getDefaultAccountDbPath(accountId);
+  if (!row?.id) {
+    return defaultPath;
   }
-  if (userCount.count === 0) {
-    const inviteCount = db.prepare(`SELECT COUNT(*) as count FROM invite_codes`).get() as {
-      count: number;
-    };
-    if (inviteCount.count === 0) {
-      const adminInvite: InviteCode = {
-        code: randomUUID(),
-        role: "admin",
-        maxUses: 1,
-        uses: 0,
-        expiresAt: null
-      };
-      db.prepare(
-        `INSERT INTO invite_codes (code, role, maxUses, uses, expiresAt) VALUES (?, ?, ?, ?, ?)`
-      ).run(
-        adminInvite.code,
-        adminInvite.role,
-        adminInvite.maxUses,
-        adminInvite.uses,
-        adminInvite.expiresAt
-      );
-      console.info(`[noctua] Admin invite code: ${adminInvite.code}`);
-    }
+  if (row.dbPath && row.dbPath.trim().length > 0) {
+    return row.dbPath;
   }
+  master.prepare(`UPDATE accounts SET dbPath = ? WHERE id = ?`).run(defaultPath, accountId);
+  return defaultPath;
+}
+
+async function getAccountDb(accountId: string) {
+  const dbPath = await resolveAccountDbPath(accountId);
+  if (!accountDbInstances.has(dbPath)) {
+    await ensureDatabaseCtor();
+    ensureDbParentDir(dbPath);
+    const accountDb = new DatabaseCtor(dbPath);
+    configureDb(accountDb);
+    accountDbInstances.set(dbPath, accountDb);
+  }
+  const accountDb = accountDbInstances.get(dbPath)!;
+  if (!accountDbInitialized.has(dbPath)) {
+    initAccountSchema(accountDb);
+    accountDbInitialized.add(dbPath);
+  }
+  return accountDb;
 }
 
 export type GroupMeta = { key: string; label: string; count: number };
@@ -443,11 +334,11 @@ export async function saveAccounts(nextAccounts: Account[]) {
     const db = await getDb();
     const insert = db.prepare(`
       INSERT OR REPLACE INTO accounts (
-        id, name, email, avatar, ownerUserId,
+        id, name, email, avatar, ownerUserId, dbPath,
         settings,
         imapHost, imapPort, imapSecure, imapUser, imapPassword,
         smtpHost, smtpPort, smtpSecure, smtpUser, smtpPassword
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     db.transaction(() => {
       db.exec(`DELETE FROM accounts`);
@@ -459,6 +350,7 @@ export async function saveAccounts(nextAccounts: Account[]) {
           account.email,
           account.avatar,
           account.ownerUserId ?? null,
+          getDefaultAccountDbPath(account.id),
           settings ? JSON.stringify(settings) : null,
           account.imap.host,
           account.imap.port,
@@ -545,16 +437,7 @@ export async function saveUserAccounts(items: { userId: string; accountId: strin
 export async function getInviteCodes() {
   const db = await getDb();
   const rows = db.prepare(`SELECT * FROM invite_codes`).all() as any[];
-  return rows.map(
-    (row) =>
-      ({
-        code: row.code,
-        role: row.role,
-        maxUses: row.maxUses === null ? null : Number(row.maxUses),
-        uses: row.uses ?? 0,
-        expiresAt: row.expiresAt === null ? null : Number(row.expiresAt)
-      }) as InviteCode
-  );
+  return rows.map(mapInviteRow);
 }
 
 export async function saveInviteCodes(items: InviteCode[]) {
@@ -572,44 +455,39 @@ export async function saveInviteCodes(items: InviteCode[]) {
   });
 }
 
-export async function getFolders(accountId?: string) {
+async function listAccountIdsFromMaster() {
   const db = await getDb();
-  const rows = accountId
-    ? (db.prepare(`SELECT * FROM folders WHERE accountId = ?`).all(accountId) as any[])
-    : (db.prepare(`SELECT * FROM folders`).all() as any[]);
-  const counts = accountId
-    ? (db
-        .prepare(
-          `SELECT folderId, COUNT(*) as count
-           FROM messages
-           WHERE accountId = ? AND unread = 1
-           GROUP BY folderId`
-        )
-        .all(accountId) as any[])
-    : (db
-        .prepare(
-          `SELECT folderId, COUNT(*) as count
-           FROM messages
-           WHERE unread = 1
-           GROUP BY folderId`
-        )
-        .all() as any[]);
-  const totals = accountId
-    ? (db
-        .prepare(
-          `SELECT folderId, COUNT(*) as count
-           FROM messages
-           WHERE accountId = ?
-           GROUP BY folderId`
-        )
-        .all(accountId) as any[])
-    : (db
-        .prepare(
-          `SELECT folderId, COUNT(*) as count
-           FROM messages
-           GROUP BY folderId`
-        )
-        .all() as any[]);
+  const rows = db.prepare(`SELECT id FROM accounts ORDER BY id ASC`).all() as Array<{ id: string }>;
+  return rows.map((row) => row.id).filter(Boolean);
+}
+
+async function getAccountEmail(accountId: string) {
+  const db = await getDb();
+  const row = db
+    .prepare(`SELECT email FROM accounts WHERE id = ?`)
+    .get(accountId) as { email?: string | null } | undefined;
+  return row?.email?.toLowerCase() ?? "";
+}
+
+async function getFoldersForAccount(accountId: string) {
+  const db = await getAccountDb(accountId);
+  const rows = db.prepare(`SELECT * FROM folders WHERE accountId = ?`).all(accountId) as any[];
+  const counts = db
+    .prepare(
+      `SELECT folderId, COUNT(*) as count
+       FROM messages
+       WHERE accountId = ? AND unread = 1
+       GROUP BY folderId`
+    )
+    .all(accountId) as any[];
+  const totals = db
+    .prepare(
+      `SELECT folderId, COUNT(*) as count
+       FROM messages
+       WHERE accountId = ?
+       GROUP BY folderId`
+    )
+    .all(accountId) as any[];
   const countMap = new Map<string, number>();
   counts.forEach((row) => {
     if (row.folderId) {
@@ -635,20 +513,30 @@ export async function getFolders(accountId?: string) {
   })) as Folder[];
 }
 
-export async function saveFolders(nextFolders: Folder[]) {
-  return withDbWriteRetry("saveFolders", async () => {
-    const db = await getDb();
+export async function getFolders(accountId?: string) {
+  if (accountId) {
+    return getFoldersForAccount(accountId);
+  }
+  const accountIds = await listAccountIdsFromMaster();
+  const folderSets = await Promise.all(accountIds.map((id) => getFoldersForAccount(id)));
+  return folderSets.flat();
+}
+
+export async function saveFoldersForAccount(accountId: string, nextFolders: Folder[]) {
+  return withDbWriteRetry("saveFoldersForAccount", async () => {
+    const db = await getAccountDb(accountId);
     const insert = db.prepare(
       `INSERT OR REPLACE INTO folders (id, name, parentId, accountId, count, specialUse, flags, delimiter) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
     );
+    const deleteForAccount = db.prepare(`DELETE FROM folders WHERE accountId = ?`);
     db.transaction(() => {
-      db.exec(`DELETE FROM folders`);
+      deleteForAccount.run(accountId);
       nextFolders.forEach((folder) => {
         insert.run(
           folder.id,
           folder.name,
           folder.parentId ?? null,
-          folder.accountId,
+          accountId,
           folder.count,
           folder.specialUse ?? null,
           folder.flags ? JSON.stringify(folder.flags) : null,
@@ -660,7 +548,7 @@ export async function saveFolders(nextFolders: Folder[]) {
 }
 
 async function recomputeThreadsForAccountInternal(accountId: string, threadIds?: string[]) {
-  const db = await getDb();
+  const db = await getAccountDb(accountId);
   if (threadIds && threadIds.length > 0) {
     const unique = Array.from(new Set(threadIds.filter(Boolean)));
     if (unique.length === 0) return;
@@ -717,7 +605,7 @@ export async function recomputeThreadsForAccount(accountId: string, threadIds?: 
 
 export async function recomputeThreadIdsForAccount(accountId: string) {
   return withDbWriteRetry("recomputeThreadIdsForAccount", async () => {
-    const db = await getDb();
+    const db = await getAccountDb(accountId);
     const rows = db
       .prepare(
         `SELECT id, messageId, inReplyTo, "references", threadId, parentId, dateValue
@@ -809,7 +697,7 @@ export async function recomputeThreadIdsForAccount(accountId: string) {
 }
 
 export async function getMailboxState(accountId: string, folderId: string) {
-  const db = await getDb();
+  const db = await getAccountDb(accountId);
   const row = db
     .prepare(
       `SELECT accountId, folderId, mailboxPath, uidValidity, highestModSeq, highestUid, supportsQresync FROM mailbox_state WHERE accountId = ? AND folderId = ?`
@@ -839,7 +727,7 @@ export async function getMailboxState(accountId: string, folderId: string) {
 
 export async function saveMailboxState(state: MailboxState) {
   return withDbWriteRetry("saveMailboxState", async () => {
-    const db = await getDb();
+    const db = await getAccountDb(state.accountId);
     const insert = db.prepare(`
       INSERT OR REPLACE INTO mailbox_state
       (folderId, accountId, mailboxPath, uidValidity, highestModSeq, highestUid, supportsQresync)
@@ -1150,13 +1038,8 @@ async function getGroupCounts(params: {
 }) {
   const { accountId, folderId, query, groupBy, fields, badges, attachmentsOnly, excludedFolderIds } =
     params;
-  const db = await getDb();
-
-  // Get account email for "from:me" support
-  const accountRow = db
-    .prepare(`SELECT email FROM accounts WHERE id = ?`)
-    .get(accountId) as { email?: string | null } | undefined;
-  const accountEmail = accountRow?.email?.toLowerCase() ?? "";
+  const db = await getAccountDb(accountId);
+  const accountEmail = await getAccountEmail(accountId);
 
   const { ftsQuery, fromTerms, toTerms, inTerms, rawQuery } = parseSearchInput(
     query,
@@ -1364,15 +1247,10 @@ async function getTotalCount(params: {
   attachmentsOnly?: boolean;
   excludedFolderIds?: string[] | null;
 }) {
-  const db = await getDb();
+  const db = await getAccountDb(params.accountId);
   const { accountId, folderId, query, fields, badges, attachmentsOnly, excludedFolderIds } =
     params;
-
-  // Get account email for "from:me" support
-  const accountRow = db
-    .prepare(`SELECT email FROM accounts WHERE id = ?`)
-    .get(accountId) as { email?: string | null } | undefined;
-  const accountEmail = accountRow?.email?.toLowerCase() ?? "";
+  const accountEmail = await getAccountEmail(accountId);
 
   const { ftsQuery, fromTerms, toTerms, inTerms, rawQuery } = parseSearchInput(
     query,
@@ -1477,16 +1355,13 @@ export async function listRelatedMessages(params: {
     attachmentsOnly,
     excludedFolderIds
   } = params;
-  const db = await getDb();
+  const db = await getAccountDb(accountId);
   const normalizedId = relatedId.trim();
   if (!normalizedId) {
     return { items: [] as Message[], groups: [], total: 0, hasMore: false, baseCount: 0 };
   }
 
-  const accountRow = db
-    .prepare(`SELECT email FROM accounts WHERE id = ?`)
-    .get(accountId) as { email?: string | null } | undefined;
-  const accountEmail = accountRow?.email?.toLowerCase() ?? "";
+  const accountEmail = await getAccountEmail(accountId);
 
   const findTarget = (id: string) =>
     db
@@ -1806,14 +1681,9 @@ export async function listMessages(params: {
     attachmentsOnly,
     excludedFolderIds
   } = params;
-  const db = await getDb();
+  const db = await getAccountDb(accountId);
   const offset = (page - 1) * pageSize;
-
-  // Get account email for "from:me" support
-  const accountRow = db
-    .prepare(`SELECT email FROM accounts WHERE id = ?`)
-    .get(accountId) as { email?: string | null } | undefined;
-  const accountEmail = accountRow?.email?.toLowerCase() ?? "";
+  const accountEmail = await getAccountEmail(accountId);
 
   const { ftsQuery, fromTerms, toTerms, inTerms, rawQuery } = parseSearchInput(
     query,
@@ -2023,14 +1893,9 @@ export async function listThreads(params: {
     attachmentsOnly,
     excludedFolderIds
   } = params;
-  const db = await getDb();
+  const db = await getAccountDb(accountId);
   const offset = (page - 1) * pageSize;
-
-  // Get account email for "from:me" support
-  const accountRow = db
-    .prepare(`SELECT email FROM accounts WHERE id = ?`)
-    .get(accountId) as { email?: string | null } | undefined;
-  const accountEmail = accountRow?.email?.toLowerCase() ?? "";
+  const accountEmail = await getAccountEmail(accountId);
 
   const { ftsQuery, fromTerms, toTerms, inTerms, rawQuery } = parseSearchInput(
     query,
@@ -2390,7 +2255,7 @@ export async function listThreadMessages(params: {
   if (uniqueThreads.length === 0 && uniqueMessages.length === 0) {
     return { items: [] as Message[] };
   }
-  const db = await getDb();
+  const db = await getAccountDb(accountId);
   const clauses: string[] = [];
   const args: any[] = [accountId];
   if (uniqueThreads.length > 0) {
@@ -2482,7 +2347,7 @@ export async function listThreadMessages(params: {
 
 export async function getThreadIdsByMessageIds(accountId: string, messageIds: string[]) {
   if (messageIds.length === 0) return new Map<string, string>();
-  const db = await getDb();
+  const db = await getAccountDb(accountId);
   const rows = db
     .prepare(
       `SELECT messageId, threadId FROM messages WHERE accountId = ? AND messageId IN (${messageIds
@@ -2501,7 +2366,7 @@ export async function getThreadIdsByMessageIds(accountId: string, messageIds: st
 
 export async function getMessageIdsByMessageIds(accountId: string, messageIds: string[]) {
   if (messageIds.length === 0) return new Map<string, string>();
-  const db = await getDb();
+  const db = await getAccountDb(accountId);
   const rows = db
     .prepare(
       `SELECT messageId, id, dateValue
@@ -2525,7 +2390,7 @@ export async function getMessageIdsByMessageIds(accountId: string, messageIds: s
 
 export async function getFolderIdsByMessageIds(accountId: string, messageIds: string[]) {
   if (messageIds.length === 0) return new Map<string, string>();
-  const db = await getDb();
+  const db = await getAccountDb(accountId);
   const rows = db
     .prepare(
       `SELECT id, folderId
@@ -2557,7 +2422,7 @@ export async function upsertMessages(
       new Promise<void>((resolve) => {
         setTimeout(resolve, 0);
       });
-    const db = await getDb();
+    const db = await getAccountDb(accountId);
     const deleteSql = folderId
       ? `DELETE FROM messages WHERE accountId = ? AND folderId = ?`
       : `DELETE FROM messages WHERE accountId = ?`;
@@ -2774,7 +2639,7 @@ export async function upsertMessages(
 }
 
 export async function getMessageById(accountId: string, messageId: string) {
-  const db = await getDb();
+  const db = await getAccountDb(accountId);
   const row = db
     .prepare(`SELECT * FROM messages WHERE accountId = ? AND id = ?`)
     .get(accountId, messageId) as any;
@@ -2828,15 +2693,15 @@ export async function getMessageById(accountId: string, messageId: string) {
   } as Message;
 }
 
-export async function getAttachmentMeta(messageId: string, attachmentId: string) {
-  const db = await getDb();
+export async function getAttachmentMeta(accountId: string, messageId: string, attachmentId: string) {
+  const db = await getAccountDb(accountId);
   return db
     .prepare(`SELECT * FROM attachments WHERE messageId = ? AND id = ?`)
     .get(messageId, attachmentId) as any;
 }
 
-export async function getAttachmentIds(messageId: string) {
-  const db = await getDb();
+export async function getAttachmentIds(accountId: string, messageId: string) {
+  const db = await getAccountDb(accountId);
   return (db.prepare(`SELECT id FROM attachments WHERE messageId = ?`).all(messageId) as any[]).map(
     (row) => row.id as string
   );
@@ -2846,7 +2711,7 @@ export async function listMessageFileRefs(
   accountId: string,
   folderId: string | null = null
 ) {
-  const db = await getDb();
+  const db = await getAccountDb(accountId);
   const rows = (folderId
     ? db
         .prepare(
@@ -2882,7 +2747,7 @@ export async function listMessageFileRefs(
 }
 
 export async function getLatestMessageDate(accountId: string, mailboxPath?: string) {
-  const db = await getDb();
+  const db = await getAccountDb(accountId);
   if (mailboxPath) {
     const row = db
       .prepare(`SELECT MAX(dateValue) as maxDate FROM messages WHERE accountId = ? AND mailboxPath = ?`)
@@ -2896,7 +2761,7 @@ export async function getLatestMessageDate(accountId: string, mailboxPath?: stri
 }
 
 export async function getLatestMessageUid(accountId: string, mailboxPath?: string) {
-  const db = await getDb();
+  const db = await getAccountDb(accountId);
   if (mailboxPath) {
     const row = db
       .prepare(
@@ -2919,7 +2784,7 @@ export async function updateMessageFolder(
   imapUid?: number | null
 ) {
   return withDbWriteRetry("updateMessageFolder", async () => {
-    const db = await getDb();
+    const db = await getAccountDb(accountId);
     if (typeof imapUid === "number" && Number.isFinite(imapUid)) {
       db.prepare(
         `UPDATE messages
@@ -2936,7 +2801,7 @@ export async function updateMessageFolder(
 
 export async function deleteMessageById(accountId: string, messageId: string) {
   return withDbWriteRetry("deleteMessageById", async () => {
-    const db = await getDb();
+    const db = await getAccountDb(accountId);
     const row = db
       .prepare(`SELECT threadId FROM messages WHERE accountId = ? AND id = ?`)
       .get(accountId, messageId) as { threadId?: string | null } | undefined;
@@ -2955,7 +2820,7 @@ export async function updateMessageFlags(
   flags: string[]
 ) {
   return withDbWriteRetry("updateMessageFlags", async () => {
-    const db = await getDb();
+    const db = await getAccountDb(accountId);
     const normalizedFlags = normalizeImapFlags(flags);
     const system = deriveSystemFlagState(normalizedFlags);
     db.prepare(
@@ -2992,7 +2857,7 @@ export async function updateMessageFlags(
 
 export async function deleteMessagesByFolderPrefix(accountId: string, folderPrefix: string) {
   return withDbWriteRetry("deleteMessagesByFolderPrefix", async () => {
-    const db = await getDb();
+    const db = await getAccountDb(accountId);
     const prefix = `${accountId}:${folderPrefix}`;
     const threadRows = db
       .prepare(
@@ -3026,7 +2891,7 @@ export async function listRecipientSuggestions(
   limit = 200,
   query?: string | null
 ) {
-  const db = await getDb();
+  const db = await getAccountDb(accountId);
   const rows = db
     .prepare(
       `SELECT toAddr, ccAddr, bccAddr
@@ -3105,7 +2970,7 @@ export async function updateMessagesFolderPrefix(
   newPrefix: string
 ) {
   return withDbWriteRetry("updateMessagesFolderPrefix", async () => {
-    const db = await getDb();
+    const db = await getAccountDb(accountId);
     const oldFull = `${accountId}:${oldPrefix}`;
     const newFull = `${accountId}:${newPrefix}`;
     db.prepare(
@@ -3124,7 +2989,7 @@ export async function recomputeCategoriesForAccount(accountId: string) {
   const { getMessageSource } = await import("@/lib/storage");
   const mailparser = await import("mailparser");
 
-  const db = await getDb();
+  const db = await getAccountDb(accountId);
 
   // Get all message IDs that have source available
   const messageIds = db

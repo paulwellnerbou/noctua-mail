@@ -21,7 +21,7 @@ export async function POST(request: Request) {
   if (message.imapUid && message.mailboxPath) {
     await deleteImapMessage(account, message.mailboxPath, message.imapUid, clientId);
   }
-  const attachmentIds = await getAttachmentIds(message.id);
+  const attachmentIds = await getAttachmentIds(payload.accountId, message.id);
   await deleteMessageById(payload.accountId, message.id);
   await deleteMessageFiles(payload.accountId, message.id, attachmentIds);
   return NextResponse.json({ ok: true });

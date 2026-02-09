@@ -94,7 +94,6 @@ import TopBar from "./mailclient/TopBar";
 import { useMessageDeleteActions } from "./mailclient/useMessageDeleteActions";
 import { useMessageMoveActions, type UndoMoveTarget } from "./mailclient/useMessageMoveActions";
 import type { Account, AccountSettings, Attachment, Folder, Message } from "@/lib/data";
-import { accounts as seedAccounts, folders as seedFolders, messages as seedMessages } from "@/lib/data";
 import AccountSettingsModal from "./AccountSettingsModal";
 import AttachmentsList from "./AttachmentsList";
 import {
@@ -185,12 +184,12 @@ function BottomStatusSection({
 }
 
 export default function MailClient() {
-  const [accounts, setAccounts] = useState<Account[]>(seedAccounts);
-  const [folders, setFolders] = useState<Folder[]>(seedFolders);
-  const [messages, setMessages] = useState<Message[]>(seedMessages);
-  const [activeAccountId, setActiveAccountId] = useState(seedAccounts[0]?.id ?? "");
-  const [activeFolderId, setActiveFolderId] = useState(seedFolders[0]?.id ?? "");
-  const [activeMessageId, setActiveMessageId] = useState(seedMessages[0]?.id ?? "");
+  const [accounts, setAccounts] = useState<Account[]>([]);
+  const [folders, setFolders] = useState<Folder[]>([]);
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [activeAccountId, setActiveAccountId] = useState("");
+  const [activeFolderId, setActiveFolderId] = useState("");
+  const [activeMessageId, setActiveMessageId] = useState("");
   const [query, setQuery] = useState("");
   const [darkMode, setDarkMode] = useState(false);
   const [manageOpen, setManageOpen] = useState(false);
@@ -265,6 +264,7 @@ export default function MailClient() {
   const [collapsedMessages, setCollapsedMessages] = useState<Record<string, boolean>>({});
   const [messageFontScale, setMessageFontScale] = useState<Record<string, number>>({});
   const [authState, setAuthState] = useState<"loading" | "ok" | "unauth">("loading");
+  const [initialDataReady, setInitialDataReady] = useState(false);
   const [sessionTtlSeconds, setSessionTtlSeconds] = useState<number | null>(null);
   const [pendingMessageActions, setPendingMessageActions] = useState<Set<string>>(new Set());
   const [threadDeleteConfirm, setThreadDeleteConfirm] = useState<ThreadDeleteConfirmState | null>(
@@ -589,6 +589,7 @@ export default function MailClient() {
     clearUrlParam("messageId", messageId);
   };
   const listLoading = loadingMessages || refreshingMessages;
+  const emptyListSyncing = isSyncing || syncingFolders.size > 0;
   const selectedSearchFields = useMemo(() => {
     const fields = Object.entries(searchFields)
       .filter(([, enabled]) => enabled)
@@ -3592,6 +3593,7 @@ export default function MailClient() {
 
   const loadInitialData = useCallback(
     async (skipAuthCheck = false) => {
+      setInitialDataReady(false);
       try {
         if (!skipAuthCheck) {
           const me = await apiFetch("/api/auth/me", {
@@ -3612,6 +3614,8 @@ export default function MailClient() {
           apiFetch("/api/accounts"),
           apiFetch("/api/folders")
         ]);
+        let loadedAccounts = false;
+        let loadedFolders = false;
         if (accountsRes.ok) {
           const nextAccounts = (await accountsRes.json()) as Account[];
           setAccounts(nextAccounts);
@@ -3619,14 +3623,19 @@ export default function MailClient() {
             if (nextAccounts.find((account) => account.id === prev)) return prev;
             return nextAccounts[0]?.id ?? prev;
           });
+          loadedAccounts = true;
         } else {
           reportError(await readErrorMessage(accountsRes));
         }
         if (foldersRes.ok) {
           const nextFolders = (await foldersRes.json()) as Folder[];
           setFolders(nextFolders);
+          loadedFolders = true;
         } else {
           reportError(await readErrorMessage(foldersRes));
+        }
+        if (loadedAccounts && loadedFolders) {
+          setInitialDataReady(true);
         }
       } catch {
         setAuthState("unauth");
@@ -3671,8 +3680,10 @@ export default function MailClient() {
 
   // Initial sync on cold start (once per account)
   useEffect(() => {
+    if (!initialDataReady || !activeAccountId) return;
+
     const inboxId = inboxFolder?.id;
-    if (!activeAccountId || !inboxId) return;
+    const hasAccountFolders = accountFolders.length > 0;
 
     if (messages.some((message) => message.accountId === activeAccountId)) {
       initialSyncStatusRef.current[activeAccountId] = "done";
@@ -3684,7 +3695,11 @@ export default function MailClient() {
 
     initialSyncStatusRef.current[activeAccountId] = "running";
     const accountId = activeAccountId;
-    const syncPromise = syncAccountRef.current?.(inboxId, "new");
+    const syncPromise = !hasAccountFolders
+      ? syncAccountRef.current?.(undefined, "full")
+      : inboxId
+        ? syncAccountRef.current?.(inboxId, "new")
+        : syncAccountRef.current?.(undefined, "new");
     if (!syncPromise) {
       delete initialSyncStatusRef.current[accountId];
       return;
@@ -3697,7 +3712,7 @@ export default function MailClient() {
       .catch(() => {
         delete initialSyncStatusRef.current[accountId];
       });
-  }, [activeAccountId, inboxFolder?.id, messages]);
+  }, [activeAccountId, accountFolders.length, inboxFolder?.id, initialDataReady, messages]);
 
   useEffect(() => {
     setMessages([]);
@@ -4287,26 +4302,28 @@ export default function MailClient() {
   }, [dragging, leftWidth]);
 
   const startEditAccount = (account?: Account) => {
-    if (account) {
-      setEditingAccount(account);
-    } else {
-      setEditingAccount({
+    const targetAccount: Account =
+      account ?? {
         id: `acc-${crypto.randomUUID().slice(0, 6)}`,
         name: "",
         email: "",
         avatar: "NW",
         imap: { host: "", port: 993, secure: true, user: "", password: "" },
         smtp: { host: "", port: 587, secure: false, user: "", password: "" }
-      });
-    }
+      };
+    setEditingAccount(targetAccount);
     setManageOpen(true);
     setManageTab("account");
     setImapProbe(null);
     setSmtpProbe(null);
     setImapDetecting(false);
     setSmtpDetecting(false);
-    setImapSecurity("tls");
-    setSmtpSecurity("starttls");
+    setImapSecurity(
+      targetAccount.imap.secure ? "tls" : targetAccount.imap.port === 143 ? "starttls" : "none"
+    );
+    setSmtpSecurity(
+      targetAccount.smtp.secure ? "tls" : targetAccount.smtp.port === 587 ? "starttls" : "none"
+    );
   };
 
   const saveAccount = async () => {
@@ -5593,6 +5610,7 @@ export default function MailClient() {
           setMessages([]);
           setFolders([]);
           setAccounts([]);
+          setInitialDataReady(false);
           setMessagesPage(1);
           setHasMoreMessages(true);
           setTotalMessages(null);
@@ -5917,7 +5935,9 @@ export default function MailClient() {
               >
                 {messageListError
                   ? `Failed to load messages. ${messageListError}`
-                  : "No messages in this folder."}
+                  : emptyListSyncing
+                    ? "Syncing messages…"
+                    : "No messages in this folder."}
               </div>
             )}
             {listLoading && sortedMessages.length > 0 && (
@@ -6085,6 +6105,8 @@ export default function MailClient() {
           smtpProbe={smtpProbe}
           imapSecurity={imapSecurity}
           smtpSecurity={smtpSecurity}
+          onImapSecurityChange={setImapSecurity}
+          onSmtpSecurityChange={setSmtpSecurity}
           onClose={() => setManageOpen(false)}
           onTabChange={setManageTab}
           onSave={manageTab === "account" ? saveAccount : saveAccountSettings}

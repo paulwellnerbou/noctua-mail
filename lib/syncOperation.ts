@@ -1,11 +1,10 @@
 import {
   getAccounts,
   getFolderIdsByMessageIds,
-  getFolders,
   listMessageFileRefs,
   getMessageIdsByMessageIds,
   getThreadIdsByMessageIds,
-  saveFolders,
+  saveFoldersForAccount,
   upsertMessages
 } from "@/lib/db";
 import { deleteMessageFiles, saveAttachmentData, saveMessageSource } from "@/lib/storage";
@@ -258,9 +257,7 @@ export async function runSyncOperation(
     }
   }
 
-  const existing = await getFolders();
-  const nextFolders = [...existing.filter((folder) => folder.accountId !== account.id), ...folders];
-  await saveFolders(nextFolders);
+  await saveFoldersForAccount(account.id, folders);
 
   const newMessages =
     syncMode === "new"

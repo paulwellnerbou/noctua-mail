@@ -3,7 +3,7 @@ import {
   deleteMessagesByFolderPrefix,
   getAccounts,
   getFolders,
-  saveFolders,
+  saveFoldersForAccount,
   updateMessagesFolderPrefix
 } from "@/lib/db";
 import {
@@ -112,9 +112,7 @@ export async function POST(request: Request) {
       `[imap] list folders account=${account.id}${clientId ? ` client=${clientId}` : ""} ${Date.now() - t2}ms`
     );
     const t3 = Date.now();
-    const existing = await getFolders();
-    const next = [...existing.filter((item) => item.accountId !== account.id), ...updated];
-    await saveFolders(next);
+    await saveFoldersForAccount(account.id, updated);
     console.info(`[db] save folders ${Date.now() - t3}ms`);
     console.info(`[folders] delete finished in ${Date.now() - startedAt}ms`);
     return NextResponse.json({ ok: true, action: "deleted", folders: updated });
@@ -147,9 +145,7 @@ export async function POST(request: Request) {
     `[imap] list folders account=${account.id}${clientId ? ` client=${clientId}` : ""} ${Date.now() - t2}ms`
   );
   const t3 = Date.now();
-  const existing = await getFolders();
-  const next = [...existing.filter((item) => item.accountId !== account.id), ...updated];
-  await saveFolders(next);
+  await saveFoldersForAccount(account.id, updated);
   console.info(`[db] save folders ${Date.now() - t3}ms`);
   console.info(`[folders] move finished in ${Date.now() - startedAt}ms`);
   return NextResponse.json({ ok: true, action: "moved", folders: updated });

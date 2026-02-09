@@ -119,12 +119,6 @@ export type Attachment = {
   url?: string;
 };
 
-export const accounts: Account[] = [];
-
-export const folders: Folder[] = [];
-
-export const messages: Message[] = [];
-
 export type User = {
   id: string;
   email: string;

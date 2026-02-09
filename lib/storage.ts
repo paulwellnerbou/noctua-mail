@@ -1,7 +1,14 @@
 import { promises as fs } from "fs";
 import path from "path";
-import { accounts, folders, messages } from "./data";
-import { getAttachmentsDir, getDataDir, getSourcesDir } from "./runtimePaths";
+import type { Account, Folder, Message } from "./data";
+import {
+  getAttachmentMessageDir,
+  getAttachmentsDir,
+  getAttachmentsAccountDir,
+  getDataDir,
+  getSourcesAccountDir,
+  getSourcesDir
+} from "./runtimePaths";
 
 const dataDir = getDataDir();
 const sourcesDir = getSourcesDir();
@@ -34,6 +41,42 @@ function attachmentFileName(accountId: string, messageId: string, attachmentId: 
   return `${safeAccount}-${safeMessage}-${safeAttachment}.bin`;
 }
 
+function sourceObjectFileName(messageId: string) {
+  return `${encodeURIComponent(messageId)}.eml`;
+}
+
+function attachmentObjectFileName(attachmentId: string) {
+  return `${encodeURIComponent(attachmentId)}.bin`;
+}
+
+function sourceFilePath(accountId: string, messageId: string) {
+  return path.join(getSourcesAccountDir(accountId), sourceObjectFileName(messageId));
+}
+
+function sourceLegacyFilePath(accountId: string, messageId: string) {
+  return path.join(sourcesDir, sourceFileName(accountId, messageId));
+}
+
+function attachmentFilePath(accountId: string, messageId: string, attachmentId: string) {
+  return path.join(getAttachmentMessageDir(accountId, messageId), attachmentObjectFileName(attachmentId));
+}
+
+function attachmentLegacyFilePath(accountId: string, messageId: string, attachmentId: string) {
+  return path.join(attachmentsDir, attachmentFileName(accountId, messageId, attachmentId));
+}
+
+async function ensureParentDir(filePath: string) {
+  await fs.mkdir(path.dirname(filePath), { recursive: true });
+}
+
+async function unlinkIfExists(filePath: string) {
+  try {
+    await fs.unlink(filePath);
+  } catch {
+    // ignore missing files
+  }
+}
+
 async function readJson<T>(fileName: string, fallback: T): Promise<T> {
   await ensureDataDir();
   const filePath = path.join(dataDir, fileName);
@@ -53,23 +96,23 @@ async function writeJson<T>(fileName: string, data: T) {
 }
 
 export async function getAccounts() {
-  return readJson("accounts.json", accounts);
+  return readJson<Account[]>("accounts.json", []);
 }
 
-export async function saveAccounts(nextAccounts: typeof accounts) {
+export async function saveAccounts(nextAccounts: Account[]) {
   await writeJson("accounts.json", nextAccounts);
 }
 
 export async function getFolders() {
-  return readJson("folders.json", folders);
+  return readJson<Folder[]>("folders.json", []);
 }
 
-export async function saveFolders(nextFolders: typeof folders) {
+export async function saveFolders(nextFolders: Folder[]) {
   await writeJson("folders.json", nextFolders);
 }
 
 export async function getMessages() {
-  const data = await readJson("messages.json", messages);
+  const data = await readJson<Message[]>("messages.json", []);
   let mutated = false;
 
   const migrated = data.map((message) => {
@@ -103,7 +146,7 @@ export async function getMessages() {
   return deduped;
 }
 
-export async function saveMessages(nextMessages: typeof messages) {
+export async function saveMessages(nextMessages: Message[]) {
   await writeJson("messages.json", nextMessages);
 }
 
@@ -113,15 +156,15 @@ export async function saveMessageSource(
   source: string
 ) {
   await ensureSourcesDir();
-  const filePath = path.join(sourcesDir, sourceFileName(accountId, messageId));
+  const filePath = sourceFilePath(accountId, messageId);
+  await ensureParentDir(filePath);
   await fs.writeFile(filePath, source);
 }
 
 export async function getMessageSource(accountId: string, messageId: string) {
   await ensureSourcesDir();
-  const filePath = path.join(sourcesDir, sourceFileName(accountId, messageId));
   try {
-    return await fs.readFile(filePath, "utf-8");
+    return await fs.readFile(sourceFilePath(accountId, messageId), "utf-8");
   } catch {
     return null;
   }
@@ -134,7 +177,8 @@ export async function saveAttachmentData(
   data: Buffer
 ) {
   await ensureAttachmentsDir();
-  const filePath = path.join(attachmentsDir, attachmentFileName(accountId, messageId, attachmentId));
+  const filePath = attachmentFilePath(accountId, messageId, attachmentId);
+  await ensureParentDir(filePath);
   await fs.writeFile(filePath, data);
 }
 
@@ -144,9 +188,8 @@ export async function getAttachmentData(
   attachmentId: string
 ) {
   await ensureAttachmentsDir();
-  const filePath = path.join(attachmentsDir, attachmentFileName(accountId, messageId, attachmentId));
   try {
-    return await fs.readFile(filePath);
+    return await fs.readFile(attachmentFilePath(accountId, messageId, attachmentId));
   } catch {
     return null;
   }
@@ -154,12 +197,10 @@ export async function getAttachmentData(
 
 export async function deleteMessageSource(accountId: string, messageId: string) {
   await ensureSourcesDir();
-  const filePath = path.join(sourcesDir, sourceFileName(accountId, messageId));
-  try {
-    await fs.unlink(filePath);
-  } catch {
-    // ignore missing files
-  }
+  await Promise.all([
+    unlinkIfExists(sourceFilePath(accountId, messageId)),
+    unlinkIfExists(sourceLegacyFilePath(accountId, messageId))
+  ]);
 }
 
 export async function deleteAttachmentData(
@@ -168,12 +209,10 @@ export async function deleteAttachmentData(
   attachmentId: string
 ) {
   await ensureAttachmentsDir();
-  const filePath = path.join(attachmentsDir, attachmentFileName(accountId, messageId, attachmentId));
-  try {
-    await fs.unlink(filePath);
-  } catch {
-    // ignore missing files
-  }
+  await Promise.all([
+    unlinkIfExists(attachmentFilePath(accountId, messageId, attachmentId)),
+    unlinkIfExists(attachmentLegacyFilePath(accountId, messageId, attachmentId))
+  ]);
 }
 
 export async function deleteMessageFiles(

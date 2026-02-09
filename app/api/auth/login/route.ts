@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { buildSessionPayload, setSessionCookie } from "@/lib/auth";
 import { getAccounts, getUserAccounts, getUsers, saveAccounts } from "@/lib/db";
 import { verifyImapCredentials } from "@/lib/mail/imapAuth";
-import { shouldStorePasswordInDb, encodeSecret } from "@/lib/secret";
+import { shouldStorePasswordInDb } from "@/lib/secret";
 
 export async function POST(request: Request) {
   const clientId = request.headers.get("x-noctua-client") ?? undefined;
@@ -33,8 +33,8 @@ export async function POST(request: Request) {
   const prevImapPass = account.imap.password;
   const prevSmtpPass = account.smtp.password;
   if (shouldStorePasswordInDb()) {
-    account.imap.password = password ? encodeSecret(password) : "";
-    account.smtp.password = password ? encodeSecret(password) : "";
+    account.imap.password = password;
+    account.smtp.password = password;
   } else {
     account.imap.password = "";
     account.smtp.password = "";
