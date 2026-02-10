@@ -64,6 +64,7 @@ export function classifyEmail(
   };
 
   const signals: string[] = [];
+  let eventSignalStrength = 0;
 
   // Extract key fields
   const fromAddress = extractEmailAddress(parsed.from);
@@ -98,18 +99,57 @@ export function classifyEmail(
   // mailparser combines List-* headers into a single "list" object
   const hasListHeader = hasHeader('list') || hasHeader('list-id') || hasHeader('list-unsubscribe');
   const precedence = getHeader('precedence')?.toLowerCase();
+  const autoSubmitted = getHeader('auto-submitted')?.toLowerCase();
+  const hasInReplyTo = hasHeader('in-reply-to');
+  const hasReferences = hasHeader('references');
+  const hasAutoResponseSuppress = hasHeader('x-auto-response-suppress');
+  const headerNames = Array.from(headers.keys()).map((key) => key.toLowerCase());
 
   // RFC 2369 List headers are the strongest signal for newsletters
   // These headers are specifically designed for mailing lists - nearly 100% reliable
   if (hasListHeader) {
-    scores.newsletter += 0.95;
+    scores.newsletter += 0.5;
     signals.push('list-header: detected (RFC 2369)');
   }
 
   // Precedence: bulk usually indicates newsletters
   if (precedence === 'bulk') {
-    scores.newsletter += 0.3;
+    scores.newsletter += 0.2;
     signals.push('precedence: bulk');
+  }
+
+  // Notification/event metadata is common in activity-driven automated emails.
+  if (hasInReplyTo || hasReferences) {
+    scores.notification += 0.45;
+    eventSignalStrength += 0.45;
+    signals.push('headers: thread-context');
+  }
+
+  if (autoSubmitted?.includes('auto-generated') || autoSubmitted?.includes('auto-replied')) {
+    scores.notification += 0.35;
+    eventSignalStrength += 0.35;
+    signals.push(`headers: auto-submitted (${autoSubmitted})`);
+  }
+
+  if (hasAutoResponseSuppress) {
+    scores.notification += 0.25;
+    eventSignalStrength += 0.25;
+    signals.push('headers: auto-response-suppress');
+  }
+
+  // Generic metadata header-name signals, intentionally provider-agnostic.
+  const eventMetadataHeaderCount = headerNames
+    .filter((name) => !['in-reply-to', 'references', 'auto-submitted', 'x-auto-response-suppress'].includes(name))
+    .filter((name) =>
+      /\b(notification|notify|reason|activity|event|issue|ticket|thread|discussion|comment|pull|merge|review|approval)\b/.test(
+        name
+      )
+    ).length;
+  if (eventMetadataHeaderCount > 0) {
+    const boost = Math.min(0.45, eventMetadataHeaderCount * 0.15);
+    scores.notification += boost;
+    eventSignalStrength += boost;
+    signals.push(`headers: event-metadata (${eventMetadataHeaderCount})`);
   }
 
   // ============================================================================
@@ -159,14 +199,21 @@ export function classifyEmail(
   // ============================================================================
 
   // Newsletter patterns (including promotional content)
-  if (/\b(newsletter|digest|weekly|monthly|daily|roundup|edition|issue\s*#?\d+|sale|discount|\d+%\s*off|flash\s*sale|limited\s*time|deal|offer|free\s*shipping)\b/.test(subject)) {
+  if (/\b(newsletter|digest|weekly|monthly|daily|roundup|edition\s*#?\d+|sale|discount|\d+%\s*off|flash\s*sale|limited\s*time|deal|offer|free\s*shipping)\b/.test(subject)) {
     scores.newsletter += 0.5;
     signals.push('subject: newsletter-pattern');
   }
 
   // Notification patterns
-  if (/\b(notification|alert|reminder|mentioned\s*you|tagged\s*you|liked\s*your|commented|activity)\b/.test(subject)) {
-    scores.notification += 0.5;
+  if (
+    /\b(notification|alert|reminder|mentioned\s*you|tagged\s*you|liked\s*your|commented|activity|pull\s*request|merge\s*request|review\s*requested|assigned|opened|closed|reopened|approved)\b/.test(
+      subject
+    ) ||
+    /\b(issue|ticket)\s*#?\d+\b/.test(subject) ||
+    /(^|[\s[(])[#!]\d+\b/.test(subject)
+  ) {
+    scores.notification += 0.55;
+    eventSignalStrength += 0.55;
     signals.push('subject: notification-pattern');
   }
 
@@ -199,17 +246,32 @@ export function classifyEmail(
     signals.push('body: promotional-ctas');
   }
 
+  // Activity/change language with issue/PR/ticket context indicates notifications.
+  if (
+    /\b(assigned|mentioned|commented|opened|closed|reopened|approved|reviewed|requested)\b/.test(
+      bodyText
+    ) &&
+    /\b(pull\s*request|merge\s*request|issue|ticket|discussion|thread)\b/.test(bodyText)
+  ) {
+    scores.notification += 0.25;
+    eventSignalStrength += 0.25;
+    signals.push('body: activity-event');
+  }
+
   // ============================================================================
   // PHASE 5: Anti-false-positive safeguards
   // ============================================================================
 
-  // If subject contains "Re:" or "Fwd:", this is likely a personal reply/forward
-  // Reduce all scores significantly
+  // If subject contains "Re:" or "Fwd:", this is often a personal reply/forward.
+  // Keep this safeguard softer for automated event notifications.
   if (/^(re|fwd|fw):/i.test(parsed.subject || '')) {
+    const replyPenalty = eventSignalStrength >= 0.45 ? 0.8 : 0.3;
     Object.keys(scores).forEach(key => {
-      scores[key as EmailCategory] *= 0.3;
+      scores[key as EmailCategory] *= replyPenalty;
     });
-    signals.push('safeguard: reply-or-forward');
+    signals.push(
+      replyPenalty === 0.8 ? 'safeguard: reply-or-forward-soft' : 'safeguard: reply-or-forward'
+    );
   }
 
   // If "To" field contains only one recipient (not BCC'd mass email), be more conservative
@@ -224,6 +286,12 @@ export function classifyEmail(
     signals.push('safeguard: single-recipient');
   }
 
+  // List headers are not sufficient for newsletters when event-driven notification signals are strong.
+  if (hasListHeader && eventSignalStrength >= 0.65) {
+    scores.newsletter *= 0.45;
+    signals.push('safeguard: event-driven-overrides-list');
+  }
+
   // ============================================================================
   // PHASE 6: Select category with highest score
   // ============================================================================
@@ -231,7 +299,19 @@ export function classifyEmail(
   // Find highest scoring category
   const entries = Object.entries(scores) as [EmailCategory, number][];
   const sorted = entries.sort((a, b) => b[1] - a[1]);
-  const [topCategory, topScore] = sorted[0];
+  let [topCategory, topScore] = sorted[0];
+
+  // Tie-break: for list-based event traffic, prefer notification over newsletter when close.
+  if (
+    topCategory === 'newsletter' &&
+    hasListHeader &&
+    eventSignalStrength >= 0.45 &&
+    scores.notification >= topScore - 0.2
+  ) {
+    topCategory = 'notification';
+    topScore = scores.notification;
+    signals.push('tie-break: notification-over-newsletter');
+  }
 
   // Check if category is enabled in config
   if (!config.categories[topCategory]) {
