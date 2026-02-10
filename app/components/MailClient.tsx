@@ -165,6 +165,19 @@ type CategoryDebugResponse = {
   message?: string;
 };
 
+type DraftSavePayload = {
+  to: string;
+  cc?: string;
+  bcc?: string;
+  subject: string;
+  text: string;
+  html?: string;
+  inReplyTo?: string;
+  references?: string[];
+  xForwardedMessageId?: string;
+  attachments?: Attachment[];
+};
+
 function BottomStatusSection({
   label,
   value,
@@ -384,6 +397,9 @@ export default function MailClient() {
   const [discardingDraft, setDiscardingDraft] = useState(false);
   const [, setRelativeTimeCounter] = useState(0);
   const draftSaveTimerRef = useRef<number | null>(null);
+  const draftSaveInFlightRef = useRef(false);
+  const pendingDraftSaveRef = useRef<{ payload: DraftSavePayload; hash: string } | null>(null);
+  const composeDraftIdRef = useRef<string | null>(null);
   const lastDraftHashRef = useRef<string>("");
   const composeBaselineHashRef = useRef<string | null>(null);
   const composeDirtyRef = useRef(false);
@@ -656,6 +672,10 @@ export default function MailClient() {
     }, 1000);
     return () => clearInterval(interval);
   }, [draftSavedAt]);
+
+  useEffect(() => {
+    composeDraftIdRef.current = composeDraftId;
+  }, [composeDraftId]);
 
   const searchFieldsLabel = useMemo(() => {
     const allEnabled =
@@ -996,15 +1016,9 @@ export default function MailClient() {
     [accounts, activeAccountId, clientId]
   );
 
-  const processDueCalendarReminders = useCallback(async () => {
-    if (!activeAccountId.trim()) {
-      setPendingCalendarReminders([]);
-      return;
-    }
+  const processDueCalendarReminders = useCallback(async (reminders: CalendarReminder[]) => {
+    if (!activeAccountId.trim()) return;
     const now = Date.now();
-    const reminders = await fetchCalendarReminders(activeAccountId);
-    setPendingCalendarReminders(reminders);
-    await syncReminderStateToServiceWorker(reminders);
     if (reminders.length === 0 || !clientId) return;
     pruneDeliveredReminderMap(activeAccountId, clientId, reminders);
     let deliveredChanged = false;
@@ -1048,10 +1062,11 @@ export default function MailClient() {
         pruneDeliveredReminderMap(activeAccountId, clientId, reminders);
       }
       await syncReminderStateToServiceWorker(reminders);
+      await processDueCalendarReminders(reminders);
     } catch {
       // ignore reminder sync failures in status UI
     }
-  }, [activeAccountId, clientId, syncReminderStateToServiceWorker]);
+  }, [activeAccountId, clientId, processDueCalendarReminders, syncReminderStateToServiceWorker]);
 
   const undoMoveOperation = async (
     targets: UndoMoveTarget[],
@@ -2217,21 +2232,7 @@ export default function MailClient() {
     });
   };
 
-  const saveDraft = async (
-    payload: {
-      to: string;
-      cc?: string;
-      bcc?: string;
-      subject: string;
-      text: string;
-      html?: string;
-      inReplyTo?: string;
-      references?: string[];
-      xForwardedMessageId?: string;
-      attachments?: Attachment[];
-    },
-    hash: string
-  ) => {
+  const saveDraftNow = async (payload: DraftSavePayload, hash: string) => {
     if (!activeAccountId) return;
     if (composeTab === "text" && composeTextRef.current) {
       const element = composeTextRef.current;
@@ -2248,7 +2249,7 @@ export default function MailClient() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           accountId: activeAccountId,
-          draftId: composeDraftId,
+          draftId: composeDraftIdRef.current,
           ...payload
         })
       });
@@ -2260,12 +2261,14 @@ export default function MailClient() {
       }
       const data = (await res.json()) as { draftId?: string | null };
       if (data?.draftId) {
-        if (composeDraftId && composeDraftId !== data.draftId) {
-          setMessages((prev) => prev.filter((msg) => msg.id !== composeDraftId));
-          if (activeMessageId === composeDraftId) {
+        const previousDraftId = composeDraftIdRef.current;
+        if (previousDraftId && previousDraftId !== data.draftId) {
+          setMessages((prev) => prev.filter((msg) => msg.id !== previousDraftId));
+          if (activeMessageId === previousDraftId) {
             setActiveMessageId(data.draftId);
           }
         }
+        composeDraftIdRef.current = data.draftId;
         setComposeDraftId(data.draftId);
       }
       lastDraftHashRef.current = hash;
@@ -2295,6 +2298,30 @@ export default function MailClient() {
         });
       }
     }
+  };
+
+  const runQueuedDraftSaves = () => {
+    if (draftSaveInFlightRef.current) return;
+    draftSaveInFlightRef.current = true;
+    void (async () => {
+      try {
+        while (pendingDraftSaveRef.current) {
+          const next = pendingDraftSaveRef.current;
+          pendingDraftSaveRef.current = null;
+          await saveDraftNow(next.payload, next.hash);
+        }
+      } finally {
+        draftSaveInFlightRef.current = false;
+        if (pendingDraftSaveRef.current) {
+          runQueuedDraftSaves();
+        }
+      }
+    })();
+  };
+
+  const saveDraft = (payload: DraftSavePayload, hash: string) => {
+    pendingDraftSaveRef.current = { payload, hash };
+    runQueuedDraftSaves();
   };
 
   const handleDiscardDraft = async () => {
@@ -2646,7 +2673,7 @@ export default function MailClient() {
   );
 
   const handleSendMail = async () => {
-    if (!composeTo.trim()) {
+    if (!composeTo.trim() && !composeCc.trim() && !composeBcc.trim()) {
       reportError("Please add at least one recipient.");
       return;
     }
@@ -3892,24 +3919,35 @@ export default function MailClient() {
   useEffect(() => {
     if (typeof window === "undefined") return;
     let active = true;
-    const run = async () => {
+    const run = () => {
       if (!active) return;
-      await processDueCalendarReminders();
+      void refreshPendingCalendarReminders();
     };
     void run();
-    const interval = window.setInterval(() => {
-      void run();
-    }, 30_000);
     const handleUpdate = () => {
-      void run();
+      run();
     };
     window.addEventListener(CALENDAR_REMINDERS_UPDATED_EVENT, handleUpdate);
     return () => {
       active = false;
-      window.clearInterval(interval);
       window.removeEventListener(CALENDAR_REMINDERS_UPDATED_EVENT, handleUpdate);
     };
-  }, [processDueCalendarReminders]);
+  }, [refreshPendingCalendarReminders]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    let active = true;
+    const run = () => {
+      if (!active) return;
+      void processDueCalendarReminders(pendingCalendarReminders);
+    };
+    void run();
+    const interval = window.setInterval(run, 15_000);
+    return () => {
+      active = false;
+      window.clearInterval(interval);
+    };
+  }, [pendingCalendarReminders, processDueCalendarReminders]);
 
   useEffect(() => {
     void syncReminderStateToServiceWorker(pendingCalendarReminders);
@@ -5607,6 +5645,7 @@ export default function MailClient() {
         syncedMessages.push(...result.newMessages);
       }
       if (syncedMessages.length === 0) return;
+      await refreshPendingCalendarReminders();
       await notifyNewMessages(syncedMessages);
     };
 
@@ -6735,17 +6774,30 @@ export default function MailClient() {
                     {exceptionEntries.map((entry) => {
                       const summary = getExceptionSummary(entry.message);
                       const active = selectedException?.id === entry.id;
+                      const interactive = exceptionEntries.length > 1;
                       return (
-                        <button
+                        <div
                           key={entry.id}
-                          className={`exception-item ${active ? "active" : ""}`}
-                          onClick={() => setSelectedExceptionId(entry.id)}
+                          className={`exception-item ${active ? "active" : ""} ${interactive ? "interactive" : ""}`}
+                          role={interactive ? "button" : undefined}
+                          tabIndex={interactive ? 0 : undefined}
+                          onClick={interactive ? () => setSelectedExceptionId(entry.id) : undefined}
+                          onKeyDown={
+                            interactive
+                              ? (event) => {
+                                  if (event.key === "Enter" || event.key === " ") {
+                                    event.preventDefault();
+                                    setSelectedExceptionId(entry.id);
+                                  }
+                                }
+                              : undefined
+                          }
                         >
                           <span className="exception-item-summary">{summary}</span>
                           <span className="exception-item-time">
                             {formatRelativeTime(entry.timestamp)}
                           </span>
-                        </button>
+                        </div>
                       );
                     })}
                   </div>

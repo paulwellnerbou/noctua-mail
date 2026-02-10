@@ -4,9 +4,10 @@ const PROJECT_URL = "https://github.com/paulwellnerbou/noctua-mail";
 const MAILER_ID = `Noctua Mail (${PROJECT_URL})`;
 
 type MailPayload = {
-  to: string;
+  to?: string;
   cc?: string;
   bcc?: string;
+  keepBcc?: boolean;
   subject: string;
   text: string;
   html?: string;
@@ -25,6 +26,9 @@ type MailPayload = {
 };
 
 function buildMailOptions(account: Account, mail: MailPayload) {
+  const to = mail.to?.trim() || undefined;
+  const cc = mail.cc?.trim() || undefined;
+  const bcc = mail.bcc?.trim() || undefined;
   const fromValue = {
     name: account.name,
     address: account.email
@@ -38,9 +42,9 @@ function buildMailOptions(account: Account, mail: MailPayload) {
   }));
   return {
     from: fromValue,
-    to: mail.to,
-    cc: mail.cc,
-    bcc: mail.bcc,
+    to,
+    cc,
+    bcc,
     replyTo: mail.replyTo,
     messageId: mail.messageId,
     inReplyTo: mail.inReplyTo,
@@ -69,7 +73,11 @@ export async function buildRawMessage(account: Account, mail: MailPayload) {
   const mailOptions = buildMailOptions(account, mail);
   const raw = await new Promise<Buffer>((resolve, reject) => {
     const composer = new MailComposer(mailOptions);
-    composer.compile().build((error: Error | null, message: Buffer) => {
+    const compiled = composer.compile();
+    if (mail.keepBcc) {
+      (compiled as { keepBcc?: boolean }).keepBcc = true;
+    }
+    compiled.build((error: Error | null, message: Buffer) => {
       if (error) {
         reject(error);
         return;

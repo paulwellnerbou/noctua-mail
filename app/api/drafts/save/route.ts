@@ -116,6 +116,7 @@ export async function POST(request: Request) {
     to: payload.to,
     cc: payload.cc,
     bcc: payload.bcc,
+    keepBcc: true,
     subject: payload.subject,
     text: payload.text,
     html: payload.html,

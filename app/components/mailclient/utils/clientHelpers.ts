@@ -16,8 +16,7 @@ export function getExceptionSummary(message: string): string {
 }
 
 export function getExceptionDetail(message: string): string | null {
-  const [, ...detailLines] = message.split("\n");
-  const detail = detailLines.join("\n").trim();
+  const detail = message.trim();
   return detail || null;
 }
 

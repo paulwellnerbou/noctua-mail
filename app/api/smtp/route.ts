@@ -57,7 +57,7 @@ export async function POST(request: Request) {
   const clientId = request.headers.get("x-noctua-client") ?? undefined;
   const payload = (await request.json()) as {
     accountId: string;
-    to: string;
+    to?: string;
     cc?: string;
     bcc?: string;
     subject: string;
@@ -80,6 +80,15 @@ export async function POST(request: Request) {
 
   if (!account) {
     return NextResponse.json({ ok: false, message: "Account not found" }, { status: 404 });
+  }
+  const to = payload.to?.trim() ?? "";
+  const cc = payload.cc?.trim() ?? "";
+  const bcc = payload.bcc?.trim() ?? "";
+  if (!to && !cc && !bcc) {
+    return NextResponse.json(
+      { ok: false, message: "Please add at least one recipient." },
+      { status: 400 }
+    );
   }
 
   const parseDataUrl = (dataUrl: string) => {
@@ -112,9 +121,9 @@ export async function POST(request: Request) {
 
   const messageId = buildMessageId(account.email);
   const result = await sendSmtpMessage(account, {
-    to: payload.to,
-    cc: payload.cc,
-    bcc: payload.bcc,
+    to: to || undefined,
+    cc: cc || undefined,
+    bcc: bcc || undefined,
     subject: payload.subject,
     text: payload.text,
     html: payload.html,

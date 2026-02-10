@@ -114,9 +114,14 @@ export default function ThreadMessageCard({
   dateFormat
 }: ThreadMessageCardProps) {
   const [menuOpen, setMenuOpen] = useState(false);
-  const toValue = message.to ?? "";
+  const toValue = (message.to ?? "").trim() || "(no recipients)";
   const ccValue = message.cc ?? "";
   const bccValue = message.bcc ?? "";
+  const recipientFields = [
+    { label: "To" as const, value: toValue, hideWhenEmpty: false },
+    { label: "Cc" as const, value: ccValue, hideWhenEmpty: true },
+    { label: "Bcc" as const, value: bccValue, hideWhenEmpty: true }
+  ];
   const priorityColor = getPriorityBadgeColor(message.priority);
   const isCollapsed = Boolean(collapsedMessages[message.id]);
   const hasHtml = hasHtmlContent(message.htmlBody);
@@ -520,24 +525,16 @@ export default function ThreadMessageCard({
                   </span>
                 </div>
               </div>
-              <MessageRecipientMetaField
-                label="To"
-                value={toValue}
-                copyValue={extractEmails(message.to).join(", ")}
-                expandable
-              />
-              <MessageRecipientMetaField
-                label="Cc"
-                value={ccValue}
-                copyValue={extractEmails(ccValue).join(", ")}
-                hideWhenEmpty
-              />
-              <MessageRecipientMetaField
-                label="Bcc"
-                value={bccValue}
-                copyValue={extractEmails(bccValue).join(", ")}
-                hideWhenEmpty
-              />
+              {recipientFields.map((field) => (
+                <MessageRecipientMetaField
+                  key={field.label}
+                  label={field.label}
+                  value={field.value}
+                  copyValue={extractEmails(field.value).join(", ")}
+                  hideWhenEmpty={field.hideWhenEmpty}
+                  expandable
+                />
+              ))}
               {(() => {
                 const refId =
                   message.inReplyTo ??

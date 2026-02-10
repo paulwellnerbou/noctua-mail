@@ -49,6 +49,7 @@ type RecipientFieldProps = {
   showToggle?: boolean;
   toggleLabel?: string;
   toggleTitle?: string;
+  toggleDisabled?: boolean;
   onToggle?: () => void;
 };
 
@@ -71,6 +72,7 @@ function RecipientField({
   showToggle,
   toggleLabel,
   toggleTitle,
+  toggleDisabled,
   onToggle
 }: RecipientFieldProps) {
   const [showSuggestions, setShowSuggestions] = useState(false);
@@ -158,6 +160,7 @@ function RecipientField({
             color="gray"
             title={toggleTitle ?? toggleLabel}
             onClick={onToggle}
+            disabled={toggleDisabled}
           >
             {toggleLabel}
           </Button>
@@ -195,6 +198,22 @@ export default function ComposeFields({
   const [recipientLoading, setRecipientLoading] = useState(false);
   const [recipientFocus, setRecipientFocus] = useState<RecipientFocus>(null);
   const [recipientActiveIndex, setRecipientActiveIndex] = useState(0);
+
+  useEffect(() => {
+    setLocalSubject(composeSubject);
+  }, [composeSubject]);
+
+  useEffect(() => {
+    setLocalTo(composeTo);
+  }, [composeTo]);
+
+  useEffect(() => {
+    setLocalCc(composeCc);
+  }, [composeCc]);
+
+  useEffect(() => {
+    setLocalBcc(composeBcc);
+  }, [composeBcc]);
 
   useEffect(() => {
     if (!activeAccountId) {
@@ -259,8 +278,19 @@ export default function ComposeFields({
     setRecipientQuery("");
   };
 
-  const toggleLabel = composeShowBcc ? "Hide Cc/Bcc" : "Show Cc and Bcc";
-  const toggleTitle = composeShowBcc ? "Hide Cc and Bcc" : "Show Cc and Bcc";
+  const hasCcOrBccValue =
+    localCc.trim().length > 0 ||
+    localBcc.trim().length > 0 ||
+    composeCc.trim().length > 0 ||
+    composeBcc.trim().length > 0;
+  const showCcBccFields = composeShowBcc || hasCcOrBccValue;
+  const canHideCcBcc = !hasCcOrBccValue;
+  const toggleLabel = showCcBccFields ? "Hide Cc/Bcc" : "Show Cc and Bcc";
+  const toggleTitle = showCcBccFields
+    ? canHideCcBcc
+      ? "Hide Cc and Bcc"
+      : "Clear Cc/Bcc to hide fields"
+    : "Show Cc and Bcc";
   const showFrom = variant === "inline";
   const subjectRow = (
     <div className="compose-grid-row">
@@ -317,10 +347,17 @@ export default function ComposeFields({
         getComposeToken={getComposeToken}
         showToggle
         toggleLabel={toggleLabel}
-        onToggle={() => setComposeShowBcc((value) => !value)}
+        toggleDisabled={showCcBccFields && !canHideCcBcc}
+        onToggle={() => {
+          if (!canHideCcBcc) {
+            setComposeShowBcc(true);
+            return;
+          }
+          setComposeShowBcc((value) => !value);
+        }}
         toggleTitle={toggleTitle}
       />
-      {composeShowBcc && (
+      {showCcBccFields && (
         <RecipientField
           variant={variant}
           label="Cc:"
@@ -341,7 +378,7 @@ export default function ComposeFields({
           getComposeToken={getComposeToken}
         />
       )}
-      {composeShowBcc && (
+      {showCcBccFields && (
         <RecipientField
           variant={variant}
           label="Bcc:"

@@ -1562,11 +1562,15 @@ a {
   gap: 8px;
   border-radius: var(--radius-sm);
   padding: 4px 6px;
-  cursor: pointer;
+  cursor: default;
   font-size: 11px;
 }
 
-.exception-item:hover {
+.exception-item.interactive {
+  cursor: pointer;
+}
+
+.exception-item.interactive:hover {
   background: var(--surface-2);
 }
 
@@ -1593,6 +1597,8 @@ a {
   border-radius: var(--radius-sm);
   padding: 10px;
   border: 1px solid var(--border);
+  cursor: text;
+  user-select: text;
 }
 
 .popover-body {
