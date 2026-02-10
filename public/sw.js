@@ -67,18 +67,18 @@ function normalizeReminder(item) {
   if (!id) return null;
   const eventTitle = typeof item.eventTitle === "string" ? item.eventTitle.trim() : "";
   const triggerAtMs = Number(item.triggerAtMs);
-  const eventStartAtMs = Number(item.eventStartAtMs);
+  const nextEventStartAtMs = Number(item.nextEventStartAtMs ?? item.eventStartAtMs);
   const leadLabel = typeof item.leadLabel === "string" ? item.leadLabel.trim() : "";
   const messageId =
     typeof item.messageId === "string" && item.messageId.trim() ? item.messageId.trim() : null;
-  if (!Number.isFinite(triggerAtMs) || !Number.isFinite(eventStartAtMs)) return null;
+  if (!Number.isFinite(triggerAtMs) || !Number.isFinite(nextEventStartAtMs)) return null;
   return {
     id,
     eventTitle: eventTitle || "Calendar event",
     eventLocation: typeof item.eventLocation === "string" ? item.eventLocation.trim() : "",
     messageId,
     triggerAtMs,
-    eventStartAtMs,
+    nextEventStartAtMs,
     leadLabel: leadLabel || "Reminder"
   };
 }
@@ -125,7 +125,7 @@ async function processReminderNotifications(source) {
       const eventDateLabel = new Intl.DateTimeFormat(undefined, {
         dateStyle: "medium",
         timeStyle: "short"
-      }).format(new Date(reminder.eventStartAtMs));
+      }).format(new Date(reminder.nextEventStartAtMs));
       const bodyParts = [`${reminder.leadLabel} reminder`, `Starts ${eventDateLabel}`];
       if (reminder.eventLocation) {
         bodyParts.push(reminder.eventLocation);

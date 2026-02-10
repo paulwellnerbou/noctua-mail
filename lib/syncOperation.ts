@@ -42,6 +42,10 @@ type CalendarReminderMutation =
       eventUid: string;
       eventTitle: string;
       eventLocation?: string;
+      startTimezone?: string;
+      recurrenceRule?: string;
+      recurrenceDates?: number[];
+      excludedDates?: number[];
       eventStartAtMs: number;
       messageId?: string;
     };
@@ -71,6 +75,10 @@ function collectReminderMutationsFromCalendarInvite(
       eventUid,
       eventTitle: event.summary?.trim() || "Calendar event",
       eventLocation: event.location?.trim() || undefined,
+      startTimezone: event.startTimezone?.trim() || undefined,
+      recurrenceRule: event.recurrenceRule?.trim() || undefined,
+      recurrenceDates: event.recurrenceDates?.map((value) => value.getTime()),
+      excludedDates: event.excludedDates?.map((value) => value.getTime()),
       eventStartAtMs,
       messageId: messageId ?? undefined
     });
@@ -308,6 +316,10 @@ export async function runSyncOperation(
         await rescheduleCalendarRemindersByEventUid(account.id, mutation.eventUid, {
           eventTitle: mutation.eventTitle,
           eventLocation: mutation.eventLocation,
+          startTimezone: mutation.startTimezone,
+          recurrenceRule: mutation.recurrenceRule,
+          recurrenceDates: mutation.recurrenceDates,
+          excludedDates: mutation.excludedDates,
           eventStartAtMs: mutation.eventStartAtMs,
           messageId: mutation.messageId
         });

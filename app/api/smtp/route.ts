@@ -90,6 +90,7 @@ export async function POST(request: Request) {
       { status: 400 }
     );
   }
+  const outboundTo = !to && !cc && bcc ? "undisclosed-recipients:;" : to;
 
   const parseDataUrl = (dataUrl: string) => {
     const match = dataUrl.match(/^data:([^;]+);base64,(.+)$/);
@@ -121,7 +122,7 @@ export async function POST(request: Request) {
 
   const messageId = buildMessageId(account.email);
   const result = await sendSmtpMessage(account, {
-    to: to || undefined,
+    to: outboundTo || undefined,
     cc: cc || undefined,
     bcc: bcc || undefined,
     subject: payload.subject,

@@ -25,6 +25,7 @@ import { CALENDAR_INVITE_FLAG, normalizeImapFlags } from "./messageFlags";
 import { normalizeAccountDateFormat } from "./dateFormatting";
 import { withDbWriteRetry } from "./dbWriteRetry";
 import { randomUUID } from "crypto";
+import { normalizeReminderDateList, resolveNextReminderOccurrence } from "./reminderRecurrence";
 import {
   CATEGORY_KEYS,
   createDefaultLinearModel,
@@ -49,6 +50,37 @@ const ACCOUNT_DB_IDLE_MS = (() => {
   return parsed;
 })();
 let shutdownHooksRegistered = false;
+
+function ensureCalendarReminderTableSchema(db: any) {
+  db.exec(`
+    DROP TABLE IF EXISTS calendar_reminders;
+
+    CREATE TABLE IF NOT EXISTS calendar_reminders (
+      id TEXT PRIMARY KEY,
+      accountId TEXT NOT NULL,
+      userId TEXT NOT NULL,
+      messageId TEXT,
+      eventUid TEXT,
+      eventTitle TEXT NOT NULL,
+      eventLocation TEXT,
+      eventStartAtMs INTEGER NOT NULL,
+      startTimezone TEXT,
+      recurrenceRule TEXT,
+      recurrenceDates TEXT,
+      excludedDates TEXT,
+      leadMinutes INTEGER NOT NULL,
+      leadLabel TEXT NOT NULL,
+      createdAtMs INTEGER NOT NULL,
+      updatedAtMs INTEGER NOT NULL,
+      deletedAtMs INTEGER
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_calendar_reminders_account_user_uid
+      ON calendar_reminders(accountId, userId, eventUid);
+    CREATE INDEX IF NOT EXISTS idx_calendar_reminders_account_user_updated
+      ON calendar_reminders(accountId, userId, updatedAtMs DESC);
+  `);
+}
 
 async function ensureDatabaseCtor() {
   if (DatabaseCtor) return;
@@ -366,9 +398,12 @@ function initAccountSchema(db: any) {
       eventTitle TEXT NOT NULL,
       eventLocation TEXT,
       eventStartAtMs INTEGER NOT NULL,
+      startTimezone TEXT,
+      recurrenceRule TEXT,
+      recurrenceDates TEXT,
+      excludedDates TEXT,
       leadMinutes INTEGER NOT NULL,
       leadLabel TEXT NOT NULL,
-      triggerAtMs INTEGER NOT NULL,
       createdAtMs INTEGER NOT NULL,
       updatedAtMs INTEGER NOT NULL,
       deletedAtMs INTEGER
@@ -393,10 +428,10 @@ function initAccountSchema(db: any) {
       ON threads(accountId, latestDateValue DESC);
     CREATE INDEX IF NOT EXISTS idx_attachments_message
       ON attachments(messageId);
-    CREATE INDEX IF NOT EXISTS idx_calendar_reminders_account_user_trigger
-      ON calendar_reminders(accountId, userId, triggerAtMs);
     CREATE INDEX IF NOT EXISTS idx_calendar_reminders_account_user_uid
       ON calendar_reminders(accountId, userId, eventUid);
+    CREATE INDEX IF NOT EXISTS idx_calendar_reminders_account_user_updated
+      ON calendar_reminders(accountId, userId, updatedAtMs DESC);
     CREATE INDEX IF NOT EXISTS idx_category_feedback_events_account_created
       ON category_feedback_events(accountId, createdAt DESC);
   `);
@@ -416,15 +451,27 @@ function initAccountSchema(db: any) {
       (row) => String(row.name ?? "")
     )
   );
-  if (reminderColumns.size > 0 && !reminderColumns.has("updatedAtMs")) {
-    db.prepare(`ALTER TABLE calendar_reminders ADD COLUMN updatedAtMs INTEGER`).run();
-    db.prepare(`UPDATE calendar_reminders SET updatedAtMs = COALESCE(createdAtMs, ?)`).run(Date.now());
-  }
-  if (reminderColumns.size > 0 && !reminderColumns.has("deletedAtMs")) {
-    db.prepare(`ALTER TABLE calendar_reminders ADD COLUMN deletedAtMs INTEGER`).run();
-  }
-  if (reminderColumns.size > 0 && !reminderColumns.has("messageId")) {
-    db.prepare(`ALTER TABLE calendar_reminders ADD COLUMN messageId TEXT`).run();
+  if (reminderColumns.size > 0) {
+    const requiredColumns = [
+      "id",
+      "accountId",
+      "userId",
+      "eventTitle",
+      "eventStartAtMs",
+      "startTimezone",
+      "recurrenceRule",
+      "recurrenceDates",
+      "excludedDates",
+      "leadMinutes",
+      "leadLabel",
+      "createdAtMs",
+      "updatedAtMs",
+      "deletedAtMs"
+    ];
+    const requiresRecreate = requiredColumns.some((column) => !reminderColumns.has(column));
+    if (requiresRecreate) {
+      ensureCalendarReminderTableSchema(db);
+    }
   }
 }
 
@@ -1026,6 +1073,10 @@ type UpsertCalendarReminderInput = {
   eventUid?: string;
   eventTitle?: string;
   eventLocation?: string;
+  startTimezone?: string;
+  recurrenceRule?: string;
+  recurrenceDates?: number[];
+  excludedDates?: number[];
   eventStartAtMs: number;
   leadMinutes: number;
   leadLabel: string;
@@ -1037,7 +1088,70 @@ type CalendarReminderEventMatch = {
   eventStartAtMs: number;
 };
 
-function mapCalendarReminderRow(row: any): CalendarReminder {
+function normalizeReminderTimezone(value?: string) {
+  const normalized = value?.trim();
+  return normalized || null;
+}
+
+function normalizeReminderRecurrenceRule(value?: string) {
+  const normalized = value?.trim();
+  if (!normalized) return null;
+  if (normalized.toUpperCase().startsWith("RRULE:")) {
+    const trimmed = normalized.slice(6).trim();
+    return trimmed || null;
+  }
+  return normalized;
+}
+
+function parseReminderDateListJson(value: unknown): number[] | undefined {
+  if (!value) return undefined;
+  if (Array.isArray(value)) {
+    return normalizeReminderDateList(value);
+  }
+  if (typeof value !== "string") return undefined;
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (!Array.isArray(parsed)) return undefined;
+    return normalizeReminderDateList(parsed);
+  } catch {
+    return undefined;
+  }
+}
+
+function serializeReminderDateList(value?: number[]) {
+  const normalized = normalizeReminderDateList(value);
+  if (!normalized || normalized.length === 0) return null;
+  return JSON.stringify(normalized);
+}
+
+function mapCalendarReminderRow(
+  row: any,
+  options?: { nowMs?: number; allowPastFallback?: boolean }
+): CalendarReminder | null {
+  const nowMs = options?.nowMs ?? Date.now();
+  const eventStartAtMs = Number(row.eventStartAtMs ?? 0);
+  const leadMinutes = Math.max(0, Number(row.leadMinutes ?? 0));
+  const recurrenceRule = normalizeReminderRecurrenceRule(
+    typeof row.recurrenceRule === "string" ? row.recurrenceRule : undefined
+  );
+  const recurrenceDates = parseReminderDateListJson(row.recurrenceDates);
+  const excludedDates = parseReminderDateListJson(row.excludedDates);
+  const startTimezone = normalizeReminderTimezone(
+    typeof row.startTimezone === "string" ? row.startTimezone : undefined
+  );
+  const nextOccurrence = resolveNextReminderOccurrence(
+    {
+      eventStartAtMs,
+      leadMinutes,
+      recurrenceRule: recurrenceRule ?? undefined,
+      recurrenceDates,
+      excludedDates,
+      startTimezone: startTimezone ?? undefined
+    },
+    nowMs
+  );
+  if (!nextOccurrence && !options?.allowPastFallback) return null;
+  const fallbackTriggerAtMs = eventStartAtMs - leadMinutes * 60 * 1000;
   return {
     id: String(row.id),
     accountId: String(row.accountId),
@@ -1046,10 +1160,15 @@ function mapCalendarReminderRow(row: any): CalendarReminder {
     eventUid: row.eventUid ? String(row.eventUid) : undefined,
     eventTitle: String(row.eventTitle ?? "Calendar event"),
     eventLocation: row.eventLocation ? String(row.eventLocation) : undefined,
-    eventStartAtMs: Number(row.eventStartAtMs ?? 0),
-    leadMinutes: Number(row.leadMinutes ?? 0),
+    startTimezone: startTimezone ?? undefined,
+    recurrenceRule: recurrenceRule ?? undefined,
+    recurrenceDates,
+    excludedDates,
+    eventStartAtMs,
+    nextEventStartAtMs: nextOccurrence?.eventStartAtMs ?? eventStartAtMs,
+    leadMinutes,
     leadLabel: String(row.leadLabel ?? ""),
-    triggerAtMs: Number(row.triggerAtMs ?? 0),
+    triggerAtMs: nextOccurrence?.triggerAtMs ?? fallbackTriggerAtMs,
     createdAtMs: Number(row.createdAtMs ?? 0),
     updatedAtMs: Number(row.updatedAtMs ?? row.createdAtMs ?? 0)
   };
@@ -1066,15 +1185,19 @@ function normalizeReminderEventUid(uid?: string) {
 
 export async function listCalendarReminders(accountId: string, userId: string) {
   const db = await getAccountDb(accountId);
+  const nowMs = Date.now();
   const rows = db
     .prepare(
-      `SELECT id, accountId, userId, messageId, eventUid, eventTitle, eventLocation, eventStartAtMs, leadMinutes, leadLabel, triggerAtMs, createdAtMs, updatedAtMs
+      `SELECT id, accountId, userId, messageId, eventUid, eventTitle, eventLocation, eventStartAtMs, startTimezone, recurrenceRule, recurrenceDates, excludedDates, leadMinutes, leadLabel, createdAtMs, updatedAtMs
        FROM calendar_reminders
        WHERE accountId = ? AND userId = ? AND deletedAtMs IS NULL
-       ORDER BY triggerAtMs ASC, createdAtMs ASC`
+       ORDER BY updatedAtMs DESC, createdAtMs DESC`
     )
     .all(accountId, userId) as any[];
-  return rows.map(mapCalendarReminderRow);
+  return rows
+    .map((row) => mapCalendarReminderRow(row, { nowMs }))
+    .filter((item): item is CalendarReminder => Boolean(item))
+    .sort((a, b) => a.triggerAtMs - b.triggerAtMs);
 }
 
 export async function upsertCalendarReminder(
@@ -1094,9 +1217,12 @@ export async function upsertCalendarReminder(
     const eventTitle = normalizeReminderEventTitle(input.eventTitle);
     const eventLocation = input.eventLocation?.trim() || null;
     const eventStartAtMs = Number(input.eventStartAtMs);
+    const startTimezone = normalizeReminderTimezone(input.startTimezone);
+    const recurrenceRule = normalizeReminderRecurrenceRule(input.recurrenceRule);
+    const recurrenceDates = normalizeReminderDateList(input.recurrenceDates);
+    const excludedDates = normalizeReminderDateList(input.excludedDates);
     const leadMinutes = Math.max(0, Number(input.leadMinutes));
     const leadLabel = String(input.leadLabel ?? "").trim();
-    const triggerAtMs = eventStartAtMs - leadMinutes * 60 * 1000;
 
     if (!Number.isFinite(eventStartAtMs) || eventStartAtMs <= 0) {
       throw new Error("Invalid eventStartAtMs");
@@ -1148,7 +1274,7 @@ export async function upsertCalendarReminder(
       const nextMessageId = messageId ?? (primaryRow.messageId ? String(primaryRow.messageId) : null);
       db.prepare(
         `UPDATE calendar_reminders
-         SET messageId = ?, eventUid = ?, eventTitle = ?, eventLocation = ?, eventStartAtMs = ?, leadMinutes = ?, leadLabel = ?, triggerAtMs = ?, updatedAtMs = ?, deletedAtMs = NULL
+         SET messageId = ?, eventUid = ?, eventTitle = ?, eventLocation = ?, eventStartAtMs = ?, startTimezone = ?, recurrenceRule = ?, recurrenceDates = ?, excludedDates = ?, leadMinutes = ?, leadLabel = ?, updatedAtMs = ?, deletedAtMs = NULL
          WHERE id = ?`
       ).run(
         nextMessageId,
@@ -1156,9 +1282,12 @@ export async function upsertCalendarReminder(
         eventTitle,
         eventLocation,
         eventStartAtMs,
+        startTimezone,
+        recurrenceRule,
+        serializeReminderDateList(recurrenceDates),
+        serializeReminderDateList(excludedDates),
         leadMinutes,
         leadLabel,
-        triggerAtMs,
         now,
         primaryRow.id
       );
@@ -1172,19 +1301,22 @@ export async function upsertCalendarReminder(
       }
       const row = db
         .prepare(
-          `SELECT id, accountId, userId, messageId, eventUid, eventTitle, eventLocation, eventStartAtMs, leadMinutes, leadLabel, triggerAtMs, createdAtMs, updatedAtMs
+          `SELECT id, accountId, userId, messageId, eventUid, eventTitle, eventLocation, eventStartAtMs, startTimezone, recurrenceRule, recurrenceDates, excludedDates, leadMinutes, leadLabel, createdAtMs, updatedAtMs
            FROM calendar_reminders
            WHERE id = ?`
         )
         .get(primaryRow.id) as any;
-      return { reminder: mapCalendarReminderRow(row), replaced: true };
+      return {
+        reminder: mapCalendarReminderRow(row, { allowPastFallback: true })!,
+        replaced: true
+      };
     }
 
     const id = inputId ?? randomUUID();
     db.prepare(
       `INSERT INTO calendar_reminders (
-         id, accountId, userId, messageId, eventUid, eventTitle, eventLocation, eventStartAtMs, leadMinutes, leadLabel, triggerAtMs, createdAtMs, updatedAtMs, deletedAtMs
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`
+         id, accountId, userId, messageId, eventUid, eventTitle, eventLocation, eventStartAtMs, startTimezone, recurrenceRule, recurrenceDates, excludedDates, leadMinutes, leadLabel, createdAtMs, updatedAtMs, deletedAtMs
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`
     ).run(
       id,
       accountId,
@@ -1194,20 +1326,26 @@ export async function upsertCalendarReminder(
       eventTitle,
       eventLocation,
       eventStartAtMs,
+      startTimezone,
+      recurrenceRule,
+      serializeReminderDateList(recurrenceDates),
+      serializeReminderDateList(excludedDates),
       leadMinutes,
       leadLabel,
-      triggerAtMs,
       now,
       now
     );
     const row = db
       .prepare(
-        `SELECT id, accountId, userId, messageId, eventUid, eventTitle, eventLocation, eventStartAtMs, leadMinutes, leadLabel, triggerAtMs, createdAtMs, updatedAtMs
+        `SELECT id, accountId, userId, messageId, eventUid, eventTitle, eventLocation, eventStartAtMs, startTimezone, recurrenceRule, recurrenceDates, excludedDates, leadMinutes, leadLabel, createdAtMs, updatedAtMs
          FROM calendar_reminders
          WHERE id = ?`
       )
       .get(id) as any;
-    return { reminder: mapCalendarReminderRow(row), replaced: false };
+    return {
+      reminder: mapCalendarReminderRow(row, { allowPastFallback: true })!,
+      replaced: false
+    };
   });
 }
 
@@ -1272,6 +1410,10 @@ export async function deleteCalendarReminderByEvent(
 type CalendarReminderRescheduleByUidInput = {
   eventTitle?: string;
   eventLocation?: string;
+  startTimezone?: string;
+  recurrenceRule?: string;
+  recurrenceDates?: number[];
+  excludedDates?: number[];
   eventStartAtMs: number;
   messageId?: string;
 };
@@ -1289,6 +1431,10 @@ export async function rescheduleCalendarRemindersByEventUid(
     if (!Number.isFinite(eventStartAtMs) || eventStartAtMs <= 0) return 0;
     const eventTitle = normalizeReminderEventTitle(input.eventTitle);
     const eventLocation = input.eventLocation?.trim() || null;
+    const startTimezone = normalizeReminderTimezone(input.startTimezone);
+    const recurrenceRule = normalizeReminderRecurrenceRule(input.recurrenceRule);
+    const recurrenceDates = normalizeReminderDateList(input.recurrenceDates);
+    const excludedDates = normalizeReminderDateList(input.excludedDates);
     const messageId =
       typeof input.messageId === "string" && input.messageId.trim()
         ? input.messageId.trim()
@@ -1300,7 +1446,10 @@ export async function rescheduleCalendarRemindersByEventUid(
          SET eventTitle = ?,
              eventLocation = ?,
              eventStartAtMs = ?,
-             triggerAtMs = (? - (leadMinutes * 60000)),
+             startTimezone = ?,
+             recurrenceRule = ?,
+             recurrenceDates = ?,
+             excludedDates = ?,
              updatedAtMs = ?,
              messageId = COALESCE(?, messageId)
          WHERE accountId = ? AND deletedAtMs IS NULL
@@ -1310,7 +1459,10 @@ export async function rescheduleCalendarRemindersByEventUid(
         eventTitle,
         eventLocation,
         eventStartAtMs,
-        eventStartAtMs,
+        startTimezone,
+        recurrenceRule,
+        serializeReminderDateList(recurrenceDates),
+        serializeReminderDateList(excludedDates),
         now,
         messageId,
         accountId,

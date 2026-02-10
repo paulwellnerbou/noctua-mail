@@ -2,8 +2,13 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { AlarmClockPlus, CalendarDays, Clock, MapPin, Trash2 } from "lucide-react";
 import { Badge, Button, Dialog, Flex, IconButton, Select, Text } from "@radix-ui/themes";
 import type { Attachment } from "@/lib/data";
-import { parseIcsEvents, type CalendarEventPreview } from "@/lib/calendar";
+import {
+  buildCalendarRecurrenceSummary,
+  parseIcsEvents,
+  type CalendarEventPreview
+} from "@/lib/calendar";
 import { isCalendarAttachment } from "@/lib/messageFlags";
+import { resolveNextReminderOccurrence } from "@/lib/reminderRecurrence";
 import {
   CALENDAR_REMINDERS_UPDATED_EVENT,
   CALENDAR_REMINDER_LEAD_OPTIONS,
@@ -38,7 +43,7 @@ function readDataUrl(dataUrl: string) {
 function formatEventDate(date?: Date, allDay = false, timezone?: string) {
   if (!date) return "";
   const options: Intl.DateTimeFormatOptions = allDay
-    ? { dateStyle: "medium" }
+    ? { dateStyle: "medium", timeZone: "UTC" }
     : { dateStyle: "medium", timeStyle: "short", ...(timezone ? { timeZone: timezone } : {}) };
   try {
     return new Intl.DateTimeFormat(undefined, options).format(date);
@@ -76,6 +81,36 @@ function formatReminderTrigger(date: Date) {
     dateStyle: "medium",
     timeStyle: "short"
   }).format(date);
+}
+
+function toMsArray(values?: Date[]) {
+  if (!values || values.length === 0) return undefined;
+  const next = values
+    .map((value) => value.getTime())
+    .filter((value) => Number.isFinite(value) && value > 0)
+    .map((value) => Math.round(value));
+  return next.length > 0 ? next : undefined;
+}
+
+function resolveEventReminderOccurrence(event: CalendarEventPreview, leadMinutes: number) {
+  if (!event.start) return null;
+  return resolveNextReminderOccurrence({
+    eventStartAtMs: event.start.getTime(),
+    leadMinutes,
+    startTimezone: event.startTimezone,
+    recurrenceRule: event.recurrenceRule,
+    recurrenceDates: toMsArray(event.recurrenceDates),
+    excludedDates: toMsArray(event.excludedDates)
+  });
+}
+
+function canScheduleReminderForEvent(event: CalendarEventPreview) {
+  if (!event.start) return false;
+  if (!event.recurrenceRule) {
+    return event.start.getTime() > Date.now();
+  }
+  const occurrence = resolveEventReminderOccurrence(event, 0);
+  return Boolean(occurrence && occurrence.eventStartAtMs > Date.now());
 }
 
 type ReminderModalState = {
@@ -190,7 +225,7 @@ export default function CalendarEventPreview({
 
   const openReminderModal = (event: CalendarEventPreview) => {
     if (!event.start) return;
-    if (event.start.getTime() <= Date.now()) {
+    if (!canScheduleReminderForEvent(event)) {
       setReminderNotice("Past events cannot be scheduled.");
       return;
     }
@@ -223,12 +258,18 @@ export default function CalendarEventPreview({
       closeReminderModal();
       return;
     }
-    if (target.start.getTime() <= Date.now()) {
+    if (!canScheduleReminderForEvent(target)) {
       setReminderNotice("Past events cannot be scheduled.");
       closeReminderModal();
       return;
     }
     const option = getCalendarReminderLeadOption(leadOptionValue);
+    const nextOccurrence = resolveEventReminderOccurrence(target, option.minutes);
+    if (!nextOccurrence) {
+      setReminderNotice("No future occurrence found for this event.");
+      closeReminderModal();
+      return;
+    }
     setSavingReminder(true);
     try {
       const stored = await upsertCalendarReminder(accountId, {
@@ -237,6 +278,10 @@ export default function CalendarEventPreview({
         eventTitle: target.summary || "Calendar event",
         eventLocation: target.location,
         eventStartAtMs: target.start.getTime(),
+        startTimezone: target.startTimezone,
+        recurrenceRule: target.recurrenceRule,
+        recurrenceDates: toMsArray(target.recurrenceDates),
+        excludedDates: toMsArray(target.excludedDates),
         leadMinutes: option.minutes,
         leadLabel: option.label
       });
@@ -301,11 +346,11 @@ export default function CalendarEventPreview({
         <div className={styles.eventList}>
           {events.slice(0, 3).map((event, index) => {
             const dateRange = formatDateRange(event);
+            const recurrenceSummary = buildCalendarRecurrenceSummary(event);
             const locationUrl = parseHttpUrl(event.location);
             const reminderKey = event.uid ?? `${attachment.id}-${index}`;
             const hasStartTime = Boolean(event.start);
-            const isPastEvent = Boolean(event.start && event.start.getTime() <= Date.now());
-            const canScheduleReminder = hasStartTime && !isPastEvent;
+            const canScheduleReminder = canScheduleReminderForEvent(event);
             const eventReminder =
               event.start
                 ? findActiveCalendarReminderForEvent(pendingReminders, {
@@ -336,6 +381,7 @@ export default function CalendarEventPreview({
                   </div>
                 ) : null}
                 {event.organizer ? <p className={styles.meta}>Organizer: {event.organizer}</p> : null}
+                {recurrenceSummary ? <p className={styles.meta}>Repeats: {recurrenceSummary}</p> : null}
                 {eventReminder ? (
                   <p className={styles.reminderMeta}>
                     Reminder: {eventReminder.leadLabel} ({formatReminderTrigger(new Date(eventReminder.triggerAtMs))})
@@ -352,7 +398,7 @@ export default function CalendarEventPreview({
                     title={
                       !hasStartTime
                         ? "No event start time available"
-                        : isPastEvent
+                        : !canScheduleReminder
                           ? "Past events cannot be scheduled"
                           : "Schedule reminder"
                     }
@@ -423,7 +469,7 @@ export default function CalendarEventPreview({
                 disabled={
                   savingReminder ||
                   !reminderModal?.event.start ||
-                  reminderModal.event.start.getTime() <= Date.now()
+                  !canScheduleReminderForEvent(reminderModal.event)
                 }
               >
                 {savingReminder ? "Saving..." : "Schedule reminder"}

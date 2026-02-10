@@ -256,7 +256,7 @@ export default function MessageMenu({
               : null,
             isVisible("category")
               ? (
-                  <DropdownMenu.Sub>
+                  <DropdownMenu.Sub key="category">
                     <DropdownMenu.SubTrigger disabled={isDisabled("category")}>
                       <span className={styles.menuIcon}>
                         <Tags size={14} />

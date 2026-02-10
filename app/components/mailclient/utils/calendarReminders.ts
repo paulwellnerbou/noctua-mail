@@ -1,4 +1,5 @@
 import type { CalendarReminder } from "@/lib/data";
+import { normalizeReminderDateList, resolveNextReminderOccurrence } from "@/lib/reminderRecurrence";
 
 export const CALENDAR_REMINDERS_UPDATED_EVENT = "noctua:calendar-reminders-updated";
 const CALENDAR_REMINDER_DELIVERED_PREFIX = "noctua:calendar-reminder-delivered";
@@ -32,6 +33,10 @@ export type CreateCalendarReminderInput = {
   eventUid?: string;
   eventTitle?: string;
   eventLocation?: string;
+  startTimezone?: string;
+  recurrenceRule?: string;
+  recurrenceDates?: number[];
+  excludedDates?: number[];
   eventStartAtMs: number;
   leadMinutes: number;
   leadLabel: string;
@@ -56,6 +61,10 @@ type QueuedReminderMutation =
         eventUid?: string;
         eventTitle: string;
         eventLocation?: string;
+        startTimezone?: string;
+        recurrenceRule?: string;
+        recurrenceDates?: number[];
+        excludedDates?: number[];
         eventStartAtMs: number;
         leadMinutes: number;
         leadLabel: string;
@@ -114,6 +123,21 @@ function generateId(prefix: string) {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
+function normalizeReminderTimezone(value?: string) {
+  const normalized = value?.trim();
+  return normalized || undefined;
+}
+
+function normalizeReminderRule(value?: string) {
+  const normalized = value?.trim();
+  if (!normalized) return undefined;
+  if (normalized.toUpperCase().startsWith("RRULE:")) {
+    const trimmed = normalized.slice(6).trim();
+    return trimmed || undefined;
+  }
+  return normalized;
+}
+
 function sanitizeReminder(input: unknown): CalendarReminder | null {
   if (!input || typeof input !== "object") return null;
   const reminder = input as Partial<CalendarReminder>;
@@ -124,11 +148,23 @@ function sanitizeReminder(input: unknown): CalendarReminder | null {
   if (typeof reminder.eventStartAtMs !== "number" || !Number.isFinite(reminder.eventStartAtMs)) {
     return null;
   }
+  if (
+    typeof reminder.nextEventStartAtMs !== "number" ||
+    !Number.isFinite(reminder.nextEventStartAtMs)
+  ) {
+    return null;
+  }
   if (typeof reminder.leadMinutes !== "number" || !Number.isFinite(reminder.leadMinutes)) return null;
   if (typeof reminder.leadLabel !== "string" || !reminder.leadLabel.trim()) return null;
   if (typeof reminder.triggerAtMs !== "number" || !Number.isFinite(reminder.triggerAtMs)) return null;
   if (typeof reminder.createdAtMs !== "number" || !Number.isFinite(reminder.createdAtMs)) return null;
   if (typeof reminder.updatedAtMs !== "number" || !Number.isFinite(reminder.updatedAtMs)) return null;
+  const recurrenceDates = normalizeReminderDateList(
+    Array.isArray(reminder.recurrenceDates) ? reminder.recurrenceDates : undefined
+  );
+  const excludedDates = normalizeReminderDateList(
+    Array.isArray(reminder.excludedDates) ? reminder.excludedDates : undefined
+  );
   return {
     id: reminder.id,
     accountId: reminder.accountId,
@@ -137,7 +173,16 @@ function sanitizeReminder(input: unknown): CalendarReminder | null {
     eventUid: typeof reminder.eventUid === "string" ? reminder.eventUid : undefined,
     eventTitle: reminder.eventTitle,
     eventLocation: typeof reminder.eventLocation === "string" ? reminder.eventLocation : undefined,
+    startTimezone: normalizeReminderTimezone(
+      typeof reminder.startTimezone === "string" ? reminder.startTimezone : undefined
+    ),
+    recurrenceRule: normalizeReminderRule(
+      typeof reminder.recurrenceRule === "string" ? reminder.recurrenceRule : undefined
+    ),
+    recurrenceDates,
+    excludedDates,
     eventStartAtMs: reminder.eventStartAtMs,
+    nextEventStartAtMs: reminder.nextEventStartAtMs,
     leadMinutes: reminder.leadMinutes,
     leadLabel: reminder.leadLabel,
     triggerAtMs: reminder.triggerAtMs,
@@ -183,6 +228,10 @@ function sanitizeMutation(input: unknown): QueuedReminderMutation | null {
       eventUid?: unknown;
       eventTitle?: unknown;
       eventLocation?: unknown;
+      startTimezone?: unknown;
+      recurrenceRule?: unknown;
+      recurrenceDates?: unknown;
+      excludedDates?: unknown;
       eventStartAtMs?: unknown;
       leadMinutes?: unknown;
       leadLabel?: unknown;
@@ -202,6 +251,16 @@ function sanitizeMutation(input: unknown): QueuedReminderMutation | null {
         eventUid: typeof payload.eventUid === "string" ? payload.eventUid : undefined,
         eventTitle: String(payload.eventTitle),
         eventLocation: typeof payload.eventLocation === "string" ? payload.eventLocation : undefined,
+        startTimezone:
+          typeof payload.startTimezone === "string" ? normalizeReminderTimezone(payload.startTimezone) : undefined,
+        recurrenceRule:
+          typeof payload.recurrenceRule === "string" ? normalizeReminderRule(payload.recurrenceRule) : undefined,
+        recurrenceDates: normalizeReminderDateList(
+          Array.isArray(payload.recurrenceDates) ? (payload.recurrenceDates as number[]) : undefined
+        ),
+        excludedDates: normalizeReminderDateList(
+          Array.isArray(payload.excludedDates) ? (payload.excludedDates as number[]) : undefined
+        ),
         eventStartAtMs: Number(payload.eventStartAtMs),
         leadMinutes: Number(payload.leadMinutes),
         leadLabel: String(payload.leadLabel)
@@ -300,7 +359,20 @@ function buildLocalReminder(accountId: string, input: CreateCalendarReminderInpu
   const eventTitle = input.eventTitle?.trim() || "Calendar event";
   const leadMinutes = Math.max(0, Number(input.leadMinutes));
   const eventStartAtMs = Number(input.eventStartAtMs);
-  const triggerAtMs = eventStartAtMs - leadMinutes * 60 * 1000;
+  const recurrenceRule = normalizeReminderRule(input.recurrenceRule);
+  const recurrenceDates = normalizeReminderDateList(input.recurrenceDates);
+  const excludedDates = normalizeReminderDateList(input.excludedDates);
+  const startTimezone = normalizeReminderTimezone(input.startTimezone);
+  const nextOccurrence = resolveNextReminderOccurrence({
+    eventStartAtMs,
+    leadMinutes,
+    recurrenceRule,
+    recurrenceDates,
+    excludedDates,
+    startTimezone
+  }, now);
+  const nextEventStartAtMs = nextOccurrence?.eventStartAtMs ?? eventStartAtMs;
+  const triggerAtMs = nextOccurrence?.triggerAtMs ?? eventStartAtMs - leadMinutes * 60 * 1000;
   return {
     id,
     accountId,
@@ -309,7 +381,12 @@ function buildLocalReminder(accountId: string, input: CreateCalendarReminderInpu
     eventUid: input.eventUid?.trim() || undefined,
     eventTitle,
     eventLocation: input.eventLocation?.trim() || undefined,
+    startTimezone,
+    recurrenceRule,
+    recurrenceDates,
+    excludedDates,
     eventStartAtMs,
+    nextEventStartAtMs,
     leadMinutes,
     leadLabel: input.leadLabel,
     triggerAtMs,
@@ -473,6 +550,10 @@ async function syncQueuedReminderMutations(accountId: string) {
             eventUid: mutation.payload.eventUid,
             eventTitle: mutation.payload.eventTitle,
             eventLocation: mutation.payload.eventLocation,
+            startTimezone: mutation.payload.startTimezone,
+            recurrenceRule: mutation.payload.recurrenceRule,
+            recurrenceDates: mutation.payload.recurrenceDates,
+            excludedDates: mutation.payload.excludedDates,
             eventStartAtMs: mutation.payload.eventStartAtMs,
             leadMinutes: mutation.payload.leadMinutes,
             leadLabel: mutation.payload.leadLabel
@@ -563,6 +644,10 @@ export async function upsertCalendarReminder(
       eventUid: local.reminder.eventUid,
       eventTitle: local.reminder.eventTitle,
       eventLocation: local.reminder.eventLocation,
+      startTimezone: local.reminder.startTimezone,
+      recurrenceRule: local.reminder.recurrenceRule,
+      recurrenceDates: local.reminder.recurrenceDates,
+      excludedDates: local.reminder.excludedDates,
       eventStartAtMs: local.reminder.eventStartAtMs,
       leadMinutes: local.reminder.leadMinutes,
       leadLabel: local.reminder.leadLabel

@@ -1029,7 +1029,7 @@ export default function MailClient() {
       const eventDateLabel = new Intl.DateTimeFormat(undefined, {
         dateStyle: "medium",
         timeStyle: "short"
-      }).format(new Date(reminder.eventStartAtMs));
+      }).format(new Date(reminder.nextEventStartAtMs));
       const bodyParts = [`${reminder.leadLabel} reminder`, `Starts ${eventDateLabel}`];
       if (reminder.eventLocation) {
         bodyParts.push(reminder.eventLocation);

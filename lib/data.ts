@@ -128,7 +128,12 @@ export type CalendarReminder = {
   eventUid?: string;
   eventTitle: string;
   eventLocation?: string;
+  startTimezone?: string;
+  recurrenceRule?: string;
+  recurrenceDates?: number[];
+  excludedDates?: number[];
   eventStartAtMs: number;
+  nextEventStartAtMs: number;
   leadMinutes: number;
   leadLabel: string;
   triggerAtMs: number;

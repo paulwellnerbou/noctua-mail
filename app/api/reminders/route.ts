@@ -13,6 +13,15 @@ function toNumber(value: unknown) {
   return Number.isFinite(num) ? num : NaN;
 }
 
+function toNumberArray(value: unknown): number[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const normalized = value
+    .map((item) => Number(item))
+    .filter((item) => Number.isFinite(item) && item > 0)
+    .map((item) => Math.round(item));
+  return normalized.length > 0 ? Array.from(new Set(normalized)).sort((a, b) => a - b) : undefined;
+}
+
 async function ensureAccountExists(accountId: string) {
   const account = await getAccountById(accountId);
   return Boolean(account);
@@ -43,6 +52,10 @@ export async function POST(request: Request) {
     eventUid?: string;
     eventTitle?: string;
     eventLocation?: string;
+    startTimezone?: string;
+    recurrenceRule?: string;
+    recurrenceDates?: number[];
+    excludedDates?: number[];
     eventStartAtMs?: number;
     leadMinutes?: number;
     leadLabel?: string;
@@ -57,6 +70,16 @@ export async function POST(request: Request) {
   const eventStartAtMs = toNumber(payload.eventStartAtMs);
   const leadMinutes = toNumber(payload.leadMinutes);
   const leadLabel = String(payload.leadLabel ?? "").trim();
+  const startTimezone =
+    typeof payload.startTimezone === "string" && payload.startTimezone.trim()
+      ? payload.startTimezone.trim()
+      : undefined;
+  const recurrenceRule =
+    typeof payload.recurrenceRule === "string" && payload.recurrenceRule.trim()
+      ? payload.recurrenceRule.trim()
+      : undefined;
+  const recurrenceDates = toNumberArray(payload.recurrenceDates);
+  const excludedDates = toNumberArray(payload.excludedDates);
   if (!Number.isFinite(eventStartAtMs) || eventStartAtMs <= 0) {
     return NextResponse.json({ ok: false, message: "Invalid eventStartAtMs" }, { status: 400 });
   }
@@ -72,6 +95,10 @@ export async function POST(request: Request) {
     eventUid: payload.eventUid,
     eventTitle: payload.eventTitle,
     eventLocation: payload.eventLocation,
+    startTimezone,
+    recurrenceRule,
+    recurrenceDates,
+    excludedDates,
     eventStartAtMs,
     leadMinutes,
     leadLabel
