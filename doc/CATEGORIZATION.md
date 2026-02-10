@@ -109,6 +109,8 @@ Newsletter subject patterns intentionally no longer use generic `issue #...` so 
 - Transactional-priority safeguards:
   - If transactional evidence is strong (`transactionalSignalStrength >= 0.75`), down-weight newsletter score with `newsletter *= 0.35`
   - If transactional evidence is very strong (`transactionalSignalStrength >= 1.0`) and notification score is already meaningful, down-weight notification with `notification *= 0.6`
+- Newsletter fallback rule:
+  - If list headers + `List-Unsubscribe` are present and there is no event or transactional evidence (`eventSignalStrength === 0` and `transactionalSignalStrength === 0`), force newsletter to at least threshold confidence.
 
 ### Phase 6: Final Selection
 
@@ -130,11 +132,14 @@ Newsletter subject patterns intentionally no longer use generic `issue #...` so 
 - A message can have:
   - `category = null` and `categoryScore > 0` (for example below threshold)
   - `category = null` and `categoryScore = 0` (or `NULL` depending on write path)
+- `categorySignals` stores the triggered classifier signals (string array), including when `category = null`.
 
 Current write-path detail:
 
 - Sync path stores `categoryScore` as-is (`message.categoryScore ?? null` in `upsertMessages(...)`).
+- Sync path also stores `categorySignals` as JSON.
 - Recompute path uses `classification.confidence || null`, so exact `0` is written as `NULL`.
+- Recompute path stores `categorySignals` from each recomputed classification.
 
 ## Recompute Existing Messages
 

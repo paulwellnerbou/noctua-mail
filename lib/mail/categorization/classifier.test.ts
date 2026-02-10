@@ -74,6 +74,49 @@ describe("categorization classifier notification/newsletter separation", () => {
     expect(result.category).toBe("notification");
     expect(result.confidence).toBeGreaterThanOrEqual(0.7);
   });
+
+  it("classifies list-unsubscribe-only list mail as newsletter fallback", () => {
+    const parsed = makeParsed({
+      from: { value: [{ address: "ticketnews@service.example.invalid" }] },
+      subject: "Tickets jetzt exklusiv!",
+      text: "Aktuelle Informationen zu Veranstaltungen."
+    });
+    const headers = toHeaderMap({
+      "List-Id": "<abcdef.service.example.invalid>",
+      "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+      "List-Unsubscribe": "<https://service.example.invalid/unsubscribe/abc>"
+    });
+
+    const result = classifyEmail(parsed as any, headers as any);
+    expect(result.category).toBe("newsletter");
+    expect(result.signals).toContain("fallback: list-unsubscribe-only-newsletter");
+    expect(result.confidence).toBeGreaterThanOrEqual(0.7);
+  });
+
+  it("classifies folded mailparser list header with unsubscribe as newsletter fallback", () => {
+    const parsed = makeParsed({
+      from: { value: [{ address: "ticketnews@service.example.invalid" }] },
+      subject: "Tickets jetzt exklusiv!",
+      text: "Aktuelle Informationen zu Veranstaltungen."
+    });
+    const headers = new Map<string, any>([
+      [
+        "list",
+        {
+          id: "<1UI1DCD-1YJC0X.service.eventim.de>",
+          unsubscribe: [
+            "<https://public-api.eventim.com/evi/api/evi/public/permission-link/abc/revoke>"
+          ],
+          unsubscribePost: "List-Unsubscribe=One-Click"
+        }
+      ]
+    ]);
+
+    const result = classifyEmail(parsed as any, headers as any);
+    expect(result.category).toBe("newsletter");
+    expect(result.signals).toContain("fallback: list-unsubscribe-only-newsletter");
+    expect(result.confidence).toBeGreaterThanOrEqual(0.7);
+  });
 });
 
 describe("categorization classifier transactional detection", () => {

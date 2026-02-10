@@ -105,6 +105,7 @@ export type Message = {
   recent?: boolean;
   category?: string | null;
   categoryScore?: number | null;
+  categorySignals?: string[];
   groupKey?: string;
 };
 

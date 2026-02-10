@@ -294,7 +294,8 @@ function initAccountSchema(db: any) {
       draft INTEGER DEFAULT 0,
       recent INTEGER DEFAULT 0,
       category TEXT,
-      categoryScore REAL
+      categoryScore REAL,
+      categorySignals TEXT
     );
 
     CREATE TABLE IF NOT EXISTS attachments (
@@ -349,6 +350,16 @@ function initAccountSchema(db: any) {
     CREATE INDEX IF NOT EXISTS idx_attachments_message
       ON attachments(messageId);
   `);
+
+  // Lightweight schema migration for existing account DBs.
+  const messageColumns = new Set(
+    (db.prepare(`PRAGMA table_info(messages)`).all() as Array<{ name?: string }>).map((row) =>
+      String(row.name ?? "")
+    )
+  );
+  if (!messageColumns.has("categorySignals")) {
+    db.prepare(`ALTER TABLE messages ADD COLUMN categorySignals TEXT`).run();
+  }
 }
 
 async function getDb() {
@@ -1091,6 +1102,19 @@ function parseReferences(value?: string | null) {
   return undefined;
 }
 
+function parseStringArray(value?: string | null) {
+  if (!value) return undefined;
+  try {
+    const parsed = JSON.parse(value);
+    if (Array.isArray(parsed)) {
+      return parsed.map(String).filter(Boolean);
+    }
+  } catch {
+    return undefined;
+  }
+  return undefined;
+}
+
 function normalizeSubjectLine(subject?: string | null) {
   let value = (subject ?? "").trim().toLowerCase();
   if (!value) return "";
@@ -1687,6 +1711,9 @@ export async function listRelatedMessages(params: {
         m.deleted,
         m.draft,
         m.recent,
+        m.category,
+        m.categoryScore,
+        m.categorySignals,
         EXISTS(SELECT 1 FROM attachments a WHERE a.messageId = m.id AND a.inline = 0)
           as hasAttachments,
         EXISTS(SELECT 1 FROM attachments a WHERE a.messageId = m.id AND a.inline = 1)
@@ -1804,7 +1831,8 @@ export async function listRelatedMessages(params: {
       draft: Boolean(row.draft),
       recent: Boolean(row.recent),
       category: row.category ?? undefined,
-      categoryScore: typeof row.categoryScore === 'number' ? row.categoryScore : undefined
+      categoryScore: typeof row.categoryScore === "number" ? row.categoryScore : undefined,
+      categorySignals: parseStringArray(row.categorySignals)
     };
     (message as any).groupKey = buildGroupKey(message, groupBy);
     return message;
@@ -1989,6 +2017,7 @@ export async function listMessages(params: {
         m.recent,
         m.category,
         m.categoryScore,
+        m.categorySignals,
         EXISTS(SELECT 1 FROM attachments a WHERE a.messageId = m.id AND a.inline = 0)
           as hasAttachments,
         EXISTS(SELECT 1 FROM attachments a WHERE a.messageId = m.id AND a.inline = 1)
@@ -2038,7 +2067,8 @@ export async function listMessages(params: {
       draft: Boolean(row.draft),
       recent: Boolean(row.recent),
       category: row.category ?? undefined,
-      categoryScore: typeof row.categoryScore === 'number' ? row.categoryScore : undefined
+      categoryScore: typeof row.categoryScore === "number" ? row.categoryScore : undefined,
+      categorySignals: parseStringArray(row.categorySignals)
     };
     (message as any).groupKey = buildGroupKey(message, groupBy);
     return message;
@@ -2370,6 +2400,7 @@ export async function listThreads(params: {
               m.recent,
               m.category,
               m.categoryScore,
+              m.categorySignals,
               EXISTS(SELECT 1 FROM attachments a WHERE a.messageId = m.id AND a.inline = 0)
                 as hasAttachments,
               EXISTS(SELECT 1 FROM attachments a WHERE a.messageId = m.id AND a.inline = 1)
@@ -2420,7 +2451,8 @@ export async function listThreads(params: {
       draft: Boolean(row.draft),
       recent: Boolean(row.recent),
       category: row.category ?? undefined,
-      categoryScore: typeof row.categoryScore === 'number' ? row.categoryScore : undefined
+      categoryScore: typeof row.categoryScore === "number" ? row.categoryScore : undefined,
+      categorySignals: parseStringArray(row.categorySignals)
     };
     (message as any).groupKey = buildGroupKey(message, groupBy);
     return message;
@@ -2534,7 +2566,8 @@ export async function listThreadMessages(params: {
       draft: Boolean(row.draft),
       recent: Boolean(row.recent),
       category: row.category ?? undefined,
-      categoryScore: typeof row.categoryScore === 'number' ? row.categoryScore : undefined
+      categoryScore: typeof row.categoryScore === "number" ? row.categoryScore : undefined,
+      categorySignals: parseStringArray(row.categorySignals)
     };
     (message as any).groupKey = buildGroupKey(message, groupBy);
     return message;
@@ -2658,8 +2691,8 @@ export async function upsertMessages(
         id, accountId, folderId, threadId, parentId, messageId, inReplyTo, "references", xForwardedMessageId,
         subject, fromAddr, fromEmail, toAddr, ccAddr, bccAddr, mailboxPath, imapUid, preview, date, dateValue,
         body, htmlBody, priority, hasSource, unread, flags, seen, answered, flagged, deleted, draft, recent,
-        category, categoryScore
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        category, categoryScore, categorySignals
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     const insertFts = db.prepare(`
       INSERT INTO message_fts (messageId, subject, fromAddr, toAddr, ccAddr, bccAddr, body, preview)
@@ -2759,7 +2792,8 @@ export async function upsertMessages(
           draft ? 1 : 0,
           recent ? 1 : 0,
           message.category ?? null,
-          message.categoryScore ?? null
+          message.categoryScore ?? null,
+          message.categorySignals ? JSON.stringify(message.categorySignals) : null
         );
         deleteFts.run(message.id);
         insertFts.run(
@@ -2887,7 +2921,8 @@ export async function getMessageById(accountId: string, messageId: string) {
     draft: Boolean(row.draft),
     recent: Boolean(row.recent),
     category: row.category ?? undefined,
-    categoryScore: typeof row.categoryScore === 'number' ? row.categoryScore : undefined
+    categoryScore: typeof row.categoryScore === "number" ? row.categoryScore : undefined,
+    categorySignals: parseStringArray(row.categorySignals)
   } as Message;
 }
 
@@ -3205,7 +3240,7 @@ export async function recomputeCategoriesForAccount(accountId: string) {
 
   const config = getCategorizationConfig();
   const updateStmt = db.prepare(
-    `UPDATE messages SET category = ?, categoryScore = ? WHERE accountId = ? AND id = ?`
+    `UPDATE messages SET category = ?, categoryScore = ?, categorySignals = ? WHERE accountId = ? AND id = ?`
   );
 
   let processed = 0;
@@ -3225,6 +3260,7 @@ export async function recomputeCategoriesForAccount(accountId: string) {
         updateStmt.run(
           classification.category || null,
           classification.confidence || null,
+          JSON.stringify(classification.signals ?? []),
           accountId,
           id
         )

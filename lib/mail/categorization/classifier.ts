@@ -119,6 +119,17 @@ export function classifyEmail(
     return undefined;
   };
 
+  // Helper to get raw header value (objects/arrays included)
+  const getHeaderRaw = (key: string): unknown => {
+    const lowerKey = key.toLowerCase();
+    for (const [k, v] of headers.entries()) {
+      if (k.toLowerCase() === lowerKey) {
+        return v;
+      }
+    }
+    return undefined;
+  };
+
   // Helper to check if header exists (regardless of value type)
   const hasHeader = (key: string): boolean => {
     const lowerKey = key.toLowerCase();
@@ -130,6 +141,20 @@ export function classifyEmail(
 
   // mailparser combines List-* headers into a single "list" object
   const hasListHeader = hasHeader('list') || hasHeader('list-id') || hasHeader('list-unsubscribe');
+  const listHeaderRaw = getHeaderRaw('list');
+  const listHeaderSerialized = (() => {
+    if (typeof listHeaderRaw === 'string') return listHeaderRaw.toLowerCase();
+    if (!listHeaderRaw) return '';
+    try {
+      return JSON.stringify(listHeaderRaw).toLowerCase();
+    } catch {
+      return '';
+    }
+  })();
+  const hasListUnsubscribe =
+    hasHeader('list-unsubscribe') ||
+    hasHeader('list-unsubscribe-post') ||
+    listHeaderSerialized.includes('unsubscribe');
   const precedence = getHeader('precedence')?.toLowerCase();
   const autoSubmitted = getHeader('auto-submitted')?.toLowerCase();
   const hasInReplyTo = hasHeader('in-reply-to');
@@ -396,6 +421,17 @@ export function classifyEmail(
   if (transactionalSignalStrength >= 1.0 && scores.notification > 0.5) {
     scores.notification *= 0.6;
     signals.push('safeguard: transactional-over-notification');
+  }
+
+  // Fallback: list + unsubscribe without any event/transactional evidence is treated as newsletter.
+  if (
+    hasListHeader &&
+    hasListUnsubscribe &&
+    eventSignalStrength === 0 &&
+    transactionalSignalStrength === 0
+  ) {
+    scores.newsletter = Math.max(scores.newsletter, config.minConfidence);
+    signals.push('fallback: list-unsubscribe-only-newsletter');
   }
 
   // ============================================================================

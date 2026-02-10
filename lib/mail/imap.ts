@@ -341,7 +341,8 @@ async function parseImapMessage(
     recent,
     unread: !seen,
     category: classification.category,
-    categoryScore: classification.confidence
+    categoryScore: classification.confidence,
+    categorySignals: classification.signals
   } as Message;
 }
 

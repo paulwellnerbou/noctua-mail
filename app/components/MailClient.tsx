@@ -5609,6 +5609,7 @@ export default function MailClient() {
   const processStatusItems = [
     isSyncing ? "Mailbox sync" : "",
     isRecomputingThreads ? "Recomputing threads…" : "",
+    isRecomputingCategories ? "Recomputing categories…" : "",
     syncingFolders.size > 0 ? `Folder sync… (${syncingFolders.size})` : ""
   ].filter(Boolean);
   const processStatusValue = processStatusItems.length > 0 ? processStatusItems.join(" · ") : "Idle";
@@ -6234,6 +6235,7 @@ export default function MailClient() {
             <div className="popover-body">
               {isSyncing && <div>Mailbox sync running</div>}
               {isRecomputingThreads && <div>Recomputing threads…</div>}
+              {isRecomputingCategories && <div>Recomputing categories…</div>}
               {syncingFolders.size > 0 && (
                 <div>
                   Folder sync running ({syncingFolders.size})
@@ -6247,7 +6249,10 @@ export default function MailClient() {
                   </div>
                 </div>
               )}
-              {!isSyncing && syncingFolders.size === 0 && !isRecomputingThreads && (
+              {!isSyncing &&
+                syncingFolders.size === 0 &&
+                !isRecomputingThreads &&
+                !isRecomputingCategories && (
                 <div>No active processes.</div>
               )}
             </div>
