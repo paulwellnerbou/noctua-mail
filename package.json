@@ -3,6 +3,14 @@
   "version": "0.1.0",
   "license": "Elastic-2.0",
   "author": "Paul Wellner Bou <paul@wellnerbou.de>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/paulwellnerbou/noctua-mail.git"
+  },
+  "homepage": "https://github.com/paulwellnerbou/noctua-mail#readme",
+  "bugs": {
+    "url": "https://github.com/paulwellnerbou/noctua-mail/issues"
+  },
   "type": "module",
   "scripts": {
     "dev": "NOCTUA_DATA_DIR=../noctua-data PORT=3654 bun --bun next dev",

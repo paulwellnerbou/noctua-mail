@@ -1,5 +1,8 @@
 import type { Account } from "@/lib/data";
 
+const PROJECT_URL = "https://github.com/paulwellnerbou/noctua-mail";
+const MAILER_ID = `Noctua Mail (${PROJECT_URL})`;
+
 type MailPayload = {
   to: string;
   cc?: string;
@@ -47,8 +50,8 @@ function buildMailOptions(account: Account, mail: MailPayload) {
     html: mail.html,
     ...(attachments && attachments.length > 0 ? { attachments } : {}),
     headers: {
-      "User-Agent": "Noctua Mail",
-      "X-Mailer": "Noctua Mail",
+      "User-Agent": MAILER_ID,
+      "X-Mailer": MAILER_ID,
       ...(mail.xForwardedMessageId ? { "X-Forwarded-Message-Id": mail.xForwardedMessageId } : {})
     }
   };
