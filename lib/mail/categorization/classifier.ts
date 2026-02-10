@@ -73,8 +73,8 @@ export function classifyEmail(
   const fromDomain = fromAddress.split('@')[1]?.toLowerCase() || '';
   const subject = (parsed.subject || '').toLowerCase();
   const bodyText = (parsed.text || '').substring(0, 5000).toLowerCase();
-  const attachmentNames = (parsed.attachments ?? [])
-    .map((attachment) => (attachment.filename || '').toLowerCase())
+  const attachmentNames: string[] = (parsed.attachments ?? [])
+    .map((attachment: { filename?: string | undefined }) => (attachment.filename || '').toLowerCase())
     .filter(Boolean);
   const attachmentText = attachmentNames.join(' ');
   const transactionalKeywords = [
