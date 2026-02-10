@@ -75,3 +75,40 @@ describe("categorization classifier notification/newsletter separation", () => {
     expect(result.confidence).toBeGreaterThanOrEqual(0.7);
   });
 });
+
+describe("categorization classifier transactional detection", () => {
+  it("classifies german invoice mail as transactional", () => {
+    const parsed = makeParsed({
+      from: { value: [{ address: "noreply@hosting-beispiel.invalid", name: "Rechnungsstelle Beispiel Hosting" }] },
+      subject: "Ihre Rechnung 123456789012 vom 09.02.2026 ist da",
+      text: "Ihre Rechnung steht bereit. Die Rechnungsnummer lautet 123456789012.",
+      attachments: [{ filename: "Rechnung_2026-02-09_123456789012_V0000001.pdf" }]
+    });
+    const headers = toHeaderMap({
+      "Auto-Submitted": "auto-generated",
+      "List-Help": "<https://example.invalid/help>"
+    });
+
+    const result = classifyEmail(parsed as any, headers as any);
+    expect(result.category).toBe("transactional");
+    expect(result.confidence).toBeGreaterThanOrEqual(0.7);
+  });
+
+  it("prioritizes transactional over newsletter-like list signals when invoice evidence is strong", () => {
+    const parsed = makeParsed({
+      from: { value: [{ address: "noreply@billing.example.com", name: "Billing Department" }] },
+      subject: "Invoice 987654321 dated 09/02/2026",
+      text: "Please find your invoice attached.",
+      attachments: [{ filename: "invoice_987654321.pdf" }]
+    });
+    const headers = toHeaderMap({
+      "List-Id": "customers.example.com",
+      "List-Unsubscribe": "<https://example.com/unsubscribe>",
+      Precedence: "bulk"
+    });
+
+    const result = classifyEmail(parsed as any, headers as any);
+    expect(result.category).toBe("transactional");
+    expect(result.confidence).toBeGreaterThanOrEqual(0.7);
+  });
+});

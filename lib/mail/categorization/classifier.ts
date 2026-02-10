@@ -65,12 +65,44 @@ export function classifyEmail(
 
   const signals: string[] = [];
   let eventSignalStrength = 0;
+  let transactionalSignalStrength = 0;
 
   // Extract key fields
   const fromAddress = extractEmailAddress(parsed.from);
+  const fromDisplayName = extractDisplayName(parsed.from);
   const fromDomain = fromAddress.split('@')[1]?.toLowerCase() || '';
   const subject = (parsed.subject || '').toLowerCase();
   const bodyText = (parsed.text || '').substring(0, 5000).toLowerCase();
+  const attachmentNames = (parsed.attachments ?? [])
+    .map((attachment) => (attachment.filename || '').toLowerCase())
+    .filter(Boolean);
+  const attachmentText = attachmentNames.join(' ');
+  const transactionalKeywords = [
+    'invoice',
+    'receipt',
+    'billing',
+    'payment',
+    'statement',
+    'bill',
+    'refund',
+    'charge',
+    'debit',
+    'credit note',
+    'rechnung',
+    'rechnungsstelle',
+    'zahlungsbeleg',
+    'gutschrift',
+    'beleg',
+    'facture',
+    'fattura',
+    'recibo',
+    'comprobante',
+  ];
+  const hasTransactionalKeyword = (value: string) =>
+    transactionalKeywords.some((keyword) => value.includes(keyword));
+  const transactionalDocPattern =
+    /\b(invoice|receipt|rechnung|facture|fattura|recibo)\b.{0,24}\b(?:nr\.?|no\.?|number)?\s*[#:]?\s*\d{6,}\b/;
+  const datePattern = /\b\d{1,2}[./-]\d{1,2}[./-]\d{2,4}\b/;
 
   // ============================================================================
   // PHASE 1: High-confidence header-based detection (most reliable)
@@ -161,6 +193,7 @@ export function classifyEmail(
   // Transactional senders (high confidence)
   if (/^(receipts?|orders?|billing|payments?|invoices?|support)@/.test(fromAddress)) {
     scores.transactional += 0.7;
+    transactionalSignalStrength += 0.7;
     signals.push(`from: transactional (${fromLocal}@)`);
   }
 
@@ -194,6 +227,13 @@ export function classifyEmail(
     signals.push(`from: newsletter-platform (${fromDomain})`);
   }
 
+  // Transactional/billing department sender names in multiple languages.
+  if (hasTransactionalKeyword(fromDisplayName)) {
+    scores.transactional += 0.55;
+    transactionalSignalStrength += 0.55;
+    signals.push('from: transactional-display-name');
+  }
+
   // ============================================================================
   // PHASE 3: Subject line analysis (moderate confidence)
   // ============================================================================
@@ -220,7 +260,32 @@ export function classifyEmail(
   // Transactional patterns (high priority - don't want false positives here)
   if (/\b(receipt|invoice|order\s*#?\d+|confirmation|booking|ticket|reset|verify|account)\b/.test(subject)) {
     scores.transactional += 0.6;
+    transactionalSignalStrength += 0.6;
     signals.push('subject: transactional-pattern');
+  }
+
+  // Multilingual billing document vocabulary.
+  if (hasTransactionalKeyword(subject)) {
+    scores.transactional += 0.7;
+    transactionalSignalStrength += 0.7;
+    signals.push('subject: transactional-billing-keyword');
+  }
+
+  // Structured document cues like "invoice 123456789" and dated invoice subjects.
+  if (transactionalDocPattern.test(subject)) {
+    scores.transactional += 0.45;
+    transactionalSignalStrength += 0.45;
+    signals.push('subject: transactional-document-id');
+  }
+  if (hasTransactionalKeyword(subject) && /\b\d{6,}\b/.test(subject)) {
+    scores.transactional += 0.35;
+    transactionalSignalStrength += 0.35;
+    signals.push('subject: transactional-long-id');
+  }
+  if (hasTransactionalKeyword(subject) && datePattern.test(subject)) {
+    scores.transactional += 0.25;
+    transactionalSignalStrength += 0.25;
+    signals.push('subject: transactional-date');
   }
 
   // ============================================================================
@@ -236,7 +301,15 @@ export function classifyEmail(
   // Order/tracking information strongly suggests transactional
   if (/\b(order\s*number|tracking\s*number|transaction\s*id|confirmation\s*code|receipt\s*#)\b/.test(bodyText)) {
     scores.transactional += 0.4;
+    transactionalSignalStrength += 0.4;
     signals.push('body: order-info');
+  }
+
+  // Multilingual billing/payment language in body.
+  if (hasTransactionalKeyword(bodyText)) {
+    scores.transactional += 0.3;
+    transactionalSignalStrength += 0.3;
+    signals.push('body: transactional-billing-keyword');
   }
 
   // Multiple strong CTAs suggest newsletter/promotional content
@@ -256,6 +329,29 @@ export function classifyEmail(
     scores.notification += 0.25;
     eventSignalStrength += 0.25;
     signals.push('body: activity-event');
+  }
+
+  // Attachments named like invoices/receipts are a strong transactional signal.
+  if (
+    attachmentNames.some((name) =>
+      /\.(pdf|xml|csv)$/i.test(name) && hasTransactionalKeyword(name)
+    )
+  ) {
+    scores.transactional += 0.65;
+    transactionalSignalStrength += 0.65;
+    signals.push('attachment: transactional-document-name');
+  }
+
+  // Long numeric document ids in attachment filenames further reinforce transactional.
+  if (
+    attachmentNames.some((name) =>
+      /\.(pdf|xml|csv)$/i.test(name) && /\b\d{6,}\b/.test(name)
+    ) &&
+    hasTransactionalKeyword(attachmentText)
+  ) {
+    scores.transactional += 0.35;
+    transactionalSignalStrength += 0.35;
+    signals.push('attachment: transactional-document-id');
   }
 
   // ============================================================================
@@ -292,6 +388,16 @@ export function classifyEmail(
     signals.push('safeguard: event-driven-overrides-list');
   }
 
+  // Transactional evidence should dominate over broadcast/list signals.
+  if (transactionalSignalStrength >= 0.75) {
+    scores.newsletter *= 0.35;
+    signals.push('safeguard: transactional-over-newsletter');
+  }
+  if (transactionalSignalStrength >= 1.0 && scores.notification > 0.5) {
+    scores.notification *= 0.6;
+    signals.push('safeguard: transactional-over-notification');
+  }
+
   // ============================================================================
   // PHASE 6: Select category with highest score
   // ============================================================================
@@ -311,6 +417,17 @@ export function classifyEmail(
     topCategory = 'notification';
     topScore = scores.notification;
     signals.push('tie-break: notification-over-newsletter');
+  }
+
+  // Strong transactional evidence should beat newsletter/notification when close.
+  if (
+    topCategory !== 'transactional' &&
+    transactionalSignalStrength >= 0.75 &&
+    scores.transactional >= topScore - 0.2
+  ) {
+    topCategory = 'transactional';
+    topScore = scores.transactional;
+    signals.push('tie-break: transactional-priority');
   }
 
   // Check if category is enabled in config
@@ -355,6 +472,22 @@ function extractEmailAddress(addressObj: any): string {
 
   if (addressObj.address) {
     return addressObj.address.toLowerCase();
+  }
+
+  return '';
+}
+
+function extractDisplayName(addressObj: any): string {
+  if (!addressObj) return '';
+
+  if (typeof addressObj === 'string') return '';
+
+  if (addressObj.value && Array.isArray(addressObj.value) && addressObj.value[0]) {
+    return (addressObj.value[0].name || '').toLowerCase();
+  }
+
+  if (addressObj.name) {
+    return String(addressObj.name).toLowerCase();
   }
 
   return '';
