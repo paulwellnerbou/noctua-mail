@@ -1,7 +1,7 @@
 
 # 🦉 Noctua Mail
 
-<img src="my-assets/icon.svg" alt="Noctua logo" width="120" style="float: right;"/>
+<img src="public/icons/icon-192.png" alt="Noctua logo" width="120" style="float: right;"/>
 
 A fast web-based mail client (IMAP/SMTP) built with Bun, TypeScript, and Next.js.
 
@@ -33,6 +33,13 @@ Access via the "Show related" option in the message action menu or search with `
 ### 🧵 Thread View Across Folders
 Unified conversation threading that works **across all folders**. Whether emails are in Inbox, Sent, or any other folder, Noctua Mail intelligently groups them into cohesive threads. Collapse and expand conversations with ease, maintaining context no matter where messages are stored.
 
+### ⏰ Calendar Invite Reminders
+Schedule reminders directly from ICS invites and get desktop/system notifications at the right time:
+- **Per-invite reminder controls** – Schedule, modify, and delete reminders from the invite preview
+- **Recurring invite support** – Reminder timing follows recurring event rules (`RRULE` + exceptions)
+- **Cross-client persistence** – Reminders are stored in the account database and visible across clients
+- **Offline-aware delivery** – PWA/service worker delivery with local cache and due-lookback handling
+
 ### 🔐 IMAP-Only Authentication
 Simple, secure authentication using your existing IMAP credentials. No separate user accounts and no stored passwords to manage – just connect with your email server credentials and start using Noctua Mail immediately.
 
@@ -47,6 +54,7 @@ Simple, secure authentication using your existing IMAP credentials. No separate 
 - **Rich message viewing** – HTML, Text, Markdown, and Source views
 - **Attachments** – Inline display and downloadable files
 - **Calendar invites** – Display ICS details (full calendar support in progress 📅)
+- **Calendar reminders** – Schedule notifications for invite events, including recurring meetings
 
 ### 🎨 UI
 - **Three-pane layout** – Folders, message list, and message view
