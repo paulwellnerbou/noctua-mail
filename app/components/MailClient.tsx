@@ -124,6 +124,17 @@ import {
   extractEmails
 } from "./mailclient/utils/clientHelpers";
 import {
+  CALENDAR_REMINDERS_UPDATED_EVENT,
+  type CalendarReminder,
+  deleteCalendarReminder,
+  fetchCalendarReminders,
+  hasReminderBeenDeliveredOnClient,
+  markReminderDeliveredOnClient,
+  markReminderDeliveredOnClientById,
+  readDeliveredReminderMap,
+  pruneDeliveredReminderMap
+} from "./mailclient/utils/calendarReminders";
+import {
   NOTICE_TIMEOUTS,
   THREAD_COLLAPSE_SETTLE_MS,
   SYNC_STATUS_POLL_INTERVAL_MS
@@ -221,6 +232,8 @@ export default function MailClient() {
   const [selectedExceptionId, setSelectedExceptionId] = useState<string | null>(null);
   const [processPanelOpen, setProcessPanelOpen] = useState(false);
   const [exceptionPanelOpen, setExceptionPanelOpen] = useState(false);
+  const [reminderPanelOpen, setReminderPanelOpen] = useState(false);
+  const [pendingCalendarReminders, setPendingCalendarReminders] = useState<CalendarReminder[]>([]);
   const [messageView, setMessageView] = useState<"card" | "table" | "compact" | "threads">("threads");
   const clientId = useMemo(() => {
     if (typeof window === "undefined") return "";
@@ -411,6 +424,7 @@ export default function MailClient() {
   const lastNotifiedUidRef = useRef<Record<string, number>>({});
   const notifiedKeysRef = useRef<Set<string>>(new Set());
   const lastDeleteReconcileAtRef = useRef<Record<string, number>>({});
+  const messageMutationVersionRef = useRef(0);
   const swRegistrationRef = useRef<ServiceWorkerRegistration | null>(null);
   const threadPreferenceByFolderRef = useRef<Record<string, boolean>>({});
   const syncStateRef = useRef<{ isSyncing: boolean; syncingFolders: Set<string> }>({
@@ -852,8 +866,22 @@ export default function MailClient() {
     const days = Math.floor(hours / 24);
     return `${days}d ago`;
   };
+  const formatUpcomingReminderTime = (triggerAtMs: number) => {
+    const diffMs = triggerAtMs - Date.now();
+    const absolute = new Intl.DateTimeFormat(undefined, {
+      dateStyle: "medium",
+      timeStyle: "short"
+    }).format(new Date(triggerAtMs));
+    if (diffMs <= 0) return `Now (${absolute})`;
+    const minutes = Math.floor(diffMs / (60 * 1000));
+    if (minutes < 60) return `In ${Math.max(1, minutes)}m (${absolute})`;
+    const hours = Math.floor(minutes / 60);
+    if (hours < 24) return `In ${hours}h ${minutes % 60}m (${absolute})`;
+    const days = Math.floor(hours / 24);
+    return `In ${days}d ${hours % 24}h (${absolute})`;
+  };
 
-  const ensureNotificationPermission = async () => {
+  const ensureNotificationPermission = useCallback(async () => {
     if (typeof window === "undefined" || !("Notification" in window)) return "denied";
     if (Notification.permission === "default") {
       try {
@@ -863,61 +891,158 @@ export default function MailClient() {
       }
     }
     return Notification.permission;
-  };
+  }, []);
 
-  const showNotification = async (
-    title: string,
-    body: string,
-    tag: string,
-    opts?: { messageId?: string | null; url?: string }
-  ) => {
-    if (typeof window === "undefined" || !("Notification" in window)) return;
-    const permission = await ensureNotificationPermission();
-    console.info("[noctua] notification permission", permission);
-    if (permission !== "granted") return;
-    const targetUrl = opts?.url ?? buildNotificationUrl(opts?.messageId);
-    const notificationOptions = {
-      body,
-      tag,
-      icon: "/icon.png",
-      badge: "/favicon.png",
-      data: {
-        url: targetUrl,
-        messageId: opts?.messageId ?? null
-      }
-    };
-    try {
-      if ("serviceWorker" in navigator) {
-        const registration =
-          swRegistrationRef.current ??
-          (await navigator.serviceWorker.getRegistration()) ??
-          (await navigator.serviceWorker.ready);
-        if (registration?.active) {
-          console.info("[noctua] showNotification via service worker", title, body);
-          await registration.showNotification(title, notificationOptions);
-          return;
+  const showNotification = useCallback(
+    async (
+      title: string,
+      body: string,
+      tag: string,
+      opts?: { messageId?: string | null; url?: string }
+    ): Promise<boolean> => {
+      if (typeof window === "undefined" || !("Notification" in window)) return false;
+      const permission = await ensureNotificationPermission();
+      console.info("[noctua] notification permission", permission);
+      if (permission !== "granted") return false;
+      const targetUrl = opts?.url ?? buildNotificationUrl(opts?.messageId);
+      const notificationOptions = {
+        body,
+        tag,
+        icon: "/icon.png",
+        badge: "/favicon.png",
+        data: {
+          url: targetUrl,
+          messageId: opts?.messageId ?? null
         }
-      }
-      console.info("[noctua] showNotification via Notification()", title, body);
-      const notification = new Notification(title, notificationOptions);
-      notification.onclick = () => {
-        window.focus();
-        window.location.assign(targetUrl);
       };
-    } catch (error) {
-      console.warn("[noctua] notification failed", error);
       try {
-        console.info("[noctua] fallback Notification()", title, body);
-        const fallback = new Notification(title, notificationOptions);
-        fallback.onclick = () => {
+        if ("serviceWorker" in navigator) {
+          const registration =
+            swRegistrationRef.current ??
+            (await navigator.serviceWorker.getRegistration()) ??
+            (await navigator.serviceWorker.ready);
+          if (registration?.active) {
+            console.info("[noctua] showNotification via service worker", title, body);
+            await registration.showNotification(title, notificationOptions);
+            return true;
+          }
+        }
+        console.info("[noctua] showNotification via Notification()", title, body);
+        const notification = new Notification(title, notificationOptions);
+        notification.onclick = () => {
           window.focus();
           window.location.assign(targetUrl);
         };
-      } catch (fallbackError) {
-        console.warn("[noctua] notification fallback failed", fallbackError);
+        return true;
+      } catch (error) {
+        console.warn("[noctua] notification failed", error);
+        try {
+          console.info("[noctua] fallback Notification()", title, body);
+          const fallback = new Notification(title, notificationOptions);
+          fallback.onclick = () => {
+            window.focus();
+            window.location.assign(targetUrl);
+          };
+          return true;
+        } catch (fallbackError) {
+          console.warn("[noctua] notification fallback failed", fallbackError);
+        }
+      }
+      return false;
+    },
+    [ensureNotificationPermission]
+  );
+
+  const syncReminderStateToServiceWorker = useCallback(
+    async (reminders: CalendarReminder[]) => {
+      if (typeof window === "undefined" || !("serviceWorker" in navigator)) return;
+      const accountIds = accounts.map((account) => account.id).filter(Boolean);
+      if (accountIds.length === 0 || !clientId) return;
+      const deliveredByAccount: Record<string, Record<string, number>> = {};
+      accountIds.forEach((accountId) => {
+        const map = readDeliveredReminderMap(accountId, clientId);
+        if (Object.keys(map).length > 0) {
+          deliveredByAccount[accountId] = map;
+        }
+      });
+      const payload = {
+        type: "noctua:reminder-state",
+        accountIds,
+        deliveredByAccount,
+        activeAccountId: activeAccountId || null,
+        activeReminderIds: reminders.map((item) => item.id)
+      };
+      try {
+        const registration =
+          swRegistrationRef.current ??
+          (await navigator.serviceWorker.getRegistration()) ??
+          null;
+        swRegistrationRef.current = registration;
+        const target = registration?.active ?? navigator.serviceWorker.controller ?? null;
+        target?.postMessage(payload);
+      } catch {
+        // ignore service worker sync errors
+      }
+    },
+    [accounts, activeAccountId, clientId]
+  );
+
+  const processDueCalendarReminders = useCallback(async () => {
+    if (!activeAccountId.trim()) {
+      setPendingCalendarReminders([]);
+      return;
+    }
+    const now = Date.now();
+    const reminders = await fetchCalendarReminders(activeAccountId);
+    setPendingCalendarReminders(reminders);
+    await syncReminderStateToServiceWorker(reminders);
+    if (reminders.length === 0 || !clientId) return;
+    pruneDeliveredReminderMap(activeAccountId, clientId, reminders);
+    let deliveredChanged = false;
+    for (let index = 0; index < reminders.length; index += 1) {
+      const reminder = reminders[index];
+      if (reminder.triggerAtMs > now) continue;
+      if (hasReminderBeenDeliveredOnClient(activeAccountId, clientId, reminder)) continue;
+      const eventDateLabel = new Intl.DateTimeFormat(undefined, {
+        dateStyle: "medium",
+        timeStyle: "short"
+      }).format(new Date(reminder.eventStartAtMs));
+      const bodyParts = [`${reminder.leadLabel} reminder`, `Starts ${eventDateLabel}`];
+      if (reminder.eventLocation) {
+        bodyParts.push(reminder.eventLocation);
+      }
+      const sent = await showNotification(
+        `Reminder: ${reminder.eventTitle || "Calendar event"}`,
+        bodyParts.join(" · "),
+        `calendar-reminder-${reminder.id}`,
+        { messageId: reminder.messageId ?? null }
+      );
+      if (sent) {
+        markReminderDeliveredOnClient(activeAccountId, clientId, reminder);
+        deliveredChanged = true;
       }
     }
-  };
+    if (deliveredChanged) {
+      await syncReminderStateToServiceWorker(reminders);
+    }
+  }, [activeAccountId, clientId, showNotification, syncReminderStateToServiceWorker]);
+
+  const refreshPendingCalendarReminders = useCallback(async () => {
+    if (!activeAccountId.trim()) {
+      setPendingCalendarReminders([]);
+      return;
+    }
+    try {
+      const reminders = await fetchCalendarReminders(activeAccountId);
+      setPendingCalendarReminders(reminders);
+      if (clientId) {
+        pruneDeliveredReminderMap(activeAccountId, clientId, reminders);
+      }
+      await syncReminderStateToServiceWorker(reminders);
+    } catch {
+      // ignore reminder sync failures in status UI
+    }
+  }, [activeAccountId, clientId, syncReminderStateToServiceWorker]);
 
   const undoMoveOperation = async (
     targets: UndoMoveTarget[],
@@ -1578,6 +1703,9 @@ export default function MailClient() {
     },
     [evictMessagesFromThreadCache]
   );
+  const markMessagesMutated = useCallback(() => {
+    messageMutationVersionRef.current += 1;
+  }, []);
   const {
     threadScopeMessages,
     groupedMessages,
@@ -2762,7 +2890,8 @@ export default function MailClient() {
     pushNotice,
     undoMoveOperation,
     noticeSuccessTimeout: NOTICE_TIMEOUTS.success,
-    onMoveComplete: evictMessageCaches
+    onMoveComplete: evictMessageCaches,
+    markMessagesMutated
   });
 
   const { handleDeleteMessage, handleDeleteMessagesByIds } = useMessageDeleteActions({
@@ -2792,7 +2921,8 @@ export default function MailClient() {
     confirmThreadDelete,
     undoMoveOperation,
     noticeSuccessTimeout: NOTICE_TIMEOUTS.success,
-    onMessagesRemoved: evictMessageCaches
+    onMessagesRemoved: evictMessageCaches,
+    markMessagesMutated
   });
 
   const getMessageSubjectForNotice = (message?: Message | null) =>
@@ -3550,8 +3680,31 @@ export default function MailClient() {
     if (!("serviceWorker" in navigator)) return;
     navigator.serviceWorker
       .register("/sw.js")
-      .then((registration) => {
+      .then(async (registration) => {
         swRegistrationRef.current = registration;
+        try {
+          if ("sync" in registration) {
+            await (registration as ServiceWorkerRegistration & {
+              sync: { register: (tag: string) => Promise<void> };
+            }).sync.register("noctua-reminders");
+          }
+        } catch {
+          // ignore one-off background sync registration errors
+        }
+        try {
+          const periodicRegistration = registration as ServiceWorkerRegistration & {
+            periodicSync?: {
+              register: (tag: string, options: { minInterval: number }) => Promise<void>;
+            };
+          };
+          if (periodicRegistration.periodicSync) {
+            await periodicRegistration.periodicSync.register("noctua-reminders", {
+              minInterval: 15 * 60 * 1000
+            });
+          }
+        } catch {
+          // ignore periodic sync registration errors
+        }
       })
       .catch(() => {
         // ignore registration errors
@@ -3587,29 +3740,80 @@ export default function MailClient() {
   useEffect(() => {
     if (typeof window === "undefined" || !("serviceWorker" in navigator)) return;
     const handleServiceWorkerMessage = (event: MessageEvent) => {
-      const payload = event.data as { type?: string; messageId?: string | null } | null;
-      if (payload?.type !== "noctua:notification-open") return;
-      const messageId = typeof payload.messageId === "string" ? payload.messageId : "";
-      if (!messageId) return;
-      pendingJumpMessageIdRef.current = messageId;
-      pendingJumpRefreshKeyRef.current = "";
-      if (jumpToMessageId(messageId)) {
-        pendingJumpMessageIdRef.current = null;
-        clearNotificationDeepLink(messageId);
+      const payload = event.data as
+        | {
+            type?: string;
+            messageId?: string | null;
+            accountId?: string;
+            reminderId?: string;
+            triggerAtMs?: number;
+          }
+        | null;
+      if (!payload?.type) return;
+      if (payload.type === "noctua:notification-open") {
+        const messageId = typeof payload.messageId === "string" ? payload.messageId : "";
+        if (!messageId) return;
+        pendingJumpMessageIdRef.current = messageId;
+        pendingJumpRefreshKeyRef.current = "";
+        if (jumpToMessageId(messageId)) {
+          pendingJumpMessageIdRef.current = null;
+          clearNotificationDeepLink(messageId);
+          return;
+        }
+        const inbox = inboxFolderRef.current;
+        if (inbox) {
+          setSearchScope("folder");
+          setActiveFolderId(inbox.id);
+        }
+        void refreshMailboxData();
         return;
       }
-      const inbox = inboxFolderRef.current;
-      if (inbox) {
-        setSearchScope("folder");
-        setActiveFolderId(inbox.id);
+      if (
+        payload.type === "noctua:reminder-delivered" &&
+        typeof payload.accountId === "string" &&
+        typeof payload.reminderId === "string" &&
+        typeof payload.triggerAtMs === "number" &&
+        clientId
+      ) {
+        markReminderDeliveredOnClientById(
+          payload.accountId,
+          clientId,
+          payload.reminderId,
+          payload.triggerAtMs
+        );
       }
-      void refreshMailboxData();
     };
     navigator.serviceWorker.addEventListener("message", handleServiceWorkerMessage);
     return () => {
       navigator.serviceWorker.removeEventListener("message", handleServiceWorkerMessage);
     };
-  }, [messageByMessageId]);
+  }, [clientId, messageByMessageId]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    let active = true;
+    const run = async () => {
+      if (!active) return;
+      await processDueCalendarReminders();
+    };
+    void run();
+    const interval = window.setInterval(() => {
+      void run();
+    }, 30_000);
+    const handleUpdate = () => {
+      void run();
+    };
+    window.addEventListener(CALENDAR_REMINDERS_UPDATED_EVENT, handleUpdate);
+    return () => {
+      active = false;
+      window.clearInterval(interval);
+      window.removeEventListener(CALENDAR_REMINDERS_UPDATED_EVENT, handleUpdate);
+    };
+  }, [processDueCalendarReminders]);
+
+  useEffect(() => {
+    void syncReminderStateToServiceWorker(pendingCalendarReminders);
+  }, [pendingCalendarReminders, syncReminderStateToServiceWorker]);
 
   const loadInitialData = useCallback(
     async (skipAuthCheck = false) => {
@@ -3758,6 +3962,7 @@ export default function MailClient() {
         return;
       }
       const requestKey = messagesKey;
+      const requestMutationVersion = messageMutationVersionRef.current;
       lastRequestRef.current = { key: requestKey, page: messagesPage };
       try {
         setLoadingMessages(true);
@@ -3809,6 +4014,10 @@ export default function MailClient() {
           const items = Array.isArray(data?.items) ? data.items.filter(Boolean) : [];
           const baseCount = typeof data?.baseCount === "number" ? data.baseCount : items.length;
           if (currentKeyRef.current !== requestKey) return;
+          if (messageMutationVersionRef.current !== requestMutationVersion) {
+            lastRequestRef.current = null;
+            return;
+          }
           if (isRelatedSearch) {
             setRelatedContext({ id: relatedQueryId, subject: data.relatedSubject });
           } else if (relatedContext) {
@@ -4490,6 +4699,7 @@ export default function MailClient() {
       return false;
     }
     setRefreshingMessages(true);
+    const requestMutationVersion = messageMutationVersionRef.current;
     const trimmedQuery = query.trim();
     const pageSize = searchScope === "all" ? 600 : 300;
     const params = new URLSearchParams({
@@ -4544,6 +4754,9 @@ export default function MailClient() {
       const nextMessages = Array.isArray(messageData?.items)
         ? messageData.items.filter(Boolean)
         : [];
+      if (messageMutationVersionRef.current !== requestMutationVersion) {
+        return false;
+      }
       const baseCount =
         typeof messageData?.baseCount === "number" ? messageData.baseCount : nextMessages.length;
       setMessages(nextMessages);
@@ -5597,11 +5810,35 @@ export default function MailClient() {
     document.documentElement.classList.toggle("dark", next);
     localStorage.setItem("noctua:theme", next ? "dark" : "light");
   };
+  const toggleProcessPanel = () => {
+    setProcessPanelOpen((open) => {
+      const next = !open;
+      if (next) {
+        setReminderPanelOpen(false);
+        setExceptionPanelOpen(false);
+      }
+      return next;
+    });
+  };
+  const toggleReminderPanel = () => {
+    setReminderPanelOpen((open) => {
+      const next = !open;
+      if (next) {
+        setProcessPanelOpen(false);
+        setExceptionPanelOpen(false);
+      }
+      return next;
+    });
+  };
   const toggleExceptionPanel = () => {
     setExceptionPanelOpen((open) => {
       const next = !open;
       if (next && !selectedExceptionId && latestException) {
         setSelectedExceptionId(latestException.id);
+      }
+      if (next) {
+        setProcessPanelOpen(false);
+        setReminderPanelOpen(false);
       }
       return next;
     });
@@ -5616,6 +5853,19 @@ export default function MailClient() {
   const processStatusTone: BottomStatusTone = processStatusItems.length > 0 ? "normal" : "muted";
   const mailCheckStatusValue = mailCheckMode === "idle" ? "Idle" : "Polling";
   const mailCheckStatusTone: BottomStatusTone = mailCheckMode === "idle" ? "muted" : "normal";
+  const nextReminder = pendingCalendarReminders[0] ?? null;
+  const reminderCount = pendingCalendarReminders.length;
+  const remindersStatusValue = (() => {
+    if (!nextReminder) return "None";
+    const shortTitle = nextReminder.eventTitle.length > 18
+      ? `${nextReminder.eventTitle.slice(0, 17)}…`
+      : nextReminder.eventTitle;
+    const time = new Intl.DateTimeFormat(undefined, { timeStyle: "short" }).format(
+      new Date(nextReminder.triggerAtMs)
+    );
+    return `${reminderCount} · ${shortTitle} @ ${time}`;
+  })();
+  const remindersStatusTone: BottomStatusTone = reminderCount > 0 ? "normal" : "muted";
   const exceptionStatusValue = latestException ? errorSummary ?? "Error" : "None";
   const exceptionStatusTone: BottomStatusTone = latestException ? "error" : "muted";
 
@@ -6215,7 +6465,7 @@ export default function MailClient() {
           label="Processes"
           value={processStatusValue}
           tone={processStatusTone}
-          onActivate={() => setProcessPanelOpen((open) => !open)}
+          onActivate={toggleProcessPanel}
         />
         <BottomStatusSection
           label="Mail check"
@@ -6223,10 +6473,16 @@ export default function MailClient() {
           tone={mailCheckStatusTone}
         />
         <BottomStatusSection
+          label="Reminders"
+          value={remindersStatusValue}
+          tone={remindersStatusTone}
+          alignRight
+          onActivate={toggleReminderPanel}
+        />
+        <BottomStatusSection
           label="Exceptions"
           value={exceptionStatusValue}
           tone={exceptionStatusTone}
-          alignRight
           onActivate={toggleExceptionPanel}
         />
         {processPanelOpen && (
@@ -6254,6 +6510,57 @@ export default function MailClient() {
                 !isRecomputingThreads &&
                 !isRecomputingCategories && (
                 <div>No active processes.</div>
+              )}
+            </div>
+          </div>
+        )}
+        {reminderPanelOpen && (
+          <div className="bottom-popover bottom-popover-reminders">
+            <div className="popover-title reminder-title">
+              <span>Reminders</span>
+              <button
+                className="icon-button small"
+                title="Close reminders"
+                aria-label="Close reminders"
+                onClick={() => setReminderPanelOpen(false)}
+              >
+                <X size={12} />
+              </button>
+            </div>
+            <div className="popover-body">
+              {pendingCalendarReminders.length > 0 ? (
+                <div className="reminder-list">
+                  {pendingCalendarReminders.map((reminder) => (
+                    <div key={reminder.id} className="reminder-item">
+                      <div className="reminder-item-main">
+                        <div className="reminder-item-title">{reminder.eventTitle}</div>
+                        <div className="reminder-item-meta">
+                          {reminder.leadLabel} · {formatUpcomingReminderTime(reminder.triggerAtMs)}
+                        </div>
+                      </div>
+                      <button
+                        className="icon-button small"
+                        title="Delete reminder"
+                        aria-label="Delete reminder"
+                        onClick={() => {
+                          if (!activeAccountId) return;
+                          void (async () => {
+                            try {
+                              await deleteCalendarReminder(activeAccountId, reminder.id);
+                              await refreshPendingCalendarReminders();
+                            } catch {
+                              reportError("Failed to delete reminder.");
+                            }
+                          })();
+                        }}
+                      >
+                        <Trash2 size={12} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div>No scheduled reminders.</div>
               )}
             </div>
           </div>

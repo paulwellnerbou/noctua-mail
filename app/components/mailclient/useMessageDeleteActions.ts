@@ -70,6 +70,7 @@ type UseMessageDeleteActionsOptions = {
   ) => Promise<void>;
   noticeSuccessTimeout: number;
   onMessagesRemoved?: (messageIds: string[]) => void;
+  markMessagesMutated?: () => void;
 };
 
 export function useMessageDeleteActions({
@@ -99,7 +100,8 @@ export function useMessageDeleteActions({
   confirmThreadDelete,
   undoMoveOperation,
   noticeSuccessTimeout,
-  onMessagesRemoved
+  onMessagesRemoved,
+  markMessagesMutated
 }: UseMessageDeleteActionsOptions) {
   const isPermanentDeleteTarget = useCallback(
     (target: Message, trashFolderId: string | null) => {
@@ -150,6 +152,7 @@ export function useMessageDeleteActions({
         throw new Error(errorMessage || "Failed to delete message.");
       }
       const data = (await res.json()) as DeleteResponse;
+      markMessagesMutated?.();
       setMessages((prev) => {
         if (data.action === "deleted" || !data.trashFolderId) {
           return prev.filter((item) => item.id !== target.id);
@@ -174,6 +177,7 @@ export function useMessageDeleteActions({
     [
       activeAccountId,
       apiFetch,
+      markMessagesMutated,
       readErrorMessage,
       searchScope,
       setMessages,

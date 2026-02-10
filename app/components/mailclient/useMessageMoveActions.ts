@@ -71,6 +71,7 @@ type UseMessageMoveActionsOptions = {
   ) => Promise<void>;
   noticeSuccessTimeout: number;
   onMoveComplete?: (messageIds: string[]) => void;
+  markMessagesMutated?: () => void;
 };
 
 export function useMessageMoveActions({
@@ -92,7 +93,8 @@ export function useMessageMoveActions({
   pushNotice,
   undoMoveOperation,
   noticeSuccessTimeout,
-  onMoveComplete
+  onMoveComplete,
+  markMessagesMutated
 }: UseMessageMoveActionsOptions) {
   const getMessageSubjectForNotice = useCallback(
     (message?: Message | null) => message?.subject?.trim() || "(no subject)",
@@ -157,6 +159,7 @@ export function useMessageMoveActions({
           return null;
         }
         const data = (await res.json()) as MoveApiResponse;
+        markMessagesMutated?.();
         setMessages((prev) => {
           let changed = false;
           const next: Message[] = [];
@@ -278,7 +281,8 @@ export function useMessageMoveActions({
       setMessages,
       setPendingMessageActions,
       undoMoveOperation,
-      onMoveComplete
+      onMoveComplete,
+      markMessagesMutated
     ]
   );
 

@@ -12,6 +12,11 @@ export type CalendarEventPreview = {
   endTimezone?: string;
 };
 
+export type ParsedCalendarInvite = {
+  method?: string;
+  events: CalendarEventPreview[];
+};
+
 type ParsedLine = {
   name: string;
   value: string;
@@ -106,15 +111,23 @@ function parseOrganizer(value: string, params: Record<string, string>) {
   return decodeIcsText(normalized);
 }
 
-export function parseIcsEvents(source: string): CalendarEventPreview[] {
-  if (!source.trim()) return [];
+export function parseIcsInvite(source: string): ParsedCalendarInvite {
+  if (!source.trim()) return { events: [] };
   const lines = unfoldLines(source);
   const events: CalendarEventPreview[] = [];
+  let method: string | undefined;
   let current: CalendarEventPreview | null = null;
 
   lines.forEach((line) => {
     const parsed = parseContentLine(line);
     if (!parsed) return;
+    if (parsed.name === "METHOD") {
+      const nextMethod = decodeIcsText(parsed.value).trim().toUpperCase();
+      if (nextMethod) {
+        method = nextMethod;
+      }
+      return;
+    }
     if (parsed.name === "BEGIN" && parsed.value.toUpperCase() === "VEVENT") {
       current = { allDay: false };
       return;
@@ -148,5 +161,10 @@ export function parseIcsEvents(source: string): CalendarEventPreview[] {
     }
   });
 
-  return events;
+  return { method, events };
+}
+
+export function parseIcsEvents(source: string): CalendarEventPreview[] {
+  if (!source.trim()) return [];
+  return parseIcsInvite(source).events;
 }

@@ -1,9 +1,19 @@
-import { useEffect, useMemo, useState } from "react";
-import { CalendarDays, Clock, MapPin } from "lucide-react";
-import { Badge } from "@radix-ui/themes";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { AlarmClockPlus, CalendarDays, Clock, MapPin, Trash2 } from "lucide-react";
+import { Badge, Button, Dialog, Flex, IconButton, Select, Text } from "@radix-ui/themes";
 import type { Attachment } from "@/lib/data";
 import { parseIcsEvents, type CalendarEventPreview } from "@/lib/calendar";
 import { isCalendarAttachment } from "@/lib/messageFlags";
+import {
+  CALENDAR_REMINDERS_UPDATED_EVENT,
+  CALENDAR_REMINDER_LEAD_OPTIONS,
+  type CalendarReminder,
+  deleteCalendarReminderForEvent,
+  fetchCalendarReminders,
+  findActiveCalendarReminderForEvent,
+  getCalendarReminderLeadOption,
+  upsertCalendarReminder
+} from "../utils/calendarReminders";
 import styles from "./CalendarEventPreview.module.css";
 
 function readDataUrl(dataUrl: string) {
@@ -25,11 +35,7 @@ function readDataUrl(dataUrl: string) {
   }
 }
 
-function formatEventDate(
-  date?: Date,
-  allDay = false,
-  timezone?: string
-) {
+function formatEventDate(date?: Date, allDay = false, timezone?: string) {
   if (!date) return "";
   const options: Intl.DateTimeFormatOptions = allDay
     ? { dateStyle: "medium" }
@@ -65,7 +71,26 @@ function parseHttpUrl(value?: string) {
   }
 }
 
-export default function CalendarEventPreview({ attachments }: { attachments: Attachment[] }) {
+function formatReminderTrigger(date: Date) {
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short"
+  }).format(date);
+}
+
+type ReminderModalState = {
+  event: CalendarEventPreview;
+};
+
+export default function CalendarEventPreview({
+  attachments,
+  accountId,
+  sourceMessageId
+}: {
+  attachments: Attachment[];
+  accountId: string;
+  sourceMessageId?: string;
+}) {
   const attachment = useMemo(
     () => attachments.find((item) => isCalendarAttachment(item) && Boolean(item.url || item.dataUrl)) ?? null,
     [attachments]
@@ -79,6 +104,26 @@ export default function CalendarEventPreview({ attachments }: { attachments: Att
     events: [],
     error: false
   });
+  const [reminderModal, setReminderModal] = useState<ReminderModalState | null>(null);
+  const [leadOptionValue, setLeadOptionValue] = useState(
+    CALENDAR_REMINDER_LEAD_OPTIONS[3]?.value ?? "15"
+  );
+  const [pendingReminders, setPendingReminders] = useState<CalendarReminder[]>([]);
+  const [reminderNotice, setReminderNotice] = useState<string | null>(null);
+  const [savingReminder, setSavingReminder] = useState(false);
+
+  const refreshPendingReminders = useCallback(async () => {
+    if (!accountId.trim()) {
+      setPendingReminders([]);
+      return;
+    }
+    try {
+      const reminders = await fetchCalendarReminders(accountId);
+      setPendingReminders(reminders);
+    } catch {
+      // ignore failures for inline reminder UI
+    }
+  }, [accountId]);
 
   useEffect(() => {
     let active = true;
@@ -112,6 +157,26 @@ export default function CalendarEventPreview({ attachments }: { attachments: Att
     };
   }, [attachment]);
 
+  useEffect(() => {
+    if (!reminderNotice) return;
+    const timer = window.setTimeout(() => setReminderNotice(null), 2600);
+    return () => window.clearTimeout(timer);
+  }, [reminderNotice]);
+
+  useEffect(() => {
+    void refreshPendingReminders();
+  }, [refreshPendingReminders]);
+
+  useEffect(() => {
+    const handleUpdate = () => {
+      void refreshPendingReminders();
+    };
+    window.addEventListener(CALENDAR_REMINDERS_UPDATED_EVENT, handleUpdate);
+    return () => {
+      window.removeEventListener(CALENDAR_REMINDERS_UPDATED_EVENT, handleUpdate);
+    };
+  }, [refreshPendingReminders]);
+
   if (!attachment) return null;
   const hasCurrentResult = result.attachmentId === attachment.id;
   const events = hasCurrentResult ? result.events : [];
@@ -122,6 +187,90 @@ export default function CalendarEventPreview({ attachments }: { attachments: Att
     const name = attachment.filename || "invite.ics";
     return name.toLowerCase().endsWith(".ics") ? name : `${name}.ics`;
   })();
+
+  const openReminderModal = (event: CalendarEventPreview) => {
+    if (!event.start) return;
+    if (event.start.getTime() <= Date.now()) {
+      setReminderNotice("Past events cannot be scheduled.");
+      return;
+    }
+    setReminderModal({ event });
+    const existingReminder =
+      event.start
+        ? findActiveCalendarReminderForEvent(pendingReminders, {
+            eventUid: event.uid,
+            eventTitle: event.summary || "Calendar event",
+            eventStartAtMs: event.start.getTime()
+          })
+        : null;
+    const existingLeadValue = existingReminder !== null ? String(existingReminder.leadMinutes) : "";
+    const hasExistingLead = CALENDAR_REMINDER_LEAD_OPTIONS.some(
+      (option) => option.value === existingLeadValue
+    );
+    setLeadOptionValue(
+      hasExistingLead ? existingLeadValue : CALENDAR_REMINDER_LEAD_OPTIONS[3]?.value ?? "15"
+    );
+  };
+
+  const closeReminderModal = () => {
+    setReminderModal(null);
+  };
+
+  const scheduleReminder = async () => {
+    const target = reminderModal?.event;
+    if (!target?.start) {
+      setReminderNotice("Reminder could not be scheduled: event start is missing.");
+      closeReminderModal();
+      return;
+    }
+    if (target.start.getTime() <= Date.now()) {
+      setReminderNotice("Past events cannot be scheduled.");
+      closeReminderModal();
+      return;
+    }
+    const option = getCalendarReminderLeadOption(leadOptionValue);
+    setSavingReminder(true);
+    try {
+      const stored = await upsertCalendarReminder(accountId, {
+        messageId: sourceMessageId,
+        eventUid: target.uid,
+        eventTitle: target.summary || "Calendar event",
+        eventLocation: target.location,
+        eventStartAtMs: target.start.getTime(),
+        leadMinutes: option.minutes,
+        leadLabel: option.label
+      });
+      const triggerDate = new Date(
+        stored.reminder.triggerAtMs > Date.now() ? stored.reminder.triggerAtMs : Date.now()
+      );
+      setReminderNotice(
+        stored.replaced
+          ? `Reminder updated for ${formatReminderTrigger(triggerDate)}.`
+          : `Reminder scheduled for ${formatReminderTrigger(triggerDate)}.`
+      );
+      closeReminderModal();
+      await refreshPendingReminders();
+    } catch {
+      setReminderNotice("Failed to schedule reminder.");
+    } finally {
+      setSavingReminder(false);
+    }
+  };
+
+  const removeReminder = async (event: CalendarEventPreview) => {
+    if (!event.start) return;
+    try {
+      const deleted = await deleteCalendarReminderForEvent(accountId, {
+        eventUid: event.uid,
+        eventTitle: event.summary || "Calendar event",
+        eventStartAtMs: event.start.getTime()
+      });
+      setReminderNotice(deleted ? "Reminder removed." : "No reminder found to remove.");
+      await refreshPendingReminders();
+    } catch {
+      setReminderNotice("Failed to remove reminder.");
+    }
+  };
 
   return (
     <section className={styles.preview}>
@@ -153,8 +302,20 @@ export default function CalendarEventPreview({ attachments }: { attachments: Att
           {events.slice(0, 3).map((event, index) => {
             const dateRange = formatDateRange(event);
             const locationUrl = parseHttpUrl(event.location);
+            const reminderKey = event.uid ?? `${attachment.id}-${index}`;
+            const hasStartTime = Boolean(event.start);
+            const isPastEvent = Boolean(event.start && event.start.getTime() <= Date.now());
+            const canScheduleReminder = hasStartTime && !isPastEvent;
+            const eventReminder =
+              event.start
+                ? findActiveCalendarReminderForEvent(pendingReminders, {
+                    eventUid: event.uid,
+                    eventTitle: event.summary || "Calendar event",
+                    eventStartAtMs: event.start.getTime()
+                  })
+                : null;
             return (
-              <article key={event.uid ?? `${attachment.id}-${index}`} className={styles.event}>
+              <article key={reminderKey} className={styles.event}>
                 <h5 className={styles.eventTitle}>{event.summary || "Untitled Event"}</h5>
                 {dateRange ? (
                   <div className={styles.metaRow}>
@@ -175,6 +336,46 @@ export default function CalendarEventPreview({ attachments }: { attachments: Att
                   </div>
                 ) : null}
                 {event.organizer ? <p className={styles.meta}>Organizer: {event.organizer}</p> : null}
+                {eventReminder ? (
+                  <p className={styles.reminderMeta}>
+                    Reminder: {eventReminder.leadLabel} ({formatReminderTrigger(new Date(eventReminder.triggerAtMs))})
+                  </p>
+                ) : null}
+                <div className={styles.actions}>
+                  <Button
+                    size="1"
+                    variant="soft"
+                    color="indigo"
+                    className={styles.reminderButton}
+                    onClick={() => openReminderModal(event)}
+                    disabled={!canScheduleReminder}
+                    title={
+                      !hasStartTime
+                        ? "No event start time available"
+                        : isPastEvent
+                          ? "Past events cannot be scheduled"
+                          : "Schedule reminder"
+                    }
+                  >
+                    <AlarmClockPlus size={14} />
+                    {eventReminder ? "Modify Reminder" : "Schedule Reminder"}
+                  </Button>
+                  {eventReminder ? (
+                    <IconButton
+                      size="1"
+                      variant="soft"
+                      color="gray"
+                      className={styles.deleteReminderButton}
+                      title="Delete reminder"
+                      aria-label="Delete reminder"
+                      onClick={() => {
+                        void removeReminder(event);
+                      }}
+                    >
+                      <Trash2 size={14} />
+                    </IconButton>
+                  ) : null}
+                </div>
               </article>
             );
           })}
@@ -183,6 +384,54 @@ export default function CalendarEventPreview({ attachments }: { attachments: Att
           ) : null}
         </div>
       )}
+      {reminderNotice ? <p className={styles.notice}>{reminderNotice}</p> : null}
+      <Dialog.Root
+        open={Boolean(reminderModal)}
+        onOpenChange={(open) => {
+          if (!open) closeReminderModal();
+        }}
+      >
+        <Dialog.Content size="2" className={styles.reminderDialog}>
+          <Flex direction="column" gap="3">
+            <Dialog.Title size="4">Schedule Reminder</Dialog.Title>
+            <Text size="2" color="gray">
+              {reminderModal?.event.summary || "Calendar event"}
+            </Text>
+            <Flex direction="column" gap="2">
+              <Text size="2" weight="medium">
+                Notify me
+              </Text>
+              <Select.Root value={leadOptionValue} onValueChange={setLeadOptionValue}>
+                <Select.Trigger />
+                <Select.Content position="popper">
+                  {CALENDAR_REMINDER_LEAD_OPTIONS.map((option) => (
+                    <Select.Item key={option.value} value={option.value}>
+                      {option.label}
+                    </Select.Item>
+                  ))}
+                </Select.Content>
+              </Select.Root>
+            </Flex>
+            <Flex justify="end" gap="2">
+              <Button variant="soft" color="gray" onClick={closeReminderModal} disabled={savingReminder}>
+                Cancel
+              </Button>
+              <Button
+                onClick={() => {
+                  void scheduleReminder();
+                }}
+                disabled={
+                  savingReminder ||
+                  !reminderModal?.event.start ||
+                  reminderModal.event.start.getTime() <= Date.now()
+                }
+              >
+                {savingReminder ? "Saving..." : "Schedule reminder"}
+              </Button>
+            </Flex>
+          </Flex>
+        </Dialog.Content>
+      </Dialog.Root>
     </section>
   );
 }

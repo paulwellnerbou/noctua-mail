@@ -120,6 +120,22 @@ export type Attachment = {
   url?: string;
 };
 
+export type CalendarReminder = {
+  id: string;
+  accountId: string;
+  userId: string;
+  messageId?: string;
+  eventUid?: string;
+  eventTitle: string;
+  eventLocation?: string;
+  eventStartAtMs: number;
+  leadMinutes: number;
+  leadLabel: string;
+  triggerAtMs: number;
+  createdAtMs: number;
+  updatedAtMs: number;
+};
+
 export type User = {
   id: string;
   email: string;

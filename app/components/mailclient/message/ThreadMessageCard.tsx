@@ -568,7 +568,11 @@ export default function ThreadMessageCard({
             <Collapsible.Content className={`${styles.content} ${styles.collapsibleContent}`}>
               <div className={styles.collapsibleInner}>
                 {content}
-                <CalendarEventPreview attachments={message.attachments ?? []} />
+                <CalendarEventPreview
+                  attachments={message.attachments ?? []}
+                  accountId={message.accountId}
+                  sourceMessageId={message.messageId}
+                />
                 <AttachmentsList attachments={message.attachments ?? []} />
               </div>
             </Collapsible.Content>

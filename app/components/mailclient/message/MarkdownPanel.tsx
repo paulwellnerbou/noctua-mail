@@ -1,6 +1,7 @@
 import ReactMarkdown from "react-markdown";
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
+import { normalizeMarkdownBody } from "./normalizeMarkdownBody";
 
 type MarkdownPanelProps = {
   body?: string;
@@ -21,7 +22,7 @@ export default function MarkdownPanel({ body, fontScale = 1 }: MarkdownPanelProp
           a: ({ node, ...props }) => <a {...props} target="_blank" rel="noreferrer" />
         }}
       >
-        {(body ?? "").replace(/\*([^*\n]+)\*(?=[A-Za-z0-9ÄÖÜäöü])/g, "*$1* ")}
+        {normalizeMarkdownBody(body ?? "")}
       </ReactMarkdown>
     </div>
   );

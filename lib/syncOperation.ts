@@ -1,12 +1,16 @@
 import {
+  cancelCalendarRemindersByEventUid,
   getAccounts,
   getFolderIdsByMessageIds,
   listMessageFileRefs,
   getMessageIdsByMessageIds,
+  rescheduleCalendarRemindersByEventUid,
   getThreadIdsByMessageIds,
   saveFoldersForAccount,
   upsertMessages
 } from "@/lib/db";
+import { parseIcsInvite } from "@/lib/calendar";
+import { isCalendarAttachment } from "@/lib/messageFlags";
 import { deleteMessageFiles, saveAttachmentData, saveMessageSource } from "@/lib/storage";
 import { syncImapAccount } from "@/lib/mail/imap";
 
@@ -30,6 +34,49 @@ export type SyncOperationResult = {
   count: number;
   newMessages?: SyncNotificationMessage[];
 };
+
+type CalendarReminderMutation =
+  | { kind: "cancel"; eventUid: string }
+  | {
+      kind: "update";
+      eventUid: string;
+      eventTitle: string;
+      eventLocation?: string;
+      eventStartAtMs: number;
+      messageId?: string;
+    };
+
+function collectReminderMutationsFromCalendarInvite(
+  icsSource: string,
+  messageId?: string | null
+): CalendarReminderMutation[] {
+  const parsed = parseIcsInvite(icsSource);
+  const method = parsed.method?.trim().toUpperCase() || "";
+  const mutations: CalendarReminderMutation[] = [];
+  parsed.events.forEach((event) => {
+    const eventUid = event.uid?.trim();
+    if (!eventUid) return;
+    const status = event.status?.trim().toUpperCase() || "";
+    const cancelled = method === "CANCEL" || status === "CANCELLED";
+    if (cancelled) {
+      mutations.push({ kind: "cancel", eventUid });
+      return;
+    }
+    const eventStartAtMs = event.start?.getTime();
+    if (!eventStartAtMs || !Number.isFinite(eventStartAtMs) || eventStartAtMs <= 0) {
+      return;
+    }
+    mutations.push({
+      kind: "update",
+      eventUid,
+      eventTitle: event.summary?.trim() || "Calendar event",
+      eventLocation: event.location?.trim() || undefined,
+      eventStartAtMs,
+      messageId: messageId ?? undefined
+    });
+  });
+  return mutations;
+}
 
 export async function runSyncOperation(
   payload: SyncPayload,
@@ -238,6 +285,36 @@ export async function runSyncOperation(
     strippedMessages,
     Boolean(payload.fullSync)
   );
+
+  if (syncMode === "new" && strippedMessages.length > 0) {
+    const strippedIds = new Set(strippedMessages.map((item) => item.id));
+    const syncedMessages = normalizedMessages.filter((message) => strippedIds.has(message.id));
+    const mutations: CalendarReminderMutation[] = [];
+    syncedMessages.forEach((message) => {
+      (message.attachments ?? []).forEach((attachment) => {
+        if (!isCalendarAttachment(attachment) || !attachment.dataUrl) return;
+        const parsed = parseDataUrl(attachment.dataUrl);
+        if (!parsed) return;
+        const calendarSource = parsed.buffer.toString("utf8");
+        mutations.push(
+          ...collectReminderMutationsFromCalendarInvite(calendarSource, message.messageId ?? undefined)
+        );
+      });
+    });
+    for (const mutation of mutations) {
+      if (mutation.kind === "cancel") {
+        await cancelCalendarRemindersByEventUid(account.id, mutation.eventUid);
+      } else {
+        await rescheduleCalendarRemindersByEventUid(account.id, mutation.eventUid, {
+          eventTitle: mutation.eventTitle,
+          eventLocation: mutation.eventLocation,
+          eventStartAtMs: mutation.eventStartAtMs,
+          messageId: mutation.messageId
+        });
+      }
+    }
+  }
+
   if (payload.fullSync && existingFileRefs.length > 0) {
     const nextIds = new Set(strippedMessages.map((message) => message.id));
     const removed = existingFileRefs.filter((item) => !nextIds.has(item.messageId));
