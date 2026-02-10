@@ -25,6 +25,16 @@ import { CALENDAR_INVITE_FLAG, normalizeImapFlags } from "./messageFlags";
 import { normalizeAccountDateFormat } from "./dateFormatting";
 import { withDbWriteRetry } from "./dbWriteRetry";
 import { randomUUID } from "crypto";
+import {
+  CATEGORY_KEYS,
+  createDefaultLinearModel,
+  extractLinearFeatures,
+  trainLinearModelNegative,
+  trainLinearModelPositive,
+  type CategoryKey,
+  type CategoryLinearModel
+} from "./mail/categorization/linearModel";
+import type { CategoryLearningDebugSnapshot } from "./mail/categorization/debugTypes";
 
 let masterDbInstance: any | null = null;
 let masterInitialized = false;
@@ -331,6 +341,22 @@ function initAccountSchema(db: any) {
       supportsQresync INTEGER
     );
 
+    CREATE TABLE IF NOT EXISTS category_model_state (
+      accountId TEXT PRIMARY KEY,
+      modelJson TEXT NOT NULL,
+      updatedAt INTEGER NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS category_feedback_events (
+      id TEXT PRIMARY KEY,
+      accountId TEXT NOT NULL,
+      messageId TEXT NOT NULL,
+      previousCategory TEXT,
+      nextCategory TEXT,
+      featureJson TEXT,
+      createdAt INTEGER NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS calendar_reminders (
       id TEXT PRIMARY KEY,
       accountId TEXT NOT NULL,
@@ -371,6 +397,8 @@ function initAccountSchema(db: any) {
       ON calendar_reminders(accountId, userId, triggerAtMs);
     CREATE INDEX IF NOT EXISTS idx_calendar_reminders_account_user_uid
       ON calendar_reminders(accountId, userId, eventUid);
+    CREATE INDEX IF NOT EXISTS idx_category_feedback_events_account_created
+      ON category_feedback_events(accountId, createdAt DESC);
   `);
 
   // Lightweight schema migration for existing account DBs.
@@ -1469,6 +1497,14 @@ function parseStringArray(value?: string | null) {
     return undefined;
   }
   return undefined;
+}
+
+function normalizeCategory(value?: string | null): CategoryKey | null {
+  if (!value) return null;
+  const normalized = value.trim().toLowerCase();
+  return CATEGORY_KEYS.includes(normalized as CategoryKey)
+    ? (normalized as CategoryKey)
+    : null;
 }
 
 function normalizeSubjectLine(subject?: string | null) {
@@ -3487,6 +3523,368 @@ export async function updateMessageFlags(
   });
 }
 
+function loadCategoryLinearModelFromRow(row: { modelJson?: string | null } | undefined) {
+  if (!row?.modelJson) return createDefaultLinearModel();
+  try {
+    const parsed = JSON.parse(row.modelJson) as CategoryLinearModel;
+    if (!parsed || typeof parsed !== "object") return createDefaultLinearModel();
+    return {
+      ...createDefaultLinearModel(),
+      ...parsed,
+      bias: {
+        ...createDefaultLinearModel().bias,
+        ...(parsed.bias ?? {})
+      },
+      weights: {
+        ...createDefaultLinearModel().weights,
+        ...(parsed.weights ?? {})
+      }
+    };
+  } catch {
+    return createDefaultLinearModel();
+  }
+}
+
+function saveCategoryLinearModelToDb(db: any, accountId: string, model: CategoryLinearModel) {
+  const normalizedModel: CategoryLinearModel = {
+    ...createDefaultLinearModel(),
+    ...model,
+    updatedAt: Date.now(),
+    bias: {
+      ...createDefaultLinearModel().bias,
+      ...(model.bias ?? {})
+    },
+    weights: {
+      ...createDefaultLinearModel().weights,
+      ...(model.weights ?? {})
+    }
+  };
+  db.prepare(
+    `INSERT OR REPLACE INTO category_model_state (accountId, modelJson, updatedAt) VALUES (?, ?, ?)`
+  ).run(accountId, JSON.stringify(normalizedModel), normalizedModel.updatedAt);
+  return normalizedModel;
+}
+
+export async function getCategoryLinearModel(accountId: string): Promise<CategoryLinearModel | null> {
+  const db = await getAccountDb(accountId);
+  const row = db
+    .prepare(`SELECT modelJson FROM category_model_state WHERE accountId = ?`)
+    .get(accountId) as { modelJson?: string | null } | undefined;
+  if (!row?.modelJson) return null;
+  return loadCategoryLinearModelFromRow(row);
+}
+
+function summarizeTopWeights(weights: Record<string, number>, limit: number) {
+  return Object.entries(weights ?? {})
+    .filter(([, value]) => Number.isFinite(value) && Math.abs(value) >= 0.0001)
+    .sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]))
+    .slice(0, limit)
+    .map(([feature, weight]) => ({
+      feature,
+      weight: Number(weight.toFixed(4))
+    }));
+}
+
+function parseFeatureCount(featureJson?: string | null) {
+  if (!featureJson) return 0;
+  try {
+    const parsed = JSON.parse(featureJson);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return 0;
+    return Object.keys(parsed as Record<string, unknown>).length;
+  } catch {
+    return 0;
+  }
+}
+
+export async function getCategoryLearningDebugSnapshot(
+  accountId: string,
+  options?: { eventLimit?: number; topFeatureLimit?: number }
+): Promise<CategoryLearningDebugSnapshot> {
+  const db = await getAccountDb(accountId);
+  const eventLimit = Math.max(5, Math.min(100, options?.eventLimit ?? 20));
+  const topFeatureLimit = Math.max(3, Math.min(25, options?.topFeatureLimit ?? 8));
+
+  const modelRow = db
+    .prepare(`SELECT modelJson, updatedAt FROM category_model_state WHERE accountId = ?`)
+    .get(accountId) as { modelJson?: string | null; updatedAt?: number | null } | undefined;
+
+  const parsedModel = modelRow?.modelJson ? loadCategoryLinearModelFromRow(modelRow) : null;
+  const model = parsedModel
+    ? {
+        version: parsedModel.version,
+        updatedAt:
+          typeof parsedModel.updatedAt === "number"
+            ? parsedModel.updatedAt
+            : Number(modelRow?.updatedAt ?? Date.now()),
+        examples: Number(parsedModel.examples ?? 0),
+        learningRate: Number(parsedModel.learningRate ?? 0.1),
+        l2: Number(parsedModel.l2 ?? 0),
+        bias: {
+          newsletter: Number((parsedModel.bias.newsletter ?? 0).toFixed(4)),
+          notification: Number((parsedModel.bias.notification ?? 0).toFixed(4)),
+          transactional: Number((parsedModel.bias.transactional ?? 0).toFixed(4))
+        },
+        featureCounts: {
+          newsletter: Object.keys(parsedModel.weights.newsletter ?? {}).length,
+          notification: Object.keys(parsedModel.weights.notification ?? {}).length,
+          transactional: Object.keys(parsedModel.weights.transactional ?? {}).length
+        },
+        topWeights: {
+          newsletter: summarizeTopWeights(parsedModel.weights.newsletter ?? {}, topFeatureLimit),
+          notification: summarizeTopWeights(parsedModel.weights.notification ?? {}, topFeatureLimit),
+          transactional: summarizeTopWeights(parsedModel.weights.transactional ?? {}, topFeatureLimit)
+        }
+      }
+    : null;
+
+  const feedbackCountRow = db
+    .prepare(
+      `SELECT COUNT(*) as count, MAX(createdAt) as lastEventAt
+       FROM category_feedback_events
+       WHERE accountId = ?`
+    )
+    .get(accountId) as { count?: number; lastEventAt?: number | null } | undefined;
+
+  const transitionRows = db
+    .prepare(
+      `SELECT previousCategory, nextCategory, COUNT(*) as count
+       FROM category_feedback_events
+       WHERE accountId = ?
+       GROUP BY previousCategory, nextCategory
+       ORDER BY count DESC, COALESCE(nextCategory, ''), COALESCE(previousCategory, '')
+       LIMIT 20`
+    )
+    .all(accountId) as Array<{
+    previousCategory?: string | null;
+    nextCategory?: string | null;
+    count?: number | null;
+  }>;
+
+  const recentRows = db
+    .prepare(
+      `SELECT messageId, previousCategory, nextCategory, featureJson, createdAt
+       FROM category_feedback_events
+       WHERE accountId = ?
+       ORDER BY createdAt DESC
+       LIMIT ?`
+    )
+    .all(accountId, eventLimit) as Array<{
+    messageId?: string | null;
+    previousCategory?: string | null;
+    nextCategory?: string | null;
+    featureJson?: string | null;
+    createdAt?: number | null;
+  }>;
+
+  const categoryCountRows = db
+    .prepare(
+      `SELECT category, COUNT(*) as count
+       FROM messages
+       WHERE accountId = ?
+       GROUP BY category`
+    )
+    .all(accountId) as Array<{ category?: string | null; count?: number | null }>;
+  const categoryCountMap = new Map<
+    "newsletter" | "notification" | "transactional" | "uncategorized",
+    number
+  >();
+  categoryCountRows.forEach((row) => {
+    const normalized = normalizeCategory(row.category);
+    const key = normalized ?? "uncategorized";
+    categoryCountMap.set(key, (categoryCountMap.get(key) ?? 0) + Number(row.count ?? 0));
+  });
+  const orderedCategoryKeys: Array<
+    "newsletter" | "notification" | "transactional" | "uncategorized"
+  > = ["newsletter", "notification", "transactional", "uncategorized"];
+  const categoryCounts = orderedCategoryKeys
+    .map((key) => ({ category: key, count: categoryCountMap.get(key) ?? 0 }))
+    .filter((entry) => entry.count > 0 || entry.category === "uncategorized");
+
+  const manualCategorizedCountRow = db
+    .prepare(
+      `SELECT COUNT(*) as count
+       FROM messages
+       WHERE accountId = ? AND COALESCE(categorySignals, '') LIKE '%manual-feedback:%'`
+    )
+    .get(accountId) as { count?: number | null } | undefined;
+
+  return {
+    model,
+    feedback: {
+      totalEvents: Number(feedbackCountRow?.count ?? 0),
+      lastEventAt:
+        typeof feedbackCountRow?.lastEventAt === "number" ? feedbackCountRow.lastEventAt : null,
+      transitions: transitionRows.map((row) => ({
+        previousCategory: normalizeCategory(row.previousCategory),
+        nextCategory: normalizeCategory(row.nextCategory),
+        count: Number(row.count ?? 0)
+      })),
+      recent: recentRows.map((row) => ({
+        messageId: row.messageId ?? "",
+        previousCategory: normalizeCategory(row.previousCategory),
+        nextCategory: normalizeCategory(row.nextCategory),
+        createdAt: Number(row.createdAt ?? 0),
+        featureCount: parseFeatureCount(row.featureJson)
+      }))
+    },
+    categoryCounts,
+    manualCategorizedCount: Number(manualCategorizedCountRow?.count ?? 0)
+  };
+}
+
+export async function setMessageCategory(
+  accountId: string,
+  messageId: string,
+  category: CategoryKey | null,
+  categoryScore: number | null,
+  categorySignals: string[]
+) {
+  return withDbWriteRetry("setMessageCategory", async () => {
+    const db = await getAccountDb(accountId);
+    db.prepare(
+      `UPDATE messages
+       SET category = ?, categoryScore = ?, categorySignals = ?
+       WHERE accountId = ? AND id = ?`
+    ).run(
+      category,
+      typeof categoryScore === "number" ? categoryScore : null,
+      JSON.stringify(categorySignals ?? []),
+      accountId,
+      messageId
+    );
+  });
+}
+
+function buildFallbackParsedMessageForFeedback(
+  row: {
+    fromAddr?: string | null;
+    fromEmail?: string | null;
+    subject?: string | null;
+    body?: string | null;
+    preview?: string | null;
+  },
+  attachmentFilenames: string[]
+) {
+  const fromAddress =
+    row.fromEmail ||
+    row.fromAddr?.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i)?.[0] ||
+    "";
+  return {
+    from: { value: [{ address: fromAddress }] },
+    subject: row.subject ?? "",
+    text: `${row.preview ?? ""}\n${row.body ?? ""}`.trim(),
+    attachments: attachmentFilenames.map((filename) => ({ filename }))
+  } as any;
+}
+
+export async function applyCategoryFeedback(
+  accountId: string,
+  messageId: string,
+  nextCategoryInput: string | null
+) {
+  const nextCategory = normalizeCategory(nextCategoryInput);
+  return withDbWriteRetry("applyCategoryFeedback", async () => {
+    const db = await getAccountDb(accountId);
+    const row = db
+      .prepare(
+        `SELECT id, category, categorySignals, fromAddr, fromEmail, subject, body, preview
+         FROM messages
+         WHERE accountId = ? AND id = ?`
+      )
+      .get(accountId, messageId) as
+      | {
+          id: string;
+          category?: string | null;
+          categorySignals?: string | null;
+          fromAddr?: string | null;
+          fromEmail?: string | null;
+          subject?: string | null;
+          body?: string | null;
+          preview?: string | null;
+        }
+      | undefined;
+
+    if (!row?.id) {
+      throw new Error("Message not found");
+    }
+
+    const previousCategory = normalizeCategory(row.category);
+    const attachmentRows = db
+      .prepare(`SELECT filename FROM attachments WHERE messageId = ?`)
+      .all(messageId) as Array<{ filename?: string | null }>;
+    const attachmentFilenames = attachmentRows
+      .map((item) => (item.filename ?? "").trim())
+      .filter(Boolean);
+
+    let features: Record<string, number> | null = null;
+    try {
+      const { getMessageSource } = await import("./storage");
+      const source = await getMessageSource(accountId, messageId);
+      if (source) {
+        const mailparser = await import("mailparser");
+        const parsed = await mailparser.simpleParser(source);
+        const headers = (parsed.headers ?? new Map()) as Map<string, any>;
+        features = extractLinearFeatures(parsed as any, headers, parseStringArray(row.categorySignals));
+      }
+    } catch {
+      features = null;
+    }
+
+    if (!features) {
+      const fallbackParsed = buildFallbackParsedMessageForFeedback(row, attachmentFilenames);
+      features = extractLinearFeatures(fallbackParsed as any, new Map(), parseStringArray(row.categorySignals));
+    }
+
+    const modelRow = db
+      .prepare(`SELECT modelJson FROM category_model_state WHERE accountId = ?`)
+      .get(accountId) as { modelJson?: string | null } | undefined;
+    let model = loadCategoryLinearModelFromRow(modelRow);
+    if (nextCategory) {
+      model = trainLinearModelPositive(model, features, nextCategory);
+    } else if (previousCategory) {
+      model = trainLinearModelNegative(model, features, previousCategory);
+    }
+    model = saveCategoryLinearModelToDb(db, accountId, model);
+
+    const manualSignals = nextCategory
+      ? [`manual-category:${nextCategory}`, "manual-feedback:positive"]
+      : ["manual-category:cleared", "manual-feedback:negative"];
+    db.prepare(
+      `UPDATE messages
+       SET category = ?, categoryScore = ?, categorySignals = ?
+       WHERE accountId = ? AND id = ?`
+    ).run(
+      nextCategory,
+      nextCategory ? 1 : null,
+      JSON.stringify(manualSignals),
+      accountId,
+      messageId
+    );
+
+    db.prepare(
+      `INSERT OR REPLACE INTO category_feedback_events
+       (id, accountId, messageId, previousCategory, nextCategory, featureJson, createdAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      randomUUID(),
+      accountId,
+      messageId,
+      previousCategory,
+      nextCategory,
+      JSON.stringify(features),
+      Date.now()
+    );
+
+    const updatedMessage = await getMessageById(accountId, messageId);
+    return {
+      message: updatedMessage,
+      previousCategory,
+      nextCategory,
+      modelExamples: model.examples
+    };
+  });
+}
+
 export async function deleteMessagesByFolderPrefix(accountId: string, folderPrefix: string) {
   return withDbWriteRetry("deleteMessagesByFolderPrefix", async () => {
     const db = await getAccountDb(accountId);
@@ -3638,6 +4036,7 @@ export async function recomputeCategoriesForAccount(accountId: string) {
   console.log(`Recomputing categories for ${messageIds.length} messages...`);
 
   const config = getCategorizationConfig();
+  const linearModel = await getCategoryLinearModel(accountId);
   const updateStmt = db.prepare(
     `UPDATE messages SET category = ?, categoryScore = ?, categorySignals = ? WHERE accountId = ? AND id = ?`
   );
@@ -3653,7 +4052,7 @@ export async function recomputeCategoriesForAccount(accountId: string) {
       const parsed = await mailparser.simpleParser(source);
       const headers = parsed.headers ?? new Map();
 
-      const classification = classifyEmail(parsed, headers, config);
+      const classification = classifyEmail(parsed, headers, config, { linearModel });
 
       await withDbWriteRetry("recomputeCategoriesForAccount.updateCategory", () =>
         updateStmt.run(

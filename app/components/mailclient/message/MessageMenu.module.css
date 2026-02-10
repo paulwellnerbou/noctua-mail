@@ -11,6 +11,13 @@
   flex: 1;
 }
 
+.menuLabelRow {
+  display: inline-flex;
+  width: 100%;
+  align-items: center;
+  gap: 8px;
+}
+
 .menuContent {
   min-width: 220px;
 }

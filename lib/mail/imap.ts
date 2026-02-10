@@ -1,8 +1,12 @@
 import type { Account, Attachment, Folder, Message } from "@/lib/data";
-import { getLatestMessageUid } from "@/lib/db";
+import { getCategoryLinearModel, getLatestMessageUid } from "@/lib/db";
 import { extractHtmlBody } from "@/lib/html";
 import { withCalendarInviteFlag } from "@/lib/messageFlags";
-import { classifyEmail, getCategorizationConfig } from "@/lib/mail/categorization";
+import {
+  classifyEmail,
+  getCategorizationConfig,
+  type CategoryLinearModel
+} from "@/lib/mail/categorization";
 import tls from "tls";
 import { getImapLogger, logImapOp } from "@/lib/mail/imapLogger";
 
@@ -146,7 +150,8 @@ async function parseImapMessage(
   account: Account,
   mailboxToOpen: string,
   message: ImapParsedMessage,
-  simpleParser: typeof import("mailparser").simpleParser
+  simpleParser: typeof import("mailparser").simpleParser,
+  linearModel?: CategoryLinearModel | null
 ) {
   const parsed = await simpleParser(message.source);
   const flags = message.flags ? Array.from(message.flags) : [];
@@ -297,7 +302,12 @@ async function parseImapMessage(
 
   // Classify email into categories
   const config = getCategorizationConfig();
-  const classification = classifyEmail(parsed, parsed.headers ?? new Map(), config);
+  const classification = classifyEmail(
+    parsed,
+    parsed.headers ?? new Map(),
+    config,
+    { linearModel: linearModel ?? null }
+  );
 
   // Debug logging - remove once verified working
   console.log('[CATEGORIZATION]', {
@@ -375,6 +385,7 @@ export async function syncImapAccount(
   const folders: Folder[] = mapImapFolders(account, folderList);
 
   const mailboxToOpen = mailboxPath ?? "INBOX";
+  const linearModel = await getCategoryLinearModel(account.id);
   await logImapOp("mailboxOpen", { mailbox: mailboxToOpen, ...logContext }, () =>
     client.mailboxOpen(mailboxToOpen)
   );
@@ -396,7 +407,8 @@ export async function syncImapAccount(
         account,
         mailboxToOpen,
         { uid: message.uid, source: message.source as Buffer, flags: message.flags },
-        simpleParser
+        simpleParser,
+        linearModel
       );
       messages.push(parsedMessage);
       count += 1;
@@ -425,7 +437,8 @@ export async function syncImapAccount(
       account,
       mailboxToOpen,
       { uid: message.uid, source: message.source as Buffer, flags: message.flags },
-      simpleParser
+      simpleParser,
+      linearModel
     );
     messages.push(parsedMessage);
     count += 1;

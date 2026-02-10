@@ -9,6 +9,7 @@
  * IMPORTANT: Uses conservative thresholds to avoid false positives.
  * Better to leave emails uncategorized than to mis-categorize important messages.
  */
+import { applyLinearModel, extractLinearFeatures, type CategoryLinearModel } from "./linearModel";
 
 type ParsedMail = Awaited<ReturnType<typeof import("mailparser").simpleParser>>;
 
@@ -28,6 +29,10 @@ export type ClassifierConfig = {
     notification: boolean;
     transactional: boolean;
   };
+};
+
+export type ClassifierRuntimeOptions = {
+  linearModel?: CategoryLinearModel | null;
 };
 
 export const DEFAULT_CONFIG: ClassifierConfig = {
@@ -51,7 +56,8 @@ export const DEFAULT_CONFIG: ClassifierConfig = {
 export function classifyEmail(
   parsed: ParsedMail,
   headers: Map<string, string>,
-  config: ClassifierConfig = DEFAULT_CONFIG
+  config: ClassifierConfig = DEFAULT_CONFIG,
+  runtimeOptions?: ClassifierRuntimeOptions
 ): ClassificationResult {
   if (!config.enabled) {
     return { category: null, confidence: 0, signals: [] };
@@ -432,6 +438,23 @@ export function classifyEmail(
   ) {
     scores.newsletter = Math.max(scores.newsletter, config.minConfidence);
     signals.push('fallback: list-unsubscribe-only-newsletter');
+  }
+
+  if (runtimeOptions?.linearModel) {
+    const features = extractLinearFeatures(parsed, headers as Map<string, any>, signals);
+    const linear = applyLinearModel(
+      {
+        newsletter: scores.newsletter,
+        notification: scores.notification,
+        transactional: scores.transactional
+      },
+      features,
+      runtimeOptions.linearModel
+    );
+    scores.newsletter = linear.scores.newsletter;
+    scores.notification = linear.scores.notification;
+    scores.transactional = linear.scores.transactional;
+    signals.push(...linear.signals);
   }
 
   // ============================================================================

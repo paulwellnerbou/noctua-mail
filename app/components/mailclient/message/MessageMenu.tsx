@@ -3,6 +3,8 @@ import { Fragment } from "react";
 import {
   Archive,
   CheckSquare,
+  Circle,
+  CircleDot,
   Download,
   Edit3,
   FileText,
@@ -20,6 +22,7 @@ import {
   Shield,
   ShieldOff,
   Square,
+  Tags,
   Trash2
 } from "lucide-react";
 import { DropdownMenu, IconButton } from "@radix-ui/themes";
@@ -39,6 +42,7 @@ type MessageMenuAction =
   | "answered"
   | "spam"
   | "archive"
+  | "category"
   | "delete"
   | "showRelated"
   | "openWindow"
@@ -63,6 +67,10 @@ type MessageMenuProps = {
   handleMarkSpam: (message: Message) => void;
   handleMarkNotSpam: (message: Message) => void;
   handleArchiveMessage: (message: Message) => void;
+  handleSetCategory: (
+    message: Message,
+    category: "newsletter" | "notification" | "transactional" | null
+  ) => void;
   handleDeleteMessage: (message: Message, options?: { allowThreadDeletion?: boolean }) => void;
   handleDownloadEml: (message: Message) => void;
   handleResyncMessage: (message: Message) => void;
@@ -87,6 +95,7 @@ export default function MessageMenu({
   handleMarkSpam,
   handleMarkNotSpam,
   handleArchiveMessage,
+  handleSetCategory,
   handleDeleteMessage,
   handleDownloadEml,
   handleResyncMessage,
@@ -100,6 +109,12 @@ export default function MessageMenu({
   const showDeleteInMenu = origin !== "table";
   const allowThreadDeletion = origin !== "thread";
   const inSpamFolder = isSpamFolder(message.folderId);
+  const selectedCategory =
+    message.category === "newsletter" ||
+    message.category === "notification" ||
+    message.category === "transactional"
+      ? message.category
+      : null;
   const isVisible = (action: MessageMenuAction, defaultValue = true) =>
     actionVisibility?.[action] ?? defaultValue;
   const isDisabled = (action: MessageMenuAction, defaultValue = false) =>
@@ -119,6 +134,14 @@ export default function MessageMenu({
       <span className={styles.menuIcon}>{icon}</span>
       <span className={styles.menuLabel}>{label}</span>
     </DropdownMenu.Item>
+  );
+  const menuRadioLabel = (checked: boolean, label: string) => (
+    <span className={styles.menuLabelRow}>
+      <span className={styles.menuIcon} aria-hidden>
+        {checked ? <CircleDot size={14} /> : <Circle size={14} />}
+      </span>
+      <span className={styles.menuLabel}>{label}</span>
+    </span>
   );
 
   return (
@@ -229,6 +252,53 @@ export default function MessageMenu({
                   <Archive size={14} />,
                   () => handleArchiveMessage(message),
                   isDisabled("archive")
+                )
+              : null,
+            isVisible("category")
+              ? (
+                  <DropdownMenu.Sub>
+                    <DropdownMenu.SubTrigger disabled={isDisabled("category")}>
+                      <span className={styles.menuIcon}>
+                        <Tags size={14} />
+                      </span>
+                      <span className={styles.menuLabel}>Category</span>
+                    </DropdownMenu.SubTrigger>
+                    <DropdownMenu.SubContent className={styles.menuContent}>
+                      <DropdownMenu.Item
+                        onSelect={(event) => {
+                          event.preventDefault();
+                          handleSetCategory(message, null);
+                        }}
+                      >
+                        {menuRadioLabel(selectedCategory === null, "Inbox / none")}
+                      </DropdownMenu.Item>
+                      <DropdownMenu.Separator />
+                      <DropdownMenu.Item
+                        onSelect={(event) => {
+                          event.preventDefault();
+                          handleSetCategory(message, "newsletter");
+                        }}
+                      >
+                        {menuRadioLabel(selectedCategory === "newsletter", "📰 Newsletters")}
+                      </DropdownMenu.Item>
+                      <DropdownMenu.Item
+                        onSelect={(event) => {
+                          event.preventDefault();
+                          handleSetCategory(message, "notification");
+                        }}
+                      >
+                        {menuRadioLabel(selectedCategory === "notification", "🔔 Notifications")}
+                      </DropdownMenu.Item>
+                      <DropdownMenu.Item
+                        onSelect={(event) => {
+                          event.preventDefault();
+                          handleSetCategory(message, "transactional");
+                        }}
+                      >
+                        {menuRadioLabel(selectedCategory === "transactional", "🧾 Transactional")}
+                      </DropdownMenu.Item>
+                    </DropdownMenu.SubContent>
+                  </DropdownMenu.Sub>
                 )
               : null,
             showDeleteInMenu && isVisible("delete")

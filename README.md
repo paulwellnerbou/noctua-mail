@@ -13,6 +13,15 @@ A working WebCal integration is planned, I need it, and it will be the first thi
 
 ## ✨ Key Features
 
+### 🧠 Adaptive Email Categorization
+Automatic message categorization into **Newsletter**, **Notification**, and **Transactional** using a hybrid approach:
+- **Heuristic classifier** based on robust mail headers and content signals
+- **Per-account online learning** from manual category actions (set/change/clear)
+- **Manual override controls** directly in the message action menu
+- **Debug visibility** for learned model state and feedback events in Account Settings → Categorization
+
+See `doc/CATEGORIZATION.md` for technical details.
+
 ### 🔗 Related Mails
 Discover connections across your inbox with related mails. When viewing any email, instantly find related messages based on:
 - **Subject similarity** – Find conversations on similar topics

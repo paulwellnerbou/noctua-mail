@@ -354,6 +354,7 @@ export default function MessageWindowPage() {
                       answered: false,
                       spam: false,
                       archive: false,
+                      category: false,
                       delete: false,
                       showRelated: false,
                       openWindow: false,
@@ -366,6 +367,7 @@ export default function MessageWindowPage() {
                     handleMarkSpam={noop}
                     handleMarkNotSpam={noop}
                     handleArchiveMessage={noop}
+                    handleSetCategory={noop}
                     handleDeleteMessage={noop}
                     handleDownloadEml={handleDownloadEml}
                     handleResyncMessage={noop}

@@ -19,8 +19,9 @@ import {
   ACCOUNT_DATE_FORMAT_OPTIONS,
   normalizeAccountDateFormat
 } from "@/lib/dateFormatting";
+import type { CategoryLearningDebugSnapshot } from "@/lib/mail/categorization/debugTypes";
 
-type ManageTab = "account" | "signatures" | "preferences";
+export type ManageTab = "account" | "signatures" | "preferences" | "categorization";
 
 type Props = {
   editingAccount: Account;
@@ -42,6 +43,10 @@ type Props = {
   onUpdateAccount: (next: Account) => void;
   onUpdateSettings: (next: AccountSettings) => void;
   onRunProbe: (protocol: "imap" | "smtp") => void;
+  categorizationDebug?: CategoryLearningDebugSnapshot | null;
+  categorizationLoading?: boolean;
+  categorizationError?: string | null;
+  onRefreshCategorization?: () => void;
 };
 
 type FieldProps = {
@@ -85,10 +90,34 @@ export default function AccountSettingsModal({
   onDelete,
   onUpdateAccount,
   onUpdateSettings,
-  onRunProbe
+  onRunProbe,
+  categorizationDebug,
+  categorizationLoading = false,
+  categorizationError,
+  onRefreshCategorization
 }: Props) {
   if (!isOpen) return null;
   const signatures = editingAccount.settings?.signatures ?? [];
+  const formatTimestamp = (value?: number | null) => {
+    if (!value || !Number.isFinite(value)) return "Never";
+    try {
+      return new Date(value).toLocaleString();
+    } catch {
+      return "Never";
+    }
+  };
+  const formatCategory = (value: string | null) => {
+    if (!value) return "none";
+    if (value === "newsletter") return "newsletter";
+    if (value === "notification") return "notification";
+    if (value === "transactional") return "transactional";
+    return value;
+  };
+  const categoryLabels: Array<"newsletter" | "notification" | "transactional"> = [
+    "newsletter",
+    "notification",
+    "transactional"
+  ];
 
   return (
     <Dialog.Root
@@ -97,16 +126,21 @@ export default function AccountSettingsModal({
         if (!open) onClose();
       }}
     >
-      <Dialog.Content
-        size="4"
-        style={{
-          width: "min(980px, 94vw)",
-          height: "min(86vh, 900px)",
-          overflow: "hidden"
-        }}
-      >
-        <Flex direction="column" gap="4" style={{ height: "100%" }}>
-          <Flex align="center" justify="between" style={{ paddingBottom: "var(--space-2)" }}>
+        <Dialog.Content
+          size="4"
+          width="94vw"
+          maxWidth="980px"
+          style={{
+            height: "min(86vh, 900px)",
+            overflow: "hidden"
+          }}
+        >
+        <Flex direction="column" gap="4" style={{ height: "100%", minHeight: 0 }}>
+          <Flex
+            align="center"
+            justify="between"
+            style={{ paddingBottom: "var(--space-2)", flexShrink: 0 }}
+          >
             <Dialog.Title size="5" weight="bold">
               Account settings
             </Dialog.Title>
@@ -120,7 +154,7 @@ export default function AccountSettingsModal({
             onValueChange={(value) => onTabChange(value as ManageTab)}
             style={{ flex: "1 1 auto", minHeight: 0, display: "flex", flexDirection: "column" }}
           >
-            <Tabs.List style={{ marginBottom: "var(--space-4)" }}>
+            <Tabs.List style={{ marginBottom: "var(--space-4)", flexShrink: 0 }}>
               <Tabs.Trigger value="account">Account</Tabs.Trigger>
               <Tabs.Trigger value="signatures" disabled={!isExistingAccount}>
                 Signatures
@@ -128,9 +162,15 @@ export default function AccountSettingsModal({
               <Tabs.Trigger value="preferences" disabled={!isExistingAccount}>
                 Preferences
               </Tabs.Trigger>
+              <Tabs.Trigger value="categorization" disabled={!isExistingAccount}>
+                Categorization
+              </Tabs.Trigger>
             </Tabs.List>
 
-            <Tabs.Content value="account" style={{ flex: "1 1 auto", minHeight: 0 }}>
+            <Tabs.Content
+              value="account"
+              style={{ flex: "1 1 auto", minHeight: 0, overflow: "hidden" }}
+            >
               <Flex direction="column" gap="4" style={{ height: "100%", minHeight: 0 }}>
                 <Flex
                   direction="column"
@@ -403,7 +443,10 @@ export default function AccountSettingsModal({
               </Flex>
             </Tabs.Content>
 
-            <Tabs.Content value="signatures" style={{ flex: "1 1 auto", minHeight: 0 }}>
+            <Tabs.Content
+              value="signatures"
+              style={{ flex: "1 1 auto", minHeight: 0, overflow: "hidden" }}
+            >
               <Flex direction="column" gap="4" style={{ height: "100%", minHeight: 0 }}>
                 <Flex
                   direction="column"
@@ -536,7 +579,10 @@ export default function AccountSettingsModal({
               </Flex>
             </Tabs.Content>
 
-            <Tabs.Content value="preferences" style={{ flex: "1 1 auto", minHeight: 0 }}>
+            <Tabs.Content
+              value="preferences"
+              style={{ flex: "1 1 auto", minHeight: 0, overflow: "hidden" }}
+            >
               <Flex direction="column" gap="4" style={{ height: "100%", minHeight: 0 }}>
                 <Flex
                   direction="column"
@@ -693,6 +739,191 @@ export default function AccountSettingsModal({
                     </Grid>
                   </Flex>
                 </Flex>
+
+                <Flex
+                  justify="end"
+                  align="center"
+                  gap="3"
+                  wrap="wrap"
+                  style={{ paddingTop: "var(--space-3)", borderTop: "1px solid var(--gray-a5)" }}
+                >
+                  <Button size="2" variant="soft" color="gray" onClick={onClose}>
+                    Cancel
+                  </Button>
+                  <Button size="2" onClick={onSave} disabled={!isExistingAccount}>
+                    Save
+                  </Button>
+                </Flex>
+              </Flex>
+            </Tabs.Content>
+
+            <Tabs.Content
+              value="categorization"
+              style={{ flex: "1 1 auto", minHeight: 0, overflow: "hidden" }}
+            >
+              <Flex direction="column" gap="4" style={{ height: "100%", minHeight: 0 }}>
+                <div style={{ flex: "1 1 auto", minHeight: 0, overflow: "auto" }}>
+                  <Flex direction="column" gap="4">
+                    <Flex align="center" justify="between" gap="3" wrap="wrap">
+                      <Text size="2" color="gray">
+                        Inspect learned category calibration and recent feedback events for this account.
+                      </Text>
+                      <Button
+                        size="1"
+                        variant="soft"
+                        onClick={onRefreshCategorization}
+                        disabled={!onRefreshCategorization || categorizationLoading}
+                      >
+                        {categorizationLoading ? "Refreshing..." : "Refresh"}
+                      </Button>
+                    </Flex>
+
+                    {categorizationError && (
+                      <Card size="2">
+                        <Text size="2" color="red">
+                          {categorizationError}
+                        </Text>
+                      </Card>
+                    )}
+
+                    <Card size="2">
+                      <Flex direction="column" gap="2">
+                        <Text size="3" weight="medium">
+                          Model
+                        </Text>
+                        {categorizationDebug?.model ? (
+                          <Grid columns={{ initial: "1", sm: "2" }} gap="2">
+                            <Text size="2">Version: {categorizationDebug.model.version}</Text>
+                            <Text size="2">Examples: {categorizationDebug.model.examples}</Text>
+                            <Text size="2">
+                              Updated: {formatTimestamp(categorizationDebug.model.updatedAt)}
+                            </Text>
+                            <Text size="2">
+                              Learning rate: {categorizationDebug.model.learningRate}
+                            </Text>
+                            <Text size="2">L2: {categorizationDebug.model.l2}</Text>
+                            <Text size="2">
+                              Features:{" "}
+                              {categoryLabels
+                                .map(
+                                  (category) =>
+                                    `${category}=${categorizationDebug.model?.featureCounts[category] ?? 0}`
+                                )
+                                .join(" · ")}
+                            </Text>
+                          </Grid>
+                        ) : (
+                          <Text size="2" color="gray">
+                            No learned model yet. Use message menu category actions to create feedback events.
+                          </Text>
+                        )}
+                      </Flex>
+                    </Card>
+
+                    <Card size="2">
+                      <Flex direction="column" gap="2">
+                        <Text size="3" weight="medium">
+                          Category Distribution
+                        </Text>
+                        <Flex direction="column" gap="1">
+                          {(categorizationDebug?.categoryCounts ?? []).map((entry) => (
+                            <Text key={entry.category} size="2">
+                              {entry.category}: {entry.count}
+                            </Text>
+                          ))}
+                        </Flex>
+                        <Text size="2">
+                          Manual category overrides: {categorizationDebug?.manualCategorizedCount ?? 0}
+                        </Text>
+                      </Flex>
+                    </Card>
+
+                    <Card size="2">
+                      <Flex direction="column" gap="2">
+                        <Text size="3" weight="medium">
+                          Feedback Events
+                        </Text>
+                        <Text size="2">
+                          Total: {categorizationDebug?.feedback.totalEvents ?? 0} · Last:{" "}
+                          {formatTimestamp(categorizationDebug?.feedback.lastEventAt)}
+                        </Text>
+                        <Text size="2" weight="medium">
+                          Top transitions
+                        </Text>
+                        <Flex direction="column" gap="1">
+                          {(categorizationDebug?.feedback.transitions ?? []).slice(0, 8).map((entry) => (
+                            <Text
+                              key={`${entry.previousCategory ?? "none"}-${entry.nextCategory ?? "none"}-${entry.count}`}
+                              size="2"
+                            >
+                              {formatCategory(entry.previousCategory)} → {formatCategory(entry.nextCategory)}:{" "}
+                              {entry.count}
+                            </Text>
+                          ))}
+                        </Flex>
+                        <Text size="2" weight="medium">
+                          Recent events
+                        </Text>
+                        <Flex direction="column" gap="1">
+                          {(categorizationDebug?.feedback.recent ?? []).map((entry) => (
+                            <Text
+                              key={`${entry.createdAt}-${entry.messageId}-${entry.previousCategory ?? "none"}-${entry.nextCategory ?? "none"}`}
+                              size="2"
+                            >
+                              {formatTimestamp(entry.createdAt)} · {formatCategory(entry.previousCategory)} →{" "}
+                              {formatCategory(entry.nextCategory)} · features: {entry.featureCount}
+                            </Text>
+                          ))}
+                          {(categorizationDebug?.feedback.recent ?? []).length === 0 && (
+                            <Text size="2" color="gray">
+                              No feedback events yet.
+                            </Text>
+                          )}
+                        </Flex>
+                      </Flex>
+                    </Card>
+
+                    <Card size="2">
+                      <Flex direction="column" gap="2">
+                        <Text size="3" weight="medium">
+                          Top Learned Features
+                        </Text>
+                        {!categorizationDebug?.model ? (
+                          <Text size="2" color="gray">
+                            No model weights available.
+                          </Text>
+                        ) : (
+                          <Grid columns={{ initial: "1", sm: "3" }} gap="3">
+                            {categoryLabels.map((category) => (
+                              <Flex key={category} direction="column" gap="1">
+                                <Text size="2" weight="medium">
+                                  {category}
+                                </Text>
+                                {categorizationDebug.model?.topWeights[category].length ? (
+                                  categorizationDebug.model.topWeights[category].map((entry) => (
+                                    <Text
+                                      key={`${category}-${entry.feature}`}
+                                      size="1"
+                                      color="gray"
+                                      style={{ overflowWrap: "anywhere" }}
+                                    >
+                                      {entry.feature}: {entry.weight >= 0 ? "+" : ""}
+                                      {entry.weight}
+                                    </Text>
+                                  ))
+                                ) : (
+                                  <Text size="1" color="gray">
+                                    No features
+                                  </Text>
+                                )}
+                              </Flex>
+                            ))}
+                          </Grid>
+                        )}
+                      </Flex>
+                    </Card>
+                  </Flex>
+                </div>
 
                 <Flex
                   justify="end"

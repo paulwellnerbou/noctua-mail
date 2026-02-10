@@ -95,7 +95,7 @@ import TopBar from "./mailclient/TopBar";
 import { useMessageDeleteActions } from "./mailclient/useMessageDeleteActions";
 import { useMessageMoveActions, type UndoMoveTarget } from "./mailclient/useMessageMoveActions";
 import type { Account, AccountSettings, Attachment, Folder, Message } from "@/lib/data";
-import AccountSettingsModal from "./AccountSettingsModal";
+import AccountSettingsModal, { type ManageTab } from "./AccountSettingsModal";
 import AttachmentsList from "./AttachmentsList";
 import {
   computeGroupMeta,
@@ -147,6 +147,7 @@ import type {
   SyncJobResult
 } from "./mailclient/types";
 import { formatMessageDate, normalizeAccountDateFormat } from "@/lib/dateFormatting";
+import type { CategoryLearningDebugSnapshot } from "@/lib/mail/categorization/debugTypes";
 
 type BottomStatusTone = "normal" | "muted" | "error";
 
@@ -156,6 +157,12 @@ type BottomStatusSectionProps = {
   tone?: BottomStatusTone;
   onActivate?: () => void;
   alignRight?: boolean;
+};
+
+type CategoryDebugResponse = {
+  ok?: boolean;
+  snapshot?: CategoryLearningDebugSnapshot;
+  message?: string;
 };
 
 function BottomStatusSection({
@@ -205,10 +212,12 @@ export default function MailClient() {
   const [query, setQuery] = useState("");
   const [darkMode, setDarkMode] = useState(false);
   const [manageOpen, setManageOpen] = useState(false);
-  const [manageTab, setManageTab] = useState<"account" | "signatures" | "preferences">(
-    "account"
-  );
+  const [manageTab, setManageTab] = useState<ManageTab>("account");
   const [editingAccount, setEditingAccount] = useState<Account | null>(null);
+  const [categorizationDebug, setCategorizationDebug] =
+    useState<CategoryLearningDebugSnapshot | null>(null);
+  const [categorizationDebugLoading, setCategorizationDebugLoading] = useState(false);
+  const [categorizationDebugError, setCategorizationDebugError] = useState("");
   const [isSyncing, setIsSyncing] = useState(false);
   const [isRecomputingThreads, setIsRecomputingThreads] = useState(false);
   const [isRecomputingCategories, setIsRecomputingCategories] = useState(false);
@@ -3184,6 +3193,7 @@ export default function MailClient() {
       handleMarkSpam={handleMarkSpam}
       handleMarkNotSpam={handleMarkNotSpam}
       handleArchiveMessage={handleArchiveMessage}
+      handleSetCategory={handleSetCategory}
       handleDeleteMessage={handleDeleteMessage}
       handleDownloadEml={handleDownloadEml}
       handleResyncMessage={handleResyncMessage}
@@ -3302,6 +3312,96 @@ export default function MailClient() {
       });
       return changed ? next : prev;
     });
+  };
+
+  const updateThreadCacheWithCategory = (
+    messageId: string,
+    category: Message["category"],
+    categoryScore: Message["categoryScore"],
+    categorySignals: Message["categorySignals"]
+  ) => {
+    setThreadContentById((prev) => {
+      let changed = false;
+      const next: Record<string, Message[]> = { ...prev };
+      Object.entries(prev).forEach(([threadId, list]) => {
+        const idx = list.findIndex((item) => item.id === messageId);
+        if (idx < 0) return;
+        const current = list[idx];
+        const updated = { ...current, category, categoryScore, categorySignals };
+        const nextList = [...list];
+        nextList[idx] = updated;
+        next[threadId] = nextList;
+        changed = true;
+      });
+      return changed ? next : prev;
+    });
+  };
+
+  const handleSetCategory = async (
+    message: Message,
+    category: "newsletter" | "notification" | "transactional" | null
+  ) => {
+    setPendingMessageActions((prev) => new Set(prev).add(message.id));
+    try {
+      const res = await apiFetch("/api/message/category", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          accountId: activeAccountId,
+          messageId: message.id,
+          category
+        })
+      });
+      if (!res.ok) {
+        reportError(await readErrorMessage(res));
+        return;
+      }
+
+      const data = (await res.json()) as {
+        ok: boolean;
+        message?: Message;
+        previousCategory?: string | null;
+        nextCategory?: string | null;
+      };
+      const updated = data.message;
+      if (!updated) return;
+
+      const shouldKeepUpdatedMessage = shouldKeepMessageInCurrentResults(updated);
+      updateMessagesWithCurrentResultPrune((item) =>
+        item.id === message.id
+          ? {
+              ...item,
+              category: updated.category ?? null,
+              categoryScore:
+                typeof updated.categoryScore === "number" ? updated.categoryScore : null,
+              categorySignals: updated.categorySignals ?? []
+            }
+          : item
+      );
+      updateThreadCacheWithCategory(
+        message.id,
+        updated.category ?? null,
+        typeof updated.categoryScore === "number" ? updated.categoryScore : null,
+        updated.categorySignals ?? []
+      );
+      if (activeMessageId === message.id && !shouldKeepUpdatedMessage) {
+        setActiveMessageId("");
+      }
+      queueFilteredSearchRefresh();
+      pushNotice({
+        type: "success",
+        title: category ? "Category updated." : "Category removed.",
+        description: getMessageSubjectForNotice(message)
+      });
+    } catch {
+      reportError("Failed to update category.");
+    } finally {
+      setPendingMessageActions((prev) => {
+        const next = new Set(prev);
+        next.delete(message.id);
+        return next;
+      });
+    }
   };
 
   const toggleTodoFlag = async (message: Message) => {
@@ -4545,6 +4645,9 @@ export default function MailClient() {
     setManageTab("account");
     setImapProbe(null);
     setSmtpProbe(null);
+    setCategorizationDebug(null);
+    setCategorizationDebugError("");
+    setCategorizationDebugLoading(false);
     setImapDetecting(false);
     setSmtpDetecting(false);
     setImapSecurity(
@@ -4601,6 +4704,42 @@ export default function MailClient() {
       if (updated) setEditingAccount(updated);
     }
   };
+
+  const loadCategorizationDebug = useCallback(
+    async (accountId: string) => {
+      setCategorizationDebugLoading(true);
+      setCategorizationDebugError("");
+      try {
+        const res = await apiFetch(
+          `/api/categories/debug?accountId=${encodeURIComponent(accountId)}&limit=20`
+        );
+        if (!res.ok) {
+          setCategorizationDebugError(await readErrorMessage(res));
+          return;
+        }
+        const data = (await res.json()) as CategoryDebugResponse;
+        if (!data?.ok || !data.snapshot) {
+          setCategorizationDebugError(data?.message || "Invalid categorization debug response.");
+          return;
+        }
+        setCategorizationDebug(data.snapshot);
+      } catch {
+        setCategorizationDebugError("Failed to load categorization debug data.");
+      } finally {
+        setCategorizationDebugLoading(false);
+      }
+    },
+    [apiFetch, readErrorMessage]
+  );
+
+  useEffect(() => {
+    const accountId = editingAccount?.id;
+    const accountExists = accountId ? accounts.some((account) => account.id === accountId) : false;
+    if (!manageOpen || manageTab !== "categorization" || !accountExists || !accountId) {
+      return;
+    }
+    void loadCategorizationDebug(accountId);
+  }, [manageOpen, manageTab, accounts, editingAccount?.id, loadCategorizationDebug]);
 
   const updateEditingSettings = (next: AccountSettings) => {
     if (!editingAccount) return;
@@ -6385,6 +6524,13 @@ export default function MailClient() {
           onUpdateAccount={setEditingAccount}
           onUpdateSettings={updateEditingSettings}
           onRunProbe={runProbe}
+          categorizationDebug={categorizationDebug}
+          categorizationLoading={categorizationDebugLoading}
+          categorizationError={categorizationDebugError}
+          onRefreshCategorization={() => {
+            if (!editingAccount?.id) return;
+            void loadCategorizationDebug(editingAccount.id);
+          }}
         />
       )}
 

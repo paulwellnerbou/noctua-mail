@@ -20,4 +20,17 @@ export {
   type ClassifierConfig,
 } from './classifier';
 
+export {
+  CATEGORY_KEYS,
+  createDefaultLinearModel,
+  extractLinearFeatures,
+  applyLinearModel,
+  trainLinearModelPositive,
+  trainLinearModelNegative,
+  type CategoryKey,
+  type CategoryLinearModel,
+  type CategoryScores,
+  type LinearFeatureVector,
+} from "./linearModel";
+
 export { isCategorizationEnabled, getCategorizationConfig } from './config';
