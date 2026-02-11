@@ -171,18 +171,6 @@ function filterUpcomingCalendarReminders(reminders: CalendarReminder[], nowMs = 
   return reminders.filter((reminder) => getCalendarReminderEndAtMs(reminder) > nowMs);
 }
 
-// Generate deterministic account ID from email address
-// This ensures the same email always gets the same account ID across environments
-function accountIdFromEmail(email: string): string {
-  let hash = 0;
-  const str = email.toLowerCase().trim();
-  for (let i = 0; i < str.length; i++) {
-    hash = ((hash << 5) - hash) + str.charCodeAt(i);
-    hash = hash & hash; // Convert to 32bit integer
-  }
-  return `acc-${Math.abs(hash).toString(36).slice(0, 8)}`;
-}
-
 type MailClientProps = {
   buildVersionLabel?: string;
 };
@@ -414,6 +402,8 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
   const lastUidNextByFolderRef = useRef<Record<string, number>>({});
   const lastNotifiedUidRef = useRef<Record<string, number>>({});
   const notifiedKeysRef = useRef<Set<string>>(new Set());
+  const autoHydrationInFlightRef = useRef<Map<string, Promise<boolean>>>(new Map());
+  const autoHydrationAttemptAtRef = useRef<Record<string, number>>({});
   const lastDeleteReconcileAtRef = useRef<Record<string, number>>({});
   const messageMutationVersionRef = useRef(0);
   const swRegistrationRef = useRef<ServiceWorkerRegistration | null>(null);
@@ -3637,6 +3627,54 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     return source.replace(/([A-Za-z0-9+/=]{200,})/g, "[base64 omitted]");
   };
 
+  const hydrateMessageFromServer = useCallback(
+    async (message: Message, options?: { silent?: boolean }) => {
+      if (!message.mailboxPath || typeof message.imapUid !== "number" || Number.isNaN(message.imapUid)) {
+        return null;
+      }
+
+      try {
+        const res = await apiFetch("/api/message/resync", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ accountId: message.accountId, messageId: message.id })
+        });
+        if (!res.ok) {
+          if (!options?.silent) {
+            reportError(await readErrorMessage(res));
+          }
+          return null;
+        }
+      } catch {
+        if (!options?.silent) {
+          reportError("Re-sync failed due to a network error.");
+        }
+        return null;
+      }
+
+      try {
+        const detailRes = await apiFetch(
+          `/api/message?accountId=${encodeURIComponent(message.accountId)}&messageId=${encodeURIComponent(
+            message.id
+          )}`,
+          { cache: "no-store" }
+        );
+        if (!detailRes.ok) return null;
+        const detail = (await detailRes.json()) as { ok?: boolean; message?: Message };
+        const hydrated = detail?.ok ? detail.message : null;
+        if (!hydrated?.id) return null;
+        updateMessagesWithCurrentResultPrune((item) => {
+          if (item.id !== hydrated.id) return item;
+          return hydrated;
+        });
+        return hydrated;
+      } catch {
+        return null;
+      }
+    },
+    [apiFetch, readErrorMessage, reportError, updateMessagesWithCurrentResultPrune]
+  );
+
   const fetchSource = useCallback(async (messageId: string) => {
     const existing = sourceFetchRef.current.get(messageId);
     if (existing) {
@@ -3646,27 +3684,52 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     console.info("[noctua] fetch source start", { messageId });
     setLoadingSource((prev) => ({ ...prev, [messageId]: true }));
     const promise = (async () => {
-      try {
+      const loadSource = async () => {
         const res = await apiFetch(
           `/api/source?accountId=${encodeURIComponent(activeAccountId)}&messageId=${encodeURIComponent(
             messageId
           )}`
         );
-        if (res.ok) {
-          const data = (await res.json()) as { source?: string };
+        if (!res.ok) {
+          const errorMessage = await readErrorMessage(res);
+          return {
+            source: null as string | null,
+            status: res.status,
+            errorMessage
+          };
+        }
+        const data = (await res.json()) as { source?: string };
+        return {
+          source: data.source ?? "",
+          status: res.status,
+          errorMessage: ""
+        };
+      };
+
+      try {
+        let result = await loadSource();
+        if (!result.source && result.status === 404) {
+          const message =
+            messageById.get(messageId) ??
+            threadMessages.find((item) => item.id === messageId);
+          if (message && !message.hasSource) {
+            await hydrateMessageFromServer(message, { silent: true });
+            result = await loadSource();
+          }
+        }
+        if (result.source !== null) {
           console.info("[noctua] fetch source ok", {
             messageId,
-            size: data?.source?.length ?? 0
+            size: result.source.length
           });
-          return data.source ?? "";
+          return result.source;
         }
-        const errorMessage = await readErrorMessage(res);
         console.warn("[noctua] fetch source failed", {
           messageId,
-          status: res.status,
-          errorMessage
+          status: result.status,
+          errorMessage: result.errorMessage
         });
-        reportError(errorMessage);
+        reportError(result.errorMessage || "Failed to load source.");
         return null;
       } catch (error) {
         console.warn("[noctua] fetch source exception", { messageId, error });
@@ -3679,7 +3742,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     })();
     sourceFetchRef.current.set(messageId, promise);
     return promise;
-  }, [activeAccountId]);
+  }, [activeAccountId, hydrateMessageFromServer, messageById, threadMessages]);
 
   const renderSourcePanel = (messageId: string) => (
     <MessageSourcePanel
@@ -3690,6 +3753,38 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
   );
   const renderMarkdownPanel = (body: string | undefined, messageId: string) => (
     <MarkdownPanel body={body} fontScale={messageFontScale[messageId] ?? 1} />
+  );
+
+  const hydrateMessageOnOpenIfNeeded = useCallback(
+    async (message: Message) => {
+      const hasText = (message.body ?? "").trim().length > 0;
+      const hasHtml = hasHtmlContent(message.htmlBody);
+      if (hasText || hasHtml) return false;
+      if (!message.mailboxPath || typeof message.imapUid !== "number" || Number.isNaN(message.imapUid)) {
+        return false;
+      }
+
+      const key = `${message.accountId}:${message.id}`;
+      const now = Date.now();
+      const lastAttempt = autoHydrationAttemptAtRef.current[key] ?? 0;
+      if (now - lastAttempt < 30_000) {
+        return false;
+      }
+      const inFlight = autoHydrationInFlightRef.current.get(key);
+      if (inFlight) {
+        return inFlight;
+      }
+      autoHydrationAttemptAtRef.current[key] = now;
+      const promise = (async () => {
+        const hydrated = await hydrateMessageFromServer(message, { silent: true });
+        return Boolean(hydrated);
+      })().finally(() => {
+        autoHydrationInFlightRef.current.delete(key);
+      });
+      autoHydrationInFlightRef.current.set(key, promise);
+      return promise;
+    },
+    [hydrateMessageFromServer]
   );
 
   const jsonPayload = useMemo(() => {
@@ -3726,6 +3821,8 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
         lastNotifiedUidRef.current[activeAccountId] = value;
       }
     }
+    autoHydrationAttemptAtRef.current = {};
+    autoHydrationInFlightRef.current.clear();
   }, [activeAccountId]);
 
   useEffect(() => {
@@ -4226,6 +4323,9 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
       const cachedActive =
         cachedThread?.find((item) => item.id === activeMessage.id) ?? null;
       const activeHasContent = hasContent(cachedActive ?? activeMessage);
+      if (!activeHasContent) {
+        await hydrateMessageOnOpenIfNeeded(activeMessage);
+      }
       if (supportsThreads && cachedThread && cachedThread.length > 0 && activeHasContent) {
         return;
       }
@@ -4291,6 +4391,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     activeMessage,
     groupBy,
     supportsThreads,
+    hydrateMessageOnOpenIfNeeded,
     upsertThreadCache
   ]);
 
@@ -4678,9 +4779,13 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(accountToSave)
     });
+    if (!saveResult.ok) {
+      reportError(await readErrorMessage(saveResult));
+      return;
+    }
 
     // Get the server-generated account ID for new accounts
-    const newAccountId = isNew && saveResult.ok
+    const newAccountId = isNew
       ? ((await saveResult.json()) as { id: string }).id
       : editingAccount.id;
 
@@ -4693,6 +4798,9 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
         await refreshFolders();
         await syncAccount(undefined, "full");
       }
+    } else {
+      reportError(await readErrorMessage(refreshed));
+      return;
     }
     setManageOpen(false);
     setEditingAccount(null);
@@ -4717,6 +4825,8 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
       setAccounts(nextAccounts);
       const updated = nextAccounts.find((item) => item.id === editingAccount.id) ?? null;
       if (updated) setEditingAccount(updated);
+    } else {
+      reportError(await readErrorMessage(refreshed));
     }
   };
 
@@ -5059,15 +5169,8 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
 
   const handleResyncMessage = async (message: Message) => {
     try {
-      const res = await apiFetch("/api/message/resync", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ accountId: activeAccountId, messageId: message.id })
-      });
-      if (!res.ok) {
-        reportError(await readErrorMessage(res));
-        return;
-      }
+      const hydrated = await hydrateMessageFromServer(message);
+      if (!hydrated) return;
       const threadId = message.threadId ?? message.messageId ?? message.id;
       evictThreadCache(threadId);
       if (searchScope === "folder" && activeFolderId === message.folderId) {

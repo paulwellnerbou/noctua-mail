@@ -42,6 +42,23 @@ type ImapParsedMessage = {
   flags?: Set<string>;
 };
 
+type ImapEnvelopeAddress = {
+  name?: string | null;
+  mailbox?: string | null;
+  host?: string | null;
+};
+
+type ImapEnvelope = {
+  subject?: string | null;
+  from?: ImapEnvelopeAddress[] | null;
+  to?: ImapEnvelopeAddress[] | null;
+  cc?: ImapEnvelopeAddress[] | null;
+  bcc?: ImapEnvelopeAddress[] | null;
+  date?: Date | null;
+  messageId?: string | null;
+  inReplyTo?: string | string[] | null;
+};
+
 type ImapLogContext = {
   accountId: string;
   clientId?: string;
@@ -55,6 +72,34 @@ const buildLogContext = (account: Account, clientId?: string): ImapLogContext =>
 function buildFolderId(accountId: string, path: string) {
   const safePath = path.replace(/\\/g, "/");
   return `${accountId}:${safePath}`;
+}
+
+function formatEnvelopeAddresses(addresses?: ImapEnvelopeAddress[] | null) {
+  if (!addresses || addresses.length === 0) return "";
+  const parts = addresses.map((addr) => {
+    const email = addr?.mailbox && addr?.host ? `${addr.mailbox}@${addr.host}` : "";
+    if (addr?.name && email) return `"${addr.name}" <${email}>`;
+    return addr?.name || email || "";
+  });
+  return parts.filter(Boolean).join(", ");
+}
+
+function normalizeEnvelopeHeaderId(value?: string | null) {
+  const trimmed = value?.trim();
+  return trimmed && trimmed.length > 0 ? trimmed : undefined;
+}
+
+function resolveEnvelopeInReplyTo(envelope?: ImapEnvelope) {
+  const raw = envelope?.inReplyTo;
+  if (Array.isArray(raw)) {
+    for (const item of raw) {
+      const normalized = normalizeEnvelopeHeaderId(typeof item === "string" ? item : null);
+      if (normalized) return normalized;
+    }
+    return undefined;
+  }
+  if (typeof raw === "string") return normalizeEnvelopeHeaderId(raw);
+  return undefined;
 }
 
 const htmlNamedEntities: Record<string, string> = {
@@ -138,6 +183,94 @@ async function listImapRaw(account: Account, logContext?: ImapLogContext) {
   }
 }
 
+function deriveFlagState(flags: string[]) {
+  const hasFlag = (flag: string) =>
+    flags.some((value) => value.toLowerCase() === flag.toLowerCase());
+  const seen = hasFlag("\\Seen");
+  const answered = hasFlag("\\Answered");
+  const flagged = hasFlag("\\Flagged");
+  const deleted = hasFlag("\\Deleted");
+  const draft = hasFlag("\\Draft");
+  const recent = hasFlag("\\Recent");
+  return {
+    seen,
+    answered,
+    flagged,
+    deleted,
+    draft,
+    recent,
+    unread: !seen
+  };
+}
+
+function buildLightweightImapMessage(params: {
+  account: Account;
+  mailboxToOpen: string;
+  uid: number;
+  flags?: Set<string> | string[];
+  envelope?: ImapEnvelope;
+  internalDate?: Date | null;
+}) {
+  const { account, mailboxToOpen, uid, flags, envelope, internalDate } = params;
+  const flagList = Array.isArray(flags) ? flags : flags ? Array.from(flags) : [];
+  const safeMailbox = mailboxToOpen.split("/").join("_");
+  const messageId = normalizeEnvelopeHeaderId(envelope?.messageId) ?? `imap-msg-${uid}`;
+  const inReplyTo = resolveEnvelopeInReplyTo(envelope);
+  const envelopeDateMs =
+    envelope?.date instanceof Date && Number.isFinite(envelope.date.getTime())
+      ? envelope.date.getTime()
+      : null;
+  const internalDateMs =
+    internalDate instanceof Date && Number.isFinite(internalDate.getTime())
+      ? internalDate.getTime()
+      : null;
+  const dateValue = envelopeDateMs ?? internalDateMs ?? Date.now();
+  const messageFlags = withCalendarInviteFlag(flagList, {
+    attachments: [],
+    textBody: "",
+    htmlBody: undefined
+  });
+  const { seen, answered, flagged, deleted, draft, recent, unread } = deriveFlagState(flagList);
+
+  return {
+    id: `imap-${account.id}-${safeMailbox}-${uid}`,
+    threadId: inReplyTo ?? messageId ?? `imap-thread-${uid}`,
+    messageId,
+    inReplyTo,
+    references: undefined,
+    xForwardedMessageId: undefined,
+    subject: envelope?.subject?.trim() || "(no subject)",
+    from: formatEnvelopeAddresses(envelope?.from) || account.email,
+    to: formatEnvelopeAddresses(envelope?.to),
+    cc: formatEnvelopeAddresses(envelope?.cc),
+    bcc: formatEnvelopeAddresses(envelope?.bcc),
+    preview: "",
+    date: new Date(dateValue).toLocaleString(),
+    dateValue,
+    folderId: buildFolderId(account.id, mailboxToOpen),
+    accountId: account.id,
+    mailboxPath: mailboxToOpen,
+    imapUid: uid,
+    body: "",
+    htmlBody: undefined,
+    priority: undefined,
+    source: undefined,
+    hasSource: false,
+    attachments: [],
+    flags: messageFlags,
+    seen,
+    answered,
+    flagged,
+    deleted,
+    draft,
+    recent,
+    unread,
+    category: null,
+    categoryScore: null,
+    categorySignals: []
+  } as Message;
+}
+
 async function parseImapMessage(
   account: Account,
   mailboxToOpen: string,
@@ -147,14 +280,7 @@ async function parseImapMessage(
 ) {
   const parsed = await simpleParser(message.source);
   const flags = message.flags ? Array.from(message.flags) : [];
-  const hasFlag = (flag: string) =>
-    flags.some((value) => value.toLowerCase() === flag.toLowerCase());
-  const seen = hasFlag("\\Seen");
-  const answered = hasFlag("\\Answered");
-  const flagged = hasFlag("\\Flagged");
-  const deleted = hasFlag("\\Deleted");
-  const draft = hasFlag("\\Draft");
-  const recent = hasFlag("\\Recent");
+  const { seen, answered, flagged, deleted, draft, recent, unread } = deriveFlagState(flags);
   const resolveFallbackDate = () => {
     if (parsed.date instanceof Date && !Number.isNaN(parsed.date.getTime())) {
       return parsed.date;
@@ -341,7 +467,7 @@ async function parseImapMessage(
     deleted,
     draft,
     recent,
-    unread: !seen,
+    unread,
     category: classification.category,
     categoryScore: classification.confidence,
     categorySignals: classification.signals
@@ -379,7 +505,7 @@ export async function* syncImapAccountBatched(
   const folders: Folder[] = mapImapFolders(account, folderList);
 
   const mailboxToOpen = mailboxPath ?? "INBOX";
-  const linearModel = await getCategoryLinearModel(account.id);
+  const linearModel = mode === "new" ? null : await getCategoryLinearModel(account.id);
   await logImapOp("mailboxOpen", { mailbox: mailboxToOpen, ...logContext }, () =>
     client.mailboxOpen(mailboxToOpen)
   );
@@ -408,16 +534,21 @@ export async function* syncImapAccountBatched(
     const range = { uid: `${startUid}:*` };
     const start = Date.now();
 
-    for await (const message of client.fetch(range, { ...fetchQuery, uid: true })) {
-      if (!message.source) continue;
-      const parsedMessage = await parseImapMessage(
+    for await (const message of client.fetch(range, {
+      envelope: true,
+      flags: true,
+      uid: true,
+      internalDate: true
+    })) {
+      const nextMessage = buildLightweightImapMessage({
         account,
         mailboxToOpen,
-        { uid: message.uid, source: message.source as Buffer, flags: message.flags },
-        simpleParser,
-        linearModel
-      );
-      currentBatch.push(parsedMessage);
+        uid: message.uid,
+        flags: message.flags,
+        envelope: message.envelope as ImapEnvelope | undefined,
+        internalDate: (message as any).internalDate
+      });
+      currentBatch.push(nextMessage);
       totalProcessed += 1;
 
       if (currentBatch.length >= batchSize) {
@@ -501,7 +632,7 @@ export async function syncImapAccount(
   const folders: Folder[] = mapImapFolders(account, folderList);
 
   const mailboxToOpen = mailboxPath ?? "INBOX";
-  const linearModel = await getCategoryLinearModel(account.id);
+  const linearModel = mode === "new" ? null : await getCategoryLinearModel(account.id);
   await logImapOp("mailboxOpen", { mailbox: mailboxToOpen, ...logContext }, () =>
     client.mailboxOpen(mailboxToOpen)
   );
@@ -517,16 +648,21 @@ export async function syncImapAccount(
     const range = { uid: `${startUid}:*` };
     const start = Date.now();
     let count = 0;
-    for await (const message of client.fetch(range, { ...fetchQuery, uid: true })) {
-      if (!message.source) continue;
-      const parsedMessage = await parseImapMessage(
+    for await (const message of client.fetch(range, {
+      envelope: true,
+      flags: true,
+      uid: true,
+      internalDate: true
+    })) {
+      const nextMessage = buildLightweightImapMessage({
         account,
         mailboxToOpen,
-        { uid: message.uid, source: message.source as Buffer, flags: message.flags },
-        simpleParser,
-        linearModel
-      );
-      messages.push(parsedMessage);
+        uid: message.uid,
+        flags: message.flags,
+        envelope: message.envelope as ImapEnvelope | undefined,
+        internalDate: (message as any).internalDate
+      });
+      messages.push(nextMessage);
       count += 1;
     }
     const logger = getImapLogger();

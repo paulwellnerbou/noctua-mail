@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { buildSessionPayload, setSessionCookie } from "@/lib/auth";
-import { getAccounts, getUserAccounts, getUsers, saveAccounts } from "@/lib/db";
+import { getAccounts, getUserAccounts, getUsers, patchAccount } from "@/lib/db";
 import { verifyImapCredentials } from "@/lib/mail/imapAuth";
 import { shouldStorePasswordInDb } from "@/lib/secret";
 
@@ -17,9 +17,11 @@ export async function POST(request: Request) {
     getUsers(),
     getUserAccounts()
   ]);
-  const user = users.find((u) => u.email.toLowerCase() === email);
-  const linkedAccountIds = links.filter((l) => l.userId === user?.id).map((l) => l.accountId);
-  const account =
+  const emailUser = users.find((u) => u.email.toLowerCase() === email);
+  const linkedAccountIds = links
+    .filter((link) => link.userId === emailUser?.id)
+    .map((link) => link.accountId);
+  let account =
     accounts.find((a) => a.email.toLowerCase() === email) ??
     accounts.find((a) => a.imap.user.toLowerCase() === email) ??
     accounts.find((a) => linkedAccountIds.includes(a.id));
@@ -30,21 +32,34 @@ export async function POST(request: Request) {
   if (!ok) {
     return NextResponse.json({ ok: false, message: "Invalid IMAP credentials" }, { status: 401 });
   }
-  const prevImapPass = account.imap.password;
-  const prevSmtpPass = account.smtp.password;
-  if (shouldStorePasswordInDb()) {
-    account.imap.password = password;
-    account.smtp.password = password;
-  } else {
-    account.imap.password = "";
-    account.smtp.password = "";
+  const nextStoredPassword = shouldStorePasswordInDb() ? password : "";
+  if (account.imap.password !== nextStoredPassword || account.smtp.password !== nextStoredPassword) {
+    await patchAccount(account.id, {
+      imap: { password: nextStoredPassword },
+      smtp: { password: nextStoredPassword }
+    });
+    account = {
+      ...account,
+      imap: { ...account.imap, password: nextStoredPassword },
+      smtp: { ...account.smtp, password: nextStoredPassword }
+    };
   }
-  if (account.imap.password !== prevImapPass || account.smtp.password !== prevSmtpPass) {
-    await saveAccounts(accounts.map((a) => (a.id === account.id ? account : a)));
-  }
+
+  const linkedUserIds = links
+    .filter((link) => link.accountId === account.id)
+    .map((link) => String(link.userId ?? "").trim())
+    .filter(Boolean);
+  const ownerUserId = account.ownerUserId?.trim();
+  const resolvedUserId =
+    ownerUserId ??
+    (emailUser && linkedUserIds.includes(emailUser.id) ? emailUser.id : linkedUserIds[0]) ??
+    emailUser?.id ??
+    account.id;
+  const resolvedUser = users.find((u) => u.id === resolvedUserId);
+
   const session = buildSessionPayload({
-    userId: account.ownerUserId ?? user?.id ?? account.id,
-    role: user?.role,
+    userId: resolvedUserId,
+    role: resolvedUser?.role,
     account,
     imapPass: password,
     smtpPass: password
