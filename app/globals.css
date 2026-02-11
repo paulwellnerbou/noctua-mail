@@ -1530,13 +1530,32 @@ a {
   gap: 8px;
 }
 
+.reminder-groups {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: min(64vh, 560px);
+  overflow: auto;
+  padding-right: 2px;
+}
+
+.reminder-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.reminder-group-label {
+  margin: 0;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+
 .reminder-list {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  max-height: min(64vh, 560px);
-  overflow: auto;
-  padding-right: 2px;
 }
 
 .reminder-item {

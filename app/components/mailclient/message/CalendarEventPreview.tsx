@@ -19,6 +19,7 @@ import {
   getCalendarReminderLeadOption,
   upsertCalendarReminder
 } from "../utils/calendarReminders";
+import { groupItemsByRelativeTime } from "../utils/relativeTimeGroups";
 import DialogTitleBar from "./DialogTitleBar";
 import RawTextPanel from "./RawTextPanel";
 import styles from "./CalendarEventPreview.module.css";
@@ -106,50 +107,6 @@ function extractIcsUid(rawSource: string) {
     if (uid) return uid;
   }
   return "";
-}
-
-type EventGroupKey = "today" | "tomorrow" | "thisWeek" | "later";
-
-const EVENT_GROUP_ORDER: EventGroupKey[] = ["today", "tomorrow", "thisWeek", "later"];
-const EVENT_GROUP_LABELS: Record<EventGroupKey, string> = {
-  today: "Today",
-  tomorrow: "Tomorrow",
-  thisWeek: "This Week",
-  later: "Later"
-};
-
-function startOfLocalDay(date: Date) {
-  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
-}
-
-function addLocalDays(date: Date, days: number) {
-  const next = new Date(date);
-  next.setDate(next.getDate() + days);
-  return next;
-}
-
-function resolveEventGroup(
-  event: CalendarEventPreview,
-  boundaries: {
-    todayStartMs: number;
-    tomorrowStartMs: number;
-    dayAfterTomorrowStartMs: number;
-    nextWeekStartMs: number;
-  }
-): EventGroupKey {
-  const startMs = event.start?.getTime();
-  if (!Number.isFinite(startMs)) return "later";
-  const safeStartMs = Number(startMs);
-  if (safeStartMs >= boundaries.todayStartMs && safeStartMs < boundaries.tomorrowStartMs) {
-    return "today";
-  }
-  if (safeStartMs >= boundaries.tomorrowStartMs && safeStartMs < boundaries.dayAfterTomorrowStartMs) {
-    return "tomorrow";
-  }
-  if (safeStartMs >= boundaries.dayAfterTomorrowStartMs && safeStartMs < boundaries.nextWeekStartMs) {
-    return "thisWeek";
-  }
-  return "later";
 }
 
 function formatReminderTrigger(date: Date) {
@@ -302,40 +259,9 @@ export default function CalendarEventPreview({
     events.find((event) => (event.uid ?? "").trim().length > 0)?.uid?.trim() ??
     extractIcsUid(normalizedRawSource);
   const groupedEvents = useMemo(() => {
-    const now = new Date();
-    const todayStart = startOfLocalDay(now);
-    const tomorrowStart = addLocalDays(todayStart, 1);
-    const dayAfterTomorrowStart = addLocalDays(todayStart, 2);
-    const nextWeekStart = addLocalDays(todayStart, 7);
-    const boundaries = {
-      todayStartMs: todayStart.getTime(),
-      tomorrowStartMs: tomorrowStart.getTime(),
-      dayAfterTomorrowStartMs: dayAfterTomorrowStart.getTime(),
-      nextWeekStartMs: nextWeekStart.getTime()
-    };
-    const buckets: Record<EventGroupKey, Array<{ event: CalendarEventPreview; index: number }>> = {
-      today: [],
-      tomorrow: [],
-      thisWeek: [],
-      later: []
-    };
-    const sourceEvents = hasCurrentResult ? result.events : [];
-    const orderedEvents = sourceEvents
-      .map((event, index) => ({ event, index }))
-      .sort((left, right) => {
-        const leftStart = left.event.start?.getTime() ?? Number.POSITIVE_INFINITY;
-        const rightStart = right.event.start?.getTime() ?? Number.POSITIVE_INFINITY;
-        return leftStart - rightStart;
-      });
-    orderedEvents.forEach((entry) => {
-      const group = resolveEventGroup(entry.event, boundaries);
-      buckets[group].push(entry);
-    });
-    return EVENT_GROUP_ORDER.map((group) => ({
-      group,
-      label: EVENT_GROUP_LABELS[group],
-      items: buckets[group]
-    })).filter((bucket) => bucket.items.length > 0);
+    const sourceEvents = (hasCurrentResult ? result.events : []).slice(0, 3);
+    const entries = sourceEvents.map((event, index) => ({ event, index }));
+    return groupItemsByRelativeTime(entries, (entry) => entry.event.start?.getTime() ?? Number.NaN);
   }, [hasCurrentResult, result.events]);
   const loading = !hasCurrentResult;
   const hasError = hasCurrentResult && result.error;
@@ -463,19 +389,18 @@ export default function CalendarEventPreview({
             </Badge>
           </a>
           <Dialog.Root open={rawIcsOpen} onOpenChange={setRawIcsOpen}>
-            <Dialog.Trigger asChild>
-              <IconButton
-                size="1"
-                variant="soft"
-                color="gray"
-                className={styles.infoButton}
-                title="Show raw ICS content"
-                aria-label="Show raw ICS content"
-                disabled={!canViewRawIcs}
-              >
-                <Info size={12} />
-              </IconButton>
-            </Dialog.Trigger>
+            <IconButton
+              size="1"
+              variant="soft"
+              color="gray"
+              className={styles.infoButton}
+              title="Show raw ICS content"
+              aria-label="Show raw ICS content"
+              disabled={!canViewRawIcs}
+              onClick={() => setRawIcsOpen(true)}
+            >
+              <Info size={12} />
+            </IconButton>
             <Dialog.Content size="4" className={styles.rawIcsDialog}>
               <Flex direction="column" gap="3">
                 <DialogTitleBar title="Raw ICS Content" onClose={() => setRawIcsOpen(false)} />
@@ -507,7 +432,7 @@ export default function CalendarEventPreview({
       ) : (
         <div className={styles.eventGroups}>
           {groupedEvents.map((bucket) => (
-            <section key={bucket.group} className={styles.eventGroup}>
+            <section key={bucket.key} className={styles.eventGroup}>
               <p className={styles.groupLabel}>{bucket.label}</p>
               <div className={styles.eventList}>
                 {bucket.items.map(({ event, index }) => {
@@ -595,6 +520,9 @@ export default function CalendarEventPreview({
               </div>
             </section>
           ))}
+          {events.length > 3 ? (
+            <p className={styles.meta}>+{events.length - 3} more events in attachment</p>
+          ) : null}
         </div>
       )}
       {reminderNotice ? <p className={styles.notice}>{reminderNotice}</p> : null}

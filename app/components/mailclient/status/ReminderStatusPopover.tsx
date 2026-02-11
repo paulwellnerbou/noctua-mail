@@ -1,12 +1,13 @@
 "use client";
 
-import { useCallback } from "react";
+import { useCallback, useMemo } from "react";
 import { Trash2, X } from "lucide-react";
 import { Badge, Box, Card, Flex, IconButton, Popover, Text } from "@radix-ui/themes";
 import {
   deleteCalendarReminder,
   type CalendarReminder
 } from "../utils/calendarReminders";
+import { groupItemsByRelativeTime } from "../utils/relativeTimeGroups";
 import {
   BottomStatusTriggerButton,
   type BottomStatusTone
@@ -65,6 +66,15 @@ export default function ReminderStatusPopover({
     return `${reminderCount} · ${reminderTitle} @ ${time}`;
   })();
   const remindersStatusTone: BottomStatusTone = reminderCount > 0 ? "normal" : "muted";
+  const groupedReminders = useMemo(
+    () =>
+      groupItemsByRelativeTime(
+        pendingCalendarReminders,
+        (reminder) =>
+          Number(reminder.nextEventStartAtMs ?? reminder.eventStartAtMs ?? reminder.triggerAtMs ?? Number.NaN)
+      ),
+    [pendingCalendarReminders]
+  );
 
   const handleDeleteReminder = useCallback(
     async (reminderId: string) => {
@@ -113,69 +123,78 @@ export default function ReminderStatusPopover({
         </Flex>
         <Box className="popover-body">
           {pendingCalendarReminders.length > 0 ? (
-            <div className="reminder-list">
-              {pendingCalendarReminders.map((reminder) => (
-                <Card key={reminder.id} size="1" className="reminder-item">
-                  <Flex align="start" justify="between" gap="2">
-                    <button
-                      type="button"
-                      className={`reminder-open-button ${reminder.messageId ? "interactive" : ""}`}
-                      onClick={() => {
-                        if (!reminder.messageId) {
-                          console.warn("[noctua][reminder-link] missing reminder.messageId", {
-                            reminderId: reminder.id,
-                            eventTitle: reminder.eventTitle,
-                            triggerAtMs: reminder.triggerAtMs
-                          });
-                          return;
-                        }
-                        console.info("[noctua][reminder-link] reminder row click", {
-                          reminderId: reminder.id,
-                          messageId: reminder.messageId,
-                          eventTitle: reminder.eventTitle
-                        });
-                        onOpenReminderMessage(reminder.messageId);
-                        onOpenChange(false);
-                      }}
-                      title={reminder.messageId ? "Open source mail" : undefined}
-                      aria-label={reminder.messageId ? "Open source mail" : undefined}
-                    >
-                      <Flex direction="column" gap="1" className="reminder-item-main">
-                        <Text as="div" size="3" weight="medium" className="reminder-item-title">
-                          {reminder.eventTitle}
-                        </Text>
-                        <Flex align="center" gap="2" wrap="wrap" className="reminder-item-tags">
-                          <Badge size="1" variant="soft" color="gray">
-                            {reminder.leadLabel}
-                          </Badge>
-                          <Text as="span" size="1" className="reminder-item-meta">
-                            Reminder: {formatUpcomingReminderTime(reminder.triggerAtMs)}
-                          </Text>
-                          <Text as="span" size="1" className="reminder-item-meta">
-                            Starts: {formatEventStartTime(reminder.nextEventStartAtMs)}
-                          </Text>
+            <div className="reminder-groups">
+              {groupedReminders.map((group) => (
+                <section key={group.key} className="reminder-group">
+                  <Text as="p" size="1" weight="medium" className="reminder-group-label">
+                    {group.label}
+                  </Text>
+                  <div className="reminder-list">
+                    {group.items.map((reminder) => (
+                      <Card key={reminder.id} size="1" className="reminder-item">
+                        <Flex align="start" justify="between" gap="2">
+                          <button
+                            type="button"
+                            className={`reminder-open-button ${reminder.messageId ? "interactive" : ""}`}
+                            onClick={() => {
+                              if (!reminder.messageId) {
+                                console.warn("[noctua][reminder-link] missing reminder.messageId", {
+                                  reminderId: reminder.id,
+                                  eventTitle: reminder.eventTitle,
+                                  triggerAtMs: reminder.triggerAtMs
+                                });
+                                return;
+                              }
+                              console.info("[noctua][reminder-link] reminder row click", {
+                                reminderId: reminder.id,
+                                messageId: reminder.messageId,
+                                eventTitle: reminder.eventTitle
+                              });
+                              onOpenReminderMessage(reminder.messageId);
+                              onOpenChange(false);
+                            }}
+                            title={reminder.messageId ? "Open source mail" : undefined}
+                            aria-label={reminder.messageId ? "Open source mail" : undefined}
+                          >
+                            <Flex direction="column" gap="1" className="reminder-item-main">
+                              <Text as="div" size="3" weight="medium" className="reminder-item-title">
+                                {reminder.eventTitle}
+                              </Text>
+                              <Flex align="center" gap="2" wrap="wrap" className="reminder-item-tags">
+                                <Badge size="1" variant="soft" color="gray">
+                                  {reminder.leadLabel}
+                                </Badge>
+                                <Text as="span" size="1" className="reminder-item-meta">
+                                  Reminder: {formatUpcomingReminderTime(reminder.triggerAtMs)}
+                                </Text>
+                                <Text as="span" size="1" className="reminder-item-meta">
+                                  Starts: {formatEventStartTime(reminder.nextEventStartAtMs)}
+                                </Text>
+                              </Flex>
+                              {reminder.eventLocation ? (
+                                <Text as="div" size="1" className="reminder-item-meta reminder-item-location">
+                                  Location: {reminder.eventLocation}
+                                </Text>
+                              ) : null}
+                            </Flex>
+                          </button>
+                          <IconButton
+                            variant="soft"
+                            color="gray"
+                            size="1"
+                            title="Delete reminder"
+                            aria-label="Delete reminder"
+                            onClick={() => {
+                              void handleDeleteReminder(reminder.id);
+                            }}
+                          >
+                            <Trash2 size={12} />
+                          </IconButton>
                         </Flex>
-                        {reminder.eventLocation ? (
-                          <Text as="div" size="1" className="reminder-item-meta reminder-item-location">
-                            Location: {reminder.eventLocation}
-                          </Text>
-                        ) : null}
-                      </Flex>
-                    </button>
-                    <IconButton
-                      variant="soft"
-                      color="gray"
-                      size="1"
-                      title="Delete reminder"
-                      aria-label="Delete reminder"
-                      onClick={() => {
-                        void handleDeleteReminder(reminder.id);
-                      }}
-                    >
-                      <Trash2 size={12} />
-                    </IconButton>
-                  </Flex>
-                </Card>
+                      </Card>
+                    ))}
+                  </div>
+                </section>
               ))}
             </div>
           ) : (
