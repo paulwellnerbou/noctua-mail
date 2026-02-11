@@ -3313,9 +3313,11 @@ export async function upsertMessages(
   accountId: string,
   folderId: string | null,
   nextMessages: Message[],
-  replaceExisting = false
+  replaceExisting = false,
+  options: { recomputeThreads?: boolean } = {}
 ) {
   return withDbWriteRetry("upsertMessages", async () => {
+    const shouldRecomputeThreads = options.recomputeThreads ?? true;
     const UPSERT_BATCH_SIZE = 200;
     const yieldToEventLoop = () =>
       new Promise<void>((resolve) => {
@@ -3507,6 +3509,9 @@ export async function upsertMessages(
       }
     }
 
+    let affectedThreadIds: string[] = [];
+    let requiresFullRecompute = false;
+
     if (replaceExisting) {
       if (folderId) {
         const affectedThreadIds = new Set<string>([
@@ -3518,12 +3523,16 @@ export async function upsertMessages(
             affectedThreadIds.add(message.threadId);
           }
         });
-        if (affectedThreadIds.size > 0) {
-          await recomputeThreadsForAccountInternal(accountId, Array.from(affectedThreadIds));
+        const affected = Array.from(affectedThreadIds);
+        if (shouldRecomputeThreads && affected.length > 0) {
+          await recomputeThreadsForAccountInternal(accountId, affected);
         }
-        return;
+        return { affectedThreadIds: affected, requiresFullRecompute };
       }
-      await recomputeThreadsForAccountInternal(accountId);
+      requiresFullRecompute = true;
+      if (shouldRecomputeThreads) {
+        await recomputeThreadsForAccountInternal(accountId);
+      }
     } else {
       const affected = Array.from(
         new Set([
@@ -3531,10 +3540,12 @@ export async function upsertMessages(
           ...dedupedThreadIds
         ])
       );
-      if (affected.length > 0) {
+      affectedThreadIds = affected;
+      if (shouldRecomputeThreads && affected.length > 0) {
         await recomputeThreadsForAccountInternal(accountId, affected);
       }
     }
+    return { affectedThreadIds, requiresFullRecompute };
   });
 }
 

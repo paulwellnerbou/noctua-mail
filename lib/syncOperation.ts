@@ -3,6 +3,7 @@ import {
   getAccounts,
   getFolderIdsByMessageIds,
   listMessageFileRefs,
+  recomputeThreadsForAccount,
   getMessageIdsByMessageIds,
   rescheduleCalendarRemindersByEventUid,
   getThreadIdsByMessageIds,
@@ -568,6 +569,8 @@ export async function runSyncOperationBatched(
   const allReferenceIds = new Set<string>();
   const newNotificationMessages: SyncNotificationMessage[] = [];
   const calendarMutations: CalendarReminderMutation[] = [];
+  const deferredThreadIds = new Set<string>();
+  let deferredNeedsFullThreadRecompute = false;
 
   // Get existing file refs if full sync (for cleanup at the end)
   const existingFileRefs = payload.fullSync
@@ -632,12 +635,21 @@ export async function runSyncOperationBatched(
     // Write this batch to database
     // Only replace existing messages on the FIRST batch during full sync
     // to avoid deleting previous batches
-    await upsertMessages(
+    const upsertResult = await upsertMessages(
       account.id,
       payload.folderId ?? null,
       strippedMessages,
-      Boolean(payload.fullSync && batch.batchNumber === 1)
+      Boolean(payload.fullSync && batch.batchNumber === 1),
+      { recomputeThreads: !payload.fullSync }
     );
+    if (payload.fullSync) {
+      if (upsertResult.requiresFullRecompute) {
+        deferredNeedsFullThreadRecompute = true;
+      }
+      upsertResult.affectedThreadIds.forEach((threadId) => {
+        if (threadId) deferredThreadIds.add(threadId);
+      });
+    }
 
     // Track processed IDs
     strippedMessages.forEach((msg) => allProcessedIds.add(msg.id));
@@ -694,6 +706,14 @@ export async function runSyncOperationBatched(
         eventEndAtMs: mutation.eventEndAtMs,
         messageId: mutation.messageId
       });
+    }
+  }
+
+  if (payload.fullSync) {
+    if (deferredNeedsFullThreadRecompute) {
+      await recomputeThreadsForAccount(account.id);
+    } else if (deferredThreadIds.size > 0) {
+      await recomputeThreadsForAccount(account.id, Array.from(deferredThreadIds));
     }
   }
 
