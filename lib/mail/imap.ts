@@ -348,6 +348,142 @@ async function parseImapMessage(
   } as Message;
 }
 
+export type ImapSyncBatch = {
+  messages: Message[];
+  folders: Folder[];
+  isLastBatch: boolean;
+  batchNumber: number;
+  totalProcessed: number;
+};
+
+/**
+ * Batched version of syncImapAccount that yields messages in chunks
+ * to reduce memory usage during large folder syncs.
+ * Processes messages in batches of 100 instead of loading all into memory.
+ */
+export async function* syncImapAccountBatched(
+  account: Account,
+  mailboxPath?: string,
+  mode: "full" | "recent" | "new" = "recent",
+  clientId?: string,
+  batchSize = 100
+): AsyncGenerator<ImapSyncBatch> {
+  const client = buildImapClient(account);
+  const logContext = buildLogContext(account, clientId);
+
+  await logImapOp("connect", { host: account.imap.host, ...logContext }, () =>
+    client.connect()
+  );
+
+  const folderList = await logImapOp("list", { ...logContext }, () => client.list());
+  const folders: Folder[] = mapImapFolders(account, folderList);
+
+  const mailboxToOpen = mailboxPath ?? "INBOX";
+  const linearModel = await getCategoryLinearModel(account.id);
+  await logImapOp("mailboxOpen", { mailbox: mailboxToOpen, ...logContext }, () =>
+    client.mailboxOpen(mailboxToOpen)
+  );
+
+  const fetchQuery = { source: true, flags: true } as const;
+  let currentBatch: Message[] = [];
+  let batchNumber = 0;
+  let totalProcessed = 0;
+
+  const flushBatch = (isLast: boolean) => {
+    if (currentBatch.length === 0 && !isLast) return null;
+    const batch: ImapSyncBatch = {
+      messages: currentBatch,
+      folders,
+      isLastBatch: isLast,
+      batchNumber: ++batchNumber,
+      totalProcessed: totalProcessed
+    };
+    currentBatch = [];
+    return batch;
+  };
+
+  if (mode === "new") {
+    const latestUid = await getLatestMessageUid(account.id, mailboxToOpen);
+    const startUid = typeof latestUid === "number" ? latestUid + 1 : 1;
+    const range = { uid: `${startUid}:*` };
+    const start = Date.now();
+
+    for await (const message of client.fetch(range, { ...fetchQuery, uid: true })) {
+      if (!message.source) continue;
+      const parsedMessage = await parseImapMessage(
+        account,
+        mailboxToOpen,
+        { uid: message.uid, source: message.source as Buffer, flags: message.flags },
+        simpleParser,
+        linearModel
+      );
+      currentBatch.push(parsedMessage);
+      totalProcessed += 1;
+
+      if (currentBatch.length >= batchSize) {
+        const batch = flushBatch(false);
+        if (batch) yield batch;
+      }
+    }
+
+    const logger = getImapLogger();
+    if (logger !== false) {
+      logger.info?.({
+        op: "fetch",
+        mailbox: mailboxToOpen,
+        range: range.uid,
+        count: totalProcessed,
+        ms: Date.now() - start
+      });
+    }
+
+    const finalBatch = flushBatch(true);
+    if (finalBatch) yield finalBatch;
+
+    await logImapOp("logout", { ...logContext }, () => client.logout());
+    return;
+  }
+
+  const searchCriteria = mode === "full" ? { all: true } : {
+    since: new Date(Date.now() - 1000 * 60 * 60 * 24 * 30)
+  };
+
+  const start = Date.now();
+  for await (const message of client.fetch(searchCriteria, fetchQuery)) {
+    if (!message.source) continue;
+    const parsedMessage = await parseImapMessage(
+      account,
+      mailboxToOpen,
+      { uid: message.uid, source: message.source as Buffer, flags: message.flags },
+      simpleParser,
+      linearModel
+    );
+    currentBatch.push(parsedMessage);
+    totalProcessed += 1;
+
+    if (currentBatch.length >= batchSize) {
+      const batch = flushBatch(false);
+      if (batch) yield batch;
+    }
+  }
+
+  const logger = getImapLogger();
+  if (logger !== false) {
+    logger.info?.({
+      op: "fetch",
+      mailbox: mailboxToOpen,
+      criteria: mode === "full" ? "all" : "since",
+      count: totalProcessed,
+      ms: Date.now() - start
+    });
+  }
+
+  const finalBatch = flushBatch(true);
+  if (finalBatch) yield finalBatch;
+
+  await logImapOp("logout", { ...logContext }, () => client.logout());
+}
+
 export async function syncImapAccount(
   account: Account,
   mailboxPath?: string,
