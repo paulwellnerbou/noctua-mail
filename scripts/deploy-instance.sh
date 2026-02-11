@@ -70,6 +70,8 @@ docker run -d \
   --name noctua-mail-$INSTANCE \
   --restart unless-stopped \
   --network noctua-net \
+  --memory=1g \
+  --memory-reservation=512m \
   -v "$DEPLOY_PATH/data-$INSTANCE:/app/.data" \
   -e PORT=3654 \
   -e NOCTUA_DATA_DIR=/app/.data/ \

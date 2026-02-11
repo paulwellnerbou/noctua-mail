@@ -171,7 +171,11 @@ function filterUpcomingCalendarReminders(reminders: CalendarReminder[], nowMs = 
   return reminders.filter((reminder) => getCalendarReminderEndAtMs(reminder) > nowMs);
 }
 
-export default function MailClient() {
+type MailClientProps = {
+  buildVersionLabel?: string;
+};
+
+export default function MailClient({ buildVersionLabel = "" }: MailClientProps) {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [folders, setFolders] = useState<Folder[]>([]);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -6051,6 +6055,7 @@ export default function MailClient() {
   return (
     <div className="app-shell">
       <TopBar
+        buildVersionLabel={buildVersionLabel}
         state={{
           query,
           searchScope,
