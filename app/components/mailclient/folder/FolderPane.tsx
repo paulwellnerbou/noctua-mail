@@ -46,8 +46,11 @@ export default function FolderPane({ state, actions, children }: FolderPaneProps
                   </IconButton>
                 </DropdownMenu.Trigger>
                 <DropdownMenu.Content align="end" className={styles.menuContent}>
+                  <DropdownMenu.Item onSelect={() => syncAccount(undefined, "new")}>
+                    Sync New Messages
+                  </DropdownMenu.Item>
                   <DropdownMenu.Item onSelect={() => syncAccount(undefined, "full")}>
-                    Sync Folders
+                    Full Mailbox Sync
                   </DropdownMenu.Item>
                   <DropdownMenu.Item
                     onSelect={() => recomputeThreads()}

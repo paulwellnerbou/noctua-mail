@@ -359,14 +359,14 @@ export type ImapSyncBatch = {
 /**
  * Batched version of syncImapAccount that yields messages in chunks
  * to reduce memory usage during large folder syncs.
- * Processes messages in batches of 100 instead of loading all into memory.
+ * Processes messages in batches of 300 instead of loading all into memory.
  */
 export async function* syncImapAccountBatched(
   account: Account,
   mailboxPath?: string,
   mode: "full" | "recent" | "new" = "recent",
   clientId?: string,
-  batchSize = 100
+  batchSize = 300
 ): AsyncGenerator<ImapSyncBatch> {
   const client = buildImapClient(account);
   const logContext = buildLogContext(account, clientId);

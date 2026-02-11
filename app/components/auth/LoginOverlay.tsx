@@ -12,6 +12,18 @@ import {
 import AccountSettingsModal from "@/app/components/AccountSettingsModal";
 import type { Account } from "@/lib/data";
 
+// Generate deterministic account ID from email address
+// This ensures the same email always gets the same account ID across environments
+function accountIdFromEmail(email: string): string {
+  let hash = 0;
+  const str = email.toLowerCase().trim();
+  for (let i = 0; i < str.length; i++) {
+    hash = ((hash << 5) - hash) + str.charCodeAt(i);
+    hash = hash & hash; // Convert to 32bit integer
+  }
+  return `acc-${Math.abs(hash).toString(36).slice(0, 8)}`;
+}
+
 type Props = {
   onAuthenticated: () => void;
 };
@@ -107,7 +119,7 @@ export default function LoginOverlay({ onAuthenticated }: Props) {
     }
     if (!editingAccount) {
       setEditingAccount({
-        id: `acc-${crypto.randomUUID().slice(0, 6)}`,
+        id: accountIdFromEmail(email),
         name: email || "",
         email,
         avatar: "NW",

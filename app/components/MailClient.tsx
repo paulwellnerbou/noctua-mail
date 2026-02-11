@@ -171,6 +171,18 @@ function filterUpcomingCalendarReminders(reminders: CalendarReminder[], nowMs = 
   return reminders.filter((reminder) => getCalendarReminderEndAtMs(reminder) > nowMs);
 }
 
+// Generate deterministic account ID from email address
+// This ensures the same email always gets the same account ID across environments
+function accountIdFromEmail(email: string): string {
+  let hash = 0;
+  const str = email.toLowerCase().trim();
+  for (let i = 0; i < str.length; i++) {
+    hash = ((hash << 5) - hash) + str.charCodeAt(i);
+    hash = hash & hash; // Convert to 32bit integer
+  }
+  return `acc-${Math.abs(hash).toString(36).slice(0, 8)}`;
+}
+
 type MailClientProps = {
   buildVersionLabel?: string;
 };
@@ -4648,19 +4660,25 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     if (!editingAccount) return;
     const exists = accounts.find((account) => account.id === editingAccount.id);
     const isNew = !exists;
-    const endpoint = exists ? `/api/accounts/${editingAccount.id}` : "/api/accounts";
+
+    // For new accounts, generate deterministic ID from email
+    const accountToSave = isNew && editingAccount.email
+      ? { ...editingAccount, id: accountIdFromEmail(editingAccount.email) }
+      : editingAccount;
+
+    const endpoint = exists ? `/api/accounts/${accountToSave.id}` : "/api/accounts";
     const method = exists ? "PUT" : "POST";
     await apiFetch(endpoint, {
       method,
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(editingAccount)
+      body: JSON.stringify(accountToSave)
     });
     const refreshed = await apiFetch("/api/accounts");
     if (refreshed.ok) {
       const nextAccounts = (await refreshed.json()) as Account[];
       setAccounts(nextAccounts);
       if (isNew) {
-        setActiveAccountId(editingAccount.id);
+        setActiveAccountId(accountToSave.id);
         await refreshFolders();
         await syncAccount(undefined, "full");
       }
@@ -5164,7 +5182,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     folderId: string,
     awaitDeep = false,
     allowRefresh = true,
-    mode: "recent" | "new" = "recent",
+    mode: "recent" | "new" | "full" = "recent",
     allowDeep = true
   ): Promise<SyncJobResult | null> => {
     const selectionKey = currentKeyRef.current;
@@ -5261,7 +5279,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
         folderId,
         false,
         true,
-        mode === "new" ? "new" : "recent",
+        mode === "new" ? "new" : mode === "full" ? "full" : "recent",
         mode !== "new"
       );
       if (mode !== "new") {
@@ -5324,9 +5342,9 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
         return;
       }
       for (const folder of accountFolders) {
-        await syncFolderWithBackground(folder.id, true, false);
+        await syncFolderWithBackground(folder.id, true, false, mode === "full" ? "full" : "recent");
       }
-      await syncNewlyDetectedFolders(knownFolderIds, "full");
+      await syncNewlyDetectedFolders(knownFolderIds, mode);
       setIsSyncing(false);
     })();
   };

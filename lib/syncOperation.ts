@@ -630,11 +630,13 @@ export async function runSyncOperationBatched(
     }
 
     // Write this batch to database
+    // Only replace existing messages on the FIRST batch during full sync
+    // to avoid deleting previous batches
     await upsertMessages(
       account.id,
       payload.folderId ?? null,
       strippedMessages,
-      Boolean(payload.fullSync)
+      Boolean(payload.fullSync && batch.batchNumber === 1)
     );
 
     // Track processed IDs

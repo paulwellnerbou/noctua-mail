@@ -35,7 +35,8 @@ function makeRow(
   message: Message,
   fullFlat: Array<{ message: Message; depth: number }>,
   depth: number,
-  threadIndex: number
+  threadIndex: number,
+  overrides?: Partial<ListRowItem>
 ): ListRowItem {
   return {
     type: "row",
@@ -57,7 +58,8 @@ function makeRow(
     isLastInDepth: true,
     hasChildren: false,
     isNestedCollapsed: false,
-    ancestorStopsHere: []
+    ancestorStopsHere: [],
+    ...overrides
   };
 }
 
@@ -176,7 +178,7 @@ describe("thread subtree checkbox behavior", () => {
     expect(partial.isSubThreadRoot).toBe(true);
     expect(partial.threadSelectionIds).toEqual(["sub-root", "sub-child"]);
     expect(partial.checkboxState).toBe("indeterminate");
-    expect(partial.rowSelected).toBe(true);
+    expect(partial.rowSelected).toBe(false);
 
     const full = getThreadRowSelectionMeta({
       item: row,
@@ -211,6 +213,47 @@ describe("thread subtree checkbox behavior", () => {
 
     expect(Array.from(store.getIds()).sort()).toEqual(["sub-child", "sub-root"]);
     expect(lastSelected).toBe("sub-root");
+  });
+
+  it("keeps partial row highlight for collapsed root thread rows", () => {
+    const root = makeMessage("root", 1000);
+    const child = makeMessage("child", 2000);
+    const fullFlat = [
+      { message: root, depth: 0 },
+      { message: child, depth: 1 }
+    ];
+    const collapsedRootRow = makeRow(root, fullFlat, 0, 0, { isCollapsed: true });
+    const expandedRootRow = makeRow(root, fullFlat, 0, 0, { isCollapsed: false });
+
+    const collapsedMeta = getThreadRowSelectionMeta({
+      item: collapsedRootRow,
+      supportsThreads: true,
+      selectedMessageIds: new Set(["child"]),
+      activeMessageId: null,
+      includeSubThreadRoots: true
+    });
+    expect(collapsedMeta.rowSelected).toBe(true);
+    expect(collapsedMeta.showThreadSelectionActive).toBe(true);
+
+    const expandedMeta = getThreadRowSelectionMeta({
+      item: expandedRootRow,
+      supportsThreads: true,
+      selectedMessageIds: new Set(["child"]),
+      activeMessageId: null,
+      includeSubThreadRoots: true
+    });
+    expect(expandedMeta.rowSelected).toBe(false);
+    expect(expandedMeta.showThreadSelectionActive).toBe(false);
+
+    const expandedWithActiveChild = getThreadRowSelectionMeta({
+      item: expandedRootRow,
+      supportsThreads: true,
+      selectedMessageIds: new Set(["child"]),
+      activeMessageId: "child",
+      includeSubThreadRoots: true
+    });
+    expect(expandedWithActiveChild.rowSelected).toBe(false);
+    expect(expandedWithActiveChild.showThreadSelectionActive).toBe(false);
   });
 });
 

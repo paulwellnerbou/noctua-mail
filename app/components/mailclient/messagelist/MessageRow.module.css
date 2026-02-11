@@ -95,6 +95,12 @@
   box-shadow: inset 0 0 0 1px var(--list-row-active-border);
 }
 
+.rowActiveThreadRoot.rowSelected {
+  background: var(--list-row-selected-bg);
+  border-color: var(--list-row-active-border);
+  box-shadow: inset 0 0 0 1px var(--list-row-active-border);
+}
+
 .row:hover {
   border-color: var(--list-row-hover-border);
   background: var(--list-row-hover-bg);

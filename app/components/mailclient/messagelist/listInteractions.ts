@@ -223,9 +223,18 @@ export function getThreadRowSelectionMeta(params: {
     activeMessageId,
     includeSubThreadRoots
   });
+  const isCollapsedRoot = isCollapsedThreadRootRow({
+    isCollapsed: item.isCollapsed,
+    threadSize: item.threadSize,
+    depth: item.depth,
+    threadIndex: item.threadIndex
+  });
+  const isCollapsedRootPartialSelection =
+    isCollapsedRoot &&
+    threadSelection.isThreadSelectionRoot &&
+    threadSelection.isThreadSelectionPartiallySelected;
   const rowSelected =
-    isSelected ||
-    (threadSelection.isThreadSelectionRoot && threadSelection.isThreadSelectionPartiallySelected);
+    isSelected || isCollapsedRootPartialSelection;
   const checkboxState = getThreadCheckboxState({
     isThreadSelectionRoot: threadSelection.isThreadSelectionRoot,
     isThreadSelectionAllSelected: threadSelection.isThreadSelectionAllSelected,
@@ -233,9 +242,7 @@ export function getThreadRowSelectionMeta(params: {
     isSelected
   });
   const showThreadSelectionActive =
-    threadSelection.isThreadSelectionRoot &&
-    threadSelection.isThreadSelectionActive &&
-    item.message.id !== activeMessageId;
+    isCollapsedRootPartialSelection;
 
   return {
     ...threadSelection,

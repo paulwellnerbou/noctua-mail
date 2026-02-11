@@ -33,10 +33,10 @@ export function getAttachmentMessageDir(accountId: string, messageId: string) {
 }
 
 export function getDbPath() {
-  return path.join(getDataDir(), "mail.db");
+  return path.join(getDataDir(), "db", "main.db");
 }
 
-export function getMasterDbPath() {
+export function getMainDbPath() {
   return getDbPath();
 }
 

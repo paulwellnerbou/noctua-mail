@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { AlarmClockPlus, CalendarDays, Clock, Info, MapPin, Trash2 } from "lucide-react";
+import { AlarmClock, AlarmClockPlus, CalendarDays, Clock, Info, MapPin, Trash2 } from "lucide-react";
 import { Badge, Button, Dialog, Flex, IconButton, Select, Text } from "@radix-ui/themes";
 import type { Attachment } from "@/lib/data";
 import {
@@ -497,7 +497,7 @@ export default function CalendarEventPreview({
                                 : "Schedule reminder"
                           }
                         >
-                          <AlarmClockPlus size={14} />
+                          {eventReminder ? <AlarmClock size={14} /> : <AlarmClockPlus size={14} />}
                           {eventReminder ? "Modify Reminder" : "Schedule Reminder"}
                         </Button>
                         {eventReminder ? (

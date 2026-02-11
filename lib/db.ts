@@ -6,7 +6,7 @@ import { simpleParser } from "mailparser";
 import {
   getAttachmentsAccountDir,
   getDefaultAccountDbPath,
-  getMasterDbPath,
+  getMainDbPath,
   getSourcesAccountDir
 } from "./runtimePaths";
 import type {
@@ -491,7 +491,7 @@ async function getDb() {
   registerDbShutdownHooks();
   if (!masterDbInstance) {
     await ensureDatabaseCtor();
-    const dbPath = getMasterDbPath();
+    const dbPath = getMainDbPath();
     ensureDbParentDir(dbPath);
     masterDbInstance = new DatabaseCtor(dbPath);
     configureDb(masterDbInstance);
@@ -686,9 +686,9 @@ export async function deleteAccountControlPlane(accountId: string) {
     const sharedPathRow = db
       .prepare(`SELECT COUNT(*) as count FROM accounts WHERE id <> ? AND dbPath = ?`)
       .get(accountId, dbPath) as { count: number } | undefined;
-    const masterDbPath = path.resolve(getMasterDbPath());
+    const mainDbPath = path.resolve(getMainDbPath());
     const deleteShardFile =
-      (sharedPathRow?.count ?? 0) === 0 && path.resolve(dbPath) !== masterDbPath;
+      (sharedPathRow?.count ?? 0) === 0 && path.resolve(dbPath) !== mainDbPath;
 
     closeAccountDbConnection(dbPath);
 
