@@ -125,6 +125,7 @@ export async function POST(request: Request) {
     to: outboundTo || undefined,
     cc: cc || undefined,
     bcc: bcc || undefined,
+    keepBcc: true,
     subject: payload.subject,
     text: payload.text,
     html: payload.html,
