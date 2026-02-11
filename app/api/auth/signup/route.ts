@@ -15,13 +15,27 @@ import { verifyImapCredentials } from "@/lib/mail/imapAuth";
 import { shouldStorePasswordInDb } from "@/lib/secret";
 import { randomUUID } from "crypto";
 
+function accountIdFromEmail(email: string): string {
+  let hash = 0;
+  const str = email.toLowerCase().trim();
+  for (let i = 0; i < str.length; i++) {
+    hash = ((hash << 5) - hash) + str.charCodeAt(i);
+    hash = hash & hash; // Convert to 32bit integer
+  }
+  return `acc-${Math.abs(hash).toString(36).slice(0, 8)}`;
+}
+
 export async function POST(request: Request) {
   const clientId = request.headers.get("x-noctua-client") ?? undefined;
-  const payload = (await request.json()) as { inviteCode: string; account: Account; password: string };
+  const payload = (await request.json()) as { inviteCode: string; account: Account; password?: string };
   const code = payload.inviteCode?.trim();
-  const password = payload.password ?? "";
-  if (!code || !payload.account || !password) {
-    return NextResponse.json({ ok: false, message: "Invalid payload" }, { status: 400 });
+
+  // Use IMAP password as the user password (fallback to payload.password for backwards compatibility)
+  const imapPassword = payload.account?.imap?.password ?? payload.password ?? "";
+  const smtpPassword = payload.account?.smtp?.password ?? imapPassword;
+
+  if (!code || !payload.account || !imapPassword) {
+    return NextResponse.json({ ok: false, message: "Invalid payload - IMAP password required" }, { status: 400 });
   }
 
   const [invites, users, accounts, links] = await Promise.all([
@@ -41,12 +55,29 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: false, message: "Invite code expired" }, { status: 400 });
   }
 
+  // Validate email
+  if (!payload.account.email?.trim()) {
+    return NextResponse.json({ ok: false, message: "Email address is required" }, { status: 400 });
+  }
+
+  // Generate deterministic account ID from email (server-side, don't trust client)
+  const accountId = accountIdFromEmail(payload.account.email);
+
   const account: Account = {
     ...payload.account,
-    ownerUserId: undefined
+    id: accountId,
+    ownerUserId: undefined,
+    imap: {
+      ...payload.account.imap,
+      password: imapPassword
+    },
+    smtp: {
+      ...payload.account.smtp,
+      password: smtpPassword
+    }
   };
 
-  const ok = await verifyImapCredentials(account, password, clientId);
+  const ok = await verifyImapCredentials(account, imapPassword, clientId);
   if (!ok) {
     return NextResponse.json({ ok: false, message: "Invalid IMAP credentials" }, { status: 401 });
   }
@@ -58,7 +89,6 @@ export async function POST(request: Request) {
     role: invite.role,
     createdAt: Date.now()
   };
-  const accountId = account.id;
   const nextUsers = [...users, user];
   const nextAccounts = [
     ...accounts,
@@ -67,11 +97,11 @@ export async function POST(request: Request) {
       ownerUserId: userId,
       imap: {
         ...account.imap,
-        password: shouldStorePasswordInDb() ? password : ""
+        password: shouldStorePasswordInDb() ? imapPassword : ""
       },
       smtp: {
         ...account.smtp,
-        password: shouldStorePasswordInDb() ? password : ""
+        password: shouldStorePasswordInDb() ? smtpPassword : ""
       }
     }
   ];
@@ -90,8 +120,8 @@ export async function POST(request: Request) {
     userId,
     role: user.role,
     account: nextAccounts.find((a) => a.id === accountId)!,
-    imapPass: password,
-    smtpPass: password
+    imapPass: imapPassword,
+    smtpPass: smtpPassword
   });
   const response = NextResponse.json({ ok: true, accountId });
   setSessionCookie(response, session);

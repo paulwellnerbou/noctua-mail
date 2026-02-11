@@ -4655,27 +4655,41 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
 
   const saveAccount = async () => {
     if (!editingAccount) return;
+
+    // Validate email is not empty for new accounts
+    if (!editingAccount.email?.trim()) {
+      reportError("Email address is required");
+      return;
+    }
+
     const exists = accounts.find((account) => account.id === editingAccount.id);
     const isNew = !exists;
 
-    // For new accounts, generate deterministic ID from email
-    const accountToSave = isNew && editingAccount.email
-      ? { ...editingAccount, id: accountIdFromEmail(editingAccount.email) }
+    // For new accounts, don't send ID - let server generate it
+    // For existing accounts, send the full account
+    const accountToSave = isNew
+      ? { ...editingAccount, id: undefined } as any
       : editingAccount;
 
-    const endpoint = exists ? `/api/accounts/${accountToSave.id}` : "/api/accounts";
+    const endpoint = exists ? `/api/accounts/${editingAccount.id}` : "/api/accounts";
     const method = exists ? "PUT" : "POST";
-    await apiFetch(endpoint, {
+    const saveResult = await apiFetch(endpoint, {
       method,
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(accountToSave)
     });
+
+    // Get the server-generated account ID for new accounts
+    const newAccountId = isNew && saveResult.ok
+      ? ((await saveResult.json()) as { id: string }).id
+      : editingAccount.id;
+
     const refreshed = await apiFetch("/api/accounts");
     if (refreshed.ok) {
       const nextAccounts = (await refreshed.json()) as Account[];
       setAccounts(nextAccounts);
       if (isNew) {
-        setActiveAccountId(accountToSave.id);
+        setActiveAccountId(newAccountId);
         await refreshFolders();
         await syncAccount(undefined, "full");
       }
