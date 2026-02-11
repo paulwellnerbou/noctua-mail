@@ -92,6 +92,7 @@ import {
 import ThreadJsonModal from "./mailclient/message/ThreadJsonModal";
 import ThreadView from "./mailclient/message/ThreadView";
 import TopBar from "./mailclient/TopBar";
+import BottomStatusBar from "./mailclient/status/BottomStatusBar";
 import { useMessageDeleteActions } from "./mailclient/useMessageDeleteActions";
 import { useMessageMoveActions, type UndoMoveTarget } from "./mailclient/useMessageMoveActions";
 import type { Account, AccountSettings, Attachment, Folder, Message } from "@/lib/data";
@@ -119,14 +120,11 @@ import {
 import {
   makeClientId,
   buildNotificationUrl,
-  getExceptionSummary,
-  getExceptionDetail,
   extractEmails
 } from "./mailclient/utils/clientHelpers";
 import {
   CALENDAR_REMINDERS_UPDATED_EVENT,
   type CalendarReminder,
-  deleteCalendarReminder,
   fetchCalendarReminders,
   hasReminderBeenDeliveredOnClient,
   markReminderDeliveredOnClient,
@@ -149,16 +147,6 @@ import type {
 import { formatMessageDate, normalizeAccountDateFormat } from "@/lib/dateFormatting";
 import type { CategoryLearningDebugSnapshot } from "@/lib/mail/categorization/debugTypes";
 
-type BottomStatusTone = "normal" | "muted" | "error";
-
-type BottomStatusSectionProps = {
-  label: string;
-  value: string;
-  tone?: BottomStatusTone;
-  onActivate?: () => void;
-  alignRight?: boolean;
-};
-
 type CategoryDebugResponse = {
   ok?: boolean;
   snapshot?: CategoryLearningDebugSnapshot;
@@ -177,43 +165,6 @@ type DraftSavePayload = {
   xForwardedMessageId?: string;
   attachments?: Attachment[];
 };
-
-function BottomStatusSection({
-  label,
-  value,
-  tone = "normal",
-  onActivate,
-  alignRight = false
-}: BottomStatusSectionProps) {
-  const interactive = Boolean(onActivate);
-  const valueClassName =
-    tone === "error" ? "bottom-error" : tone === "muted" ? "bottom-muted" : "bottom-item";
-  const className = ["bottom-section", alignRight ? "bottom-right" : ""].filter(Boolean).join(" ");
-  const activate = () => {
-    if (onActivate) onActivate();
-  };
-  const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
-    if (!interactive) return;
-    if (event.key === "Enter" || event.key === " ") {
-      event.preventDefault();
-      activate();
-    }
-  };
-
-  return (
-    <div
-      className={className}
-      data-interactive={interactive ? "true" : "false"}
-      role={interactive ? "button" : undefined}
-      tabIndex={interactive ? 0 : undefined}
-      onClick={interactive ? activate : undefined}
-      onKeyDown={handleKeyDown}
-    >
-      <span className="bottom-label">{label}</span>
-      <span className={valueClassName}>{value}</span>
-    </div>
-  );
-}
 
 export default function MailClient() {
   const [accounts, setAccounts] = useState<Account[]>([]);
@@ -251,10 +202,6 @@ export default function MailClient() {
   const [syncingFolders, setSyncingFolders] = useState<Set<string>>(new Set());
   const [folderQuery, setFolderQuery] = useState("");
   const [exceptionEntries, setExceptionEntries] = useState<ExceptionEntry[]>([]);
-  const [selectedExceptionId, setSelectedExceptionId] = useState<string | null>(null);
-  const [processPanelOpen, setProcessPanelOpen] = useState(false);
-  const [exceptionPanelOpen, setExceptionPanelOpen] = useState(false);
-  const [reminderPanelOpen, setReminderPanelOpen] = useState(false);
   const [pendingCalendarReminders, setPendingCalendarReminders] = useState<CalendarReminder[]>([]);
   const [messageView, setMessageView] = useState<"card" | "table" | "compact" | "threads">("threads");
   const clientId = useMemo(() => {
@@ -607,9 +554,23 @@ export default function MailClient() {
     return map;
   }, [messages, activeAccountId]);
 
-  const jumpToMessageId = (messageId: string) => {
+  const jumpToMessageId = (messageId: string, source = "unknown") => {
     const target = messageByMessageId.get(messageId);
-    if (!target) return false;
+    if (!target) {
+      console.warn("[noctua][reminder-link] messageId not found in loaded cache", {
+        source,
+        messageId,
+        activeAccountId,
+        loadedMessageIdCount: messageByMessageId.size
+      });
+      return false;
+    }
+    console.info("[noctua][reminder-link] message jump resolved", {
+      source,
+      messageId,
+      localMessageId: target.id,
+      folderId: target.folderId
+    });
     setSearchScope("folder");
     setActiveFolderId(target.folderId);
     selectionStore.setActiveId(target.id);
@@ -814,8 +775,6 @@ export default function MailClient() {
       timestamp: Date.now()
     };
     setExceptionEntries((prev) => [entry, ...prev].slice(0, 30));
-    setSelectedExceptionId(entry.id);
-    setExceptionPanelOpen(true);
     pushNotice({
       type: "error",
       title: "Operation failed",
@@ -872,18 +831,6 @@ export default function MailClient() {
     }
     return withRequestPath(`Request failed (${res.status})`);
   }, []);
-  const latestException = exceptionEntries[0] ?? null;
-  const selectedException = useMemo(() => {
-    if (exceptionEntries.length === 0) return null;
-    if (!selectedExceptionId) return exceptionEntries[0];
-    return (
-      exceptionEntries.find((entry) => entry.id === selectedExceptionId) ?? exceptionEntries[0]
-    );
-  }, [exceptionEntries, selectedExceptionId]);
-  const errorSummary = latestException ? getExceptionSummary(latestException.message) : null;
-  const selectedExceptionDetail = selectedException
-    ? getExceptionDetail(selectedException.message)
-    : null;
   const formatRelativeTime = (timestamp?: number | null) => {
     if (!timestamp) return "";
     const seconds = Math.max(1, Math.floor((Date.now() - timestamp) / 1000));
@@ -894,20 +841,6 @@ export default function MailClient() {
     if (hours < 24) return `${hours}h ago`;
     const days = Math.floor(hours / 24);
     return `${days}d ago`;
-  };
-  const formatUpcomingReminderTime = (triggerAtMs: number) => {
-    const diffMs = triggerAtMs - Date.now();
-    const absolute = new Intl.DateTimeFormat(undefined, {
-      dateStyle: "medium",
-      timeStyle: "short"
-    }).format(new Date(triggerAtMs));
-    if (diffMs <= 0) return `Now (${absolute})`;
-    const minutes = Math.floor(diffMs / (60 * 1000));
-    if (minutes < 60) return `In ${Math.max(1, minutes)}m (${absolute})`;
-    const hours = Math.floor(minutes / 60);
-    if (hours < 24) return `In ${hours}h ${minutes % 60}m (${absolute})`;
-    const days = Math.floor(hours / 24);
-    return `In ${days}d ${hours % 24}h (${absolute})`;
   };
 
   const ensureNotificationPermission = useCallback(async () => {
@@ -3882,7 +3815,7 @@ export default function MailClient() {
         if (!messageId) return;
         pendingJumpMessageIdRef.current = messageId;
         pendingJumpRefreshKeyRef.current = "";
-        if (jumpToMessageId(messageId)) {
+        if (jumpToMessageId(messageId, "sw-notification-open")) {
           pendingJumpMessageIdRef.current = null;
           clearNotificationDeepLink(messageId);
           return;
@@ -4460,7 +4393,7 @@ export default function MailClient() {
   useEffect(() => {
     const pending = pendingJumpMessageIdRef.current;
     if (!pending) return;
-    if (jumpToMessageId(pending)) {
+    if (jumpToMessageId(pending, "pending-jump-effect")) {
       pendingJumpMessageIdRef.current = null;
       pendingJumpRefreshKeyRef.current = "";
       clearNotificationDeepLink(pending);
@@ -4470,6 +4403,11 @@ export default function MailClient() {
     const refreshKey = `${activeAccountId}:${pending}`;
     if (pendingJumpRefreshKeyRef.current === refreshKey) return;
     pendingJumpRefreshKeyRef.current = refreshKey;
+    console.info("[noctua][reminder-link] pending jump unresolved, forcing refresh", {
+      messageId: pending,
+      activeAccountId,
+      refreshKey
+    });
     const inbox = inboxFolderRef.current;
     if (inbox) {
       setSearchScope("folder");
@@ -4972,18 +4910,31 @@ export default function MailClient() {
     }, 120);
   };
 
+  const openMessageByExternalMessageId = (messageId: string, source = "unknown") => {
+    console.info("[noctua][reminder-link] open by external messageId", {
+      source,
+      messageId
+    });
+    if (jumpToMessageId(messageId, source)) return true;
+    pendingJumpMessageIdRef.current = messageId;
+    const inbox = inboxFolderRef.current;
+    if (inbox) {
+      setSearchScope("folder");
+      setActiveFolderId(inbox.id);
+    }
+    void refreshMailboxData();
+    console.info("[noctua][reminder-link] fallback queued", {
+      source,
+      messageId,
+      hasInbox: Boolean(inbox)
+    });
+    return false;
+  };
+
   const handleNoticeOpen = (notice: InAppNotice) => {
     const jumpTarget = notice.messageId ?? notice.ids?.[0];
     if (jumpTarget) {
-      if (!jumpToMessageId(jumpTarget)) {
-        pendingJumpMessageIdRef.current = jumpTarget;
-        const inbox = inboxFolderRef.current;
-        if (inbox) {
-          setSearchScope("folder");
-          setActiveFolderId(inbox.id);
-        }
-        void refreshMailboxData();
-      }
+      openMessageByExternalMessageId(jumpTarget, "in-app-notice");
     } else {
       const inbox = inboxFolderRef.current;
       if (inbox) {
@@ -5988,64 +5939,6 @@ export default function MailClient() {
     document.documentElement.classList.toggle("dark", next);
     localStorage.setItem("noctua:theme", next ? "dark" : "light");
   };
-  const toggleProcessPanel = () => {
-    setProcessPanelOpen((open) => {
-      const next = !open;
-      if (next) {
-        setReminderPanelOpen(false);
-        setExceptionPanelOpen(false);
-      }
-      return next;
-    });
-  };
-  const toggleReminderPanel = () => {
-    setReminderPanelOpen((open) => {
-      const next = !open;
-      if (next) {
-        setProcessPanelOpen(false);
-        setExceptionPanelOpen(false);
-      }
-      return next;
-    });
-  };
-  const toggleExceptionPanel = () => {
-    setExceptionPanelOpen((open) => {
-      const next = !open;
-      if (next && !selectedExceptionId && latestException) {
-        setSelectedExceptionId(latestException.id);
-      }
-      if (next) {
-        setProcessPanelOpen(false);
-        setReminderPanelOpen(false);
-      }
-      return next;
-    });
-  };
-  const processStatusItems = [
-    isSyncing ? "Mailbox sync" : "",
-    isRecomputingThreads ? "Recomputing threads…" : "",
-    isRecomputingCategories ? "Recomputing categories…" : "",
-    syncingFolders.size > 0 ? `Folder sync… (${syncingFolders.size})` : ""
-  ].filter(Boolean);
-  const processStatusValue = processStatusItems.length > 0 ? processStatusItems.join(" · ") : "Idle";
-  const processStatusTone: BottomStatusTone = processStatusItems.length > 0 ? "normal" : "muted";
-  const mailCheckStatusValue = mailCheckMode === "idle" ? "Idle" : "Polling";
-  const mailCheckStatusTone: BottomStatusTone = mailCheckMode === "idle" ? "muted" : "normal";
-  const nextReminder = pendingCalendarReminders[0] ?? null;
-  const reminderCount = pendingCalendarReminders.length;
-  const remindersStatusValue = (() => {
-    if (!nextReminder) return "None";
-    const shortTitle = nextReminder.eventTitle.length > 18
-      ? `${nextReminder.eventTitle.slice(0, 17)}…`
-      : nextReminder.eventTitle;
-    const time = new Intl.DateTimeFormat(undefined, { timeStyle: "short" }).format(
-      new Date(nextReminder.triggerAtMs)
-    );
-    return `${reminderCount} · ${shortTitle} @ ${time}`;
-  })();
-  const remindersStatusTone: BottomStatusTone = reminderCount > 0 ? "normal" : "muted";
-  const exceptionStatusValue = latestException ? errorSummary ?? "Error" : "None";
-  const exceptionStatusTone: BottomStatusTone = latestException ? "error" : "muted";
 
   if (authState === "unauth") {
     return (
@@ -6053,9 +5946,7 @@ export default function MailClient() {
         onAuthenticated={async () => {
           setAuthState("loading");
           setExceptionEntries([]);
-          setSelectedExceptionId(null);
           setMessageListError(null);
-          setExceptionPanelOpen(false);
           setMessages([]);
           setFolders([]);
           setAccounts([]);
@@ -6645,178 +6536,26 @@ export default function MailClient() {
         onToggleOmitBody={() => setOmitBody((value) => !value)}
         onCopyOk={setCopyOk}
       />
-      <div className="bottom-bar">
-        <BottomStatusSection
-          label="Processes"
-          value={processStatusValue}
-          tone={processStatusTone}
-          onActivate={toggleProcessPanel}
-        />
-        <BottomStatusSection
-          label="Mail check"
-          value={mailCheckStatusValue}
-          tone={mailCheckStatusTone}
-        />
-        <BottomStatusSection
-          label="Reminders"
-          value={remindersStatusValue}
-          tone={remindersStatusTone}
-          alignRight
-          onActivate={toggleReminderPanel}
-        />
-        <BottomStatusSection
-          label="Exceptions"
-          value={exceptionStatusValue}
-          tone={exceptionStatusTone}
-          onActivate={toggleExceptionPanel}
-        />
-        {processPanelOpen && (
-          <div className="bottom-popover bottom-popover-left">
-            <div className="popover-title">Processes</div>
-            <div className="popover-body">
-              {isSyncing && <div>Mailbox sync running</div>}
-              {isRecomputingThreads && <div>Recomputing threads…</div>}
-              {isRecomputingCategories && <div>Recomputing categories…</div>}
-              {syncingFolders.size > 0 && (
-                <div>
-                  Folder sync running ({syncingFolders.size})
-                  <div className="process-list">
-                    {Array.from(syncingFolders)
-                      .map((folderId) => accountFolders.find((folder) => folder.id === folderId))
-                      .filter(Boolean)
-                      .map((folder) => (
-                        <div key={folder!.id}>• {folder!.name}</div>
-                      ))}
-                  </div>
-                </div>
-              )}
-              {!isSyncing &&
-                syncingFolders.size === 0 &&
-                !isRecomputingThreads &&
-                !isRecomputingCategories && (
-                <div>No active processes.</div>
-              )}
-            </div>
-          </div>
-        )}
-        {reminderPanelOpen && (
-          <div className="bottom-popover bottom-popover-reminders">
-            <div className="popover-title reminder-title">
-              <span>Reminders</span>
-              <button
-                className="icon-button small"
-                title="Close reminders"
-                aria-label="Close reminders"
-                onClick={() => setReminderPanelOpen(false)}
-              >
-                <X size={12} />
-              </button>
-            </div>
-            <div className="popover-body">
-              {pendingCalendarReminders.length > 0 ? (
-                <div className="reminder-list">
-                  {pendingCalendarReminders.map((reminder) => (
-                    <div key={reminder.id} className="reminder-item">
-                      <div className="reminder-item-main">
-                        <div className="reminder-item-title">{reminder.eventTitle}</div>
-                        <div className="reminder-item-meta">
-                          {reminder.leadLabel} · {formatUpcomingReminderTime(reminder.triggerAtMs)}
-                        </div>
-                      </div>
-                      <button
-                        className="icon-button small"
-                        title="Delete reminder"
-                        aria-label="Delete reminder"
-                        onClick={() => {
-                          if (!activeAccountId) return;
-                          void (async () => {
-                            try {
-                              await deleteCalendarReminder(activeAccountId, reminder.id);
-                              await refreshPendingCalendarReminders();
-                            } catch {
-                              reportError("Failed to delete reminder.");
-                            }
-                          })();
-                        }}
-                      >
-                        <Trash2 size={12} />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              ) : (
-                <div>No scheduled reminders.</div>
-              )}
-            </div>
-          </div>
-        )}
-        {exceptionPanelOpen && (
-          <div className="bottom-popover bottom-popover-right">
-            <div className="popover-title exception-title">
-              <span>Exceptions</span>
-                <button
-                  className="icon-button small"
-                  title="Clear exceptions"
-                  aria-label="Clear exceptions"
-                  onClick={() => {
-                    setExceptionEntries([]);
-                    setSelectedExceptionId(null);
-                    setExceptionPanelOpen(false);
-                  }}
-                >
-                  <X size={12} />
-                </button>
-            </div>
-            <div className="popover-body">
-              {exceptionEntries.length > 0 ? (
-                <>
-                  <div className="exception-list">
-                    {exceptionEntries.map((entry) => {
-                      const summary = getExceptionSummary(entry.message);
-                      const active = selectedException?.id === entry.id;
-                      const interactive = exceptionEntries.length > 1;
-                      return (
-                        <div
-                          key={entry.id}
-                          className={`exception-item ${active ? "active" : ""} ${interactive ? "interactive" : ""}`}
-                          role={interactive ? "button" : undefined}
-                          tabIndex={interactive ? 0 : undefined}
-                          onClick={interactive ? () => setSelectedExceptionId(entry.id) : undefined}
-                          onKeyDown={
-                            interactive
-                              ? (event) => {
-                                  if (event.key === "Enter" || event.key === " ") {
-                                    event.preventDefault();
-                                    setSelectedExceptionId(entry.id);
-                                  }
-                                }
-                              : undefined
-                          }
-                        >
-                          <span className="exception-item-summary">{summary}</span>
-                          <span className="exception-item-time">
-                            {formatRelativeTime(entry.timestamp)}
-                          </span>
-                        </div>
-                      );
-                    })}
-                  </div>
-                  {selectedException && selectedExceptionDetail ? (
-                    <>
-                      <div className="exception-meta">
-                        {formatRelativeTime(selectedException.timestamp)}
-                      </div>
-                      <pre className="exception-detail">{selectedExceptionDetail}</pre>
-                    </>
-                  ) : null}
-                </>
-              ) : (
-                <div>No exceptions.</div>
-              )}
-            </div>
-          </div>
-        )}
-      </div>
+      <BottomStatusBar
+        isSyncing={isSyncing}
+        isRecomputingThreads={isRecomputingThreads}
+        isRecomputingCategories={isRecomputingCategories}
+        syncingFolders={syncingFolders}
+        accountFolders={accountFolders}
+        mailCheckMode={mailCheckMode}
+        activeAccountId={activeAccountId}
+        pendingCalendarReminders={pendingCalendarReminders}
+        onRefreshPendingReminders={refreshPendingCalendarReminders}
+        onOpenReminderMessage={(messageId) => {
+          openMessageByExternalMessageId(messageId, "status-reminder-click");
+        }}
+        onReportError={reportError}
+        exceptionEntries={exceptionEntries}
+        onClearExceptions={() => {
+          setExceptionEntries([]);
+        }}
+        formatRelativeTime={formatRelativeTime}
+      />
     </div>
   );
 }

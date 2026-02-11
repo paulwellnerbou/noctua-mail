@@ -1,6 +1,9 @@
 # Storage
 
-This document describes the current runtime storage layout and cleanup behavior.
+This document explains runtime storage from an operator/deployment perspective:
+- where data is stored
+- how critical each storage component is
+- what users lose if specific files are missing
 
 ## Base Data Directory
 
@@ -13,81 +16,106 @@ This document describes the current runtime storage layout and cleanup behavior.
 
 Path segments are `encodeURIComponent(...)` encoded.
 
-## Database Layout
+## What Is Stored Where
 
-### Master DB (`mail.db`)
+### `mail.db` (master DB, critical)
 
-Used for low-churn identity/control-plane data:
-
-- `accounts` (includes IMAP/SMTP config, encrypted credentials when enabled, and `dbPath`)
+Contains control-plane and identity data:
+- `accounts` (account definitions, IMAP/SMTP connection config, `dbPath`)
 - `users`
 - `user_accounts`
 - `invite_codes`
 
-### Per-Account DB (`db/accounts/<accountId>.db`)
+Depending on `IMAP_CREDENTIALS_STORAGE`, encrypted IMAP/SMTP passwords may also be stored here:
+- `db`: credentials in DB
+- `both`: credentials in DB and session cookie
+- `cookie`: credentials not persisted in DB
 
-Used for high-churn mail data:
+### `db/accounts/<accountId>.db` (account shard DB, important)
 
-- `folders`
-- `messages`
-- `attachments` (metadata only)
-- `threads`
-- `mailbox_state`
-- `message_fts`
+Contains per-account operational and user-facing mail state:
+- `folders`, `messages`, `threads`, `mailbox_state`, `message_fts`
+- attachment metadata (`attachments`)
+- reminder definitions (`calendar_reminders`)
+- categorization state and learning:
+  - message category fields (`messages.category`, `messages.categoryScore`, `messages.categorySignals`)
+  - learned model (`category_model_state`)
+  - feedback/training history (`category_feedback_events`)
 
-Per-account DB connections are cached in-process and auto-evicted after an idle period (default: `ACCOUNT_DB_IDLE_MS=3600000`, 1 hour). The next request for that account recreates the connection automatically.
+### `sources/...` and `attachments/...` (cache, rebuildable)
 
-## Credentials Storage
+Contains cached raw message source and attachment binaries.
+These files are performance/availability cache for message rendering and downloads.
 
-`IMAP_CREDENTIALS_STORAGE` controls where credentials live:
+## Loss Impact (What Users Lose)
 
-- `db`: encrypted in master `accounts.imapPassword` / `accounts.smtpPassword`.
-- `both`: encrypted in master DB and also present in sealed session cookie.
-- `cookie`: master DB password columns are blank/ignored; session cookie cache is used.
+### If `mail.db` is lost
 
-Credentials are never duplicated into account shard DB files.
+Users lose:
+- account definitions and account-to-user assignments
+- application users and invite codes
+- IMAP/SMTP passwords stored in DB (`IMAP_CREDENTIALS_STORAGE=db|both`)
 
-## Source/Attachment Files
+Operational impact:
+- app cannot map users/accounts until rebuilt/recreated
+- account shard files may still exist on disk, but become orphaned without master metadata
 
-- Source/attachment files are a cache for message content retrieval.
-- Reads use only the account-scoped layout above (legacy read fallback was removed).
-- Deletes still try both:
-  - current account-scoped path
-  - old legacy flat path (`sources/<account>-<message>.eml`, `attachments/<account>-<message>-<attachment>.bin`)
+### If one account shard `db/accounts/<accountId>.db` is lost
 
-## Cleanup Behavior (Current)
+Users lose local state for that account:
+- local message index/search/threading metadata
+- folder/mailbox sync cursors (`mailbox_state`)
+- reminders (`calendar_reminders`)
+- all categorization values and learned categorization model/feedback
 
-### Automatic cleanup currently done
+Not lost:
+- canonical mailbox content on the upstream IMAP server
 
-- Message hard-delete (already in trash flow) deletes:
-  - message rows/attachment metadata from account DB
-  - cached source/attachment files for that message (`deleteMessageFiles`)
-- Draft discard does the same cleanup.
-- Full sync (`fullSync=true`) prunes file cache for messages that disappeared from that sync scope and no longer exist in DB.
+Operational impact:
+- account can be re-synced, but local classifications/reminders/learning are gone
 
-### Cleanup currently not done automatically
+### If `sources/...` is lost
 
-- Folder-delete path removes message rows from DB but does not remove cached files for those removed messages.
-- There is no global/orphan sweeper job for:
-  - unreferenced source/attachment files
-  - stale shard DB files
+Users lose:
+- cached raw RFC822 source files for affected messages
 
-### Account delete lifecycle (current)
+Operational impact:
+- source view and some reprocessing paths may fail until cache is rebuilt (e.g. via re-sync/resync)
 
-- Account delete (`DELETE /api/accounts/[id]`) performs a control-plane flow:
-  - closes cached shard DB handle for that account
-  - transactionally deletes `user_accounts` links and `accounts` row in master DB
-  - removes account source/attachment cache directories
-  - removes the shard DB file (`.db`, `-wal`, `-shm`) when no other account row points to the same `dbPath`
-- Filesystem cleanup is best-effort; failures are logged.
+### If `attachments/...` is lost
 
-### Connection lifecycle cleanup
+Users lose:
+- cached attachment binaries for affected messages
 
-- Master DB connection is process-scoped.
-- Account DB connections are closed on idle timeout (`ACCOUNT_DB_IDLE_MS`) and reopened on demand.
-- On process shutdown (`SIGINT`, `SIGTERM`, `beforeExit`), cached DB connections are closed.
+Operational impact:
+- attachment download/inline rendering may fail until binaries are rebuilt (e.g. via re-sync/resync)
+- attachment metadata in account DB remains
 
-## Operational Notes
+### If entire `NOCTUA_DATA_DIR` is lost
 
-- Deleting cached source/attachment files does not destroy canonical server mail; missing files are re-created when messages are re-synced/resolved again.
-- Deleting shard DB files removes local indexed/state data for that account; data can be repopulated by re-sync.
+Users lose all local app state:
+- all users/accounts
+- all local indexed mail state
+- all reminders
+- all categorization values/learning
+- all source/attachment caches
+
+Canonical IMAP mailbox content is not deleted by this, but full re-onboarding and re-sync is required.
+
+## Backup Priority
+
+Recommended backup priority:
+1. `mail.db` (highest)
+2. `db/accounts/*.db` (high)
+3. `sources/` and `attachments/` (optional cache, lower priority)
+
+If backup volume is constrained, prioritize DB files first.
+
+## Cleanup and Lifecycle Notes
+
+- Account delete removes:
+  - account linkage/row in master DB
+  - account shard DB file (`.db`, `-wal`, `-shm`) when unreferenced
+  - account source/attachment cache directories
+- Message hard-delete and draft discard remove DB rows plus cached source/attachment files for those messages.
+- Full sync can prune cache files for messages no longer present in that sync scope.
