@@ -6,7 +6,8 @@ const nextConfig: NextConfig = {
   images: {
     qualities: [75, 85]
   },
-  serverExternalPackages: ['rrule']
+  // Ensure these packages are included in standalone build
+  serverExternalPackages: ['rrule', 'imapflow', 'mailparser', 'nodemailer']
 };
 
 export default nextConfig;
