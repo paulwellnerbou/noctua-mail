@@ -1,6 +1,7 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import type { CSSProperties, ReactNode } from "react";
 import { Theme } from "@radix-ui/themes";
+import { APP_THEME_COLOR } from "@/lib/ui/theme";
 import "@radix-ui/themes/styles.css";
 import "./globals.css";
 
@@ -15,6 +16,10 @@ export const metadata: Metadata = {
     ],
     apple: [{ url: "/apple-icon.png", type: "image/png", sizes: "180x180" }]
   }
+};
+
+export const viewport: Viewport = {
+  themeColor: APP_THEME_COLOR
 };
 
 export default function RootLayout({

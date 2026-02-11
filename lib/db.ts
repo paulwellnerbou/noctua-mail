@@ -620,6 +620,20 @@ export async function getAccounts() {
   return rows.map((row) => applyCachedCredentials(mapAccountRow(row))) as Account[];
 }
 
+export async function getAccountsForUser(userId: string) {
+  const db = await getDb();
+  const rows = db
+    .prepare(
+      `SELECT DISTINCT a.*
+       FROM accounts a
+       LEFT JOIN user_accounts ua ON ua.accountId = a.id
+       WHERE ua.userId = ? OR a.ownerUserId = ?
+       ORDER BY a.id ASC`
+    )
+    .all(userId, userId) as any[];
+  return rows.map((row) => applyCachedCredentials(mapAccountRow(row))) as Account[];
+}
+
 export async function saveAccounts(nextAccounts: Account[]) {
   return withDbWriteRetry("saveAccounts", async () => {
     const db = await getDb();
@@ -755,6 +769,22 @@ export async function getUserAccounts() {
   return rows as { userId: string; accountId: string }[];
 }
 
+export async function listAccessibleAccountIdsForUser(userId: string) {
+  const db = await getDb();
+  const rows = db
+    .prepare(
+      `SELECT DISTINCT a.id as id
+       FROM accounts a
+       LEFT JOIN user_accounts ua ON ua.accountId = a.id
+       WHERE ua.userId = ? OR a.ownerUserId = ?
+       ORDER BY a.id ASC`
+    )
+    .all(userId, userId) as Array<{ id?: string | null }>;
+  return rows
+    .map((row) => String(row.id ?? "").trim())
+    .filter(Boolean);
+}
+
 export async function saveUserAccounts(items: { userId: string; accountId: string }[]) {
   return withDbWriteRetry("saveUserAccounts", async () => {
     const db = await getDb();
@@ -765,6 +795,16 @@ export async function saveUserAccounts(items: { userId: string; accountId: strin
       db.exec(`DELETE FROM user_accounts`);
       items.forEach((it) => insert.run(it.userId, it.accountId));
     })();
+  });
+}
+
+export async function addUserAccountLink(userId: string, accountId: string) {
+  return withDbWriteRetry("addUserAccountLink", async () => {
+    const db = await getDb();
+    db.prepare(`INSERT OR REPLACE INTO user_accounts (userId, accountId) VALUES (?, ?)`).run(
+      userId,
+      accountId
+    );
   });
 }
 

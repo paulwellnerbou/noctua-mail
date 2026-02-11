@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getAccounts, getUserAccounts, getUsers } from "@/lib/db";
+import { getAccountsForUser, getUsers } from "@/lib/db";
 import {
   getSessionTtlSeconds,
   refreshSession,
@@ -7,6 +7,7 @@ import {
   setSessionCookie,
   shouldRotateSession
 } from "@/lib/auth";
+import { sanitizeAccountsForClient } from "@/lib/accountPresentation";
 
 export async function GET(request: Request) {
   const cookie = request.headers.get("cookie");
@@ -14,20 +15,14 @@ export async function GET(request: Request) {
   if (!session) {
     return NextResponse.json({ ok: false }, { status: 401 });
   }
-  const [users, accounts, links] = await Promise.all([
-    getUsers(),
-    getAccounts(),
-    getUserAccounts()
-  ]);
+  const [users, accounts] = await Promise.all([getUsers(), getAccountsForUser(session.userId)]);
   const user = users.find((u) => u.id === session.userId);
-  const linkedIds = links.filter((l) => l.userId === session.userId).map((l) => l.accountId);
-  const linkedAccounts = accounts.filter((a) => linkedIds.includes(a.id));
   const rotated = shouldRotateSession(session);
   const nextSession = rotated ? refreshSession(session) : session;
   const response = NextResponse.json({
     ok: true,
     user: user ?? null,
-    accounts: linkedAccounts,
+    accounts: sanitizeAccountsForClient(accounts),
     exp: nextSession.exp,
     ttlSeconds: getSessionTtlSeconds()
   });

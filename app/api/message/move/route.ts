@@ -8,7 +8,7 @@ import {
 } from "@/lib/db";
 import { moveImapMessage } from "@/lib/mail/imap";
 import type { Folder } from "@/lib/data";
-import { requireSessionOr401 } from "@/lib/auth";
+import { requireAccountAccessOr403, requireSessionOr401 } from "@/lib/auth";
 
 type MovePayload = {
   accountId: string;
@@ -33,6 +33,8 @@ export async function POST(request: Request) {
   if (!accountId || !Array.isArray(messageIds) || messageIds.length === 0 || !destinationFolderId) {
     return NextResponse.json({ ok: false, message: "Invalid payload" }, { status: 400 });
   }
+  const access = await requireAccountAccessOr403(session, accountId);
+  if (access instanceof NextResponse) return access;
 
   const accounts = await getAccounts();
   const account = accounts.find((item) => item.id === accountId);

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { listMessages } from "@/lib/db";
-import { requireSessionOr401 } from "@/lib/auth";
+import { requireAccountAccessOr403, requireSessionOr401 } from "@/lib/auth";
 
 export async function GET(request: Request) {
   const session = requireSessionOr401(request);
@@ -24,6 +24,8 @@ export async function GET(request: Request) {
   if (!accountId) {
     return NextResponse.json({ ok: false, message: "Missing accountId" }, { status: 400 });
   }
+  const access = await requireAccountAccessOr403(session, accountId);
+  if (access instanceof NextResponse) return access;
   const data = await listMessages({
     accountId,
     folderId,

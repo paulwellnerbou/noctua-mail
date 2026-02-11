@@ -3,7 +3,7 @@ import tls from "tls";
 
 import { getAccounts, getLatestMessageUid } from "@/lib/db";
 import { getImapLogger, logImapOp } from "@/lib/mail/imapLogger";
-import { requireSessionOr401 } from "@/lib/auth";
+import { requireAccountAccessOr403, requireSessionOr401 } from "@/lib/auth";
 
 type EnvelopeAddress = { name?: string | null; mailbox?: string | null; host?: string | null };
 type Envelope = { subject?: string | null; from?: EnvelopeAddress[] | null; date?: Date | null; messageId?: string | null };
@@ -30,6 +30,8 @@ export async function GET(request: Request) {
   if (!accountId) {
     return NextResponse.json({ ok: false, message: "Missing accountId" }, { status: 400 });
   }
+  const access = await requireAccountAccessOr403(session, accountId);
+  if (access instanceof NextResponse) return access;
 
   const accounts = await getAccounts();
   const account = accounts.find((item) => item.id === accountId);

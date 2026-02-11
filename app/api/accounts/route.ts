@@ -1,23 +1,15 @@
 import { NextResponse } from "next/server";
-import { getAccounts, upsertAccount } from "@/lib/db";
+import { addUserAccountLink, getAccountById, getAccountsForUser, upsertAccount } from "@/lib/db";
 import type { Account } from "@/lib/data";
-import { requireSessionOr401 } from "@/lib/auth";
-
-function accountIdFromEmail(email: string): string {
-  let hash = 0;
-  const str = email.toLowerCase().trim();
-  for (let i = 0; i < str.length; i++) {
-    hash = ((hash << 5) - hash) + str.charCodeAt(i);
-    hash = hash & hash;
-  }
-  return `acc-${Math.abs(hash).toString(36).slice(0, 8)}`;
-}
+import { requireAccountAccessOr403, requireSessionOr401 } from "@/lib/auth";
+import { sanitizeAccountsForClient } from "@/lib/accountPresentation";
+import { accountIdFromEmail } from "@/lib/accountId";
 
 export async function GET(request: Request) {
   const session = requireSessionOr401(request);
   if (session instanceof NextResponse) return session;
-  const data = await getAccounts();
-  return NextResponse.json(data);
+  const data = await getAccountsForUser(session.userId);
+  return NextResponse.json(sanitizeAccountsForClient(data));
 }
 
 export async function POST(request: Request) {
@@ -32,8 +24,18 @@ export async function POST(request: Request) {
 
   // Generate deterministic account ID from email (don't trust client)
   const accountId = accountIdFromEmail(payload.email);
-  const accountToSave = { ...payload, id: accountId };
+  const existing = await getAccountById(accountId);
+  if (existing) {
+    const access = await requireAccountAccessOr403(session, accountId);
+    if (access instanceof NextResponse) return access;
+  }
+  const accountToSave = {
+    ...payload,
+    id: accountId,
+    ownerUserId: existing?.ownerUserId ?? session.userId
+  };
 
   await upsertAccount(accountToSave);
+  await addUserAccountLink(session.userId, accountId);
   return NextResponse.json({ id: accountId }, { status: 201 });
 }

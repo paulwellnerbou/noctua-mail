@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireSessionOr401 } from "@/lib/auth";
+import { requireAccountAccessOr403, requireSessionOr401 } from "@/lib/auth";
 import { startSyncJob } from "@/lib/syncJobs";
 import type { SyncPayload } from "@/lib/syncOperation";
 
@@ -12,6 +12,8 @@ export async function POST(request: Request) {
   if (!payload?.accountId) {
     return NextResponse.json({ ok: false, message: "Missing accountId" }, { status: 400 });
   }
+  const access = await requireAccountAccessOr403(session, payload.accountId);
+  if (access instanceof NextResponse) return access;
 
   const job = startSyncJob(payload, clientId);
   if (job.status === "failed") {

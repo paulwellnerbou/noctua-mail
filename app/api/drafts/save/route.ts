@@ -10,7 +10,7 @@ import { appendImapMessage, deleteImapMessage, syncImapMessage } from "@/lib/mai
 import { buildRawMessage } from "@/lib/mail/smtp";
 import { saveMessageSource } from "@/lib/storage";
 import type { Folder } from "@/lib/data";
-import { requireSessionOr401 } from "@/lib/auth";
+import { requireAccountAccessOr403, requireSessionOr401 } from "@/lib/auth";
 
 const DRAFT_NAMES = [
   "drafts",
@@ -70,6 +70,11 @@ export async function POST(request: Request) {
       dataUrl?: string;
     }>;
   };
+  if (!payload?.accountId) {
+    return NextResponse.json({ ok: false, message: "Missing accountId" }, { status: 400 });
+  }
+  const access = await requireAccountAccessOr403(auth, payload.accountId);
+  if (access instanceof NextResponse) return access;
   const accounts = await getAccounts();
   const account = accounts.find((item) => item.id === payload.accountId);
   if (!account) {

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireSessionOr401 } from "@/lib/auth";
+import { requireAccountAccessOr403, requireSessionOr401 } from "@/lib/auth";
 import { getCategoryRecomputeJob } from "@/lib/categoryRecomputeJobs";
 
 export async function GET(request: Request) {
@@ -12,6 +12,10 @@ export async function GET(request: Request) {
   }
   const job = getCategoryRecomputeJob(jobId);
   if (!job) {
+    return NextResponse.json({ ok: false, message: "Job not found" }, { status: 404 });
+  }
+  const access = await requireAccountAccessOr403(session, job.accountId);
+  if (access instanceof NextResponse) {
     return NextResponse.json({ ok: false, message: "Job not found" }, { status: 404 });
   }
   return NextResponse.json({ ok: true, job });

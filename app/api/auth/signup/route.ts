@@ -13,17 +13,8 @@ import {
 import type { Account } from "@/lib/data";
 import { verifyImapCredentials } from "@/lib/mail/imapAuth";
 import { shouldStorePasswordInDb } from "@/lib/secret";
+import { accountIdFromEmail } from "@/lib/accountId";
 import { randomUUID } from "crypto";
-
-function accountIdFromEmail(email: string): string {
-  let hash = 0;
-  const str = email.toLowerCase().trim();
-  for (let i = 0; i < str.length; i++) {
-    hash = ((hash << 5) - hash) + str.charCodeAt(i);
-    hash = hash & hash; // Convert to 32bit integer
-  }
-  return `acc-${Math.abs(hash).toString(36).slice(0, 8)}`;
-}
 
 export async function POST(request: Request) {
   const clientId = request.headers.get("x-noctua-client") ?? undefined;

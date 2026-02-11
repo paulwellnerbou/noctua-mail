@@ -8,7 +8,7 @@ import {
 } from "@/lib/db";
 import { moveImapMessage, updateImapFlags } from "@/lib/mail/imap";
 import type { Folder } from "@/lib/data";
-import { requireSessionOr401 } from "@/lib/auth";
+import { requireAccountAccessOr403, requireSessionOr401 } from "@/lib/auth";
 
 const NONJUNK_KEYWORD = "NONJUNK";
 
@@ -45,6 +45,11 @@ export async function POST(request: Request) {
   if (session instanceof NextResponse) return session;
   const clientId = request.headers.get("x-noctua-client") ?? undefined;
   const payload = (await request.json()) as { accountId: string; messageId: string };
+  if (!payload?.accountId || !payload?.messageId) {
+    return NextResponse.json({ ok: false, message: "Missing accountId or messageId" }, { status: 400 });
+  }
+  const access = await requireAccountAccessOr403(session, payload.accountId);
+  if (access instanceof NextResponse) return access;
   const accounts = await getAccounts();
   const account = accounts.find((item) => item.id === payload.accountId);
   if (!account) {

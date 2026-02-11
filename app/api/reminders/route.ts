@@ -6,7 +6,7 @@ import {
   listCalendarReminders,
   upsertCalendarReminder
 } from "@/lib/db";
-import { requireSessionOr401 } from "@/lib/auth";
+import { requireAccountAccessOr403, requireSessionOr401 } from "@/lib/auth";
 
 function toNumber(value: unknown) {
   const num = Number(value);
@@ -35,6 +35,8 @@ export async function GET(request: Request) {
   if (!accountId) {
     return NextResponse.json({ ok: false, message: "Missing accountId" }, { status: 400 });
   }
+  const access = await requireAccountAccessOr403(session, accountId);
+  if (access instanceof NextResponse) return access;
   if (!(await ensureAccountExists(accountId))) {
     return NextResponse.json({ ok: false, message: "Account not found" }, { status: 404 });
   }
@@ -66,6 +68,8 @@ export async function POST(request: Request) {
   if (!accountId) {
     return NextResponse.json({ ok: false, message: "Missing accountId" }, { status: 400 });
   }
+  const access = await requireAccountAccessOr403(session, accountId);
+  if (access instanceof NextResponse) return access;
   if (!(await ensureAccountExists(accountId))) {
     return NextResponse.json({ ok: false, message: "Account not found" }, { status: 404 });
   }
@@ -130,6 +134,8 @@ export async function DELETE(request: Request) {
   if (!accountId) {
     return NextResponse.json({ ok: false, message: "Missing accountId" }, { status: 400 });
   }
+  const access = await requireAccountAccessOr403(session, accountId);
+  if (access instanceof NextResponse) return access;
   if (!(await ensureAccountExists(accountId))) {
     return NextResponse.json({ ok: false, message: "Account not found" }, { status: 404 });
   }

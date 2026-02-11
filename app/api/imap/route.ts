@@ -8,13 +8,18 @@ import {
 } from "@/lib/db";
 import { saveAttachmentData, saveMessageSource } from "@/lib/storage";
 import { syncImapAccount } from "@/lib/mail/imap";
-import { requireSessionOr401 } from "@/lib/auth";
+import { requireAccountAccessOr403, requireSessionOr401 } from "@/lib/auth";
 
 export async function POST(request: Request) {
   const session = requireSessionOr401(request);
   if (session instanceof NextResponse) return session;
   const clientId = request.headers.get("x-noctua-client") ?? undefined;
   const payload = (await request.json()) as { accountId: string; folderId?: string };
+  if (!payload?.accountId) {
+    return NextResponse.json({ ok: false, message: "Missing accountId" }, { status: 400 });
+  }
+  const access = await requireAccountAccessOr403(session, payload.accountId);
+  if (access instanceof NextResponse) return access;
   const accounts = await getAccounts();
   const account = accounts.find((item) => item.id === payload.accountId);
 
