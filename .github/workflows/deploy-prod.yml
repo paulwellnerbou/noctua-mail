@@ -17,7 +17,7 @@ jobs:
     runs-on: ubuntu-latest
     environment:
       name: production
-      url: https://${{ vars.DOMAIN || secrets.DOMAIN }}
+      url: https://${{ vars.DOMAIN }}
 
     steps:
       - name: Validate confirmation
@@ -53,7 +53,7 @@ jobs:
       - name: Verify deployment
         run: |
           echo "Production deployed successfully!"
-          echo "URL: https://${{ vars.DOMAIN || secrets.DOMAIN }}"
+          echo "URL: https://${{ vars.DOMAIN }}"
 
       - name: Create deployment notification
         run: |

@@ -1,7 +1,9 @@
 name: Deploy to Development
 
 on:
-  push:
+  workflow_run:
+    workflows: ["Build and Push Docker Image"]
+    types: [completed]
     branches: [main, master, develop]
   workflow_dispatch:  # Allow manual trigger
 
@@ -12,9 +14,11 @@ env:
 jobs:
   deploy-dev:
     runs-on: ubuntu-latest
+    # Only deploy if build succeeded or if manually triggered
+    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
     environment:
       name: development
-      url: https://${{ vars.DOMAIN || secrets.DOMAIN }}
+      url: https://${{ vars.DOMAIN }}
 
     steps:
       - name: Checkout repository
@@ -44,4 +48,4 @@ jobs:
       - name: Verify deployment
         run: |
           echo "Development deployed successfully!"
-          echo "URL: https://${{ vars.DOMAIN || secrets.DOMAIN }}"
+          echo "URL: https://${{ vars.DOMAIN }}"
