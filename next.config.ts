@@ -1,8 +1,11 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  /* config options here */
-  output: 'standalone', // Required for Docker deployment
+  output: 'standalone',
+  typedRoutes: false,
+  images: {
+    qualities: [75, 85]
+  }
 };
 
 export default nextConfig;

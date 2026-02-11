@@ -4910,6 +4910,58 @@ export default function MailClient() {
     }, 120);
   };
 
+  const resolveMessageByExternalMessageId = useCallback(
+    async (messageId: string) => {
+      if (!activeAccountId) return null;
+      try {
+        const res = await apiFetch(
+          `/api/message?accountId=${encodeURIComponent(activeAccountId)}&messageId=${encodeURIComponent(
+            messageId
+          )}`,
+          { cache: "no-store" }
+        );
+        if (res.status === 404) {
+          console.warn("[noctua][reminder-link] server resolve not found", {
+            messageId,
+            activeAccountId
+          });
+          return null;
+        }
+        if (!res.ok) {
+          console.warn("[noctua][reminder-link] server resolve failed", {
+            messageId,
+            activeAccountId,
+            status: res.status
+          });
+          return null;
+        }
+        const payload = (await res.json()) as { ok?: boolean; message?: Message };
+        const resolved = payload?.message;
+        if (!payload?.ok || !resolved?.id || !resolved.folderId) {
+          console.warn("[noctua][reminder-link] server resolve payload invalid", {
+            messageId,
+            activeAccountId
+          });
+          return null;
+        }
+        console.info("[noctua][reminder-link] server resolve success", {
+          messageId,
+          localMessageId: resolved.id,
+          folderId: resolved.folderId
+        });
+        return { id: resolved.id, folderId: resolved.folderId };
+      } catch (error) {
+        console.warn("[noctua][reminder-link] server resolve exception", {
+          messageId,
+          activeAccountId,
+          error
+        });
+        return null;
+      }
+    },
+    [activeAccountId, apiFetch]
+  );
+
   const openMessageByExternalMessageId = (messageId: string, source = "unknown") => {
     console.info("[noctua][reminder-link] open by external messageId", {
       source,
@@ -4917,17 +4969,29 @@ export default function MailClient() {
     });
     if (jumpToMessageId(messageId, source)) return true;
     pendingJumpMessageIdRef.current = messageId;
-    const inbox = inboxFolderRef.current;
-    if (inbox) {
-      setSearchScope("folder");
-      setActiveFolderId(inbox.id);
-    }
-    void refreshMailboxData();
-    console.info("[noctua][reminder-link] fallback queued", {
-      source,
-      messageId,
-      hasInbox: Boolean(inbox)
-    });
+    const refreshKey = `${activeAccountId}:${messageId}`;
+    pendingJumpRefreshKeyRef.current = refreshKey;
+    void (async () => {
+      const resolved = await resolveMessageByExternalMessageId(messageId);
+      if (resolved) {
+        setSearchScope("folder");
+        setActiveFolderId(resolved.folderId);
+        pendingJumpLocalMessageIdRef.current = resolved.id;
+        await refreshMailboxData();
+        return;
+      }
+      const inbox = inboxFolderRef.current;
+      if (inbox) {
+        setSearchScope("folder");
+        setActiveFolderId(inbox.id);
+      }
+      await refreshMailboxData();
+      console.info("[noctua][reminder-link] fallback queued", {
+        source,
+        messageId,
+        hasInbox: Boolean(inbox)
+      });
+    })();
     return false;
   };
 

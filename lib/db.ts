@@ -3459,13 +3459,31 @@ export async function upsertMessages(
 
 export async function getMessageById(accountId: string, messageId: string) {
   const db = await getAccountDb(accountId);
-  const row = db
+  const normalizedLookup = messageId.trim();
+  let row = db
     .prepare(`SELECT * FROM messages WHERE accountId = ? AND id = ?`)
-    .get(accountId, messageId) as any;
+    .get(accountId, normalizedLookup) as any;
+  if (!row) {
+    row = db
+      .prepare(
+        `SELECT * FROM messages WHERE accountId = ? AND lower(messageId) = lower(?) ORDER BY dateValue DESC LIMIT 1`
+      )
+      .get(accountId, normalizedLookup) as any;
+  }
+  if (!row) {
+    const trimmed = normalizedLookup.replace(/[<>]/g, "").trim();
+    if (trimmed && trimmed !== normalizedLookup) {
+      row = db
+        .prepare(
+          `SELECT * FROM messages WHERE accountId = ? AND lower(messageId) LIKE ? ORDER BY dateValue DESC LIMIT 1`
+        )
+        .get(accountId, `%${trimmed.toLowerCase()}%`) as any;
+    }
+  }
   if (!row) return null;
   const attachments = db
     .prepare(`SELECT * FROM attachments WHERE messageId = ?`)
-    .all(messageId) as any[];
+    .all(row.id) as any[];
   return {
     id: row.id,
     accountId: row.accountId,
