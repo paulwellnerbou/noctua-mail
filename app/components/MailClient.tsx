@@ -126,6 +126,7 @@ import {
   CALENDAR_REMINDERS_UPDATED_EVENT,
   type CalendarReminder,
   fetchCalendarReminders,
+  getCalendarReminderStartAtMs,
   hasReminderBeenDeliveredOnClient,
   markReminderDeliveredOnClient,
   markReminderDeliveredOnClientById,
@@ -165,6 +166,10 @@ type DraftSavePayload = {
   xForwardedMessageId?: string;
   attachments?: Attachment[];
 };
+
+function filterUpcomingCalendarReminders(reminders: CalendarReminder[], nowMs = Date.now()) {
+  return reminders.filter((reminder) => getCalendarReminderStartAtMs(reminder) > nowMs);
+}
 
 export default function MailClient() {
   const [accounts, setAccounts] = useState<Account[]>([]);
@@ -989,12 +994,13 @@ export default function MailClient() {
     }
     try {
       const reminders = await fetchCalendarReminders(activeAccountId);
-      setPendingCalendarReminders(reminders);
+      const upcomingReminders = filterUpcomingCalendarReminders(reminders);
+      setPendingCalendarReminders(upcomingReminders);
       if (clientId) {
-        pruneDeliveredReminderMap(activeAccountId, clientId, reminders);
+        pruneDeliveredReminderMap(activeAccountId, clientId, upcomingReminders);
       }
-      await syncReminderStateToServiceWorker(reminders);
-      await processDueCalendarReminders(reminders);
+      await syncReminderStateToServiceWorker(upcomingReminders);
+      await processDueCalendarReminders(upcomingReminders);
     } catch {
       // ignore reminder sync failures in status UI
     }

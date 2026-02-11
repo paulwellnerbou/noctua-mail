@@ -2,9 +2,10 @@
 
 import { useCallback, useMemo } from "react";
 import { Trash2, X } from "lucide-react";
-import { Badge, Box, Card, Flex, IconButton, Popover, Text } from "@radix-ui/themes";
+import { Box, Card, Flex, IconButton, Popover, Text } from "@radix-ui/themes";
 import {
   deleteCalendarReminder,
+  getCalendarReminderStartAtMs,
   type CalendarReminder
 } from "../utils/calendarReminders";
 import { groupItemsByRelativeTime } from "../utils/relativeTimeGroups";
@@ -23,21 +24,6 @@ type ReminderStatusPopoverProps = {
   onReportError: (message: string) => void;
 };
 
-function formatUpcomingReminderTime(triggerAtMs: number) {
-  const diffMs = triggerAtMs - Date.now();
-  const absolute = new Intl.DateTimeFormat(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short"
-  }).format(new Date(triggerAtMs));
-  if (diffMs <= 0) return `Now (${absolute})`;
-  const minutes = Math.floor(diffMs / (60 * 1000));
-  if (minutes < 60) return `In ${Math.max(1, minutes)}m (${absolute})`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `In ${hours}h ${minutes % 60}m (${absolute})`;
-  const days = Math.floor(hours / 24);
-  return `In ${days}d ${hours % 24}h (${absolute})`;
-}
-
 function formatEventStartTime(eventStartAtMs: number) {
   return new Intl.DateTimeFormat(undefined, {
     dateStyle: "medium",
@@ -54,8 +40,9 @@ export default function ReminderStatusPopover({
   onOpenReminderMessage,
   onReportError
 }: ReminderStatusPopoverProps) {
-  const nextReminder = pendingCalendarReminders[0] ?? null;
-  const reminderCount = pendingCalendarReminders.length;
+  const upcomingReminders = pendingCalendarReminders;
+  const nextReminder = upcomingReminders[0] ?? null;
+  const reminderCount = upcomingReminders.length;
   const reminderHeading = `${reminderCount} Reminder${reminderCount === 1 ? "" : "s"}`;
   const remindersStatusValue = (() => {
     if (!nextReminder) return "None";
@@ -69,11 +56,10 @@ export default function ReminderStatusPopover({
   const groupedReminders = useMemo(
     () =>
       groupItemsByRelativeTime(
-        pendingCalendarReminders,
-        (reminder) =>
-          Number(reminder.nextEventStartAtMs ?? reminder.eventStartAtMs ?? reminder.triggerAtMs ?? Number.NaN)
+        upcomingReminders,
+        (reminder) => getCalendarReminderStartAtMs(reminder)
       ),
-    [pendingCalendarReminders]
+    [upcomingReminders]
   );
 
   const handleDeleteReminder = useCallback(
@@ -122,7 +108,7 @@ export default function ReminderStatusPopover({
           </IconButton>
         </Flex>
         <Box className="popover-body">
-          {pendingCalendarReminders.length > 0 ? (
+          {upcomingReminders.length > 0 ? (
             <div className="reminder-groups">
               {groupedReminders.map((group) => (
                 <section key={group.key} className="reminder-group">
@@ -130,69 +116,69 @@ export default function ReminderStatusPopover({
                     {group.label}
                   </Text>
                   <div className="reminder-list">
-                    {group.items.map((reminder) => (
-                      <Card key={reminder.id} size="1" className="reminder-item">
-                        <Flex align="start" justify="between" gap="2">
-                          <button
-                            type="button"
-                            className={`reminder-open-button ${reminder.messageId ? "interactive" : ""}`}
-                            onClick={() => {
-                              if (!reminder.messageId) {
-                                console.warn("[noctua][reminder-link] missing reminder.messageId", {
+                    {group.items.map((reminder) => {
+                      const startAtMs = getCalendarReminderStartAtMs(reminder);
+                      return (
+                        <Card key={reminder.id} size="1" className="reminder-item">
+                          <Flex align="start" justify="between" gap="2">
+                            <button
+                              type="button"
+                              className={`reminder-open-button ${reminder.messageId ? "interactive" : ""}`}
+                              onClick={() => {
+                                if (!reminder.messageId) {
+                                  console.warn("[noctua][reminder-link] missing reminder.messageId", {
+                                    reminderId: reminder.id,
+                                    eventTitle: reminder.eventTitle,
+                                    triggerAtMs: reminder.triggerAtMs
+                                  });
+                                  return;
+                                }
+                                console.info("[noctua][reminder-link] reminder row click", {
                                   reminderId: reminder.id,
-                                  eventTitle: reminder.eventTitle,
-                                  triggerAtMs: reminder.triggerAtMs
+                                  messageId: reminder.messageId,
+                                  eventTitle: reminder.eventTitle
                                 });
-                                return;
-                              }
-                              console.info("[noctua][reminder-link] reminder row click", {
-                                reminderId: reminder.id,
-                                messageId: reminder.messageId,
-                                eventTitle: reminder.eventTitle
-                              });
-                              onOpenReminderMessage(reminder.messageId);
-                              onOpenChange(false);
-                            }}
-                            title={reminder.messageId ? "Open source mail" : undefined}
-                            aria-label={reminder.messageId ? "Open source mail" : undefined}
-                          >
-                            <Flex direction="column" gap="1" className="reminder-item-main">
-                              <Text as="div" size="3" weight="medium" className="reminder-item-title">
-                                {reminder.eventTitle}
-                              </Text>
-                              <Flex align="center" gap="2" wrap="wrap" className="reminder-item-tags">
-                                <Badge size="1" variant="soft" color="gray">
-                                  {reminder.leadLabel}
-                                </Badge>
-                                <Text as="span" size="1" className="reminder-item-meta">
-                                  Reminder: {formatUpcomingReminderTime(reminder.triggerAtMs)}
+                                onOpenReminderMessage(reminder.messageId);
+                                onOpenChange(false);
+                              }}
+                              title={reminder.messageId ? "Open source mail" : undefined}
+                              aria-label={reminder.messageId ? "Open source mail" : undefined}
+                            >
+                              <Flex direction="column" gap="1" className="reminder-item-main">
+                                <Text as="div" size="3" weight="medium" className="reminder-item-title">
+                                  {reminder.eventTitle}
                                 </Text>
-                                <Text as="span" size="1" className="reminder-item-meta">
-                                  Starts: {formatEventStartTime(reminder.nextEventStartAtMs)}
-                                </Text>
+                                <Flex align="baseline" gap="2" wrap="wrap" className="reminder-item-timing">
+                                  <Text as="span" size="2" weight="medium" className="reminder-item-start">
+                                    Start: {formatEventStartTime(startAtMs)}
+                                  </Text>
+                                  <Text as="span" size="1" className="reminder-item-reminder-label">
+                                    (Reminder: {reminder.leadLabel})
+                                  </Text>
+                                </Flex>
+                                {reminder.eventLocation ? (
+                                  <Text as="div" size="1" className="reminder-item-meta reminder-item-location">
+                                    Location: {reminder.eventLocation}
+                                  </Text>
+                                ) : null}
                               </Flex>
-                              {reminder.eventLocation ? (
-                                <Text as="div" size="1" className="reminder-item-meta reminder-item-location">
-                                  Location: {reminder.eventLocation}
-                                </Text>
-                              ) : null}
-                            </Flex>
-                          </button>
-                          <IconButton
-                            variant="soft"
-                            color="gray"
-                            size="1"
-                            title="Delete reminder"
-                            aria-label="Delete reminder"
-                            onClick={() => {
-                              void handleDeleteReminder(reminder.id);
-                            }}
-                          >
-                            <Trash2 size={12} />
-                          </IconButton>
-                        </Flex>
-                      </Card>
-                    ))}
+                            </button>
+                            <IconButton
+                              variant="soft"
+                              color="gray"
+                              size="1"
+                              title="Delete reminder"
+                              aria-label="Delete reminder"
+                              onClick={() => {
+                                void handleDeleteReminder(reminder.id);
+                              }}
+                            >
+                              <Trash2 size={12} />
+                            </IconButton>
+                          </Flex>
+                        </Card>
+                      );
+                    })}
                   </div>
                 </section>
               ))}

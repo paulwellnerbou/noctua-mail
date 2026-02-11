@@ -25,8 +25,8 @@ FROM base AS runner
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 
-# Create non-root user
-RUN groupadd -r noctua && useradd -r -g noctua noctua
+# Create non-root user with fixed UID/GID for consistent permissions
+RUN groupadd -g 999 noctua && useradd -u 999 -g noctua -s /bin/bash noctua
 
 # Copy standalone build output (minimal, tree-shaken dependencies)
 COPY --from=builder /app/public ./public

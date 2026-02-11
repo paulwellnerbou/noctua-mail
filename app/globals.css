@@ -1607,17 +1607,26 @@ a {
   color: var(--muted);
 }
 
-.reminder-item-tags {
-  margin-top: 2px;
-  align-items: baseline;
-}
-
 .reminder-item-location {
   margin-top: 2px;
 }
 
-.reminder-item-tags .reminder-item-meta {
+.reminder-item-timing {
+  margin-top: 2px;
+  align-items: baseline;
   overflow-wrap: anywhere;
+}
+
+.reminder-item-start {
+  font-size: 12px;
+  line-height: 1.25;
+  color: var(--text);
+}
+
+.reminder-item-reminder-label {
+  font-size: 10px;
+  line-height: 1.25;
+  color: var(--muted);
 }
 
 .reminder-item-title {

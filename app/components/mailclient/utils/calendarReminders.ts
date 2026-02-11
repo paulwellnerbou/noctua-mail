@@ -95,6 +95,14 @@ type ReminderEventKey = {
   eventStartAtMs: number;
 };
 
+export function getCalendarReminderStartAtMs(reminder: CalendarReminder) {
+  const startAtMs =
+    typeof reminder.nextEventStartAtMs === "number" && Number.isFinite(reminder.nextEventStartAtMs)
+      ? reminder.nextEventStartAtMs
+      : reminder.eventStartAtMs;
+  return Number.isFinite(startAtMs) ? startAtMs : Number.NaN;
+}
+
 function dispatchReminderUpdateEvent() {
   if (typeof window === "undefined") return;
   window.dispatchEvent(new Event(CALENDAR_REMINDERS_UPDATED_EVENT));

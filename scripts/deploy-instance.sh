@@ -31,6 +31,11 @@ echo "=========================================="
 
 # Create deployment directory
 mkdir -p "$DEPLOY_PATH/data-$INSTANCE"
+
+# Ensure proper permissions for the noctua user in the container
+# The noctua user has UID 999 (created with useradd -r in Dockerfile)
+chown -R 999:999 "$DEPLOY_PATH/data-$INSTANCE"
+
 cd "$DEPLOY_PATH"
 
 # Login to container registry
