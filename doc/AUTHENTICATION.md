@@ -1,6 +1,6 @@
 # Authentication
 
-This project uses a lightweight, server‑side session cookie for access control. When `AUTH_ENABLED=true`, all API routes require a valid session cookie; unauthenticated requests return `401`.
+This project uses a lightweight, server-side session cookie for access control. All API routes require a valid session cookie; unauthenticated requests return `401`.
 
 ## Overview
 
@@ -30,15 +30,12 @@ We support three modes, controlled by `IMAP_CREDENTIALS_STORAGE`:
 
 **Note:** IMAP connections are built from account data loaded from the DB, but we overlay credentials from the active session (cached when `requireSessionOr401` runs). This keeps IMAP/SMTP connections working while the backend is running, even if DB storage is disabled (`IMAP_CREDENTIALS_STORAGE=cookie`).
 
-This allows fast local development (default true) while keeping a stricter production posture if desired.
-
 ## Session rotation
 
 When the client calls `/api/auth/me`, the server refreshes the cookie if it is nearing expiry (sliding session). The UI polls `/api/auth/me` periodically to keep active sessions fresh while the app is open.
 
 ## Environment variables
 
-- `AUTH_ENABLED` (default: `true`)
 - `SESSION_TTL_SECONDS` (default: 43200)
 - `SESSION_SEAL_KEY` (required in production) – key used to seal/unseal session cookies
 - `IMAP_CREDENTIALS_STORAGE` (default: `both`)

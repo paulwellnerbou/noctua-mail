@@ -20,7 +20,6 @@ Quick reference for deploying Noctua Mail in any environment.
 | `IMAP_SECRET_KEY` | 32-byte hex key for IMAP credential encryption | `openssl rand -hex 32` | ✅ Yes |
 | `PORT` | HTTP port to listen on | `3654` | No (default: 3654) |
 | `NOCTUA_DATA_DIR` | Directory for SQLite DB and attachments | `/app/.data/` | No (default: `.data/`) |
-| `AUTH_ENABLED` | Enable built-in authentication | `true` or `false` | No (default: true) |
 | `IMAP_CREDENTIALS_STORAGE` | Where to store IMAP credentials | `cookie`, `db`, or `both` | No (default: both) |
 
 ## Generating Secrets
@@ -52,7 +51,6 @@ docker run -d \
   -v /path/to/data:/app/.data \
   -e SESSION_SEAL_KEY="your_key_here" \
   -e IMAP_SECRET_KEY="your_key_here" \
-  -e AUTH_ENABLED=true \
   noctua-mail
 ```
 
@@ -218,4 +216,3 @@ tar xzf noctua-backup-20260211.tar.gz -C /path/to/noctua/data/
 - **Cache regeneration:** Missing `sources/` or `attachments/` files are automatically re-downloaded from IMAP servers when needed.
 - **Space savings:** Database-only backups are much smaller (excludes potentially large attachment cache).
 - **IMAP requirement:** Cache regeneration requires IMAP access. Ensure credentials are valid before restoring database-only backups.
-

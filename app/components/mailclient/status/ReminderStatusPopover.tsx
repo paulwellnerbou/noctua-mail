@@ -1,8 +1,8 @@
 "use client";
 
 import { useCallback, useMemo } from "react";
-import { Trash2, X } from "lucide-react";
-import { Box, Card, Flex, IconButton, Popover, Text } from "@radix-ui/themes";
+import { Trash2, X, MapPin, Clock } from "lucide-react";
+import { Box, Card, Flex, IconButton, Popover, Text, Heading, Badge } from "@radix-ui/themes";
 import {
   deleteCalendarReminder,
   getCalendarReminderStartAtMs,
@@ -43,7 +43,7 @@ export default function ReminderStatusPopover({
   const upcomingReminders = pendingCalendarReminders;
   const nextReminder = upcomingReminders[0] ?? null;
   const reminderCount = upcomingReminders.length;
-  const reminderHeading = `${reminderCount} Reminder${reminderCount === 1 ? "" : "s"}`;
+  // const reminderHeading = `${reminderCount} Reminder${reminderCount === 1 ? "" : "s"}`;
   const remindersStatusValue = (() => {
     if (!nextReminder) return "None";
     const reminderTitle = nextReminder.eventTitle || "Calendar event";
@@ -92,19 +92,24 @@ export default function ReminderStatusPopover({
         align="end"
         sideOffset={8}
       >
-        <Flex align="center" justify="between" className="popover-title reminder-title">
-          <Text size="1" weight="medium" className="bottom-popover-heading">
-            {reminderHeading}
-          </Text>
+        <Flex align="center" justify="between" className="popover-title-row">
+          <Flex align="baseline" gap="3">
+             <Heading size="3" weight="medium" className="reminder-main-title">
+              Reminders
+            </Heading>
+            <Badge color="gray" variant="soft" radius="full">
+              {reminderCount}
+            </Badge>
+          </Flex>
           <IconButton
-            variant="soft"
+            variant="ghost"
             color="gray"
-            size="1"
+            size="2"
             title="Close reminders"
             aria-label="Close reminders"
             onClick={() => onOpenChange(false)}
           >
-            <X size={12} />
+            <X size={16} />
           </IconButton>
         </Flex>
         <Box className="popover-body">
@@ -112,15 +117,18 @@ export default function ReminderStatusPopover({
             <div className="reminder-groups">
               {groupedReminders.map((group) => (
                 <section key={group.key} className="reminder-group">
-                  <Text as="p" size="1" weight="medium" className="reminder-group-label">
-                    {group.label}
-                  </Text>
+                  <div className="reminder-group-header">
+                    <Text size="1" weight="medium" className="reminder-group-label" color="indigo">
+                      {group.label}
+                    </Text>
+                    <div className="reminder-group-line" />
+                  </div>
                   <div className="reminder-list">
                     {group.items.map((reminder) => {
                       const startAtMs = getCalendarReminderStartAtMs(reminder);
                       return (
-                        <Card key={reminder.id} size="1" className="reminder-item">
-                          <Flex align="start" justify="between" gap="2">
+                        <Card key={reminder.id} size="1" className="reminder-item-card">
+                          <Flex align="start" justify="between" gap="3">
                             <button
                               type="button"
                               className={`reminder-open-button ${reminder.messageId ? "interactive" : ""}`}
@@ -128,52 +136,54 @@ export default function ReminderStatusPopover({
                                 if (!reminder.messageId) {
                                   console.warn("[noctua][reminder-link] missing reminder.messageId", {
                                     reminderId: reminder.id,
-                                    eventTitle: reminder.eventTitle,
-                                    triggerAtMs: reminder.triggerAtMs
+                                    eventTitle: reminder.eventTitle
+                                    // triggerAtMs: reminder.triggerAtMs
                                   });
                                   return;
                                 }
-                                console.info("[noctua][reminder-link] reminder row click", {
-                                  reminderId: reminder.id,
-                                  messageId: reminder.messageId,
-                                  eventTitle: reminder.eventTitle
-                                });
                                 onOpenReminderMessage(reminder.messageId);
                                 onOpenChange(false);
                               }}
                               title={reminder.messageId ? "Open source mail" : undefined}
                               aria-label={reminder.messageId ? "Open source mail" : undefined}
                             >
-                              <Flex direction="column" gap="1" className="reminder-item-main">
-                                <Text as="div" size="3" weight="medium" className="reminder-item-title">
+                              <Flex direction="column" gap="2" className="reminder-item-main">
+                                <Text as="div" size="2" weight="medium" className="reminder-item-title">
                                   {reminder.eventTitle}
                                 </Text>
-                                <Flex align="baseline" gap="2" wrap="wrap" className="reminder-item-timing">
-                                  <Text as="span" size="2" weight="medium" className="reminder-item-start">
-                                    Start: {formatEventStartTime(startAtMs)}
-                                  </Text>
-                                  <Text as="span" size="1" className="reminder-item-reminder-label">
-                                    (Reminder: {reminder.leadLabel})
-                                  </Text>
+                                <Flex direction="column" gap="1">
+                                    <Flex align="center" gap="2" className="reminder-meta-row">
+                                        <Clock size={12} className="reminder-icon" />
+                                        <Text size="1" color="gray">
+                                            {formatEventStartTime(startAtMs)}
+                                        </Text>
+                                        <Badge color="orange" variant="surface" size="1">
+                                            {reminder.leadLabel} before
+                                        </Badge>
+                                    </Flex>
+                                    {reminder.eventLocation && (
+                                    <Flex align="center" gap="2" className="reminder-meta-row">
+                                        <MapPin size={12} className="reminder-icon" />
+                                        <Text size="1" color="gray">
+                                        {reminder.eventLocation}
+                                        </Text>
+                                    </Flex>
+                                    )}
                                 </Flex>
-                                {reminder.eventLocation ? (
-                                  <Text as="div" size="1" className="reminder-item-meta reminder-item-location">
-                                    Location: {reminder.eventLocation}
-                                  </Text>
-                                ) : null}
                               </Flex>
                             </button>
                             <IconButton
-                              variant="soft"
+                              variant="ghost"
                               color="gray"
                               size="1"
                               title="Delete reminder"
                               aria-label="Delete reminder"
+                              className="reminder-delete-btn"
                               onClick={() => {
                                 void handleDeleteReminder(reminder.id);
                               }}
                             >
-                              <Trash2 size={12} />
+                              <Trash2 size={14} />
                             </IconButton>
                           </Flex>
                         </Card>
@@ -184,7 +194,9 @@ export default function ReminderStatusPopover({
               ))}
             </div>
           ) : (
-            <Text size="2">No scheduled reminders.</Text>
+            <Flex align="center" justify="center" p="4" className="empty-state">
+                <Text size="2" color="gray">No scheduled reminders.</Text>
+            </Flex>
           )}
         </Box>
       </Popover.Content>

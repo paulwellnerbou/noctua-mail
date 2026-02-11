@@ -127,9 +127,12 @@ export default function AccountSettingsModal({
       }}
     >
         <Dialog.Content
+          className="account-settings-modal"
           size="4"
           width="94vw"
           maxWidth="980px"
+          onInteractOutside={(event) => event.preventDefault()}
+          onEscapeKeyDown={(event) => event.preventDefault()}
           style={{
             height: "min(86vh, 900px)",
             overflow: "hidden"

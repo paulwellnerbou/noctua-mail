@@ -5,8 +5,6 @@ import { cacheSessionCredentials } from "./credentials";
 import { shouldIncludeSessionCredentials } from "./secret";
 
 const SESSION_KEY = process.env.SESSION_SEAL_KEY ?? "";
-const AUTH_ENABLED =
-  (process.env.AUTH_ENABLED ?? "true").toLowerCase() === "true";
 const SESSION_COOKIE = "noctua_session";
 const SESSION_TTL_SECONDS = (() => {
   const raw = process.env.SESSION_TTL_SECONDS ?? "43200";
@@ -91,21 +89,13 @@ export function clearSessionCookie(response: NextResponse) {
 }
 
 export function getSessionFromRequest(req: NextRequest): SessionData | null {
-  if (!AUTH_ENABLED) return null;
   const cookie = req.cookies.get(SESSION_COOKIE)?.value;
   return unsealSession(cookie);
-}
-
-export function authEnabled() {
-  return AUTH_ENABLED;
 }
 
 export function requireSessionOr401(
   request?: Request | null
 ): SessionData | NextResponse {
-  if (!AUTH_ENABLED) {
-    return { userId: "dev", exp: Date.now() / 1000 + SESSION_TTL_SECONDS };
-  }
   if (!request) {
     return new NextResponse(JSON.stringify({ ok: false, message: "Unauthorized" }), {
       status: 401,
@@ -134,7 +124,6 @@ export function requireSessionOr401(
 }
 
 export function sessionFromCookie(cookieHeader?: string | null): SessionData | null {
-  if (!AUTH_ENABLED) return null;
   if (!cookieHeader) return null;
   const match = cookieHeader
     .split(";")

@@ -5,7 +5,9 @@ const nextConfig: NextConfig = {
   typedRoutes: false,
   images: {
     qualities: [75, 85]
-  }
+  },
+  // Ensure these packages are included in standalone build
+  serverExternalPackages: ['rrule']
 };
 
 export default nextConfig;

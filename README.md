@@ -150,7 +150,6 @@ IMAP_SECRET_KEY=<32-byte-hex-key>  # Required for DB encryption
 Control access to the application:
 
 ```bash
-AUTH_ENABLED=true  # Default: true - enables login/signup flow
 SESSION_SEAL_KEY=<32-byte-hex-key>  # Required for session cookie sealing
 ```
 

@@ -75,7 +75,6 @@ docker run -d \
   -e NOCTUA_DATA_DIR=/app/.data/ \
   -e SESSION_SEAL_KEY="${SESSION_SEAL_KEY:-}" \
   -e IMAP_SECRET_KEY="${IMAP_SECRET_KEY:-}" \
-  -e AUTH_ENABLED="${AUTH_ENABLED:-true}" \
   -e IMAP_CREDENTIALS_STORAGE="${IMAP_CREDENTIALS_STORAGE:-both}" \
   "$FULL_IMAGE"
 
