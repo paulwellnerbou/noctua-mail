@@ -1,6 +1,6 @@
 import type { Account } from "@/lib/data";
 import nodemailer from "nodemailer";
-import MailComposer from "nodemailer/lib/mail-composer";
+import MailComposer from "nodemailer/lib/mail-composer/index.js";
 
 const PROJECT_URL = "https://github.com/paulwellnerbou/noctua-mail";
 const MAILER_ID = `Noctua Mail (${PROJECT_URL})`;

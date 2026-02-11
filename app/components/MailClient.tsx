@@ -344,7 +344,6 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
   const [messagesPage, setMessagesPage] = useState(1);
   const [hasMoreMessages, setHasMoreMessages] = useState(true);
   const [totalMessages, setTotalMessages] = useState<number | null>(null);
-  const [loadedMessageCount, setLoadedMessageCount] = useState(0);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [refreshingMessages, setRefreshingMessages] = useState(false);
   const [messageListError, setMessageListError] = useState<string | null>(null);
@@ -1085,6 +1084,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
   }, [activeAccountId, messages]);
 
   const filteredMessages = accountMessages;
+  const loadedMessageCount = filteredMessages.length;
   const hasLoadedMessages = filteredMessages.length > 0;
 
   const sortedMessages = useMemo(() => {
@@ -4036,7 +4036,6 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     setMessagesPage(1);
     setHasMoreMessages(true);
     setTotalMessages(null);
-    setLoadedMessageCount(0);
     lastRequestRef.current = null;
     currentKeyRef.current = messagesKey;
     setGroupMeta([]);
@@ -4105,7 +4104,6 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
             relatedSubject?: string;
           };
           const items = Array.isArray(data?.items) ? data.items.filter(Boolean) : [];
-          const baseCount = typeof data?.baseCount === "number" ? data.baseCount : items.length;
           if (currentKeyRef.current !== requestKey) return;
           if (messageMutationVersionRef.current !== requestMutationVersion) {
             lastRequestRef.current = null;
@@ -4119,7 +4117,6 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
           setMessages((prev) => (messagesPage === 1 ? items : [...prev, ...items]));
           setHasMoreMessages(Boolean(data?.hasMore));
           setTotalMessages(typeof data?.total === "number" ? data.total : null);
-          setLoadedMessageCount((prev) => (messagesPage === 1 ? baseCount : prev + baseCount));
           if (messagesPage === 1) {
             const nextMeta = Array.isArray(data?.groups)
               ? data.groups
@@ -4900,8 +4897,6 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
       if (messageMutationVersionRef.current !== requestMutationVersion) {
         return false;
       }
-      const baseCount =
-        typeof messageData?.baseCount === "number" ? messageData.baseCount : nextMessages.length;
       setMessages(nextMessages);
       setActiveMessageId((prev) => {
         if (prev) return prev;
@@ -4910,7 +4905,6 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
       setMessagesPage(1);
       setHasMoreMessages(Boolean(messageData?.hasMore));
       setTotalMessages(typeof messageData?.total === "number" ? messageData.total : null);
-      setLoadedMessageCount(baseCount);
       const nextMeta = Array.isArray(messageData?.groups)
         ? messageData.groups
         : computeGroupMeta(nextMessages);
@@ -6046,7 +6040,6 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
           setMessagesPage(1);
           setHasMoreMessages(true);
           setTotalMessages(null);
-          setLoadedMessageCount(0);
           try {
             const res = await apiFetch("/api/auth/me", {
               credentials: "include",
