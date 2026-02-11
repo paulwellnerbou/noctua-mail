@@ -340,13 +340,14 @@ function formatTimeZoneLabel(timeZone: string, referenceDate: Date) {
   try {
     const parts = new Intl.DateTimeFormat(undefined, {
       timeZone: resolved,
-      timeZoneName: "long"
+      timeZoneName: "short"
     }).formatToParts(referenceDate);
     const zoneName = parts.find((part) => part.type === "timeZoneName")?.value ?? "";
-    if (zoneName && city && !zoneName.toLowerCase().includes(city.toLowerCase())) {
-      return `${zoneName} - ${city}`;
+    if (!zoneName) return city;
+    if (zoneName.startsWith("GMT") || zoneName.startsWith("UTC")) {
+      return city ? `${zoneName} - ${city}` : zoneName;
     }
-    return zoneName || city;
+    return zoneName;
   } catch {
     return city;
   }
@@ -403,10 +404,11 @@ export function buildCalendarRecurrenceSummary(event: CalendarEventPreview): str
     details.push(`starting ${formatRecurrenceBoundaryDate(event, event.start)}`);
   }
 
+  const hasUntilInBase = /\buntil\b/i.test(base);
   const untilDate = parsedRule?.options.until;
-  if (untilDate instanceof Date) {
+  if (untilDate instanceof Date && !hasUntilInBase) {
     details.push(`until ${formatRecurrenceBoundaryDate(event, untilDate)}`);
-  } else {
+  } else if (!hasUntilInBase) {
     const untilRaw = (fallbackFields.UNTIL ?? "").trim();
     if (untilRaw) {
       const fallbackUntilDate = parseCalendarDate(untilRaw, event.startTimezone).date;

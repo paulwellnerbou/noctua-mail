@@ -52,11 +52,13 @@ export async function POST(request: Request) {
     eventUid?: string;
     eventTitle?: string;
     eventLocation?: string;
+    eventDescription?: string;
     startTimezone?: string;
     recurrenceRule?: string;
     recurrenceDates?: number[];
     excludedDates?: number[];
     eventStartAtMs?: number;
+    eventEndAtMs?: number;
     leadMinutes?: number;
     leadLabel?: string;
   };
@@ -68,6 +70,8 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: false, message: "Account not found" }, { status: 404 });
   }
   const eventStartAtMs = toNumber(payload.eventStartAtMs);
+  const eventEndAtMs =
+    payload.eventEndAtMs == null ? undefined : toNumber(payload.eventEndAtMs);
   const leadMinutes = toNumber(payload.leadMinutes);
   const leadLabel = String(payload.leadLabel ?? "").trim();
   const startTimezone =
@@ -86,6 +90,9 @@ export async function POST(request: Request) {
   if (!Number.isFinite(leadMinutes) || leadMinutes < 0) {
     return NextResponse.json({ ok: false, message: "Invalid leadMinutes" }, { status: 400 });
   }
+  if (eventEndAtMs !== undefined && (!Number.isFinite(eventEndAtMs) || eventEndAtMs <= 0)) {
+    return NextResponse.json({ ok: false, message: "Invalid eventEndAtMs" }, { status: 400 });
+  }
   if (!leadLabel) {
     return NextResponse.json({ ok: false, message: "Invalid leadLabel" }, { status: 400 });
   }
@@ -95,11 +102,14 @@ export async function POST(request: Request) {
     eventUid: payload.eventUid,
     eventTitle: payload.eventTitle,
     eventLocation: payload.eventLocation,
+    eventDescription:
+      typeof payload.eventDescription === "string" ? payload.eventDescription : undefined,
     startTimezone,
     recurrenceRule,
     recurrenceDates,
     excludedDates,
     eventStartAtMs,
+    eventEndAtMs,
     leadMinutes,
     leadLabel
   });

@@ -1,8 +1,9 @@
 "use client";
 
 import { useCallback, useMemo } from "react";
-import { Trash2, X, MapPin, Clock } from "lucide-react";
+import { Trash2, X, MapPin, Clock, Repeat } from "lucide-react";
 import { Box, Card, Flex, IconButton, Popover, Text, Heading, Badge } from "@radix-ui/themes";
+import { buildCalendarRecurrenceSummary } from "@/lib/calendar";
 import {
   deleteCalendarReminder,
   getCalendarReminderStartAtMs,
@@ -29,6 +30,20 @@ function formatEventStartTime(eventStartAtMs: number) {
     dateStyle: "medium",
     timeStyle: "short"
   }).format(new Date(eventStartAtMs));
+}
+
+function buildReminderRecurrenceSummary(reminder: CalendarReminder) {
+  if (!reminder.recurrenceRule?.trim()) return null;
+  const startAtMs = getCalendarReminderStartAtMs(reminder);
+  if (!Number.isFinite(startAtMs)) return null;
+  return buildCalendarRecurrenceSummary({
+    allDay: false,
+    start: new Date(startAtMs),
+    startTimezone: reminder.startTimezone,
+    recurrenceRule: reminder.recurrenceRule,
+    recurrenceDates: reminder.recurrenceDates?.map((value) => new Date(value)),
+    excludedDates: reminder.excludedDates?.map((value) => new Date(value))
+  });
 }
 
 export default function ReminderStatusPopover({
@@ -125,6 +140,7 @@ export default function ReminderStatusPopover({
                   <div className="reminder-list">
                     {group.items.map((reminder) => {
                       const startAtMs = getCalendarReminderStartAtMs(reminder);
+                      const recurrenceSummary = buildReminderRecurrenceSummary(reminder);
                       return (
                         <Card key={reminder.id} size="1" className="reminder-item-card">
                           <Flex align="start" justify="between" gap="3">
@@ -164,6 +180,14 @@ export default function ReminderStatusPopover({
                                     <MapPin size={12} className="reminder-icon" />
                                     <Text size="1" color="gray">
                                     {reminder.eventLocation}
+                                    </Text>
+                                </Flex>
+                                )}
+                                {recurrenceSummary && (
+                                <Flex align="center" gap="1" className="reminder-meta-row">
+                                    <Repeat size={12} className="reminder-icon" />
+                                    <Text size="1" color="gray">
+                                    Repeats: {recurrenceSummary}
                                     </Text>
                                 </Flex>
                                 )}

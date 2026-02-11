@@ -9,11 +9,10 @@ import {
 } from "@/lib/mail/categorization";
 import tls from "tls";
 import { getImapLogger, logImapOp } from "@/lib/mail/imapLogger";
+import { ImapFlow } from "imapflow";
+import { simpleParser } from "mailparser";
 
-const buildImapClient = (
-  ImapFlow: typeof import("imapflow").ImapFlow,
-  account: Account
-) =>
+const buildImapClient = (account: Account) =>
   new ImapFlow({
     host: account.imap.host,
     port: account.imap.port,
@@ -125,14 +124,7 @@ function mapImapFolders(account: Account, list: Awaited<ReturnType<typeof listIm
 }
 
 async function listImapRaw(account: Account, logContext?: ImapLogContext) {
-  let ImapFlow: typeof import("imapflow").ImapFlow;
-  try {
-    ({ ImapFlow } = await import("imapflow"));
-  } catch (error) {
-    throw new Error("IMAP library is missing. Run `bun install` to add imapflow.");
-  }
-
-  const client = buildImapClient(ImapFlow, account);
+  const client = buildImapClient(account);
 
   try {
     await logImapOp("connect", { host: account.imap.host, ...logContext }, () => client.connect());
@@ -362,19 +354,7 @@ export async function syncImapAccount(
   mode: "full" | "recent" | "new" = "recent",
   clientId?: string
 ): Promise<ImapSyncResult> {
-  let ImapFlow: typeof import("imapflow").ImapFlow;
-  let simpleParser: typeof import("mailparser").simpleParser;
-
-  try {
-    ({ ImapFlow } = await import("imapflow"));
-    ({ simpleParser } = await import("mailparser"));
-  } catch (error) {
-    throw new Error(
-      "IMAP libraries are missing. Run `bun install` to add imapflow/mailparser."
-    );
-  }
-
-  const client = buildImapClient(ImapFlow, account);
+  const client = buildImapClient(account);
   const logContext = buildLogContext(account, clientId);
 
   await logImapOp("connect", { host: account.imap.host, ...logContext }, () =>
@@ -465,19 +445,7 @@ export async function syncImapMessage(
   uid: number,
   clientId?: string
 ): Promise<Message | null> {
-  let ImapFlow: typeof import("imapflow").ImapFlow;
-  let simpleParser: typeof import("mailparser").simpleParser;
-
-  try {
-    ({ ImapFlow } = await import("imapflow"));
-    ({ simpleParser } = await import("mailparser"));
-  } catch (error) {
-    throw new Error(
-      "IMAP libraries are missing. Run `bun install` to add imapflow/mailparser."
-    );
-  }
-
-  const client = buildImapClient(ImapFlow, account);
+  const client = buildImapClient(account);
   const logContext = buildLogContext(account, clientId);
 
   let message: Message | null = null;
@@ -518,14 +486,7 @@ export async function appendImapMessage(
   flags: string[] = ["\\Seen"],
   clientId?: string
 ) {
-  let ImapFlow: typeof import("imapflow").ImapFlow;
-  try {
-    ({ ImapFlow } = await import("imapflow"));
-  } catch (error) {
-    throw new Error("IMAP library is missing. Run `bun install` to add imapflow.");
-  }
-
-  const client = buildImapClient(ImapFlow, account);
+  const client = buildImapClient(account);
   const logContext = buildLogContext(account, clientId);
 
   try {
@@ -556,14 +517,7 @@ export async function moveImapMessage(
   destination: string,
   clientId?: string
 ): Promise<number | null> {
-  let ImapFlow: typeof import("imapflow").ImapFlow;
-  try {
-    ({ ImapFlow } = await import("imapflow"));
-  } catch (error) {
-    throw new Error("IMAP library is missing. Run `bun install` to add imapflow.");
-  }
-
-  const client = buildImapClient(ImapFlow, account);
+  const client = buildImapClient(account);
   const logContext = buildLogContext(account, clientId);
 
   try {
@@ -598,14 +552,7 @@ export async function deleteImapMessage(
   uid: number,
   clientId?: string
 ) {
-  let ImapFlow: typeof import("imapflow").ImapFlow;
-  try {
-    ({ ImapFlow } = await import("imapflow"));
-  } catch (error) {
-    throw new Error("IMAP library is missing. Run `bun install` to add imapflow.");
-  }
-
-  const client = buildImapClient(ImapFlow, account);
+  const client = buildImapClient(account);
   const logContext = buildLogContext(account, clientId);
 
   try {
@@ -635,14 +582,7 @@ export async function updateImapFlags(
   enable: boolean,
   clientId?: string
 ) {
-  let ImapFlow: typeof import("imapflow").ImapFlow;
-  try {
-    ({ ImapFlow } = await import("imapflow"));
-  } catch (error) {
-    throw new Error("IMAP library is missing. Run `bun install` to add imapflow.");
-  }
-
-  const client = buildImapClient(ImapFlow, account);
+  const client = buildImapClient(account);
   const logContext = buildLogContext(account, clientId);
 
   try {
@@ -678,13 +618,7 @@ export async function listImapFolders(account: Account, clientId?: string) {
 }
 
 export async function createImapFolder(account: Account, path: string, clientId?: string) {
-  let ImapFlow: typeof import("imapflow").ImapFlow;
-  try {
-    ({ ImapFlow } = await import("imapflow"));
-  } catch (error) {
-    throw new Error("IMAP library is missing. Run `bun install` to add imapflow.");
-  }
-  const client = buildImapClient(ImapFlow, account);
+  const client = buildImapClient(account);
   const logContext = buildLogContext(account, clientId);
   try {
     await logImapOp("connect", { host: account.imap.host, ...logContext }, () =>
@@ -708,13 +642,7 @@ export async function renameImapFolder(
   newPath: string,
   clientId?: string
 ) {
-  let ImapFlow: typeof import("imapflow").ImapFlow;
-  try {
-    ({ ImapFlow } = await import("imapflow"));
-  } catch (error) {
-    throw new Error("IMAP library is missing. Run `bun install` to add imapflow.");
-  }
-  const client = buildImapClient(ImapFlow, account);
+  const client = buildImapClient(account);
   const logContext = buildLogContext(account, clientId);
   try {
     await logImapOp("connect", { host: account.imap.host, ...logContext }, () =>
@@ -735,13 +663,7 @@ export async function renameImapFolder(
 }
 
 export async function deleteImapFolder(account: Account, path: string, clientId?: string) {
-  let ImapFlow: typeof import("imapflow").ImapFlow;
-  try {
-    ({ ImapFlow } = await import("imapflow"));
-  } catch (error) {
-    throw new Error("IMAP library is missing. Run `bun install` to add imapflow.");
-  }
-  const client = buildImapClient(ImapFlow, account);
+  const client = buildImapClient(account);
   const logContext = buildLogContext(account, clientId);
   try {
     await logImapOp("connect", { host: account.imap.host, ...logContext }, () =>
@@ -764,13 +686,7 @@ export async function unsubscribeImapFolder(
   path: string,
   clientId?: string
 ) {
-  let ImapFlow: typeof import("imapflow").ImapFlow;
-  try {
-    ({ ImapFlow } = await import("imapflow"));
-  } catch (error) {
-    throw new Error("IMAP library is missing. Run `bun install` to add imapflow.");
-  }
-  const client = buildImapClient(ImapFlow, account);
+  const client = buildImapClient(account);
   const logContext = buildLogContext(account, clientId);
   try {
     await logImapOp("connect", { host: account.imap.host, ...logContext }, () =>

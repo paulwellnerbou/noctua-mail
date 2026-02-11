@@ -1500,10 +1500,17 @@ a {
 .bottom-popover-reminders {
   min-width: min(560px, calc(100vw - 24px));
   max-width: min(920px, calc(100vw - 24px));
+  display: flex;
+  flex-direction: column;
+}
+
+.bottom-popover-reminders .popover-body {
+  max-height: min(64vh, 560px);
+  overflow: auto;
+  padding-right: 2px;
 }
 
 .popover-title-row {
-  margin-bottom: 12px;
   padding-bottom: 8px;
   border-bottom: 1px solid var(--gray-5);
 }
@@ -1522,15 +1529,16 @@ a {
   display: flex;
   flex-direction: column;
   gap: 16px;
-  max-height: min(64vh, 560px);
-  overflow: auto;
-  padding-right: 2px;
 }
 
 .reminder-group {
   display: flex;
   flex-direction: column;
   gap: 8px;
+}
+
+.reminder-group-header:first-child {
+  margin-top: 12px;
 }
 
 .reminder-group-header {

@@ -16,6 +16,7 @@ type RawTextPanelProps = {
   fields?: RawTextField[];
   className?: string;
   preClassName?: string;
+  constrainHeight?: boolean;
 };
 
 function joinClassNames(...values: Array<string | undefined | null | false>) {
@@ -29,7 +30,8 @@ export default function RawTextPanel({
   emptyText = "",
   fields = [],
   className,
-  preClassName
+  preClassName,
+  constrainHeight = true
 }: RawTextPanelProps) {
   const [copyOk, setCopyOk] = useState(false);
   const resetTimerRef = useRef<number | null>(null);
@@ -46,7 +48,13 @@ export default function RawTextPanel({
   const displayText = text || emptyText;
 
   return (
-    <div className={joinClassNames(styles.block, className)}>
+    <div
+      className={joinClassNames(
+        styles.block,
+        constrainHeight ? styles.blockConstrained : styles.blockAutoHeight,
+        className
+      )}
+    >
       {fields.length > 0 ? (
         <div className={styles.fields}>
           {fields.map((field) => (

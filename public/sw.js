@@ -67,7 +67,16 @@ function normalizeReminder(item) {
   if (!id) return null;
   const eventTitle = typeof item.eventTitle === "string" ? item.eventTitle.trim() : "";
   const triggerAtMs = Number(item.triggerAtMs);
+  const eventStartAtMs = Number(item.eventStartAtMs);
   const nextEventStartAtMs = Number(item.nextEventStartAtMs ?? item.eventStartAtMs);
+  const eventEndAtMsRaw = Number(item.eventEndAtMs);
+  const durationMs =
+    Number.isFinite(eventStartAtMs) &&
+    Number.isFinite(eventEndAtMsRaw) &&
+    eventEndAtMsRaw > eventStartAtMs
+      ? eventEndAtMsRaw - eventStartAtMs
+      : 0;
+  const endAtMs = durationMs > 0 ? nextEventStartAtMs + durationMs : nextEventStartAtMs;
   const leadLabel = typeof item.leadLabel === "string" ? item.leadLabel.trim() : "";
   const messageId =
     typeof item.messageId === "string" && item.messageId.trim() ? item.messageId.trim() : null;
@@ -79,6 +88,7 @@ function normalizeReminder(item) {
     messageId,
     triggerAtMs,
     nextEventStartAtMs,
+    endAtMs,
     leadLabel: leadLabel || "Reminder"
   };
 }
@@ -121,6 +131,7 @@ async function processReminderNotifications(source) {
 
     for (const reminder of reminders) {
       if (reminder.triggerAtMs > now) continue;
+      if (reminder.endAtMs <= now) continue;
       if (Number(delivered[reminder.id]) === reminder.triggerAtMs) continue;
       const eventDateLabel = new Intl.DateTimeFormat(undefined, {
         dateStyle: "medium",

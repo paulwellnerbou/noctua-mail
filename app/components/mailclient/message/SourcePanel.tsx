@@ -45,6 +45,7 @@ export default function SourcePanel({ messageId, fetchSource, scrubSource }: Sou
       text={text}
       copyText={status === "loaded" ? source : ""}
       copyLabel="Copy source"
+      constrainHeight={false}
     />
   );
 }

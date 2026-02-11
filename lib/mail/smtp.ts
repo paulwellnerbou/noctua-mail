@@ -1,4 +1,6 @@
 import type { Account } from "@/lib/data";
+import nodemailer from "nodemailer";
+import MailComposer from "nodemailer/lib/mail-composer";
 
 const PROJECT_URL = "https://github.com/paulwellnerbou/noctua-mail";
 const MAILER_ID = `Noctua Mail (${PROJECT_URL})`;
@@ -62,14 +64,6 @@ function buildMailOptions(account: Account, mail: MailPayload) {
 }
 
 export async function buildRawMessage(account: Account, mail: MailPayload) {
-  let MailComposer: any;
-  try {
-    const composerModule = await import("nodemailer/lib/mail-composer");
-    MailComposer = (composerModule as any).default ?? composerModule;
-  } catch {
-    throw new Error("SMTP composer is missing. Run `bun install` to add nodemailer.");
-  }
-
   const mailOptions = buildMailOptions(account, mail);
   const raw = await new Promise<Buffer>((resolve, reject) => {
     const composer = new MailComposer(mailOptions);
@@ -90,13 +84,6 @@ export async function buildRawMessage(account: Account, mail: MailPayload) {
 }
 
 export async function sendSmtpMessage(account: Account, mail: MailPayload) {
-  let nodemailer: typeof import("nodemailer");
-  try {
-    nodemailer = await import("nodemailer");
-  } catch {
-    throw new Error("SMTP library is missing. Run `bun install` to add nodemailer.");
-  }
-
   const transporter = nodemailer.createTransport({
     host: account.smtp.host,
     port: account.smtp.port,

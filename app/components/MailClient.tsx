@@ -126,7 +126,7 @@ import {
   CALENDAR_REMINDERS_UPDATED_EVENT,
   type CalendarReminder,
   fetchCalendarReminders,
-  getCalendarReminderStartAtMs,
+  getCalendarReminderEndAtMs,
   hasReminderBeenDeliveredOnClient,
   markReminderDeliveredOnClient,
   markReminderDeliveredOnClientById,
@@ -168,7 +168,7 @@ type DraftSavePayload = {
 };
 
 function filterUpcomingCalendarReminders(reminders: CalendarReminder[], nowMs = Date.now()) {
-  return reminders.filter((reminder) => getCalendarReminderStartAtMs(reminder) > nowMs);
+  return reminders.filter((reminder) => getCalendarReminderEndAtMs(reminder) > nowMs);
 }
 
 export default function MailClient() {
@@ -962,6 +962,7 @@ export default function MailClient() {
     for (let index = 0; index < reminders.length; index += 1) {
       const reminder = reminders[index];
       if (reminder.triggerAtMs > now) continue;
+      if (getCalendarReminderEndAtMs(reminder) <= now) continue;
       if (hasReminderBeenDeliveredOnClient(activeAccountId, clientId, reminder)) continue;
       const eventDateLabel = new Intl.DateTimeFormat(undefined, {
         dateStyle: "medium",

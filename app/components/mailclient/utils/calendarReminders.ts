@@ -33,11 +33,13 @@ export type CreateCalendarReminderInput = {
   eventUid?: string;
   eventTitle?: string;
   eventLocation?: string;
+  eventDescription?: string;
   startTimezone?: string;
   recurrenceRule?: string;
   recurrenceDates?: number[];
   excludedDates?: number[];
   eventStartAtMs: number;
+  eventEndAtMs?: number;
   leadMinutes: number;
   leadLabel: string;
 };
@@ -61,11 +63,13 @@ type QueuedReminderMutation =
         eventUid?: string;
         eventTitle: string;
         eventLocation?: string;
+        eventDescription?: string;
         startTimezone?: string;
         recurrenceRule?: string;
         recurrenceDates?: number[];
         excludedDates?: number[];
         eventStartAtMs: number;
+        eventEndAtMs?: number;
         leadMinutes: number;
         leadLabel: string;
       };
@@ -101,6 +105,19 @@ export function getCalendarReminderStartAtMs(reminder: CalendarReminder) {
       ? reminder.nextEventStartAtMs
       : reminder.eventStartAtMs;
   return Number.isFinite(startAtMs) ? startAtMs : Number.NaN;
+}
+
+export function getCalendarReminderEndAtMs(reminder: CalendarReminder) {
+  const startAtMs = getCalendarReminderStartAtMs(reminder);
+  if (!Number.isFinite(startAtMs)) return Number.NaN;
+  if (typeof reminder.eventEndAtMs !== "number" || !Number.isFinite(reminder.eventEndAtMs)) {
+    return startAtMs;
+  }
+  const durationMs = reminder.eventEndAtMs - reminder.eventStartAtMs;
+  if (!Number.isFinite(durationMs) || durationMs <= 0) {
+    return startAtMs;
+  }
+  return startAtMs + durationMs;
 }
 
 function dispatchReminderUpdateEvent() {
@@ -156,6 +173,10 @@ function sanitizeReminder(input: unknown): CalendarReminder | null {
   if (typeof reminder.eventStartAtMs !== "number" || !Number.isFinite(reminder.eventStartAtMs)) {
     return null;
   }
+  const eventEndAtMs =
+    typeof reminder.eventEndAtMs === "number" && Number.isFinite(reminder.eventEndAtMs)
+      ? reminder.eventEndAtMs
+      : undefined;
   if (
     typeof reminder.nextEventStartAtMs !== "number" ||
     !Number.isFinite(reminder.nextEventStartAtMs)
@@ -181,6 +202,8 @@ function sanitizeReminder(input: unknown): CalendarReminder | null {
     eventUid: typeof reminder.eventUid === "string" ? reminder.eventUid : undefined,
     eventTitle: reminder.eventTitle,
     eventLocation: typeof reminder.eventLocation === "string" ? reminder.eventLocation : undefined,
+    eventDescription:
+      typeof reminder.eventDescription === "string" ? reminder.eventDescription : undefined,
     startTimezone: normalizeReminderTimezone(
       typeof reminder.startTimezone === "string" ? reminder.startTimezone : undefined
     ),
@@ -190,6 +213,7 @@ function sanitizeReminder(input: unknown): CalendarReminder | null {
     recurrenceDates,
     excludedDates,
     eventStartAtMs: reminder.eventStartAtMs,
+    eventEndAtMs,
     nextEventStartAtMs: reminder.nextEventStartAtMs,
     leadMinutes: reminder.leadMinutes,
     leadLabel: reminder.leadLabel,
@@ -236,11 +260,13 @@ function sanitizeMutation(input: unknown): QueuedReminderMutation | null {
       eventUid?: unknown;
       eventTitle?: unknown;
       eventLocation?: unknown;
+      eventDescription?: unknown;
       startTimezone?: unknown;
       recurrenceRule?: unknown;
       recurrenceDates?: unknown;
       excludedDates?: unknown;
       eventStartAtMs?: unknown;
+      eventEndAtMs?: unknown;
       leadMinutes?: unknown;
       leadLabel?: unknown;
     };
@@ -259,6 +285,8 @@ function sanitizeMutation(input: unknown): QueuedReminderMutation | null {
         eventUid: typeof payload.eventUid === "string" ? payload.eventUid : undefined,
         eventTitle: String(payload.eventTitle),
         eventLocation: typeof payload.eventLocation === "string" ? payload.eventLocation : undefined,
+        eventDescription:
+          typeof payload.eventDescription === "string" ? payload.eventDescription : undefined,
         startTimezone:
           typeof payload.startTimezone === "string" ? normalizeReminderTimezone(payload.startTimezone) : undefined,
         recurrenceRule:
@@ -270,6 +298,10 @@ function sanitizeMutation(input: unknown): QueuedReminderMutation | null {
           Array.isArray(payload.excludedDates) ? (payload.excludedDates as number[]) : undefined
         ),
         eventStartAtMs: Number(payload.eventStartAtMs),
+        eventEndAtMs:
+          typeof payload.eventEndAtMs === "number" && Number.isFinite(payload.eventEndAtMs)
+            ? Number(payload.eventEndAtMs)
+            : undefined,
         leadMinutes: Number(payload.leadMinutes),
         leadLabel: String(payload.leadLabel)
       }
@@ -367,6 +399,10 @@ function buildLocalReminder(accountId: string, input: CreateCalendarReminderInpu
   const eventTitle = input.eventTitle?.trim() || "Calendar event";
   const leadMinutes = Math.max(0, Number(input.leadMinutes));
   const eventStartAtMs = Number(input.eventStartAtMs);
+  const eventEndAtMs =
+    typeof input.eventEndAtMs === "number" && Number.isFinite(input.eventEndAtMs)
+      ? Math.round(input.eventEndAtMs)
+      : undefined;
   const recurrenceRule = normalizeReminderRule(input.recurrenceRule);
   const recurrenceDates = normalizeReminderDateList(input.recurrenceDates);
   const excludedDates = normalizeReminderDateList(input.excludedDates);
@@ -389,11 +425,13 @@ function buildLocalReminder(accountId: string, input: CreateCalendarReminderInpu
     eventUid: input.eventUid?.trim() || undefined,
     eventTitle,
     eventLocation: input.eventLocation?.trim() || undefined,
+    eventDescription: input.eventDescription?.trim() || undefined,
     startTimezone,
     recurrenceRule,
     recurrenceDates,
     excludedDates,
     eventStartAtMs,
+    eventEndAtMs,
     nextEventStartAtMs,
     leadMinutes,
     leadLabel: input.leadLabel,
@@ -558,11 +596,13 @@ async function syncQueuedReminderMutations(accountId: string) {
             eventUid: mutation.payload.eventUid,
             eventTitle: mutation.payload.eventTitle,
             eventLocation: mutation.payload.eventLocation,
+            eventDescription: mutation.payload.eventDescription,
             startTimezone: mutation.payload.startTimezone,
             recurrenceRule: mutation.payload.recurrenceRule,
             recurrenceDates: mutation.payload.recurrenceDates,
             excludedDates: mutation.payload.excludedDates,
             eventStartAtMs: mutation.payload.eventStartAtMs,
+            eventEndAtMs: mutation.payload.eventEndAtMs,
             leadMinutes: mutation.payload.leadMinutes,
             leadLabel: mutation.payload.leadLabel
           })
@@ -652,11 +692,13 @@ export async function upsertCalendarReminder(
       eventUid: local.reminder.eventUid,
       eventTitle: local.reminder.eventTitle,
       eventLocation: local.reminder.eventLocation,
+      eventDescription: local.reminder.eventDescription,
       startTimezone: local.reminder.startTimezone,
       recurrenceRule: local.reminder.recurrenceRule,
       recurrenceDates: local.reminder.recurrenceDates,
       excludedDates: local.reminder.excludedDates,
       eventStartAtMs: local.reminder.eventStartAtMs,
+      eventEndAtMs: local.reminder.eventEndAtMs,
       leadMinutes: local.reminder.leadMinutes,
       leadLabel: local.reminder.leadLabel
     }
