@@ -5,7 +5,8 @@ const nextConfig: NextConfig = {
   typedRoutes: false,
   images: {
     qualities: [75, 85]
-  }
+  },
+  serverExternalPackages: ['rrule']
 };
 
 export default nextConfig;
