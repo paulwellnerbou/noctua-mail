@@ -35,7 +35,8 @@ jobs:
         env:
           REGISTRY: ghcr.io
           IMAGE_NAME: ${{ github.repository }}
-          IMAGE_TAG: ${{ github.ref_name }}-${{ github.sha }}
+          # Use short SHA (7 chars) to match docker/metadata-action output
+          IMAGE_TAG: ${{ github.ref_name }}-${GITHUB_SHA::7}
         run: |
           ssh ${{ secrets.VPS_USER }}@${{ secrets.VPS_HOST }} \
             "DEPLOY_PATH=${{ secrets.DEPLOY_PATH }} \

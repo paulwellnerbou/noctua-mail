@@ -243,7 +243,6 @@ export default function MailClient() {
   const [threadsEnabled, setThreadsEnabled] = useState(true);
   const [showJson, setShowJson] = useState(false);
   const [omitBody, setOmitBody] = useState(true);
-  const [copyOk, setCopyOk] = useState(false);
   const [collapsedMessages, setCollapsedMessages] = useState<Record<string, boolean>>({});
   const [messageFontScale, setMessageFontScale] = useState<Record<string, number>>({});
   const [authState, setAuthState] = useState<"loading" | "ok" | "unauth">("loading");
@@ -6595,10 +6594,8 @@ export default function MailClient() {
         open={showJson}
         omitBody={omitBody}
         jsonPayload={jsonPayload}
-        copyOk={copyOk}
         onClose={() => setShowJson(false)}
         onToggleOmitBody={() => setOmitBody((value) => !value)}
-        onCopyOk={setCopyOk}
       />
       <BottomStatusBar
         isSyncing={isSyncing}

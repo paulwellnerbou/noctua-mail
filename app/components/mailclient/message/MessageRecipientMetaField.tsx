@@ -26,9 +26,12 @@ export default function MessageRecipientMetaField({
 }: MessageRecipientMetaFieldProps) {
   const [expanded, setExpanded] = useState(false);
   const [copyOk, setCopyOk] = useState(false);
+  const [hasOverflow, setHasOverflow] = useState(false);
   const resetTimerRef = useRef<number | null>(null);
+  const valueRef = useRef<HTMLSpanElement | null>(null);
   const text = value ?? "";
   const normalizedCopyValue = copyValue?.trim() ?? "";
+  const shouldMeasureOverflow = expandable && text.length > expandThreshold;
 
   useEffect(
     () => () => {
@@ -39,11 +42,42 @@ export default function MessageRecipientMetaField({
     []
   );
 
-  if (hideWhenEmpty && !text.trim()) return null;
-
-  const canToggle = expandable && text.length > expandThreshold;
   const hasCopy = normalizedCopyValue.length > 0;
+  const canToggle = shouldMeasureOverflow && (expanded || hasOverflow);
   const copyActive = copyOk;
+
+  useEffect(() => {
+    if (!shouldMeasureOverflow) return;
+
+    const node = valueRef.current;
+    if (!node) return;
+
+    const measureOverflow = () => {
+      // Use hidden content deltas directly; line-height math is prone to rounding false positives.
+      const hiddenHeight = node.scrollHeight - node.clientHeight;
+      const hiddenWidth = node.scrollWidth - node.clientWidth;
+      setHasOverflow(hiddenHeight > 2 || hiddenWidth > 2);
+    };
+
+    const frameId = window.requestAnimationFrame(measureOverflow);
+
+    if (typeof ResizeObserver === "undefined") {
+      window.addEventListener("resize", measureOverflow);
+      return () => {
+        window.cancelAnimationFrame(frameId);
+        window.removeEventListener("resize", measureOverflow);
+      };
+    }
+
+    const observer = new ResizeObserver(measureOverflow);
+    observer.observe(node);
+    return () => {
+      window.cancelAnimationFrame(frameId);
+      observer.disconnect();
+    };
+  }, [hasCopy, shouldMeasureOverflow, text]);
+
+  if (hideWhenEmpty && !text.trim()) return null;
 
   const handleCopy = async () => {
     if (!hasCopy) return;
@@ -64,6 +98,7 @@ export default function MessageRecipientMetaField({
 
   const valueNode = (
     <span
+      ref={valueRef}
       className={[
         styles.metaValue,
         variant === "line" ? styles.toValue : "",

@@ -1,0 +1,60 @@
+.block {
+  position: relative;
+  background: var(--gray-2);
+  border: 1px solid var(--gray-5);
+  border-radius: var(--radius-3);
+  padding: var(--space-3);
+  padding-right: calc(var(--space-3) + 28px);
+  max-height: 55vh;
+  overflow: auto;
+}
+
+.view {
+  font-size: 11px;
+  line-height: 1.4;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  margin: 0;
+  color: var(--gray-12);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New",
+    monospace;
+}
+
+.copyButton {
+  position: absolute;
+  top: var(--space-2);
+  right: var(--space-2);
+}
+
+.copyOk {
+  color: var(--green-11);
+}
+
+.fields {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: var(--space-2);
+}
+
+.fieldRow {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: start;
+  gap: 8px;
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.fieldLabel {
+  color: var(--gray-11);
+  font-weight: 600;
+}
+
+.fieldValue {
+  color: var(--gray-12);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New",
+    monospace;
+  word-break: break-all;
+}

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { AlarmClockPlus, CalendarDays, Clock, MapPin, Trash2 } from "lucide-react";
+import { AlarmClockPlus, CalendarDays, Clock, Info, MapPin, Trash2 } from "lucide-react";
 import { Badge, Button, Dialog, Flex, IconButton, Select, Text } from "@radix-ui/themes";
 import type { Attachment } from "@/lib/data";
 import {
@@ -19,6 +19,8 @@ import {
   getCalendarReminderLeadOption,
   upsertCalendarReminder
 } from "../utils/calendarReminders";
+import DialogTitleBar from "./DialogTitleBar";
+import RawTextPanel from "./RawTextPanel";
 import styles from "./CalendarEventPreview.module.css";
 
 function readDataUrl(dataUrl: string) {
@@ -42,15 +44,26 @@ function readDataUrl(dataUrl: string) {
 
 function formatEventDate(date?: Date, allDay = false, timezone?: string) {
   if (!date) return "";
+  const dateOptions: Intl.DateTimeFormatOptions = {
+    weekday: "short",
+    year: "numeric",
+    month: "short",
+    day: "numeric"
+  };
   const options: Intl.DateTimeFormatOptions = allDay
-    ? { dateStyle: "medium", timeZone: "UTC" }
-    : { dateStyle: "medium", timeStyle: "short", ...(timezone ? { timeZone: timezone } : {}) };
+    ? { ...dateOptions, timeZone: "UTC" }
+    : {
+        ...dateOptions,
+        hour: "numeric",
+        minute: "2-digit",
+        ...(timezone ? { timeZone: timezone } : {})
+      };
   try {
     return new Intl.DateTimeFormat(undefined, options).format(date);
   } catch {
     const fallbackOptions: Intl.DateTimeFormatOptions = allDay
-      ? { dateStyle: "medium" }
-      : { dateStyle: "medium", timeStyle: "short" };
+      ? dateOptions
+      : { ...dateOptions, hour: "numeric", minute: "2-digit" };
     return new Intl.DateTimeFormat(undefined, fallbackOptions).format(date);
   }
 }
@@ -74,6 +87,69 @@ function parseHttpUrl(value?: string) {
   } catch {
     return null;
   }
+}
+
+function normalizeLineEndings(value: string) {
+  return value.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+}
+
+function extractIcsUid(rawSource: string) {
+  if (!rawSource) return "";
+  const unfolded = normalizeLineEndings(rawSource).replace(/\n[ \t]/g, "");
+  const lines = unfolded.split("\n");
+  for (const line of lines) {
+    const separator = line.indexOf(":");
+    if (separator < 0) continue;
+    const key = line.slice(0, separator).trim().toUpperCase();
+    if (key !== "UID" && !key.startsWith("UID;")) continue;
+    const uid = line.slice(separator + 1).trim();
+    if (uid) return uid;
+  }
+  return "";
+}
+
+type EventGroupKey = "today" | "tomorrow" | "thisWeek" | "later";
+
+const EVENT_GROUP_ORDER: EventGroupKey[] = ["today", "tomorrow", "thisWeek", "later"];
+const EVENT_GROUP_LABELS: Record<EventGroupKey, string> = {
+  today: "Today",
+  tomorrow: "Tomorrow",
+  thisWeek: "This Week",
+  later: "Later"
+};
+
+function startOfLocalDay(date: Date) {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate());
+}
+
+function addLocalDays(date: Date, days: number) {
+  const next = new Date(date);
+  next.setDate(next.getDate() + days);
+  return next;
+}
+
+function resolveEventGroup(
+  event: CalendarEventPreview,
+  boundaries: {
+    todayStartMs: number;
+    tomorrowStartMs: number;
+    dayAfterTomorrowStartMs: number;
+    nextWeekStartMs: number;
+  }
+): EventGroupKey {
+  const startMs = event.start?.getTime();
+  if (!Number.isFinite(startMs)) return "later";
+  const safeStartMs = Number(startMs);
+  if (safeStartMs >= boundaries.todayStartMs && safeStartMs < boundaries.tomorrowStartMs) {
+    return "today";
+  }
+  if (safeStartMs >= boundaries.tomorrowStartMs && safeStartMs < boundaries.dayAfterTomorrowStartMs) {
+    return "tomorrow";
+  }
+  if (safeStartMs >= boundaries.dayAfterTomorrowStartMs && safeStartMs < boundaries.nextWeekStartMs) {
+    return "thisWeek";
+  }
+  return "later";
 }
 
 function formatReminderTrigger(date: Date) {
@@ -133,10 +209,12 @@ export default function CalendarEventPreview({
   const [result, setResult] = useState<{
     attachmentId: string;
     events: CalendarEventPreview[];
+    rawSource: string;
     error: boolean;
   }>({
     attachmentId: "",
     events: [],
+    rawSource: "",
     error: false
   });
   const [reminderModal, setReminderModal] = useState<ReminderModalState | null>(null);
@@ -146,6 +224,7 @@ export default function CalendarEventPreview({
   const [pendingReminders, setPendingReminders] = useState<CalendarReminder[]>([]);
   const [reminderNotice, setReminderNotice] = useState<string | null>(null);
   const [savingReminder, setSavingReminder] = useState(false);
+  const [rawIcsOpen, setRawIcsOpen] = useState(false);
 
   const refreshPendingReminders = useCallback(async () => {
     if (!accountId.trim()) {
@@ -175,6 +254,7 @@ export default function CalendarEventPreview({
         setResult({
           attachmentId: attachment.id,
           events: parsed,
+          rawSource: source,
           error: parsed.length === 0
         });
       } catch {
@@ -182,6 +262,7 @@ export default function CalendarEventPreview({
         setResult({
           attachmentId: attachment.id,
           events: [],
+          rawSource: "",
           error: true
         });
       }
@@ -212,11 +293,54 @@ export default function CalendarEventPreview({
     };
   }, [refreshPendingReminders]);
 
-  if (!attachment) return null;
-  const hasCurrentResult = result.attachmentId === attachment.id;
+  const hasCurrentResult = Boolean(attachment && result.attachmentId === attachment.id);
   const events = hasCurrentResult ? result.events : [];
+  const rawSource = hasCurrentResult ? result.rawSource : "";
+  const normalizedRawSource = normalizeLineEndings(rawSource);
+  const canViewRawIcs = normalizedRawSource.trim().length > 0;
+  const rawIcsUid =
+    events.find((event) => (event.uid ?? "").trim().length > 0)?.uid?.trim() ??
+    extractIcsUid(normalizedRawSource);
+  const groupedEvents = useMemo(() => {
+    const now = new Date();
+    const todayStart = startOfLocalDay(now);
+    const tomorrowStart = addLocalDays(todayStart, 1);
+    const dayAfterTomorrowStart = addLocalDays(todayStart, 2);
+    const nextWeekStart = addLocalDays(todayStart, 7);
+    const boundaries = {
+      todayStartMs: todayStart.getTime(),
+      tomorrowStartMs: tomorrowStart.getTime(),
+      dayAfterTomorrowStartMs: dayAfterTomorrowStart.getTime(),
+      nextWeekStartMs: nextWeekStart.getTime()
+    };
+    const buckets: Record<EventGroupKey, Array<{ event: CalendarEventPreview; index: number }>> = {
+      today: [],
+      tomorrow: [],
+      thisWeek: [],
+      later: []
+    };
+    const sourceEvents = hasCurrentResult ? result.events : [];
+    const orderedEvents = sourceEvents
+      .map((event, index) => ({ event, index }))
+      .sort((left, right) => {
+        const leftStart = left.event.start?.getTime() ?? Number.POSITIVE_INFINITY;
+        const rightStart = right.event.start?.getTime() ?? Number.POSITIVE_INFINITY;
+        return leftStart - rightStart;
+      });
+    orderedEvents.forEach((entry) => {
+      const group = resolveEventGroup(entry.event, boundaries);
+      buckets[group].push(entry);
+    });
+    return EVENT_GROUP_ORDER.map((group) => ({
+      group,
+      label: EVENT_GROUP_LABELS[group],
+      items: buckets[group]
+    })).filter((bucket) => bucket.items.length > 0);
+  }, [hasCurrentResult, result.events]);
   const loading = !hasCurrentResult;
   const hasError = hasCurrentResult && result.error;
+
+  if (!attachment) return null;
 
   const downloadFilename = (() => {
     const name = attachment.filename || "invite.ics";
@@ -324,110 +448,153 @@ export default function CalendarEventPreview({
           <CalendarDays size={14} />
           <span>Calendar Event</span>
         </div>
-        <a
-          href={attachment.url ?? attachment.dataUrl ?? "#"}
-          style={{ textDecoration: "none" }}
-          onClick={(event) => {
-            if (!attachment.url && !attachment.dataUrl) {
-              event.preventDefault();
-            }
-          }}
-        >
-          <Badge size="1" variant="soft" color="indigo" style={{ cursor: "pointer" }}>
-            {downloadFilename}
-          </Badge>
-        </a>
+        <Flex align="center" gap="2" className={styles.attachmentControls}>
+          <a
+            className={styles.attachmentLink}
+            href={attachment.url ?? attachment.dataUrl ?? "#"}
+            onClick={(event) => {
+              if (!attachment.url && !attachment.dataUrl) {
+                event.preventDefault();
+              }
+            }}
+          >
+            <Badge size="1" variant="soft" color="indigo" className={styles.attachmentBadge}>
+              {downloadFilename}
+            </Badge>
+          </a>
+          <Dialog.Root open={rawIcsOpen} onOpenChange={setRawIcsOpen}>
+            <Dialog.Trigger asChild>
+              <IconButton
+                size="1"
+                variant="soft"
+                color="gray"
+                className={styles.infoButton}
+                title="Show raw ICS content"
+                aria-label="Show raw ICS content"
+                disabled={!canViewRawIcs}
+              >
+                <Info size={12} />
+              </IconButton>
+            </Dialog.Trigger>
+            <Dialog.Content size="4" className={styles.rawIcsDialog}>
+              <Flex direction="column" gap="3">
+                <DialogTitleBar title="Raw ICS Content" onClose={() => setRawIcsOpen(false)} />
+                <Text size="2" color="gray">
+                  {downloadFilename}
+                </Text>
+                {rawIcsUid ? (
+                  <div className={styles.uidRow}>
+                    <span className={styles.uidLabel}>UID</span>
+                    <span className={styles.uidValue}>{rawIcsUid}</span>
+                  </div>
+                ) : null}
+                <RawTextPanel
+                  text={canViewRawIcs ? normalizedRawSource : ""}
+                  copyText={canViewRawIcs ? normalizedRawSource : ""}
+                  copyLabel="Copy ICS"
+                  emptyText="Raw ICS content is unavailable."
+                  className={styles.rawIcsPanel}
+                />
+              </Flex>
+            </Dialog.Content>
+          </Dialog.Root>
+        </Flex>
       </div>
       {loading ? (
         <p className={styles.meta}>Loading event preview…</p>
       ) : hasError || events.length === 0 ? (
         <p className={styles.meta}>Could not parse calendar event details.</p>
       ) : (
-        <div className={styles.eventList}>
-          {events.slice(0, 3).map((event, index) => {
-            const dateRange = formatDateRange(event);
-            const recurrenceSummary = buildCalendarRecurrenceSummary(event);
-            const locationUrl = parseHttpUrl(event.location);
-            const reminderKey = event.uid ?? `${attachment.id}-${index}`;
-            const hasStartTime = Boolean(event.start);
-            const canScheduleReminder = canScheduleReminderForEvent(event);
-            const eventReminder =
-              event.start
-                ? findActiveCalendarReminderForEvent(pendingReminders, {
-                    eventUid: event.uid,
-                    eventTitle: event.summary || "Calendar event",
-                    eventStartAtMs: event.start.getTime()
-                  })
-                : null;
-            return (
-              <article key={reminderKey} className={styles.event}>
-                <h5 className={styles.eventTitle}>{event.summary || "Untitled Event"}</h5>
-                {dateRange ? (
-                  <div className={styles.metaRow}>
-                    <Clock size={12} />
-                    <span>{dateRange}</span>
-                  </div>
-                ) : null}
-                {event.location ? (
-                  <div className={styles.metaRow}>
-                    <MapPin size={12} />
-                    {locationUrl ? (
-                      <a className={styles.locationLink} href={locationUrl} target="_blank" rel="noreferrer">
-                        {event.location}
-                      </a>
-                    ) : (
-                      <span>{event.location}</span>
-                    )}
-                  </div>
-                ) : null}
-                {event.organizer ? <p className={styles.meta}>Organizer: {event.organizer}</p> : null}
-                {recurrenceSummary ? <p className={styles.meta}>Repeats: {recurrenceSummary}</p> : null}
-                {eventReminder ? (
-                  <p className={styles.reminderMeta}>
-                    Reminder: {eventReminder.leadLabel} ({formatReminderTrigger(new Date(eventReminder.triggerAtMs))})
-                  </p>
-                ) : null}
-                <div className={styles.actions}>
-                  <Button
-                    size="1"
-                    variant="soft"
-                    color="indigo"
-                    className={styles.reminderButton}
-                    onClick={() => openReminderModal(event)}
-                    disabled={!canScheduleReminder}
-                    title={
-                      !hasStartTime
-                        ? "No event start time available"
-                        : !canScheduleReminder
-                          ? "Past events cannot be scheduled"
-                          : "Schedule reminder"
-                    }
-                  >
-                    <AlarmClockPlus size={14} />
-                    {eventReminder ? "Modify Reminder" : "Schedule Reminder"}
-                  </Button>
-                  {eventReminder ? (
-                    <IconButton
-                      size="1"
-                      variant="soft"
-                      color="gray"
-                      className={styles.deleteReminderButton}
-                      title="Delete reminder"
-                      aria-label="Delete reminder"
-                      onClick={() => {
-                        void removeReminder(event);
-                      }}
-                    >
-                      <Trash2 size={14} />
-                    </IconButton>
-                  ) : null}
-                </div>
-              </article>
-            );
-          })}
-          {events.length > 3 ? (
-            <p className={styles.meta}>+{events.length - 3} more events in attachment</p>
-          ) : null}
+        <div className={styles.eventGroups}>
+          {groupedEvents.map((bucket) => (
+            <section key={bucket.group} className={styles.eventGroup}>
+              <p className={styles.groupLabel}>{bucket.label}</p>
+              <div className={styles.eventList}>
+                {bucket.items.map(({ event, index }) => {
+                  const dateRange = formatDateRange(event);
+                  const recurrenceSummary = buildCalendarRecurrenceSummary(event);
+                  const locationUrl = parseHttpUrl(event.location);
+                  const reminderKey = event.uid ?? `${attachment.id}-${index}`;
+                  const hasStartTime = Boolean(event.start);
+                  const canScheduleReminder = canScheduleReminderForEvent(event);
+                  const eventReminder =
+                    event.start
+                      ? findActiveCalendarReminderForEvent(pendingReminders, {
+                          eventUid: event.uid,
+                          eventTitle: event.summary || "Calendar event",
+                          eventStartAtMs: event.start.getTime()
+                        })
+                      : null;
+                  return (
+                    <article key={reminderKey} className={styles.event}>
+                      <h5 className={styles.eventTitle}>{event.summary || "Untitled Event"}</h5>
+                      {dateRange ? (
+                        <div className={styles.metaRow}>
+                          <Clock size={12} />
+                          <span>{dateRange}</span>
+                        </div>
+                      ) : null}
+                      {event.location ? (
+                        <div className={styles.metaRow}>
+                          <MapPin size={12} />
+                          {locationUrl ? (
+                            <a className={styles.locationLink} href={locationUrl} target="_blank" rel="noreferrer">
+                              {event.location}
+                            </a>
+                          ) : (
+                            <span>{event.location}</span>
+                          )}
+                        </div>
+                      ) : null}
+                      {event.organizer ? <p className={styles.meta}>Organizer: {event.organizer}</p> : null}
+                      {recurrenceSummary ? <p className={styles.meta}>Repeats: {recurrenceSummary}</p> : null}
+                      {eventReminder ? (
+                        <p className={styles.reminderMeta}>
+                          Reminder: {eventReminder.leadLabel} (
+                          {formatReminderTrigger(new Date(eventReminder.triggerAtMs))})
+                        </p>
+                      ) : null}
+                      <div className={styles.actions}>
+                        <Button
+                          size="1"
+                          variant="soft"
+                          color="indigo"
+                          className={styles.reminderButton}
+                          onClick={() => openReminderModal(event)}
+                          disabled={!canScheduleReminder}
+                          title={
+                            !hasStartTime
+                              ? "No event start time available"
+                              : !canScheduleReminder
+                                ? "Past events cannot be scheduled"
+                                : "Schedule reminder"
+                          }
+                        >
+                          <AlarmClockPlus size={14} />
+                          {eventReminder ? "Modify Reminder" : "Schedule Reminder"}
+                        </Button>
+                        {eventReminder ? (
+                          <IconButton
+                            size="1"
+                            variant="soft"
+                            color="gray"
+                            className={styles.deleteReminderButton}
+                            title="Delete reminder"
+                            aria-label="Delete reminder"
+                            onClick={() => {
+                              void removeReminder(event);
+                            }}
+                          >
+                            <Trash2 size={14} />
+                          </IconButton>
+                        ) : null}
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
+            </section>
+          ))}
         </div>
       )}
       {reminderNotice ? <p className={styles.notice}>{reminderNotice}</p> : null}

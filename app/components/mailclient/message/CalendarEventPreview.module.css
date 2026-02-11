@@ -16,6 +16,29 @@
   gap: var(--space-2);
 }
 
+.attachmentControls {
+  flex-shrink: 0;
+  --attachment-control-height: 26px;
+}
+
+.attachmentLink {
+  text-decoration: none;
+}
+
+.attachmentBadge {
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  min-height: var(--attachment-control-height);
+  line-height: 1;
+}
+
+.infoButton {
+  flex-shrink: 0;
+  width: var(--attachment-control-height);
+  height: var(--attachment-control-height);
+}
+
 .title {
   display: inline-flex;
   align-items: center;
@@ -29,6 +52,27 @@
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
+}
+
+.eventGroups {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.eventGroup {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+.groupLabel {
+  margin: 0;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--gray-11);
 }
 
 .event {
@@ -99,4 +143,36 @@
 
 .reminderDialog {
   width: min(420px, 92vw);
+}
+
+.rawIcsDialog.rawIcsDialog {
+  width: min(1320px, 99vw);
+  max-width: min(1320px, 99vw);
+}
+
+.uidRow {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 8px;
+  align-items: start;
+}
+
+.uidLabel {
+  font-size: 12px;
+  line-height: 1.4;
+  font-weight: 600;
+  color: var(--gray-11);
+}
+
+.uidValue {
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--gray-12);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New",
+    monospace;
+  word-break: break-all;
+}
+
+.rawIcsPanel {
+  max-height: min(68vh, 560px);
 }
