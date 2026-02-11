@@ -695,7 +695,7 @@ export default function AccountSettingsModal({
                       Performance
                     </Text>
                     <Text size="1" color="gray">
-                      Controls IMAP polling and how many folders stay on IDLE.
+                      Controls IMAP polling cadence and how many folders stay on IDLE.
                     </Text>
                     <Grid columns="2" gap="3">
                       <Field
@@ -719,8 +719,29 @@ export default function AccountSettingsModal({
                         />
                       </Field>
                       <Field
-                        label="Poll interval (ms)"
-                        hint="Frequency for background folder status checks."
+                        label="Background folder poll (ms)"
+                        hint="How often non-INBOX folders are checked for updates."
+                      >
+                        <TextField.Root
+                          type="number"
+                          min={10000}
+                          step={1000}
+                          placeholder="Default: 900000"
+                          value={editingAccount.settings?.sync?.backgroundPollIntervalMs ?? ""}
+                          onChange={(event) => {
+                            const value = event.target.value;
+                            onUpdateSettings({
+                              sync: {
+                                ...(editingAccount.settings?.sync ?? {}),
+                                backgroundPollIntervalMs: value === "" ? undefined : Number(value)
+                              }
+                            });
+                          }}
+                        />
+                      </Field>
+                      <Field
+                        label="INBOX poll fallback (ms)"
+                        hint="Used when stream/IDLE is unavailable (e.g. hidden tab/network issues)."
                       >
                         <TextField.Root
                           type="number"

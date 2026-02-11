@@ -35,8 +35,8 @@ export async function POST(request: Request) {
   const nextStoredPassword = shouldStorePasswordInDb() ? password : "";
   if (account.imap.password !== nextStoredPassword || account.smtp.password !== nextStoredPassword) {
     await patchAccount(account.id, {
-      imap: { password: nextStoredPassword },
-      smtp: { password: nextStoredPassword }
+      imap: { ...account.imap, password: nextStoredPassword },
+      smtp: { ...account.smtp, password: nextStoredPassword }
     });
     account = {
       ...account,

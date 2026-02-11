@@ -26,6 +26,7 @@ export type AccountDateFormat = "locale" | "mdy" | "dmy" | "ymd";
 export type AccountSettings = {
   sync?: {
     maxIdleSessions?: number;
+    backgroundPollIntervalMs?: number;
     pollIntervalMs?: number;
   };
   threading?: {

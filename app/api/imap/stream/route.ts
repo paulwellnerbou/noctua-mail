@@ -11,7 +11,7 @@ type EnvelopeAddress = { name?: string | null; mailbox?: string | null; host?: s
 type Envelope = { subject?: string | null; from?: EnvelopeAddress[] | null; date?: Date | null; messageId?: string | null };
 
 const DEFAULT_MAX_IDLE = 3;
-const DEFAULT_POLL_INTERVAL = 300_000; // 5 minutes
+const DEFAULT_BACKGROUND_POLL_INTERVAL = 900_000; // 15 minutes
 
 function formatAddress(addresses?: EnvelopeAddress[] | null) {
   if (!addresses || addresses.length === 0) return "";
@@ -48,9 +48,11 @@ export async function GET(request: Request) {
     account?.settings?.sync?.maxIdleSessions ||
     DEFAULT_MAX_IDLE;
   const pollIntervalMs =
+    Number(searchParams.get("backgroundPollIntervalMs")) ||
     Number(searchParams.get("pollIntervalMs")) ||
+    account?.settings?.sync?.backgroundPollIntervalMs ||
     account?.settings?.sync?.pollIntervalMs ||
-    DEFAULT_POLL_INTERVAL;
+    DEFAULT_BACKGROUND_POLL_INTERVAL;
 
   const folders = await getFolders(accountId);
   const inboxFolder =
