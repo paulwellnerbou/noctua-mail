@@ -1547,12 +1547,6 @@ a {
   white-space: nowrap;
 }
 
-.reminder-group-line {
-  flex: 1;
-  height: 1px;
-  background: var(--gray-5);
-}
-
 .reminder-list {
   display: flex;
   flex-direction: column;
@@ -1561,15 +1555,13 @@ a {
 
 .reminder-item-card {
   padding: 10px 12px;
-  transition: transform 0.2s ease, box-shadow 0.2s ease;
+  transition: background-color 0.2s ease, border-color 0.2s ease;
   border: 1px solid transparent;
 }
 
 .reminder-item-card:hover {
-  transform: translateY(-1px);
-  box-shadow: var(--shadow-2);
-  border-color: var(--gray-5);
-  background: var(--gray-2);
+  background: var(--list-row-hover-bg);
+  border-color: var(--list-row-hover-border);
 }
 
 .reminder-open-button {
@@ -1596,10 +1588,6 @@ a {
   border-radius: var(--radius-sm);
 }
 
-.reminder-open-button.interactive:hover .reminder-item-title {
-  color: var(--accent-9);
-}
-
 .reminder-item-main {
   min-width: 0;
 }
@@ -1607,6 +1595,7 @@ a {
 .reminder-item-title {
   line-height: 1.3;
   color: var(--gray-12);
+  transition: color 0.2s ease;
 }
 
 .reminder-meta-row {

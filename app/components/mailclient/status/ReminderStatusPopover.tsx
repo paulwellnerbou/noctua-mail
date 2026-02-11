@@ -43,7 +43,7 @@ export default function ReminderStatusPopover({
   const upcomingReminders = pendingCalendarReminders;
   const nextReminder = upcomingReminders[0] ?? null;
   const reminderCount = upcomingReminders.length;
-  // const reminderHeading = `${reminderCount} Reminder${reminderCount === 1 ? "" : "s"}`;
+  const reminderHeading = `${reminderCount} Reminder${reminderCount === 1 ? "" : "s"}`;
   const remindersStatusValue = (() => {
     if (!nextReminder) return "None";
     const reminderTitle = nextReminder.eventTitle || "Calendar event";
@@ -118,10 +118,9 @@ export default function ReminderStatusPopover({
               {groupedReminders.map((group) => (
                 <section key={group.key} className="reminder-group">
                   <div className="reminder-group-header">
-                    <Text size="1" weight="medium" className="reminder-group-label" color="indigo">
+                    <Text size="1" weight="medium" className="reminder-group-label">
                       {group.label}
                     </Text>
-                    <div className="reminder-group-line" />
                   </div>
                   <div className="reminder-list">
                     {group.items.map((reminder) => {
@@ -147,29 +146,27 @@ export default function ReminderStatusPopover({
                               title={reminder.messageId ? "Open source mail" : undefined}
                               aria-label={reminder.messageId ? "Open source mail" : undefined}
                             >
-                              <Flex direction="column" gap="2" className="reminder-item-main">
+                              <Flex direction="column" gap="1" className="reminder-item-main">
                                 <Text as="div" size="2" weight="medium" className="reminder-item-title">
                                   {reminder.eventTitle}
                                 </Text>
-                                <Flex direction="column" gap="1">
-                                    <Flex align="center" gap="2" className="reminder-meta-row">
-                                        <Clock size={12} className="reminder-icon" />
-                                        <Text size="1" color="gray">
-                                            {formatEventStartTime(startAtMs)}
-                                        </Text>
-                                        <Badge color="orange" variant="surface" size="1">
-                                            {reminder.leadLabel} before
-                                        </Badge>
-                                    </Flex>
-                                    {reminder.eventLocation && (
-                                    <Flex align="center" gap="2" className="reminder-meta-row">
-                                        <MapPin size={12} className="reminder-icon" />
-                                        <Text size="1" color="gray">
-                                        {reminder.eventLocation}
-                                        </Text>
-                                    </Flex>
-                                    )}
+                                <Flex align="center" gap="1" className="reminder-meta-row" wrap="wrap">
+                                    <Clock size={12} className="reminder-icon" />
+                                    <Text size="1" weight="bold" color="gray" highContrast>
+                                        {formatEventStartTime(startAtMs)}
+                                    </Text>
+                                    <Text size="1" color="gray">
+                                        (Reminder: {reminder.leadLabel} before)
+                                    </Text>
                                 </Flex>
+                                {reminder.eventLocation && (
+                                <Flex align="center" gap="1" className="reminder-meta-row">
+                                    <MapPin size={12} className="reminder-icon" />
+                                    <Text size="1" color="gray">
+                                    {reminder.eventLocation}
+                                    </Text>
+                                </Flex>
+                                )}
                               </Flex>
                             </button>
                             <IconButton

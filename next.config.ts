@@ -7,7 +7,8 @@ const nextConfig: NextConfig = {
     qualities: [75, 85]
   },
   // Ensure these packages are included in standalone build
-  serverExternalPackages: ['rrule']
+  // (dynamic imports aren't detected by Turbopack)
+  serverExternalPackages: ['rrule', 'imapflow', 'mailparser', 'nodemailer']
 };
 
 export default nextConfig;
