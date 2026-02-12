@@ -127,6 +127,10 @@ import {
   extractEmails
 } from "./mailclient/utils/clientHelpers";
 import {
+  mergeLoadedMessageCount,
+  resolveLoadedMessageCount
+} from "./mailclient/utils/listCount";
+import {
   CALENDAR_REMINDERS_UPDATED_EVENT,
   type CalendarReminder,
   fetchCalendarReminders,
@@ -140,6 +144,7 @@ import {
 import {
   CALENDAR_REMINDER_REFRESH_INTERVAL_MS,
   NOTICE_TIMEOUTS,
+  SYNC_STATUS_POLL_MAX_INTERVAL_MS,
   THREAD_COLLAPSE_SETTLE_MS,
   SYNC_STATUS_POLL_INTERVAL_MS
 } from "./mailclient/constants";
@@ -173,6 +178,7 @@ type DraftSavePayload = {
 };
 
 const LIST_DEBUG_SAMPLE_LIMIT = 12;
+const LOCAL_DELETE_RECONCILE_SUPPRESS_MS = 15_000;
 
 type CurrentResultDecision = { keep: true } | { keep: false; reason: string };
 
@@ -340,6 +346,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
   const listPaneRef = useRef<HTMLDivElement | null>(null);
   const [messagesPage, setMessagesPage] = useState(1);
   const [hasMoreMessages, setHasMoreMessages] = useState(true);
+  const [loadedMessageCount, setLoadedMessageCount] = useState(0);
   const [totalMessages, setTotalMessages] = useState<number | null>(null);
   const [loadingMessages, setLoadingMessages] = useState(false);
   const [refreshingMessages, setRefreshingMessages] = useState(false);
@@ -415,6 +422,8 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
   const autoHydrationInFlightRef = useRef<Map<string, Promise<boolean>>>(new Map());
   const autoHydrationAttemptAtRef = useRef<Record<string, number>>({});
   const lastDeleteReconcileAtRef = useRef<Record<string, number>>({});
+  const localDeleteReconcileByFolderRef = useRef<Record<string, number>>({});
+  const localDeleteReconcileByUidRef = useRef<Record<string, number>>({});
   const messageMutationVersionRef = useRef(0);
   const listReplacementLogFingerprintRef = useRef("");
   const duplicateMessageIdLogFingerprintRef = useRef("");
@@ -1159,7 +1168,6 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
   }, [activeAccountId, messages]);
 
   const filteredMessages = accountMessages;
-  const loadedMessageCount = filteredMessages.length;
   const hasLoadedMessages = filteredMessages.length > 0;
 
   const sortedMessages = useMemo(() => {
@@ -1760,6 +1768,23 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
   const markMessagesMutated = useCallback(() => {
     messageMutationVersionRef.current += 1;
   }, []);
+  const markDeleteReconcileSuppression = useCallback((targets: Message[]) => {
+    if (targets.length === 0) return;
+    const expiresAt = Date.now() + LOCAL_DELETE_RECONCILE_SUPPRESS_MS;
+    targets.forEach((target) => {
+      if (!target.folderId) return;
+      const folderExpiry = localDeleteReconcileByFolderRef.current[target.folderId] ?? 0;
+      if (expiresAt > folderExpiry) {
+        localDeleteReconcileByFolderRef.current[target.folderId] = expiresAt;
+      }
+      if (typeof target.imapUid !== "number" || !Number.isFinite(target.imapUid)) return;
+      const key = `${target.folderId}:${target.imapUid}`;
+      const uidExpiry = localDeleteReconcileByUidRef.current[key] ?? 0;
+      if (expiresAt > uidExpiry) {
+        localDeleteReconcileByUidRef.current[key] = expiresAt;
+      }
+    });
+  }, []);
   const {
     threadScopeMessages,
     groupedMessages,
@@ -1776,6 +1801,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     groupMeta,
     isFlaggedMessage,
     computeGroupMeta,
+    includeFlaggedGroup: !(searchScope === "folder" && isTrashFolder(activeFolderId)),
     collapsedGroups,
     collapsedThreads,
     includeThreadAcrossFolders,
@@ -3124,17 +3150,40 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     undoMoveOperation,
     noticeSuccessTimeout: NOTICE_TIMEOUTS.success,
     onMessagesRemoved: evictMessageCaches,
-    markMessagesMutated
+    markMessagesMutated,
+    markDeleteReconcileSuppression
   });
 
   const getMessageSubjectForNotice = (message?: Message | null) =>
     message?.subject?.trim() || "(no subject)";
+  const remapMovedMessageReferences = (
+    message: Message,
+    previousId: string,
+    nextId: string
+  ): Message => {
+    if (!previousId || !nextId || previousId === nextId) return message;
+    const encodedPrevious = encodeURIComponent(previousId);
+    const encodedNext = encodeURIComponent(nextId);
+    const replaceMessageId = (value?: string) => {
+      if (!value) return value;
+      return value
+        .split(`messageId=${encodedPrevious}`)
+        .join(`messageId=${encodedNext}`)
+        .split(`messageId=${previousId}`)
+        .join(`messageId=${nextId}`);
+    };
+    return {
+      ...message,
+      body: replaceMessageId(message.body) ?? message.body,
+      htmlBody: replaceMessageId(message.htmlBody),
+      attachments: message.attachments?.map((attachment) => ({
+        ...attachment,
+        url: replaceMessageId(attachment.url)
+      }))
+    };
+  };
 
   const handleArchiveMessage = async (message: Message) => {
-    const undoTarget: UndoMoveTarget = {
-      messageId: message.id,
-      restoreFolderId: message.folderId
-    };
     try {
       const res = await apiFetch("/api/message/archive", {
         method: "POST",
@@ -3148,25 +3197,47 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
       const data = (await res.json()) as {
         action: "moved";
         archiveFolderId?: string | null;
+        previousMessageId?: string;
+        messageId?: string;
       };
-      evictMessageCaches([message.id]);
+      const movedMessageId = data.messageId ?? message.id;
+      evictMessageCaches(
+        Array.from(new Set([message.id, movedMessageId]))
+      );
       const shouldKeepArchivedMessage =
         searchScope === "all" &&
         Boolean(data.archiveFolderId) &&
-        shouldKeepMessageInCurrentResults({
-          ...message,
-          folderId: data.archiveFolderId!
-        });
+        shouldKeepMessageInCurrentResults(
+          remapMovedMessageReferences(
+            {
+              ...message,
+              id: movedMessageId,
+              folderId: data.archiveFolderId!
+            },
+            message.id,
+            movedMessageId
+          )
+        );
       updateMessagesWithCurrentResultPrune((item) => {
         if (item.id !== message.id) return item;
         if (searchScope === "all" && data.archiveFolderId) {
-          return { ...item, folderId: data.archiveFolderId! };
+          return remapMovedMessageReferences(
+            { ...item, id: movedMessageId, folderId: data.archiveFolderId! },
+            item.id,
+            movedMessageId
+          );
         }
         return null;
       }, { source: "archive-message" });
       if (activeMessageId === message.id && !shouldKeepArchivedMessage) {
         setActiveMessageId("");
+      } else if (activeMessageId === message.id && movedMessageId !== message.id) {
+        setActiveMessageId(movedMessageId);
       }
+      const undoTarget: UndoMoveTarget = {
+        messageId: movedMessageId,
+        restoreFolderId: message.folderId
+      };
       pushNotice({
         type: "success",
         title: "Message archived.",
@@ -3184,10 +3255,6 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
   };
 
   const handleMarkSpam = async (message: Message) => {
-    const undoTarget: UndoMoveTarget = {
-      messageId: message.id,
-      restoreFolderId: message.folderId
-    };
     setPendingMessageActions((prev) => new Set(prev).add(message.id));
     try {
       const res = await apiFetch("/api/message/spam", {
@@ -3204,29 +3271,44 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
         junkFolderId?: string | null;
         junkMailbox?: string;
         flags?: string[];
+        previousMessageId?: string;
+        messageId?: string;
       };
-      evictMessageCaches([message.id]);
+      const movedMessageId = data.messageId ?? message.id;
+      evictMessageCaches(
+        Array.from(new Set([message.id, movedMessageId]))
+      );
       const movedSpamMessage =
         searchScope === "all" && data.junkFolderId
-          ? applyFlagsToMessage(
-              {
-                ...message,
-                folderId: data.junkFolderId!,
-                mailboxPath: data.junkMailbox ?? message.mailboxPath
-              },
-              data.flags ?? message.flags ?? []
+          ? remapMovedMessageReferences(
+              applyFlagsToMessage(
+                {
+                  ...message,
+                  id: movedMessageId,
+                  folderId: data.junkFolderId!,
+                  mailboxPath: data.junkMailbox ?? message.mailboxPath
+                },
+                data.flags ?? message.flags ?? []
+              ),
+              message.id,
+              movedMessageId
             )
           : null;
       updateMessagesWithCurrentResultPrune((item) => {
         if (item.id !== message.id) return item;
         if (searchScope === "all" && data.junkFolderId) {
-          return applyFlagsToMessage(
-            {
-              ...item,
-              folderId: data.junkFolderId!,
-              mailboxPath: data.junkMailbox ?? item.mailboxPath
-            },
-            data.flags ?? item.flags ?? []
+          return remapMovedMessageReferences(
+            applyFlagsToMessage(
+              {
+                ...item,
+                id: movedMessageId,
+                folderId: data.junkFolderId!,
+                mailboxPath: data.junkMailbox ?? item.mailboxPath
+              },
+              data.flags ?? item.flags ?? []
+            ),
+            item.id,
+            movedMessageId
           );
         }
         return null;
@@ -3236,7 +3318,13 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
         (!movedSpamMessage || !shouldKeepMessageInCurrentResults(movedSpamMessage))
       ) {
         setActiveMessageId("");
+      } else if (activeMessageId === message.id && movedMessageId !== message.id) {
+        setActiveMessageId(movedMessageId);
       }
+      const undoTarget: UndoMoveTarget = {
+        messageId: movedMessageId,
+        restoreFolderId: message.folderId
+      };
       pushNotice({
         type: "success",
         title: "Message marked as spam.",
@@ -3260,10 +3348,6 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
   };
 
   const handleMarkNotSpam = async (message: Message) => {
-    const undoTarget: UndoMoveTarget = {
-      messageId: message.id,
-      restoreFolderId: message.folderId
-    };
     setPendingMessageActions((prev) => new Set(prev).add(message.id));
     try {
       const res = await apiFetch("/api/message/not-spam", {
@@ -3280,29 +3364,44 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
         inboxFolderId?: string | null;
         inboxMailbox?: string;
         flags?: string[];
+        previousMessageId?: string;
+        messageId?: string;
       };
-      evictMessageCaches([message.id]);
+      const movedMessageId = data.messageId ?? message.id;
+      evictMessageCaches(
+        Array.from(new Set([message.id, movedMessageId]))
+      );
       const movedInboxMessage =
         searchScope === "all" && data.inboxFolderId
-          ? applyFlagsToMessage(
-              {
-                ...message,
-                folderId: data.inboxFolderId!,
-                mailboxPath: data.inboxMailbox ?? message.mailboxPath
-              },
-              data.flags ?? message.flags ?? []
+          ? remapMovedMessageReferences(
+              applyFlagsToMessage(
+                {
+                  ...message,
+                  id: movedMessageId,
+                  folderId: data.inboxFolderId!,
+                  mailboxPath: data.inboxMailbox ?? message.mailboxPath
+                },
+                data.flags ?? message.flags ?? []
+              ),
+              message.id,
+              movedMessageId
             )
           : null;
       updateMessagesWithCurrentResultPrune((item) => {
         if (item.id !== message.id) return item;
         if (searchScope === "all" && data.inboxFolderId) {
-          return applyFlagsToMessage(
-            {
-              ...item,
-              folderId: data.inboxFolderId!,
-              mailboxPath: data.inboxMailbox ?? item.mailboxPath
-            },
-            data.flags ?? item.flags ?? []
+          return remapMovedMessageReferences(
+            applyFlagsToMessage(
+              {
+                ...item,
+                id: movedMessageId,
+                folderId: data.inboxFolderId!,
+                mailboxPath: data.inboxMailbox ?? item.mailboxPath
+              },
+              data.flags ?? item.flags ?? []
+            ),
+            item.id,
+            movedMessageId
           );
         }
         return null;
@@ -3312,7 +3411,13 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
         (!movedInboxMessage || !shouldKeepMessageInCurrentResults(movedInboxMessage))
       ) {
         setActiveMessageId("");
+      } else if (activeMessageId === message.id && movedMessageId !== message.id) {
+        setActiveMessageId(movedMessageId);
       }
+      const undoTarget: UndoMoveTarget = {
+        messageId: movedMessageId,
+        restoreFolderId: message.folderId
+      };
       pushNotice({
         type: "success",
         title: "Message marked as not spam.",
@@ -4392,6 +4497,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     setMessages([]);
     setMessagesPage(1);
     setHasMoreMessages(true);
+    setLoadedMessageCount(0);
     setTotalMessages(null);
     lastRequestRef.current = null;
     currentKeyRef.current = messagesKey;
@@ -4501,6 +4607,14 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
             }
             return [...prev, ...items];
           });
+          setLoadedMessageCount((prev) =>
+            mergeLoadedMessageCount({
+              page: messagesPage,
+              previousCount: prev,
+              itemCount: items.length,
+              baseCount: data?.baseCount
+            })
+          );
           setHasMoreMessages(Boolean(data?.hasMore));
           setTotalMessages(typeof data?.total === "number" ? data.total : null);
           if (messagesPage === 1) {
@@ -4613,6 +4727,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
         cachedThread?.find((item) => item.id === activeMessage.id) ?? null;
       const activeHasContent = hasContent(cachedActive ?? activeMessage);
       if (!activeHasContent) {
+        setThreadContentLoading(threadId);
         await hydrateMessageOnOpenIfNeeded(activeMessage);
       }
       if (supportsThreads && cachedThread && cachedThread.length > 0 && activeHasContent) {
@@ -5335,6 +5450,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
         logListReplacement("refreshMailboxData", prev, nextMessages);
         return nextMessages;
       });
+      setLoadedMessageCount(resolveLoadedMessageCount(nextMessages.length, messageData?.baseCount));
       setActiveMessageId((prev) => {
         if (prev) return prev;
         return nextMessages[0]?.id ?? "";
@@ -5576,6 +5692,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
   const waitForSyncJob = async (jobId: string): Promise<SyncJobResult> => {
     const startedAt = Date.now();
     const timeoutMs = 1000 * 60 * 10;
+    let pollDelayMs = SYNC_STATUS_POLL_INTERVAL_MS;
     while (Date.now() - startedAt < timeoutMs) {
       const statusRes = await apiFetch(`/api/sync/status?jobId=${encodeURIComponent(jobId)}`);
       if (!statusRes.ok) {
@@ -5597,8 +5714,12 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
         throw new Error(data.job?.error || "Sync job failed.");
       }
       await new Promise<void>((resolve) => {
-        window.setTimeout(resolve, SYNC_STATUS_POLL_INTERVAL_MS);
+        window.setTimeout(resolve, pollDelayMs);
       });
+      pollDelayMs = Math.min(
+        SYNC_STATUS_POLL_MAX_INTERVAL_MS,
+        Math.round(pollDelayMs * 1.5)
+      );
     }
     throw new Error("Sync timed out.");
   };
@@ -5622,6 +5743,39 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
       throw new Error("Sync job did not return a job id.");
     }
     return waitForSyncJob(data.jobId);
+  };
+
+  type NewSyncFolderDecision = {
+    folderId: string;
+    mailboxPath: string;
+    uidNext: number | null;
+    skip: boolean;
+    reason:
+      | "baseline-unsynced-folder"
+      | "no-new-uids"
+      | "has-new-uids"
+      | "missing-uid-next"
+      | "status-error";
+  };
+
+  const planNewSyncCandidates = async (folderIds: string[]): Promise<NewSyncFolderDecision[]> => {
+    const response = await apiFetch("/api/sync/new-candidates", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ accountId: activeAccountId, folderIds })
+    });
+    if (!response.ok) {
+      throw new Error(await readErrorMessage(response));
+    }
+    const data = (await response.json()) as {
+      ok?: boolean;
+      decisions?: NewSyncFolderDecision[];
+      message?: string;
+    };
+    if (data.ok === false) {
+      throw new Error(data.message || "Failed to plan new-message sync.");
+    }
+    return Array.isArray(data.decisions) ? data.decisions : [];
   };
 
   const syncFolderWithBackground = async (
@@ -5766,7 +5920,29 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     setIsSyncing(true);
     void (async () => {
       if (mode === "new") {
+        const plannedFolders = accountFolders.map((folder) => folder.id);
+        let foldersToSync = plannedFolders;
+        try {
+          const decisions = await planNewSyncCandidates(plannedFolders);
+          const decisionMap = new Map(decisions.map((item) => [item.folderId, item]));
+          foldersToSync = plannedFolders.filter((folderId) => {
+            const decision = decisionMap.get(folderId);
+            if (!decision) return true;
+            return !decision.skip;
+          });
+        } catch (error) {
+          reportError(
+            error instanceof Error
+              ? error.message
+              : "Could not determine new-message sync candidates."
+          );
+        }
+
+        const foldersToSyncSet = new Set(foldersToSync);
         for (const folder of accountFolders) {
+          if (!foldersToSyncSet.has(folder.id)) {
+            continue;
+          }
           const refreshThis =
             searchScope === "folder" && activeFolderId === folder.id ? true : false;
           await syncFolderWithBackground(
@@ -6215,6 +6391,28 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
       });
       const source = new EventSource(`/api/imap/stream?${params.toString()}`);
       streamSourceRef.current = source;
+      const shouldSkipDeleteReconcile = (folderId?: string, uid?: number) => {
+        if (!folderId) return false;
+        const now = Date.now();
+        const folderExpiry = localDeleteReconcileByFolderRef.current[folderId] ?? 0;
+        if (folderExpiry <= now) {
+          if (folderExpiry > 0) {
+            delete localDeleteReconcileByFolderRef.current[folderId];
+          }
+        } else {
+          return true;
+        }
+        if (typeof uid !== "number" || !Number.isFinite(uid)) return false;
+        const uidKey = `${folderId}:${uid}`;
+        const uidExpiry = localDeleteReconcileByUidRef.current[uidKey] ?? 0;
+        if (uidExpiry <= now) {
+          if (uidExpiry > 0) {
+            delete localDeleteReconcileByUidRef.current[uidKey];
+          }
+          return false;
+        }
+        return true;
+      };
       const requestFolderReconcileSync = (folderId?: string) => {
         if (!folderId) return;
         const now = Date.now();
@@ -6319,7 +6517,9 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
             (flag) => flag.toLowerCase() === "\\deleted"
           );
           if (hasDeletedFlag) {
-            requestFolderReconcileSync(data.folderId ?? activeFolderId);
+            const folderId = data.folderId ?? activeFolderId;
+            if (shouldSkipDeleteReconcile(folderId, data.uid)) return;
+            requestFolderReconcileSync(folderId);
           }
         } catch {
           // ignore
@@ -6332,6 +6532,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
           if (data.uid && folderId) {
             setMessages((prev) => prev.filter((msg) => !(msg.folderId === folderId && msg.imapUid === data.uid)));
           }
+          if (shouldSkipDeleteReconcile(folderId, data.uid)) return;
           requestFolderReconcileSync(folderId);
         } catch {
           // ignore

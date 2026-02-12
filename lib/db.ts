@@ -22,11 +22,20 @@ import type {
 } from "./data";
 import { decodeSecret, encodeSecret, shouldStorePasswordInDb } from "./secret";
 import { applyCachedCredentials } from "./credentials";
-import { CALENDAR_INVITE_FLAG, normalizeImapFlags } from "./messageFlags";
+import {
+  CALENDAR_FILENAME_EXTENSIONS,
+  CALENDAR_INVITE_FLAG,
+  CALENDAR_MIME_HINTS,
+  CRYPTO_SIGNATURE_FILENAME_EXTENSIONS,
+  CRYPTO_SIGNATURE_MIME_HINTS,
+  MIN_VISIBLE_ATTACHMENT_SIZE_BYTES,
+  normalizeImapFlags
+} from "./messageFlags";
 import { normalizeAccountDateFormat } from "./dateFormatting";
 import { withDbWriteRetry } from "./dbWriteRetry";
 import { randomUUID } from "crypto";
 import { normalizeReminderDateList, resolveNextReminderOccurrence } from "./reminderRecurrence";
+import { buildImapMessageRowId } from "./messageIds";
 import {
   CATEGORY_KEYS,
   createDefaultLinearModel,
@@ -427,6 +436,10 @@ function initAccountSchema(db: any) {
       ON messages(accountId, threadId, dateValue DESC);
     CREATE INDEX IF NOT EXISTS idx_messages_account_flagged_thread
       ON messages(accountId, flagged, threadId);
+    CREATE INDEX IF NOT EXISTS idx_messages_account_flagged_date
+      ON messages(accountId, flagged DESC, dateValue DESC);
+    CREATE INDEX IF NOT EXISTS idx_messages_account_folder_flagged_date
+      ON messages(accountId, folderId, flagged DESC, dateValue DESC);
     CREATE INDEX IF NOT EXISTS idx_messages_category
       ON messages(accountId, category, dateValue DESC);
     CREATE INDEX IF NOT EXISTS idx_threads_account_latest
@@ -1838,6 +1851,44 @@ function applyVisibleMessageFilters(where: string, alias = "m") {
   return `${where} AND COALESCE(${alias}.deleted, 0) = 0`;
 }
 
+function escapeSqlLiteral(value: string) {
+  return value.replaceAll("'", "''");
+}
+
+function buildSqlContainsAny(valueSql: string, hints: readonly string[]) {
+  if (hints.length === 0) return "0";
+  return hints
+    .map((hint) => `${valueSql} LIKE '%${escapeSqlLiteral(hint.toLowerCase())}%'`)
+    .join(" OR ");
+}
+
+function buildSqlEndsWithAny(valueSql: string, suffixes: readonly string[]) {
+  if (suffixes.length === 0) return "0";
+  return suffixes
+    .map((suffix) => `${valueSql} LIKE '%${escapeSqlLiteral(suffix.toLowerCase())}'`)
+    .join(" OR ");
+}
+
+function buildMeaningfulAttachmentPredicateSql(attachmentAlias = "a") {
+  const contentTypeSql = `lower(COALESCE(${attachmentAlias}.contentType, ''))`;
+  const filenameSql = `lower(COALESCE(${attachmentAlias}.filename, ''))`;
+  const calendarSql = `(${buildSqlContainsAny(contentTypeSql, CALENDAR_MIME_HINTS)} OR ${buildSqlEndsWithAny(filenameSql, CALENDAR_FILENAME_EXTENSIONS)})`;
+  const signatureSql = `(${buildSqlContainsAny(contentTypeSql, CRYPTO_SIGNATURE_MIME_HINTS)} OR ${buildSqlEndsWithAny(filenameSql, CRYPTO_SIGNATURE_FILENAME_EXTENSIONS)})`;
+  return `${attachmentAlias}.inline = 0
+    AND COALESCE(${attachmentAlias}.size, 0) >= ${MIN_VISIBLE_ATTACHMENT_SIZE_BYTES}
+    AND NOT ${calendarSql}
+    AND NOT ${signatureSql}`;
+}
+
+function buildMeaningfulAttachmentExistsSql(messageAlias = "m", attachmentAlias = "a") {
+  return `EXISTS (
+    SELECT 1
+    FROM attachments ${attachmentAlias}
+    WHERE ${attachmentAlias}.messageId = ${messageAlias}.id
+      AND ${buildMeaningfulAttachmentPredicateSql(attachmentAlias)}
+  )`;
+}
+
 const RELATED_TRASH_SPECIAL_USES = new Set(["\\trash"]);
 const RELATED_SPAM_SPECIAL_USES = new Set(["\\junk", "\\spam"]);
 const RELATED_TRASH_KEYWORDS = ["trash", "deleted", "bin", "wastebasket", "papierkorb"];
@@ -1961,7 +2012,7 @@ async function getGroupCounts(params: {
   where = applyExcludedFolderFilters(where, args, excludedFolderIds);
   const attachmentsFilter = attachmentsOnly ?? badges?.includes("attachments");
   if (attachmentsFilter) {
-    where += " AND EXISTS (SELECT 1 FROM attachments a WHERE a.messageId = m.id AND a.inline = 0)";
+    where += ` AND ${buildMeaningfulAttachmentExistsSql("m")}`;
   }
 
   if (groupBy === "date") {
@@ -2172,7 +2223,7 @@ async function getTotalCount(params: {
   where = applyExcludedFolderFilters(where, args, excludedFolderIds);
   const attachmentsFilter = attachmentsOnly ?? badges?.includes("attachments");
   if (attachmentsFilter) {
-    where += " AND EXISTS (SELECT 1 FROM attachments a WHERE a.messageId = m.id AND a.inline = 0)";
+    where += ` AND ${buildMeaningfulAttachmentExistsSql("m")}`;
   }
   const row = db
     .prepare(
@@ -2305,7 +2356,7 @@ export async function listRelatedMessages(params: {
   where = applyExcludedFolderFilters(where, args, effectiveExcludedFolderIds);
   const attachmentsFilter = attachmentsOnly ?? badges?.includes("attachments");
   if (attachmentsFilter) {
-    where += " AND EXISTS (SELECT 1 FROM attachments a WHERE a.messageId = m.id AND a.inline = 0)";
+    where += ` AND ${buildMeaningfulAttachmentExistsSql("m")}`;
   }
 
   const rows = db
@@ -2344,8 +2395,7 @@ export async function listRelatedMessages(params: {
         m.category,
         m.categoryScore,
         m.categorySignals,
-        EXISTS(SELECT 1 FROM attachments a WHERE a.messageId = m.id AND a.inline = 0)
-          as hasAttachments,
+        ${buildMeaningfulAttachmentExistsSql("m")} as hasAttachments,
         EXISTS(SELECT 1 FROM attachments a WHERE a.messageId = m.id AND a.inline = 1)
           as hasInlineAttachments
       FROM messages m
@@ -2610,8 +2660,19 @@ export async function listMessages(params: {
   where = applyExcludedFolderFilters(where, args, excludedFolderIds);
   const attachmentsFilter = attachmentsOnly ?? badges?.includes("attachments");
   if (attachmentsFilter) {
-    where += " AND EXISTS (SELECT 1 FROM attachments a WHERE a.messageId = m.id AND a.inline = 0)";
+    where += ` AND ${buildMeaningfulAttachmentExistsSql("m")}`;
   }
+  const shouldPrioritizeFlaggedMessages =
+    !hasQuery &&
+    !hasIdQuery &&
+    fromTerms.length === 0 &&
+    toTerms.length === 0 &&
+    inTerms.length === 0 &&
+    (badges?.length ?? 0) === 0 &&
+    !attachmentsFilter;
+  const orderBySql = shouldPrioritizeFlaggedMessages
+    ? "m.flagged DESC, m.dateValue DESC"
+    : "m.dateValue DESC";
   const rows = db
     .prepare(
       `
@@ -2648,13 +2709,12 @@ export async function listMessages(params: {
         m.category,
         m.categoryScore,
         m.categorySignals,
-        EXISTS(SELECT 1 FROM attachments a WHERE a.messageId = m.id AND a.inline = 0)
-          as hasAttachments,
+        ${buildMeaningfulAttachmentExistsSql("m")} as hasAttachments,
         EXISTS(SELECT 1 FROM attachments a WHERE a.messageId = m.id AND a.inline = 1)
           as hasInlineAttachments
       FROM messages m
       WHERE ${where}
-      ORDER BY m.dateValue DESC
+      ORDER BY ${orderBySql}
       LIMIT ? OFFSET ?
     `
     )
@@ -2824,7 +2884,7 @@ export async function listThreads(params: {
   where = applyExcludedFolderFilters(where, args, excludedFolderIds);
   const attachmentsFilter = attachmentsOnly ?? badges?.includes("attachments");
   if (attachmentsFilter) {
-    where += " AND EXISTS (SELECT 1 FROM attachments a WHERE a.messageId = m.id AND a.inline = 0)";
+    where += ` AND ${buildMeaningfulAttachmentExistsSql("m")}`;
   }
 
   const normalizedExcludedFolderIds = Array.from(
@@ -3069,8 +3129,7 @@ export async function listThreads(params: {
               m.category,
               m.categoryScore,
               m.categorySignals,
-              EXISTS(SELECT 1 FROM attachments a WHERE a.messageId = m.id AND a.inline = 0)
-                as hasAttachments,
+              ${buildMeaningfulAttachmentExistsSql("m")} as hasAttachments,
               EXISTS(SELECT 1 FROM attachments a WHERE a.messageId = m.id AND a.inline = 1)
                 as hasInlineAttachments
             FROM messages m
@@ -3726,6 +3785,217 @@ export async function updateMessageFolder(
     db.prepare(
       `UPDATE messages SET folderId = ?, mailboxPath = ? WHERE accountId = ? AND id = ?`
     ).run(folderId, mailboxPath, accountId, messageId);
+  });
+}
+
+export type RelocateMovedMessageResult = {
+  previousId: string;
+  nextId: string;
+  attachmentIds: string[];
+  changed: boolean;
+};
+
+export async function relocateMovedMessage(params: {
+  accountId: string;
+  previousId: string;
+  destinationFolderId: string;
+  destinationMailboxPath: string;
+  destinationUid?: number | null;
+}) {
+  const {
+    accountId,
+    previousId,
+    destinationFolderId,
+    destinationMailboxPath,
+    destinationUid
+  } = params;
+  return withDbWriteRetry("relocateMovedMessage", async () => {
+    const db = await getAccountDb(accountId);
+    const normalizedPreviousId = previousId.trim();
+    const existing = db
+      .prepare(`SELECT id, threadId FROM messages WHERE accountId = ? AND id = ?`)
+      .get(accountId, normalizedPreviousId) as
+      | { id: string; threadId?: string | null }
+      | undefined;
+    if (!existing) return null;
+
+    const attachmentIds = (db
+      .prepare(`SELECT id FROM attachments WHERE messageId = ?`)
+      .all(normalizedPreviousId) as Array<{ id?: string | null }>)
+      .map((row) => (row.id ? String(row.id) : ""))
+      .filter(Boolean);
+    const nextId =
+      typeof destinationUid === "number" && Number.isFinite(destinationUid)
+        ? buildImapMessageRowId(accountId, destinationMailboxPath, destinationUid)
+        : normalizedPreviousId;
+    const changed = nextId !== normalizedPreviousId;
+
+    if (!changed) {
+      if (typeof destinationUid === "number" && Number.isFinite(destinationUid)) {
+        db.prepare(
+          `UPDATE messages
+           SET folderId = ?, mailboxPath = ?, imapUid = ?
+           WHERE accountId = ? AND id = ?`
+        ).run(
+          destinationFolderId,
+          destinationMailboxPath,
+          destinationUid,
+          accountId,
+          normalizedPreviousId
+        );
+      } else {
+        db.prepare(
+          `UPDATE messages
+           SET folderId = ?, mailboxPath = ?
+           WHERE accountId = ? AND id = ?`
+        ).run(destinationFolderId, destinationMailboxPath, accountId, normalizedPreviousId);
+      }
+      return {
+        previousId: normalizedPreviousId,
+        nextId,
+        attachmentIds,
+        changed
+      } satisfies RelocateMovedMessageResult;
+    }
+
+    const targetExisting = db
+      .prepare(`SELECT id, threadId FROM messages WHERE accountId = ? AND id = ?`)
+      .get(accountId, nextId) as { id: string; threadId?: string | null } | undefined;
+    const parentThreadRows = db
+      .prepare(
+        `SELECT DISTINCT threadId
+         FROM messages
+         WHERE accountId = ? AND parentId = ?`
+      )
+      .all(accountId, normalizedPreviousId) as Array<{ threadId?: string | null }>;
+    const affectedThreadIds = new Set<string>();
+    if (existing.threadId) affectedThreadIds.add(existing.threadId);
+    if (targetExisting?.threadId) affectedThreadIds.add(targetExisting.threadId);
+    parentThreadRows.forEach((row) => {
+      if (row.threadId) {
+        affectedThreadIds.add(row.threadId);
+      }
+    });
+
+    const updateFlagsAndCategoryRefs = db.prepare(
+      `UPDATE category_feedback_events
+       SET messageId = ?
+       WHERE accountId = ? AND messageId = ?`
+    );
+    const updateReminderRefs = db.prepare(
+      `UPDATE calendar_reminders
+       SET messageId = ?
+       WHERE accountId = ? AND messageId = ?`
+    );
+    const updateParentRefs = db.prepare(
+      `UPDATE messages
+       SET parentId = ?
+       WHERE accountId = ? AND parentId = ?`
+    );
+    const deleteOldMessage = db.prepare(
+      `DELETE FROM messages WHERE accountId = ? AND id = ?`
+    );
+    const updateMovedMessage = db.prepare(
+      `UPDATE messages
+       SET folderId = ?, mailboxPath = ?, imapUid = ?
+       WHERE accountId = ? AND id = ?`
+    );
+    const updateMovedMessageWithoutUid = db.prepare(
+      `UPDATE messages
+       SET folderId = ?, mailboxPath = ?
+       WHERE accountId = ? AND id = ?`
+    );
+
+    if (targetExisting) {
+      db.transaction(() => {
+        if (typeof destinationUid === "number" && Number.isFinite(destinationUid)) {
+          updateMovedMessage.run(
+            destinationFolderId,
+            destinationMailboxPath,
+            destinationUid,
+            accountId,
+            nextId
+          );
+        } else {
+          updateMovedMessageWithoutUid.run(
+            destinationFolderId,
+            destinationMailboxPath,
+            accountId,
+            nextId
+          );
+        }
+        db.prepare(`UPDATE OR REPLACE attachments SET messageId = ? WHERE messageId = ?`).run(
+          nextId,
+          normalizedPreviousId
+        );
+        const targetFtsExists = db
+          .prepare(`SELECT 1 FROM message_fts WHERE messageId = ? LIMIT 1`)
+          .get(nextId);
+        if (targetFtsExists) {
+          db.prepare(`DELETE FROM message_fts WHERE messageId = ?`).run(normalizedPreviousId);
+        } else {
+          db.prepare(`UPDATE message_fts SET messageId = ? WHERE messageId = ?`).run(
+            nextId,
+            normalizedPreviousId
+          );
+        }
+        updateParentRefs.run(nextId, accountId, normalizedPreviousId);
+        updateFlagsAndCategoryRefs.run(nextId, accountId, normalizedPreviousId);
+        updateReminderRefs.run(nextId, accountId, normalizedPreviousId);
+        deleteOldMessage.run(accountId, normalizedPreviousId);
+      })();
+    } else {
+      db.transaction(() => {
+        db.prepare(
+          `INSERT INTO messages (
+             id, accountId, folderId, threadId, parentId, messageId, inReplyTo, "references", xForwardedMessageId,
+             subject, fromAddr, fromEmail, toAddr, ccAddr, bccAddr, mailboxPath, imapUid, preview, date, dateValue,
+             body, htmlBody, priority, hasSource, unread, flags, seen, answered, flagged, deleted, draft, recent,
+             category, categoryScore, categorySignals
+           )
+           SELECT
+             ?, accountId, ?, threadId, parentId, messageId, inReplyTo, "references", xForwardedMessageId,
+             subject, fromAddr, fromEmail, toAddr, ccAddr, bccAddr, ?, ?, preview, date, dateValue,
+             body, htmlBody, priority, hasSource, unread, flags, seen, answered, flagged, deleted, draft, recent,
+             category, categoryScore, categorySignals
+           FROM messages
+           WHERE accountId = ? AND id = ?`
+        ).run(
+          nextId,
+          destinationFolderId,
+          destinationMailboxPath,
+          typeof destinationUid === "number" && Number.isFinite(destinationUid)
+            ? destinationUid
+            : null,
+          accountId,
+          normalizedPreviousId
+        );
+        db.prepare(`UPDATE attachments SET messageId = ? WHERE messageId = ?`).run(
+          nextId,
+          normalizedPreviousId
+        );
+        db.prepare(`UPDATE message_fts SET messageId = ? WHERE messageId = ?`).run(
+          nextId,
+          normalizedPreviousId
+        );
+        updateParentRefs.run(nextId, accountId, normalizedPreviousId);
+        updateFlagsAndCategoryRefs.run(nextId, accountId, normalizedPreviousId);
+        updateReminderRefs.run(nextId, accountId, normalizedPreviousId);
+        deleteOldMessage.run(accountId, normalizedPreviousId);
+      })();
+    }
+
+    const recomputeTargets = Array.from(affectedThreadIds);
+    if (recomputeTargets.length > 0) {
+      await recomputeThreadsForAccountInternal(accountId, recomputeTargets);
+    }
+
+    return {
+      previousId: normalizedPreviousId,
+      nextId,
+      attachmentIds,
+      changed
+    } satisfies RelocateMovedMessageResult;
   });
 }
 

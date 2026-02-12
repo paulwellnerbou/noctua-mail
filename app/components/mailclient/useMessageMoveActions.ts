@@ -23,6 +23,7 @@ type MoveApiResponse = {
   ok: boolean;
   destinationFolderId: string;
   destinationMailbox?: string;
+  movedIds?: Array<{ previousId: string; nextId: string }>;
 };
 
 export type MoveMessagesResult = {
@@ -96,6 +97,32 @@ export function useMessageMoveActions({
   onMoveComplete,
   markMessagesMutated
 }: UseMessageMoveActionsOptions) {
+  const remapMessageReferenceIds = useCallback(
+    (message: Message, previousId: string, nextId: string): Message => {
+      if (!previousId || !nextId || previousId === nextId) return message;
+      const encodedPrevious = encodeURIComponent(previousId);
+      const encodedNext = encodeURIComponent(nextId);
+      const replaceMessageId = (value?: string) => {
+        if (!value) return value;
+        return value
+          .split(`messageId=${encodedPrevious}`)
+          .join(`messageId=${encodedNext}`)
+          .split(`messageId=${previousId}`)
+          .join(`messageId=${nextId}`);
+      };
+      return {
+        ...message,
+        body: replaceMessageId(message.body) ?? message.body,
+        htmlBody: replaceMessageId(message.htmlBody),
+        attachments: message.attachments?.map((attachment) => ({
+          ...attachment,
+          url: replaceMessageId(attachment.url)
+        }))
+      };
+    },
+    []
+  );
+
   const getMessageSubjectForNotice = useCallback(
     (message?: Message | null) => message?.subject?.trim() || "(no subject)",
     []
@@ -159,20 +186,42 @@ export function useMessageMoveActions({
           return null;
         }
         const data = (await res.json()) as MoveApiResponse;
+        const idRemap = new Map<string, string>();
+        (data.movedIds ?? []).forEach((item) => {
+          if (!item?.previousId || !item?.nextId) return;
+          idRemap.set(item.previousId, item.nextId);
+        });
+        const movedPreviousIds = data.movedIds
+          ? new Set(
+              data.movedIds
+                .map((item) => item?.previousId ?? "")
+                .filter(Boolean)
+            )
+          : new Set(uniqueIds);
+        const resolveMovedId = (id: string) => idRemap.get(id) ?? id;
+        const mappedUndoTargets = undoTargets
+          .filter((target) => movedPreviousIds.has(target.messageId))
+          .map((target) => ({
+            ...target,
+            messageId: resolveMovedId(target.messageId)
+          }));
         markMessagesMutated?.();
         setMessages((prev) => {
           let changed = false;
-          const next: Message[] = [];
+          const nextById = new Map<string, Message>();
           prev.forEach((item) => {
-            if (!idSet.has(item.id)) {
-              next.push(item);
+            if (!movedPreviousIds.has(item.id)) {
+              nextById.set(item.id, item);
               return;
             }
-            const updated: Message = {
+            const resolvedId = resolveMovedId(item.id);
+            const updatedBase: Message = {
               ...item,
+              id: resolvedId,
               folderId: data.destinationFolderId,
               mailboxPath: data.destinationMailbox ?? item.mailboxPath
             };
+            const updated = remapMessageReferenceIds(updatedBase, item.id, resolvedId);
             const keep = shouldKeepMessageInResults
               ? shouldKeepMessageInResults(updated)
               : !(
@@ -182,21 +231,27 @@ export function useMessageMoveActions({
                 );
             changed = true;
             if (!keep) return;
-            next.push(updated);
+            nextById.set(updated.id, updated);
           });
-          return changed ? next : prev;
+          return changed ? Array.from(nextById.values()) : prev;
         });
         if (
           updateActiveMessage &&
-          idSet.has(activeMessageId)
+          movedPreviousIds.has(activeMessageId)
         ) {
+          const resolvedActiveId = resolveMovedId(activeMessageId);
           const activeMessage = messages.find((item) => item.id === activeMessageId);
           const activeUpdated = activeMessage
-            ? {
-                ...activeMessage,
-                folderId: data.destinationFolderId,
-                mailboxPath: data.destinationMailbox ?? activeMessage.mailboxPath
-              }
+            ? remapMessageReferenceIds(
+                {
+                  ...activeMessage,
+                  id: resolvedActiveId,
+                  folderId: data.destinationFolderId,
+                  mailboxPath: data.destinationMailbox ?? activeMessage.mailboxPath
+                },
+                activeMessage.id,
+                resolvedActiveId
+              )
             : null;
           const activeStillVisible = activeUpdated
             ? shouldKeepMessageInResults
@@ -209,6 +264,8 @@ export function useMessageMoveActions({
             : false;
           if (!activeStillVisible) {
             setActiveMessageId("");
+          } else if (resolvedActiveId !== activeMessageId) {
+            setActiveMessageId(resolvedActiveId);
           }
         }
         if (clearSelectionOnSuccess) {
@@ -223,25 +280,33 @@ export function useMessageMoveActions({
                 ? `Moved message to ${destinationName}.`
                 : `Moved ${uniqueIds.length} messages to ${destinationName}.`,
             description: singleSubject,
-            actionLabel: undoTargets.length > 0 ? "Undo" : undefined,
+            actionLabel: mappedUndoTargets.length > 0 ? "Undo" : undefined,
             onAction:
-              undoTargets.length > 0
+              mappedUndoTargets.length > 0
                 ? () =>
                     void undoMoveOperation(
-                      undoTargets,
+                      mappedUndoTargets,
                       activeAccountId,
-                      undoTargets.length === 1 ? "Move undone." : "Moves undone."
+                      mappedUndoTargets.length === 1 ? "Move undone." : "Moves undone."
                     )
                 : undefined,
-            durationMs: undoTargets.length > 0 ? 12000 : noticeSuccessTimeout
+            durationMs: mappedUndoTargets.length > 0 ? 12000 : noticeSuccessTimeout
           });
         }
         if (onMoveComplete) {
-          onMoveComplete(uniqueIds);
+          onMoveComplete(
+            Array.from(
+              new Set([
+                ...Array.from(movedPreviousIds),
+                ...Array.from(movedPreviousIds).map((id) => resolveMovedId(id))
+              ])
+            )
+          );
         }
+        const resultIds = data.movedIds ? Array.from(movedPreviousIds) : uniqueIds;
         return {
-          ids: uniqueIds,
-          undoTargets,
+          ids: resultIds,
+          undoTargets: mappedUndoTargets,
           destinationFolderId: data.destinationFolderId,
           destinationName,
           singleSubject
@@ -272,6 +337,7 @@ export function useMessageMoveActions({
       messages,
       noticeSuccessTimeout,
       pushNotice,
+      remapMessageReferenceIds,
       readErrorMessage,
       reportError,
       searchScope,

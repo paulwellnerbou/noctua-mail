@@ -18,8 +18,52 @@ export function buildNotificationUrl(messageId?: string | null, accountId?: stri
   return query ? `/?${query}` : "/";
 }
 
+const CODE_FRAME_LINE_RE = /^\s*(?:\d+\s*\|.*|\|.*)$/;
+const STACK_TRACE_LINE_RE = /^\s*at\s+\S+/;
+const CARET_LINE_RE = /^\s*\^+\s*$/;
+const ERROR_PREFIX_RE = /^\s*(?:error|exception)\s*:\s*(.+)$/i;
+const JS_ERROR_RE =
+  /^\s*(?:Error|TypeError|ReferenceError|SyntaxError|RangeError|URIError|EvalError|AggregateError|[A-Z][\w$.]*(?:Error|Exception))\s*:\s*(.+)$/;
+const SOURCE_LOCATION_LINE_RE =
+  /^\s*(?:[A-Za-z]:\\|\/).+:\d+:\d+\)?\s*$|^\s*[\w.-]+\.(?:[cm]?js|[cm]?ts|tsx|jsx):\d+:\d+\)?\s*$/;
+
+function cleanExceptionLine(line: string): string {
+  return line.trim().replace(/\s+/g, " ");
+}
+
+function isNoiseExceptionLine(line: string): boolean {
+  if (!line.trim()) return true;
+  return (
+    CODE_FRAME_LINE_RE.test(line) ||
+    STACK_TRACE_LINE_RE.test(line) ||
+    CARET_LINE_RE.test(line) ||
+    SOURCE_LOCATION_LINE_RE.test(line)
+  );
+}
+
+function extractExceptionHeadline(message: string): string | null {
+  const lines = message.split(/\r?\n/);
+  for (const line of lines) {
+    const match = line.match(ERROR_PREFIX_RE);
+    if (!match) continue;
+    const candidate = cleanExceptionLine(match[1] ?? "");
+    if (candidate) return candidate;
+  }
+  for (const line of lines) {
+    const normalized = cleanExceptionLine(line);
+    if (!normalized) continue;
+    if (JS_ERROR_RE.test(normalized)) return normalized;
+  }
+  for (const line of lines) {
+    if (isNoiseExceptionLine(line)) continue;
+    const normalized = cleanExceptionLine(line);
+    if (normalized) return normalized;
+  }
+  return null;
+}
+
 export function getExceptionSummary(message: string): string {
-  return message.split("\n")[0]?.slice(0, 120) || "(no message)";
+  return extractExceptionHeadline(message)?.slice(0, 120) || "(no message)";
 }
 
 export function getExceptionDetail(message: string): string | null {

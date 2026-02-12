@@ -4,9 +4,10 @@ import {
   getAccounts,
   getFolders,
   getMessageById,
-  updateMessageFolder
+  relocateMovedMessage
 } from "@/lib/db";
 import { moveImapMessage } from "@/lib/mail/imap";
+import { moveMessageFiles } from "@/lib/storage";
 import type { Folder } from "@/lib/data";
 import { requireAccountAccessOr403, requireSessionOr401 } from "@/lib/auth";
 
@@ -52,6 +53,7 @@ export async function POST(request: Request) {
   }
 
   const destinationMailbox = mailboxPathFromFolder(destinationFolder, accountId);
+  const movedIds: Array<{ previousId: string; nextId: string }> = [];
 
   for (const messageId of messageIds) {
     const message = await getMessageById(accountId, messageId);
@@ -66,13 +68,26 @@ export async function POST(request: Request) {
         destinationMailbox,
         clientId
       );
-      await updateMessageFolder(
+      const relocated = await relocateMovedMessage({
         accountId,
-        message.id,
+        previousId: message.id,
         destinationFolderId,
-        destinationMailbox,
+        destinationMailboxPath: destinationMailbox,
         destinationUid
-      );
+      });
+      if (!relocated) continue;
+      if (relocated.changed) {
+        await moveMessageFiles(
+          accountId,
+          relocated.previousId,
+          relocated.nextId,
+          relocated.attachmentIds
+        );
+      }
+      movedIds.push({
+        previousId: relocated.previousId,
+        nextId: relocated.nextId
+      });
     } catch (error) {
       return NextResponse.json(
         { ok: false, message: (error as Error).message ?? "Failed to move message" },
@@ -85,6 +100,7 @@ export async function POST(request: Request) {
     ok: true,
     destinationFolderId,
     destinationMailbox,
-    moved: messageIds.length
+    moved: movedIds.length,
+    movedIds
   });
 }

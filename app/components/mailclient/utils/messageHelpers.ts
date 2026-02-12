@@ -3,7 +3,11 @@
  */
 import type { Message, Folder } from "@/lib/data";
 import type { MessageGroupMeta } from "../messagelist/listModel";
-import { hasMessageFlag, CALENDAR_INVITE_FLAG } from "@/lib/messageFlags";
+import {
+  hasMessageFlag,
+  CALENDAR_INVITE_FLAG,
+  isMeaningfulNonInlineAttachment
+} from "@/lib/messageFlags";
 
 export function computeGroupMeta(items: Message[]): MessageGroupMeta[] {
   const counts = new Map<string, number>();
@@ -62,6 +66,13 @@ export function hasCalendarFlag(message: Message) {
 }
 
 export function hasNonInlineAttachments(message: Message) {
-  if (message.hasAttachments) return true;
-  return (message.attachments ?? []).some((attachment) => !attachment.inline);
+  const attachments = message.attachments ?? [];
+  if (attachments.length > 0) {
+    return attachments.some(isMeaningfulNonInlineAttachment);
+  }
+  return Boolean(message.hasAttachments);
+}
+
+export function shouldShowAttachmentIcon(message: Message) {
+  return hasNonInlineAttachments(message);
 }

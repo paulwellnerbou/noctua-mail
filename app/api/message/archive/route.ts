@@ -3,9 +3,10 @@ import {
   getAccounts,
   getFolders,
   getMessageById,
-  updateMessageFolder
+  relocateMovedMessage
 } from "@/lib/db";
 import { moveImapMessage } from "@/lib/mail/imap";
+import { moveMessageFiles } from "@/lib/storage";
 import type { Folder } from "@/lib/data";
 import { requireAccountAccessOr403, requireSessionOr401 } from "@/lib/auth";
 
@@ -85,19 +86,27 @@ export async function POST(request: Request) {
     archiveMailbox,
     clientId
   );
-  if (archiveFolder) {
-    await updateMessageFolder(
+  const relocated = await relocateMovedMessage({
+    accountId: payload.accountId,
+    previousId: message.id,
+    destinationFolderId: archiveFolder?.id ?? message.folderId,
+    destinationMailboxPath: archiveMailbox,
+    destinationUid
+  });
+  if (relocated?.changed) {
+    await moveMessageFiles(
       payload.accountId,
-      message.id,
-      archiveFolder.id,
-      archiveMailbox,
-      destinationUid
+      relocated.previousId,
+      relocated.nextId,
+      relocated.attachmentIds
     );
   }
   return NextResponse.json({
     ok: true,
     action: "moved",
     archiveFolderId: archiveFolder?.id ?? null,
-    archiveMailbox
+    archiveMailbox,
+    previousMessageId: relocated?.previousId ?? message.id,
+    messageId: relocated?.nextId ?? message.id
   });
 }

@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
-import tls from "tls";
 
 import { getAccounts, getLatestMessageUid } from "@/lib/db";
 import { getImapLogger, logImapOp } from "@/lib/mail/imapLogger";
+import { bindImapClientError, buildImapFlowOptions } from "@/lib/mail/imapClientOptions";
 import { requireAccountAccessOr403, requireSessionOr401 } from "@/lib/auth";
 
 type EnvelopeAddress = { name?: string | null; mailbox?: string | null; host?: string | null };
@@ -49,20 +49,8 @@ export async function GET(request: Request) {
     );
   }
 
-  const client = new ImapFlow({
-    host: account.imap.host,
-    port: account.imap.port,
-    secure: account.imap.secure,
-    logger: getImapLogger(),
-    auth: { user: account.imap.user, pass: account.imap.password },
-    tls: {
-      servername: account.imap.host,
-      checkServerIdentity: (hostname, cert) => {
-        if (!cert) return undefined;
-        return tls.checkServerIdentity(hostname, cert);
-      }
-    }
-  });
+  const client = new ImapFlow(buildImapFlowOptions(account));
+  bindImapClientError(client, { accountId, clientId, mailbox });
 
   try {
     await logImapOp(

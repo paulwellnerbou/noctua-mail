@@ -48,7 +48,7 @@ export default function BottomStatusBar({
   const [processPanelOpen, setProcessPanelOpen] = useState(false);
   const [exceptionPanelOpen, setExceptionPanelOpen] = useState(false);
   const [reminderPanelOpen, setReminderPanelOpen] = useState(false);
-  const [currentTimeMs, setCurrentTimeMs] = useState(() => Date.now());
+  const [currentTimeMs, setCurrentTimeMs] = useState<number | null>(null);
 
   const dateTimeFormatter = useMemo(
     () =>
@@ -59,7 +59,7 @@ export default function BottomStatusBar({
     []
   );
   const currentDateTimeLabel = useMemo(
-    () => dateTimeFormatter.format(new Date(currentTimeMs)),
+    () => (currentTimeMs === null ? "" : dateTimeFormatter.format(new Date(currentTimeMs))),
     [currentTimeMs, dateTimeFormatter]
   );
 

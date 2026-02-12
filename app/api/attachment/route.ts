@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
-import { simpleParser } from "mailparser";
 import { getAttachmentData, getMessageSource, saveAttachmentData } from "@/lib/storage";
 import { getAttachmentMeta } from "@/lib/db";
 import { requireAccountAccessOr403, requireSessionOr401 } from "@/lib/auth";
+import { extractAttachmentBufferFromSource } from "@/lib/mail/attachmentFromSource";
 
 export async function GET(request: Request) {
   const session = requireSessionOr401(request);
@@ -31,28 +31,15 @@ export async function GET(request: Request) {
     }
 
     try {
-      const parsed = await simpleParser(source);
-      const parsedAttachments = parsed.attachments ?? [];
-      const indexMatch = attachmentId.match(/-(\d+)$/);
-      const attachmentIndex = indexMatch ? Number.parseInt(indexMatch[1], 10) : -1;
-      const byIndex =
-        attachmentIndex >= 0 && attachmentIndex < parsedAttachments.length
-          ? parsedAttachments[attachmentIndex]
-          : null;
-      const byMetadata =
-        byIndex ??
-        parsedAttachments.find(
-          (item: { filename?: string; contentType?: string; content?: unknown }) =>
-            item.filename === attachment.filename &&
-            (item.contentType ?? "application/octet-stream") ===
-              (attachment.contentType ?? "application/octet-stream")
-        ) ??
-        null;
-      if (!byMetadata || !Buffer.isBuffer(byMetadata.content)) {
+      const extractedContent = await extractAttachmentBufferFromSource(source, {
+        id: attachmentId,
+        filename: attachment.filename ?? undefined,
+        contentType: attachment.contentType ?? undefined,
+        cid: attachment.cid ?? undefined
+      });
+      if (!extractedContent) {
         return NextResponse.json({ ok: false, message: "Attachment data not found" }, { status: 404 });
       }
-
-      const extractedContent = Buffer.from(byMetadata.content);
       data = extractedContent;
       await saveAttachmentData(accountId, messageId, attachmentId, extractedContent);
     } catch {

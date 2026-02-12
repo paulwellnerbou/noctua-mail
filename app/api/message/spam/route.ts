@@ -3,10 +3,11 @@ import {
   getAccounts,
   getFolders,
   getMessageById,
-  updateMessageFolder,
+  relocateMovedMessage,
   updateMessageFlags
 } from "@/lib/db";
 import { moveImapMessage, updateImapFlags } from "@/lib/mail/imap";
+import { moveMessageFiles } from "@/lib/storage";
 import type { Folder } from "@/lib/data";
 import { requireAccountAccessOr403, requireSessionOr401 } from "@/lib/auth";
 
@@ -107,13 +108,19 @@ export async function POST(request: Request) {
     junkMailbox,
     clientId
   );
-  if (junkFolder) {
-    await updateMessageFolder(
+  const relocated = await relocateMovedMessage({
+    accountId: payload.accountId,
+    previousId: message.id,
+    destinationFolderId: junkFolder?.id ?? message.folderId,
+    destinationMailboxPath: junkMailbox,
+    destinationUid
+  });
+  if (relocated?.changed) {
+    await moveMessageFiles(
       payload.accountId,
-      message.id,
-      junkFolder.id,
-      junkMailbox,
-      destinationUid
+      relocated.previousId,
+      relocated.nextId,
+      relocated.attachmentIds
     );
   }
 
@@ -121,13 +128,15 @@ export async function POST(request: Request) {
     (flag) => !isNonJunkKeyword(flag) && flag.toLowerCase() !== "\\recent"
   );
   if (cleanedFlags.length !== existingFlags.length) {
-    await updateMessageFlags(payload.accountId, message.id, cleanedFlags);
+    await updateMessageFlags(payload.accountId, relocated?.nextId ?? message.id, cleanedFlags);
   }
   return NextResponse.json({
     ok: true,
     action: "moved",
     junkFolderId: junkFolder?.id ?? null,
     junkMailbox,
-    flags: cleanedFlags.length !== existingFlags.length ? cleanedFlags : existingFlags
+    flags: cleanedFlags.length !== existingFlags.length ? cleanedFlags : existingFlags,
+    previousMessageId: relocated?.previousId ?? message.id,
+    messageId: relocated?.nextId ?? message.id
   });
 }

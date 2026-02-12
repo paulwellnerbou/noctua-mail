@@ -18,6 +18,7 @@ type UseMessageListDerivedStateParams = {
   groupMeta: MessageGroupMeta[];
   isFlaggedMessage: (message: Message) => boolean;
   computeGroupMeta: (items: Message[]) => MessageGroupMeta[];
+  includeFlaggedGroup?: boolean;
   collapsedGroups: Record<string, boolean>;
   collapsedThreads: Record<string, boolean>;
   includeThreadAcrossFolders: boolean;
@@ -69,6 +70,7 @@ export function useMessageListDerivedState({
   groupMeta,
   isFlaggedMessage,
   computeGroupMeta,
+  includeFlaggedGroup = true,
   collapsedGroups,
   collapsedThreads,
   includeThreadAcrossFolders,
@@ -117,12 +119,14 @@ export function useMessageListDerivedState({
         buildThreadTree,
         flattenThread,
         isFlaggedMessage,
-        computeGroupMeta
+        computeGroupMeta,
+        includeFlaggedGroup
       }),
     [
       buildThreadTree,
       computeGroupMeta,
       flattenThread,
+      includeFlaggedGroup,
       groupMeta,
       isFlaggedMessage,
       listScopeMessages,

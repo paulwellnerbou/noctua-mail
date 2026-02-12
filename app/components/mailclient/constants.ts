@@ -11,6 +11,7 @@ export const NOTICE_TIMEOUTS: Record<InAppNoticeType, number> = {
 };
 
 export const THREAD_COLLAPSE_SETTLE_MS = 220;
-export const SYNC_STATUS_POLL_INTERVAL_MS = 1000;
+export const SYNC_STATUS_POLL_INTERVAL_MS = 2000;
+export const SYNC_STATUS_POLL_MAX_INTERVAL_MS = 10000;
 export const THREAD_CACHE_LIMIT = 50;
 export const CALENDAR_REMINDER_REFRESH_INTERVAL_MS = 60 * 1000;

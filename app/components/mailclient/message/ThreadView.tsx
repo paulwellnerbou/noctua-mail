@@ -39,38 +39,24 @@ export default function ThreadView({
           };
           const activeThreadId =
             activeMessage.threadId ?? activeMessage.messageId ?? activeMessage.id;
-          const hasFullThread =
-            activeThreadId && (threadContentById[activeThreadId]?.length ?? 0) > 0;
-          const showThreadLoading =
-            supportsThreads &&
-            activeThreadId &&
-            threadContentLoading === activeThreadId &&
-            !hasFullThread;
+          const hasFullThread = Boolean(
+            activeThreadId && (threadContentById[activeThreadId]?.length ?? 0) > 0
+          );
+          const isThreadLoading = Boolean(
+            activeThreadId && threadContentLoading === activeThreadId
+          );
           const activeMessageFromThread =
             activeThread.find((item) => item.id === activeMessage.id) ?? activeMessage;
-          const showMessageContentLoading =
-            activeThreadId &&
-            threadContentLoading === activeThreadId &&
-            !showThreadLoading &&
-            !hasMessageContent(activeMessageFromThread);
-          if (showThreadLoading) {
-            return (
-              <Text size="2" color="gray" className={styles.loading}>
-                Loading thread…
-              </Text>
-            );
-          }
-          if (showMessageContentLoading) {
-            return (
-              <Text size="2" color="gray" className={styles.loading}>
-                Loading message content…
-              </Text>
-            );
-          }
-          return activeThread.map((message) => (
+          const activeMessageBodyLoading = isThreadLoading && !hasMessageContent(activeMessageFromThread);
+          const visibleThread =
+            supportsThreads && isThreadLoading && !hasFullThread
+              ? [activeMessageFromThread]
+              : activeThread;
+          return visibleThread.map((message) => (
             <React.Fragment key={message.id}>
               <ThreadMessageCard
                 message={message}
+                bodyLoading={activeMessageBodyLoading && message.id === activeMessageFromThread.id}
                 {...messageCardProps}
               />
               {composeReplyMessageId === message.id && renderComposeInlineCard?.()}

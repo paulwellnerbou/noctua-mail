@@ -38,6 +38,32 @@ export type SyncOperationResult = {
   newMessages?: SyncNotificationMessage[];
 };
 
+export type SyncOperationProgressPhase =
+  | "starting"
+  | "fetching"
+  | "finalizing"
+  | "done"
+  | "failed";
+
+export type SyncOperationProgress = {
+  accountId: string;
+  folderId?: string;
+  mailboxPath: string;
+  mode: "full" | "recent" | "new";
+  phase: SyncOperationProgressPhase;
+  processed: number;
+  batchNumber?: number;
+  batchSize?: number;
+  estimatedTotal?: number;
+  percent?: number;
+  message?: string;
+  updatedAt: number;
+};
+
+export type SyncOperationOptions = {
+  onProgress?: (progress: SyncOperationProgress) => void;
+};
+
 type CalendarReminderMutation =
   | { kind: "cancel"; eventUid: string }
   | {
@@ -98,11 +124,12 @@ function collectReminderMutationsFromCalendarInvite(
 
 export async function runSyncOperation(
   payload: SyncPayload,
-  clientId?: string
+  clientId?: string,
+  options?: SyncOperationOptions
 ): Promise<SyncOperationResult> {
   // Use batched version by default for better memory efficiency
   // This reduces peak memory usage by 80-90% for large folders
-  return runSyncOperationBatched(payload, clientId);
+  return runSyncOperationBatched(payload, clientId, options);
 }
 
 /**
@@ -348,7 +375,8 @@ export async function runSyncOperationLegacy(
  */
 export async function runSyncOperationBatched(
   payload: SyncPayload,
-  clientId?: string
+  clientId?: string,
+  options?: SyncOperationOptions
 ): Promise<SyncOperationResult> {
   const accounts = await getAccounts();
   const account = accounts.find((item) => item.id === payload.accountId);
@@ -360,7 +388,29 @@ export async function runSyncOperationBatched(
   const mailboxPath = payload.folderId
     ? payload.folderId.replace(`${account.id}:`, "")
     : undefined;
+  const resolvedMailboxPath = mailboxPath ?? "INBOX";
   const syncMode = payload.mode ?? (payload.fullSync ? "full" : "recent");
+  const emitProgress = (
+    progress: Omit<
+      SyncOperationProgress,
+      "accountId" | "folderId" | "mailboxPath" | "mode" | "updatedAt"
+    > &
+      Pick<SyncOperationProgress, "phase">
+  ) => {
+    options?.onProgress?.({
+      accountId: account.id,
+      folderId: payload.folderId,
+      mailboxPath: resolvedMailboxPath,
+      mode: syncMode,
+      ...progress,
+      updatedAt: Date.now()
+    });
+  };
+  const calculatePercent = (processed: number, estimatedTotal?: number) => {
+    if (typeof estimatedTotal !== "number" || !Number.isFinite(estimatedTotal)) return undefined;
+    if (estimatedTotal <= 0) return 100;
+    return Math.min(100, Math.round((Math.max(0, processed) / estimatedTotal) * 1000) / 10);
+  };
 
   const normalizeThreading = (
     items: Message[],
@@ -456,6 +506,13 @@ export async function runSyncOperationBatched(
   const calendarMutations: CalendarReminderMutation[] = [];
   const deferredThreadIds = new Set<string>();
   let deferredNeedsFullThreadRecompute = false;
+  let latestEstimatedTotal: number | undefined;
+
+  emitProgress({
+    phase: "starting",
+    processed: 0,
+    message: "Starting sync."
+  });
 
   // Get existing file refs if full sync (for cleanup at the end)
   const existingFileRefs = payload.fullSync
@@ -467,6 +524,19 @@ export async function runSyncOperationBatched(
     folders = batch.folders; // Keep latest folder list
     const batchMessages = batch.messages;
     totalCount = batch.totalProcessed;
+    if (typeof batch.estimatedTotal === "number" && Number.isFinite(batch.estimatedTotal)) {
+      latestEstimatedTotal = batch.estimatedTotal;
+    }
+
+    emitProgress({
+      phase: "fetching",
+      processed: totalCount,
+      batchNumber: batch.batchNumber,
+      batchSize: batchMessages.length,
+      estimatedTotal: latestEstimatedTotal,
+      percent: calculatePercent(totalCount, latestEstimatedTotal),
+      message: "Fetched message batch."
+    });
 
     if (batchMessages.length === 0) continue;
 
@@ -574,6 +644,14 @@ export async function runSyncOperationBatched(
     // (TypeScript/JS GC will handle this, but makes intent clear)
   }
 
+  emitProgress({
+    phase: "finalizing",
+    processed: totalCount,
+    estimatedTotal: latestEstimatedTotal,
+    percent: calculatePercent(totalCount, latestEstimatedTotal),
+    message: "Applying synchronized changes."
+  });
+
   // Process calendar reminders after all batches
   for (const mutation of calendarMutations) {
     if (mutation.kind === "cancel") {
@@ -624,8 +702,17 @@ export async function runSyncOperationBatched(
   // Save folders
   await saveFoldersForAccount(account.id, folders);
 
-  return {
+  const result = {
     count: totalCount,
     newMessages: syncMode === "new" ? newNotificationMessages : undefined
   };
+  emitProgress({
+    phase: "done",
+    processed: result.count,
+    estimatedTotal: latestEstimatedTotal,
+    percent: calculatePercent(result.count, latestEstimatedTotal),
+    message: "Sync completed."
+  });
+
+  return result;
 }

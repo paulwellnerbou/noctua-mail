@@ -1,5 +1,6 @@
 import type { Message } from "@/lib/data";
-import { CALENDAR_INVITE_FLAG, hasMessageFlag, isCalendarAttachment } from "@/lib/messageFlags";
+import { CALENDAR_INVITE_FLAG, hasMessageFlag } from "@/lib/messageFlags";
+import { shouldShowAttachmentIcon } from "../utils/messageHelpers";
 
 export type ThreadBadgeUnion = {
   threadCategories: string[];
@@ -25,11 +26,7 @@ export function getCollapsedThreadBadgeUnion(params: {
   fullFlat.forEach(({ message }) => {
     if (message.category) categories.add(message.category);
     if (message.flagged) hasFlagged = true;
-    const nonInlineAttachments = message.attachments?.filter((att) => !att.inline) ?? [];
-    if (nonInlineAttachments.length > 0) {
-      const allCalendar = nonInlineAttachments.every(isCalendarAttachment);
-      if (!allCalendar) hasAttachments = true;
-    }
+    if (shouldShowAttachmentIcon(message)) hasAttachments = true;
     if (hasMessageFlag(message.flags, CALENDAR_INVITE_FLAG)) hasCalendar = true;
   });
 

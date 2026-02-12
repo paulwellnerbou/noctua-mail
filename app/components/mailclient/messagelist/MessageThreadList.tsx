@@ -4,9 +4,10 @@ import { CalendarDays, Flag, GitBranch, MoveRight, Paperclip, Trash2 } from "luc
 import { Badge, IconButton, Text } from "@radix-ui/themes";
 import { badgeColors, getFlagBadgeColor } from "@/lib/ui/badgeColors";
 import type { AccountDateFormat, Message } from "@/lib/data";
-import { CALENDAR_INVITE_FLAG, hasMessageFlag, isCalendarAttachment } from "@/lib/messageFlags";
+import { CALENDAR_INVITE_FLAG, hasMessageFlag } from "@/lib/messageFlags";
 import badgeStyles from "../message/MessageBadge.module.css";
 import CategoryBadge from "../CategoryBadge";
+import { shouldShowAttachmentIcon } from "../utils/messageHelpers";
 import {
   buildMessageListItems,
   type MessageGroup,
@@ -428,14 +429,7 @@ export default function MessageThreadList({
                   <span className={styles.cellSubjectText}>{message.subject}</span>
                   {renderFolderBadges(item.folderIds)}
                   {(threadBadgeUnion.threadHasAttachments ||
-                    (() => {
-                      const nonInlineAttachments =
-                        message.attachments?.filter((att) => !att.inline) ?? [];
-                      if (nonInlineAttachments.length === 0) return false;
-                      // Don't show attachment icon if all non-inline attachments are calendar events
-                      const allCalendar = nonInlineAttachments.every(isCalendarAttachment);
-                      return !allCalendar;
-                    })()) && (
+                    shouldShowAttachmentIcon(message)) && (
                     <Badge
                       size="1"
                       variant="soft"

@@ -44,12 +44,16 @@ function readDataUrl(dataUrl: string) {
   }
 }
 
-function formatDateRange(event: CalendarEventPreview) {
-  const start = formatCalendarEventDate(event.start, {
+function formatDateRange(
+  event: CalendarEventPreview,
+  startDate = event.start,
+  endDate = event.end
+) {
+  const start = formatCalendarEventDate(startDate, {
     allDay: event.allDay,
     timeZone: event.startTimezone
   });
-  const end = formatCalendarEventDate(event.end, {
+  const end = formatCalendarEventDate(endDate, {
     allDay: event.allDay,
     timeZone: event.endTimezone
   });
@@ -106,7 +110,11 @@ function toMsArray(values?: Date[]) {
   return next.length > 0 ? next : undefined;
 }
 
-function resolveEventReminderOccurrence(event: CalendarEventPreview, leadMinutes: number) {
+function resolveEventReminderOccurrence(
+  event: CalendarEventPreview,
+  leadMinutes: number,
+  nowMs = Date.now()
+) {
   if (!event.start) return null;
   return resolveNextReminderOccurrence({
     eventStartAtMs: event.start.getTime(),
@@ -115,16 +123,47 @@ function resolveEventReminderOccurrence(event: CalendarEventPreview, leadMinutes
     recurrenceRule: event.recurrenceRule,
     recurrenceDates: toMsArray(event.recurrenceDates),
     excludedDates: toMsArray(event.excludedDates)
-  });
+  }, nowMs);
 }
 
-function canScheduleReminderForEvent(event: CalendarEventPreview) {
-  if (!event.start) return false;
-  if (!event.recurrenceRule) {
-    return event.start.getTime() > Date.now();
+function resolveEventDisplayRange(event: CalendarEventPreview, nowMs = Date.now()) {
+  if (!event.start) {
+    return {
+      start: undefined,
+      end: undefined,
+      startAtMs: Number.NaN
+    };
   }
-  const occurrence = resolveEventReminderOccurrence(event, 0);
-  return Boolean(occurrence && occurrence.eventStartAtMs > Date.now());
+
+  const startAtMs = event.start.getTime();
+  if (!event.recurrenceRule?.trim()) {
+    return {
+      start: event.start,
+      end: event.end,
+      startAtMs
+    };
+  }
+
+  const nextOccurrence = resolveEventReminderOccurrence(event, 0, nowMs);
+  const displayStartAtMs = nextOccurrence?.eventStartAtMs ?? startAtMs;
+  const durationMs = event.end ? event.end.getTime() - startAtMs : Number.NaN;
+  const hasDuration = Number.isFinite(durationMs) && durationMs > 0;
+  const displayEndAtMs = hasDuration ? displayStartAtMs + durationMs : Number.NaN;
+
+  return {
+    start: new Date(displayStartAtMs),
+    end: Number.isFinite(displayEndAtMs) ? new Date(displayEndAtMs) : undefined,
+    startAtMs: displayStartAtMs
+  };
+}
+
+function canScheduleReminderForEvent(event: CalendarEventPreview, nowMs = Date.now()) {
+  if (!event.start) return false;
+  if (!event.recurrenceRule?.trim()) {
+    return event.start.getTime() > nowMs;
+  }
+  const occurrence = resolveEventReminderOccurrence(event, 0, nowMs);
+  return Boolean(occurrence && occurrence.eventStartAtMs > nowMs);
 }
 
 type ReminderModalState = {
@@ -240,9 +279,19 @@ export default function CalendarEventPreview({
     events.find((event) => (event.uid ?? "").trim().length > 0)?.uid?.trim() ??
     extractIcsUid(normalizedRawSource);
   const groupedEvents = useMemo(() => {
+    const nowMs = Date.now();
     const sourceEvents = (hasCurrentResult ? result.events : []).slice(0, 3);
-    const entries = sourceEvents.map((event, index) => ({ event, index }));
-    return groupItemsByRelativeTime(entries, (entry) => entry.event.start?.getTime() ?? Number.NaN);
+    const entries = sourceEvents.map((event, index) => {
+      const displayRange = resolveEventDisplayRange(event, nowMs);
+      return {
+        event,
+        index,
+        displayStart: displayRange.start,
+        displayEnd: displayRange.end,
+        displayStartAtMs: displayRange.startAtMs
+      };
+    });
+    return groupItemsByRelativeTime(entries, (entry) => entry.displayStartAtMs, nowMs);
   }, [hasCurrentResult, result.events]);
   const loading = !hasCurrentResult;
   const hasError = hasCurrentResult && result.error;
@@ -418,8 +467,8 @@ export default function CalendarEventPreview({
             <section key={bucket.key} className={styles.eventGroup}>
               <p className={styles.groupLabel}>{bucket.label}</p>
               <div className={styles.eventList}>
-                {bucket.items.map(({ event, index }) => {
-                  const dateRange = formatDateRange(event);
+                {bucket.items.map(({ event, index, displayStart, displayEnd }) => {
+                  const dateRange = formatDateRange(event, displayStart, displayEnd);
                   const recurrenceSummary = buildCalendarRecurrenceSummary(event);
                   const locationUrl = parseHttpUrl(event.location);
                   const reminderKey = event.uid ?? `${attachment.id}-${index}`;

@@ -3,10 +3,11 @@ import {
   getAccounts,
   getFolders,
   getMessageById,
-  updateMessageFolder,
+  relocateMovedMessage,
   updateMessageFlags
 } from "@/lib/db";
 import { moveImapMessage, updateImapFlags } from "@/lib/mail/imap";
+import { moveMessageFiles } from "@/lib/storage";
 import type { Folder } from "@/lib/data";
 import { requireAccountAccessOr403, requireSessionOr401 } from "@/lib/auth";
 
@@ -98,13 +99,19 @@ export async function POST(request: Request) {
     inboxMailbox,
     clientId
   );
-  if (inboxFolder) {
-    await updateMessageFolder(
+  const relocated = await relocateMovedMessage({
+    accountId: payload.accountId,
+    previousId: message.id,
+    destinationFolderId: inboxFolder?.id ?? message.folderId,
+    destinationMailboxPath: inboxMailbox,
+    destinationUid
+  });
+  if (relocated?.changed) {
+    await moveMessageFiles(
       payload.accountId,
-      message.id,
-      inboxFolder.id,
-      inboxMailbox,
-      destinationUid
+      relocated.previousId,
+      relocated.nextId,
+      relocated.attachmentIds
     );
   }
 
@@ -116,7 +123,7 @@ export async function POST(request: Request) {
     nextFlags.length !== existingFlags.length ||
     nextFlags.some((flag, index) => flag !== existingFlags[index]);
   if (flagsChanged) {
-    await updateMessageFlags(payload.accountId, message.id, nextFlags);
+    await updateMessageFlags(payload.accountId, relocated?.nextId ?? message.id, nextFlags);
   }
 
   return NextResponse.json({
@@ -124,6 +131,8 @@ export async function POST(request: Request) {
     action: "moved",
     inboxFolderId: inboxFolder?.id ?? null,
     inboxMailbox,
-    flags: nextFlags
+    flags: nextFlags,
+    previousMessageId: relocated?.previousId ?? message.id,
+    messageId: relocated?.nextId ?? message.id
   });
 }

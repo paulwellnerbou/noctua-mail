@@ -4,11 +4,11 @@ import {
   getAttachmentIds,
   getFolders,
   getMessageById,
-  updateMessageFolder,
+  relocateMovedMessage,
   updateMessageFlags,
   deleteMessageById
 } from "@/lib/db";
-import { deleteMessageFiles } from "@/lib/storage";
+import { deleteMessageFiles, moveMessageFiles } from "@/lib/storage";
 import { deleteImapMessage, moveImapMessage } from "@/lib/mail/imap";
 import type { Folder } from "@/lib/data";
 import { requireAccountAccessOr403, requireSessionOr401 } from "@/lib/auth";
@@ -106,13 +106,19 @@ export async function POST(request: Request) {
     trashMailbox,
     clientId
   );
-  if (trashFolder) {
-    await updateMessageFolder(
+  const relocated = await relocateMovedMessage({
+    accountId: payload.accountId,
+    previousId: message.id,
+    destinationFolderId: trashFolder?.id ?? message.folderId,
+    destinationMailboxPath: trashMailbox,
+    destinationUid
+  });
+  if (relocated?.changed) {
+    await moveMessageFiles(
       payload.accountId,
-      message.id,
-      trashFolder.id,
-      trashMailbox,
-      destinationUid
+      relocated.previousId,
+      relocated.nextId,
+      relocated.attachmentIds
     );
   }
   if (message.flags && message.flags.length > 0) {
@@ -120,13 +126,15 @@ export async function POST(request: Request) {
       (flag) => flag.toLowerCase() !== "\\recent"
     );
     if (cleaned.length !== message.flags.length) {
-      await updateMessageFlags(payload.accountId, message.id, cleaned);
+      await updateMessageFlags(payload.accountId, relocated?.nextId ?? message.id, cleaned);
     }
   }
   return NextResponse.json({
     ok: true,
     action: "moved",
     trashFolderId: trashFolder?.id ?? null,
-    trashMailbox
+    trashMailbox,
+    previousMessageId: relocated?.previousId ?? message.id,
+    messageId: relocated?.nextId ?? message.id
   });
 }

@@ -13,7 +13,6 @@ import { Badge, Button, Card, IconButton, Tabs } from "@radix-ui/themes";
 import { CaretRightIcon } from "@radix-ui/react-icons";
 import * as Collapsible from "@radix-ui/react-collapsible";
 import { badgeColors, getFlagBadgeColor, getPriorityBadgeColor } from "@/lib/ui/badgeColors";
-import { isCalendarAttachment } from "@/lib/messageFlags";
 import { getMessageDateDisplay } from "@/lib/dateFormatting";
 import type { AccountDateFormat, Message } from "@/lib/data";
 import badgeStyles from "./MessageBadge.module.css";
@@ -25,6 +24,7 @@ import FolderBadges from "../folder/FolderBadges";
 import CalendarEventPreview from "./CalendarEventPreview";
 import MessageRecipientMetaField from "./MessageRecipientMetaField";
 import CategoryBadge from "../CategoryBadge";
+import { hasNonInlineAttachments } from "../utils/messageHelpers";
 
 type MessageTab = "html" | "text" | "markdown" | "source";
 
@@ -34,6 +34,7 @@ type ComposeMode = "new" | "reply" | "replyAll" | "forward" | "edit" | "editAsNe
 
 type ThreadMessageCardProps = {
   message: Message;
+  bodyLoading?: boolean;
   messageRefs: React.MutableRefObject<Map<string, HTMLElement>>;
   pendingMessageActions: Set<string>;
   includeThreadAcrossFolders: boolean;
@@ -79,6 +80,7 @@ type ThreadMessageCardProps = {
 
 export default function ThreadMessageCard({
   message,
+  bodyLoading = false,
   messageRefs,
   pendingMessageActions,
   includeThreadAcrossFolders,
@@ -273,7 +275,19 @@ export default function ThreadMessageCard({
   );
 
   let content: React.ReactNode = null;
-  if (hasHtml && hasText) {
+  if (bodyLoading && !hasHtml && !hasText) {
+    content = wrapPanel(
+      "loading",
+      <div className={styles.bodyLoading} role="status" aria-live="polite">
+        <span className={styles.bodyLoadingLabel}>Loading message content…</span>
+        <div className={styles.bodyLoadingSkeleton} aria-hidden="true">
+          <span className={styles.bodyLoadingLine} />
+          <span className={styles.bodyLoadingLine} />
+          <span className={`${styles.bodyLoadingLine} ${styles.bodyLoadingLineShort}`} />
+        </div>
+      </div>
+    );
+  } else if (hasHtml && hasText) {
     const tabs = [
       { value: "html" as const, label: "HTML" },
       { value: "text" as const, label: "Text" },
@@ -454,24 +468,17 @@ export default function ThreadMessageCard({
                       Priority: {message.priority}
                     </Badge>
                   )}
-                  {(() => {
-                    const nonInlineAttachments = message.attachments?.filter((att) => !att.inline) ?? [];
-                    if (nonInlineAttachments.length === 0) return null;
-                    // Don't show attachment badge if all non-inline attachments are calendar events
-                    const allCalendar = nonInlineAttachments.every(isCalendarAttachment);
-                    if (allCalendar) return null;
-                    return (
-                      <Badge
-                        size="1"
-                        variant="soft"
-                        color={badgeColors.attachment}
-                        className={badgeStyles.badge}
-                        title="Attachments"
-                      >
-                        <Paperclip size={12} />
-                      </Badge>
-                    );
-                  })()}
+                  {hasNonInlineAttachments(message) && (
+                    <Badge
+                      size="1"
+                      variant="soft"
+                      color={badgeColors.attachment}
+                      className={badgeStyles.badge}
+                      title="Attachments"
+                    >
+                      <Paperclip size={12} />
+                    </Badge>
+                  )}
                   {(message.hasInlineAttachments ??
                     message.attachments?.some((item) => item.inline)) && (
                     <Badge

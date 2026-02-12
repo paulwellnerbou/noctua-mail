@@ -1,30 +1,22 @@
 import { ImapFlow } from "imapflow";
-import tls from "tls";
 import type { Account } from "@/lib/data";
-import { getImapLogger, logImapOp } from "./imapLogger";
+import { logImapOp } from "./imapLogger";
+import { bindImapClientError, buildImapFlowOptions } from "./imapClientOptions";
 
 export async function verifyImapCredentials(
   account: Account,
   password: string,
   clientId?: string
 ) {
-  const client = new ImapFlow({
-    host: account.imap.host,
-    port: account.imap.port,
-    secure: account.imap.secure,
-    logger: getImapLogger(),
-    auth: {
-      user: account.imap.user,
-      pass: password
-    },
-    tls: {
-      servername: account.imap.host,
-      checkServerIdentity: (hostname, cert) => {
-        if (!cert) return undefined;
-        return tls.checkServerIdentity(hostname, cert);
+  const client = new ImapFlow(
+    buildImapFlowOptions(account, {
+      auth: {
+        user: account.imap.user,
+        pass: password
       }
-    }
-  });
+    })
+  );
+  bindImapClientError(client, { accountId: account.id, clientId });
   try {
     await logImapOp(
       "connect",

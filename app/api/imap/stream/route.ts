@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
-import tls from "tls";
 
 import { getAccounts, getFolders, getMailboxState, saveMailboxState } from "@/lib/db";
-import { getImapLogger, logImapOp } from "@/lib/mail/imapLogger";
+import { logImapOp } from "@/lib/mail/imapLogger";
+import { bindImapClientError, buildImapFlowOptions } from "@/lib/mail/imapClientOptions";
 import { registerStream } from "@/lib/mail/imapStreamRegistry";
 import { normalizeImapFlags } from "@/lib/messageFlags";
 import { requireAccountAccessOr403, requireSessionOr401 } from "@/lib/auth";
@@ -162,22 +162,13 @@ export async function GET(request: Request) {
           ? folder.id.slice(accountId.length + 1)
           : folder.name;
 
-        const client = new ImapFlow({
-          host: account.imap.host,
-          port: account.imap.port,
-          secure: account.imap.secure,
-          logger: getImapLogger(),
-          auth: { user: account.imap.user, pass: account.imap.password },
-          tls: {
-            servername: account.imap.host,
-            checkServerIdentity: (hostname, cert) => {
-              if (!cert) return undefined;
-              return tls.checkServerIdentity(hostname, cert);
-            }
-          },
-          maxIdleTime: 10 * 60 * 1000,
-          qresync: true
-        });
+        const client = new ImapFlow(
+          buildImapFlowOptions(account, {
+            maxIdleTime: 10 * 60 * 1000,
+            qresync: true
+          })
+        );
+        bindImapClientError(client, { ...logContext, mailbox });
 
         await logImapOp("imap.connect", { ...logContext, mailbox }, async () => {
           await client.connect();
@@ -349,20 +340,8 @@ export async function GET(request: Request) {
             );
             if (toPoll.length === 0) return;
 
-          const pollClient = new ImapFlow({
-            host: account.imap.host,
-            port: account.imap.port,
-            secure: account.imap.secure,
-            logger: getImapLogger(),
-            auth: { user: account.imap.user, pass: account.imap.password },
-            tls: {
-              servername: account.imap.host,
-              checkServerIdentity: (hostname, cert) => {
-                if (!cert) return undefined;
-                return tls.checkServerIdentity(hostname, cert);
-              }
-            }
-          });
+          const pollClient = new ImapFlow(buildImapFlowOptions(account));
+          bindImapClientError(pollClient, { ...logContext, mailbox: "poll" });
           try {
             await logImapOp("imap.connect", { ...logContext, mailbox: "poll" }, async () => {
               await pollClient.connect();

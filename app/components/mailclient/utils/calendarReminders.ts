@@ -5,6 +5,7 @@ export const CALENDAR_REMINDERS_UPDATED_EVENT = "noctua:calendar-reminders-updat
 const CALENDAR_REMINDER_DELIVERED_PREFIX = "noctua:calendar-reminder-delivered";
 const CALENDAR_REMINDER_CACHE_PREFIX = "noctua:calendar-reminder-cache";
 const CALENDAR_REMINDER_QUEUE_PREFIX = "noctua:calendar-reminder-queue";
+const CALENDAR_REMINDER_REMOTE_FETCH_TTL_MS = 5 * 60 * 1000;
 
 type CalendarReminderLeadOption = {
   value: string;
@@ -98,6 +99,13 @@ type ReminderEventKey = {
   eventTitle?: string;
   eventStartAtMs: number;
 };
+
+type ReminderRemoteFetchState = {
+  lastSuccessAtMs: number;
+  inFlight?: Promise<CalendarReminder[]>;
+};
+
+const reminderRemoteFetchState = new Map<string, ReminderRemoteFetchState>();
 
 export function getCalendarReminderStartAtMs(reminder: CalendarReminder) {
   const startAtMs =
@@ -667,12 +675,32 @@ export async function fetchCalendarReminders(accountId: string): Promise<Calenda
   if (!canAttemptOnlineSync()) {
     return cache;
   }
-  try {
-    await syncQueuedReminderMutations(accountId);
-    return await fetchRemindersFromServer(accountId);
-  } catch {
+  const queue = readReminderQueue(accountId);
+  const state = reminderRemoteFetchState.get(accountId) ?? { lastSuccessAtMs: 0 };
+  reminderRemoteFetchState.set(accountId, state);
+  const now = Date.now();
+  const hasPendingQueue = queue.length > 0;
+  const cacheFresh = now - state.lastSuccessAtMs < CALENDAR_REMINDER_REMOTE_FETCH_TTL_MS;
+  if (!hasPendingQueue && cacheFresh && !state.inFlight) {
     return cache;
   }
+  if (state.inFlight) {
+    return state.inFlight;
+  }
+  const request = (async () => {
+    try {
+      await syncQueuedReminderMutations(accountId);
+      const reminders = await fetchRemindersFromServer(accountId);
+      state.lastSuccessAtMs = Date.now();
+      return reminders;
+    } catch {
+      return cache;
+    } finally {
+      state.inFlight = undefined;
+    }
+  })();
+  state.inFlight = request;
+  return request;
 }
 
 export async function upsertCalendarReminder(

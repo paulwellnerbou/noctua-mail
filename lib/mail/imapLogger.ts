@@ -10,6 +10,16 @@ const LEVELS: Record<LogLevel, number> = {
 
 const noop = () => {};
 
+function formatLogMessage(message: unknown) {
+  if (typeof message === "string") return message;
+  if (message instanceof Error) return message.message;
+  try {
+    return JSON.stringify(message);
+  } catch {
+    return String(message);
+  }
+}
+
 export function getImapLogger() {
   const rawLevel = (process.env.IMAP_LOG_LEVEL || "info").toLowerCase() as LogLevel;
   const level = LEVELS[rawLevel] ?? LEVELS.warn;
@@ -18,9 +28,7 @@ export function getImapLogger() {
   }
 
   const logLine = (fn: (...args: unknown[]) => void) => (message: unknown) => {
-    if (typeof message === "string") {
-      fn(message);
-    }
+    fn(formatLogMessage(message));
   };
 
   const logger = {

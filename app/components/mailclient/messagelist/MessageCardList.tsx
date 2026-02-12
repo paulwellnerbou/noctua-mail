@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import type React from "react";
 import type { AccountDateFormat, Message } from "@/lib/data";
-import { CALENDAR_INVITE_FLAG, hasMessageFlag, isCalendarAttachment } from "@/lib/messageFlags";
+import { CALENDAR_INVITE_FLAG, hasMessageFlag } from "@/lib/messageFlags";
 import MessageRow from "./MessageRow";
+import { shouldShowAttachmentIcon } from "../utils/messageHelpers";
 import {
   buildMessageListItems,
   type MessageGroup,
@@ -505,14 +506,7 @@ export default function MessageCardList({
               showFolderBadgesInMeta={false}
               quickActions={renderQuickActions(message)}
               messageMenu={renderMessageMenu(message, isCompactView ? "table" : "list")}
-              showAttachmentIcon={(() => {
-                const nonInlineAttachments =
-                  message.attachments?.filter((att) => !att.inline) ?? [];
-                if (nonInlineAttachments.length === 0) return false;
-                // Don't show attachment icon if all non-inline attachments are calendar events
-                const allCalendar = nonInlineAttachments.every(isCalendarAttachment);
-                return !allCalendar;
-              })()}
+              showAttachmentIcon={shouldShowAttachmentIcon(message)}
               showCalendarInviteIcon={hasMessageFlag(message.flags, CALENDAR_INVITE_FLAG)}
               showNewBadge={
                 !displaySeen &&

@@ -15,6 +15,15 @@ function getLocalDayStartMs(timestampMs: number) {
   return new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
 }
 
+function getLocalWeekStartMs(timestampMs: number) {
+  const date = new Date(timestampMs);
+  const dayStart = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  const dayOfWeek = dayStart.getDay();
+  const daysSinceMonday = (dayOfWeek + 6) % 7;
+  dayStart.setDate(dayStart.getDate() - daysSinceMonday);
+  return dayStart.getTime();
+}
+
 function getRelativeTimeGroupMeta(timestampMs: number, nowMs: number): RelativeTimeGroupMeta {
   if (!Number.isFinite(timestampMs)) {
     return {
@@ -24,7 +33,9 @@ function getRelativeTimeGroupMeta(timestampMs: number, nowMs: number): RelativeT
     };
   }
 
-  const dayOffset = Math.floor((getLocalDayStartMs(timestampMs) - getLocalDayStartMs(nowMs)) / DAY_MS);
+  const targetDayStartMs = getLocalDayStartMs(timestampMs);
+  const nowDayStartMs = getLocalDayStartMs(nowMs);
+  const dayOffset = Math.floor((targetDayStartMs - nowDayStartMs) / DAY_MS);
   if (dayOffset < 0) {
     return {
       key: "past",
@@ -46,22 +57,27 @@ function getRelativeTimeGroupMeta(timestampMs: number, nowMs: number): RelativeT
       order: 200
     };
   }
-  if (dayOffset <= 6) {
+
+  const thisWeekStartMs = getLocalWeekStartMs(nowMs);
+  const nextWeekStartMs = thisWeekStartMs + 7 * DAY_MS;
+  const weekAfterNextStartMs = nextWeekStartMs + 7 * DAY_MS;
+
+  if (targetDayStartMs < nextWeekStartMs) {
     return {
       key: "this-week",
       label: "This Week",
       order: 300
     };
   }
-  if (dayOffset <= 13) {
+  if (targetDayStartMs < weekAfterNextStartMs) {
     return {
-      key: `in-${dayOffset}-days`,
-      label: `In ${dayOffset} days`,
-      order: 400 + dayOffset
+      key: "next-week",
+      label: "Next Week",
+      order: 400
     };
   }
 
-  const weeks = Math.floor(dayOffset / 7);
+  const weeks = Math.floor((targetDayStartMs - thisWeekStartMs) / (7 * DAY_MS));
   return {
     key: `in-${weeks}-weeks`,
     label: `In ${weeks} week${weeks === 1 ? "" : "s"}`,

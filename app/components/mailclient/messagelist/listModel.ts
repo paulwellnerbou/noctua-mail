@@ -103,6 +103,7 @@ export function buildGroupedMessages(params: {
   ) => Array<{ message: Message; depth: number }>;
   isFlaggedMessage: (message: Message) => boolean;
   computeGroupMeta: (items: Message[]) => MessageGroupMeta[];
+  includeFlaggedGroup?: boolean;
 }): MessageGroup[] {
   const {
     listScopeMessages,
@@ -111,7 +112,8 @@ export function buildGroupedMessages(params: {
     buildThreadTree,
     flattenThread,
     isFlaggedMessage,
-    computeGroupMeta
+    computeGroupMeta,
+    includeFlaggedGroup = true
   } = params;
   const base = [...listScopeMessages].sort((a, b) => b.dateValue - a.dateValue);
   const groups = new Map<string, Message[]>();
@@ -121,7 +123,7 @@ export function buildGroupedMessages(params: {
     buildThreadTree(base).forEach((root) => {
       const flat = flattenThread(root, 0);
       if (!flat.length) return;
-      const hasFlagged = flat.some(({ message }) => isFlaggedMessage(message));
+      const hasFlagged = includeFlaggedGroup && flat.some(({ message }) => isFlaggedMessage(message));
       if (hasFlagged) {
         flat.forEach(({ message }) => {
           threadGroupKey.set(message.id, "Flagged");
@@ -141,22 +143,23 @@ export function buildGroupedMessages(params: {
   base.forEach((message) => {
     const key = supportsThreads
       ? threadGroupKey.get(message.id) ?? message.groupKey ?? "Other"
-      : isFlaggedMessage(message)
+      : includeFlaggedGroup && isFlaggedMessage(message)
         ? "Flagged"
         : message.groupKey ?? "Other";
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key)!.push(message);
   });
   const meta = groupMeta.length ? groupMeta : computeGroupMeta(base);
+  const normalizedMeta = includeFlaggedGroup ? meta : meta.filter((group) => group.key !== "Flagged");
   // Keep the Flagged header count aligned with non-threaded grouping:
   // count flagged messages only, not every message inside flagged threads.
   const flaggedCount = base.filter((message) => isFlaggedMessage(message)).length;
-  const orderedMeta = flaggedCount > 0
+  const orderedMeta = includeFlaggedGroup && flaggedCount > 0
     ? [
         { key: "Flagged", label: "Flagged", count: flaggedCount },
-        ...meta.filter((group) => group.key !== "Flagged")
+        ...normalizedMeta.filter((group) => group.key !== "Flagged")
       ]
-    : meta;
+    : normalizedMeta;
   const metaKeys = new Set(orderedMeta.map((group) => group.key));
   const missingMeta = Array.from(groups.entries())
     .filter(([key]) => !metaKeys.has(key))

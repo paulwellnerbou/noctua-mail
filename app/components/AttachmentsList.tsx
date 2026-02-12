@@ -80,15 +80,17 @@ export default function AttachmentsList({
   attachments: Attachment[];
   onRemove?: (id: string) => void;
 }) {
-  // Filter out calendar attachments as they're shown in CalendarEventPreview
-  const nonCalendarAttachments = attachments.filter((att) => !isCalendarAttachment(att));
+  // Inline attachments are rendered in the message body; calendar invites are shown separately.
+  const visibleAttachments = attachments.filter(
+    (att) => !att.inline && !isCalendarAttachment(att)
+  );
 
-  if (!nonCalendarAttachments.length) return null;
+  if (!visibleAttachments.length) return null;
   return (
     <div className="attachments">
       <h4>Attachments</h4>
       <div className="attachment-list">
-        {nonCalendarAttachments.map((file) => {
+        {visibleAttachments.map((file) => {
           const FileIcon = getFileIcon(file.contentType, file.filename);
           const showImagePreview = isImage(file.contentType) && (file.url || file.dataUrl);
           return (

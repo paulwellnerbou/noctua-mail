@@ -1,4 +1,11 @@
-import { runSyncOperation, type SyncPayload } from "../lib/syncOperation";
+import {
+  runSyncOperation,
+  type SyncPayload
+} from "../lib/syncOperation";
+import {
+  formatSyncWorkerProgressLine,
+  formatSyncWorkerResultLine
+} from "../lib/syncWorkerProtocol";
 
 const rawPayload = process.argv[2];
 
@@ -22,9 +29,17 @@ if (!parsed?.accountId) {
 
 try {
   const { clientId, ...payload } = parsed;
-  const result = await runSyncOperation(payload, clientId);
-  process.stdout.write(JSON.stringify(result));
+  const result = await runSyncOperation(payload, clientId, {
+    onProgress: (progress) => {
+      process.stdout.write(`${formatSyncWorkerProgressLine(progress)}\n`);
+    }
+  });
+  process.stdout.write(`${formatSyncWorkerResultLine(result)}\n`);
 } catch (error) {
-  console.error(error instanceof Error ? error.message : "Sync job failed.");
+  if (error instanceof Error) {
+    console.error(error.stack ?? error.message);
+  } else {
+    console.error(error ?? "Sync job failed.");
+  }
   process.exit(1);
 }

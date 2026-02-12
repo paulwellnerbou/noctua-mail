@@ -1,38 +1,45 @@
 import type { Account, Folder, Message } from "@/lib/data";
-import { getCategoryLinearModel, getLatestMessageUid } from "@/lib/db";
+import {
+  getCategoryLinearModel,
+  getLatestMessageUid,
+  getMailboxState,
+  saveMailboxState
+} from "@/lib/db";
 import { extractHtmlBody } from "@/lib/html";
 import { isCalendarAttachment, withCalendarInviteFlag } from "@/lib/messageFlags";
+import { simpleParser } from "mailparser";
 import {
   classifyEmail,
   getCategorizationConfig,
   type CategoryLinearModel
 } from "@/lib/mail/categorization";
-import tls from "tls";
+import { buildImapMessageRowId } from "@/lib/messageIds";
 import { getImapLogger, logImapOp } from "@/lib/mail/imapLogger";
+import { bindImapClientError, buildImapFlowOptions } from "@/lib/mail/imapClientOptions";
 import { ImapFlow } from "imapflow";
 
-const buildImapClient = (account: Account) =>
-  new ImapFlow({
-    host: account.imap.host,
-    port: account.imap.port,
-    secure: account.imap.secure,
-    logger: getImapLogger(),
-    auth: {
-      user: account.imap.user,
-      pass: account.imap.password
-    },
-    tls: {
-      servername: account.imap.host,
-      checkServerIdentity: (hostname, cert) => {
-        if (!cert) return undefined;
-        return tls.checkServerIdentity(hostname, cert);
-      }
-    }
-  });
+const buildImapClient = (account: Account, logContext?: ImapLogContext) => {
+  const client = new ImapFlow(buildImapFlowOptions(account));
+  bindImapClientError(client, logContext);
+  return client;
+};
 
 type ImapSyncResult = {
   messages: Message[];
   folders: Folder[];
+};
+
+export type NewSyncFolderDecision = {
+  folderId: string;
+  mailboxPath: string;
+  uidNext: number | null;
+  skip: boolean;
+  reason:
+    | "baseline-unsynced-folder"
+    | "no-new-uids"
+    | "has-new-uids"
+    | "missing-uid-next"
+    | "status-error";
 };
 
 type ImapParsedMessage = {
@@ -63,7 +70,7 @@ type ImapEnvelope = {
   inReplyTo?: string | string[] | null;
 };
 
-type ImapBodyStructure = {
+export type ImapBodyStructure = {
   part?: string;
   type?: string;
   parameters?: Record<string, string>;
@@ -88,6 +95,18 @@ const buildLogContext = (account: Account, clientId?: string): ImapLogContext =>
 function buildFolderId(accountId: string, path: string) {
   const safePath = path.replace(/\\/g, "/");
   return `${accountId}:${safePath}`;
+}
+
+function mailboxPathFromFolderId(accountId: string, folderId: string) {
+  const prefix = `${accountId}:`;
+  if (folderId.startsWith(prefix)) {
+    return folderId.slice(prefix.length) || "INBOX";
+  }
+  return folderId || "INBOX";
+}
+
+function toFiniteNumber(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
 function formatEnvelopeAddresses(addresses?: ImapEnvelopeAddress[] | null) {
@@ -214,7 +233,7 @@ function choosePreferredTextPart(parts: string[]) {
   return sorted[0];
 }
 
-function extractMessageStructureMetadata(
+export function extractMessageStructureMetadata(
   account: Account,
   uid: number,
   bodyStructure?: ImapBodyStructure
@@ -254,16 +273,20 @@ function extractMessageStructureMetadata(
           ? "1"
           : "";
 
-    if (partKey && disposition !== "attachment") {
+    const isBodyTextPart =
+      (isTextPlain || isTextHtml) &&
+      disposition !== "attachment" &&
+      !filename &&
+      !cid;
+    if (partKey && isBodyTextPart) {
       if (isTextPlain && !plainTextParts.includes(partKey)) plainTextParts.push(partKey);
       if (isTextHtml && !htmlParts.includes(partKey)) htmlParts.push(partKey);
     }
 
     const shouldTreatAsAttachment =
       disposition === "attachment" ||
-      disposition === "inline" ||
       Boolean(filename) ||
-      Boolean(cid) ||
+      (Boolean(cid) && !isTextPlain && !isTextHtml) ||
       (contentType.length > 0 && !isTextPlain && !isTextHtml);
 
     if (!shouldTreatAsAttachment) return;
@@ -439,7 +462,7 @@ function mapImapFolders(account: Account, list: Awaited<ReturnType<typeof listIm
 }
 
 async function listImapRaw(account: Account, logContext?: ImapLogContext) {
-  const client = buildImapClient(account);
+  const client = buildImapClient(account, logContext);
 
   try {
     await logImapOp("connect", { host: account.imap.host, ...logContext }, () => client.connect());
@@ -484,7 +507,6 @@ function buildLightweightImapMessage(params: {
 }) {
   const { account, mailboxToOpen, uid, flags, envelope, internalDate, attachments = [] } = params;
   const flagList = Array.isArray(flags) ? flags : flags ? Array.from(flags) : [];
-  const safeMailbox = mailboxToOpen.split("/").join("_");
   const messageId = normalizeEnvelopeHeaderId(envelope?.messageId) ?? `imap-msg-${uid}`;
   const inReplyTo = resolveEnvelopeInReplyTo(envelope);
   const envelopeDateMs =
@@ -504,7 +526,7 @@ function buildLightweightImapMessage(params: {
   const { seen, answered, flagged, deleted, draft, recent, unread } = deriveFlagState(flagList);
 
   return {
-    id: `imap-${account.id}-${safeMailbox}-${uid}`,
+    id: buildImapMessageRowId(account.id, mailboxToOpen, uid),
     threadId: inReplyTo ?? messageId ?? `imap-thread-${uid}`,
     messageId,
     inReplyTo,
@@ -558,14 +580,19 @@ async function parseImapMessage(
     headerToClassificationMap.set(key, values.length <= 1 ? values[0] ?? "" : values);
   });
   const {
-    attachments,
-    plainTextPart,
-    htmlPart
+    attachments
   } = extractMessageStructureMetadata(account, message.uid, message.bodyStructure);
-  const textBody = await readImapTextPart(client, message.uid, plainTextPart);
-  const htmlBodyPart = await readImapTextPart(client, message.uid, htmlPart);
-  const body = textBody ?? "";
-  const htmlBody = htmlBodyPart ?? undefined;
+  const parsedSource = await simpleParser(message.source, {
+    skipHtmlToText: true,
+    skipTextToHtml: true
+  });
+  const body = typeof parsedSource.text === "string" ? parsedSource.text : "";
+  const htmlBody =
+    typeof parsedSource.html === "string"
+      ? parsedSource.html
+      : Buffer.isBuffer(parsedSource.html)
+        ? parsedSource.html.toString("utf8")
+        : undefined;
   const normalizePriority = (value?: string) => {
     if (!value) return undefined;
     const trimmed = value.trim();
@@ -638,7 +665,6 @@ async function parseImapMessage(
   const previewSource =
     htmlBody && (hasQpArtifacts || !hasTextBody) ? htmlToText(htmlBody) : body;
   const preview = buildPreview(previewSource);
-  const safeMailbox = mailboxToOpen.split("/").join("_");
   const source = message.source.toString();
   const referencesArray = parseHeaderMessageIdList(getHeaderValue(headers, "references"));
   const xForwardedMessageId = headerValue("x-forwarded-message-id");
@@ -647,7 +673,8 @@ async function parseImapMessage(
   const inReplyTo = envelopeInReplyTo ?? headerInReplyTo;
   const envelopeMessageId = normalizeEnvelopeHeaderId(envelope?.messageId);
   const headerMessageId = normalizeEnvelopeHeaderId(headerValue("message-id"));
-  const messageId = envelopeMessageId ?? headerMessageId ?? `imap-msg-${message.uid}`;
+  const internalMessageId = `imap-msg-${message.uid}`;
+  const messageId = envelopeMessageId ?? headerMessageId ?? internalMessageId;
   const messageFlags = withCalendarInviteFlag(flags, {
     attachments,
     textBody: body,
@@ -688,15 +715,24 @@ async function parseImapMessage(
   );
 
   // Debug logging - remove once verified working
-  console.log('[CATEGORIZATION]', {
-    subject: subject.substring(0, 50),
-    category: classification.category,
-    confidence: classification.confidence,
-    signals: classification.signals
-  });
+  console.log(
+    `[CATEGORIZATION] ${JSON.stringify({
+      accountId: account.id,
+      messageId: {
+        all: messageId,
+        imap: envelopeMessageId ?? null,
+        internal: internalMessageId,
+        header: headerMessageId ?? null
+      },
+      subject: subject.substring(0, 50),
+      category: classification.category,
+      confidence: classification.confidence,
+      signals: classification.signals
+    })}`
+  );
 
   return {
-    id: `imap-${account.id}-${safeMailbox}-${message.uid}`,
+    id: buildImapMessageRowId(account.id, mailboxToOpen, message.uid),
     threadId: inReplyTo ?? messageId ?? `imap-thread-${message.uid}`,
     messageId,
     inReplyTo: inReplyTo ?? undefined,
@@ -734,12 +770,254 @@ async function parseImapMessage(
   } as Message;
 }
 
+function logNewSyncDecision(params: {
+  accountId: string;
+  folder: string;
+  uidNext: number | null;
+  skip: boolean;
+  reason: NewSyncFolderDecision["reason"];
+}) {
+  const logger = getImapLogger();
+  if (logger === false) return;
+  logger.info?.({
+    op: "sync-new-decision",
+    account: params.accountId,
+    folder: params.folder,
+    uidNext: params.uidNext,
+    skip: params.skip,
+    reason: params.reason
+  });
+}
+
+async function persistMailboxHighestUid(params: {
+  account: Account;
+  folderId: string;
+  mailboxPath: string;
+  highestUid: number | null;
+  uidValidity?: unknown;
+}) {
+  const storedState = await getMailboxState(params.account.id, params.folderId);
+  const nextUidValidity =
+    params.uidValidity === undefined || params.uidValidity === null
+      ? storedState?.uidValidity ?? null
+      : String(params.uidValidity);
+  await saveMailboxState({
+    accountId: params.account.id,
+    folderId: params.folderId,
+    mailboxPath: params.mailboxPath,
+    uidValidity: nextUidValidity,
+    highestModSeq: storedState?.highestModSeq ?? null,
+    highestUid: params.highestUid,
+    supportsQresync: storedState?.supportsQresync ?? null
+  });
+}
+
+export async function planImapNewSyncFolders(
+  account: Account,
+  folderIds: string[],
+  clientId?: string
+): Promise<NewSyncFolderDecision[]> {
+  const logContext = buildLogContext(account, clientId);
+  const client = buildImapClient(account, logContext);
+  const uniqueFolderIds = Array.from(new Set(folderIds.filter(Boolean)));
+  if (uniqueFolderIds.length === 0) return [];
+
+  try {
+    await logImapOp("connect", { host: account.imap.host, ...logContext }, () => client.connect());
+    const decisions: NewSyncFolderDecision[] = [];
+
+    for (const folderId of uniqueFolderIds) {
+      const mailboxPath = mailboxPathFromFolderId(account.id, folderId);
+      try {
+        const status = await logImapOp(
+          "status",
+          { mailbox: mailboxPath, ...logContext },
+          () => client.status(mailboxPath, { uidNext: true, uidValidity: true })
+        );
+        const uidNext = toFiniteNumber((status as { uidNext?: unknown })?.uidNext) ?? null;
+        const [latestUid, mailboxState] = await Promise.all([
+          getLatestMessageUid(account.id, mailboxPath),
+          getMailboxState(account.id, folderId)
+        ]);
+        const knownUidCandidates: number[] = [];
+        if (typeof latestUid === "number" && Number.isFinite(latestUid)) {
+          knownUidCandidates.push(latestUid);
+        }
+        if (
+          typeof mailboxState?.highestUid === "number" &&
+          Number.isFinite(mailboxState.highestUid)
+        ) {
+          knownUidCandidates.push(mailboxState.highestUid);
+        }
+        const highestKnownUid =
+          knownUidCandidates.length > 0 ? Math.max(...knownUidCandidates) : null;
+
+        let decision: NewSyncFolderDecision;
+        if (uidNext === null) {
+          decision = {
+            folderId,
+            mailboxPath,
+            uidNext: null,
+            skip: false,
+            reason: "missing-uid-next"
+          };
+        } else if (highestKnownUid === null) {
+          const baselineHighestUid = Math.max(0, uidNext - 1);
+          await persistMailboxHighestUid({
+            account,
+            folderId,
+            mailboxPath,
+            highestUid: baselineHighestUid,
+            uidValidity: (status as { uidValidity?: unknown })?.uidValidity
+          });
+          decision = {
+            folderId,
+            mailboxPath,
+            uidNext,
+            skip: true,
+            reason: "baseline-unsynced-folder"
+          };
+        } else {
+          const startUid = highestKnownUid + 1;
+          const skip = uidNext <= startUid;
+          if (skip) {
+            await persistMailboxHighestUid({
+              account,
+              folderId,
+              mailboxPath,
+              highestUid: Math.max(highestKnownUid, uidNext - 1),
+              uidValidity: (status as { uidValidity?: unknown })?.uidValidity
+            });
+          }
+          decision = {
+            folderId,
+            mailboxPath,
+            uidNext,
+            skip,
+            reason: skip ? "no-new-uids" : "has-new-uids"
+          };
+        }
+        logNewSyncDecision({
+          accountId: account.id,
+          folder: mailboxPath,
+          uidNext: decision.uidNext,
+          skip: decision.skip,
+          reason: decision.reason
+        });
+        decisions.push(decision);
+      } catch {
+        const decision: NewSyncFolderDecision = {
+          folderId,
+          mailboxPath,
+          uidNext: null,
+          skip: false,
+          reason: "status-error"
+        };
+        logNewSyncDecision({
+          accountId: account.id,
+          folder: mailboxPath,
+          uidNext: decision.uidNext,
+          skip: decision.skip,
+          reason: decision.reason
+        });
+        decisions.push(decision);
+      }
+    }
+
+    return decisions;
+  } finally {
+    try {
+      await logImapOp("logout", { ...logContext }, () => client.logout());
+    } catch {
+      // ignore logout errors
+    }
+  }
+}
+
+type NewModeRangeDecision = {
+  startUid: number;
+  uidNext: number | null;
+  skip: boolean;
+  reason: NewSyncFolderDecision["reason"];
+  highestKnownUid: number | null;
+};
+
+async function resolveNewModeRange(params: {
+  account: Account;
+  mailboxPath: string;
+  mailboxUidNext?: number;
+  mailboxUidValidity?: unknown;
+}) {
+  const folderId = buildFolderId(params.account.id, params.mailboxPath);
+  const [latestUid, mailboxState] = await Promise.all([
+    getLatestMessageUid(params.account.id, params.mailboxPath),
+    getMailboxState(params.account.id, folderId)
+  ]);
+  const knownUidCandidates: number[] = [];
+  if (typeof latestUid === "number" && Number.isFinite(latestUid)) {
+    knownUidCandidates.push(latestUid);
+  }
+  if (
+    typeof mailboxState?.highestUid === "number" &&
+    Number.isFinite(mailboxState.highestUid)
+  ) {
+    knownUidCandidates.push(mailboxState.highestUid);
+  }
+  const highestKnownUid = knownUidCandidates.length > 0 ? Math.max(...knownUidCandidates) : null;
+  const uidNext = params.mailboxUidNext ?? null;
+
+  if (uidNext !== null && highestKnownUid === null) {
+    const baselineHighestUid = Math.max(0, uidNext - 1);
+    await persistMailboxHighestUid({
+      account: params.account,
+      folderId,
+      mailboxPath: params.mailboxPath,
+      highestUid: baselineHighestUid,
+      uidValidity: params.mailboxUidValidity
+    });
+    return {
+      startUid: uidNext,
+      uidNext,
+      skip: true,
+      reason: "baseline-unsynced-folder",
+      highestKnownUid
+    } satisfies NewModeRangeDecision;
+  }
+
+  const startUid = highestKnownUid === null ? 1 : highestKnownUid + 1;
+  if (uidNext !== null && uidNext <= startUid) {
+    await persistMailboxHighestUid({
+      account: params.account,
+      folderId,
+      mailboxPath: params.mailboxPath,
+      highestUid: Math.max(startUid - 1, uidNext - 1),
+      uidValidity: params.mailboxUidValidity
+    });
+    return {
+      startUid,
+      uidNext,
+      skip: true,
+      reason: "no-new-uids",
+      highestKnownUid
+    } satisfies NewModeRangeDecision;
+  }
+
+  return {
+    startUid,
+    uidNext,
+    skip: false,
+    reason: uidNext === null ? "missing-uid-next" : "has-new-uids",
+    highestKnownUid
+  } satisfies NewModeRangeDecision;
+}
+
 export type ImapSyncBatch = {
   messages: Message[];
   folders: Folder[];
   isLastBatch: boolean;
   batchNumber: number;
   totalProcessed: number;
+  estimatedTotal?: number;
 };
 
 /**
@@ -754,8 +1032,8 @@ export async function* syncImapAccountBatched(
   clientId?: string,
   batchSize = 300
 ): AsyncGenerator<ImapSyncBatch> {
-  const client = buildImapClient(account);
   const logContext = buildLogContext(account, clientId);
+  const client = buildImapClient(account, logContext);
 
   await logImapOp("connect", { host: account.imap.host, ...logContext }, () =>
     client.connect()
@@ -766,9 +1044,16 @@ export async function* syncImapAccountBatched(
 
   const mailboxToOpen = mailboxPath ?? "INBOX";
   const linearModel = mode === "new" ? null : await getCategoryLinearModel(account.id);
-  await logImapOp("mailboxOpen", { mailbox: mailboxToOpen, ...logContext }, () =>
+  const mailbox = await logImapOp("mailboxOpen", { mailbox: mailboxToOpen, ...logContext }, () =>
     client.mailboxOpen(mailboxToOpen)
   );
+  const mailboxExistsRaw = (mailbox as { exists?: unknown })?.exists;
+  const mailboxExists =
+    typeof mailboxExistsRaw === "number" && Number.isFinite(mailboxExistsRaw)
+      ? mailboxExistsRaw
+      : undefined;
+  const mailboxUidNext = toFiniteNumber((mailbox as { uidNext?: unknown })?.uidNext);
+  const mailboxUidValidity = (mailbox as { uidValidity?: unknown })?.uidValidity;
 
   const fetchQuery = {
     source: true,
@@ -781,6 +1066,8 @@ export async function* syncImapAccountBatched(
   let currentBatch: Message[] = [];
   let batchNumber = 0;
   let totalProcessed = 0;
+  let estimatedTotal = mode === "full" ? mailboxExists : undefined;
+  const progressEvery = Math.max(10, Math.floor(batchSize / 10));
 
   const flushBatch = (isLast: boolean) => {
     if (currentBatch.length === 0 && !isLast) return null;
@@ -789,16 +1076,51 @@ export async function* syncImapAccountBatched(
       folders,
       isLastBatch: isLast,
       batchNumber: ++batchNumber,
-      totalProcessed: totalProcessed
+      totalProcessed: totalProcessed,
+      estimatedTotal
     };
     currentBatch = [];
     return batch;
   };
 
+  const progressBatch = () => ({
+    messages: [] as Message[],
+    folders,
+    isLastBatch: false,
+    batchNumber,
+    totalProcessed,
+    estimatedTotal
+  });
+
+  // Emit an initial progress tick as soon as mailbox metadata is loaded.
+  yield progressBatch();
+
   if (mode === "new") {
-    const latestUid = await getLatestMessageUid(account.id, mailboxToOpen);
-    const startUid = typeof latestUid === "number" ? latestUid + 1 : 1;
-    const range = { uid: `${startUid}:*` };
+    const newRange = await resolveNewModeRange({
+      account,
+      mailboxPath: mailboxToOpen,
+      mailboxUidNext,
+      mailboxUidValidity
+    });
+    logNewSyncDecision({
+      accountId: account.id,
+      folder: mailboxToOpen,
+      uidNext: newRange.uidNext,
+      skip: newRange.skip,
+      reason: newRange.reason
+    });
+    if (typeof newRange.uidNext === "number") {
+      estimatedTotal = Math.max(0, newRange.uidNext - newRange.startUid);
+    } else if (typeof mailboxExists === "number") {
+      estimatedTotal = Math.max(0, mailboxExists - newRange.startUid + 1);
+    }
+    if (newRange.skip) {
+      const finalBatch = flushBatch(true);
+      if (finalBatch) yield finalBatch;
+      await logImapOp("logout", { ...logContext }, () => client.logout());
+      return;
+    }
+    const range = { uid: `${newRange.startUid}:*` };
     const start = Date.now();
 
     for await (const message of client.fetch(range, {
@@ -826,6 +1148,10 @@ export async function* syncImapAccountBatched(
       currentBatch.push(nextMessage);
       totalProcessed += 1;
 
+      if (currentBatch.length < batchSize && totalProcessed % progressEvery === 0) {
+        yield progressBatch();
+      }
+
       if (currentBatch.length >= batchSize) {
         const batch = flushBatch(false);
         if (batch) yield batch;
@@ -845,6 +1171,16 @@ export async function* syncImapAccountBatched(
 
     const finalBatch = flushBatch(true);
     if (finalBatch) yield finalBatch;
+
+    if (typeof newRange.uidNext === "number") {
+      await persistMailboxHighestUid({
+        account,
+        folderId: buildFolderId(account.id, mailboxToOpen),
+        mailboxPath: mailboxToOpen,
+        highestUid: Math.max(newRange.startUid - 1, newRange.uidNext - 1),
+        uidValidity: mailboxUidValidity
+      });
+    }
 
     await logImapOp("logout", { ...logContext }, () => client.logout());
     return;
@@ -875,6 +1211,10 @@ export async function* syncImapAccountBatched(
     currentBatch.push(parsedMessage);
     totalProcessed += 1;
 
+    if (currentBatch.length < batchSize && totalProcessed % progressEvery === 0) {
+      yield progressBatch();
+    }
+
     if (currentBatch.length >= batchSize) {
       const batch = flushBatch(false);
       if (batch) yield batch;
@@ -904,8 +1244,8 @@ export async function syncImapAccount(
   mode: "full" | "recent" | "new" = "recent",
   clientId?: string
 ): Promise<ImapSyncResult> {
-  const client = buildImapClient(account);
   const logContext = buildLogContext(account, clientId);
+  const client = buildImapClient(account, logContext);
 
   await logImapOp("connect", { host: account.imap.host, ...logContext }, () =>
     client.connect()
@@ -916,9 +1256,11 @@ export async function syncImapAccount(
 
   const mailboxToOpen = mailboxPath ?? "INBOX";
   const linearModel = mode === "new" ? null : await getCategoryLinearModel(account.id);
-  await logImapOp("mailboxOpen", { mailbox: mailboxToOpen, ...logContext }, () =>
+  const mailbox = await logImapOp("mailboxOpen", { mailbox: mailboxToOpen, ...logContext }, () =>
     client.mailboxOpen(mailboxToOpen)
   );
+  const mailboxUidNext = toFiniteNumber((mailbox as { uidNext?: unknown })?.uidNext);
+  const mailboxUidValidity = (mailbox as { uidValidity?: unknown })?.uidValidity;
 
   const messages: Message[] = [];
   const now = new Date();
@@ -933,9 +1275,24 @@ export async function syncImapAccount(
   } as const;
 
   if (mode === "new") {
-    const latestUid = await getLatestMessageUid(account.id, mailboxToOpen);
-    const startUid = typeof latestUid === "number" ? latestUid + 1 : 1;
-    const range = { uid: `${startUid}:*` };
+    const newRange = await resolveNewModeRange({
+      account,
+      mailboxPath: mailboxToOpen,
+      mailboxUidNext,
+      mailboxUidValidity
+    });
+    logNewSyncDecision({
+      accountId: account.id,
+      folder: mailboxToOpen,
+      uidNext: newRange.uidNext,
+      skip: newRange.skip,
+      reason: newRange.reason
+    });
+    if (newRange.skip) {
+      await logImapOp("logout", { ...logContext }, () => client.logout());
+      return { messages, folders };
+    }
+    const range = { uid: `${newRange.startUid}:*` };
     const start = Date.now();
     let count = 0;
     for await (const message of client.fetch(range, {
@@ -971,6 +1328,15 @@ export async function syncImapAccount(
         range: range.uid,
         count,
         ms: Date.now() - start
+      });
+    }
+    if (typeof newRange.uidNext === "number") {
+      await persistMailboxHighestUid({
+        account,
+        folderId: buildFolderId(account.id, mailboxToOpen),
+        mailboxPath: mailboxToOpen,
+        highestUid: Math.max(newRange.startUid - 1, newRange.uidNext - 1),
+        uidValidity: mailboxUidValidity
       });
     }
     await logImapOp("logout", { ...logContext }, () => client.logout());
@@ -1023,8 +1389,8 @@ export async function syncImapMessage(
   uid: number,
   clientId?: string
 ): Promise<Message | null> {
-  const client = buildImapClient(account);
   const logContext = buildLogContext(account, clientId);
+  const client = buildImapClient(account, logContext);
 
   let message: Message | null = null;
   try {
@@ -1084,8 +1450,8 @@ export async function appendImapMessage(
   flags: string[] = ["\\Seen"],
   clientId?: string
 ) {
-  const client = buildImapClient(account);
   const logContext = buildLogContext(account, clientId);
+  const client = buildImapClient(account, logContext);
 
   try {
     await logImapOp("connect", { host: account.imap.host, ...logContext }, () =>
@@ -1115,8 +1481,8 @@ export async function moveImapMessage(
   destination: string,
   clientId?: string
 ): Promise<number | null> {
-  const client = buildImapClient(account);
   const logContext = buildLogContext(account, clientId);
+  const client = buildImapClient(account, logContext);
 
   try {
     await logImapOp("connect", { host: account.imap.host, ...logContext }, () =>
@@ -1150,8 +1516,8 @@ export async function deleteImapMessage(
   uid: number,
   clientId?: string
 ) {
-  const client = buildImapClient(account);
   const logContext = buildLogContext(account, clientId);
+  const client = buildImapClient(account, logContext);
 
   try {
     await logImapOp("connect", { host: account.imap.host, ...logContext }, () =>
@@ -1180,8 +1546,8 @@ export async function updateImapFlags(
   enable: boolean,
   clientId?: string
 ) {
-  const client = buildImapClient(account);
   const logContext = buildLogContext(account, clientId);
+  const client = buildImapClient(account, logContext);
 
   try {
     await logImapOp("connect", { host: account.imap.host, ...logContext }, () =>
@@ -1216,8 +1582,8 @@ export async function listImapFolders(account: Account, clientId?: string) {
 }
 
 export async function createImapFolder(account: Account, path: string, clientId?: string) {
-  const client = buildImapClient(account);
   const logContext = buildLogContext(account, clientId);
+  const client = buildImapClient(account, logContext);
   try {
     await logImapOp("connect", { host: account.imap.host, ...logContext }, () =>
       client.connect()
@@ -1240,8 +1606,8 @@ export async function renameImapFolder(
   newPath: string,
   clientId?: string
 ) {
-  const client = buildImapClient(account);
   const logContext = buildLogContext(account, clientId);
+  const client = buildImapClient(account, logContext);
   try {
     await logImapOp("connect", { host: account.imap.host, ...logContext }, () =>
       client.connect()
@@ -1261,8 +1627,8 @@ export async function renameImapFolder(
 }
 
 export async function deleteImapFolder(account: Account, path: string, clientId?: string) {
-  const client = buildImapClient(account);
   const logContext = buildLogContext(account, clientId);
+  const client = buildImapClient(account, logContext);
   try {
     await logImapOp("connect", { host: account.imap.host, ...logContext }, () =>
       client.connect()
@@ -1284,8 +1650,8 @@ export async function unsubscribeImapFolder(
   path: string,
   clientId?: string
 ) {
-  const client = buildImapClient(account);
   const logContext = buildLogContext(account, clientId);
+  const client = buildImapClient(account, logContext);
   try {
     await logImapOp("connect", { host: account.imap.host, ...logContext }, () =>
       client.connect()

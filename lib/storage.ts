@@ -77,6 +77,32 @@ async function unlinkIfExists(filePath: string) {
   }
 }
 
+function getErrorCode(error: unknown) {
+  if (!error || typeof error !== "object") return "";
+  if (!("code" in error)) return "";
+  return String((error as { code?: unknown }).code ?? "");
+}
+
+async function renameIfExists(fromPath: string, toPath: string) {
+  if (fromPath === toPath) return;
+  try {
+    await fs.access(fromPath);
+  } catch {
+    return;
+  }
+  await ensureParentDir(toPath);
+  await unlinkIfExists(toPath);
+  try {
+    await fs.rename(fromPath, toPath);
+  } catch (error) {
+    if (getErrorCode(error) !== "EXDEV") {
+      throw error;
+    }
+    await fs.copyFile(fromPath, toPath);
+    await unlinkIfExists(fromPath);
+  }
+}
+
 async function readJson<T>(fileName: string, fallback: T): Promise<T> {
   await ensureDataDir();
   const filePath = path.join(dataDir, fileName);
@@ -224,4 +250,38 @@ export async function deleteMessageFiles(
     deleteMessageSource(accountId, messageId),
     ...attachmentIds.map((id) => deleteAttachmentData(accountId, messageId, id))
   ]);
+}
+
+export async function moveMessageFiles(
+  accountId: string,
+  previousMessageId: string,
+  nextMessageId: string,
+  attachmentIds: string[]
+) {
+  if (!previousMessageId || !nextMessageId || previousMessageId === nextMessageId) return;
+  await Promise.all([
+    renameIfExists(
+      sourceFilePath(accountId, previousMessageId),
+      sourceFilePath(accountId, nextMessageId)
+    ),
+    renameIfExists(
+      sourceLegacyFilePath(accountId, previousMessageId),
+      sourceLegacyFilePath(accountId, nextMessageId)
+    ),
+    ...attachmentIds.flatMap((attachmentId) => [
+      renameIfExists(
+        attachmentFilePath(accountId, previousMessageId, attachmentId),
+        attachmentFilePath(accountId, nextMessageId, attachmentId)
+      ),
+      renameIfExists(
+        attachmentLegacyFilePath(accountId, previousMessageId, attachmentId),
+        attachmentLegacyFilePath(accountId, nextMessageId, attachmentId)
+      )
+    ])
+  ]);
+
+  await fs.rm(getAttachmentMessageDir(accountId, previousMessageId), {
+    recursive: true,
+    force: true
+  });
 }

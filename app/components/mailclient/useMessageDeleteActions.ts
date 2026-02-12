@@ -21,6 +21,8 @@ const TRASH_NAMES = [
 type DeleteResponse = {
   action: "deleted" | "moved";
   trashFolderId?: string | null;
+  messageId?: string;
+  previousMessageId?: string;
 };
 
 type DeleteNoticeInput = {
@@ -71,6 +73,7 @@ type UseMessageDeleteActionsOptions = {
   noticeSuccessTimeout: number;
   onMessagesRemoved?: (messageIds: string[]) => void;
   markMessagesMutated?: () => void;
+  markDeleteReconcileSuppression?: (targets: Message[]) => void;
 };
 
 export function useMessageDeleteActions({
@@ -101,7 +104,8 @@ export function useMessageDeleteActions({
   undoMoveOperation,
   noticeSuccessTimeout,
   onMessagesRemoved,
-  markMessagesMutated
+  markMessagesMutated,
+  markDeleteReconcileSuppression
 }: UseMessageDeleteActionsOptions) {
   const isPermanentDeleteTarget = useCallback(
     (target: Message, trashFolderId: string | null) => {
@@ -152,6 +156,7 @@ export function useMessageDeleteActions({
         throw new Error(errorMessage || "Failed to delete message.");
       }
       const data = (await res.json()) as DeleteResponse;
+      const movedMessageId = data.messageId ?? target.id;
       markMessagesMutated?.();
       setMessages((prev) => {
         if (data.action === "deleted" || !data.trashFolderId) {
@@ -163,7 +168,12 @@ export function useMessageDeleteActions({
           }
           return prev.flatMap((item) => {
             if (item.id !== target.id) return [item];
-            const updated = { ...item, folderId: data.trashFolderId!, recent: false };
+            const updated = {
+              ...item,
+              id: movedMessageId,
+              folderId: data.trashFolderId!,
+              recent: false
+            };
             const keep = shouldKeepMessageInResults
               ? shouldKeepMessageInResults(updated)
               : true;
@@ -282,6 +292,7 @@ export function useMessageDeleteActions({
       }
     ) => {
       if (targets.length === 0) return;
+      markDeleteReconcileSuppression?.(targets);
       const targetIds = new Set(targets.map((item) => item.id));
       const { activeWasDeleted, nextActiveId } = resolveDeleteNextActiveId(
         targetIds,
@@ -327,7 +338,7 @@ export function useMessageDeleteActions({
             movedToTrashCount += 1;
             if (result.trashFolderId) {
               undoTargets.push({
-                messageId: target.id,
+                messageId: result.messageId ?? target.id,
                 restoreFolderId: target.folderId
               });
             }
@@ -380,7 +391,8 @@ export function useMessageDeleteActions({
       selectionStore,
       setActiveMessageId,
       setPendingMessageActions,
-      onMessagesRemoved
+      onMessagesRemoved,
+      markDeleteReconcileSuppression
     ]
   );
 
