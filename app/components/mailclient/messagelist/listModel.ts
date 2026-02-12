@@ -157,7 +157,16 @@ export function buildGroupedMessages(params: {
         ...meta.filter((group) => group.key !== "Flagged")
       ]
     : meta;
-  return orderedMeta.map((group) => ({
+  const metaKeys = new Set(orderedMeta.map((group) => group.key));
+  const missingMeta = Array.from(groups.entries())
+    .filter(([key]) => !metaKeys.has(key))
+    .map(([key, items]) => ({
+      key,
+      label: key,
+      count: items.length
+    }));
+  const mergedMeta = [...orderedMeta, ...missingMeta];
+  return mergedMeta.map((group) => ({
     key: group.key,
     label: group.label,
     count: group.count,

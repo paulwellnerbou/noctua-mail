@@ -3890,7 +3890,12 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
         if (!hydrated?.id) return null;
         updateMessagesWithCurrentResultPrune((item) => {
           if (item.id !== hydrated.id) return item;
-          return hydrated;
+          return {
+            ...hydrated,
+            // /api/message does not include list grouping metadata; preserve existing group key
+            // so the row remains in the same visible group after hydration.
+            groupKey: item.groupKey ?? hydrated.groupKey
+          };
         }, { source: "hydrate-message-from-server" });
         return hydrated;
       } catch {
