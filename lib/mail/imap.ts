@@ -384,13 +384,17 @@ async function parseImapMessage(
   const attachments: Attachment[] = (parsed.attachments ?? []).map((att: any, index: number) => {
     const content = att.content as Buffer;
     const contentType = att.contentType ?? "application/octet-stream";
+    const contentDisposition =
+      typeof att.contentDisposition === "string"
+        ? att.contentDisposition.trim().toLowerCase()
+        : "";
     const base64 = content.toString("base64");
     return {
       id: `att-${account.id}-${message.uid}-${index}`,
       filename: att.filename ?? `attachment-${index + 1}`,
       contentType,
       size: content.length,
-      inline: Boolean(att.cid),
+      inline: Boolean(att.cid) || contentDisposition.startsWith("inline"),
       cid: att.cid ?? undefined,
       dataUrl: `data:${contentType};base64,${base64}`
     };

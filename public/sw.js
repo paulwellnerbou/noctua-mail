@@ -80,9 +80,12 @@ function normalizeReminder(item) {
   const leadLabel = typeof item.leadLabel === "string" ? item.leadLabel.trim() : "";
   const messageId =
     typeof item.messageId === "string" && item.messageId.trim() ? item.messageId.trim() : null;
+  const accountId =
+    typeof item.accountId === "string" && item.accountId.trim() ? item.accountId.trim() : null;
   if (!Number.isFinite(triggerAtMs) || !Number.isFinite(nextEventStartAtMs)) return null;
   return {
     id,
+    accountId,
     eventTitle: eventTitle || "Calendar event",
     eventLocation: typeof item.eventLocation === "string" ? item.eventLocation.trim() : "",
     messageId,
@@ -141,15 +144,25 @@ async function processReminderNotifications(source) {
       if (reminder.eventLocation) {
         bodyParts.push(reminder.eventLocation);
       }
-      const targetUrl = reminder.messageId
-        ? `/?${new URLSearchParams({ messageId: reminder.messageId }).toString()}`
-        : "/";
+      const params = new URLSearchParams();
+      if (reminder.accountId) {
+        params.set("accountId", reminder.accountId);
+      }
+      if (reminder.messageId) {
+        params.set("messageId", reminder.messageId);
+      }
+      const query = params.toString();
+      const targetUrl = query ? `/?${query}` : "/";
       await self.registration.showNotification(`Reminder: ${reminder.eventTitle}`, {
         body: bodyParts.join(" · "),
         tag: `calendar-reminder-${reminder.id}`,
         icon: "/icon.png",
         badge: "/favicon.png",
-        data: { url: targetUrl, messageId: reminder.messageId }
+        data: {
+          url: targetUrl,
+          messageId: reminder.messageId,
+          accountId: reminder.accountId ?? accountId
+        }
       });
       delivered[reminder.id] = reminder.triggerAtMs;
       changed = true;
@@ -224,9 +237,11 @@ self.addEventListener("notificationclick", (event) => {
   event.notification.close();
   const targetUrl = event.notification?.data?.url || "/";
   const targetMessageId = event.notification?.data?.messageId || null;
+  const target = new URL(targetUrl, self.location.origin);
+  const targetAccountId =
+    event.notification?.data?.accountId || target.searchParams.get("accountId") || null;
   event.waitUntil(
     self.clients.matchAll({ type: "window", includeUncontrolled: true }).then(async (clients) => {
-      const target = new URL(targetUrl, self.location.origin);
       for (const client of clients) {
         const clientUrl = new URL(client.url);
         if (clientUrl.origin !== target.origin) continue;
@@ -237,6 +252,7 @@ self.addEventListener("notificationclick", (event) => {
           client.postMessage({
             type: "noctua:notification-open",
             messageId: targetMessageId,
+            accountId: targetAccountId,
             url: targetUrl
           });
         }

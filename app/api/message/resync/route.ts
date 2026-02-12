@@ -6,6 +6,7 @@ import {
   getThreadIdsByMessageIds,
   upsertMessages
 } from "@/lib/db";
+import { appendUnreferencedInlineImages } from "@/lib/html";
 import { saveAttachmentData, saveMessageSource } from "@/lib/storage";
 import { syncImapMessage } from "@/lib/mail/imap";
 import { requireAccountAccessOr403, requireSessionOr401 } from "@/lib/auth";
@@ -28,11 +29,18 @@ export async function POST(request: Request) {
   }
 
   const existing = await getMessageById(payload.accountId, payload.messageId);
+  if (!existing) {
+    return NextResponse.json(
+      { ok: false, message: "Message not found in local cache." },
+      { status: 404 }
+    );
+  }
+
   const mailboxPath = existing?.mailboxPath;
   const imapUid = typeof existing?.imapUid === "number" ? existing.imapUid : undefined;
   if (!mailboxPath || typeof imapUid !== "number" || Number.isNaN(imapUid)) {
     return NextResponse.json(
-      { ok: false, message: "Message does not have IMAP metadata to re-sync." },
+      { ok: false, message: "Message is missing IMAP metadata to re-sync." },
       { status: 400 }
     );
   }
@@ -88,6 +96,7 @@ export async function POST(request: Request) {
       dataUrlReplacements.forEach((url, dataUrl) => {
         htmlBody = htmlBody?.replaceAll(dataUrl, url);
       });
+      htmlBody = appendUnreferencedInlineImages(htmlBody, attachments);
       htmlBody = htmlBody.replace(/data:(?!image\/)[^'")\s]+/gi, "about:blank");
     }
     const { source, ...rest } = nextMessage;

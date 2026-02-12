@@ -4,6 +4,13 @@ type QuotedHtmlParts = {
   bodyHtml: string;
 };
 
+type InlineImageAttachment = {
+  inline?: boolean;
+  contentType?: string;
+  filename?: string;
+  url?: string;
+};
+
 export function stripConditionalComments(input: string) {
   return input.replace(/<!--\s*\[if[\s\S]*?<!\s*\[endif\s*\]\s*-->/gi, "");
 }
@@ -29,6 +36,39 @@ export function extractHtmlBody(value: string) {
   const match = value.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
   if (match?.[1]) return match[1];
   return value;
+}
+
+function isRenderableInlineImageAttachment(attachment: InlineImageAttachment) {
+  if (!attachment.inline || !attachment.url) return false;
+  const contentType = attachment.contentType?.toLowerCase() ?? "";
+  if (!contentType.startsWith("image/")) return false;
+  // Avoid auto-injecting SVG in the fallback renderer.
+  return !contentType.startsWith("image/svg+xml");
+}
+
+export function appendUnreferencedInlineImages(
+  html: string,
+  attachments: InlineImageAttachment[]
+) {
+  if (!html || attachments.length === 0) return html;
+
+  const snippets: string[] = [];
+  attachments.forEach((attachment) => {
+    if (!isRenderableInlineImageAttachment(attachment) || !attachment.url) return;
+    const escapedUrl = escapeHtml(attachment.url);
+    if (html.includes(attachment.url) || html.includes(escapedUrl)) return;
+    const alt = escapeHtml(attachment.filename?.trim() || "inline image");
+    snippets.push(
+      `<div data-noctua-inline-image="1" style="margin:12px 0;"><img src="${escapedUrl}" alt="${alt}" loading="lazy" decoding="async" style="max-width:100%;height:auto;"></div>`
+    );
+  });
+
+  if (snippets.length === 0) return html;
+  const block = `<div data-noctua-inline-images="1">${snippets.join("")}</div>`;
+  if (/<\/body>/i.test(html)) {
+    return html.replace(/<\/body>/i, `${block}</body>`);
+  }
+  return `${html}${block}`;
 }
 
 export function buildQuotedHtmlPartsFromText(body: string, header: string): QuotedHtmlParts {

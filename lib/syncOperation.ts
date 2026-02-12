@@ -11,6 +11,7 @@ import {
   upsertMessages
 } from "@/lib/db";
 import { parseIcsInvite } from "@/lib/calendar";
+import { appendUnreferencedInlineImages } from "@/lib/html";
 import { isCalendarAttachment } from "@/lib/messageFlags";
 import { deleteMessageFiles, saveAttachmentData, saveMessageSource } from "@/lib/storage";
 import { syncImapAccount, syncImapAccountBatched } from "@/lib/mail/imap";
@@ -176,6 +177,7 @@ export async function runSyncOperationLegacy(
       dataUrlReplacements.forEach((url, dataUrl) => {
         htmlBody = htmlBody?.replaceAll(dataUrl, url);
       });
+      htmlBody = appendUnreferencedInlineImages(htmlBody, attachments);
       htmlBody = htmlBody.replace(/data:(?!image\/)[^'")\s]+/gi, "about:blank");
     }
     const { source, ...rest } = message;
@@ -466,6 +468,7 @@ export async function runSyncOperationBatched(
       dataUrlReplacements.forEach((url, dataUrl) => {
         htmlBody = htmlBody?.replaceAll(dataUrl, url);
       });
+      htmlBody = appendUnreferencedInlineImages(htmlBody, attachments);
       htmlBody = htmlBody.replace(/data:(?!image\/)[^'")\s]+/gi, "about:blank");
     }
     const { source, ...rest } = message;

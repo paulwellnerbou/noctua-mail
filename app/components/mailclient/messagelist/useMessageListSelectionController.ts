@@ -11,6 +11,21 @@ import {
 import type { SelectionStore } from "./selectionStore";
 
 type ThreadFlatEntry = { message: Message; depth: number };
+const LIST_DEBUG_PREFIX = "[noctua][list-debug]";
+
+function summarizeMessageForListDebug(message: Message) {
+  return {
+    id: message.id,
+    messageId: message.messageId ?? null,
+    accountId: message.accountId,
+    folderId: message.folderId,
+    threadId: message.threadId ?? null,
+    parentId: message.parentId ?? null,
+    seen: Boolean(message.seen),
+    unread: Boolean(message.unread ?? !message.seen),
+    dateValue: message.dateValue
+  };
+}
 
 type UseMessageListSelectionControllerParams = {
   selectionStore: SelectionStore;
@@ -110,6 +125,24 @@ export function useMessageListSelectionController({
 
   const handleRowClick = useCallback(
     (event: React.MouseEvent, message: Message) => {
+      const selectedCountBefore = selectionStore.getIds().size;
+      const action = event.shiftKey
+        ? "range-select"
+        : event.metaKey || event.ctrlKey
+          ? "toggle-select"
+          : "open-message";
+      console.info(`${LIST_DEBUG_PREFIX} row click`, {
+        action,
+        modifiers: {
+          shift: event.shiftKey,
+          meta: event.metaKey,
+          ctrl: event.ctrlKey,
+          alt: event.altKey
+        },
+        activeMessageIdBefore: activeMessageId || null,
+        selectedCountBefore,
+        message: summarizeMessageForListDebug(message)
+      });
       if (event.shiftKey) {
         event.preventDefault();
         selectRangeTo(message.id);
@@ -122,7 +155,7 @@ export function useMessageListSelectionController({
       }
       handleSelectMessage(message);
     },
-    [handleSelectMessage, selectRangeTo, toggleMessageSelection]
+    [activeMessageId, handleSelectMessage, selectRangeTo, selectionStore, toggleMessageSelection]
   );
 
   const selectCollapsedThread = useCallback(

@@ -6,9 +6,16 @@ export function makeClientId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-export function buildNotificationUrl(messageId?: string | null): string {
-  if (!messageId) return "/";
-  return `/?${new URLSearchParams({ messageId }).toString()}`;
+export function buildNotificationUrl(messageId?: string | null, accountId?: string | null): string {
+  const params = new URLSearchParams();
+  if (typeof accountId === "string" && accountId.trim()) {
+    params.set("accountId", accountId.trim());
+  }
+  if (typeof messageId === "string" && messageId.trim()) {
+    params.set("messageId", messageId.trim());
+  }
+  const query = params.toString();
+  return query ? `/?${query}` : "/";
 }
 
 export function getExceptionSummary(message: string): string {

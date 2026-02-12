@@ -1,11 +1,23 @@
 import { NextResponse } from "next/server";
 import { getMessageById } from "@/lib/db";
 import { requireAccountAccessOr403, requireSessionOr401 } from "@/lib/auth";
-import { escapeHtml, sanitizeHtmlForDisplay, stripConditionalComments } from "@/lib/html";
+import {
+  appendUnreferencedInlineImages,
+  escapeHtml,
+  sanitizeHtmlForDisplay,
+  stripConditionalComments
+} from "@/lib/html";
 
 function postprocessHtml(
   html: string,
-  attachments: Array<{ inline?: boolean; cid?: string; url?: string; dataUrl?: string }>
+  attachments: Array<{
+    inline?: boolean;
+    cid?: string;
+    url?: string;
+    dataUrl?: string;
+    contentType?: string;
+    filename?: string;
+  }>
 ) {
   let nextHtml = html;
   attachments.forEach((attachment) => {
@@ -19,6 +31,7 @@ function postprocessHtml(
         .replaceAll(`cid:${attachment.cid}`, attachment.url);
     }
   });
+  nextHtml = appendUnreferencedInlineImages(nextHtml, attachments);
   return sanitizeHtmlForDisplay(stripConditionalComments(nextHtml)).replace(
     /data:(?!image\/)[^'")\s]+/gi,
     "about:blank"

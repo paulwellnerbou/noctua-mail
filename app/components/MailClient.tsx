@@ -167,6 +167,26 @@ type DraftSavePayload = {
   attachments?: Attachment[];
 };
 
+const LIST_DEBUG_PREFIX = "[noctua][list-debug]";
+const LIST_DEBUG_SAMPLE_LIMIT = 12;
+
+type CurrentResultDecision = { keep: true } | { keep: false; reason: string };
+
+function summarizeMessageForListDebug(message: Message | null | undefined) {
+  if (!message) return null;
+  return {
+    id: message.id,
+    messageId: message.messageId ?? null,
+    accountId: message.accountId,
+    folderId: message.folderId,
+    threadId: message.threadId ?? null,
+    parentId: message.parentId ?? null,
+    seen: Boolean(message.seen),
+    unread: Boolean(message.unread ?? !message.seen),
+    dateValue: message.dateValue
+  };
+}
+
 function filterUpcomingCalendarReminders(reminders: CalendarReminder[], nowMs = Date.now()) {
   return reminders.filter((reminder) => getCalendarReminderEndAtMs(reminder) > nowMs);
 }
@@ -397,6 +417,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
   const [streamMode, setStreamMode] = useState<"stream" | "polling" | "idle">("polling");
   const pendingJumpMessageIdRef = useRef<string | null>(null);
   const pendingJumpLocalMessageIdRef = useRef<string | null>(null);
+  const pendingJumpAccountIdRef = useRef<string | null>(null);
   const pendingJumpRefreshKeyRef = useRef("");
   const lastUidNextRef = useRef<Record<string, number>>({});
   const lastUidNextByFolderRef = useRef<Record<string, number>>({});
@@ -406,6 +427,9 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
   const autoHydrationAttemptAtRef = useRef<Record<string, number>>({});
   const lastDeleteReconcileAtRef = useRef<Record<string, number>>({});
   const messageMutationVersionRef = useRef(0);
+  const listReplacementLogFingerprintRef = useRef("");
+  const duplicateMessageIdLogFingerprintRef = useRef("");
+  const activeVisibilityLogFingerprintRef = useRef("");
   const swRegistrationRef = useRef<ServiceWorkerRegistration | null>(null);
   const threadPreferenceByFolderRef = useRef<Record<string, boolean>>({});
   const syncStateRef = useRef<{ isSyncing: boolean; syncingFolders: Set<string> }>({
@@ -564,7 +588,19 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
   }, [messages, activeAccountId]);
 
   const jumpToMessageId = (messageId: string, source = "unknown") => {
-    const target = messageByMessageId.get(messageId);
+    const normalized = messageId.trim();
+    const lower = normalized.toLowerCase();
+    const stripped = normalized.replace(/[<>]/g, "").trim().toLowerCase();
+    const target =
+      messageByMessageId.get(messageId) ??
+      messageByMessageId.get(normalized) ??
+      messages.find((message) => {
+        if (message.accountId !== activeAccountId || !message.messageId) return false;
+        const candidate = message.messageId.trim();
+        if (!candidate) return false;
+        if (candidate.toLowerCase() === lower) return true;
+        return candidate.replace(/[<>]/g, "").trim().toLowerCase() === stripped;
+      });
     if (!target) {
       console.warn("[noctua][reminder-link] messageId not found in loaded cache", {
         source,
@@ -621,6 +657,47 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
   );
   const hasFilteredSearchCriteria =
     isRelatedSearch || trimmedQuery.length > 0 || selectedSearchBadges.length > 0;
+  const logListReplacement = (
+    source: string,
+    prevMessages: Message[],
+    nextMessages: Message[]
+  ) => {
+    const prevScoped = prevMessages.filter((message) => message.accountId === activeAccountId);
+    const nextScoped = nextMessages.filter((message) => message.accountId === activeAccountId);
+    const nextIds = new Set(nextScoped.map((message) => message.id));
+    const removed = prevScoped.filter((message) => !nextIds.has(message.id));
+    const foreign = nextMessages.filter((message) => message.accountId !== activeAccountId);
+    if (removed.length === 0 && foreign.length === 0) return;
+    const removedSample = removed
+      .slice(0, LIST_DEBUG_SAMPLE_LIMIT)
+      .map((message) => summarizeMessageForListDebug(message));
+    const foreignSample = foreign
+      .slice(0, LIST_DEBUG_SAMPLE_LIMIT)
+      .map((message) => summarizeMessageForListDebug(message));
+    const fingerprint = [
+      source,
+      activeAccountId,
+      activeFolderId,
+      searchScope,
+      removed.length,
+      foreign.length,
+      removedSample.map((message) => message?.id ?? "").join(",")
+    ].join("|");
+    if (listReplacementLogFingerprintRef.current === fingerprint) return;
+    listReplacementLogFingerprintRef.current = fingerprint;
+    console.warn(`${LIST_DEBUG_PREFIX} list replacement changed membership`, {
+      source,
+      activeAccountId,
+      activeFolderId,
+      searchScope,
+      previousCount: prevScoped.length,
+      nextCount: nextScoped.length,
+      removedCount: removed.length,
+      foreignCount: foreign.length,
+      removedSample,
+      foreignSample
+    });
+  };
 
   // Cleanup debounce timer on unmount
   useEffect(() => {
@@ -869,13 +946,13 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
       title: string,
       body: string,
       tag: string,
-      opts?: { messageId?: string | null; url?: string }
+      opts?: { messageId?: string | null; accountId?: string | null; url?: string }
     ): Promise<boolean> => {
       if (typeof window === "undefined" || !("Notification" in window)) return false;
       const permission = await ensureNotificationPermission();
       console.info("[noctua] notification permission", permission);
       if (permission !== "granted") return false;
-      const targetUrl = opts?.url ?? buildNotificationUrl(opts?.messageId);
+      const targetUrl = opts?.url ?? buildNotificationUrl(opts?.messageId, opts?.accountId);
       const notificationOptions = {
         body,
         tag,
@@ -883,7 +960,8 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
         badge: "/favicon.png",
         data: {
           url: targetUrl,
-          messageId: opts?.messageId ?? null
+          messageId: opts?.messageId ?? null,
+          accountId: opts?.accountId ?? null
         }
       };
       try {
@@ -981,7 +1059,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
         `Reminder: ${reminder.eventTitle || "Calendar event"}`,
         bodyParts.join(" · "),
         `calendar-reminder-${reminder.id}`,
-        { messageId: reminder.messageId ?? null }
+        { messageId: reminder.messageId ?? null, accountId: reminder.accountId ?? activeAccountId }
       );
       if (sent) {
         markReminderDeliveredOnClient(activeAccountId, clientId, reminder);
@@ -1061,15 +1139,33 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
   const accountMessages = useMemo(() => {
     const filtered = messages.filter((message) => message.accountId === activeAccountId);
     const seen = new Set<string>();
+    const duplicateEntries: ReturnType<typeof summarizeMessageForListDebug>[] = [];
     const deduped: Message[] = [];
     filtered.forEach((msg, index) => {
       let nextId = msg.id;
       if (seen.has(nextId)) {
+        duplicateEntries.push(summarizeMessageForListDebug(msg));
         nextId = `${msg.id}-${index}`;
       }
       seen.add(nextId);
       deduped.push({ ...msg, id: nextId });
     });
+    if (duplicateEntries.length > 0) {
+      const sample = duplicateEntries.slice(0, LIST_DEBUG_SAMPLE_LIMIT);
+      const fingerprint = `${activeAccountId}|${duplicateEntries.length}|${sample
+        .map((entry) => entry?.id ?? "")
+        .join(",")}`;
+      if (duplicateMessageIdLogFingerprintRef.current !== fingerprint) {
+        duplicateMessageIdLogFingerprintRef.current = fingerprint;
+        console.warn(`${LIST_DEBUG_PREFIX} duplicate local message ids detected`, {
+          activeAccountId,
+          duplicateCount: duplicateEntries.length,
+          sample
+        });
+      }
+    } else if (duplicateMessageIdLogFingerprintRef.current) {
+      duplicateMessageIdLogFingerprintRef.current = "";
+    }
     return deduped;
   }, [activeAccountId, messages]);
 
@@ -1710,6 +1806,13 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
       const currentThreadKey = currentMessage
         ? currentMessage.threadId ?? currentMessage.messageId ?? currentMessage.id
         : "";
+      console.info(`${LIST_DEBUG_PREFIX} selecting message`, {
+        activeAccountId,
+        activeFolderId,
+        searchScope,
+        currentMessage: summarizeMessageForListDebug(currentMessage),
+        nextMessage: summarizeMessageForListDebug(nextMessage)
+      });
       const shouldAutoMinimizeComposer =
         composeOpen &&
         composeView === "inline" &&
@@ -1719,7 +1822,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
         setComposeView("minimized");
       }
     },
-    [composeMode, composeOpen, composeView]
+    [activeAccountId, activeFolderId, composeMode, composeOpen, composeView, searchScope]
   );
 
   const {
@@ -1741,6 +1844,42 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     isFlaggedMessage,
     onBeforeSelectMessage: handleBeforeSelectMessage
   });
+  useEffect(() => {
+    if (!activeMessageId) {
+      activeVisibilityLogFingerprintRef.current = "";
+      return;
+    }
+    const inVisibleList = visibleMessages.some((item) => item.message.id === activeMessageId);
+    if (inVisibleList) {
+      activeVisibilityLogFingerprintRef.current = "";
+      return;
+    }
+    const active = messageById.get(activeMessageId) ?? null;
+    const fingerprint = [
+      activeAccountId,
+      activeFolderId,
+      searchScope,
+      activeMessageId,
+      visibleMessages.length
+    ].join("|");
+    if (activeVisibilityLogFingerprintRef.current === fingerprint) return;
+    activeVisibilityLogFingerprintRef.current = fingerprint;
+    console.warn(`${LIST_DEBUG_PREFIX} active message missing from visible list`, {
+      activeAccountId,
+      activeFolderId,
+      searchScope,
+      activeMessageId,
+      activeMessage: summarizeMessageForListDebug(active),
+      visibleMessageCount: visibleMessages.length
+    });
+  }, [
+    activeAccountId,
+    activeFolderId,
+    activeMessageId,
+    messageById,
+    searchScope,
+    visibleMessages
+  ]);
 
   const showComposeInline = composeOpen && composeView === "inline";
   const showComposeModal = composeOpen && composeView === "modal";
@@ -2781,45 +2920,52 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     };
   }, []);
 
-  const shouldKeepMessageInCurrentResults = useCallback(
-    (message: Message) => {
-      if (message.accountId !== activeAccountId) return false;
+  const evaluateMessageInCurrentResults = useCallback(
+    (message: Message): CurrentResultDecision => {
+      if (message.accountId !== activeAccountId) {
+        return { keep: false, reason: `account-mismatch:${message.accountId}` };
+      }
       if (searchScope === "folder") {
-        if (!activeFolderId || message.folderId !== activeFolderId) return false;
+        if (!activeFolderId) {
+          return { keep: false, reason: "missing-active-folder" };
+        }
+        if (message.folderId !== activeFolderId) {
+          return { keep: false, reason: `folder-mismatch:${message.folderId}` };
+        }
       } else if (excludedEverywhereFolderIds.includes(message.folderId)) {
-        return false;
+        return { keep: false, reason: `excluded-everywhere-folder:${message.folderId}` };
       }
 
       for (const badge of selectedSearchBadges) {
         if (badge === "unread" && !Boolean(message.unread ?? !message.seen)) {
-          return false;
+          return { keep: false, reason: "badge-unread" };
         }
         if (badge === "unanswered" && Boolean(message.answered)) {
-          return false;
+          return { keep: false, reason: "badge-unanswered" };
         }
         if (badge === "flagged" && !isMessageFlagged(message)) {
-          return false;
+          return { keep: false, reason: "badge-flagged" };
         }
         if (badge === "todo" && !hasTodoFlag(message)) {
-          return false;
+          return { keep: false, reason: "badge-todo" };
         }
         if (badge === "calendar" && !hasCalendarFlag(message)) {
-          return false;
+          return { keep: false, reason: "badge-calendar" };
         }
         if (badge === "attachments" && !hasNonInlineAttachments(message)) {
-          return false;
+          return { keep: false, reason: "badge-attachments" };
         }
         if (badge === "newsletter" && message.category !== "newsletter") {
-          return false;
+          return { keep: false, reason: `badge-newsletter:${message.category ?? "none"}` };
         }
         if (badge === "notification" && message.category !== "notification") {
-          return false;
+          return { keep: false, reason: `badge-notification:${message.category ?? "none"}` };
         }
         if (badge === "transactional" && message.category !== "transactional") {
-          return false;
+          return { keep: false, reason: `badge-transactional:${message.category ?? "none"}` };
         }
       }
-      return true;
+      return { keep: true };
     },
     [
       activeAccountId,
@@ -2830,11 +2976,22 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     ]
   );
 
+  const shouldKeepMessageInCurrentResults = useCallback(
+    (message: Message) => evaluateMessageInCurrentResults(message).keep,
+    [evaluateMessageInCurrentResults]
+  );
+
   const updateMessagesWithCurrentResultPrune = useCallback(
-    (updater: (message: Message) => Message | null) => {
+    (updater: (message: Message) => Message | null, options?: { source?: string }) => {
+      const source = options?.source ?? "unknown";
       setMessages((prev) => {
         let changed = false;
         const next: Message[] = [];
+        const pruned: Array<{
+          reason: string;
+          before: ReturnType<typeof summarizeMessageForListDebug>;
+          after: ReturnType<typeof summarizeMessageForListDebug>;
+        }> = [];
         prev.forEach((item) => {
           const updated = updater(item);
           if (updated === item) {
@@ -2842,14 +2999,46 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
             return;
           }
           changed = true;
-          if (!updated) return;
-          if (!shouldKeepMessageInCurrentResults(updated)) return;
+          if (!updated) {
+            pruned.push({
+              reason: "updater-null",
+              before: summarizeMessageForListDebug(item),
+              after: null
+            });
+            return;
+          }
+          const decision = evaluateMessageInCurrentResults(updated);
+          if (!decision.keep) {
+            pruned.push({
+              reason: decision.reason,
+              before: summarizeMessageForListDebug(item),
+              after: summarizeMessageForListDebug(updated)
+            });
+            return;
+          }
           next.push(updated);
         });
+        if (pruned.length > 0) {
+          console.warn(`${LIST_DEBUG_PREFIX} message pruned from current results`, {
+            source,
+            activeAccountId,
+            activeFolderId,
+            searchScope,
+            selectedSearchBadges,
+            prunedCount: pruned.length,
+            prunedSample: pruned.slice(0, LIST_DEBUG_SAMPLE_LIMIT)
+          });
+        }
         return changed ? next : prev;
       });
     },
-    [shouldKeepMessageInCurrentResults]
+    [
+      activeAccountId,
+      activeFolderId,
+      evaluateMessageInCurrentResults,
+      searchScope,
+      selectedSearchBadges
+    ]
   );
 
   const { handleMoveMessages, moveMessagesToFolder } = useMessageMoveActions({
@@ -2942,7 +3131,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
           return { ...item, folderId: data.archiveFolderId! };
         }
         return null;
-      });
+      }, { source: "archive-message" });
       if (activeMessageId === message.id && !shouldKeepArchivedMessage) {
         setActiveMessageId("");
       }
@@ -3009,7 +3198,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
           );
         }
         return null;
-      });
+      }, { source: "mark-spam" });
       if (
         activeMessageId === message.id &&
         (!movedSpamMessage || !shouldKeepMessageInCurrentResults(movedSpamMessage))
@@ -3085,7 +3274,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
           );
         }
         return null;
-      });
+      }, { source: "mark-not-spam" });
       if (
         activeMessageId === message.id &&
         (!movedInboxMessage || !shouldKeepMessageInCurrentResults(movedInboxMessage))
@@ -3201,8 +3390,9 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
       const data = (await res.json()) as { flags: string[] };
       const updatedMessage = applyFlagsToMessage(message, data.flags);
       const shouldKeepUpdatedMessage = shouldKeepMessageInCurrentResults(updatedMessage);
-      updateMessagesWithCurrentResultPrune((item) =>
-        item.id === message.id ? applyFlagsToMessage(item, data.flags) : item
+      updateMessagesWithCurrentResultPrune(
+        (item) => (item.id === message.id ? applyFlagsToMessage(item, data.flags) : item),
+        { source: "update-flag-state" }
       );
       updateThreadCacheWithFlags(message.id, data.flags);
       if (flag === "seen") {
@@ -3253,8 +3443,9 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
       const data = (await res.json()) as { flags: string[] };
       const updatedMessage = applyFlagsToMessage(message, data.flags);
       const shouldKeepUpdatedMessage = shouldKeepMessageInCurrentResults(updatedMessage);
-      updateMessagesWithCurrentResultPrune((item) =>
-        item.id === message.id ? applyFlagsToMessage(item, data.flags) : item
+      updateMessagesWithCurrentResultPrune(
+        (item) => (item.id === message.id ? applyFlagsToMessage(item, data.flags) : item),
+        { source: "update-keyword-flag" }
       );
       updateThreadCacheWithFlags(message.id, data.flags);
       if (activeMessageId === message.id && !shouldKeepUpdatedMessage) {
@@ -3339,16 +3530,18 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
       if (!updated) return;
 
       const shouldKeepUpdatedMessage = shouldKeepMessageInCurrentResults(updated);
-      updateMessagesWithCurrentResultPrune((item) =>
-        item.id === message.id
-          ? {
-              ...item,
-              category: updated.category ?? null,
-              categoryScore:
-                typeof updated.categoryScore === "number" ? updated.categoryScore : null,
-              categorySignals: updated.categorySignals ?? []
-            }
-          : item
+      updateMessagesWithCurrentResultPrune(
+        (item) =>
+          item.id === message.id
+            ? {
+                ...item,
+                category: updated.category ?? null,
+                categoryScore:
+                  typeof updated.categoryScore === "number" ? updated.categoryScore : null,
+                categorySignals: updated.categorySignals ?? []
+              }
+            : item,
+        { source: "set-category" }
       );
       updateThreadCacheWithCategory(
         message.id,
@@ -3396,8 +3589,9 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
       const data = (await res.json()) as { flags: string[] };
       const updatedMessage = applyFlagsToMessage(message, data.flags);
       const shouldKeepUpdatedMessage = shouldKeepMessageInCurrentResults(updatedMessage);
-      updateMessagesWithCurrentResultPrune((item) =>
-        item.id === message.id ? applyFlagsToMessage(item, data.flags) : item
+      updateMessagesWithCurrentResultPrune(
+        (item) => (item.id === message.id ? applyFlagsToMessage(item, data.flags) : item),
+        { source: "toggle-todo-flag" }
       );
       updateThreadCacheWithFlags(message.id, data.flags);
       if (activeMessageId === message.id && !shouldKeepUpdatedMessage) {
@@ -3666,7 +3860,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
         updateMessagesWithCurrentResultPrune((item) => {
           if (item.id !== hydrated.id) return item;
           return hydrated;
-        });
+        }, { source: "hydrate-message-from-server" });
         return hydrated;
       } catch {
         return null;
@@ -3909,6 +4103,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     }
     if (messageId) {
       pendingJumpMessageIdRef.current = messageId;
+      pendingJumpAccountIdRef.current = accountIdParam?.trim() || null;
       pendingJumpRefreshKeyRef.current = "";
     }
     if (localMessageId) {
@@ -3932,10 +4127,24 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
       if (payload.type === "noctua:notification-open") {
         const messageId = typeof payload.messageId === "string" ? payload.messageId : "";
         if (!messageId) return;
+        const targetAccountId = typeof payload.accountId === "string" ? payload.accountId.trim() : "";
+        if (targetAccountId) {
+          pendingJumpAccountIdRef.current = targetAccountId;
+        }
+        if (targetAccountId && targetAccountId !== activeAccountId) {
+          const hasAccount = accounts.some((account) => account.id === targetAccountId);
+          if (hasAccount) {
+            pendingJumpMessageIdRef.current = messageId;
+            pendingJumpRefreshKeyRef.current = "";
+            setActiveAccountId(targetAccountId);
+            return;
+          }
+        }
         pendingJumpMessageIdRef.current = messageId;
         pendingJumpRefreshKeyRef.current = "";
         if (jumpToMessageId(messageId, "sw-notification-open")) {
           pendingJumpMessageIdRef.current = null;
+          pendingJumpAccountIdRef.current = null;
           clearNotificationDeepLink(messageId);
           return;
         }
@@ -3966,7 +4175,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     return () => {
       navigator.serviceWorker.removeEventListener("message", handleServiceWorkerMessage);
     };
-  }, [clientId, messageByMessageId]);
+  }, [accounts, activeAccountId, clientId, messageByMessageId]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -4201,6 +4410,17 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
             relatedSubject?: string;
           };
           const items = Array.isArray(data?.items) ? data.items.filter(Boolean) : [];
+          const foreignItems = items.filter((item) => item.accountId !== activeAccountId);
+          if (foreignItems.length > 0) {
+            console.error(`${LIST_DEBUG_PREFIX} list API returned foreign-account rows`, {
+              source: "loadMessages",
+              activeAccountId,
+              foreignCount: foreignItems.length,
+              sample: foreignItems
+                .slice(0, LIST_DEBUG_SAMPLE_LIMIT)
+                .map((item) => summarizeMessageForListDebug(item))
+            });
+          }
           if (currentKeyRef.current !== requestKey) return;
           if (messageMutationVersionRef.current !== requestMutationVersion) {
             lastRequestRef.current = null;
@@ -4211,7 +4431,25 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
           } else if (relatedContext) {
             setRelatedContext(null);
           }
-          setMessages((prev) => (messagesPage === 1 ? items : [...prev, ...items]));
+          setMessages((prev) => {
+            if (messagesPage === 1) {
+              logListReplacement("loadMessages-page1", prev, items);
+              return items;
+            }
+            const prevIds = new Set(prev.map((message) => message.id));
+            const duplicateIncoming = items.filter((message) => prevIds.has(message.id));
+            if (duplicateIncoming.length > 0) {
+              console.warn(`${LIST_DEBUG_PREFIX} paged list append contains duplicate ids`, {
+                source: "loadMessages-append",
+                activeAccountId,
+                duplicateCount: duplicateIncoming.length,
+                sample: duplicateIncoming
+                  .slice(0, LIST_DEBUG_SAMPLE_LIMIT)
+                  .map((item) => summarizeMessageForListDebug(item))
+              });
+            }
+            return [...prev, ...items];
+          });
           setHasMoreMessages(Boolean(data?.hasMore));
           setTotalMessages(typeof data?.total === "number" ? data.total : null);
           if (messagesPage === 1) {
@@ -4513,8 +4751,18 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
   useEffect(() => {
     const pending = pendingJumpMessageIdRef.current;
     if (!pending) return;
+    const pendingAccountId = pendingJumpAccountIdRef.current;
+    if (pendingAccountId && pendingAccountId !== activeAccountId) {
+      const hasPendingAccount = accounts.some((account) => account.id === pendingAccountId);
+      if (hasPendingAccount) {
+        setActiveAccountId(pendingAccountId);
+        return;
+      }
+      pendingJumpAccountIdRef.current = null;
+    }
     if (jumpToMessageId(pending, "pending-jump-effect")) {
       pendingJumpMessageIdRef.current = null;
+      pendingJumpAccountIdRef.current = null;
       pendingJumpRefreshKeyRef.current = "";
       clearNotificationDeepLink(pending);
       return;
@@ -4534,7 +4782,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
       setActiveFolderId(inbox.id);
     }
     void refreshMailboxData();
-  }, [activeAccountId, authState, messageByMessageId]);
+  }, [accounts, activeAccountId, authState, messageByMessageId]);
 
   // Collapse all messages in the active thread except the selected one
   useEffect(() => {
@@ -5018,10 +5266,24 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
       const nextMessages = Array.isArray(messageData?.items)
         ? messageData.items.filter(Boolean)
         : [];
+      const foreignItems = nextMessages.filter((item) => item.accountId !== activeAccountId);
+      if (foreignItems.length > 0) {
+        console.error(`${LIST_DEBUG_PREFIX} refresh returned foreign-account rows`, {
+          source: "refreshMailboxData",
+          activeAccountId,
+          foreignCount: foreignItems.length,
+          sample: foreignItems
+            .slice(0, LIST_DEBUG_SAMPLE_LIMIT)
+            .map((item) => summarizeMessageForListDebug(item))
+        });
+      }
       if (messageMutationVersionRef.current !== requestMutationVersion) {
         return false;
       }
-      setMessages(nextMessages);
+      setMessages((prev) => {
+        logListReplacement("refreshMailboxData", prev, nextMessages);
+        return nextMessages;
+      });
       setActiveMessageId((prev) => {
         if (prev) return prev;
         return nextMessages[0]?.id ?? "";
@@ -5057,11 +5319,11 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
   };
 
   const resolveMessageByExternalMessageId = useCallback(
-    async (messageId: string) => {
-      if (!activeAccountId) return null;
+    async (messageId: string, accountId: string) => {
+      if (!accountId) return null;
       try {
         const res = await apiFetch(
-          `/api/message?accountId=${encodeURIComponent(activeAccountId)}&messageId=${encodeURIComponent(
+          `/api/message?accountId=${encodeURIComponent(accountId)}&messageId=${encodeURIComponent(
             messageId
           )}`,
           { cache: "no-store" }
@@ -5069,14 +5331,14 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
         if (res.status === 404) {
           console.warn("[noctua][reminder-link] server resolve not found", {
             messageId,
-            activeAccountId
+            accountId
           });
           return null;
         }
         if (!res.ok) {
           console.warn("[noctua][reminder-link] server resolve failed", {
             messageId,
-            activeAccountId,
+            accountId,
             status: res.status
           });
           return null;
@@ -5086,7 +5348,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
         if (!payload?.ok || !resolved?.id || !resolved.folderId) {
           console.warn("[noctua][reminder-link] server resolve payload invalid", {
             messageId,
-            activeAccountId
+            accountId
           });
           return null;
         }
@@ -5099,26 +5361,47 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
       } catch (error) {
         console.warn("[noctua][reminder-link] server resolve exception", {
           messageId,
-          activeAccountId,
+          accountId,
           error
         });
         return null;
       }
     },
-    [activeAccountId, apiFetch]
+    [apiFetch]
   );
 
-  const openMessageByExternalMessageId = (messageId: string, source = "unknown") => {
+  const openMessageByExternalMessageId = (
+    messageId: string,
+    source = "unknown",
+    requestedAccountId?: string | null
+  ) => {
+    const targetAccountId =
+      typeof requestedAccountId === "string" && requestedAccountId.trim()
+        ? requestedAccountId.trim()
+        : activeAccountId;
     console.info("[noctua][reminder-link] open by external messageId", {
       source,
-      messageId
+      messageId,
+      activeAccountId,
+      targetAccountId
     });
+    if (targetAccountId && targetAccountId !== activeAccountId) {
+      const hasTargetAccount = accounts.some((account) => account.id === targetAccountId);
+      if (hasTargetAccount) {
+        pendingJumpMessageIdRef.current = messageId;
+        pendingJumpAccountIdRef.current = targetAccountId;
+        pendingJumpRefreshKeyRef.current = "";
+        setActiveAccountId(targetAccountId);
+        return false;
+      }
+    }
     if (jumpToMessageId(messageId, source)) return true;
     pendingJumpMessageIdRef.current = messageId;
-    const refreshKey = `${activeAccountId}:${messageId}`;
+    pendingJumpAccountIdRef.current = targetAccountId;
+    const refreshKey = `${targetAccountId}:${messageId}`;
     pendingJumpRefreshKeyRef.current = refreshKey;
     void (async () => {
-      const resolved = await resolveMessageByExternalMessageId(messageId);
+      const resolved = await resolveMessageByExternalMessageId(messageId, targetAccountId);
       if (resolved) {
         setSearchScope("folder");
         setActiveFolderId(resolved.folderId);
@@ -5135,6 +5418,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
       console.info("[noctua][reminder-link] fallback queued", {
         source,
         messageId,
+        targetAccountId,
         hasInbox: Boolean(inbox)
       });
     })();
@@ -5733,7 +6017,8 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
         const body = message.from ? `From: ${message.from}` : "New message received";
         console.info("[noctua] new mail", message);
         await showNotification(title, body, `mail-${message.messageId ?? message.uid}`, {
-          messageId: message.messageId ?? null
+          messageId: message.messageId ?? null,
+          accountId: activeAccountId
         });
         pushNotice({
           type: "info",
@@ -5977,7 +6262,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
               htmlBody: msg.htmlBody
             });
             return applyFlagsToMessage(msg, flags);
-          });
+          }, { source: "stream-flags-update" });
           const hasDeletedFlag = (data.flags ?? []).some(
             (flag) => flag.toLowerCase() === "\\deleted"
           );

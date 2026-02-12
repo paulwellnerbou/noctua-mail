@@ -6,6 +6,7 @@ import {
   saveFoldersForAccount,
   upsertMessages
 } from "@/lib/db";
+import { appendUnreferencedInlineImages } from "@/lib/html";
 import { saveAttachmentData, saveMessageSource } from "@/lib/storage";
 import { syncImapAccount } from "@/lib/mail/imap";
 import { requireAccountAccessOr403, requireSessionOr401 } from "@/lib/auth";
@@ -161,6 +162,7 @@ export async function POST(request: Request) {
       dataUrlReplacements.forEach((url, dataUrl) => {
         htmlBody = htmlBody?.replaceAll(dataUrl, url);
       });
+      htmlBody = appendUnreferencedInlineImages(htmlBody, attachments);
       htmlBody = htmlBody.replace(/data:(?!image\/)[^'")\s]+/gi, "about:blank");
     }
     const { source, ...rest } = message;
