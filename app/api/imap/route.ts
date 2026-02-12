@@ -6,9 +6,8 @@ import {
   saveFoldersForAccount,
   upsertMessages
 } from "@/lib/db";
-import { appendUnreferencedInlineImages } from "@/lib/html";
-import { saveAttachmentData, saveMessageSource } from "@/lib/storage";
 import { syncImapAccount } from "@/lib/mail/imap";
+import { sanitizeSyncedMessage } from "@/lib/mail/syncMessageSanitizer";
 import { requireAccountAccessOr403, requireSessionOr401 } from "@/lib/auth";
 
 export async function POST(request: Request) {
@@ -116,63 +115,6 @@ export async function POST(request: Request) {
       parentId: resolveParentId(msg) ?? undefined
     }));
   };
-  const buildAttachmentUrl = (accountId: string, messageId: string, attachmentId: string) =>
-    `/api/attachment?accountId=${encodeURIComponent(accountId)}&messageId=${encodeURIComponent(
-      messageId
-    )}&attachmentId=${encodeURIComponent(attachmentId)}`;
-  const parseDataUrl = (dataUrl: string) => {
-    const prefix = "data:";
-    if (!dataUrl.startsWith(prefix)) return null;
-    const commaIndex = dataUrl.indexOf(",");
-    if (commaIndex === -1) return null;
-    const header = dataUrl.slice(prefix.length, commaIndex);
-    if (!header.includes(";base64")) return null;
-    const contentType = header.split(";")[0] || "application/octet-stream";
-    const payload = dataUrl.slice(commaIndex + 1);
-    const buffer = Buffer.from(payload, "base64");
-    return { contentType, buffer };
-  };
-  const sanitizeMessage = async (message: typeof messages[number], accountId: string) => {
-    if (message.source) {
-      await saveMessageSource(accountId, message.id, message.source);
-    }
-    let htmlBody = message.htmlBody;
-    const dataUrlReplacements = new Map<string, string>();
-    const attachments = await Promise.all(
-      (message.attachments ?? []).map(async (attachment) => {
-        if (attachment.dataUrl) {
-          const parsed = parseDataUrl(attachment.dataUrl);
-          if (parsed) {
-            await saveAttachmentData(accountId, message.id, attachment.id, parsed.buffer);
-          }
-        }
-        const url = buildAttachmentUrl(accountId, message.id, attachment.id);
-        if (attachment.dataUrl) {
-          dataUrlReplacements.set(attachment.dataUrl, url);
-        }
-        if (attachment.inline && attachment.cid && htmlBody) {
-          const cid = attachment.cid.replace(/[<>]/g, "");
-          htmlBody = htmlBody.replaceAll(`cid:${cid}`, url).replaceAll(`cid:${attachment.cid}`, url);
-        }
-        const { dataUrl, ...rest } = attachment;
-        return { ...rest, url };
-      })
-    );
-    if (htmlBody) {
-      dataUrlReplacements.forEach((url, dataUrl) => {
-        htmlBody = htmlBody?.replaceAll(dataUrl, url);
-      });
-      htmlBody = appendUnreferencedInlineImages(htmlBody, attachments);
-      htmlBody = htmlBody.replace(/data:(?!image\/)[^'")\s]+/gi, "about:blank");
-    }
-    const { source, ...rest } = message;
-    return {
-      ...rest,
-      htmlBody,
-      attachments,
-      hasSource: Boolean(source ?? message.hasSource)
-    };
-  };
   const referenceIds = new Set<string>();
   messages.forEach((msg) => {
     if (msg.inReplyTo) referenceIds.add(msg.inReplyTo);
@@ -188,7 +130,7 @@ export async function POST(request: Request) {
   );
   const normalizedMessages = normalizeThreading(messages, externalThreadIds, externalParentIds);
   const strippedMessages = await Promise.all(
-    normalizedMessages.map((message) => sanitizeMessage(message, account.id))
+    normalizedMessages.map((message) => sanitizeSyncedMessage(message, account.id))
   );
   await upsertMessages(account.id, payload.folderId ?? null, strippedMessages);
 

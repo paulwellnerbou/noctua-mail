@@ -5603,7 +5603,8 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
       return null;
     }
 
-    if (!allowDeep) {
+    const shouldRunDeepSync = allowDeep && mode !== "full";
+    if (!shouldRunDeepSync) {
       setSyncingFolders((prev) => {
         const next = new Set(prev);
         next.delete(folderId);

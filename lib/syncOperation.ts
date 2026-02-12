@@ -11,9 +11,9 @@ import {
   upsertMessages
 } from "@/lib/db";
 import { parseIcsInvite } from "@/lib/calendar";
-import { appendUnreferencedInlineImages } from "@/lib/html";
+import { getAttachmentContentBuffer, sanitizeSyncedMessage } from "@/lib/mail/syncMessageSanitizer";
 import { isCalendarAttachment } from "@/lib/messageFlags";
-import { deleteMessageFiles, saveAttachmentData, saveMessageSource } from "@/lib/storage";
+import { deleteMessageFiles } from "@/lib/storage";
 import { syncImapAccount, syncImapAccountBatched } from "@/lib/mail/imap";
 import type { Message } from "@/lib/data";
 
@@ -131,63 +131,6 @@ export async function runSyncOperationLegacy(
     syncMode,
     clientId
   );
-  const buildAttachmentUrl = (accountId: string, messageId: string, attachmentId: string) =>
-    `/api/attachment?accountId=${encodeURIComponent(accountId)}&messageId=${encodeURIComponent(
-      messageId
-    )}&attachmentId=${encodeURIComponent(attachmentId)}`;
-  const parseDataUrl = (dataUrl: string) => {
-    const prefix = "data:";
-    if (!dataUrl.startsWith(prefix)) return null;
-    const commaIndex = dataUrl.indexOf(",");
-    if (commaIndex === -1) return null;
-    const header = dataUrl.slice(prefix.length, commaIndex);
-    if (!header.includes(";base64")) return null;
-    const contentType = header.split(";")[0] || "application/octet-stream";
-    const body = dataUrl.slice(commaIndex + 1);
-    const buffer = Buffer.from(body, "base64");
-    return { contentType, buffer };
-  };
-  const sanitizeMessage = async (message: typeof messages[number], accountId: string) => {
-    if (message.source) {
-      await saveMessageSource(accountId, message.id, message.source);
-    }
-    let htmlBody = message.htmlBody;
-    const dataUrlReplacements = new Map<string, string>();
-    const attachments = await Promise.all(
-      (message.attachments ?? []).map(async (attachment) => {
-        if (attachment.dataUrl) {
-          const parsed = parseDataUrl(attachment.dataUrl);
-          if (parsed) {
-            await saveAttachmentData(accountId, message.id, attachment.id, parsed.buffer);
-          }
-        }
-        const url = buildAttachmentUrl(accountId, message.id, attachment.id);
-        if (attachment.dataUrl) {
-          dataUrlReplacements.set(attachment.dataUrl, url);
-        }
-        if (attachment.inline && attachment.cid && htmlBody) {
-          const cid = attachment.cid.replace(/[<>]/g, "");
-          htmlBody = htmlBody.replaceAll(`cid:${cid}`, url).replaceAll(`cid:${attachment.cid}`, url);
-        }
-        const { dataUrl, ...rest } = attachment;
-        return { ...rest, url };
-      })
-    );
-    if (htmlBody) {
-      dataUrlReplacements.forEach((url, dataUrl) => {
-        htmlBody = htmlBody?.replaceAll(dataUrl, url);
-      });
-      htmlBody = appendUnreferencedInlineImages(htmlBody, attachments);
-      htmlBody = htmlBody.replace(/data:(?!image\/)[^'")\s]+/gi, "about:blank");
-    }
-    const { source, ...rest } = message;
-    return {
-      ...rest,
-      htmlBody,
-      attachments,
-      hasSource: Boolean(source ?? message.hasSource)
-    };
-  };
   const normalizeThreading = (
     items: typeof messages,
     externalThreadIds: Map<string, string>,
@@ -286,11 +229,11 @@ export async function runSyncOperationLegacy(
   );
   const normalizedMessages = normalizeThreading(messages, externalThreadIds, externalParentIds);
   const SANITIZE_BATCH_SIZE = 50;
-  const sanitizedMessages: Array<Awaited<ReturnType<typeof sanitizeMessage>>> = [];
+  const sanitizedMessages: Array<Awaited<ReturnType<typeof sanitizeSyncedMessage>>> = [];
   for (let start = 0; start < normalizedMessages.length; start += SANITIZE_BATCH_SIZE) {
     const batch = normalizedMessages.slice(start, start + SANITIZE_BATCH_SIZE);
     const sanitizedBatch = await Promise.all(
-      batch.map((message) => sanitizeMessage(message, account.id))
+      batch.map((message) => sanitizeSyncedMessage(message, account.id))
     );
     sanitizedMessages.push(...sanitizedBatch);
     if (start + SANITIZE_BATCH_SIZE < normalizedMessages.length) {
@@ -325,10 +268,10 @@ export async function runSyncOperationLegacy(
     const mutations: CalendarReminderMutation[] = [];
     syncedMessages.forEach((message) => {
       (message.attachments ?? []).forEach((attachment) => {
-        if (!isCalendarAttachment(attachment) || !attachment.dataUrl) return;
-        const parsed = parseDataUrl(attachment.dataUrl);
-        if (!parsed) return;
-        const calendarSource = parsed.buffer.toString("utf8");
+        if (!isCalendarAttachment(attachment)) return;
+        const attachmentBuffer = getAttachmentContentBuffer(attachment);
+        if (!attachmentBuffer) return;
+        const calendarSource = attachmentBuffer.toString("utf8");
         mutations.push(
           ...collectReminderMutationsFromCalendarInvite(calendarSource, message.messageId ?? undefined)
         );
@@ -418,67 +361,6 @@ export async function runSyncOperationBatched(
     ? payload.folderId.replace(`${account.id}:`, "")
     : undefined;
   const syncMode = payload.mode ?? (payload.fullSync ? "full" : "recent");
-
-  // Helper functions
-  const buildAttachmentUrl = (accountId: string, messageId: string, attachmentId: string) =>
-    `/api/attachment?accountId=${encodeURIComponent(accountId)}&messageId=${encodeURIComponent(
-      messageId
-    )}&attachmentId=${encodeURIComponent(attachmentId)}`;
-
-  const parseDataUrl = (dataUrl: string) => {
-    const prefix = "data:";
-    if (!dataUrl.startsWith(prefix)) return null;
-    const commaIndex = dataUrl.indexOf(",");
-    if (commaIndex === -1) return null;
-    const header = dataUrl.slice(prefix.length, commaIndex);
-    if (!header.includes(";base64")) return null;
-    const contentType = header.split(";")[0] || "application/octet-stream";
-    const body = dataUrl.slice(commaIndex + 1);
-    const buffer = Buffer.from(body, "base64");
-    return { contentType, buffer };
-  };
-
-  const sanitizeMessage = async (message: Message, accountId: string) => {
-    if (message.source) {
-      await saveMessageSource(accountId, message.id, message.source);
-    }
-    let htmlBody = message.htmlBody;
-    const dataUrlReplacements = new Map<string, string>();
-    const attachments = await Promise.all(
-      (message.attachments ?? []).map(async (attachment) => {
-        if (attachment.dataUrl) {
-          const parsed = parseDataUrl(attachment.dataUrl);
-          if (parsed) {
-            await saveAttachmentData(accountId, message.id, attachment.id, parsed.buffer);
-          }
-        }
-        const url = buildAttachmentUrl(accountId, message.id, attachment.id);
-        if (attachment.dataUrl) {
-          dataUrlReplacements.set(attachment.dataUrl, url);
-        }
-        if (attachment.inline && attachment.cid && htmlBody) {
-          const cid = attachment.cid.replace(/[<>]/g, "");
-          htmlBody = htmlBody.replaceAll(`cid:${cid}`, url).replaceAll(`cid:${attachment.cid}`, url);
-        }
-        const { dataUrl, ...rest } = attachment;
-        return { ...rest, url };
-      })
-    );
-    if (htmlBody) {
-      dataUrlReplacements.forEach((url, dataUrl) => {
-        htmlBody = htmlBody?.replaceAll(dataUrl, url);
-      });
-      htmlBody = appendUnreferencedInlineImages(htmlBody, attachments);
-      htmlBody = htmlBody.replace(/data:(?!image\/)[^'")\s]+/gi, "about:blank");
-    }
-    const { source, ...rest } = message;
-    return {
-      ...rest,
-      htmlBody,
-      attachments,
-      hasSource: Boolean(source ?? message.hasSource)
-    };
-  };
 
   const normalizeThreading = (
     items: Message[],
@@ -609,11 +491,11 @@ export async function runSyncOperationBatched(
 
     // Sanitize messages in sub-batches of 50
     const SANITIZE_BATCH_SIZE = 50;
-    const sanitizedMessages: Array<Awaited<ReturnType<typeof sanitizeMessage>>> = [];
+    const sanitizedMessages: Array<Awaited<ReturnType<typeof sanitizeSyncedMessage>>> = [];
     for (let start = 0; start < normalizedMessages.length; start += SANITIZE_BATCH_SIZE) {
       const subBatch = normalizedMessages.slice(start, start + SANITIZE_BATCH_SIZE);
       const sanitizedBatch = await Promise.all(
-        subBatch.map((message) => sanitizeMessage(message, account.id))
+        subBatch.map((message) => sanitizeSyncedMessage(message, account.id))
       );
       sanitizedMessages.push(...sanitizedBatch);
       if (start + SANITIZE_BATCH_SIZE < normalizedMessages.length) {
@@ -664,10 +546,10 @@ export async function runSyncOperationBatched(
 
       syncedMessages.forEach((message) => {
         (message.attachments ?? []).forEach((attachment) => {
-          if (!isCalendarAttachment(attachment) || !attachment.dataUrl) return;
-          const parsed = parseDataUrl(attachment.dataUrl);
-          if (!parsed) return;
-          const calendarSource = parsed.buffer.toString("utf8");
+          if (!isCalendarAttachment(attachment)) return;
+          const attachmentBuffer = getAttachmentContentBuffer(attachment);
+          if (!attachmentBuffer) return;
+          const calendarSource = attachmentBuffer.toString("utf8");
           calendarMutations.push(
             ...collectReminderMutationsFromCalendarInvite(calendarSource, message.messageId ?? undefined)
           );

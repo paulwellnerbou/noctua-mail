@@ -1,4 +1,4 @@
-import type { Account, Attachment, Folder, Message } from "@/lib/data";
+import type { Account, Folder, Message } from "@/lib/data";
 import { getCategoryLinearModel, getLatestMessageUid } from "@/lib/db";
 import { extractHtmlBody } from "@/lib/html";
 import { withCalendarInviteFlag } from "@/lib/messageFlags";
@@ -10,7 +10,6 @@ import {
 import tls from "tls";
 import { getImapLogger, logImapOp } from "@/lib/mail/imapLogger";
 import { ImapFlow } from "imapflow";
-import { simpleParser } from "mailparser";
 
 const buildImapClient = (account: Account) =>
   new ImapFlow({
@@ -40,10 +39,15 @@ type ImapParsedMessage = {
   uid: number;
   source: Buffer;
   flags?: Set<string>;
+  envelope?: ImapEnvelope;
+  internalDate?: Date | string | null;
+  bodyStructure?: ImapBodyStructure;
+  headers?: Buffer;
 };
 
 type ImapEnvelopeAddress = {
   name?: string | null;
+  address?: string | null;
   mailbox?: string | null;
   host?: string | null;
 };
@@ -57,6 +61,18 @@ type ImapEnvelope = {
   date?: Date | null;
   messageId?: string | null;
   inReplyTo?: string | string[] | null;
+};
+
+type ImapBodyStructure = {
+  part?: string;
+  type?: string;
+  parameters?: Record<string, string>;
+  id?: string;
+  encoding?: string;
+  size?: number;
+  disposition?: string;
+  dispositionParameters?: Record<string, string>;
+  childNodes?: ImapBodyStructure[];
 };
 
 type ImapLogContext = {
@@ -77,7 +93,7 @@ function buildFolderId(accountId: string, path: string) {
 function formatEnvelopeAddresses(addresses?: ImapEnvelopeAddress[] | null) {
   if (!addresses || addresses.length === 0) return "";
   const parts = addresses.map((addr) => {
-    const email = addr?.mailbox && addr?.host ? `${addr.mailbox}@${addr.host}` : "";
+    const email = addr?.address || (addr?.mailbox && addr?.host ? `${addr.mailbox}@${addr.host}` : "");
     if (addr?.name && email) return `"${addr.name}" <${email}>`;
     return addr?.name || email || "";
   });
@@ -100,6 +116,202 @@ function resolveEnvelopeInReplyTo(envelope?: ImapEnvelope) {
   }
   if (typeof raw === "string") return normalizeEnvelopeHeaderId(raw);
   return undefined;
+}
+
+function resolveEnvelopeAddressEmail(address?: ImapEnvelopeAddress | null) {
+  if (!address) return "";
+  const direct = address.address?.trim();
+  if (direct) return direct;
+  if (address.mailbox && address.host) {
+    return `${address.mailbox}@${address.host}`;
+  }
+  return "";
+}
+
+function parseHeaderMap(raw?: Buffer) {
+  const map = new Map<string, string[]>();
+  if (!raw || raw.length === 0) return map;
+  const unfolded: string[] = [];
+  const lines = raw.toString("utf8").split(/\r?\n/);
+  lines.forEach((line) => {
+    if (!line) return;
+    if (/^\s/.test(line) && unfolded.length > 0) {
+      unfolded[unfolded.length - 1] = `${unfolded[unfolded.length - 1]} ${line.trim()}`;
+      return;
+    }
+    unfolded.push(line);
+  });
+  unfolded.forEach((line) => {
+    const separator = line.indexOf(":");
+    if (separator <= 0) return;
+    const key = line.slice(0, separator).trim().toLowerCase();
+    const value = line.slice(separator + 1).trim();
+    if (!map.has(key)) map.set(key, []);
+    map.get(key)!.push(value);
+  });
+  return map;
+}
+
+function getHeaderValue(headers: Map<string, string[]>, key: string) {
+  const values = headers.get(key.toLowerCase());
+  if (!values || values.length === 0) return undefined;
+  return values[0];
+}
+
+function getHeaderValues(headers: Map<string, string[]>, key: string) {
+  return headers.get(key.toLowerCase()) ?? [];
+}
+
+function parseHeaderMessageIdList(value?: string) {
+  if (!value) return undefined;
+  const bracketMatches = value.match(/<[^>]+>/g);
+  if (bracketMatches && bracketMatches.length > 0) {
+    const normalized = bracketMatches
+      .map((item) => normalizeEnvelopeHeaderId(item))
+      .filter((item): item is string => Boolean(item));
+    return normalized.length > 0 ? normalized : undefined;
+  }
+  const normalized = value
+    .split(/\s+/)
+    .map((item) => normalizeEnvelopeHeaderId(item))
+    .filter((item): item is string => Boolean(item));
+  return normalized.length > 0 ? normalized : undefined;
+}
+
+function resolveHeaderInReplyTo(headers: Map<string, string[]>) {
+  const values = getHeaderValues(headers, "in-reply-to");
+  for (const value of values) {
+    const parsed = parseHeaderMessageIdList(value);
+    if (parsed && parsed.length > 0) return parsed[0];
+  }
+  return undefined;
+}
+
+function resolveHeaderDate(headers: Map<string, string[]>) {
+  const dateHeader = getHeaderValue(headers, "date");
+  if (dateHeader) {
+    const parsedDate = new Date(dateHeader);
+    if (!Number.isNaN(parsedDate.getTime())) return parsedDate;
+  }
+  const receivedHeaders = getHeaderValues(headers, "received");
+  for (const value of receivedHeaders) {
+    const match = value.match(/;\s*(.+)$/);
+    if (!match?.[1]) continue;
+    const parsedDate = new Date(match[1].trim());
+    if (!Number.isNaN(parsedDate.getTime())) return parsedDate;
+  }
+  return undefined;
+}
+
+function choosePreferredTextPart(parts: string[]) {
+  if (parts.length === 0) return undefined;
+  const sorted = [...parts].sort((left, right) => {
+    const leftDepth = left.split(".").length;
+    const rightDepth = right.split(".").length;
+    if (leftDepth !== rightDepth) return leftDepth - rightDepth;
+    return left.localeCompare(right);
+  });
+  return sorted[0];
+}
+
+function extractMessageStructureMetadata(
+  account: Account,
+  uid: number,
+  bodyStructure?: ImapBodyStructure
+) {
+  const attachments: Array<{
+    id: string;
+    filename: string;
+    contentType: string;
+    size: number;
+    inline: boolean;
+    cid?: string;
+  }> = [];
+  const plainTextParts: string[] = [];
+  const htmlParts: string[] = [];
+  let attachmentIndex = 0;
+
+  const walk = (node?: ImapBodyStructure) => {
+    if (!node) return;
+    const children = Array.isArray(node.childNodes) ? node.childNodes : [];
+    if (children.length > 0) {
+      children.forEach((child) => walk(child));
+      return;
+    }
+
+    const contentType = (node.type ?? "").toLowerCase().trim();
+    const disposition = (node.disposition ?? "").toLowerCase().trim();
+    const filename =
+      node.dispositionParameters?.filename ?? node.parameters?.name ?? undefined;
+    const cid = node.id?.replace(/[<>]/g, "").trim() || undefined;
+    const isTextPlain = contentType === "text/plain";
+    const isTextHtml = contentType === "text/html";
+    const partKey =
+      typeof node.part === "string" && node.part.trim().length > 0
+        ? node.part
+        : isTextPlain || isTextHtml
+          ? "1"
+          : "";
+
+    if (partKey && disposition !== "attachment") {
+      if (isTextPlain && !plainTextParts.includes(partKey)) plainTextParts.push(partKey);
+      if (isTextHtml && !htmlParts.includes(partKey)) htmlParts.push(partKey);
+    }
+
+    const shouldTreatAsAttachment =
+      disposition === "attachment" ||
+      disposition === "inline" ||
+      Boolean(filename) ||
+      Boolean(cid) ||
+      (contentType.length > 0 && !isTextPlain && !isTextHtml);
+
+    if (!shouldTreatAsAttachment) return;
+
+    const index = attachmentIndex++;
+    attachments.push({
+      id: `att-${account.id}-${uid}-${index}`,
+      filename: filename ?? `attachment-${index + 1}`,
+      contentType: contentType || "application/octet-stream",
+      size: typeof node.size === "number" && Number.isFinite(node.size) ? node.size : 0,
+      inline: disposition === "inline" || Boolean(cid),
+      cid
+    });
+  };
+
+  walk(bodyStructure);
+  return {
+    attachments,
+    plainTextPart: choosePreferredTextPart(plainTextParts),
+    htmlPart: choosePreferredTextPart(htmlParts)
+  };
+}
+
+async function readImapTextPart(
+  client: ImapFlow,
+  uid: number,
+  partKey?: string
+) {
+  if (!partKey) return undefined;
+  try {
+    const downloaded = await client.download(String(uid), partKey, {
+      uid: true,
+      maxBytes: 5 * 1024 * 1024
+    });
+    if (!downloaded?.content) return undefined;
+    const chunks: Buffer[] = [];
+    for await (const chunk of downloaded.content) {
+      if (Buffer.isBuffer(chunk)) {
+        chunks.push(chunk);
+      } else if (chunk instanceof Uint8Array) {
+        chunks.push(Buffer.from(chunk.buffer, chunk.byteOffset, chunk.byteLength));
+      } else {
+        chunks.push(Buffer.from(String(chunk)));
+      }
+    }
+    return Buffer.concat(chunks).toString("utf8");
+  } catch {
+    return undefined;
+  }
 }
 
 const htmlNamedEntities: Record<string, string> = {
@@ -275,47 +487,26 @@ async function parseImapMessage(
   account: Account,
   mailboxToOpen: string,
   message: ImapParsedMessage,
-  simpleParser: typeof import("mailparser").simpleParser,
+  client: ImapFlow,
   linearModel?: CategoryLinearModel | null
 ) {
-  const parsed = await simpleParser(message.source);
   const flags = message.flags ? Array.from(message.flags) : [];
   const { seen, answered, flagged, deleted, draft, recent, unread } = deriveFlagState(flags);
-  const resolveFallbackDate = () => {
-    if (parsed.date instanceof Date && !Number.isNaN(parsed.date.getTime())) {
-      return parsed.date;
-    }
-    const headerDate = parsed.headers?.get("date");
-    if (typeof headerDate === "string") {
-      const parsedHeaderDate = new Date(headerDate);
-      if (!Number.isNaN(parsedHeaderDate.getTime())) {
-        return parsedHeaderDate;
-      }
-    }
-    const receivedHeader = parsed.headers?.get("received");
-    const receivedValue = Array.isArray(receivedHeader)
-      ? receivedHeader[0]
-      : typeof receivedHeader === "string"
-        ? receivedHeader
-        : undefined;
-    if (receivedValue) {
-      const match = receivedValue.match(/;\s*(.+)$/);
-      if (match?.[1]) {
-        const parsedReceived = new Date(match[1].trim());
-        if (!Number.isNaN(parsedReceived.getTime())) {
-          return parsedReceived;
-        }
-      }
-    }
-    return new Date();
-  };
-  const subject = parsed.subject ?? "(no subject)";
-  const from = parsed.from?.text ?? account.email;
-  const to = parsed.to?.text ?? "";
-  const cc = parsed.cc?.text ?? "";
-  const bcc = parsed.bcc?.text ?? "";
-  const body = parsed.text ?? "";
-  const htmlBody = parsed.html ?? undefined;
+  const envelope = message.envelope;
+  const headers = parseHeaderMap(message.headers);
+  const headerToClassificationMap = new Map<string, string | string[]>();
+  headers.forEach((values, key) => {
+    headerToClassificationMap.set(key, values.length <= 1 ? values[0] ?? "" : values);
+  });
+  const {
+    attachments,
+    plainTextPart,
+    htmlPart
+  } = extractMessageStructureMetadata(account, message.uid, message.bodyStructure);
+  const textBody = await readImapTextPart(client, message.uid, plainTextPart);
+  const htmlBodyPart = await readImapTextPart(client, message.uid, htmlPart);
+  const body = textBody ?? "";
+  const htmlBody = htmlBodyPart ?? undefined;
   const normalizePriority = (value?: string) => {
     if (!value) return undefined;
     const trimmed = value.trim();
@@ -332,17 +523,24 @@ async function parseImapMessage(
     if (lower.includes("normal")) return "Normal";
     return trimmed;
   };
-  const headerValue = (key: string) => {
-    const value = parsed.headers?.get(key);
-    if (Array.isArray(value)) return value[0];
-    if (typeof value === "string") return value;
-    return undefined;
-  };
+  const headerValue = (key: string) => getHeaderValue(headers, key);
   const priority =
     normalizePriority(headerValue("priority")) ??
     normalizePriority(headerValue("x-priority")) ??
     normalizePriority(headerValue("importance"));
-  const resolvedDate = resolveFallbackDate();
+  const envelopeDate =
+    envelope?.date instanceof Date && !Number.isNaN(envelope.date.getTime()) ? envelope.date : undefined;
+  const internalDate =
+    message.internalDate instanceof Date
+      ? message.internalDate
+      : typeof message.internalDate === "string"
+        ? new Date(message.internalDate)
+        : undefined;
+  const resolvedDate =
+    envelopeDate ??
+    (internalDate && !Number.isNaN(internalDate.getTime()) ? internalDate : undefined) ??
+    resolveHeaderDate(headers) ??
+    new Date();
   const dateValue = resolvedDate.getTime();
   const date = new Date(dateValue).toLocaleString();
   const htmlToText = (value: string) => {
@@ -381,34 +579,16 @@ async function parseImapMessage(
   const previewSource =
     htmlBody && (hasQpArtifacts || !hasTextBody) ? htmlToText(htmlBody) : body;
   const preview = buildPreview(previewSource);
-  const attachments: Attachment[] = (parsed.attachments ?? []).map((att: any, index: number) => {
-    const content = att.content as Buffer;
-    const contentType = att.contentType ?? "application/octet-stream";
-    const contentDisposition =
-      typeof att.contentDisposition === "string"
-        ? att.contentDisposition.trim().toLowerCase()
-        : "";
-    const base64 = content.toString("base64");
-    return {
-      id: `att-${account.id}-${message.uid}-${index}`,
-      filename: att.filename ?? `attachment-${index + 1}`,
-      contentType,
-      size: content.length,
-      inline: Boolean(att.cid) || contentDisposition.startsWith("inline"),
-      cid: att.cid ?? undefined,
-      dataUrl: `data:${contentType};base64,${base64}`
-    };
-  });
   const safeMailbox = mailboxToOpen.split("/").join("_");
   const source = message.source.toString();
-  const referencesHeader = parsed.headers?.get("references");
-  const referencesArray =
-    Array.isArray(referencesHeader) && referencesHeader.length > 0
-      ? referencesHeader.map(String)
-      : typeof referencesHeader === "string"
-      ? referencesHeader.split(/\s+/).filter(Boolean)
-      : undefined;
+  const referencesArray = parseHeaderMessageIdList(getHeaderValue(headers, "references"));
   const xForwardedMessageId = headerValue("x-forwarded-message-id");
+  const envelopeInReplyTo = resolveEnvelopeInReplyTo(envelope);
+  const headerInReplyTo = resolveHeaderInReplyTo(headers);
+  const inReplyTo = envelopeInReplyTo ?? headerInReplyTo;
+  const envelopeMessageId = normalizeEnvelopeHeaderId(envelope?.messageId);
+  const headerMessageId = normalizeEnvelopeHeaderId(headerValue("message-id"));
+  const messageId = envelopeMessageId ?? headerMessageId ?? `imap-msg-${message.uid}`;
   const messageFlags = withCalendarInviteFlag(flags, {
     attachments,
     textBody: body,
@@ -424,9 +604,26 @@ async function parseImapMessage(
 
   // Classify email into categories
   const config = getCategorizationConfig();
+  const firstFromAddress = envelope?.from?.[0];
+  const fromAddressValue =
+    resolveEnvelopeAddressEmail(firstFromAddress) ||
+    (() => {
+      const emailMatch = (formatEnvelopeAddresses(envelope?.from) || account.email).match(/<([^>]+)>/);
+      return emailMatch?.[1] ?? account.email;
+    })();
+  const parsedForClassification = {
+    subject: envelope?.subject?.trim() || headerValue("subject") || "(no subject)",
+    text: body,
+    from: {
+      address: fromAddressValue,
+      name: firstFromAddress?.name ?? undefined
+    },
+    attachments: attachments.map((attachment) => ({ filename: attachment.filename }))
+  };
+  const subject = parsedForClassification.subject;
   const classification = classifyEmail(
-    parsed,
-    parsed.headers ?? new Map(),
+    parsedForClassification as any,
+    headerToClassificationMap as Map<string, string>,
     config,
     { linearModel: linearModel ?? null }
   );
@@ -441,16 +638,16 @@ async function parseImapMessage(
 
   return {
     id: `imap-${account.id}-${safeMailbox}-${message.uid}`,
-    threadId: parsed.inReplyTo ?? parsed.messageId ?? `imap-thread-${message.uid}`,
-    messageId: parsed.messageId ?? `imap-msg-${message.uid}`,
-    inReplyTo: parsed.inReplyTo ?? undefined,
+    threadId: inReplyTo ?? messageId ?? `imap-thread-${message.uid}`,
+    messageId,
+    inReplyTo: inReplyTo ?? undefined,
     references: referencesArray,
     xForwardedMessageId: xForwardedMessageId ?? undefined,
-    subject,
-    from,
-    to,
-    cc,
-    bcc,
+    subject: envelope?.subject?.trim() || headerValue("subject") || "(no subject)",
+    from: formatEnvelopeAddresses(envelope?.from) || account.email,
+    to: formatEnvelopeAddresses(envelope?.to),
+    cc: formatEnvelopeAddresses(envelope?.cc),
+    bcc: formatEnvelopeAddresses(envelope?.bcc),
     preview,
     date,
     dateValue,
@@ -514,7 +711,14 @@ export async function* syncImapAccountBatched(
     client.mailboxOpen(mailboxToOpen)
   );
 
-  const fetchQuery = { source: true, flags: true } as const;
+  const fetchQuery = {
+    source: true,
+    flags: true,
+    envelope: true,
+    internalDate: true,
+    bodyStructure: true,
+    headers: true
+  } as const;
   let currentBatch: Message[] = [];
   let batchNumber = 0;
   let totalProcessed = 0;
@@ -589,8 +793,16 @@ export async function* syncImapAccountBatched(
     const parsedMessage = await parseImapMessage(
       account,
       mailboxToOpen,
-      { uid: message.uid, source: message.source as Buffer, flags: message.flags },
-      simpleParser,
+      {
+        uid: message.uid,
+        source: message.source as Buffer,
+        flags: message.flags,
+        envelope: message.envelope as ImapEnvelope | undefined,
+        internalDate: (message as any).internalDate,
+        bodyStructure: (message as any).bodyStructure as ImapBodyStructure | undefined,
+        headers: (message as any).headers as Buffer | undefined
+      },
+      client,
       linearModel
     );
     currentBatch.push(parsedMessage);
@@ -644,7 +856,14 @@ export async function syncImapAccount(
   const messages: Message[] = [];
   const now = new Date();
   const since = new Date(now.getTime() - 1000 * 60 * 60 * 24 * 30);
-  const fetchQuery = { source: true, flags: true } as const;
+  const fetchQuery = {
+    source: true,
+    flags: true,
+    envelope: true,
+    internalDate: true,
+    bodyStructure: true,
+    headers: true
+  } as const;
 
   if (mode === "new") {
     const latestUid = await getLatestMessageUid(account.id, mailboxToOpen);
@@ -692,8 +911,16 @@ export async function syncImapAccount(
     const parsedMessage = await parseImapMessage(
       account,
       mailboxToOpen,
-      { uid: message.uid, source: message.source as Buffer, flags: message.flags },
-      simpleParser,
+      {
+        uid: message.uid,
+        source: message.source as Buffer,
+        flags: message.flags,
+        envelope: message.envelope as ImapEnvelope | undefined,
+        internalDate: (message as any).internalDate,
+        bodyStructure: (message as any).bodyStructure as ImapBodyStructure | undefined,
+        headers: (message as any).headers as Buffer | undefined
+      },
+      client,
       linearModel
     );
     messages.push(parsedMessage);
@@ -735,14 +962,34 @@ export async function syncImapMessage(
     const item = await logImapOp(
       "fetchOne",
       { mailbox: mailboxPath, uid, ...logContext },
-      () => client.fetchOne(String(uid), { source: true, flags: true }, { uid: true })
+      () =>
+        client.fetchOne(
+          String(uid),
+          {
+            source: true,
+            flags: true,
+            envelope: true,
+            internalDate: true,
+            bodyStructure: true,
+            headers: true
+          },
+          { uid: true }
+        )
     );
     if (item && (item as any).source) {
       message = await parseImapMessage(
         account,
         mailboxPath,
-        { uid: item.uid, source: item.source as Buffer, flags: item.flags },
-        simpleParser
+        {
+          uid: item.uid,
+          source: item.source as Buffer,
+          flags: item.flags,
+          envelope: item.envelope as ImapEnvelope | undefined,
+          internalDate: (item as any).internalDate,
+          bodyStructure: (item as any).bodyStructure as ImapBodyStructure | undefined,
+          headers: (item as any).headers as Buffer | undefined
+        },
+        client
       );
     }
   } finally {
