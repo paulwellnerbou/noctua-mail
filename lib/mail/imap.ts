@@ -1,7 +1,7 @@
 import type { Account, Folder, Message } from "@/lib/data";
 import { getCategoryLinearModel, getLatestMessageUid } from "@/lib/db";
 import { extractHtmlBody } from "@/lib/html";
-import { withCalendarInviteFlag } from "@/lib/messageFlags";
+import { isCalendarAttachment, withCalendarInviteFlag } from "@/lib/messageFlags";
 import {
   classifyEmail,
   getCategorizationConfig,
@@ -226,6 +226,7 @@ function extractMessageStructureMetadata(
     size: number;
     inline: boolean;
     cid?: string;
+    partKey?: string;
   }> = [];
   const plainTextParts: string[] = [];
   const htmlParts: string[] = [];
@@ -274,7 +275,13 @@ function extractMessageStructureMetadata(
       contentType: contentType || "application/octet-stream",
       size: typeof node.size === "number" && Number.isFinite(node.size) ? node.size : 0,
       inline: disposition === "inline" || Boolean(cid),
-      cid
+      cid,
+      partKey:
+        typeof node.part === "string" && node.part.trim().length > 0
+          ? node.part
+          : contentType
+            ? "1"
+            : undefined
     });
   };
 
@@ -284,6 +291,57 @@ function extractMessageStructureMetadata(
     plainTextPart: choosePreferredTextPart(plainTextParts),
     htmlPart: choosePreferredTextPart(htmlParts)
   };
+}
+
+async function readImapBinaryPart(
+  client: ImapFlow,
+  uid: number,
+  partKey?: string,
+  maxBytes = 1024 * 1024
+) {
+  if (!partKey) return null;
+  try {
+    const downloaded = await client.download(String(uid), partKey, {
+      uid: true,
+      maxBytes
+    });
+    if (!downloaded?.content) return null;
+    const chunks: Buffer[] = [];
+    for await (const chunk of downloaded.content) {
+      if (Buffer.isBuffer(chunk)) {
+        chunks.push(chunk);
+      } else if (chunk instanceof Uint8Array) {
+        chunks.push(Buffer.from(chunk.buffer, chunk.byteOffset, chunk.byteLength));
+      } else {
+        chunks.push(Buffer.from(String(chunk)));
+      }
+    }
+    return Buffer.concat(chunks);
+  } catch {
+    return null;
+  }
+}
+
+async function resolveCalendarAttachmentsForNewMode(
+  client: ImapFlow,
+  uid: number,
+  bodyStructure: ImapBodyStructure | undefined,
+  account: Account
+) {
+  const { attachments } = extractMessageStructureMetadata(account, uid, bodyStructure);
+  const calendarAttachments = attachments.filter((attachment) =>
+    isCalendarAttachment(attachment as any)
+  );
+  if (calendarAttachments.length === 0) return [];
+  const resolved = await Promise.all(
+    calendarAttachments.map(async (attachment) => {
+      const content = await readImapBinaryPart(client, uid, attachment.partKey, 512 * 1024);
+      const { partKey, ...rest } = attachment;
+      if (!content) return rest;
+      return { ...rest, content };
+    })
+  );
+  return resolved;
 }
 
 async function readImapTextPart(
@@ -422,8 +480,9 @@ function buildLightweightImapMessage(params: {
   flags?: Set<string> | string[];
   envelope?: ImapEnvelope;
   internalDate?: Date | null;
+  attachments?: Message["attachments"];
 }) {
-  const { account, mailboxToOpen, uid, flags, envelope, internalDate } = params;
+  const { account, mailboxToOpen, uid, flags, envelope, internalDate, attachments = [] } = params;
   const flagList = Array.isArray(flags) ? flags : flags ? Array.from(flags) : [];
   const safeMailbox = mailboxToOpen.split("/").join("_");
   const messageId = normalizeEnvelopeHeaderId(envelope?.messageId) ?? `imap-msg-${uid}`;
@@ -438,7 +497,7 @@ function buildLightweightImapMessage(params: {
       : null;
   const dateValue = envelopeDateMs ?? internalDateMs ?? Date.now();
   const messageFlags = withCalendarInviteFlag(flagList, {
-    attachments: [],
+    attachments,
     textBody: "",
     htmlBody: undefined
   });
@@ -468,7 +527,7 @@ function buildLightweightImapMessage(params: {
     priority: undefined,
     source: undefined,
     hasSource: false,
-    attachments: [],
+    attachments,
     flags: messageFlags,
     seen,
     answered,
@@ -746,15 +805,23 @@ export async function* syncImapAccountBatched(
       envelope: true,
       flags: true,
       uid: true,
-      internalDate: true
+      internalDate: true,
+      bodyStructure: true
     })) {
+      const calendarAttachments = await resolveCalendarAttachmentsForNewMode(
+        client,
+        message.uid,
+        (message as any).bodyStructure as ImapBodyStructure | undefined,
+        account
+      );
       const nextMessage = buildLightweightImapMessage({
         account,
         mailboxToOpen,
         uid: message.uid,
         flags: message.flags,
         envelope: message.envelope as ImapEnvelope | undefined,
-        internalDate: (message as any).internalDate
+        internalDate: (message as any).internalDate,
+        attachments: calendarAttachments
       });
       currentBatch.push(nextMessage);
       totalProcessed += 1;
@@ -875,15 +942,23 @@ export async function syncImapAccount(
       envelope: true,
       flags: true,
       uid: true,
-      internalDate: true
+      internalDate: true,
+      bodyStructure: true
     })) {
+      const calendarAttachments = await resolveCalendarAttachmentsForNewMode(
+        client,
+        message.uid,
+        (message as any).bodyStructure as ImapBodyStructure | undefined,
+        account
+      );
       const nextMessage = buildLightweightImapMessage({
         account,
         mailboxToOpen,
         uid: message.uid,
         flags: message.flags,
         envelope: message.envelope as ImapEnvelope | undefined,
-        internalDate: (message as any).internalDate
+        internalDate: (message as any).internalDate,
+        attachments: calendarAttachments
       });
       messages.push(nextMessage);
       count += 1;
