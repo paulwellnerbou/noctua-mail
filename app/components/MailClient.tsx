@@ -48,6 +48,10 @@ import {
   mergeCollapsedThreadsWithMessages,
   useMessageListDerivedState
 } from "./mailclient/messagelist/listState";
+import {
+  logListDebug,
+  summarizeMessageForListDebug
+} from "./mailclient/messagelist/listDebug";
 import { getCollapsedRootThreadMessageIds } from "./mailclient/messagelist/listInteractions";
 import { useMessageListHelpers } from "./mailclient/messagelist/useMessageListHelpers";
 import { useMessageListSelectionController } from "./mailclient/messagelist/useMessageListSelectionController";
@@ -167,25 +171,9 @@ type DraftSavePayload = {
   attachments?: Attachment[];
 };
 
-const LIST_DEBUG_PREFIX = "[noctua][list-debug]";
 const LIST_DEBUG_SAMPLE_LIMIT = 12;
 
 type CurrentResultDecision = { keep: true } | { keep: false; reason: string };
-
-function summarizeMessageForListDebug(message: Message | null | undefined) {
-  if (!message) return null;
-  return {
-    id: message.id,
-    messageId: message.messageId ?? null,
-    accountId: message.accountId,
-    folderId: message.folderId,
-    threadId: message.threadId ?? null,
-    parentId: message.parentId ?? null,
-    seen: Boolean(message.seen),
-    unread: Boolean(message.unread ?? !message.seen),
-    dateValue: message.dateValue
-  };
-}
 
 function filterUpcomingCalendarReminders(reminders: CalendarReminder[], nowMs = Date.now()) {
   return reminders.filter((reminder) => getCalendarReminderEndAtMs(reminder) > nowMs);
@@ -685,7 +673,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     ].join("|");
     if (listReplacementLogFingerprintRef.current === fingerprint) return;
     listReplacementLogFingerprintRef.current = fingerprint;
-    console.warn(`${LIST_DEBUG_PREFIX} list replacement changed membership`, {
+    logListDebug("warn", "list replacement changed membership", {
       source,
       activeAccountId,
       activeFolderId,
@@ -1157,7 +1145,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
         .join(",")}`;
       if (duplicateMessageIdLogFingerprintRef.current !== fingerprint) {
         duplicateMessageIdLogFingerprintRef.current = fingerprint;
-        console.warn(`${LIST_DEBUG_PREFIX} duplicate local message ids detected`, {
+        logListDebug("warn", "duplicate local message ids detected", {
           activeAccountId,
           duplicateCount: duplicateEntries.length,
           sample
@@ -1806,7 +1794,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
       const currentThreadKey = currentMessage
         ? currentMessage.threadId ?? currentMessage.messageId ?? currentMessage.id
         : "";
-      console.info(`${LIST_DEBUG_PREFIX} selecting message`, {
+      logListDebug("info", "selecting message", {
         activeAccountId,
         activeFolderId,
         searchScope,
@@ -1864,20 +1852,63 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     ].join("|");
     if (activeVisibilityLogFingerprintRef.current === fingerprint) return;
     activeVisibilityLogFingerprintRef.current = fingerprint;
-    console.warn(`${LIST_DEBUG_PREFIX} active message missing from visible list`, {
+    const matchingByMessageId = active?.messageId
+      ? visibleMessages
+          .filter((item) => item.message.messageId === active.messageId)
+          .slice(0, LIST_DEBUG_SAMPLE_LIMIT)
+      : [];
+    const matchingByIdPrefix = visibleMessages
+      .filter((item) => item.message.id === activeMessageId || item.message.id.startsWith(`${activeMessageId}-`))
+      .slice(0, LIST_DEBUG_SAMPLE_LIMIT);
+    const activeThreadKey = active
+      ? active.threadId ?? active.messageId ?? active.id
+      : null;
+    const threadScopeMatches = activeThreadKey
+      ? threadScopeMessages
+          .filter(
+            (item) =>
+              (item.threadId ?? item.messageId ?? item.id) === activeThreadKey
+          )
+          .slice(0, LIST_DEBUG_SAMPLE_LIMIT)
+      : [];
+    const visibleThreadMatches = activeThreadKey
+      ? visibleMessages
+          .filter((item) => item.threadId === activeThreadKey)
+          .slice(0, LIST_DEBUG_SAMPLE_LIMIT)
+      : [];
+    logListDebug("warn", "active message missing from visible list", {
       activeAccountId,
       activeFolderId,
       searchScope,
+      supportsThreads,
       activeMessageId,
       activeMessage: summarizeMessageForListDebug(active),
-      visibleMessageCount: visibleMessages.length
+      visibleMessageCount: visibleMessages.length,
+      activeThreadKey,
+      activeThreadCollapsed:
+        activeThreadKey && supportsThreads ? (collapsedThreads[activeThreadKey] ?? true) : null,
+      matchingByMessageId: matchingByMessageId.map((item) =>
+        summarizeMessageForListDebug(item.message)
+      ),
+      matchingByIdPrefix: matchingByIdPrefix.map((item) =>
+        summarizeMessageForListDebug(item.message)
+      ),
+      threadScopeMatchCount: activeThreadKey ? threadScopeMatches.length : 0,
+      threadScopeMatchSample: threadScopeMatches.map((item) => summarizeMessageForListDebug(item)),
+      visibleThreadMatchCount: activeThreadKey ? visibleThreadMatches.length : 0,
+      visibleThreadMatchSample: visibleThreadMatches.map((item) =>
+        summarizeMessageForListDebug(item.message)
+      )
     });
   }, [
     activeAccountId,
     activeFolderId,
     activeMessageId,
+    collapsedThreads,
     messageById,
     searchScope,
+    supportsThreads,
+    threadScopeMessages,
     visibleMessages
   ]);
 
@@ -3019,7 +3050,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
           next.push(updated);
         });
         if (pruned.length > 0) {
-          console.warn(`${LIST_DEBUG_PREFIX} message pruned from current results`, {
+          logListDebug("warn", "message pruned from current results", {
             source,
             activeAccountId,
             activeFolderId,
@@ -4412,7 +4443,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
           const items = Array.isArray(data?.items) ? data.items.filter(Boolean) : [];
           const foreignItems = items.filter((item) => item.accountId !== activeAccountId);
           if (foreignItems.length > 0) {
-            console.error(`${LIST_DEBUG_PREFIX} list API returned foreign-account rows`, {
+            logListDebug("error", "list API returned foreign-account rows", {
               source: "loadMessages",
               activeAccountId,
               foreignCount: foreignItems.length,
@@ -4439,7 +4470,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
             const prevIds = new Set(prev.map((message) => message.id));
             const duplicateIncoming = items.filter((message) => prevIds.has(message.id));
             if (duplicateIncoming.length > 0) {
-              console.warn(`${LIST_DEBUG_PREFIX} paged list append contains duplicate ids`, {
+              logListDebug("warn", "paged list append contains duplicate ids", {
                 source: "loadMessages-append",
                 activeAccountId,
                 duplicateCount: duplicateIncoming.length,
@@ -5268,7 +5299,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
         : [];
       const foreignItems = nextMessages.filter((item) => item.accountId !== activeAccountId);
       if (foreignItems.length > 0) {
-        console.error(`${LIST_DEBUG_PREFIX} refresh returned foreign-account rows`, {
+        logListDebug("error", "refresh returned foreign-account rows", {
           source: "refreshMailboxData",
           activeAccountId,
           foreignCount: foreignItems.length,

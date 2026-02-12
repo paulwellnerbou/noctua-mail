@@ -2,6 +2,7 @@ import type React from "react";
 import type { Message } from "@/lib/data";
 import type { ListRowItem, VisibleMessageEntry } from "./listModel";
 import { getThreadSelectionState } from "./listModel";
+import { logListDebug, summarizeMessageForListDebug } from "./listDebug";
 import type { SelectionStore } from "./selectionStore";
 import {
   getDisplaySeenForThreadRow,
@@ -48,6 +49,17 @@ export function handleCollapsedThreadRootClick<E extends {
     onDefault
   } = params;
   if (!hasSelectionModifier(event) && supportsThreads && isCollapsedThreadRoot) {
+    logListDebug("info", "collapsed-thread-root click", {
+      supportsThreads,
+      isCollapsedThreadRoot,
+      threadSize: fullFlat.length,
+      targetMessage: summarizeMessageForListDebug(message),
+      rootMessage: fullFlat[0] ? summarizeMessageForListDebug(fullFlat[0].message) : null,
+      threadSample: fullFlat
+        .slice(0, 12)
+        .map((entry) => summarizeMessageForListDebug(entry.message)),
+      isFlaggedGroup
+    });
     selectCollapsedThread(fullFlat, message, {
       isFlaggedGroup
     });

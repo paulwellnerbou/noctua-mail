@@ -8,24 +8,10 @@ import {
   selectRangeToMessage,
   toggleListMessageSelection
 } from "./listSelection";
+import { logListDebug, summarizeMessageForListDebug } from "./listDebug";
 import type { SelectionStore } from "./selectionStore";
 
 type ThreadFlatEntry = { message: Message; depth: number };
-const LIST_DEBUG_PREFIX = "[noctua][list-debug]";
-
-function summarizeMessageForListDebug(message: Message) {
-  return {
-    id: message.id,
-    messageId: message.messageId ?? null,
-    accountId: message.accountId,
-    folderId: message.folderId,
-    threadId: message.threadId ?? null,
-    parentId: message.parentId ?? null,
-    seen: Boolean(message.seen),
-    unread: Boolean(message.unread ?? !message.seen),
-    dateValue: message.dateValue
-  };
-}
 
 type UseMessageListSelectionControllerParams = {
   selectionStore: SelectionStore;
@@ -131,7 +117,7 @@ export function useMessageListSelectionController({
         : event.metaKey || event.ctrlKey
           ? "toggle-select"
           : "open-message";
-      console.info(`${LIST_DEBUG_PREFIX} row click`, {
+      logListDebug("info", "row click", {
         action,
         modifiers: {
           shift: event.shiftKey,
