@@ -4,6 +4,7 @@ import { Badge, Button, Dialog, Flex, IconButton, Select, Text } from "@radix-ui
 import type { Attachment } from "@/lib/data";
 import {
   buildCalendarRecurrenceSummary,
+  formatCalendarEventDate,
   parseIcsEvents,
   type CalendarEventPreview
 } from "@/lib/calendar";
@@ -43,35 +44,15 @@ function readDataUrl(dataUrl: string) {
   }
 }
 
-function formatEventDate(date?: Date, allDay = false, timezone?: string) {
-  if (!date) return "";
-  const dateOptions: Intl.DateTimeFormatOptions = {
-    weekday: "short",
-    year: "numeric",
-    month: "short",
-    day: "numeric"
-  };
-  const options: Intl.DateTimeFormatOptions = allDay
-    ? { ...dateOptions, timeZone: "UTC" }
-    : {
-        ...dateOptions,
-        hour: "numeric",
-        minute: "2-digit",
-        ...(timezone ? { timeZone: timezone } : {})
-      };
-  try {
-    return new Intl.DateTimeFormat(undefined, options).format(date);
-  } catch {
-    const fallbackOptions: Intl.DateTimeFormatOptions = allDay
-      ? dateOptions
-      : { ...dateOptions, hour: "numeric", minute: "2-digit" };
-    return new Intl.DateTimeFormat(undefined, fallbackOptions).format(date);
-  }
-}
-
 function formatDateRange(event: CalendarEventPreview) {
-  const start = formatEventDate(event.start, event.allDay, event.startTimezone);
-  const end = formatEventDate(event.end, event.allDay, event.endTimezone);
+  const start = formatCalendarEventDate(event.start, {
+    allDay: event.allDay,
+    timeZone: event.startTimezone
+  });
+  const end = formatCalendarEventDate(event.end, {
+    allDay: event.allDay,
+    timeZone: event.endTimezone
+  });
   if (!start) return "";
   if (!end) return start;
   return `${start} - ${end}`;

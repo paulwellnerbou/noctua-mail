@@ -3,7 +3,7 @@
 import { useCallback, useMemo } from "react";
 import { Trash2, X, MapPin, Clock, Repeat } from "lucide-react";
 import { Box, Card, Flex, IconButton, Popover, Text, Heading, Badge } from "@radix-ui/themes";
-import { buildCalendarRecurrenceSummary } from "@/lib/calendar";
+import { buildCalendarRecurrenceSummary, formatCalendarEventDate } from "@/lib/calendar";
 import {
   deleteCalendarReminder,
   getCalendarReminderStartAtMs,
@@ -25,11 +25,9 @@ type ReminderStatusPopoverProps = {
   onReportError: (message: string) => void;
 };
 
-function formatEventStartTime(eventStartAtMs: number) {
-  return new Intl.DateTimeFormat(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short"
-  }).format(new Date(eventStartAtMs));
+function formatEventStartTime(eventStartAtMs: number, timeZone?: string) {
+  if (!Number.isFinite(eventStartAtMs)) return "";
+  return formatCalendarEventDate(new Date(eventStartAtMs), { timeZone });
 }
 
 function buildReminderRecurrenceSummary(reminder: CalendarReminder) {
@@ -169,7 +167,7 @@ export default function ReminderStatusPopover({
                                 <Flex align="center" gap="1" className="reminder-meta-row" wrap="wrap">
                                     <Clock size={12} className="reminder-icon" />
                                     <Text size="1" weight="bold" color="gray" highContrast>
-                                        {formatEventStartTime(startAtMs)}
+                                        {formatEventStartTime(startAtMs, reminder.startTimezone)}
                                     </Text>
                                     <Text size="1" color="gray">
                                         (Reminder: {reminder.leadLabel} before)

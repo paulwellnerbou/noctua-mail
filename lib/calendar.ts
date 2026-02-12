@@ -30,6 +30,11 @@ type ParsedLine = {
   params: Record<string, string>;
 };
 
+type CalendarEventDateFormatInput = {
+  allDay?: boolean;
+  timeZone?: string;
+};
+
 const WINDOWS_TIMEZONE_MAP: Record<string, string> = {
   "W. EUROPE STANDARD TIME": "Europe/Berlin",
   "CENTRAL EUROPE STANDARD TIME": "Europe/Budapest",
@@ -83,6 +88,35 @@ function decodeIcsText(value: string) {
     .replace(/\\,/g, ",")
     .replace(/\\;/g, ";")
     .replace(/\\\\/g, "\\");
+}
+
+export function formatCalendarEventDate(
+  date?: Date,
+  { allDay = false, timeZone }: CalendarEventDateFormatInput = {}
+) {
+  if (!date) return "";
+  const dateOptions: Intl.DateTimeFormatOptions = {
+    weekday: "short",
+    year: "numeric",
+    month: "short",
+    day: "numeric"
+  };
+  const options: Intl.DateTimeFormatOptions = allDay
+    ? { ...dateOptions, timeZone: "UTC" }
+    : {
+        ...dateOptions,
+        hour: "numeric",
+        minute: "2-digit",
+        ...(timeZone ? { timeZone } : {})
+      };
+  try {
+    return new Intl.DateTimeFormat(undefined, options).format(date);
+  } catch {
+    const fallbackOptions: Intl.DateTimeFormatOptions = allDay
+      ? dateOptions
+      : { ...dateOptions, hour: "numeric", minute: "2-digit" };
+    return new Intl.DateTimeFormat(undefined, fallbackOptions).format(date);
+  }
 }
 
 function resolveTimeZoneId(tzid?: string) {
