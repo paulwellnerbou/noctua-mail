@@ -138,6 +138,7 @@ import {
   pruneDeliveredReminderMap
 } from "./mailclient/utils/calendarReminders";
 import {
+  CALENDAR_REMINDER_REFRESH_INTERVAL_MS,
   NOTICE_TIMEOUTS,
   THREAD_COLLAPSE_SETTLE_MS,
   SYNC_STATUS_POLL_INTERVAL_MS
@@ -4228,6 +4229,20 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     return () => {
       active = false;
       window.removeEventListener(CALENDAR_REMINDERS_UPDATED_EVENT, handleUpdate);
+    };
+  }, [refreshPendingCalendarReminders]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    let active = true;
+    const run = () => {
+      if (!active) return;
+      void refreshPendingCalendarReminders();
+    };
+    const interval = window.setInterval(run, CALENDAR_REMINDER_REFRESH_INTERVAL_MS);
+    return () => {
+      active = false;
+      window.clearInterval(interval);
     };
   }, [refreshPendingCalendarReminders]);
 

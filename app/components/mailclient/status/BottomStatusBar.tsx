@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { Folder } from "@/lib/data";
 import type { CalendarReminder } from "../utils/calendarReminders";
 import type { ExceptionEntry } from "../types";
@@ -48,6 +48,38 @@ export default function BottomStatusBar({
   const [processPanelOpen, setProcessPanelOpen] = useState(false);
   const [exceptionPanelOpen, setExceptionPanelOpen] = useState(false);
   const [reminderPanelOpen, setReminderPanelOpen] = useState(false);
+  const [currentTimeMs, setCurrentTimeMs] = useState(() => Date.now());
+
+  const dateTimeFormatter = useMemo(
+    () =>
+      new Intl.DateTimeFormat(undefined, {
+        dateStyle: "medium",
+        timeStyle: "short"
+      }),
+    []
+  );
+  const currentDateTimeLabel = useMemo(
+    () => dateTimeFormatter.format(new Date(currentTimeMs)),
+    [currentTimeMs, dateTimeFormatter]
+  );
+
+  useEffect(() => {
+    let intervalId: number | null = null;
+    const tick = () => {
+      setCurrentTimeMs(Date.now());
+    };
+    tick();
+    const timeoutId = window.setTimeout(() => {
+      tick();
+      intervalId = window.setInterval(tick, 60_000);
+    }, 60_000 - (Date.now() % 60_000));
+    return () => {
+      window.clearTimeout(timeoutId);
+      if (intervalId !== null) {
+        window.clearInterval(intervalId);
+      }
+    };
+  }, []);
 
   const handleProcessPanelOpenChange = (open: boolean) => {
     setProcessPanelOpen(open);
@@ -92,6 +124,9 @@ export default function BottomStatusBar({
         value={mailCheckStatusValue}
         tone={mailCheckStatusTone}
       />
+      <div className="bottom-center-time" title={currentDateTimeLabel}>
+        {currentDateTimeLabel}
+      </div>
       <ExceptionStatusPopover
         open={exceptionPanelOpen}
         onOpenChange={handleExceptionPanelOpenChange}

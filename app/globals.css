@@ -1474,6 +1474,17 @@ a {
   color: var(--text);
 }
 
+.bottom-center-time {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+  pointer-events: none;
+  color: var(--muted);
+  text-align: center;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
 .bottom-muted {
   color: var(--muted);
 }
