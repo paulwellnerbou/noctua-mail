@@ -40,8 +40,9 @@ export async function GET(request: Request) {
       if (!extractedContent) {
         return NextResponse.json({ ok: false, message: "Attachment data not found" }, { status: 404 });
       }
-      data = extractedContent;
-      await saveAttachmentData(accountId, messageId, attachmentId, extractedContent);
+      const normalizedContent = Buffer.from(extractedContent);
+      data = normalizedContent;
+      await saveAttachmentData(accountId, messageId, attachmentId, normalizedContent);
     } catch {
       return NextResponse.json({ ok: false, message: "Attachment data not found" }, { status: 404 });
     }
