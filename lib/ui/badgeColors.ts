@@ -28,6 +28,8 @@ const flagColorMap: Record<string, BadgeColor> = {
   forwarded: "blue",
   calendar: "indigo",
   recent: "blue",
+  todo: "orange",
+  done: "green",
   custom: "gray",
   // Category badges
   "category-newsletter": "purple",

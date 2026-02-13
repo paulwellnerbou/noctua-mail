@@ -296,10 +296,3 @@
   width: 15px;
   height: 15px;
 }
-
-.flagBadgeButton {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  cursor: pointer;
-}

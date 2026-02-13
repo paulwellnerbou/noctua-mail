@@ -102,8 +102,10 @@ export function buildGroupedMessages(params: {
     visited?: Set<string>
   ) => Array<{ message: Message; depth: number }>;
   isFlaggedMessage: (message: Message) => boolean;
+  hasDoneFlag?: (message: Message) => boolean;
   computeGroupMeta: (items: Message[]) => MessageGroupMeta[];
   includeFlaggedGroup?: boolean;
+  includeDoneGroup?: boolean;
 }): MessageGroup[] {
   const {
     listScopeMessages,
@@ -112,12 +114,15 @@ export function buildGroupedMessages(params: {
     buildThreadTree,
     flattenThread,
     isFlaggedMessage,
+    hasDoneFlag,
     computeGroupMeta,
-    includeFlaggedGroup = true
+    includeFlaggedGroup = true,
+    includeDoneGroup = false
   } = params;
   const base = [...listScopeMessages].sort((a, b) => b.dateValue - a.dateValue);
   const groups = new Map<string, Message[]>();
   const threadGroupKey = new Map<string, string>();
+  const isDoneMessage = (message: Message) => includeDoneGroup && hasDoneFlag?.(message);
 
   if (supportsThreads) {
     buildThreadTree(base).forEach((root) => {
@@ -127,6 +132,14 @@ export function buildGroupedMessages(params: {
       if (hasFlagged) {
         flat.forEach(({ message }) => {
           threadGroupKey.set(message.id, "Flagged");
+        });
+        return;
+      }
+      // Check for Done messages (only if all are done, thread goes to Done group)
+      const allDone = includeDoneGroup && flat.every(({ message }) => isDoneMessage(message));
+      if (allDone) {
+        flat.forEach(({ message }) => {
+          threadGroupKey.set(message.id, "Done");
         });
         return;
       }
@@ -141,11 +154,16 @@ export function buildGroupedMessages(params: {
   }
 
   base.forEach((message) => {
-    const key = supportsThreads
-      ? threadGroupKey.get(message.id) ?? message.groupKey ?? "Other"
-      : includeFlaggedGroup && isFlaggedMessage(message)
-        ? "Flagged"
-        : message.groupKey ?? "Other";
+    let key: string;
+    if (supportsThreads) {
+      key = threadGroupKey.get(message.id) ?? message.groupKey ?? "Other";
+    } else if (includeFlaggedGroup && isFlaggedMessage(message)) {
+      key = "Flagged";
+    } else if (isDoneMessage(message)) {
+      key = "Done";
+    } else {
+      key = message.groupKey ?? "Other";
+    }
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key)!.push(message);
   });
@@ -154,21 +172,31 @@ export function buildGroupedMessages(params: {
   // Keep the Flagged header count aligned with non-threaded grouping:
   // count flagged messages only, not every message inside flagged threads.
   const flaggedCount = base.filter((message) => isFlaggedMessage(message)).length;
-  const orderedMeta = includeFlaggedGroup && flaggedCount > 0
+  const doneCount = includeDoneGroup ? base.filter((message) => isDoneMessage(message)).length : 0;
+  
+  // Build ordered meta with Flagged at the beginning
+  let orderedMeta = includeFlaggedGroup && flaggedCount > 0
     ? [
         { key: "Flagged", label: "Flagged", count: flaggedCount },
-        ...normalizedMeta.filter((group) => group.key !== "Flagged")
+        ...normalizedMeta.filter((group) => group.key !== "Flagged" && group.key !== "Done")
       ]
-    : normalizedMeta;
+    : normalizedMeta.filter((group) => group.key !== "Done");
+  
   const metaKeys = new Set(orderedMeta.map((group) => group.key));
   const missingMeta = Array.from(groups.entries())
-    .filter(([key]) => !metaKeys.has(key))
+    .filter(([key]) => !metaKeys.has(key) && key !== "Done")
     .map(([key, items]) => ({
       key,
       label: key,
       count: items.length
     }));
   const mergedMeta = [...orderedMeta, ...missingMeta];
+  
+  // Add Done group at the end if there are done messages
+  if (includeDoneGroup && doneCount > 0) {
+    mergedMeta.push({ key: "Done", label: "Done", count: doneCount });
+  }
+  
   return mergedMeta.map((group) => ({
     key: group.key,
     label: group.label,

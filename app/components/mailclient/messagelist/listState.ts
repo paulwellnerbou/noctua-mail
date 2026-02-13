@@ -17,8 +17,10 @@ type UseMessageListDerivedStateParams = {
   supportsThreads: boolean;
   groupMeta: MessageGroupMeta[];
   isFlaggedMessage: (message: Message) => boolean;
+  hasDoneFlag?: (message: Message) => boolean;
   computeGroupMeta: (items: Message[]) => MessageGroupMeta[];
   includeFlaggedGroup?: boolean;
+  includeDoneGroup?: boolean;
   collapsedGroups: Record<string, boolean>;
   collapsedThreads: Record<string, boolean>;
   includeThreadAcrossFolders: boolean;
@@ -69,8 +71,10 @@ export function useMessageListDerivedState({
   supportsThreads,
   groupMeta,
   isFlaggedMessage,
+  hasDoneFlag,
   computeGroupMeta,
   includeFlaggedGroup = true,
+  includeDoneGroup = false,
   collapsedGroups,
   collapsedThreads,
   includeThreadAcrossFolders,
@@ -119,15 +123,19 @@ export function useMessageListDerivedState({
         buildThreadTree,
         flattenThread,
         isFlaggedMessage,
+        hasDoneFlag,
         computeGroupMeta,
-        includeFlaggedGroup
+        includeFlaggedGroup,
+        includeDoneGroup
       }),
     [
       buildThreadTree,
       computeGroupMeta,
       flattenThread,
       includeFlaggedGroup,
+      includeDoneGroup,
       groupMeta,
+      hasDoneFlag,
       isFlaggedMessage,
       listScopeMessages,
       supportsThreads

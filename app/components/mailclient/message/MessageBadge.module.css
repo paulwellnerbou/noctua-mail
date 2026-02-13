@@ -4,3 +4,10 @@
   justify-content: center;
   min-height: calc(var(--line-height-1) + var(--space-1));
 }
+
+.flagBadgeButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+}

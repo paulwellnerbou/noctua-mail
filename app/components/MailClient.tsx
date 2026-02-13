@@ -16,11 +16,11 @@ import {
   Archive,
   CalendarClock,
   FileText,
-  ListTodo,
   Paperclip,
   Send,
   Search,
   ShieldOff,
+  Square,
   Trash2,
   X
 } from "lucide-react";
@@ -86,7 +86,7 @@ import {
   buildQuotedHtmlPartsFromText,
   escapeHtml
 } from "@/lib/html";
-import { CALENDAR_INVITE_FLAG, hasMessageFlag, withCalendarInviteFlag } from "@/lib/messageFlags";
+import { CALENDAR_INVITE_FLAG, TODO_FLAG, DONE_FLAG, hasMessageFlag, withCalendarInviteFlag } from "@/lib/messageFlags";
 import { openDetachedWindow } from "@/lib/ui/openDetachedWindow";
 import { getImapFlagBadges, hasHtmlContent } from "@/lib/ui/messageView";
 import {
@@ -112,6 +112,7 @@ import {
   applyFlagsToMessage,
   isMessageFlagged,
   hasTodoFlag,
+  hasDoneFlag,
   hasCalendarFlag,
   hasNonInlineAttachments
 } from "./mailclient/utils/messageHelpers";
@@ -1930,8 +1931,10 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     supportsThreads,
     groupMeta,
     isFlaggedMessage,
+    hasDoneFlag,
     computeGroupMeta,
     includeFlaggedGroup: !(searchScope === "folder" && isTrashFolder(activeFolderId)),
+    includeDoneGroup: activeVirtualFolderId === "virtual:action-queue",
     collapsedGroups,
     collapsedThreads,
     includeThreadAcrossFolders,
@@ -3117,7 +3120,14 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
         if (!activeFolderId) {
           return { keep: false, reason: "missing-active-folder" };
         }
-        if (message.folderId !== activeFolderId) {
+        // When cross-folder threads are enabled, allow messages from other folders
+        // that are part of threads (have a threadId). These are shown via
+        // threadRelatedMessages or server-side thread grouping.
+        const allowCrossFolderThread =
+          includeThreadAcrossFoldersForList &&
+          message.folderId !== activeFolderId &&
+          Boolean(message.threadId);
+        if (message.folderId !== activeFolderId && !allowCrossFolderThread) {
           return { keep: false, reason: `folder-mismatch:${message.folderId}` };
         }
       } else if (currentSearchExcludedFolderIds.includes(message.folderId)) {
@@ -3137,6 +3147,9 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
         if (badge === "todo" && !hasTodoFlag(message)) {
           return { keep: false, reason: "badge-todo" };
         }
+        if (badge === "done" && !hasDoneFlag(message)) {
+          return { keep: false, reason: "badge-done" };
+        }
         if (badge === "calendar" && !hasCalendarFlag(message)) {
           return { keep: false, reason: "badge-calendar" };
         }
@@ -3152,7 +3165,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
         if (badge === "transactional" && message.category !== "transactional") {
           return { keep: false, reason: `badge-transactional:${message.category ?? "none"}` };
         }
-        if (badge === "attention" && !(isMessageFlagged(message) || hasTodoFlag(message))) {
+        if (badge === "attention" && !(isMessageFlagged(message) || hasTodoFlag(message) || hasDoneFlag(message))) {
           return { keep: false, reason: "badge-attention" };
         }
       }
@@ -3163,6 +3176,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
       activeFolderId,
       currentSearchExcludedFolderIds,
       effectiveSearchBadges,
+      includeThreadAcrossFoldersForList,
       searchScope,
     ]
   );
@@ -3839,31 +3853,201 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     }
   };
 
-  const toggleTodoFlag = async (message: Message) => {
-    const hasTodo = hasTodoFlag(message);
+  // Helper to mark a single message: remove fromFlag, add toFlag
+  const transitionTodoState = async (
+    msg: Message,
+    fromKeyword: string,
+    toKeyword: string
+  ): Promise<void> => {
+    // Remove the old flag
+    const removeRes = await apiFetch("/api/message/flags", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        accountId: activeAccountId,
+        messageId: msg.id,
+        keyword: fromKeyword,
+        value: false
+      })
+    });
+    if (!removeRes.ok) {
+      reportError(await readErrorMessage(removeRes));
+      return;
+    }
+    const removeData = (await removeRes.json()) as { flags: string[] };
+    
+    // Add the new flag
+    const addRes = await apiFetch("/api/message/flags", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        accountId: activeAccountId,
+        messageId: msg.id,
+        keyword: toKeyword,
+        value: true
+      })
+    });
+    if (!addRes.ok) {
+      reportError(await readErrorMessage(addRes));
+      return;
+    }
+    const addData = (await addRes.json()) as { flags: string[] };
+    const finalFlags = addData.flags;
+    
+    const updatedMessage = applyFlagsToMessage(msg, finalFlags);
+    const shouldKeepUpdatedMessage = shouldKeepMessageInCurrentResults(updatedMessage);
+    updateMessagesWithCurrentResultPrune(
+      (item) => (item.id === msg.id ? applyFlagsToMessage(item, finalFlags) : item),
+      { source: "transition-todo-state" }
+    );
+    updateThreadCacheWithFlags(msg.id, finalFlags);
+    if (activeMessageId === msg.id && !shouldKeepUpdatedMessage) {
+      setActiveMessageId("");
+    }
+  };
+
+  const toggleTodoFlag = async (
+    message: Message,
+    collapsedThreadMessages?: Message[],
+    clickedBadge?: "todo" | "done"
+  ) => {
     try {
-      const res = await apiFetch("/api/message/flags", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          accountId: activeAccountId,
-          messageId: message.id,
-          keyword: "To-Do",
-          value: !hasTodo
-        })
-      });
-      if (!res.ok) {
-        reportError(await readErrorMessage(res));
+      // Handle bulk operations for collapsed threads
+      if (collapsedThreadMessages && collapsedThreadMessages.length > 0 && clickedBadge) {
+        if (clickedBadge === "todo") {
+          // Mark all To-Do messages as Done
+          const todoMessages = collapsedThreadMessages.filter((m) => hasTodoFlag(m));
+          if (todoMessages.length > 0) {
+            await Promise.all(
+              todoMessages.map((m) => transitionTodoState(m, TODO_FLAG, DONE_FLAG))
+            );
+            queueFilteredSearchRefresh();
+          }
+        } else if (clickedBadge === "done") {
+          // Mark all Done messages as To-Do
+          const doneMessages = collapsedThreadMessages.filter((m) => hasDoneFlag(m));
+          if (doneMessages.length > 0) {
+            await Promise.all(
+              doneMessages.map((m) => transitionTodoState(m, DONE_FLAG, TODO_FLAG))
+            );
+            queueFilteredSearchRefresh();
+          }
+        }
         return;
       }
-      const data = (await res.json()) as { flags: string[] };
-      const updatedMessage = applyFlagsToMessage(message, data.flags);
+
+      // Single message toggle
+      const hasTodo = hasTodoFlag(message);
+      const hasDone = hasDoneFlag(message);
+    
+      // State transitions:
+      // No flag → Add $Todo
+      // Has $Todo → Remove $Todo, Add $Done
+      // Has $Done → Remove $Done, Add $Todo
+      
+      let finalFlags = message.flags ?? [];
+      
+      if (hasTodo) {
+        // Mark as Done: remove $Todo, add $Done
+        // First remove $Todo
+        const removeRes = await apiFetch("/api/message/flags", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            accountId: activeAccountId,
+            messageId: message.id,
+            keyword: TODO_FLAG,
+            value: false
+          })
+        });
+        if (!removeRes.ok) {
+          reportError(await readErrorMessage(removeRes));
+          return;
+        }
+        const removeData = (await removeRes.json()) as { flags: string[] };
+        finalFlags = removeData.flags;
+        
+        // Then add $Done
+        const addRes = await apiFetch("/api/message/flags", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            accountId: activeAccountId,
+            messageId: message.id,
+            keyword: DONE_FLAG,
+            value: true
+          })
+        });
+        if (!addRes.ok) {
+          reportError(await readErrorMessage(addRes));
+          return;
+        }
+        const addData = (await addRes.json()) as { flags: string[] };
+        finalFlags = addData.flags;
+      } else if (hasDone) {
+        // Mark as To-Do: remove $Done, add $Todo
+        // First remove $Done
+        const removeRes = await apiFetch("/api/message/flags", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            accountId: activeAccountId,
+            messageId: message.id,
+            keyword: DONE_FLAG,
+            value: false
+          })
+        });
+        if (!removeRes.ok) {
+          reportError(await readErrorMessage(removeRes));
+          return;
+        }
+        const removeData = (await removeRes.json()) as { flags: string[] };
+        finalFlags = removeData.flags;
+        
+        // Then add $Todo
+        const addRes = await apiFetch("/api/message/flags", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            accountId: activeAccountId,
+            messageId: message.id,
+            keyword: TODO_FLAG,
+            value: true
+          })
+        });
+        if (!addRes.ok) {
+          reportError(await readErrorMessage(addRes));
+          return;
+        }
+        const addData = (await addRes.json()) as { flags: string[] };
+        finalFlags = addData.flags;
+      } else {
+        // No flag → Add $Todo
+        const res = await apiFetch("/api/message/flags", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            accountId: activeAccountId,
+            messageId: message.id,
+            keyword: TODO_FLAG,
+            value: true
+          })
+        });
+        if (!res.ok) {
+          reportError(await readErrorMessage(res));
+          return;
+        }
+        const data = (await res.json()) as { flags: string[] };
+        finalFlags = data.flags;
+      }
+      
+      const updatedMessage = applyFlagsToMessage(message, finalFlags);
       const shouldKeepUpdatedMessage = shouldKeepMessageInCurrentResults(updatedMessage);
       updateMessagesWithCurrentResultPrune(
-        (item) => (item.id === message.id ? applyFlagsToMessage(item, data.flags) : item),
+        (item) => (item.id === message.id ? applyFlagsToMessage(item, finalFlags) : item),
         { source: "toggle-todo-flag" }
       );
-      updateThreadCacheWithFlags(message.id, data.flags);
+      updateThreadCacheWithFlags(message.id, finalFlags);
       if (activeMessageId === message.id && !shouldKeepUpdatedMessage) {
         setActiveMessageId("");
       }
@@ -3873,7 +4057,21 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     }
   };
 
-  const toggleFlaggedFlag = async (message: Message) => {
+  const toggleFlaggedFlag = async (
+    message: Message,
+    collapsedThreadMessages?: Message[]
+  ) => {
+    // If collapsed thread messages provided, unflag all flagged messages in the thread
+    if (collapsedThreadMessages && collapsedThreadMessages.length > 0) {
+      const flaggedMessages = collapsedThreadMessages.filter((m) => isFlaggedMessage(m));
+      if (flaggedMessages.length > 0) {
+        await Promise.all(
+          flaggedMessages.map((m) => updateFlagState(m, "flagged", false))
+        );
+      }
+      return;
+    }
+    // Single message toggle
     await updateFlagState(message, "flagged", !isFlaggedMessage(message));
   };
 
@@ -6841,7 +7039,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
             : (inviteDeckUnreadCount ?? 0) > 0,
         icon:
           folder.id === "virtual:action-queue" ? (
-            <ListTodo size={13} />
+            <Square size={13} />
           ) : (
             <CalendarClock size={13} />
           )
@@ -7170,7 +7368,8 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
                 selectRangeTo,
                 selectCollapsedThread,
                 handleDeleteMessage,
-                toggleFlaggedFlag
+                toggleFlaggedFlag,
+                toggleTodoFlag
               }}
               helpers={{
                 buildThreadTree,
@@ -7326,6 +7525,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
                       setActiveFolderId,
                       getImapFlagBadges,
                       toggleFlaggedFlag,
+                      toggleTodoFlag,
                       isDraftMessage,
                       openCompose,
                       renderQuickActions,

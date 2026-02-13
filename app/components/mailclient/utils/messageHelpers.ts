@@ -5,6 +5,8 @@ import type { Message, Folder } from "@/lib/data";
 import type { MessageGroupMeta } from "../messagelist/listModel";
 import {
   hasMessageFlag,
+  hasTodoFlag as hasTodoFlagFromFlags,
+  hasDoneFlag as hasDoneFlagFromFlags,
   CALENDAR_INVITE_FLAG,
   isMeaningfulNonInlineAttachment
 } from "@/lib/messageFlags";
@@ -58,7 +60,11 @@ export function isMessageFlagged(message: Message) {
 }
 
 export function hasTodoFlag(message: Message) {
-  return hasMessageFlag(message.flags, "to-do");
+  return hasTodoFlagFromFlags(message.flags);
+}
+
+export function hasDoneFlag(message: Message) {
+  return hasDoneFlagFromFlags(message.flags);
 }
 
 export function hasCalendarFlag(message: Message) {

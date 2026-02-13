@@ -64,7 +64,8 @@ type MessageCardListProps = {
       options?: { isFlaggedGroup?: boolean }
     ) => void;
     handleDeleteMessage: (message: Message) => void;
-    toggleFlaggedFlag: (message: Message) => void;
+    toggleFlaggedFlag: (message: Message, collapsedThreadMessages?: Message[]) => void;
+    toggleTodoFlag: (message: Message, collapsedThreadMessages?: Message[], clickedBadge?: "todo" | "done") => void;
   };
   helpers: {
     buildThreadTree: (items: Message[]) => ThreadNode[];
@@ -129,7 +130,8 @@ export default function MessageCardList({
     toggleMessageSelection,
     selectCollapsedThread,
     handleDeleteMessage,
-    toggleFlaggedFlag
+    toggleFlaggedFlag,
+    toggleTodoFlag
   } = actions;
 
 
@@ -523,10 +525,16 @@ export default function MessageCardList({
                 return message.category ? categoryIcons[message.category] : undefined;
               })()}
               toggleFlaggedFlag={toggleFlaggedFlag}
+              toggleTodoFlag={toggleTodoFlag}
               threadCategories={threadBadgeUnion?.threadCategories}
               threadHasFlagged={threadBadgeUnion?.threadHasFlagged}
+              threadHasTodo={threadBadgeUnion?.threadHasTodo}
+              threadHasDone={threadBadgeUnion?.threadHasDone}
               threadHasAttachments={threadBadgeUnion?.threadHasAttachments}
               threadHasCalendar={threadBadgeUnion?.threadHasCalendar}
+              collapsedThreadMessages={
+                isCollapsedThreadRoot ? item.fullFlat.map((entry) => entry.message) : undefined
+              }
               dateFormat={dateFormat}
             />
           </div>

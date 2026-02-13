@@ -1,5 +1,5 @@
 import type { Message } from "@/lib/data";
-import { CALENDAR_INVITE_FLAG } from "@/lib/messageFlags";
+import { CALENDAR_INVITE_FLAG, TODO_FLAG, DONE_FLAG } from "@/lib/messageFlags";
 
 export type ImapFlagBadge = { label: string; kind: string };
 
@@ -45,16 +45,22 @@ export function getImapFlagBadges(message: Message): ImapFlagBadge[] {
       const lower = flag.toLowerCase();
       const isForwarded = lower === "$forwarded" || lower === "forwarded";
       const isCalendarInvite = lower === CALENDAR_INVITE_FLAG;
+      const isTodo = lower === TODO_FLAG.toLowerCase();
+      const isDone = lower === DONE_FLAG.toLowerCase();
       if (lower === "\\recent" && (message.seen || message.draft)) return null;
       const label = isForwarded
         ? "Forwarded"
         : isCalendarInvite
           ? "Calendar Invite"
-          : lower === "\\recent"
-            ? "New"
-            : flag.startsWith("\\")
-              ? flag.slice(1)
-              : flag;
+          : isTodo
+            ? "To-Do"
+            : isDone
+              ? "Done"
+              : lower === "\\recent"
+                ? "New"
+                : flag.startsWith("\\")
+                  ? flag.slice(1)
+                  : flag;
       let kind = "custom";
       if (lower === "\\seen") kind = "seen";
       if (lower === "\\answered") kind = "answered";
@@ -64,6 +70,8 @@ export function getImapFlagBadges(message: Message): ImapFlagBadge[] {
       if (lower === "\\recent") kind = "new";
       if (isForwarded) kind = "forwarded";
       if (isCalendarInvite) kind = "calendar";
+      if (isTodo) kind = "todo";
+      if (isDone) kind = "done";
       return { label, kind };
     })
     .filter(Boolean) as ImapFlagBadge[];

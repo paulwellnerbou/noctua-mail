@@ -22,11 +22,13 @@ import {
   Shield,
   ShieldOff,
   Square,
+  SquareCheckBig,
   Tags,
   Trash2
 } from "lucide-react";
 import { DropdownMenu, IconButton } from "@radix-ui/themes";
 import type { Message } from "@/lib/data";
+import { hasTodoFlag, hasDoneFlag } from "../utils/messageHelpers";
 import styles from "./MessageMenu.module.css";
 
 type ComposeMode = "new" | "reply" | "replyAll" | "forward" | "edit" | "editAsNew";
@@ -215,12 +217,16 @@ export default function MessageMenu({
             isVisible("todo")
               ? buildItem(
                   "todo",
-                  message.flags?.some((flag) => flag.toLowerCase() === "to-do")
+                  hasTodoFlag(message)
                     ? "Mark as Done"
-                    : "Mark as To-Do",
-                  message.flags?.some((flag) => flag.toLowerCase() === "to-do")
+                    : hasDoneFlag(message)
+                      ? "Mark as To-Do"
+                      : "Mark as To-Do",
+                  hasTodoFlag(message)
                     ? <CheckSquare size={14} />
-                    : <Square size={14} />,
+                    : hasDoneFlag(message)
+                      ? <SquareCheckBig size={14} />
+                      : <Square size={14} />,
                   () => toggleTodoFlag(message),
                   isDisabled("todo")
                 )

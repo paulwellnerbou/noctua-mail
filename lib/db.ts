@@ -29,6 +29,8 @@ import {
   CRYPTO_SIGNATURE_FILENAME_EXTENSIONS,
   CRYPTO_SIGNATURE_MIME_HINTS,
   MIN_VISIBLE_ATTACHMENT_SIZE_BYTES,
+  TODO_FLAG,
+  DONE_FLAG,
   normalizeImapFlags
 } from "./messageFlags";
 import { normalizeAccountDateFormat } from "./dateFormatting";
@@ -1799,7 +1801,8 @@ function deriveSystemFlagState(flags: string[]): MessageSystemFlagState {
 
 function applyBadgeFilters(where: string, args: any[], badges?: string[] | null) {
   const normalized = (badges ?? []).map((badge) => badge.toLowerCase());
-  const todoFlagPattern = '%"to-do"%';
+  const todoFlagPattern = `%"${TODO_FLAG.toLowerCase()}"%`;
+  const doneFlagPattern = `%"${DONE_FLAG.toLowerCase()}"%`;
   if (normalized.includes("unread")) {
     where += " AND m.unread = 1";
   }
@@ -1813,9 +1816,14 @@ function applyBadgeFilters(where: string, args: any[], badges?: string[] | null)
     where += " AND m.flags IS NOT NULL AND lower(m.flags) LIKE ?";
     args.push(todoFlagPattern);
   }
+  if (normalized.includes("done")) {
+    where += " AND m.flags IS NOT NULL AND lower(m.flags) LIKE ?";
+    args.push(doneFlagPattern);
+  }
   if (normalized.includes("attention")) {
-    where += " AND (m.flagged = 1 OR (m.flags IS NOT NULL AND lower(m.flags) LIKE ?))";
-    args.push(todoFlagPattern);
+    // Action Queue: flagged OR todo OR done
+    where += " AND (m.flagged = 1 OR (m.flags IS NOT NULL AND (lower(m.flags) LIKE ? OR lower(m.flags) LIKE ?)))";
+    args.push(todoFlagPattern, doneFlagPattern);
   }
   if (normalized.includes("calendar")) {
     where += " AND m.flags IS NOT NULL AND lower(m.flags) LIKE ?";

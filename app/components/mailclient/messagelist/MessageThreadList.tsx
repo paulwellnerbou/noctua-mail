@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useState } from "react";
 import type React from "react";
-import { CalendarDays, Flag, GitBranch, MoveRight, Paperclip, Trash2 } from "lucide-react";
+import { CalendarDays, GitBranch, MoveRight, Paperclip, Trash2 } from "lucide-react";
 import { Badge, IconButton, Text } from "@radix-ui/themes";
-import { badgeColors, getFlagBadgeColor } from "@/lib/ui/badgeColors";
+import { badgeColors } from "@/lib/ui/badgeColors";
 import type { AccountDateFormat, Message } from "@/lib/data";
 import { CALENDAR_INVITE_FLAG, hasMessageFlag } from "@/lib/messageFlags";
 import badgeStyles from "../message/MessageBadge.module.css";
 import CategoryBadge from "../CategoryBadge";
-import { shouldShowAttachmentIcon } from "../utils/messageHelpers";
+import FlagBadge from "../message/FlagBadge";
+import { shouldShowAttachmentIcon, hasTodoFlag, hasDoneFlag } from "../utils/messageHelpers";
 import {
   buildMessageListItems,
   type MessageGroup,
@@ -65,7 +66,8 @@ type MessageThreadListProps = {
       options?: { isFlaggedGroup?: boolean }
     ) => void;
     handleDeleteMessage: (message: Message) => void;
-    toggleFlaggedFlag: (message: Message) => void;
+    toggleFlaggedFlag: (message: Message, collapsedThreadMessages?: Message[]) => void;
+    toggleTodoFlag: (message: Message, collapsedThreadMessages?: Message[], clickedBadge?: "todo" | "done") => void;
   };
   helpers: {
     buildThreadTree: (items: Message[]) => ThreadNode[];
@@ -126,7 +128,8 @@ export default function MessageThreadList({
     toggleMessageSelection,
     selectCollapsedThread,
     handleDeleteMessage,
-    toggleFlaggedFlag
+    toggleFlaggedFlag,
+    toggleTodoFlag
   } = actions;
 
   const {
@@ -300,6 +303,8 @@ export default function MessageThreadList({
         }) ?? {
           threadCategories: [],
           threadHasFlagged: false,
+          threadHasTodo: false,
+          threadHasDone: false,
           threadHasAttachments: false,
           threadHasCalendar: false
         };
@@ -466,26 +471,39 @@ export default function MessageThreadList({
                         <CategoryBadge category={message.category as any} showText={false} />
                       )}
                   {(threadBadgeUnion.threadHasFlagged || message.flagged) && (
-                    <Badge
-                      size="1"
-                      variant="soft"
-                      color={getFlagBadgeColor("flagged")}
-                      className={badgeStyles.badge}
-                      asChild
-                    >
-                      <button
-                        type="button"
-                        className={styles.flagBadgeButton}
-                        title="Unflag message"
-                        aria-label="Unflag message"
-                        onClick={(event) => {
-                          event.stopPropagation();
-                          toggleFlaggedFlag(message);
-                        }}
-                      >
-                        <Flag size={12} />
-                      </button>
-                    </Badge>
+                    <FlagBadge
+                      kind="flagged"
+                      onClick={() =>
+                        toggleFlaggedFlag(
+                          message,
+                          isCollapsedThreadRoot ? item.fullFlat.map((entry) => entry.message) : undefined
+                        )
+                      }
+                    />
+                  )}
+                  {(threadBadgeUnion.threadHasTodo || hasTodoFlag(message)) && (
+                    <FlagBadge
+                      kind="todo"
+                      onClick={() =>
+                        toggleTodoFlag(
+                          message,
+                          isCollapsedThreadRoot ? item.fullFlat.map((entry) => entry.message) : undefined,
+                          "todo"
+                        )
+                      }
+                    />
+                  )}
+                  {(threadBadgeUnion.threadHasDone || hasDoneFlag(message)) && (
+                    <FlagBadge
+                      kind="done"
+                      onClick={() =>
+                        toggleTodoFlag(
+                          message,
+                          isCollapsedThreadRoot ? item.fullFlat.map((entry) => entry.message) : undefined,
+                          "done"
+                        )
+                      }
+                    />
                   )}
                 </span>
 

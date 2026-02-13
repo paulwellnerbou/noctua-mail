@@ -324,6 +324,7 @@ export default function MessageWindowPage() {
                 toggleFlaggedFlag: (target) => {
                   void updateFlagState(target, "flagged", !Boolean(target.flagged));
                 },
+                toggleTodoFlag: noop as (message: Message) => void,
                 isDraftMessage: (target) => Boolean(target.draft),
                 openCompose: noop as (mode: ComposeMode, message?: Message) => void,
                 renderQuickActions: (target) => (

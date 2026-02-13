@@ -46,13 +46,6 @@
   min-width: 0;
 }
 
-.flagBadgeButton {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  cursor: pointer;
-}
-
 .caretTrigger {
   background: transparent;
   border: none;

@@ -3,7 +3,6 @@ import type React from "react";
 import {
   CalendarDays,
   Edit3,
-  Flag,
   Image as ImageIcon,
   Paperclip,
   ZoomIn,
@@ -24,6 +23,7 @@ import FolderBadges from "../folder/FolderBadges";
 import CalendarEventPreview from "./CalendarEventPreview";
 import MessageRecipientMetaField from "./MessageRecipientMetaField";
 import CategoryBadge from "../CategoryBadge";
+import FlagBadge from "./FlagBadge";
 import { hasNonInlineAttachments } from "../utils/messageHelpers";
 
 type MessageTab = "html" | "text" | "markdown" | "source";
@@ -45,6 +45,7 @@ type ThreadMessageCardProps = {
   setActiveFolderId: React.Dispatch<React.SetStateAction<string>>;
   getImapFlagBadges: (message: Message) => ImapFlagBadge[];
   toggleFlaggedFlag: (message: Message) => void;
+  toggleTodoFlag: (message: Message) => void;
   isDraftMessage: (message: Message) => boolean;
   openCompose: (mode: ComposeMode, message?: Message) => void;
   renderQuickActions: (
@@ -91,6 +92,7 @@ export default function ThreadMessageCard({
   setActiveFolderId,
   getImapFlagBadges,
   toggleFlaggedFlag,
+  toggleTodoFlag,
   isDraftMessage,
   openCompose,
   renderQuickActions,
@@ -411,27 +413,26 @@ export default function ThreadMessageCard({
                 <div className={styles.badges}>
                   {getImapFlagBadges(message).map((badge) =>
                     badge.kind === "flagged" ? (
-                      <Badge
+                      <FlagBadge
                         key={`${badge.kind}-${badge.label}`}
-                        size="1"
-                        variant="soft"
-                        color={getFlagBadgeColor(badge.kind)}
-                        asChild
-                      >
-                        <button
-                          type="button"
-                          className={styles.flagBadgeButton}
-                          title="Unflag message"
-                          aria-label="Unflag message"
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            toggleFlaggedFlag(message);
-                          }}
-                        >
-                          <Flag size={12} />
-                          {badge.label}
-                        </button>
-                      </Badge>
+                        kind="flagged"
+                        showLabel
+                        onClick={() => toggleFlaggedFlag(message)}
+                      />
+                    ) : badge.kind === "todo" ? (
+                      <FlagBadge
+                        key={`${badge.kind}-${badge.label}`}
+                        kind="todo"
+                        showLabel
+                        onClick={() => toggleTodoFlag(message)}
+                      />
+                    ) : badge.kind === "done" ? (
+                      <FlagBadge
+                        key={`${badge.kind}-${badge.label}`}
+                        kind="done"
+                        showLabel
+                        onClick={() => toggleTodoFlag(message)}
+                      />
                     ) : badge.kind.startsWith("category-") ? (
                       <CategoryBadge
                         key={`${badge.kind}-${badge.label}`}
@@ -448,7 +449,7 @@ export default function ThreadMessageCard({
                         title={badge.label}
                       >
                         {badge.kind === "calendar" && <CalendarDays size={12} />}
-                        {badge.kind !== "calendar" && badge.label}
+                        {badge.label}
                       </Badge>
                     )
                   )}

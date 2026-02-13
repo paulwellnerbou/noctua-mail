@@ -1,15 +1,17 @@
 import { memo, useEffect, useRef, useState } from "react";
 import type React from "react";
-import { CalendarDays, Flag, GitBranch, MoveRight, Paperclip, Search, Trash2 } from "lucide-react";
+import { CalendarDays, GitBranch, MoveRight, Paperclip, Search, Trash2 } from "lucide-react";
 import { Badge, Checkbox, IconButton, Text } from "@radix-ui/themes";
 import { CaretRightIcon } from "@radix-ui/react-icons";
-import { badgeColors, getFlagBadgeColor } from "@/lib/ui/badgeColors";
+import { badgeColors } from "@/lib/ui/badgeColors";
 import type { AccountDateFormat, Message } from "@/lib/data";
+import { hasTodoFlag, hasDoneFlag } from "../utils/messageHelpers";
 import badgeStyles from "../message/MessageBadge.module.css";
 import commonStyles from "./MessageListCommon.module.css";
 import { getMessageListDateDisplay } from "./messageDateDisplay";
 import styles from "./MessageRow.module.css";
 import CategoryBadge from "../CategoryBadge";
+import FlagBadge from "../message/FlagBadge";
 
 type MessageRowProps = {
   message: Message;
@@ -43,7 +45,8 @@ type MessageRowProps = {
   onSubjectClick: (event: React.MouseEvent) => void;
   onDelete: (event: React.MouseEvent) => void;
   onShowRelated: (event: React.MouseEvent) => void;
-  toggleFlaggedFlag: (message: Message) => void;
+  toggleFlaggedFlag: (message: Message, collapsedThreadMessages?: Message[]) => void;
+  toggleTodoFlag: (message: Message, collapsedThreadMessages?: Message[], clickedBadge?: "todo" | "done") => void;
   deleteTitle: string;
   renderUnreadDot: React.ReactNode;
   renderSelectIndicators: React.ReactNode;
@@ -63,8 +66,11 @@ type MessageRowProps = {
   categoryIcon?: string;
   threadCategories?: string[];
   threadHasFlagged?: boolean;
+  threadHasTodo?: boolean;
+  threadHasDone?: boolean;
   threadHasAttachments?: boolean;
   threadHasCalendar?: boolean;
+  collapsedThreadMessages?: Message[];
   dateFormat?: AccountDateFormat;
 };
 
@@ -101,6 +107,7 @@ function MessageRow({
   onDelete,
   onShowRelated,
   toggleFlaggedFlag,
+  toggleTodoFlag,
   deleteTitle,
   renderUnreadDot,
   renderSelectIndicators,
@@ -120,8 +127,11 @@ function MessageRow({
   categoryIcon,
   threadCategories,
   threadHasFlagged,
+  threadHasTodo,
+  threadHasDone,
   threadHasAttachments,
   threadHasCalendar,
+  collapsedThreadMessages,
   dateFormat
 }: MessageRowProps) {
   const [optimisticSelected, setOptimisticSelected] = useState<boolean | null>(null);
@@ -418,26 +428,13 @@ function MessageRow({
                   <CategoryBadge category={message.category as any} showText={false} />
                 )}
             {(threadHasFlagged ?? message.flagged) && (
-              <Badge
-                size="1"
-                variant="soft"
-                color={getFlagBadgeColor("flagged")}
-                className={badgeStyles.badge}
-                asChild
-              >
-                <button
-                  type="button"
-                  className={styles.flagBadgeButton}
-                  title="Unflag message"
-                  aria-label="Unflag message"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    toggleFlaggedFlag(message);
-                  }}
-                >
-                  <Flag size={12} />
-                </button>
-              </Badge>
+              <FlagBadge kind="flagged" onClick={() => toggleFlaggedFlag(message, collapsedThreadMessages)} />
+            )}
+            {(threadHasTodo ?? hasTodoFlag(message)) && (
+              <FlagBadge kind="todo" onClick={() => toggleTodoFlag(message, collapsedThreadMessages, "todo")} />
+            )}
+            {(threadHasDone ?? hasDoneFlag(message)) && (
+              <FlagBadge kind="done" onClick={() => toggleTodoFlag(message, collapsedThreadMessages, "done")} />
             )}
           </div>
         )}
@@ -479,6 +476,9 @@ const areEqual = (prev: MessageRowProps, next: MessageRowProps) =>
   prev.checkboxState === next.checkboxState &&
   prev.deleteTitle === next.deleteTitle &&
   prev.folderBadgeKey === next.folderBadgeKey &&
-  prev.categoryIcon === next.categoryIcon;
+  prev.categoryIcon === next.categoryIcon &&
+  prev.threadHasFlagged === next.threadHasFlagged &&
+  prev.threadHasTodo === next.threadHasTodo &&
+  prev.threadHasDone === next.threadHasDone;
 
 export default memo(MessageRow, areEqual);

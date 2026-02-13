@@ -51,6 +51,7 @@ type MessageListViewProps = {
     ) => void;
     handleDeleteMessage: (message: Message) => void;
     toggleFlaggedFlag: (message: Message) => void;
+    toggleTodoFlag: (message: Message) => void;
   };
   helpers: {
     buildThreadTree: (items: Message[]) => ThreadNode[];
@@ -168,7 +169,8 @@ export default function MessageListView({
           toggleMessageSelection: actions.toggleMessageSelection,
           selectCollapsedThread: actions.selectCollapsedThread,
           handleDeleteMessage: actions.handleDeleteMessage,
-          toggleFlaggedFlag: actions.toggleFlaggedFlag
+          toggleFlaggedFlag: actions.toggleFlaggedFlag,
+          toggleTodoFlag: actions.toggleTodoFlag
         }}
         helpers={{
           buildThreadTree: helpers.buildThreadTree,
@@ -217,7 +219,8 @@ export default function MessageListView({
         toggleMessageSelection: actions.toggleMessageSelection,
         selectCollapsedThread: actions.selectCollapsedThread,
         handleDeleteMessage: actions.handleDeleteMessage,
-        toggleFlaggedFlag: actions.toggleFlaggedFlag
+        toggleFlaggedFlag: actions.toggleFlaggedFlag,
+        toggleTodoFlag: actions.toggleTodoFlag
       }}
       helpers={{
         buildThreadTree: helpers.buildThreadTree,

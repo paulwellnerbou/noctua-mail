@@ -1,6 +1,8 @@
 import type { Attachment } from "@/lib/data";
 
 export const CALENDAR_INVITE_FLAG = "calendar-invite";
+export const TODO_FLAG = "$Todo";
+export const DONE_FLAG = "$Done";
 const LEGACY_CUSTOM_FLAGGED_KEYWORD = "pinned";
 
 export const CALENDAR_MIME_HINTS = [
@@ -92,6 +94,20 @@ function bodyLooksLikeCalendarInvite(textBody?: string | null, htmlBody?: string
 export function hasMessageFlag(flags: string[] | null | undefined, flag: string) {
   const target = flag.toLowerCase();
   return (flags ?? []).some((item) => item.toLowerCase() === target);
+}
+
+/**
+ * Checks if the message has a Todo flag ($Todo)
+ */
+export function hasTodoFlag(flags: string[] | null | undefined) {
+  return hasMessageFlag(flags, TODO_FLAG);
+}
+
+/**
+ * Checks if the message has a Done flag ($Done)
+ */
+export function hasDoneFlag(flags: string[] | null | undefined) {
+  return hasMessageFlag(flags, DONE_FLAG);
 }
 
 export function normalizeImapFlags(flags: string[] | null | undefined) {
