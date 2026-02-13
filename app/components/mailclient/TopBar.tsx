@@ -85,7 +85,11 @@ type TopBarProps = {
     startEditAccount: (account?: Account) => void;
     deleteAccount: (accountId: string) => void;
     setActiveAccountId: React.Dispatch<React.SetStateAction<string>>;
-    syncAccount: (folderId?: string, mode?: "new" | "full") => void;
+    syncAccount: (
+      folderId?: string,
+      mode?: "new" | "full",
+      options?: { recategorizeFolder?: boolean }
+    ) => void;
   };
 };
 

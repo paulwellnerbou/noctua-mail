@@ -16,6 +16,7 @@ import {
   Archive,
   CalendarClock,
   FileText,
+  ListTodo,
   Paperclip,
   Send,
   Search,
@@ -156,6 +157,7 @@ import type {
   ThreadDeleteConfirmState,
   NoticeInput,
   SyncNotificationMessage,
+  SyncJobProgress,
   SyncJobResult
 } from "./mailclient/types";
 import { formatMessageDate, normalizeAccountDateFormat } from "@/lib/dateFormatting";
@@ -164,6 +166,11 @@ import type { CategoryLearningDebugSnapshot } from "@/lib/mail/categorization/de
 type CategoryDebugResponse = {
   ok?: boolean;
   snapshot?: CategoryLearningDebugSnapshot;
+  message?: string;
+};
+
+type CategoryModelResetResponse = {
+  ok?: boolean;
   message?: string;
 };
 
@@ -259,6 +266,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     useState<CategoryLearningDebugSnapshot | null>(null);
   const [categorizationDebugLoading, setCategorizationDebugLoading] = useState(false);
   const [categorizationDebugError, setCategorizationDebugError] = useState("");
+  const [categorizationResetting, setCategorizationResetting] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [isRecomputingThreads, setIsRecomputingThreads] = useState(false);
   const [isRecomputingCategories, setIsRecomputingCategories] = useState(false);
@@ -277,6 +285,9 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
   const [sortDir, setSortDir] = useState<"desc" | "asc">("desc");
   const [collapsedFolders, setCollapsedFolders] = useState<Record<string, boolean>>({});
   const [syncingFolders, setSyncingFolders] = useState<Set<string>>(new Set());
+  const [syncProgressByJobId, setSyncProgressByJobId] = useState<Record<string, SyncJobProgress>>(
+    {}
+  );
   const [folderQuery, setFolderQuery] = useState("");
   const [exceptionEntries, setExceptionEntries] = useState<ExceptionEntry[]>([]);
   const [pendingCalendarReminders, setPendingCalendarReminders] = useState<CalendarReminder[]>([]);
@@ -457,11 +468,10 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
   const pendingJumpLocalMessageIdRef = useRef<string | null>(null);
   const pendingJumpAccountIdRef = useRef<string | null>(null);
   const pendingJumpRefreshKeyRef = useRef("");
-  const lastUidNextRef = useRef<Record<string, number>>({});
   const lastUidNextByFolderRef = useRef<Record<string, number>>({});
   const lastNotifiedUidRef = useRef<Record<string, number>>({});
   const notifiedKeysRef = useRef<Set<string>>(new Set());
-  const autoHydrationInFlightRef = useRef<Map<string, Promise<boolean>>>(new Map());
+  const autoHydrationInFlightRef = useRef<Map<string, Promise<boolean | null>>>(new Map());
   const autoHydrationAttemptAtRef = useRef<Record<string, number>>({});
   const lastDeleteReconcileAtRef = useRef<Record<string, number>>({});
   const localDeleteReconcileByFolderRef = useRef<Record<string, number>>({});
@@ -476,7 +486,13 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     isSyncing: false,
     syncingFolders: new Set()
   });
-  const syncAccountRef = useRef<(folderId?: string, mode?: "new" | "full") => Promise<void> | undefined>(
+  const syncAccountRef = useRef<
+    (
+      folderId?: string,
+      mode?: "new" | "full",
+      options?: { recategorizeFolder?: boolean }
+    ) => Promise<void> | undefined
+  >(
     undefined
   );
   const initialSyncStatusRef = useRef<Record<string, "running" | "done">>({});
@@ -1785,6 +1801,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
   const [threadRelatedMessages, setThreadRelatedMessages] = useState<Message[]>([]);
   const [threadContentById, setThreadContentById] = useState<Record<string, Message[]>>({});
   const [threadContentLoading, setThreadContentLoading] = useState<string | null>(null);
+  const [threadContentErrorById, setThreadContentErrorById] = useState<Record<string, string>>({});
   const threadContentByIdRef = useRef(threadContentById);
   const threadCacheOrderRef = useRef<string[]>([]);
   const THREAD_CACHE_LIMIT = 20;
@@ -1804,6 +1821,22 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
       return next;
     });
   }, []);
+  const clearThreadContentError = useCallback((threadId: string) => {
+    setThreadContentErrorById((prev) => {
+      if (!(threadId in prev)) return prev;
+      const next = { ...prev };
+      delete next[threadId];
+      return next;
+    });
+  }, []);
+  const setThreadContentError = useCallback(
+    (threadId: string, message = "Failed to load message content.") => {
+      setThreadContentErrorById((prev) =>
+        prev[threadId] === message ? prev : { ...prev, [threadId]: message }
+      );
+    },
+    []
+  );
   const evictMessagesFromThreadCache = useCallback((messageIds: string[]) => {
     if (messageIds.length === 0) return;
     const idSet = new Set(messageIds);
@@ -4426,16 +4459,16 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     async (message: Message) => {
       const hasText = (message.body ?? "").trim().length > 0;
       const hasHtml = hasHtmlContent(message.htmlBody);
-      if (hasText || hasHtml) return false;
+      if (hasText || hasHtml) return null;
       if (!message.mailboxPath || typeof message.imapUid !== "number" || Number.isNaN(message.imapUid)) {
-        return false;
+        return null;
       }
 
       const key = `${message.accountId}:${message.id}`;
       const now = Date.now();
       const lastAttempt = autoHydrationAttemptAtRef.current[key] ?? 0;
       if (now - lastAttempt < 30_000) {
-        return false;
+        return null;
       }
       const inFlight = autoHydrationInFlightRef.current.get(key);
       if (inFlight) {
@@ -5046,6 +5079,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
       const threadId =
         activeMessage.threadId ?? activeMessage.messageId ?? activeMessage.id;
       if (!threadId) return;
+      const loadFailureMessage = "Failed to load message content.";
 
       const cachedThread = threadContentByIdRef.current[threadId];
       const hasContent = (message?: Message | null) => {
@@ -5057,9 +5091,13 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
       const cachedActive =
         cachedThread?.find((item) => item.id === activeMessage.id) ?? null;
       const activeHasContent = hasContent(cachedActive ?? activeMessage);
+      let hydrationResult: boolean | null = null;
       if (!activeHasContent) {
+        clearThreadContentError(threadId);
         setThreadContentLoading(threadId);
-        await hydrateMessageOnOpenIfNeeded(activeMessage);
+        hydrationResult = await hydrateMessageOnOpenIfNeeded(activeMessage);
+      } else {
+        clearThreadContentError(threadId);
       }
       if (supportsThreads && cachedThread && cachedThread.length > 0 && activeHasContent) {
         return;
@@ -5092,6 +5130,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
         : [];
 
       setThreadContentLoading(threadId);
+      clearThreadContentError(threadId);
       try {
         const res = await apiFetch(`/api/thread/related`, {
           method: "POST",
@@ -5104,6 +5143,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
           })
         });
         if (!res.ok) {
+          setThreadContentError(threadId, loadFailureMessage);
           setThreadContentLoading(null);
           return;
         }
@@ -5112,9 +5152,14 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
         const filtered = items.filter(
           (item) => item.folderId === activeFolderId || !checkIsThreadExcludedFolder(item.folderId)
         );
+        const loadedActive = filtered.find((item) => item.id === activeMessage.id) ?? null;
+        const loadedHasContent = hasContent(loadedActive ?? activeMessage);
+        if (hydrationResult === false && !loadedHasContent) {
+          setThreadContentError(threadId, loadFailureMessage);
+        }
         upsertThreadCache(threadId, filtered);
       } catch {
-        // ignore
+        setThreadContentError(threadId, loadFailureMessage);
       } finally {
         setThreadContentLoading(null);
       }
@@ -5126,7 +5171,9 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     activeMessage,
     groupBy,
     supportsThreads,
+    clearThreadContentError,
     hydrateMessageOnOpenIfNeeded,
+    setThreadContentError,
     upsertThreadCache
   ]);
 
@@ -5489,6 +5536,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     setCategorizationDebug(null);
     setCategorizationDebugError("");
     setCategorizationDebugLoading(false);
+    setCategorizationResetting(false);
     setImapDetecting(false);
     setSmtpDetecting(false);
     setImapSecurity(
@@ -5600,6 +5648,44 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
       }
     },
     [apiFetch, readErrorMessage]
+  );
+
+  const resetCategorizationModel = useCallback(
+    async (accountId: string) => {
+      const confirmed = window.confirm(
+        "Reset the categorization learning model for this account to the default baseline?"
+      );
+      if (!confirmed) return;
+      setCategorizationResetting(true);
+      setCategorizationDebugError("");
+      try {
+        const res = await apiFetch("/api/categories/model/reset", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ accountId })
+        });
+        if (!res.ok) {
+          setCategorizationDebugError(await readErrorMessage(res));
+          return;
+        }
+        const data = (await res.json()) as CategoryModelResetResponse;
+        if (!data?.ok) {
+          setCategorizationDebugError(data?.message || "Failed to reset categorization model.");
+          return;
+        }
+        pushNotice({
+          type: "success",
+          title: "Categorization model reset",
+          description: "Default baseline model restored for this account."
+        });
+        await loadCategorizationDebug(accountId);
+      } catch {
+        setCategorizationDebugError("Failed to reset categorization model.");
+      } finally {
+        setCategorizationResetting(false);
+      }
+    },
+    [apiFetch, loadCategorizationDebug, pushNotice, readErrorMessage]
   );
 
   useEffect(() => {
@@ -5947,7 +6033,8 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
       threadCacheOrderRef.current = threadCacheOrderRef.current.filter((id) => id !== threadId);
       return next;
     });
-  }, []);
+    clearThreadContentError(threadId);
+  }, [clearThreadContentError]);
 
   const handleResyncMessage = async (message: Message) => {
     try {
@@ -6024,9 +6111,18 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     const startedAt = Date.now();
     const timeoutMs = 1000 * 60 * 10;
     let pollDelayMs = SYNC_STATUS_POLL_INTERVAL_MS;
+    const clearProgress = () => {
+      setSyncProgressByJobId((prev) => {
+        if (!prev[jobId]) return prev;
+        const next = { ...prev };
+        delete next[jobId];
+        return next;
+      });
+    };
     while (Date.now() - startedAt < timeoutMs) {
       const statusRes = await apiFetch(`/api/sync/status?jobId=${encodeURIComponent(jobId)}`);
       if (!statusRes.ok) {
+        clearProgress();
         throw new Error(await readErrorMessage(statusRes));
       }
       const data = (await statusRes.json()) as {
@@ -6035,13 +6131,25 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
           status?: "queued" | "running" | "done" | "failed";
           error?: string;
           result?: SyncJobResult;
+          progress?: Omit<SyncJobProgress, "jobId">;
         };
       };
+      const progress = data.job?.progress;
+      if (progress) {
+        const nextProgress: SyncJobProgress = {
+          ...progress,
+          jobId,
+          updatedAt: typeof progress.updatedAt === "number" ? progress.updatedAt : Date.now()
+        };
+        setSyncProgressByJobId((prev) => ({ ...prev, [jobId]: nextProgress }));
+      }
       const status = data.job?.status;
       if (status === "done") {
+        clearProgress();
         return data.job?.result ?? { count: 0 };
       }
       if (status === "failed") {
+        clearProgress();
         throw new Error(data.job?.error || "Sync job failed.");
       }
       await new Promise<void>((resolve) => {
@@ -6052,6 +6160,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
         Math.round(pollDelayMs * 1.5)
       );
     }
+    clearProgress();
     throw new Error("Sync timed out.");
   };
 
@@ -6060,6 +6169,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     folderId?: string;
     fullSync?: boolean;
     mode?: "full" | "recent" | "new";
+    recategorizeFolder?: boolean;
   }): Promise<SyncJobResult> => {
     const syncRes = await apiFetch("/api/sync", {
       method: "POST",
@@ -6114,13 +6224,19 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     awaitDeep = false,
     allowRefresh = true,
     mode: "recent" | "new" | "full" = "recent",
-    allowDeep = true
+    allowDeep = true,
+    options?: { recategorizeFolder?: boolean }
   ): Promise<SyncJobResult | null> => {
     const selectionKey = currentKeyRef.current;
     setSyncingFolders((prev) => new Set(prev).add(folderId));
     let syncResult: SyncJobResult;
     try {
-      syncResult = await runSyncJob({ accountId: activeAccountId, folderId, mode });
+      syncResult = await runSyncJob({
+        accountId: activeAccountId,
+        folderId,
+        mode,
+        recategorizeFolder: Boolean(options?.recategorizeFolder)
+      });
       if (
         allowRefresh &&
         currentKeyRef.current === selectionKey &&
@@ -6151,7 +6267,12 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
 
     const deepSync = (async () => {
       try {
-        await runSyncJob({ accountId: activeAccountId, folderId, fullSync: true });
+        await runSyncJob({
+          accountId: activeAccountId,
+          folderId,
+          fullSync: true,
+          recategorizeFolder: Boolean(options?.recategorizeFolder)
+        });
         if (
           allowRefresh &&
           currentKeyRef.current === selectionKey &&
@@ -6203,7 +6324,11 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     return (refreshed ?? accountList).filter((folder) => folder.accountId === activeAccountId);
   };
 
-  const syncAccount = async (folderId?: string, mode: "new" | "full" = "full") => {
+  const syncAccount = async (
+    folderId?: string,
+    mode: "new" | "full" = "full",
+    options?: { recategorizeFolder?: boolean }
+  ) => {
     const selectionKey = currentKeyRef.current;
     const knownFolderIds = new Set(accountFolders.map((folder) => folder.id));
     if (folderId) {
@@ -6212,7 +6337,8 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
         false,
         true,
         mode === "new" ? "new" : mode === "full" ? "full" : "recent",
-        mode !== "new"
+        mode !== "new",
+        { recategorizeFolder: Boolean(options?.recategorizeFolder) }
       );
       if (mode !== "new") {
         await syncNewlyDetectedFolders(knownFolderIds, mode);
@@ -6651,12 +6777,13 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
       if (pollInFlightRef.current) return;
       pollInFlightRef.current = true;
       try {
+        const inboxFolderId = inboxFolderRef.current?.id;
         const params = new URLSearchParams({
           accountId: activeAccountId,
           mailbox: inboxMailboxPath
         });
-        const since = lastUidNextRef.current[activeAccountId];
-        if (since) {
+        const since = inboxFolderId ? lastUidNextByFolderRef.current[inboxFolderId] : undefined;
+        if (typeof since === "number" && Number.isFinite(since)) {
           params.set("sinceUidNext", String(since));
         }
         const res = await apiFetch(`/api/imap/poll?${params.toString()}`);
@@ -6674,8 +6801,8 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
           reportError(data.message || "Failed to check for new mail.");
           return;
         }
-        if (typeof data?.uidNext === "number") {
-          lastUidNextRef.current[activeAccountId] = data.uidNext;
+        if (typeof data?.uidNext === "number" && inboxFolderId) {
+          lastUidNextByFolderRef.current[inboxFolderId] = data.uidNext;
         }
         if (Array.isArray(data?.messages) && data.messages.length > 0) {
           await syncAndNotifyNewMessages(data.messages);
@@ -6707,19 +6834,16 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     };
 
     const startStream = () => {
-      if (!activeFolderId) {
-        return;
-      }
       stopStream();
       stopPoll();
       if (typeof window === "undefined" || !("EventSource" in window)) {
         startPoll(streamPollInterval);
         return;
       }
-      const params = new URLSearchParams({
-        accountId: activeAccountId,
-        activeFolderId: activeFolderId
-      });
+      const params = new URLSearchParams({ accountId: activeAccountId });
+      if (activeFolderId) {
+        params.set("activeFolderId", activeFolderId);
+      }
       const source = new EventSource(`/api/imap/stream?${params.toString()}`);
       streamSourceRef.current = source;
       const shouldSkipDeleteReconcile = (folderId?: string, uid?: number) => {
@@ -6782,7 +6906,6 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
             );
             data.forEach((item) => {
               if (typeof item.uidNext === "number") {
-                lastUidNextRef.current[activeAccountId] = item.uidNext;
                 lastUidNextByFolderRef.current[item.id] = item.uidNext;
               }
             });
@@ -6803,9 +6926,6 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
               folderId?: string;
             }>;
           };
-          if (typeof data?.uidNext === "number") {
-            lastUidNextRef.current[activeAccountId] = data.uidNext;
-          }
           if (Array.isArray(data?.messages) && data.messages.length > 0) {
             const nextUid = data?.uidNext;
             if (typeof nextUid === "number") {
@@ -7039,7 +7159,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
             : (inviteDeckUnreadCount ?? 0) > 0,
         icon:
           folder.id === "virtual:action-queue" ? (
-            <Square size={13} />
+            <ListTodo size={13} />
           ) : (
             <CalendarClock size={13} />
           )
@@ -7426,6 +7546,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
           onEvictThreadCache={() => {
             console.info("[noctua] evict thread cache");
             setThreadContentById({});
+            setThreadContentErrorById({});
             threadCacheOrderRef.current = [];
             setThreadContentLoading(null);
           }}
@@ -7506,6 +7627,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
                     supportsThreads={supportsThreads}
                     threadContentById={threadContentById}
                     threadContentLoading={threadContentLoading}
+                    threadContentErrorById={threadContentErrorById}
                     composeReplyMessageId={
                       showComposeInline && replyMessageInThread && composeReplyMessage
                         ? composeReplyMessage.id
@@ -7581,9 +7703,14 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
           categorizationDebug={categorizationDebug}
           categorizationLoading={categorizationDebugLoading}
           categorizationError={categorizationDebugError}
+          categorizationResetting={categorizationResetting}
           onRefreshCategorization={() => {
             if (!editingAccount?.id) return;
             void loadCategorizationDebug(editingAccount.id);
+          }}
+          onResetCategorizationModel={() => {
+            if (!editingAccount?.id) return;
+            void resetCategorizationModel(editingAccount.id);
           }}
         />
       )}
@@ -7663,6 +7790,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
         isRecomputingThreads={isRecomputingThreads}
         isRecomputingCategories={isRecomputingCategories}
         syncingFolders={syncingFolders}
+        syncProgressItems={Object.values(syncProgressByJobId)}
         accountFolders={accountFolders}
         mailCheckMode={mailCheckMode}
         activeAccountId={activeAccountId}

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test";
-import { classifyEmail } from "./classifier";
+import { classifyCategoryFromMetadata } from "./classifier";
+import { createDefaultLinearModel, createSeededLinearModel } from "./linearModel";
 
 type HeaderInput = Record<string, string>;
 
@@ -17,30 +18,8 @@ function makeParsed(overrides?: Partial<any>) {
   };
 }
 
-describe("categorization classifier notification/newsletter separation", () => {
-  it("classifies list-based GitLab-style activity mail as notification", () => {
-    const parsed = makeParsed({
-      from: { value: [{ address: "incoming+abc@mailgun.org" }] },
-      subject: 'Re: IDAApp issue update (#395)',
-      text: "You were assigned to this issue and someone commented on the thread."
-    });
-    const headers = toHeaderMap({
-      "List-Id": "project/repo <123.repo.project.example.com>",
-      "List-Unsubscribe": "<https://example.com/unsubscribe>",
-      "In-Reply-To": "<issue_182129227@gitlab.com>",
-      References: "<reply-1@gitlab.com> <issue_182129227@gitlab.com>",
-      "X-GitLab-NotificationReason": "assigned",
-      "X-GitLab-Issue-ID": "182129227",
-      "Auto-Submitted": "auto-generated",
-      "X-Auto-Response-Suppress": "All"
-    });
-
-    const result = classifyEmail(parsed as any, headers as any);
-    expect(result.category).toBe("notification");
-    expect(result.confidence).toBeGreaterThanOrEqual(0.7);
-  });
-
-  it("keeps promotional digest mail categorized as newsletter", () => {
+describe("categorization classifier linear-only behavior", () => {
+  it("does not classify without a trained or weighted model", () => {
     const parsed = makeParsed({
       from: { value: [{ address: "newsletter@digest.example.com" }] },
       subject: "Weekly digest - edition #42",
@@ -52,106 +31,207 @@ describe("categorization classifier notification/newsletter separation", () => {
       Precedence: "bulk"
     });
 
-    const result = classifyEmail(parsed as any, headers as any);
+    const result = classifyCategoryFromMetadata(
+      {
+        subject: parsed.subject,
+        from: parsed.from,
+        attachments: parsed.attachments ?? [],
+        headers: headers as Map<string, unknown>
+      }
+    );
+    expect(result.category).toBeNull();
+    expect(result.confidence).toBeLessThan(0.7);
+    expect(result.signals).toContain("classifier:linear-only");
+  });
+
+  it("classifies newsletter when linear model weights favor newsletter features", () => {
+    const parsed = makeParsed({
+      from: { value: [{ address: "newsletter@digest.example.com" }] },
+      subject: "Weekly digest - edition #42",
+      text: "Unsubscribe here. Shop now and claim offer now. Limited time deal."
+    });
+    const headers = toHeaderMap({
+      "List-Id": "digest.example.com",
+      "List-Unsubscribe": "<https://example.com/unsubscribe>",
+      Precedence: "bulk"
+    });
+
+    const model = createDefaultLinearModel();
+    model.bias.newsletter = 0.75;
+
+    const result = classifyCategoryFromMetadata(
+      {
+        subject: parsed.subject,
+        from: parsed.from,
+        attachments: parsed.attachments ?? [],
+        headers: headers as Map<string, unknown>
+      },
+      { linearModel: model }
+    );
     expect(result.category).toBe("newsletter");
     expect(result.confidence).toBeGreaterThanOrEqual(0.7);
   });
 
-  it("does not require hardcoded providers for event notifications", () => {
+  it("uses model scores consistently over heuristic-looking message structure", () => {
     const parsed = makeParsed({
-      subject: "New comment on issue #123",
-      text: "A reviewer commented on this issue thread."
+      from: { value: [{ address: "newsletter@digest.example.com" }] },
+      subject: "Issue update #123",
+      text: "You were assigned to this issue and someone commented on the thread."
+    });
+    const headers = toHeaderMap({
+      "List-Id": "engineering.example.com",
+      "List-Unsubscribe": "<https://example.com/unsubscribe>"
+    });
+
+    const model = createDefaultLinearModel();
+    model.bias.notification = 0.9;
+
+    const result = classifyCategoryFromMetadata(
+      {
+        subject: parsed.subject,
+        from: parsed.from,
+        attachments: parsed.attachments ?? [],
+        headers: headers as Map<string, unknown>
+      },
+      { linearModel: model }
+    );
+    expect(result.category).toBe("notification");
+    expect(result.confidence).toBeGreaterThanOrEqual(0.7);
+  });
+});
+
+describe("categorization classifier seeded baseline model", () => {
+  it("classifies list mail as newsletter with seeded model", () => {
+    const parsed = makeParsed({
+      from: { value: [{ address: "newsletter@digest.example.com" }] },
+      subject: "Weekly digest - edition #42",
+      text: "Unsubscribe here. Shop now and claim offer now."
+    });
+    const headers = toHeaderMap({
+      "List-Id": "digest.example.com",
+      "List-Unsubscribe": "<https://example.com/unsubscribe>",
+      Precedence: "bulk"
+    });
+
+    const result = classifyCategoryFromMetadata(
+      {
+        subject: parsed.subject,
+        from: parsed.from,
+        attachments: parsed.attachments ?? [],
+        headers: headers as Map<string, unknown>
+      },
+      { linearModel: createSeededLinearModel() }
+    );
+    expect(result.category).toBe("newsletter");
+    expect(result.confidence).toBeGreaterThanOrEqual(0.7);
+  });
+
+  it("strongly suppresses reply-thread messages", () => {
+    const parsed = makeParsed({
+      subject: "Re: Issue update #123",
+      text: "You were assigned to this issue and someone commented on the thread."
     });
     const headers = toHeaderMap({
       "List-Id": "engineering.example.com",
       "In-Reply-To": "<thread-123@example.com>",
       References: "<thread-123@example.com>",
-      "X-Notification-Reason": "commented",
-      "Auto-Submitted": "auto-generated"
-    });
-
-    const result = classifyEmail(parsed as any, headers as any);
-    expect(result.category).toBe("notification");
-    expect(result.confidence).toBeGreaterThanOrEqual(0.7);
-  });
-
-  it("classifies list-unsubscribe-only list mail as newsletter fallback", () => {
-    const parsed = makeParsed({
-      from: { value: [{ address: "ticketnews@service.example.invalid" }] },
-      subject: "Tickets jetzt exklusiv!",
-      text: "Aktuelle Informationen zu Veranstaltungen."
-    });
-    const headers = toHeaderMap({
-      "List-Id": "<abcdef.service.example.invalid>",
-      "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
-      "List-Unsubscribe": "<https://service.example.invalid/unsubscribe/abc>"
-    });
-
-    const result = classifyEmail(parsed as any, headers as any);
-    expect(result.category).toBe("newsletter");
-    expect(result.signals).toContain("fallback: list-unsubscribe-only-newsletter");
-    expect(result.confidence).toBeGreaterThanOrEqual(0.7);
-  });
-
-  it("classifies folded mailparser list header with unsubscribe as newsletter fallback", () => {
-    const parsed = makeParsed({
-      from: { value: [{ address: "ticketnews@service.example.invalid" }] },
-      subject: "Tickets jetzt exklusiv!",
-      text: "Aktuelle Informationen zu Veranstaltungen."
-    });
-    const headers = new Map<string, any>([
-      [
-        "list",
-        {
-          id: "<1UI1DCD-1YJC0X.service.eventim.de>",
-          unsubscribe: [
-            "<https://public-api.eventim.com/evi/api/evi/public/permission-link/abc/revoke>"
-          ],
-          unsubscribePost: "List-Unsubscribe=One-Click"
-        }
-      ]
-    ]);
-
-    const result = classifyEmail(parsed as any, headers as any);
-    expect(result.category).toBe("newsletter");
-    expect(result.signals).toContain("fallback: list-unsubscribe-only-newsletter");
-    expect(result.confidence).toBeGreaterThanOrEqual(0.7);
-  });
-});
-
-describe("categorization classifier transactional detection", () => {
-  it("classifies german invoice mail as transactional", () => {
-    const parsed = makeParsed({
-      from: { value: [{ address: "noreply@hosting-beispiel.invalid", name: "Rechnungsstelle Beispiel Hosting" }] },
-      subject: "Ihre Rechnung 123456789012 vom 09.02.2026 ist da",
-      text: "Ihre Rechnung steht bereit. Die Rechnungsnummer lautet 123456789012.",
-      attachments: [{ filename: "Rechnung_2026-02-09_123456789012_V0000001.pdf" }]
-    });
-    const headers = toHeaderMap({
       "Auto-Submitted": "auto-generated",
-      "List-Help": "<https://example.invalid/help>"
+      "X-Auto-Response-Suppress": "All"
     });
 
-    const result = classifyEmail(parsed as any, headers as any);
-    expect(result.category).toBe("transactional");
-    expect(result.confidence).toBeGreaterThanOrEqual(0.7);
+    const result = classifyCategoryFromMetadata(
+      {
+        subject: parsed.subject,
+        from: parsed.from,
+        attachments: parsed.attachments ?? [],
+        headers: headers as Map<string, unknown>
+      },
+      { linearModel: createSeededLinearModel() }
+    );
+    expect(result.category).toBeNull();
+    expect(result.confidence).toBeLessThan(0.7);
+    expect(result.signals).toContain("suppress:thread-reply:x0.20");
   });
 
-  it("prioritizes transactional over newsletter-like list signals when invoice evidence is strong", () => {
+  it("classifies invoice mails as transactional with seeded model", () => {
     const parsed = makeParsed({
-      from: { value: [{ address: "noreply@billing.example.com", name: "Billing Department" }] },
+      from: { value: [{ address: "billing@example.com" }] },
       subject: "Invoice 987654321 dated 09/02/2026",
       text: "Please find your invoice attached.",
       attachments: [{ filename: "invoice_987654321.pdf" }]
     });
     const headers = toHeaderMap({
-      "List-Id": "customers.example.com",
-      "List-Unsubscribe": "<https://example.com/unsubscribe>",
-      Precedence: "bulk"
+      "Auto-Submitted": "auto-generated"
     });
 
-    const result = classifyEmail(parsed as any, headers as any);
+    const result = classifyCategoryFromMetadata(
+      {
+        subject: parsed.subject,
+        from: parsed.from,
+        attachments: parsed.attachments ?? [],
+        headers: headers as Map<string, unknown>
+      },
+      { linearModel: createSeededLinearModel() }
+    );
     expect(result.category).toBe("transactional");
     expect(result.confidence).toBeGreaterThanOrEqual(0.7);
+  });
+
+  it("skips categorization for sent/trash/spam folders", () => {
+    const parsed = makeParsed({
+      from: { value: [{ address: "newsletter@digest.example.com" }] },
+      subject: "Weekly digest - edition #42",
+      text: "Unsubscribe here. Shop now and claim offer now."
+    });
+    const headers = toHeaderMap({
+      "List-Id": "digest.example.com",
+      "List-Unsubscribe": "<https://example.com/unsubscribe>"
+    });
+
+    const result = classifyCategoryFromMetadata(
+      {
+        subject: parsed.subject,
+        from: parsed.from,
+        attachments: parsed.attachments ?? [],
+        headers: headers as Map<string, unknown>
+      },
+      {
+        linearModel: createSeededLinearModel(),
+        context: { folderSpecialUse: "\\sent" }
+      }
+    );
+
+    expect(result.category).toBeNull();
+    expect(result.confidence).toBe(0);
+    expect(result.signals).toContain("skip:folder-suppressed");
+  });
+
+  it("skips categorization for messages sent by account owner", () => {
+    const parsed = makeParsed({
+      from: { value: [{ address: "me@example.com" }] },
+      subject: "Weekly digest - edition #42",
+      text: "Unsubscribe here. Shop now and claim offer now."
+    });
+    const headers = toHeaderMap({
+      "List-Id": "digest.example.com",
+      "List-Unsubscribe": "<https://example.com/unsubscribe>"
+    });
+
+    const result = classifyCategoryFromMetadata(
+      {
+        subject: parsed.subject,
+        from: parsed.from,
+        attachments: parsed.attachments ?? [],
+        headers: headers as Map<string, unknown>
+      },
+      {
+        linearModel: createSeededLinearModel(),
+        context: { accountEmail: "me@example.com" }
+      }
+    );
+
+    expect(result.category).toBeNull();
+    expect(result.confidence).toBe(0);
+    expect(result.signals).toContain("skip:sender-is-account");
   });
 });

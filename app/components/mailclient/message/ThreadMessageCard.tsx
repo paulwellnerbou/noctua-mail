@@ -35,6 +35,7 @@ type ComposeMode = "new" | "reply" | "replyAll" | "forward" | "edit" | "editAsNe
 type ThreadMessageCardProps = {
   message: Message;
   bodyLoading?: boolean;
+  bodyLoadError?: string | null;
   messageRefs: React.MutableRefObject<Map<string, HTMLElement>>;
   pendingMessageActions: Set<string>;
   includeThreadAcrossFolders: boolean;
@@ -82,6 +83,7 @@ type ThreadMessageCardProps = {
 export default function ThreadMessageCard({
   message,
   bodyLoading = false,
+  bodyLoadError = null,
   messageRefs,
   pendingMessageActions,
   includeThreadAcrossFolders,
@@ -277,7 +279,14 @@ export default function ThreadMessageCard({
   );
 
   let content: React.ReactNode = null;
-  if (bodyLoading && !hasHtml && !hasText) {
+  if (bodyLoadError && !hasHtml && !hasText) {
+    content = wrapPanel(
+      "load-error",
+      <div className={styles.bodyLoadError} role="alert" aria-live="polite">
+        <span className={styles.bodyLoadErrorLabel}>{bodyLoadError}</span>
+      </div>
+    );
+  } else if (bodyLoading && !hasHtml && !hasText) {
     content = wrapPanel(
       "loading",
       <div className={styles.bodyLoading} role="status" aria-live="polite">

@@ -11,18 +11,23 @@
  */
 
 export {
-  classifyEmail,
+  classifyCategoryFromMetadata,
+  parseMailForCategorization,
+  CATEGORY_SOURCE_PARSE_OPTIONS,
   getCategoryLabel,
   getCategoryIcon,
   DEFAULT_CONFIG,
   type EmailCategory,
   type ClassificationResult,
   type ClassifierConfig,
+  type CategoryClassificationInput,
+  type ClassifyCategoryOptions,
 } from './classifier';
 
 export {
   CATEGORY_KEYS,
   createDefaultLinearModel,
+  createSeededLinearModel,
   extractLinearFeatures,
   applyLinearModel,
   trainLinearModelPositive,
@@ -30,6 +35,7 @@ export {
   type CategoryKey,
   type CategoryLinearModel,
   type CategoryScores,
+  type LinearFeatureEmailInput,
   type LinearFeatureVector,
 } from "./linearModel";
 

@@ -7,10 +7,10 @@ import {
 } from "@/lib/db";
 import { extractHtmlBody } from "@/lib/html";
 import { isCalendarAttachment, withCalendarInviteFlag } from "@/lib/messageFlags";
-import { simpleParser } from "mailparser";
 import {
-  classifyEmail,
+  classifyCategoryFromMetadata,
   getCategorizationConfig,
+  parseMailForCategorization,
   type CategoryLinearModel
 } from "@/lib/mail/categorization";
 import { buildImapMessageRowId } from "@/lib/messageIds";
@@ -345,26 +345,28 @@ async function readImapBinaryPart(
   }
 }
 
-async function resolveCalendarAttachmentsForNewMode(
+async function resolveAttachmentsForNewMode(
   client: ImapFlow,
   uid: number,
   bodyStructure: ImapBodyStructure | undefined,
   account: Account
 ) {
   const { attachments } = extractMessageStructureMetadata(account, uid, bodyStructure);
-  const calendarAttachments = attachments.filter((attachment) =>
-    isCalendarAttachment(attachment as any)
-  );
-  if (calendarAttachments.length === 0) return [];
-  const resolved = await Promise.all(
-    calendarAttachments.map(async (attachment) => {
-      const content = await readImapBinaryPart(client, uid, attachment.partKey, 512 * 1024);
-      const { partKey, ...rest } = attachment;
-      if (!content) return rest;
-      return { ...rest, content };
-    })
-  );
-  return resolved;
+  if (attachments.length === 0) return [];
+  const calendarContentByAttachmentId = new Map<string, Buffer>();
+  for (const attachment of attachments) {
+    if (!isCalendarAttachment(attachment as any)) continue;
+    const content = await readImapBinaryPart(client, uid, attachment.partKey, 512 * 1024);
+    if (content) {
+      calendarContentByAttachmentId.set(attachment.id, content);
+    }
+  }
+  return attachments.map((attachment) => {
+    const { partKey, ...rest } = attachment;
+    const content = calendarContentByAttachmentId.get(attachment.id);
+    if (!content) return rest;
+    return { ...rest, content };
+  });
 }
 
 async function readImapTextPart(
@@ -461,6 +463,27 @@ function mapImapFolders(account: Account, list: Awaited<ReturnType<typeof listIm
   });
 }
 
+function buildFolderSpecialUseByPath(
+  list: Array<{ path?: string | null; specialUse?: string | null }>
+) {
+  const map = new Map<string, string>();
+  list.forEach((item) => {
+    const path = (item.path ?? "").trim().toLowerCase();
+    if (!path) return;
+    const specialUse = (item.specialUse ?? "").trim();
+    if (!specialUse) return;
+    map.set(path, specialUse);
+  });
+  return map;
+}
+
+function resolveFolderSpecialUse(
+  folderSpecialUseByPath: Map<string, string>,
+  mailboxPath: string
+) {
+  return folderSpecialUseByPath.get(mailboxPath.trim().toLowerCase());
+}
+
 async function listImapRaw(account: Account, logContext?: ImapLogContext) {
   const client = buildImapClient(account, logContext);
 
@@ -496,16 +519,102 @@ function deriveFlagState(flags: string[]) {
   };
 }
 
+function classifyImapMessageCategory(params: {
+  account: Account;
+  mailboxPath: string;
+  folderSpecialUse?: string | null;
+  envelope?: ImapEnvelope;
+  headers: Map<string, string[]>;
+  attachments: Array<{ filename: string }>;
+  linearModel?: CategoryLinearModel | null;
+}) {
+  const { account, mailboxPath, folderSpecialUse, envelope, headers, attachments, linearModel } = params;
+  const headerToClassificationMap = new Map<string, string | string[]>();
+  headers.forEach((values, key) => {
+    headerToClassificationMap.set(key, values.length <= 1 ? values[0] ?? "" : values);
+  });
+  const firstFromAddress = envelope?.from?.[0];
+  const fromAddressValue =
+    resolveEnvelopeAddressEmail(firstFromAddress) ||
+    (() => {
+      const emailMatch = (formatEnvelopeAddresses(envelope?.from) || account.email).match(/<([^>]+)>/);
+      return emailMatch?.[1] ?? account.email;
+    })();
+  const classification = classifyCategoryFromMetadata({
+    subject: envelope?.subject?.trim() || getHeaderValue(headers, "subject") || "(no subject)",
+    from: {
+      address: fromAddressValue,
+      name: firstFromAddress?.name ?? undefined
+    },
+    attachments,
+    headers: headerToClassificationMap as Map<string, unknown>,
+  }, {
+    config: getCategorizationConfig(),
+    linearModel: linearModel ?? null,
+    context: {
+      accountEmail: account.email,
+      mailboxPath,
+      folderSpecialUse
+    }
+  });
+  return {
+    category: classification.category,
+    categoryScore: classification.confidence,
+    categorySignals: classification.signals
+  };
+}
+
+function mergeAttachmentContentForNewMode(
+  attachments: Message["attachments"],
+  attachmentsWithContent: Message["attachments"]
+) {
+  const contentById = new Map<string, Buffer | Uint8Array | ArrayBuffer>();
+  (attachmentsWithContent ?? []).forEach((attachment) => {
+    const candidate = attachment as {
+      id: string;
+      content?: Buffer | Uint8Array | ArrayBuffer | null;
+    };
+    if (candidate?.content) {
+      contentById.set(attachment.id, candidate.content);
+    }
+  });
+  if (contentById.size === 0) {
+    return attachments;
+  }
+  return (attachments ?? []).map((attachment) => {
+    const content = contentById.get(attachment.id);
+    if (!content) return attachment;
+    return {
+      ...attachment,
+      content
+    } as any;
+  });
+}
+
 function buildLightweightImapMessage(params: {
   account: Account;
   mailboxToOpen: string;
+  folderSpecialUse?: string | null;
   uid: number;
   flags?: Set<string> | string[];
   envelope?: ImapEnvelope;
   internalDate?: Date | null;
   attachments?: Message["attachments"];
+  headers?: Buffer;
+  linearModel?: CategoryLinearModel | null;
 }) {
-  const { account, mailboxToOpen, uid, flags, envelope, internalDate, attachments = [] } = params;
+  const {
+    account,
+    mailboxToOpen,
+    folderSpecialUse,
+    uid,
+    flags,
+    envelope,
+    internalDate,
+    attachments = [],
+    headers: rawHeaders,
+    linearModel
+  } = params;
   const flagList = Array.isArray(flags) ? flags : flags ? Array.from(flags) : [];
   const messageId = normalizeEnvelopeHeaderId(envelope?.messageId) ?? `imap-msg-${uid}`;
   const inReplyTo = resolveEnvelopeInReplyTo(envelope);
@@ -524,6 +633,16 @@ function buildLightweightImapMessage(params: {
     htmlBody: undefined
   });
   const { seen, answered, flagged, deleted, draft, recent, unread } = deriveFlagState(flagList);
+  const headers = parseHeaderMap(rawHeaders);
+  const classification = classifyImapMessageCategory({
+    account,
+    mailboxPath: mailboxToOpen,
+    folderSpecialUse,
+    envelope,
+    headers,
+    attachments: attachments.map((attachment) => ({ filename: attachment.filename })),
+    linearModel
+  });
 
   return {
     id: buildImapMessageRowId(account.id, mailboxToOpen, uid),
@@ -558,9 +677,9 @@ function buildLightweightImapMessage(params: {
     draft,
     recent,
     unread,
-    category: null,
-    categoryScore: null,
-    categorySignals: []
+    category: classification.category,
+    categoryScore: classification.categoryScore,
+    categorySignals: classification.categorySignals
   } as Message;
 }
 
@@ -569,23 +688,17 @@ async function parseImapMessage(
   mailboxToOpen: string,
   message: ImapParsedMessage,
   client: ImapFlow,
-  linearModel?: CategoryLinearModel | null
+  linearModel?: CategoryLinearModel | null,
+  folderSpecialUse?: string | null
 ) {
   const flags = message.flags ? Array.from(message.flags) : [];
   const { seen, answered, flagged, deleted, draft, recent, unread } = deriveFlagState(flags);
   const envelope = message.envelope;
   const headers = parseHeaderMap(message.headers);
-  const headerToClassificationMap = new Map<string, string | string[]>();
-  headers.forEach((values, key) => {
-    headerToClassificationMap.set(key, values.length <= 1 ? values[0] ?? "" : values);
-  });
   const {
     attachments
   } = extractMessageStructureMetadata(account, message.uid, message.bodyStructure);
-  const parsedSource = await simpleParser(message.source, {
-    skipHtmlToText: true,
-    skipTextToHtml: true
-  });
+  const parsedSource = await parseMailForCategorization(message.source);
   const body = typeof parsedSource.text === "string" ? parsedSource.text : "";
   const htmlBody =
     typeof parsedSource.html === "string"
@@ -688,48 +801,15 @@ async function parseImapMessage(
     ]
   });
 
-  // Classify email into categories
-  const config = getCategorizationConfig();
-  const firstFromAddress = envelope?.from?.[0];
-  const fromAddressValue =
-    resolveEnvelopeAddressEmail(firstFromAddress) ||
-    (() => {
-      const emailMatch = (formatEnvelopeAddresses(envelope?.from) || account.email).match(/<([^>]+)>/);
-      return emailMatch?.[1] ?? account.email;
-    })();
-  const parsedForClassification = {
-    subject: envelope?.subject?.trim() || headerValue("subject") || "(no subject)",
-    text: body,
-    from: {
-      address: fromAddressValue,
-      name: firstFromAddress?.name ?? undefined
-    },
-    attachments: attachments.map((attachment) => ({ filename: attachment.filename }))
-  };
-  const subject = parsedForClassification.subject;
-  const classification = classifyEmail(
-    parsedForClassification as any,
-    headerToClassificationMap as Map<string, string>,
-    config,
-    { linearModel: linearModel ?? null }
-  );
-
-  // Debug logging - remove once verified working
-  console.log(
-    `[CATEGORIZATION] ${JSON.stringify({
-      accountId: account.id,
-      messageId: {
-        all: messageId,
-        imap: envelopeMessageId ?? null,
-        internal: internalMessageId,
-        header: headerMessageId ?? null
-      },
-      subject: subject.substring(0, 50),
-      category: classification.category,
-      confidence: classification.confidence,
-      signals: classification.signals
-    })}`
-  );
+  const classification = classifyImapMessageCategory({
+    account,
+    mailboxPath: mailboxToOpen,
+    folderSpecialUse,
+    envelope,
+    headers,
+    attachments: attachments.map((attachment) => ({ filename: attachment.filename })),
+    linearModel: linearModel ?? null
+  });
 
   return {
     id: buildImapMessageRowId(account.id, mailboxToOpen, message.uid),
@@ -765,8 +845,8 @@ async function parseImapMessage(
     recent,
     unread,
     category: classification.category,
-    categoryScore: classification.confidence,
-    categorySignals: classification.signals
+    categoryScore: classification.categoryScore,
+    categorySignals: classification.categorySignals
   } as Message;
 }
 
@@ -1041,9 +1121,14 @@ export async function* syncImapAccountBatched(
 
   const folderList = await logImapOp("list", { ...logContext }, () => client.list());
   const folders: Folder[] = mapImapFolders(account, folderList);
+  const folderSpecialUseByPath = buildFolderSpecialUseByPath(folderList as Array<{
+    path?: string | null;
+    specialUse?: string | null;
+  }>);
 
   const mailboxToOpen = mailboxPath ?? "INBOX";
-  const linearModel = mode === "new" ? null : await getCategoryLinearModel(account.id);
+  const mailboxSpecialUse = resolveFolderSpecialUse(folderSpecialUseByPath, mailboxToOpen);
+  const linearModel = await getCategoryLinearModel(account.id);
   const mailbox = await logImapOp("mailboxOpen", { mailbox: mailboxToOpen, ...logContext }, () =>
     client.mailboxOpen(mailboxToOpen)
   );
@@ -1124,28 +1209,60 @@ export async function* syncImapAccountBatched(
     const start = Date.now();
 
     for await (const message of client.fetch(range, {
+      source: true,
       envelope: true,
       flags: true,
       uid: true,
       internalDate: true,
-      bodyStructure: true
+      bodyStructure: true,
+      headers: true
     })) {
-      const calendarAttachments = await resolveCalendarAttachmentsForNewMode(
+      const attachmentsWithContent = await resolveAttachmentsForNewMode(
         client,
         message.uid,
         (message as any).bodyStructure as ImapBodyStructure | undefined,
         account
       );
-      const nextMessage = buildLightweightImapMessage({
-        account,
-        mailboxToOpen,
-        uid: message.uid,
-        flags: message.flags,
-        envelope: message.envelope as ImapEnvelope | undefined,
-        internalDate: (message as any).internalDate,
-        attachments: calendarAttachments
-      });
-      currentBatch.push(nextMessage);
+      const source = (message as any).source as Buffer | undefined;
+      const nextMessage = source
+        ? await parseImapMessage(
+            account,
+            mailboxToOpen,
+            {
+              uid: message.uid,
+              source,
+              flags: message.flags,
+              envelope: message.envelope as ImapEnvelope | undefined,
+              internalDate: (message as any).internalDate,
+              bodyStructure: (message as any).bodyStructure as ImapBodyStructure | undefined,
+              headers: (message as any).headers as Buffer | undefined
+            },
+            client,
+            linearModel,
+            mailboxSpecialUse
+          )
+        : buildLightweightImapMessage({
+            account,
+            mailboxToOpen,
+            folderSpecialUse: mailboxSpecialUse,
+            uid: message.uid,
+            flags: message.flags,
+            envelope: message.envelope as ImapEnvelope | undefined,
+            internalDate: (message as any).internalDate,
+            attachments: attachmentsWithContent,
+            headers: (message as any).headers as Buffer | undefined,
+            linearModel
+          });
+      const nextMessageWithCalendarContent = source
+        ? {
+            ...nextMessage,
+            attachments: mergeAttachmentContentForNewMode(
+              nextMessage.attachments,
+              attachmentsWithContent
+            )
+          }
+        : nextMessage;
+      currentBatch.push(nextMessageWithCalendarContent);
       totalProcessed += 1;
 
       if (currentBatch.length < batchSize && totalProcessed % progressEvery === 0) {
@@ -1206,7 +1323,8 @@ export async function* syncImapAccountBatched(
         headers: (message as any).headers as Buffer | undefined
       },
       client,
-      linearModel
+      linearModel,
+      mailboxSpecialUse
     );
     currentBatch.push(parsedMessage);
     totalProcessed += 1;
@@ -1253,9 +1371,14 @@ export async function syncImapAccount(
 
   const folderList = await logImapOp("list", { ...logContext }, () => client.list());
   const folders: Folder[] = mapImapFolders(account, folderList);
+  const folderSpecialUseByPath = buildFolderSpecialUseByPath(folderList as Array<{
+    path?: string | null;
+    specialUse?: string | null;
+  }>);
 
   const mailboxToOpen = mailboxPath ?? "INBOX";
-  const linearModel = mode === "new" ? null : await getCategoryLinearModel(account.id);
+  const mailboxSpecialUse = resolveFolderSpecialUse(folderSpecialUseByPath, mailboxToOpen);
+  const linearModel = await getCategoryLinearModel(account.id);
   const mailbox = await logImapOp("mailboxOpen", { mailbox: mailboxToOpen, ...logContext }, () =>
     client.mailboxOpen(mailboxToOpen)
   );
@@ -1296,28 +1419,61 @@ export async function syncImapAccount(
     const start = Date.now();
     let count = 0;
     for await (const message of client.fetch(range, {
+      source: true,
       envelope: true,
       flags: true,
       uid: true,
       internalDate: true,
-      bodyStructure: true
+      bodyStructure: true,
+      headers: true
     })) {
-      const calendarAttachments = await resolveCalendarAttachmentsForNewMode(
+      const attachmentsWithContent = await resolveAttachmentsForNewMode(
         client,
         message.uid,
         (message as any).bodyStructure as ImapBodyStructure | undefined,
         account
       );
-      const nextMessage = buildLightweightImapMessage({
-        account,
-        mailboxToOpen,
-        uid: message.uid,
-        flags: message.flags,
-        envelope: message.envelope as ImapEnvelope | undefined,
-        internalDate: (message as any).internalDate,
-        attachments: calendarAttachments
-      });
-      messages.push(nextMessage);
+      const source = (message as any).source as Buffer | undefined;
+      const nextMessage = source
+        ? await parseImapMessage(
+            account,
+            mailboxToOpen,
+            {
+              uid: message.uid,
+              source,
+              flags: message.flags,
+              envelope: message.envelope as ImapEnvelope | undefined,
+              internalDate: (message as any).internalDate,
+              bodyStructure: (message as any).bodyStructure as ImapBodyStructure | undefined,
+              headers: (message as any).headers as Buffer | undefined
+            },
+            client,
+            linearModel,
+            mailboxSpecialUse
+          )
+        : buildLightweightImapMessage({
+            account,
+            mailboxToOpen,
+            folderSpecialUse: mailboxSpecialUse,
+            uid: message.uid,
+            flags: message.flags,
+            envelope: message.envelope as ImapEnvelope | undefined,
+            internalDate: (message as any).internalDate,
+            attachments: attachmentsWithContent,
+            headers: (message as any).headers as Buffer | undefined,
+            linearModel
+          });
+      messages.push(
+        source
+          ? {
+              ...nextMessage,
+              attachments: mergeAttachmentContentForNewMode(
+                nextMessage.attachments,
+                attachmentsWithContent
+              )
+            }
+          : nextMessage
+      );
       count += 1;
     }
     const logger = getImapLogger();
@@ -1362,7 +1518,8 @@ export async function syncImapAccount(
         headers: (message as any).headers as Buffer | undefined
       },
       client,
-      linearModel
+      linearModel,
+      mailboxSpecialUse
     );
     messages.push(parsedMessage);
     count += 1;
@@ -1391,6 +1548,7 @@ export async function syncImapMessage(
 ): Promise<Message | null> {
   const logContext = buildLogContext(account, clientId);
   const client = buildImapClient(account, logContext);
+  const linearModel = await getCategoryLinearModel(account.id);
 
   let message: Message | null = null;
   try {
@@ -1430,7 +1588,8 @@ export async function syncImapMessage(
           bodyStructure: (item as any).bodyStructure as ImapBodyStructure | undefined,
           headers: (item as any).headers as Buffer | undefined
         },
-        client
+        client,
+        linearModel
       );
     }
   } finally {

@@ -13,6 +13,7 @@ type ThreadViewProps = {
   supportsThreads: boolean;
   threadContentById: Record<string, Message[]>;
   threadContentLoading: string | null;
+  threadContentErrorById: Record<string, string>;
   messageCardProps: Omit<ThreadMessageCardProps, "message">;
   composeReplyMessageId: string | null;
   renderComposeInlineCard: (() => React.ReactNode) | null;
@@ -25,6 +26,7 @@ export default function ThreadView({
   supportsThreads,
   threadContentById,
   threadContentLoading,
+  threadContentErrorById,
   messageCardProps,
   composeReplyMessageId,
   renderComposeInlineCard
@@ -45,9 +47,12 @@ export default function ThreadView({
           const isThreadLoading = Boolean(
             activeThreadId && threadContentLoading === activeThreadId
           );
+          const activeThreadError = activeThreadId ? threadContentErrorById[activeThreadId] : "";
           const activeMessageFromThread =
             activeThread.find((item) => item.id === activeMessage.id) ?? activeMessage;
           const activeMessageBodyLoading = isThreadLoading && !hasMessageContent(activeMessageFromThread);
+          const activeMessageBodyError =
+            !isThreadLoading && Boolean(activeThreadError) && !hasMessageContent(activeMessageFromThread);
           const visibleThread =
             supportsThreads && isThreadLoading && !hasFullThread
               ? [activeMessageFromThread]
@@ -57,6 +62,11 @@ export default function ThreadView({
               <ThreadMessageCard
                 message={message}
                 bodyLoading={activeMessageBodyLoading && message.id === activeMessageFromThread.id}
+                bodyLoadError={
+                  activeMessageBodyError && message.id === activeMessageFromThread.id
+                    ? activeThreadError
+                    : null
+                }
                 {...messageCardProps}
               />
               {composeReplyMessageId === message.id && renderComposeInlineCard?.()}

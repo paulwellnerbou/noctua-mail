@@ -1,4 +1,8 @@
-type ParsedMail = Awaited<ReturnType<typeof import("mailparser").simpleParser>>;
+export type LinearFeatureEmailInput = {
+  subject?: string | null;
+  from?: unknown;
+  attachments?: Array<{ filename?: string | null }> | null;
+};
 
 export const CATEGORY_KEYS = ["newsletter", "notification", "transactional"] as const;
 export type CategoryKey = (typeof CATEGORY_KEYS)[number];
@@ -30,7 +34,7 @@ export function createDefaultLinearModel(): CategoryLinearModel {
     version: "linear-v1",
     updatedAt: Date.now(),
     examples: 0,
-    learningRate: 0.1,
+    learningRate: 0.05,
     l2: 0.0005,
     bias: {
       newsletter: 0,
@@ -39,6 +43,119 @@ export function createDefaultLinearModel(): CategoryLinearModel {
     },
     weights: createEmptyWeights()
   };
+}
+
+function setWeights(
+  target: Record<string, number>,
+  entries: Array<[feature: string, weight: number]>
+) {
+  entries.forEach(([feature, weight]) => {
+    target[feature] = weight;
+  });
+}
+
+function keywordWeights(
+  prefix: "kw:newsletter" | "kw:notification" | "kw:transactional",
+  keywords: readonly string[],
+  weight: number
+) {
+  return keywords.map((keyword) => [`${prefix}:${keyword}`, weight] as [string, number]);
+}
+
+/**
+ * Baseline seeded model used for new accounts.
+ *
+ * This model approximates the legacy behavior by assigning weights to the
+ * linear features extracted in `extractLinearFeatures`.
+ */
+export function createSeededLinearModel(): CategoryLinearModel {
+  const model = createDefaultLinearModel();
+  model.updatedAt = Date.now();
+
+  const newsletter = model.weights.newsletter;
+  const notification = model.weights.notification;
+  const transactional = model.weights.transactional;
+
+  setWeights(newsletter, [
+    ["has:list_header", 0.55],
+    ["has:list_unsubscribe", 0.35],
+    ["sender_local:newsletter", 0.55],
+    ["sender_local:digest", 0.45],
+    ["sender_local:updates", 0.35],
+    ["sender_local:marketing", 0.45],
+    ["sender_local:offers", 0.4],
+    ["sender_local:deals", 0.4],
+    ["sender_root_domain:substack.com", 0.65],
+    ["sender_root_domain:beehiiv.com", 0.65],
+    ["sender_root_domain:ghost.io", 0.55],
+    ["sender_root_domain:convertkit.com", 0.55],
+    ["sender_root_domain:mailchi.mp", 0.5],
+    ["sender_root_domain:mailchimp.com", 0.55],
+    ["sender_root_domain:constantcontact.com", 0.55],
+    ["sender_root_domain:sendinblue.com", 0.55],
+    ["sender_root_domain:buttondown.email", 0.6],
+    ["has:in_reply_to", -0.45],
+    ["has:references", -0.35],
+    ["has:auto_submitted", -0.2],
+    ["has:auto_response_suppress", -0.15],
+    ["subject:thread_marker", -0.2],
+    ["subject:long_number", -0.1],
+    ["has:pdf_attachment", -0.15],
+    ["attachment:transactional_keyword", -0.5]
+  ]);
+  setWeights(newsletter, [
+    ...keywordWeights("kw:newsletter", NEWSLETTER_KEYWORDS, 0.22),
+    ...keywordWeights("kw:notification", NOTIFICATION_KEYWORDS, -0.18),
+    ...keywordWeights("kw:transactional", TRANSACTIONAL_KEYWORDS, -0.28)
+  ]);
+
+  setWeights(notification, [
+    ["has:in_reply_to", 0.45],
+    ["has:references", 0.38],
+    ["has:auto_submitted", 0.32],
+    ["has:auto_response_suppress", 0.24],
+    ["subject:thread_marker", 0.3],
+    ["subject:long_number", 0.05],
+    ["has:list_header", 0.08],
+    ["has:list_unsubscribe", -0.08],
+    ["sender_local:notifications", 0.55],
+    ["sender_local:notification", 0.55],
+    ["sender_local:no-reply", 0.22],
+    ["sender_local:noreply", 0.22],
+    ["sender_local:alerts", 0.45],
+    ["sender_local:activity", 0.5],
+    ["attachment:transactional_keyword", -0.2]
+  ]);
+  setWeights(notification, [
+    ...keywordWeights("kw:notification", NOTIFICATION_KEYWORDS, 0.3),
+    ...keywordWeights("kw:newsletter", NEWSLETTER_KEYWORDS, -0.08),
+    ...keywordWeights("kw:transactional", TRANSACTIONAL_KEYWORDS, -0.12)
+  ]);
+
+  setWeights(transactional, [
+    ["has:list_header", -0.28],
+    ["has:list_unsubscribe", -0.2],
+    ["has:in_reply_to", -0.1],
+    ["has:references", -0.08],
+    ["has:pdf_attachment", 0.32],
+    ["attachment:transactional_keyword", 0.65],
+    ["subject:long_number", 0.22],
+    ["sender_local:receipt", 0.7],
+    ["sender_local:receipts", 0.7],
+    ["sender_local:invoice", 0.7],
+    ["sender_local:billing", 0.65],
+    ["sender_local:payment", 0.65],
+    ["sender_local:payments", 0.65],
+    ["sender_local:orders", 0.55],
+    ["sender_local:support", 0.3]
+  ]);
+  setWeights(transactional, [
+    ...keywordWeights("kw:transactional", TRANSACTIONAL_KEYWORDS, 0.45),
+    ...keywordWeights("kw:newsletter", NEWSLETTER_KEYWORDS, -0.2),
+    ...keywordWeights("kw:notification", NOTIFICATION_KEYWORDS, -0.1)
+  ]);
+
+  return model;
 }
 
 function hasHeader(headers: Map<string, any>, key: string) {
@@ -119,18 +236,30 @@ function addFeature(features: LinearFeatureVector, key: string, value = 1) {
   features[key] = (features[key] ?? 0) + value;
 }
 
+function featureLearningScale(feature: string) {
+  if (!feature) return 1;
+  // Keep category bias as the single global offset term.
+  if (feature === "bias") return 0;
+  // These broad signals are useful priors but should not be moved too quickly.
+  if (feature === "has:list_header" || feature === "has:list_unsubscribe") return 0.2;
+  if (feature.startsWith("has:")) return 0.5;
+  if (feature.startsWith("sender_domain:") || feature.startsWith("sender_root_domain:")) return 0.5;
+  if (feature.startsWith("sender_local:")) return 0.75;
+  if (feature.startsWith("kw:")) return 0.75;
+  return 1;
+}
+
 export function extractLinearFeatures(
-  parsed: ParsedMail,
+  input: LinearFeatureEmailInput,
   headers: Map<string, any>,
   signals?: string[]
 ): LinearFeatureVector {
   const features: LinearFeatureVector = {};
-  const fromAddress = extractEmailAddress(parsed.from);
+  const fromAddress = extractEmailAddress(input.from);
   const fromLocal = normalizeToken(fromAddress.split("@")[0] ?? "");
   const fromDomain = normalizeToken(fromAddress.split("@")[1] ?? "");
-  const subject = (parsed.subject ?? "").toLowerCase();
-  const bodyText = (parsed.text ?? "").slice(0, 2000).toLowerCase();
-  const attachmentNames = (parsed.attachments ?? [])
+  const subject = (input.subject ?? "").toLowerCase();
+  const attachmentNames = (input.attachments ?? [])
     .map((att: { filename?: string | null }) => (att.filename ?? "").toLowerCase())
     .filter(Boolean);
 
@@ -148,7 +277,6 @@ export function extractLinearFeatures(
     hasHeader(headers, "list-unsubscribe-post") ||
     listSerialized.includes("unsubscribe");
 
-  addFeature(features, "bias", 1);
   if (hasListHeader) addFeature(features, "has:list_header");
   if (hasListUnsubscribe) addFeature(features, "has:list_unsubscribe");
   if (hasHeader(headers, "in-reply-to")) addFeature(features, "has:in_reply_to");
@@ -170,17 +298,17 @@ export function extractLinearFeatures(
   }
 
   NEWSLETTER_KEYWORDS.forEach((token) => {
-    if (subject.includes(token) || bodyText.includes(token)) {
+    if (subject.includes(token)) {
       addFeature(features, `kw:newsletter:${token}`);
     }
   });
   NOTIFICATION_KEYWORDS.forEach((token) => {
-    if (subject.includes(token) || bodyText.includes(token)) {
+    if (subject.includes(token)) {
       addFeature(features, `kw:notification:${token}`);
     }
   });
   TRANSACTIONAL_KEYWORDS.forEach((token) => {
-    if (subject.includes(token) || bodyText.includes(token)) {
+    if (subject.includes(token)) {
       addFeature(features, `kw:transactional:${token}`);
     }
   });
@@ -308,9 +436,10 @@ export function trainLinearModelPositive(
   if (predicted === target) {
     next.bias[target] = clipWeight(next.bias[target] + lr * 0.1);
     for (const [feature, value] of Object.entries(features)) {
-      if (!value) continue;
+      const scaledValue = value * featureLearningScale(feature);
+      if (!scaledValue) continue;
       const current = next.weights[target][feature] ?? 0;
-      next.weights[target][feature] = clipWeight(current + lr * 0.1 * value);
+      next.weights[target][feature] = clipWeight(current + lr * 0.1 * scaledValue);
     }
     return next;
   }
@@ -318,11 +447,12 @@ export function trainLinearModelPositive(
   next.bias[target] = clipWeight(next.bias[target] + lr);
   next.bias[predicted] = clipWeight(next.bias[predicted] - lr);
   for (const [feature, value] of Object.entries(features)) {
-    if (!value) continue;
+    const scaledValue = value * featureLearningScale(feature);
+    if (!scaledValue) continue;
     const targetCurrent = next.weights[target][feature] ?? 0;
     const predictedCurrent = next.weights[predicted][feature] ?? 0;
-    next.weights[target][feature] = clipWeight(targetCurrent + lr * value);
-    next.weights[predicted][feature] = clipWeight(predictedCurrent - lr * value);
+    next.weights[target][feature] = clipWeight(targetCurrent + lr * scaledValue);
+    next.weights[predicted][feature] = clipWeight(predictedCurrent - lr * scaledValue);
   }
   return next;
 }
@@ -352,9 +482,10 @@ export function trainLinearModelNegative(
 
   next.bias[negativeCategory] = clipWeight(next.bias[negativeCategory] - lr);
   for (const [feature, value] of Object.entries(features)) {
-    if (!value) continue;
+    const scaledValue = value * featureLearningScale(feature);
+    if (!scaledValue) continue;
     const current = next.weights[negativeCategory][feature] ?? 0;
-    next.weights[negativeCategory][feature] = clipWeight(current - lr * value);
+    next.weights[negativeCategory][feature] = clipWeight(current - lr * scaledValue);
   }
   return next;
 }

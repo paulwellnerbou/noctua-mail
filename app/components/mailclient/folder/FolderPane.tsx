@@ -27,7 +27,11 @@ type FolderPaneProps = {
   actions: {
     setFolderQuery: React.Dispatch<React.SetStateAction<string>>;
     activateVirtualFolder: (virtualFolderId: string) => void;
-    syncAccount: (folderId?: string, mode?: "new" | "full") => void;
+    syncAccount: (
+      folderId?: string,
+      mode?: "new" | "full",
+      options?: { recategorizeFolder?: boolean }
+    ) => void;
     recomputeThreads: () => void;
     recomputeCategories: () => void;
   };

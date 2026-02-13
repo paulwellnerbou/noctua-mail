@@ -33,7 +33,11 @@ type FolderTreeNodeProps = {
     handleCreateSubfolder: (folder: Folder) => void;
     handleRenameFolderItem: (folder: Folder) => void;
     handleDeleteFolderItem: (folder: Folder) => void;
-    syncAccount: (folderId?: string, mode?: "new" | "full") => void;
+    syncAccount: (
+      folderId?: string,
+      mode?: "new" | "full",
+      options?: { recategorizeFolder?: boolean }
+    ) => void;
     folderSpecialIcon: (folder: Folder) => React.ReactNode;
   };
   helpers: {
@@ -207,7 +211,7 @@ export default function FolderTreeNode({
               <DropdownMenu.Item
                 disabled={isDeleting || isSyncingFolder}
                 onSelect={() => {
-                  syncAccount(folder.id);
+                  syncAccount(folder.id, "full", { recategorizeFolder: true });
                 }}
               >
                 Sync

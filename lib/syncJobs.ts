@@ -64,11 +64,14 @@ function getSyncMode(payload: SyncPayload): "full" | "recent" | "new" {
 
 function normalizeSyncPayload(payload: SyncPayload): SyncPayload {
   const mode = getSyncMode(payload);
+  const recategorizeFolder =
+    Boolean(payload.recategorizeFolder) && typeof payload.folderId === "string" && payload.folderId.length > 0;
   return {
     accountId: payload.accountId,
     folderId: payload.folderId,
     mode,
-    fullSync: mode === "full"
+    fullSync: mode === "full",
+    recategorizeFolder
   };
 }
 
@@ -78,7 +81,8 @@ function isSameSyncIntent(a: SyncPayload, b: SyncPayload) {
   return (
     left.accountId === right.accountId &&
     (left.folderId ?? "") === (right.folderId ?? "") &&
-    left.mode === right.mode
+    left.mode === right.mode &&
+    Boolean(left.recategorizeFolder) === Boolean(right.recategorizeFolder)
   );
 }
 
@@ -99,7 +103,10 @@ function coalesceSyncPayload(existing: SyncPayload, incoming: SyncPayload): Sync
     accountId: normalizedExisting.accountId,
     folderId,
     mode,
-    fullSync: mode === "full"
+    fullSync: mode === "full",
+    recategorizeFolder:
+      Boolean(normalizedExisting.recategorizeFolder || normalizedIncoming.recategorizeFolder) &&
+      Boolean(folderId)
   };
 }
 

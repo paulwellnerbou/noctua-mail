@@ -396,6 +396,19 @@
   width: 70%;
 }
 
+.bodyLoadError {
+  border: 1px solid var(--red-7);
+  border-radius: var(--radius-2);
+  background: color-mix(in srgb, var(--red-3) 55%, transparent);
+  color: var(--red-11);
+  padding: var(--space-3);
+}
+
+.bodyLoadErrorLabel {
+  font-size: 13px;
+  line-height: 1.4;
+}
+
 .textView {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
     monospace;

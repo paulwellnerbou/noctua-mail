@@ -40,7 +40,7 @@ import { normalizeReminderDateList, resolveNextReminderOccurrence } from "./remi
 import { buildImapMessageRowId } from "./messageIds";
 import {
   CATEGORY_KEYS,
-  createDefaultLinearModel,
+  createSeededLinearModel,
   extractLinearFeatures,
   trainLinearModelNegative,
   trainLinearModelPositive,
@@ -352,7 +352,8 @@ function initAccountSchema(db: any) {
       recent INTEGER DEFAULT 0,
       category TEXT,
       categoryScore REAL,
-      categorySignals TEXT
+      categorySignals TEXT,
+      categoryManualState TEXT
     );
 
     CREATE TABLE IF NOT EXISTS attachments (
@@ -464,6 +465,15 @@ function initAccountSchema(db: any) {
   );
   if (!messageColumns.has("categorySignals")) {
     db.prepare(`ALTER TABLE messages ADD COLUMN categorySignals TEXT`).run();
+  }
+  if (!messageColumns.has("categoryManualState")) {
+    db.prepare(`ALTER TABLE messages ADD COLUMN categoryManualState TEXT`).run();
+    db.prepare(
+      `UPDATE messages
+       SET categoryManualState = 'cleared'
+       WHERE category IS NULL
+         AND COALESCE(categorySignals, '') LIKE '%manual-category:cleared%'`
+    ).run();
   }
 
   const reminderColumns = new Set(
@@ -666,6 +676,10 @@ export async function saveAccounts(nextAccounts: Account[]) {
         persistAccountRow(db, account, existingPaths.get(account.id));
       });
     })();
+    const newAccountIds = nextAccounts
+      .map((account) => account.id)
+      .filter((accountId) => !existingPaths.has(accountId));
+    await Promise.all(newAccountIds.map((accountId) => getCategoryLinearModel(accountId)));
   });
 }
 
@@ -685,6 +699,9 @@ export async function upsertAccount(account: Account) {
     db.transaction(() => {
       persistAccountRow(db, account, existing?.dbPath ?? null);
     })();
+    if (!existing) {
+      await getCategoryLinearModel(account.id);
+    }
     return applyCachedCredentials(account);
   });
 }
@@ -1755,6 +1772,13 @@ function normalizeCategory(value?: string | null): CategoryKey | null {
     : null;
 }
 
+function normalizeCategoryManualState(value?: string | null): CategoryManualState | null {
+  if (!value) return null;
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "cleared") return "cleared";
+  return null;
+}
+
 function normalizeSubjectLine(subject?: string | null) {
   let value = (subject ?? "").trim().toLowerCase();
   if (!value) return "";
@@ -1783,6 +1807,8 @@ type MessageSystemFlagState = {
   recent: number;
   unread: number;
 };
+
+type CategoryManualState = "cleared";
 
 function deriveSystemFlagState(flags: string[]): MessageSystemFlagState {
   const hasFlag = (flag: string) =>
@@ -3433,8 +3459,8 @@ export async function upsertMessages(
         id, accountId, folderId, threadId, parentId, messageId, inReplyTo, "references", xForwardedMessageId,
         subject, fromAddr, fromEmail, toAddr, ccAddr, bccAddr, mailboxPath, imapUid, preview, date, dateValue,
         body, htmlBody, priority, hasSource, unread, flags, seen, answered, flagged, deleted, draft, recent,
-        category, categoryScore, categorySignals
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        category, categoryScore, categorySignals, categoryManualState
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     const insertFts = db.prepare(`
       INSERT INTO message_fts (messageId, subject, fromAddr, toAddr, ccAddr, bccAddr, body, preview)
@@ -3458,6 +3484,56 @@ export async function upsertMessages(
               .filter((id): id is string => Boolean(id))
           )
         : null;
+    const manualCategoryStateByMessageId = new Map<string, CategoryManualState>();
+    const rememberManualCategoryState = (rows: Array<{ id?: string | null; categoryManualState?: string | null }>) => {
+      rows.forEach((row) => {
+        const id = (row.id ?? "").trim();
+        if (!id) return;
+        const manualState = normalizeCategoryManualState(row.categoryManualState);
+        if (manualState) {
+          manualCategoryStateByMessageId.set(id, manualState);
+        }
+      });
+    };
+    const loadManualCategoryStatesForMessageIds = (messageIds: string[]) => {
+      const uniqueIds = Array.from(new Set(messageIds.map((id) => id.trim()).filter(Boolean)));
+      if (uniqueIds.length === 0) return;
+      const QUERY_BATCH_SIZE = 400;
+      for (let start = 0; start < uniqueIds.length; start += QUERY_BATCH_SIZE) {
+        const chunk = uniqueIds.slice(start, start + QUERY_BATCH_SIZE);
+        if (chunk.length === 0) continue;
+        const rows = db
+          .prepare(
+            `SELECT id, categoryManualState
+             FROM messages
+             WHERE accountId = ?
+               AND categoryManualState IS NOT NULL
+               AND id IN (${chunk.map(() => "?").join(",")})`
+          )
+          .all(accountId, ...chunk) as Array<{ id?: string | null; categoryManualState?: string | null }>;
+        rememberManualCategoryState(rows);
+      }
+    };
+    if (replaceExisting) {
+      const rows = (folderId
+        ? db
+            .prepare(
+              `SELECT id, categoryManualState
+               FROM messages
+               WHERE accountId = ? AND folderId = ? AND categoryManualState IS NOT NULL`
+            )
+            .all(accountId, folderId)
+        : db
+            .prepare(
+              `SELECT id, categoryManualState
+               FROM messages
+               WHERE accountId = ? AND categoryManualState IS NOT NULL`
+            )
+            .all(accountId)) as Array<{ id?: string | null; categoryManualState?: string | null }>;
+      rememberManualCategoryState(rows);
+    } else {
+      loadManualCategoryStatesForMessageIds(nextMessages.map((message) => message.id));
+    }
     const dedupedThreadIds = new Set<string>();
     const upsertBatch = db.transaction((batch: Message[], shouldDeleteAttachments: boolean) => {
       batch.forEach((message) => {
@@ -3498,6 +3574,19 @@ export async function upsertMessages(
           : typeof message.unread === "boolean"
             ? message.unread
             : !seen;
+        const manualCategoryState = manualCategoryStateByMessageId.get(message.id) ?? null;
+        const category =
+          manualCategoryState === "cleared" ? null : normalizeCategory(message.category) ?? null;
+        const categoryScore =
+          manualCategoryState === "cleared"
+            ? null
+            : typeof message.categoryScore === "number"
+              ? message.categoryScore
+              : null;
+        const categorySignals =
+          manualCategoryState === "cleared"
+            ? ["manual-category:cleared", "manual-feedback:negative"]
+            : message.categorySignals;
         const emailMatch = message.from.match(/<([^>]+)>/);
         const fromEmail = emailMatch ? emailMatch[1] : null;
         insertMessage.run(
@@ -3533,9 +3622,10 @@ export async function upsertMessages(
           deleted ? 1 : 0,
           draft ? 1 : 0,
           recent ? 1 : 0,
-          message.category ?? null,
-          message.categoryScore ?? null,
-          message.categorySignals ? JSON.stringify(message.categorySignals) : null
+          category,
+          categoryScore,
+          categorySignals ? JSON.stringify(categorySignals) : null,
+          manualCategoryState
         );
         deleteFts.run(message.id);
         insertFts.run(
@@ -4068,55 +4158,79 @@ export async function updateMessageFlags(
   });
 }
 
-function loadCategoryLinearModelFromRow(row: { modelJson?: string | null } | undefined) {
-  if (!row?.modelJson) return createDefaultLinearModel();
-  try {
-    const parsed = JSON.parse(row.modelJson) as CategoryLinearModel;
-    if (!parsed || typeof parsed !== "object") return createDefaultLinearModel();
-    return {
-      ...createDefaultLinearModel(),
-      ...parsed,
-      bias: {
-        ...createDefaultLinearModel().bias,
-        ...(parsed.bias ?? {})
+function normalizeCategoryLinearModel(
+  model: Partial<CategoryLinearModel> | null | undefined,
+  options?: { touchUpdatedAt?: boolean }
+): CategoryLinearModel {
+  const seeded = createSeededLinearModel();
+  const normalizedModel: CategoryLinearModel = {
+    ...seeded,
+    ...(model ?? {}),
+    bias: {
+      ...seeded.bias,
+      ...(model?.bias ?? {})
+    },
+    weights: {
+      newsletter: {
+        ...seeded.weights.newsletter,
+        ...(model?.weights?.newsletter ?? {})
       },
-      weights: {
-        ...createDefaultLinearModel().weights,
-        ...(parsed.weights ?? {})
+      notification: {
+        ...seeded.weights.notification,
+        ...(model?.weights?.notification ?? {})
+      },
+      transactional: {
+        ...seeded.weights.transactional,
+        ...(model?.weights?.transactional ?? {})
       }
-    };
+    }
+  };
+  if (options?.touchUpdatedAt) {
+    normalizedModel.updatedAt = Date.now();
+  }
+  return normalizedModel;
+}
+
+function loadCategoryLinearModelFromRow(row: { modelJson?: string | null } | undefined) {
+  if (!row?.modelJson) return createSeededLinearModel();
+  try {
+    const parsed = JSON.parse(row.modelJson) as Partial<CategoryLinearModel> | null;
+    if (!parsed || typeof parsed !== "object") return createSeededLinearModel();
+    return normalizeCategoryLinearModel(parsed);
   } catch {
-    return createDefaultLinearModel();
+    return createSeededLinearModel();
   }
 }
 
 function saveCategoryLinearModelToDb(db: any, accountId: string, model: CategoryLinearModel) {
-  const normalizedModel: CategoryLinearModel = {
-    ...createDefaultLinearModel(),
-    ...model,
-    updatedAt: Date.now(),
-    bias: {
-      ...createDefaultLinearModel().bias,
-      ...(model.bias ?? {})
-    },
-    weights: {
-      ...createDefaultLinearModel().weights,
-      ...(model.weights ?? {})
-    }
-  };
+  const normalizedModel = normalizeCategoryLinearModel(model, { touchUpdatedAt: true });
   db.prepare(
     `INSERT OR REPLACE INTO category_model_state (accountId, modelJson, updatedAt) VALUES (?, ?, ?)`
   ).run(accountId, JSON.stringify(normalizedModel), normalizedModel.updatedAt);
   return normalizedModel;
 }
 
-export async function getCategoryLinearModel(accountId: string): Promise<CategoryLinearModel | null> {
+export async function getCategoryLinearModel(accountId: string): Promise<CategoryLinearModel> {
   const db = await getAccountDb(accountId);
   const row = db
     .prepare(`SELECT modelJson FROM category_model_state WHERE accountId = ?`)
     .get(accountId) as { modelJson?: string | null } | undefined;
-  if (!row?.modelJson) return null;
+  if (!row?.modelJson) {
+    return saveCategoryLinearModelToDb(db, accountId, createSeededLinearModel());
+  }
   return loadCategoryLinearModelFromRow(row);
+}
+
+export async function resetCategoryLinearModel(accountId: string): Promise<CategoryLinearModel> {
+  return withDbWriteRetry("resetCategoryLinearModel", async () => {
+    const db = await getAccountDb(accountId);
+    let model = createSeededLinearModel();
+    db.transaction(() => {
+      db.prepare(`DELETE FROM category_feedback_events WHERE accountId = ?`).run(accountId);
+      model = saveCategoryLinearModelToDb(db, accountId, createSeededLinearModel());
+    })();
+    return model;
+  });
 }
 
 function summarizeTopWeights(weights: Record<string, number>, limit: number) {
@@ -4288,7 +4402,7 @@ export async function setMessageCategory(
     const db = await getAccountDb(accountId);
     db.prepare(
       `UPDATE messages
-       SET category = ?, categoryScore = ?, categorySignals = ?
+       SET category = ?, categoryScore = ?, categorySignals = ?, categoryManualState = NULL
        WHERE accountId = ? AND id = ?`
     ).run(
       category,
@@ -4393,14 +4507,16 @@ export async function applyCategoryFeedback(
     const manualSignals = nextCategory
       ? [`manual-category:${nextCategory}`, "manual-feedback:positive"]
       : ["manual-category:cleared", "manual-feedback:negative"];
+    const manualCategoryState: CategoryManualState | null = nextCategory ? null : "cleared";
     db.prepare(
       `UPDATE messages
-       SET category = ?, categoryScore = ?, categorySignals = ?
+       SET category = ?, categoryScore = ?, categorySignals = ?, categoryManualState = ?
        WHERE accountId = ? AND id = ?`
     ).run(
       nextCategory,
       nextCategory ? 1 : null,
       JSON.stringify(manualSignals),
+      manualCategoryState,
       accountId,
       messageId
     );
@@ -4556,27 +4672,56 @@ export async function updateMessagesFolderPrefix(
   });
 }
 
-export async function recomputeCategoriesForAccount(accountId: string) {
+export async function recomputeCategoriesForAccount(
+  accountId: string,
+  options?: { folderId?: string | null }
+) {
   console.log(`[RECOMPUTE CATEGORIES] Starting for account ${accountId}`);
 
-  const { classifyEmail, getCategorizationConfig } = await import("@/lib/mail/categorization");
+  const {
+    classifyCategoryFromMetadata,
+    getCategorizationConfig,
+    parseMailForCategorization
+  } = await import("@/lib/mail/categorization");
   const { getMessageSource } = await import("@/lib/storage");
 
   const db = await getAccountDb(accountId);
+  const account = await getAccountById(accountId);
+  const accountEmail = account?.email ?? "";
+  const folderIdFilter = options?.folderId?.trim() ? options.folderId.trim() : null;
 
-  // Get all message IDs that have source available
-  const messageIds = db
-    .prepare(`SELECT id FROM messages WHERE accountId = ? AND hasSource = 1`)
-    .all(accountId) as Array<{ id: string }>;
+  // Get all eligible message IDs (source-backed and metadata-only).
+  const messages = db
+    .prepare(
+      `SELECT m.id, m.mailboxPath, m.fromEmail, m.fromAddr, m.subject, m.inReplyTo, m."references" AS "references", m.hasSource, f.specialUse AS folderSpecialUse
+       FROM messages m
+       LEFT JOIN folders f
+         ON f.accountId = m.accountId
+        AND f.id = m.folderId
+       WHERE m.accountId = ?
+         AND (? IS NULL OR m.folderId = ?)
+         AND COALESCE(m.categoryManualState, '') <> 'cleared'`
+    )
+    .all(accountId, folderIdFilter, folderIdFilter) as Array<{
+      id: string;
+      mailboxPath?: string | null;
+      fromEmail?: string | null;
+      fromAddr?: string | null;
+      subject?: string | null;
+      inReplyTo?: string | null;
+      references?: string | null;
+      hasSource?: number | null;
+      folderSpecialUse?: string | null;
+    }>;
 
-  console.log(`[RECOMPUTE CATEGORIES] Found ${messageIds.length} messages with hasSource=1`);
+  console.log(`[RECOMPUTE CATEGORIES] Found ${messages.length} eligible messages`);
 
-  if (messageIds.length === 0) {
-    console.log(`No messages with source found for account ${accountId}`);
+  if (messages.length === 0) {
+    console.log(`No eligible messages found for account ${accountId}`);
     return;
   }
 
-  console.log(`Recomputing categories for ${messageIds.length} messages...`);
+  console.log(`Recomputing categories for ${messages.length} messages...`);
 
   const config = getCategorizationConfig();
   const linearModel = await getCategoryLinearModel(accountId);
@@ -4587,15 +4732,74 @@ export async function recomputeCategoriesForAccount(accountId: string) {
   let processed = 0;
   let categorized = 0;
 
-  for (const { id } of messageIds) {
+  for (const message of messages) {
+    const id = message.id;
     try {
-      const source = await getMessageSource(accountId, id);
-      if (!source) continue;
+      const metadataHeaderMap = new Map<string, unknown>();
+      const inReplyTo = message.inReplyTo?.trim();
+      if (inReplyTo) {
+        metadataHeaderMap.set("in-reply-to", inReplyTo);
+      }
+      const refs = parseReferences(message.references);
+      if (refs && refs.length > 0) {
+        metadataHeaderMap.set("references", refs.join(" "));
+      }
 
-      const parsed = await simpleParser(source);
-      const headers = parsed.headers ?? new Map();
+      let classificationInput:
+        | {
+            subject?: string | null;
+            from?: unknown;
+            attachments?: Array<{ filename?: string | null }> | undefined;
+            headers?: Map<string, unknown>;
+          }
+        | null = null;
 
-      const classification = classifyEmail(parsed, headers, config, { linearModel });
+      if (message.hasSource) {
+        const source = await getMessageSource(accountId, id);
+        if (source) {
+          const parsed = await parseMailForCategorization(source);
+          classificationInput = {
+            subject: parsed.subject,
+            from: parsed.from,
+            attachments: parsed.attachments as Array<{ filename?: string | null }> | undefined,
+            headers: parsed.headers as Map<string, unknown>
+          };
+        }
+      }
+
+      if (!classificationInput) {
+        const attachmentRows = db
+          .prepare(`SELECT filename FROM attachments WHERE messageId = ?`)
+          .all(id) as Array<{ filename?: string | null }>;
+        const attachmentFilenames = attachmentRows
+          .map((item) => (item.filename ?? "").trim())
+          .filter(Boolean);
+        const fallbackParsed = buildFallbackParsedMessageForFeedback(
+          {
+            fromAddr: message.fromAddr,
+            fromEmail: message.fromEmail,
+            subject: message.subject
+          },
+          attachmentFilenames
+        );
+        classificationInput = {
+          subject: fallbackParsed.subject,
+          from: fallbackParsed.from,
+          attachments: fallbackParsed.attachments as Array<{ filename?: string | null }> | undefined,
+          headers: metadataHeaderMap
+        };
+      }
+
+      const classification = classifyCategoryFromMetadata(classificationInput, {
+        config,
+        linearModel,
+        context: {
+          accountEmail,
+          mailboxPath: message.mailboxPath ?? null,
+          folderSpecialUse: message.folderSpecialUse ?? null,
+          fromAddressHint: message.fromEmail ?? message.fromAddr ?? null
+        }
+      });
 
       await withDbWriteRetry("recomputeCategoriesForAccount.updateCategory", () =>
         updateStmt.run(
@@ -4613,12 +4817,12 @@ export async function recomputeCategoriesForAccount(accountId: string) {
 
       processed++;
       if (processed % 100 === 0) {
-        console.log(`Processed ${processed}/${messageIds.length} messages, ${categorized} categorized`);
+        console.log(`Processed ${processed}/${messages.length} messages, ${categorized} categorized`);
       }
     } catch (error) {
       console.error(`Failed to recompute category for message ${id}:`, error);
     }
   }
 
-  console.log(`Finished: ${processed}/${messageIds.length} processed, ${categorized} categorized`);
+  console.log(`Finished: ${processed}/${messages.length} processed, ${categorized} categorized`);
 }

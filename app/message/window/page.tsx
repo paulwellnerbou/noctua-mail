@@ -308,6 +308,7 @@ export default function MessageWindowPage() {
               supportsThreads={false}
               threadContentById={{}}
               threadContentLoading={null}
+              threadContentErrorById={{}}
               composeReplyMessageId={null}
               renderComposeInlineCard={null}
               messageCardProps={{

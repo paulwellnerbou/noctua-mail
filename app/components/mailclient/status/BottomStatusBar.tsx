@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { Folder } from "@/lib/data";
 import type { CalendarReminder } from "../utils/calendarReminders";
-import type { ExceptionEntry } from "../types";
+import type { ExceptionEntry, SyncJobProgress } from "../types";
 import {
   BottomStatusSection,
   type BottomStatusTone
@@ -17,6 +17,7 @@ type BottomStatusBarProps = {
   isRecomputingThreads: boolean;
   isRecomputingCategories: boolean;
   syncingFolders: Set<string>;
+  syncProgressItems: SyncJobProgress[];
   accountFolders: Folder[];
   mailCheckMode: "idle" | "polling";
   activeAccountId: string;
@@ -34,6 +35,7 @@ export default function BottomStatusBar({
   isRecomputingThreads,
   isRecomputingCategories,
   syncingFolders,
+  syncProgressItems,
   accountFolders,
   mailCheckMode,
   activeAccountId,
@@ -117,6 +119,7 @@ export default function BottomStatusBar({
         isRecomputingThreads={isRecomputingThreads}
         isRecomputingCategories={isRecomputingCategories}
         syncingFolders={syncingFolders}
+        syncProgressItems={syncProgressItems}
         accountFolders={accountFolders}
       />
       <BottomStatusSection

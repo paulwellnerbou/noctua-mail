@@ -46,7 +46,9 @@ type Props = {
   categorizationDebug?: CategoryLearningDebugSnapshot | null;
   categorizationLoading?: boolean;
   categorizationError?: string | null;
+  categorizationResetting?: boolean;
   onRefreshCategorization?: () => void;
+  onResetCategorizationModel?: () => void;
 };
 
 type FieldProps = {
@@ -94,7 +96,9 @@ export default function AccountSettingsModal({
   categorizationDebug,
   categorizationLoading = false,
   categorizationError,
-  onRefreshCategorization
+  categorizationResetting = false,
+  onRefreshCategorization,
+  onResetCategorizationModel
 }: Props) {
   if (!isOpen) return null;
   const signatures = editingAccount.settings?.signatures ?? [];
@@ -792,14 +796,25 @@ export default function AccountSettingsModal({
                       <Text size="2" color="gray">
                         Inspect learned category calibration and recent feedback events for this account.
                       </Text>
-                      <Button
-                        size="1"
-                        variant="soft"
-                        onClick={onRefreshCategorization}
-                        disabled={!onRefreshCategorization || categorizationLoading}
-                      >
-                        {categorizationLoading ? "Refreshing..." : "Refresh"}
-                      </Button>
+                      <Flex align="center" gap="2" wrap="wrap">
+                        <Button
+                          size="1"
+                          variant="soft"
+                          color="red"
+                          onClick={onResetCategorizationModel}
+                          disabled={!onResetCategorizationModel || categorizationResetting}
+                        >
+                          {categorizationResetting ? "Resetting..." : "Reset learning model"}
+                        </Button>
+                        <Button
+                          size="1"
+                          variant="soft"
+                          onClick={onRefreshCategorization}
+                          disabled={!onRefreshCategorization || categorizationLoading || categorizationResetting}
+                        >
+                          {categorizationLoading ? "Refreshing..." : "Refresh"}
+                        </Button>
+                      </Flex>
                     </Flex>
 
                     {categorizationError && (

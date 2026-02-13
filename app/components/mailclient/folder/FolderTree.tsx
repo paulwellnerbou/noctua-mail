@@ -26,7 +26,11 @@ type FolderTreeProps = {
     handleCreateSubfolder: (folder: Folder) => void;
     handleRenameFolderItem: (folder: Folder) => void;
     handleDeleteFolderItem: (folder: Folder) => void;
-    syncAccount: (folderId?: string, mode?: "new" | "full") => void;
+    syncAccount: (
+      folderId?: string,
+      mode?: "new" | "full",
+      options?: { recategorizeFolder?: boolean }
+    ) => void;
     folderSpecialIcon: (folder: Folder) => React.ReactNode;
   };
 };

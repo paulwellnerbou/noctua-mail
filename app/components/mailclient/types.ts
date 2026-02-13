@@ -32,3 +32,26 @@ export type SyncJobResult = {
   count: number;
   newMessages?: SyncNotificationMessage[];
 };
+
+export type SyncJobProgressPhase =
+  | "starting"
+  | "fetching"
+  | "finalizing"
+  | "done"
+  | "failed";
+
+export type SyncJobProgress = {
+  jobId: string;
+  accountId: string;
+  folderId?: string;
+  mailboxPath: string;
+  mode: "full" | "recent" | "new";
+  phase: SyncJobProgressPhase;
+  processed: number;
+  batchNumber?: number;
+  batchSize?: number;
+  estimatedTotal?: number;
+  percent?: number;
+  message?: string;
+  updatedAt: number;
+};
