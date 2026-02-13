@@ -22,6 +22,29 @@
   gap: 2px;
 }
 
+.virtualSection {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-bottom: 8px;
+  margin-bottom: 8px;
+  border-bottom: 1px solid var(--gray-a4);
+}
+
+.virtualRow {
+  background: linear-gradient(90deg, var(--accent-a2), transparent 70%);
+  border-color: var(--accent-a5);
+}
+
+.virtualRow:hover {
+  background: linear-gradient(90deg, var(--accent-a3), transparent 74%);
+  border-color: var(--accent-a7);
+}
+
+.virtualIcon {
+  color: var(--accent-11);
+}
+
 .treeHeader {
   display: flex;
   align-items: center;

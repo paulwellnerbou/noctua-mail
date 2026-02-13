@@ -17,4 +17,16 @@ describe("normalizeMarkdownBody", () => {
   it("preserves existing asterisk spacing normalization", () => {
     expect(normalizeMarkdownBody("Hello *world*again")).toBe("Hello *world* again");
   });
+
+  it("normalizes explicit links with nested autolink labels for mailto", () => {
+    expect(normalizeMarkdownBody("[<mailto:paul@wellnerbou.de>](mailto:paul@wellnerbou.de)")).toBe(
+      "<mailto:paul@wellnerbou.de>"
+    );
+  });
+
+  it("normalizes explicit links with nested autolink labels for https", () => {
+    expect(normalizeMarkdownBody("[<https://example.com>](https://example.com)")).toBe(
+      "<https://example.com>"
+    );
+  });
 });

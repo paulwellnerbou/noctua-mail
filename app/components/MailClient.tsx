@@ -14,7 +14,9 @@ import TurndownService from "turndown";
 import {
   Inbox,
   Archive,
+  CalendarClock,
   FileText,
+  ListTodo,
   Paperclip,
   Send,
   Search,
@@ -179,6 +181,56 @@ type DraftSavePayload = {
 
 const LIST_DEBUG_SAMPLE_LIMIT = 12;
 const LOCAL_DELETE_RECONCILE_SUPPRESS_MS = 15_000;
+
+type SearchFieldKey = (typeof SEARCH_FIELD_ORDER)[number];
+type SearchBadgeKey = (typeof SEARCH_BADGE_ORDER)[number];
+type SearchFieldsState = Record<SearchFieldKey, boolean>;
+type SearchBadgesState = Record<SearchBadgeKey, boolean>;
+
+const DEFAULT_SEARCH_FIELDS: SearchFieldsState = {
+  sender: true,
+  participants: true,
+  subject: true,
+  body: true,
+  attachments: true
+};
+
+const DEFAULT_SEARCH_BADGES: SearchBadgesState = {
+  unread: false,
+  unanswered: false,
+  flagged: false,
+  todo: false,
+  calendar: false,
+  attachments: false,
+  newsletter: false,
+  notification: false,
+  transactional: false
+};
+
+type VirtualFolderDefinition = {
+  id: "virtual:action-queue" | "virtual:invite-deck";
+  name: string;
+  description: string;
+  badgeLabel: string;
+  queryBadges: readonly string[];
+};
+
+const VIRTUAL_FOLDERS: readonly VirtualFolderDefinition[] = [
+  {
+    id: "virtual:action-queue",
+    name: "Action Queue",
+    description: "To-Do & Flagged",
+    badgeLabel: "Flagged or To-Do",
+    queryBadges: ["attention"]
+  },
+  {
+    id: "virtual:invite-deck",
+    name: "Invite Deck",
+    description: "Calendar invites",
+    badgeLabel: "Calendar",
+    queryBadges: ["calendar"]
+  }
+];
 
 type CurrentResultDecision = { keep: true } | { keep: false; reason: string };
 
@@ -376,24 +428,13 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
   const composeEditorInitRef = useRef(false);
   const composeLastEditedRef = useRef<"html" | "text">("html");
   const listIsNarrow = listWidth < 360;
-  const [searchFields, setSearchFields] = useState({
-    sender: true,
-    participants: true,
-    subject: true,
-    body: true,
-    attachments: true
-  });
-  const [searchBadges, setSearchBadges] = useState({
-    unread: false,
-    unanswered: false,
-    flagged: false,
-    todo: false,
-    calendar: false,
-    attachments: false,
-    newsletter: false,
-    notification: false,
-    transactional: false
-  });
+  const [searchFields, setSearchFields] = useState<SearchFieldsState>(DEFAULT_SEARCH_FIELDS);
+  const [searchBadges, setSearchBadges] = useState<SearchBadgesState>(DEFAULT_SEARCH_BADGES);
+  const [activeVirtualFolderId, setActiveVirtualFolderId] =
+    useState<VirtualFolderDefinition["id"] | null>(null);
+  const [actionQueueTodoCount, setActionQueueTodoCount] = useState<number | null>(null);
+  const [inviteDeckTotalCount, setInviteDeckTotalCount] = useState<number | null>(null);
+  const [inviteDeckUnreadCount, setInviteDeckUnreadCount] = useState<number | null>(null);
   const [relatedContext, setRelatedContext] = useState<{
     id: string;
     subject?: string;
@@ -457,40 +498,12 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
       .map(([key]) => key)
       .join(",");
   }, [isRelatedSearch, searchFields, trimmedQuery]);
-  const everywhereExclusionKey = useMemo(
-    () =>
-      folders
-        .filter((folder) => {
-          if (folder.accountId !== activeAccountId) return false;
-          const special = (folder.specialUse ?? "").toLowerCase();
-          if (special === "\\trash" || special === "\\junk" || special === "\\spam") return true;
-          if (!includeSentInEverywhere && special === "\\sent") return true;
-          return false;
-        })
-        .map((folder) => folder.id)
-        .sort()
-        .join(","),
-    [activeAccountId, folders, includeSentInEverywhere]
-  );
-  const messagesKey = useMemo(
-    () =>
-      `${activeAccountId}|${searchScope}|${everywhereExclusionKey}|${activeFolderId}|${trimmedQuery}|${groupBy}|${threadsEnabled ? "threads-on" : "threads-off"}|${searchFieldKey}|${Object.entries(searchBadges)
-        .filter(([, enabled]) => enabled)
-        .map(([key]) => key)
-        .join(",")}`,
-    [
-      activeAccountId,
-      activeFolderId,
-      everywhereExclusionKey,
-      groupBy,
-      trimmedQuery,
-      threadsEnabled,
-      searchFieldKey,
-      searchBadges,
-      searchScope
-    ]
-  );
-  currentKeyRef.current = messagesKey;
+  const activeVirtualFolder = useMemo(() => {
+    if (!activeVirtualFolderId) return null;
+    if (searchScope !== "all") return null;
+    if (trimmedQuery.length > 0 || isRelatedSearch) return null;
+    return VIRTUAL_FOLDERS.find((folder) => folder.id === activeVirtualFolderId) ?? null;
+  }, [activeVirtualFolderId, isRelatedSearch, searchScope, trimmedQuery]);
 
   const accountFolders = useMemo(
     () => folders.filter((folder) => folder.accountId === activeAccountId),
@@ -512,6 +525,53 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
         .map((folder) => folder.id),
     [accountFolders, includeSentInEverywhere]
   );
+  const virtualExcludedFolderIds = useMemo(
+    () =>
+      accountFolders
+        .filter((folder) => {
+          const special = (folder.specialUse ?? "").toLowerCase();
+          return (
+            special === "\\trash" ||
+            special === "\\junk" ||
+            special === "\\spam" ||
+            special === "\\sent"
+          );
+        })
+        .map((folder) => folder.id),
+    [accountFolders]
+  );
+  const virtualExcludedFolderIdsKey = useMemo(
+    () => [...virtualExcludedFolderIds].sort().join(","),
+    [virtualExcludedFolderIds]
+  );
+  const currentSearchExcludedFolderIds = useMemo(
+    () => (activeVirtualFolder ? virtualExcludedFolderIds : excludedEverywhereFolderIds),
+    [activeVirtualFolder, excludedEverywhereFolderIds, virtualExcludedFolderIds]
+  );
+  const everywhereExclusionKey = useMemo(
+    () => [...currentSearchExcludedFolderIds].sort().join(","),
+    [currentSearchExcludedFolderIds]
+  );
+  const messagesKey = useMemo(
+    () =>
+      `${activeAccountId}|${searchScope}|${everywhereExclusionKey}|${activeFolderId}|${activeVirtualFolder?.id ?? ""}|${trimmedQuery}|${groupBy}|${threadsEnabled ? "threads-on" : "threads-off"}|${searchFieldKey}|${Object.entries(searchBadges)
+        .filter(([, enabled]) => enabled)
+        .map(([key]) => key)
+        .join(",")}`,
+    [
+      activeAccountId,
+      activeFolderId,
+      activeVirtualFolder?.id,
+      everywhereExclusionKey,
+      groupBy,
+      trimmedQuery,
+      threadsEnabled,
+      searchFieldKey,
+      searchBadges,
+      searchScope
+    ]
+  );
+  currentKeyRef.current = messagesKey;
   const folderTree = useMemo(() => buildFolderTree(accountFolders), [accountFolders]);
   const folderById = useMemo(
     () => new Map(accountFolders.map((folder) => [folder.id, folder])),
@@ -649,12 +709,19 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
         .map(([key]) => key),
     [searchBadges]
   );
+  const effectiveSearchBadges = useMemo(
+    () => (activeVirtualFolder ? [...activeVirtualFolder.queryBadges] : selectedSearchBadges),
+    [activeVirtualFolder, selectedSearchBadges]
+  );
   const selectedSearchBadgeLabels = useMemo(
-    () => selectedSearchBadges.map((key) => getSearchBadgeLabel(key)),
-    [selectedSearchBadges]
+    () =>
+      activeVirtualFolder
+        ? [activeVirtualFolder.badgeLabel]
+        : selectedSearchBadges.map((key) => getSearchBadgeLabel(key)),
+    [activeVirtualFolder, selectedSearchBadges]
   );
   const hasFilteredSearchCriteria =
-    isRelatedSearch || trimmedQuery.length > 0 || selectedSearchBadges.length > 0;
+    isRelatedSearch || trimmedQuery.length > 0 || effectiveSearchBadges.length > 0;
   const logListReplacement = (
     source: string,
     prevMessages: Message[],
@@ -746,10 +813,12 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     return `in fields ${normalized}`;
   }, [searchFieldsCriteriaLabel]);
   const searchScopeSummaryLabel = useMemo(() => {
-    if (searchScope === "all") return "everywhere";
+    if (searchScope === "all") {
+      return activeVirtualFolder ? `in ${activeVirtualFolder.name}` : "everywhere";
+    }
     const folderName = activeFolderId ? folderById.get(activeFolderId)?.name?.trim() : "";
     return folderName ? `in ${folderName}` : "in current folder";
-  }, [activeFolderId, folderById, searchScope]);
+  }, [activeFolderId, activeVirtualFolder, folderById, searchScope]);
   const searchBadgesLabel = useMemo(() => {
     const selected = SEARCH_BADGE_ORDER.filter((key) => searchBadges[key]);
     if (selected.length === 0) return "Filter: Any";
@@ -784,9 +853,9 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     if (trimmedQuery.length > 0) {
       badges.push({ key: "fields", label: searchFieldsSummaryLabel });
     }
-    if (selectedSearchBadges.length > 0) {
-      selectedSearchBadges.forEach((key) => {
-        badges.push({ key: `badge-${key}`, label: getSearchBadgeLabel(key) });
+    if (selectedSearchBadgeLabels.length > 0) {
+      selectedSearchBadgeLabels.forEach((label, index) => {
+        badges.push({ key: `badge-${index}`, label });
       });
     }
     badges.push({ key: "scope", label: searchScopeSummaryLabel });
@@ -794,7 +863,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
       badges.push({ key: "all", label: "All messages" });
     }
     return badges;
-  }, [query, searchFieldsSummaryLabel, searchScopeSummaryLabel, selectedSearchBadges]);
+  }, [query, searchFieldsSummaryLabel, searchScopeSummaryLabel, selectedSearchBadgeLabels]);
   const relatedNotice = useMemo(() => {
     if (!isRelatedSearch) return "";
     const subject = relatedContext?.subject?.trim();
@@ -807,24 +876,9 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
         ? relatedRestoreRef.current
         : null;
     setQuery("");
-    setSearchBadges({
-      unread: false,
-      unanswered: false,
-      flagged: false,
-      todo: false,
-      calendar: false,
-      attachments: false,
-      newsletter: false,
-      notification: false,
-      transactional: false
-    });
-    setSearchFields({
-      sender: true,
-      participants: true,
-      subject: true,
-      body: true,
-      attachments: true
-    });
+    setActiveVirtualFolderId(null);
+    setSearchBadges({ ...DEFAULT_SEARCH_BADGES });
+    setSearchFields({ ...DEFAULT_SEARCH_FIELDS });
     if (relatedRestore?.scope === "folder") {
       setSearchScope("folder");
       setActiveFolderId(relatedRestore.folderId || accountFolders[0]?.id || "");
@@ -833,6 +887,82 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
       setActiveFolderId("");
     }
   };
+  const activateVirtualFolder = useCallback(
+    (virtualFolderId: string) => {
+      const virtualFolder = VIRTUAL_FOLDERS.find((folder) => folder.id === virtualFolderId);
+      if (!virtualFolder) return;
+      if (searchScope === "folder" && activeFolderId) {
+        setLastFolderId(activeFolderId);
+      }
+      setActiveVirtualFolderId(virtualFolder.id);
+      setQuery("");
+      setSearchFields({ ...DEFAULT_SEARCH_FIELDS });
+      setSearchScope("all");
+      setActiveFolderId("");
+      setSearchBadges({ ...DEFAULT_SEARCH_BADGES });
+    },
+    [activeFolderId, searchScope]
+  );
+  useEffect(() => {
+    if (!activeAccountId) {
+      setActionQueueTodoCount(null);
+      setInviteDeckTotalCount(null);
+      setInviteDeckUnreadCount(null);
+      return;
+    }
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => {
+      const fetchCount = async (badges: string) => {
+        const params = new URLSearchParams({
+          accountId: activeAccountId,
+          page: "1",
+          pageSize: "1",
+          groupBy: "date",
+          badges
+        });
+        if (virtualExcludedFolderIdsKey) {
+          params.set("excludeFolderIds", virtualExcludedFolderIdsKey);
+        }
+        const response = await apiFetch(`/api/messages?${params.toString()}`, {
+          signal: controller.signal
+        });
+        if (!response.ok || controller.signal.aborted) return null;
+        const data = (await response.json()) as { total?: number };
+        if (controller.signal.aborted) return null;
+        return typeof data.total === "number" ? data.total : 0;
+      };
+
+      void Promise.all([fetchCount("todo"), fetchCount("calendar"), fetchCount("calendar,unread")])
+        .then(([todoCount, inviteTotalCount, inviteUnreadCount]) => {
+          if (controller.signal.aborted) return;
+          setActionQueueTodoCount(todoCount);
+          setInviteDeckTotalCount(inviteTotalCount);
+          setInviteDeckUnreadCount(inviteUnreadCount);
+        })
+        .catch(() => {
+          if (controller.signal.aborted) return;
+          setActionQueueTodoCount(null);
+          setInviteDeckTotalCount(null);
+          setInviteDeckUnreadCount(null);
+        });
+    }, 160);
+
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
+  }, [activeAccountId, apiFetch, messages, virtualExcludedFolderIdsKey]);
+  useEffect(() => {
+    if (!activeVirtualFolderId) return;
+    if (searchScope !== "all" || trimmedQuery.length > 0 || isRelatedSearch) {
+      setActiveVirtualFolderId(null);
+      return;
+    }
+    const hasManualBadges = SEARCH_BADGE_ORDER.some((badge) => searchBadges[badge]);
+    if (hasManualBadges) {
+      setActiveVirtualFolderId(null);
+    }
+  }, [activeVirtualFolderId, isRelatedSearch, searchBadges, searchScope, trimmedQuery]);
   const pushNotice = useCallback((input: NoticeInput) => {
     const { durationMs, ...notice } = input;
     const timeoutMs =
@@ -2990,11 +3120,11 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
         if (message.folderId !== activeFolderId) {
           return { keep: false, reason: `folder-mismatch:${message.folderId}` };
         }
-      } else if (excludedEverywhereFolderIds.includes(message.folderId)) {
+      } else if (currentSearchExcludedFolderIds.includes(message.folderId)) {
         return { keep: false, reason: `excluded-everywhere-folder:${message.folderId}` };
       }
 
-      for (const badge of selectedSearchBadges) {
+      for (const badge of effectiveSearchBadges) {
         if (badge === "unread" && !Boolean(message.unread ?? !message.seen)) {
           return { keep: false, reason: "badge-unread" };
         }
@@ -3022,15 +3152,18 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
         if (badge === "transactional" && message.category !== "transactional") {
           return { keep: false, reason: `badge-transactional:${message.category ?? "none"}` };
         }
+        if (badge === "attention" && !(isMessageFlagged(message) || hasTodoFlag(message))) {
+          return { keep: false, reason: "badge-attention" };
+        }
       }
       return { keep: true };
     },
     [
       activeAccountId,
       activeFolderId,
-      excludedEverywhereFolderIds,
+      currentSearchExcludedFolderIds,
+      effectiveSearchBadges,
       searchScope,
-      selectedSearchBadges
     ]
   );
 
@@ -3082,7 +3215,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
             activeAccountId,
             activeFolderId,
             searchScope,
-            selectedSearchBadges,
+            selectedSearchBadges: effectiveSearchBadges,
             prunedCount: pruned.length,
             prunedSample: pruned.slice(0, LIST_DEBUG_SAMPLE_LIMIT)
           });
@@ -3094,8 +3227,8 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
       activeAccountId,
       activeFolderId,
       evaluateMessageInCurrentResults,
+      effectiveSearchBadges,
       searchScope,
-      selectedSearchBadges
     ]
   );
 
@@ -4535,14 +4668,14 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
         if (searchBadges.attachments) {
           params.set("attachments", "1");
         }
-        if (selectedSearchBadges.length > 0) {
-          params.set("badges", selectedSearchBadges.join(","));
+        if (effectiveSearchBadges.length > 0) {
+          params.set("badges", effectiveSearchBadges.join(","));
         }
         if (!isRelatedSearch && searchScope === "folder" && activeFolderId) {
           params.set("folderId", activeFolderId);
         }
-        if (searchScope === "all" && excludedEverywhereFolderIds.length > 0) {
-          params.set("excludeFolderIds", excludedEverywhereFolderIds.join(","));
+        if (searchScope === "all" && currentSearchExcludedFolderIds.length > 0) {
+          params.set("excludeFolderIds", currentSearchExcludedFolderIds.join(","));
         }
         let endpoint = trimmedQuery ? "/api/search" : "/api/messages";
         if (isRelatedSearch) {
@@ -5392,14 +5525,14 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     if (searchBadges.attachments) {
       params.set("attachments", "1");
     }
-    if (selectedSearchBadges.length > 0) {
-      params.set("badges", selectedSearchBadges.join(","));
+    if (effectiveSearchBadges.length > 0) {
+      params.set("badges", effectiveSearchBadges.join(","));
     }
     if (!isRelatedSearch && searchScope === "folder" && activeFolderId) {
       params.set("folderId", activeFolderId);
     }
-    if (searchScope === "all" && excludedEverywhereFolderIds.length > 0) {
-      params.set("excludeFolderIds", excludedEverywhereFolderIds.join(","));
+    if (searchScope === "all" && currentSearchExcludedFolderIds.length > 0) {
+      params.set("excludeFolderIds", currentSearchExcludedFolderIds.join(","));
     }
     let endpoint = trimmedQuery ? "/api/search" : "/api/messages";
     if (isRelatedSearch) {
@@ -6671,6 +6804,50 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
   const deferredMessageView = useDeferredValue(messageView);
   const isCompactView = deferredMessageView === "compact";
   const rootFolders = accountFolders.filter((folder) => !folder.parentId);
+  const virtualFoldersForPane = useMemo(
+    () =>
+      VIRTUAL_FOLDERS.map((folder) => ({
+        ...folder,
+        active: activeVirtualFolder?.id === folder.id,
+        count:
+          folder.id === "virtual:action-queue"
+            ? actionQueueTodoCount
+            : folder.id === "virtual:invite-deck"
+              ? inviteDeckUnreadCount
+              : null,
+        countLabel:
+          folder.id === "virtual:action-queue"
+            ? `To-Do: ${actionQueueTodoCount ?? 0}`
+            : undefined,
+        countAriaLabel:
+          folder.id === "virtual:action-queue"
+            ? `${actionQueueTodoCount ?? 0} to-do`
+            : `${inviteDeckUnreadCount ?? 0} unread`,
+        countTitle:
+          folder.id === "virtual:invite-deck" &&
+          typeof inviteDeckTotalCount === "number" &&
+          typeof inviteDeckUnreadCount === "number"
+            ? `${folder.description} (${inviteDeckTotalCount} Messages, ${inviteDeckUnreadCount} unread)`
+            : undefined,
+        rowTitle:
+          folder.id === "virtual:invite-deck" &&
+          typeof inviteDeckTotalCount === "number" &&
+          typeof inviteDeckUnreadCount === "number"
+            ? `${folder.description} (${inviteDeckTotalCount} Messages, ${inviteDeckUnreadCount} unread)`
+            : `${folder.name}: ${folder.description}`,
+        emphasize:
+          folder.id === "virtual:action-queue"
+            ? (actionQueueTodoCount ?? 0) > 0
+            : (inviteDeckUnreadCount ?? 0) > 0,
+        icon:
+          folder.id === "virtual:action-queue" ? (
+            <ListTodo size={13} />
+          ) : (
+            <CalendarClock size={13} />
+          )
+      })),
+    [actionQueueTodoCount, activeVirtualFolder?.id, inviteDeckTotalCount, inviteDeckUnreadCount]
+  );
   const isExistingAccount = Boolean(
     editingAccount && accounts.some((account) => account.id === editingAccount.id)
   );
@@ -6820,11 +6997,13 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
             leftWidth,
             folderQuery,
             accountFolderCount: accountFolders.length,
+            virtualFolders: virtualFoldersForPane,
             isRecomputingThreads,
             isRecomputingCategories
           }}
           actions={{
             setFolderQuery,
+            activateVirtualFolder,
             syncAccount,
             recomputeThreads,
             recomputeCategories
@@ -7018,7 +7197,11 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
                   ? `Failed to load messages. ${messageListError}`
                   : emptyListSyncing
                     ? "Syncing messages…"
-                    : "No messages in this folder."}
+                    : activeVirtualFolder
+                      ? `No messages in ${activeVirtualFolder.name}.`
+                      : searchScope === "all"
+                        ? "No messages match this search."
+                        : "No messages in this folder."}
               </div>
             )}
             {listLoading && sortedMessages.length > 0 && (

@@ -1,17 +1,32 @@
 import type React from "react";
 import { MoreVertical } from "lucide-react";
-import { DropdownMenu, IconButton, TextField } from "@radix-ui/themes";
+import { Badge, DropdownMenu, IconButton, TextField } from "@radix-ui/themes";
+import { badgeColors } from "@/lib/ui/badgeColors";
 import styles from "./FolderTree.module.css";
 type FolderPaneProps = {
   state: {
     leftWidth: number;
     folderQuery: string;
     accountFolderCount: number;
+    virtualFolders: Array<{
+      id: string;
+      name: string;
+      description: string;
+      active: boolean;
+      count?: number | null;
+      countLabel?: string;
+      countAriaLabel?: string;
+      countTitle?: string;
+      rowTitle?: string;
+      emphasize?: boolean;
+      icon: React.ReactNode;
+    }>;
     isRecomputingThreads: boolean;
     isRecomputingCategories: boolean;
   };
   actions: {
     setFolderQuery: React.Dispatch<React.SetStateAction<string>>;
+    activateVirtualFolder: (virtualFolderId: string) => void;
     syncAccount: (folderId?: string, mode?: "new" | "full") => void;
     recomputeThreads: () => void;
     recomputeCategories: () => void;
@@ -20,13 +35,55 @@ type FolderPaneProps = {
 };
 
 export default function FolderPane({ state, actions, children }: FolderPaneProps) {
-  const { leftWidth, folderQuery, accountFolderCount, isRecomputingThreads, isRecomputingCategories } = state;
-  const { setFolderQuery, syncAccount, recomputeThreads, recomputeCategories } = actions;
+  const {
+    leftWidth,
+    folderQuery,
+    accountFolderCount,
+    virtualFolders,
+    isRecomputingThreads,
+    isRecomputingCategories
+  } = state;
+  const { setFolderQuery, activateVirtualFolder, syncAccount, recomputeThreads, recomputeCategories } =
+    actions;
 
   return (
     <aside className={`pane ${styles.pane}`} style={{ width: leftWidth }}>
       <div className={styles.folderPanel}>
         <div className={styles.treeRail}>
+          {virtualFolders.length > 0 ? (
+            <div className={styles.virtualSection} aria-label="Virtual folders">
+              {virtualFolders.map((folder) => (
+                <button
+                  key={folder.id}
+                  type="button"
+                  className={`${styles.treeRow} ${styles.virtualRow} ${
+                    folder.active ? styles.treeRowActive : ""
+                  }`}
+                  onClick={() => activateVirtualFolder(folder.id)}
+                  title={folder.rowTitle ?? `${folder.name}: ${folder.description}`}
+                >
+                  <span className={`${styles.treeIcon} ${styles.virtualIcon}`} aria-hidden>
+                    {folder.icon}
+                  </span>
+                  <span className={`${styles.treeName} ${folder.emphasize ? styles.treeNameUnread : ""}`}>
+                    <span className={styles.treeNameText}>{folder.name}</span>
+                  </span>
+                  {typeof folder.count === "number" && folder.count > 0 ? (
+                    <Badge
+                      size="1"
+                      variant="soft"
+                      color={badgeColors.unread}
+                      className={styles.treeUnreadBadge}
+                      aria-label={folder.countAriaLabel ?? `${folder.count} unread`}
+                      title={folder.countTitle ?? folder.rowTitle}
+                    >
+                      {folder.countLabel ?? folder.count}
+                    </Badge>
+                  ) : null}
+                </button>
+              ))}
+            </div>
+          ) : null}
           <div className={styles.treeHeader}>
             <div>
               <div className={styles.panelTitle}>Folders</div>

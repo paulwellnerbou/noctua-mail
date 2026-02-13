@@ -1799,6 +1799,7 @@ function deriveSystemFlagState(flags: string[]): MessageSystemFlagState {
 
 function applyBadgeFilters(where: string, args: any[], badges?: string[] | null) {
   const normalized = (badges ?? []).map((badge) => badge.toLowerCase());
+  const todoFlagPattern = '%"to-do"%';
   if (normalized.includes("unread")) {
     where += " AND m.unread = 1";
   }
@@ -1810,7 +1811,11 @@ function applyBadgeFilters(where: string, args: any[], badges?: string[] | null)
   }
   if (normalized.includes("todo")) {
     where += " AND m.flags IS NOT NULL AND lower(m.flags) LIKE ?";
-    args.push('%"to-do"%');
+    args.push(todoFlagPattern);
+  }
+  if (normalized.includes("attention")) {
+    where += " AND (m.flagged = 1 OR (m.flags IS NOT NULL AND lower(m.flags) LIKE ?))";
+    args.push(todoFlagPattern);
   }
   if (normalized.includes("calendar")) {
     where += " AND m.flags IS NOT NULL AND lower(m.flags) LIKE ?";
