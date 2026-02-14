@@ -2158,27 +2158,39 @@ function buildGroupLabel(key: string, groupBy: string) {
   return key;
 }
 
-function buildFtsQuery(raw?: string | null) {
-  if (!raw) return null;
-  const tokens = raw
+function buildSearchTokens(raw?: string | null) {
+  if (!raw) return [];
+  return raw
     .trim()
     .split(/\s+/)
     .map((token) => token.trim())
     .filter(Boolean)
     .map((token) => {
-      const escaped = token.replace(/"/g, '""');
-      if (/^[\p{L}\p{N}]+$/u.test(token)) {
-        return `${escaped}*`;
-      }
-      if (/[\p{L}\p{N}]/u.test(token)) {
-        return `"${escaped}"*`;
-      }
-      return null;
+      const normalized = token.replace(/^"+|"+$/g, "");
+      if (!normalized) return null;
+      if (!/[\p{L}\p{N}]/u.test(normalized)) return null;
+      return normalized;
     })
     .filter((token): token is string => Boolean(token));
+}
 
-  if (tokens.length === 0) return null;
-  return tokens.join(" AND ");
+function buildFtsTokenQuery(token: string) {
+  const escaped = token.replace(/"/g, '""');
+  if (/^[\p{L}\p{N}]+$/u.test(token)) return `${escaped}*`;
+  if (/[\p{L}\p{N}]/u.test(token)) return `"${escaped}"*`;
+  return null;
+}
+
+function buildScopedFtsTokenQueries(tokens: string[], columns: string[]) {
+  if (columns.length === 0 || tokens.length === 0) return [];
+  return tokens
+    .map((token) => {
+      const ftsToken = buildFtsTokenQuery(token);
+      if (!ftsToken) return null;
+      const orParts = columns.map((col) => `${col}:${ftsToken}`);
+      return orParts.length > 1 ? `(${orParts.join(" OR ")})` : orParts[0];
+    })
+    .filter((token): token is string => Boolean(token));
 }
 
 function normalizeSearchFields(fields?: string[] | null) {
@@ -2199,9 +2211,15 @@ function normalizeSearchFields(fields?: string[] | null) {
     if (field === "body") columns.add("body");
   });
   if (columns.size === 0) {
-    return ["fromAddr", "toAddr", "ccAddr", "bccAddr", "subject", "body"];
+    return [];
   }
   return Array.from(columns);
+}
+
+function shouldSearchAttachmentFilenames(fields?: string[] | null) {
+  const selected = (fields ?? []).map((field) => field.trim()).filter(Boolean);
+  if (selected.length === 0) return true;
+  return selected.includes("attachments");
 }
 
 function parseSearchInput(
@@ -2254,23 +2272,95 @@ function parseSearchInput(
   );
 
   const rawQuery = withoutInviteUid.trim();
-  const baseQuery = buildFtsQuery(withoutInviteUid);
+  const queryTokens = buildSearchTokens(withoutInviteUid);
   const columns = normalizeSearchFields(fields);
-  if (!baseQuery) {
-    return { ftsQuery: null, fromTerms, toTerms, inTerms, inviteUidTerms, rawQuery };
-  }
-  const tokens = baseQuery.split(/\s+AND\s+/);
-  const scoped = tokens.map((token) => {
-    const orParts = columns.map((col) => `${col}:${token}`);
-    return orParts.length > 1 ? `(${orParts.join(" OR ")})` : orParts[0];
-  });
+  const includeAttachmentFilenames = shouldSearchAttachmentFilenames(fields);
+  const ftsTokenQueries = buildScopedFtsTokenQueries(queryTokens, columns);
+  const attachmentFilenameTerms = includeAttachmentFilenames
+    ? queryTokens.map((token) => token.toLowerCase())
+    : [];
   return {
-    ftsQuery: scoped.join(" AND "),
+    ftsTokenQueries,
     fromTerms,
     toTerms,
     inTerms,
     inviteUidTerms,
-    rawQuery
+    rawQuery,
+    attachmentFilenameTerms
+  };
+}
+
+function applySearchQueryFilters(params: {
+  where: string;
+  args: any[];
+  ftsTokenQueries: string[];
+  rawQuery: string;
+  attachmentFilenameTerms: string[];
+  messageAlias?: string;
+}) {
+  const messageAlias = params.messageAlias ?? "m";
+  const ftsTokenQueries = params.ftsTokenQueries;
+  const hasQuery = ftsTokenQueries.length > 0;
+  const idQuery = params.rawQuery.trim();
+  const hasIdQuery = Boolean(idQuery);
+  const attachmentFilenameTerms = params.attachmentFilenameTerms;
+  const hasAttachmentFilenameQuery = attachmentFilenameTerms.length > 0;
+  if (!hasQuery && !hasIdQuery && !hasAttachmentFilenameQuery) {
+    return {
+      where: params.where,
+      hasQuery,
+      hasIdQuery,
+      hasAttachmentFilenameQuery
+    };
+  }
+
+  const clauses: string[] = [];
+  if (hasQuery || hasAttachmentFilenameQuery) {
+    const tokenCount = Math.max(ftsTokenQueries.length, attachmentFilenameTerms.length);
+    const tokenClauses: string[] = [];
+    for (let index = 0; index < tokenCount; index += 1) {
+      const tokenParts: string[] = [];
+      const ftsTokenQuery = ftsTokenQueries[index];
+      if (ftsTokenQuery) {
+        tokenParts.push(
+          `${messageAlias}.id IN (SELECT messageId FROM message_fts WHERE message_fts MATCH ?)`
+        );
+        params.args.push(ftsTokenQuery);
+      }
+      const attachmentTerm = attachmentFilenameTerms[index];
+      if (attachmentTerm) {
+        tokenParts.push(
+          `EXISTS (
+            SELECT 1
+            FROM attachments a
+            WHERE a.messageId = ${messageAlias}.id
+              AND lower(COALESCE(a.filename, '')) LIKE ?
+          )`
+        );
+        params.args.push(`%${attachmentTerm}%`);
+      }
+      if (tokenParts.length === 0) continue;
+      tokenClauses.push(tokenParts.length > 1 ? `(${tokenParts.join(" OR ")})` : tokenParts[0]);
+    }
+    if (tokenClauses.length > 0) {
+      clauses.push(`(${tokenClauses.join(" AND ")})`);
+    }
+  }
+  if (hasIdQuery) {
+    clauses.push(`lower(${messageAlias}.messageId) LIKE ?`);
+    clauses.push(`lower(${messageAlias}.threadId) LIKE ?`);
+    clauses.push(`lower(${messageAlias}.id) LIKE ?`);
+  }
+  const where = `${params.where} AND (${clauses.join(" OR ")})`;
+  if (hasIdQuery) {
+    const pattern = `%${idQuery.toLowerCase()}%`;
+    params.args.push(pattern, pattern, pattern);
+  }
+  return {
+    where,
+    hasQuery,
+    hasIdQuery,
+    hasAttachmentFilenameQuery
   };
 }
 
@@ -2540,14 +2630,11 @@ async function getGroupCounts(params: {
   const db = await getAccountDb(accountId);
   const accountEmail = await getAccountEmail(accountId);
 
-  const { ftsQuery, fromTerms, toTerms, inTerms, inviteUidTerms, rawQuery } = parseSearchInput(
+  const { ftsTokenQueries, fromTerms, toTerms, inTerms, inviteUidTerms, rawQuery, attachmentFilenameTerms } = parseSearchInput(
     query,
     fields,
     accountEmail
   );
-  const hasQuery = Boolean(ftsQuery);
-  const idQuery = rawQuery.trim();
-  const hasIdQuery = Boolean(idQuery);
   const baseWhere = `m.accountId = ? ${folderId ? "AND m.folderId = ?" : ""}`;
   const args: any[] = [accountId];
   if (folderId) args.push(folderId);
@@ -2586,25 +2673,13 @@ async function getGroupCounts(params: {
       where += " AND 0 = 1";
     }
   }
-  if (hasQuery || hasIdQuery) {
-    const clauses: string[] = [];
-    if (hasQuery) {
-      clauses.push(
-        "m.id IN (SELECT messageId FROM message_fts WHERE message_fts MATCH ?)"
-      );
-    }
-    if (hasIdQuery) {
-      clauses.push("lower(m.messageId) LIKE ?");
-      clauses.push("lower(m.threadId) LIKE ?");
-      clauses.push("lower(m.id) LIKE ?");
-    }
-    where += ` AND (${clauses.join(" OR ")})`;
-    if (hasQuery) args.push(ftsQuery);
-    if (hasIdQuery) {
-      const pattern = `%${idQuery.toLowerCase()}%`;
-      args.push(pattern, pattern, pattern);
-    }
-  }
+  where = applySearchQueryFilters({
+    where,
+    args,
+    ftsTokenQueries,
+    rawQuery,
+    attachmentFilenameTerms
+  }).where;
   inviteUidTerms.forEach(() => {
     where += ` AND EXISTS (
       SELECT 1
@@ -2763,14 +2838,11 @@ async function getTotalCount(params: {
     params;
   const accountEmail = await getAccountEmail(accountId);
 
-  const { ftsQuery, fromTerms, toTerms, inTerms, inviteUidTerms, rawQuery } = parseSearchInput(
+  const { ftsTokenQueries, fromTerms, toTerms, inTerms, inviteUidTerms, rawQuery, attachmentFilenameTerms } = parseSearchInput(
     query,
     fields,
     accountEmail
   );
-  const hasQuery = Boolean(ftsQuery);
-  const idQuery = rawQuery.trim();
-  const hasIdQuery = Boolean(idQuery);
   const baseWhere = `m.accountId = ? ${folderId ? "AND m.folderId = ?" : ""}`;
   const args: any[] = [accountId];
   if (folderId) args.push(folderId);
@@ -2809,25 +2881,13 @@ async function getTotalCount(params: {
       where += " AND 0 = 1";
     }
   }
-  if (hasQuery || hasIdQuery) {
-    const clauses: string[] = [];
-    if (hasQuery) {
-      clauses.push(
-        "m.id IN (SELECT messageId FROM message_fts WHERE message_fts MATCH ?)"
-      );
-    }
-    if (hasIdQuery) {
-      clauses.push("lower(m.messageId) LIKE ?");
-      clauses.push("lower(m.threadId) LIKE ?");
-      clauses.push("lower(m.id) LIKE ?");
-    }
-    where += ` AND (${clauses.join(" OR ")})`;
-    if (hasQuery) args.push(ftsQuery);
-    if (hasIdQuery) {
-      const pattern = `%${idQuery.toLowerCase()}%`;
-      args.push(pattern, pattern, pattern);
-    }
-  }
+  where = applySearchQueryFilters({
+    where,
+    args,
+    ftsTokenQueries,
+    rawQuery,
+    attachmentFilenameTerms
+  }).where;
   inviteUidTerms.forEach(() => {
     where += ` AND EXISTS (
       SELECT 1
@@ -3254,15 +3314,12 @@ export async function listMessages(params: {
   const offset = (page - 1) * pageSize;
   const accountEmail = await getAccountEmail(accountId);
 
-  const { ftsQuery, fromTerms, toTerms, inTerms, inviteUidTerms, rawQuery } = parseSearchInput(
+  const { ftsTokenQueries, fromTerms, toTerms, inTerms, inviteUidTerms, rawQuery, attachmentFilenameTerms } = parseSearchInput(
     query,
     fields,
     accountEmail
   );
-  const hasQuery = Boolean(ftsQuery);
   const hasInviteUidQuery = inviteUidTerms.length > 0;
-  const idQuery = rawQuery.trim();
-  const hasIdQuery = Boolean(idQuery);
   const baseWhere = `m.accountId = ? ${folderId ? "AND m.folderId = ?" : ""}`;
   const args: any[] = [accountId];
   if (folderId) args.push(folderId);
@@ -3301,25 +3358,17 @@ export async function listMessages(params: {
       where += " AND 0 = 1";
     }
   }
-  if (hasQuery || hasIdQuery) {
-    const clauses: string[] = [];
-    if (hasQuery) {
-      clauses.push(
-        "m.id IN (SELECT messageId FROM message_fts WHERE message_fts MATCH ?)"
-      );
-    }
-    if (hasIdQuery) {
-      clauses.push("lower(m.messageId) LIKE ?");
-      clauses.push("lower(m.threadId) LIKE ?");
-      clauses.push("lower(m.id) LIKE ?");
-    }
-    where += ` AND (${clauses.join(" OR ")})`;
-    if (hasQuery) args.push(ftsQuery);
-    if (hasIdQuery) {
-      const pattern = `%${idQuery.toLowerCase()}%`;
-      args.push(pattern, pattern, pattern);
-    }
-  }
+  const searchQueryState = applySearchQueryFilters({
+    where,
+    args,
+    ftsTokenQueries,
+    rawQuery,
+    attachmentFilenameTerms
+  });
+  where = searchQueryState.where;
+  const hasQuery = searchQueryState.hasQuery;
+  const hasIdQuery = searchQueryState.hasIdQuery;
+  const hasAttachmentFilenameQuery = searchQueryState.hasAttachmentFilenameQuery;
   inviteUidTerms.forEach(() => {
     where += ` AND EXISTS (
       SELECT 1
@@ -3342,6 +3391,7 @@ export async function listMessages(params: {
     !hasQuery &&
     !hasInviteUidQuery &&
     !hasIdQuery &&
+    !hasAttachmentFilenameQuery &&
     fromTerms.length === 0 &&
     toTerms.length === 0 &&
     inTerms.length === 0 &&
@@ -3492,15 +3542,12 @@ export async function listThreads(params: {
   const offset = (page - 1) * pageSize;
   const accountEmail = await getAccountEmail(accountId);
 
-  const { ftsQuery, fromTerms, toTerms, inTerms, inviteUidTerms, rawQuery } = parseSearchInput(
+  const { ftsTokenQueries, fromTerms, toTerms, inTerms, inviteUidTerms, rawQuery, attachmentFilenameTerms } = parseSearchInput(
     query,
     fields,
     accountEmail
   );
-  const hasQuery = Boolean(ftsQuery);
   const hasInviteUidQuery = inviteUidTerms.length > 0;
-  const idQuery = rawQuery.trim();
-  const hasIdQuery = Boolean(idQuery);
   const baseWhere = `m.accountId = ? ${folderId ? "AND m.folderId = ?" : ""}`;
   const args: any[] = [accountId];
   if (folderId) args.push(folderId);
@@ -3539,25 +3586,17 @@ export async function listThreads(params: {
       where += " AND 0 = 1";
     }
   }
-  if (hasQuery || hasIdQuery) {
-    const clauses: string[] = [];
-    if (hasQuery) {
-      clauses.push(
-        "m.id IN (SELECT messageId FROM message_fts WHERE message_fts MATCH ?)"
-      );
-    }
-    if (hasIdQuery) {
-      clauses.push("lower(m.messageId) LIKE ?");
-      clauses.push("lower(m.threadId) LIKE ?");
-      clauses.push("lower(m.id) LIKE ?");
-    }
-    where += ` AND (${clauses.join(" OR ")})`;
-    if (hasQuery) args.push(ftsQuery);
-    if (hasIdQuery) {
-      const pattern = `%${idQuery.toLowerCase()}%`;
-      args.push(pattern, pattern, pattern);
-    }
-  }
+  const searchQueryState = applySearchQueryFilters({
+    where,
+    args,
+    ftsTokenQueries,
+    rawQuery,
+    attachmentFilenameTerms
+  });
+  where = searchQueryState.where;
+  const hasQuery = searchQueryState.hasQuery;
+  const hasIdQuery = searchQueryState.hasIdQuery;
+  const hasAttachmentFilenameQuery = searchQueryState.hasAttachmentFilenameQuery;
   inviteUidTerms.forEach(() => {
     where += ` AND EXISTS (
       SELECT 1
@@ -3584,6 +3623,7 @@ export async function listThreads(params: {
     !hasQuery &&
     !hasInviteUidQuery &&
     !hasIdQuery &&
+    !hasAttachmentFilenameQuery &&
     fromTerms.length === 0 &&
     toTerms.length === 0 &&
     inTerms.length === 0 &&
@@ -3594,6 +3634,7 @@ export async function listThreads(params: {
     !hasQuery &&
     !hasInviteUidQuery &&
     !hasIdQuery &&
+    !hasAttachmentFilenameQuery &&
     fromTerms.length === 0 &&
     toTerms.length === 0 &&
     inTerms.length === 0 &&
