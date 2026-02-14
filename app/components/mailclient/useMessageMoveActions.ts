@@ -4,6 +4,7 @@ import type React from "react";
 import { useCallback } from "react";
 import type { Message } from "@/lib/data";
 import type { SelectionStore } from "./messagelist/selectionStore";
+import { getMessageSubjectForNotice, remapMessageReferenceIds } from "./utils/messageMutation";
 
 export type UndoMoveTarget = {
   messageId: string;
@@ -98,36 +99,6 @@ export function useMessageMoveActions({
   onMoveComplete,
   markMessagesMutated
 }: UseMessageMoveActionsOptions) {
-  const remapMessageReferenceIds = useCallback(
-    (message: Message, previousId: string, nextId: string): Message => {
-      if (!previousId || !nextId || previousId === nextId) return message;
-      const encodedPrevious = encodeURIComponent(previousId);
-      const encodedNext = encodeURIComponent(nextId);
-      const replaceMessageId = (value?: string) => {
-        if (!value) return value;
-        return value
-          .split(`messageId=${encodedPrevious}`)
-          .join(`messageId=${encodedNext}`)
-          .split(`messageId=${previousId}`)
-          .join(`messageId=${nextId}`);
-      };
-      return {
-        ...message,
-        body: replaceMessageId(message.body) ?? message.body,
-        htmlBody: replaceMessageId(message.htmlBody),
-        attachments: message.attachments?.map((attachment) => ({
-          ...attachment,
-          url: replaceMessageId(attachment.url)
-        }))
-      };
-    },
-    []
-  );
-
-  const getMessageSubjectForNotice = useCallback(
-    (message?: Message | null) => message?.subject?.trim() || "(no subject)",
-    []
-  );
 
   const clearSelectionState = useCallback(() => {
     selectionStore.clearSelection();

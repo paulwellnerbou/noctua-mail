@@ -975,6 +975,78 @@ async function persistMailboxHighestUid(params: {
   });
 }
 
+/**
+ * Validates that mailbox_state.highestUid doesn't exceed the actual latest message UID.
+ * Fixes any mismatches found to prevent sync gaps.
+ */
+async function validateAndFixMailboxHighestUid(
+  account: Account,
+  folderId: string,
+  mailboxPath: string
+): Promise<void> {
+  const [mailboxState, actualLatestUid] = await Promise.all([
+    getMailboxState(account.id, folderId),
+    getLatestMessageUid(account.id, mailboxPath)
+  ]);
+
+  const stateHighestUid = mailboxState?.highestUid ?? null;
+
+  // If state says we have messages but DB is empty, reset
+  if (stateHighestUid !== null && actualLatestUid === null) {
+    await saveMailboxState({
+      accountId: account.id,
+      folderId,
+      mailboxPath,
+      uidValidity: mailboxState?.uidValidity ?? null,
+      highestModSeq: mailboxState?.highestModSeq ?? null,
+      highestUid: null,
+      supportsQresync: mailboxState?.supportsQresync ?? null
+    });
+    const logger = getImapLogger();
+    if (logger !== false) {
+      logger.warn?.({
+        op: "fix-uid-mismatch-reset",
+        accountId: account.id,
+        folderId,
+        mailboxPath,
+        stateHighestUid,
+        actualLatestUid: null
+      });
+    }
+    return;
+  }
+
+  // If state has higher UID than actual messages, fix it
+  if (
+    stateHighestUid !== null &&
+    actualLatestUid !== null &&
+    stateHighestUid > actualLatestUid
+  ) {
+    await saveMailboxState({
+      accountId: account.id,
+      folderId,
+      mailboxPath,
+      uidValidity: mailboxState?.uidValidity ?? null,
+      highestModSeq: mailboxState?.highestModSeq ?? null,
+      highestUid: actualLatestUid,
+      supportsQresync: mailboxState?.supportsQresync ?? null
+    });
+
+    const logger = getImapLogger();
+    if (logger !== false) {
+      logger.warn?.({
+        op: "fix-uid-mismatch",
+        accountId: account.id,
+        folderId,
+        mailboxPath,
+        stateHighestUid,
+        actualLatestUid,
+        gap: stateHighestUid - actualLatestUid
+      });
+    }
+  }
+}
+
 export async function planImapNewSyncFolders(
   account: Account,
   folderIds: string[],
@@ -1043,15 +1115,8 @@ export async function planImapNewSyncFolders(
         } else {
           const startUid = highestKnownUid + 1;
           const skip = uidNext <= startUid;
-          if (skip) {
-            await persistMailboxHighestUid({
-              account,
-              folderId,
-              mailboxPath,
-              highestUid: Math.max(highestKnownUid, uidNext - 1),
-              uidValidity: (status as { uidValidity?: unknown })?.uidValidity
-            });
-          }
+          // Don't update highestUid during planning - only after actual sync
+          // This prevents gaps when sync fails or is interrupted
           decision = {
             folderId,
             mailboxPath,
@@ -1209,13 +1274,8 @@ async function resolveNewModeRange(params: {
 
   const startUid = highestKnownUid === null ? 1 : highestKnownUid + 1;
   if (uidNext !== null && uidNext <= startUid) {
-    await persistMailboxHighestUid({
-      account: params.account,
-      folderId,
-      mailboxPath: params.mailboxPath,
-      highestUid: Math.max(startUid - 1, uidNext - 1),
-      uidValidity: params.mailboxUidValidity
-    });
+    // Don't update highestUid during range decision - only after actual sync
+    // This prevents gaps when sync fails or is interrupted
     return {
       startUid,
       uidNext,
@@ -1282,6 +1342,10 @@ export async function* syncImapAccountBatched(
       : undefined;
   const mailboxUidNext = toFiniteNumber((mailbox as { uidNext?: unknown })?.uidNext);
   const mailboxUidValidity = (mailbox as { uidValidity?: unknown })?.uidValidity;
+
+  // Validate and fix any existing UID mismatches before syncing
+  const folderId = buildFolderId(account.id, mailboxToOpen);
+  await validateAndFixMailboxHighestUid(account, folderId, mailboxToOpen);
 
   const fetchQuery = {
     source: true,
@@ -1429,14 +1493,19 @@ export async function* syncImapAccountBatched(
     const finalBatch = flushBatch(true);
     if (finalBatch) yield finalBatch;
 
-    if (typeof newRange.uidNext === "number") {
-      await persistMailboxHighestUid({
-        account,
-        folderId: buildFolderId(account.id, mailboxToOpen),
-        mailboxPath: mailboxToOpen,
-        highestUid: Math.max(newRange.startUid - 1, newRange.uidNext - 1),
-        uidValidity: mailboxUidValidity
-      });
+    // Only update highestUid if we actually processed messages
+    // Use the actual latest UID from the database, not server's uidNext
+    if (totalProcessed > 0) {
+      const actualLatestUid = await getLatestMessageUid(account.id, mailboxToOpen);
+      if (actualLatestUid !== null) {
+        await persistMailboxHighestUid({
+          account,
+          folderId: buildFolderId(account.id, mailboxToOpen),
+          mailboxPath: mailboxToOpen,
+          highestUid: actualLatestUid,
+          uidValidity: mailboxUidValidity
+        });
+      }
     }
 
     await logImapOp("logout", { ...logContext }, () => client.logout());
@@ -1524,6 +1593,10 @@ export async function syncImapAccount(
   );
   const mailboxUidNext = toFiniteNumber((mailbox as { uidNext?: unknown })?.uidNext);
   const mailboxUidValidity = (mailbox as { uidValidity?: unknown })?.uidValidity;
+
+  // Validate and fix any existing UID mismatches before syncing
+  const folderId = buildFolderId(account.id, mailboxToOpen);
+  await validateAndFixMailboxHighestUid(account, folderId, mailboxToOpen);
 
   const messages: Message[] = [];
   const now = new Date();
@@ -1623,14 +1696,19 @@ export async function syncImapAccount(
         ms: Date.now() - start
       });
     }
-    if (typeof newRange.uidNext === "number") {
-      await persistMailboxHighestUid({
-        account,
-        folderId: buildFolderId(account.id, mailboxToOpen),
-        mailboxPath: mailboxToOpen,
-        highestUid: Math.max(newRange.startUid - 1, newRange.uidNext - 1),
-        uidValidity: mailboxUidValidity
-      });
+    // Only update highestUid if we actually processed messages
+    // Use the actual latest UID from the database, not server's uidNext
+    if (count > 0) {
+      const actualLatestUid = await getLatestMessageUid(account.id, mailboxToOpen);
+      if (actualLatestUid !== null) {
+        await persistMailboxHighestUid({
+          account,
+          folderId: buildFolderId(account.id, mailboxToOpen),
+          mailboxPath: mailboxToOpen,
+          highestUid: actualLatestUid,
+          uidValidity: mailboxUidValidity
+        });
+      }
     }
     await logImapOp("logout", { ...logContext }, () => client.logout());
     return { messages, folders };

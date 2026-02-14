@@ -5,6 +5,7 @@ import { useCallback } from "react";
 import type { Folder, Message } from "@/lib/data";
 import type { SelectionStore } from "./messagelist/selectionStore";
 import type { MoveMessagesToFolder, UndoMoveTarget } from "./useMessageMoveActions";
+import { getMessageSubjectForNotice } from "./utils/messageMutation";
 
 type DeleteResponse = {
   action: "deleted" | "moved";
@@ -109,10 +110,6 @@ export function useMessageDeleteActions({
     [isTrashFolder]
   );
 
-  const getMessageSubjectForNotice = useCallback(
-    (message?: Message | null) => message?.subject?.trim() || "(no subject)",
-    []
-  );
 
   const clearSelectionState = useCallback(() => {
     selectionStore.clearSelection();
