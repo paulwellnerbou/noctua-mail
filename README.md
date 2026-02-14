@@ -27,17 +27,24 @@ Discover connections across your inbox with related mails. When viewing any emai
 - **Subject similarity** – Find conversations on similar topics
 - **Sender/Recipient overlap** – Track communications with the same people
 - **Thread references** – Follow email chains using In-Reply-To and References headers
+- **Calendar invite UID matches** – Find invitation updates/cancellations tied to the same event
 
-Access via the "Show related" option in the message action menu or search with `related:<mail-id>`.
+Access via the "Show related" option in the message action menu or search with `related:<mail-id>`. For calendar invites, use `invite:<uid>` (or `event:<uid>`) to find related invitation mails.
 
 ### 🧵 Thread View Across Folders
 Unified conversation threading that works **across all folders**. Whether emails are in Inbox, Sent, or any other folder, Noctua Mail intelligently groups them into cohesive threads. Collapse and expand conversations with ease, maintaining context no matter where messages are stored.
+
+### 🎯 Workflow Views
+Built-in virtual folders keep triage fast and actionable:
+- **Focused** – Prioritized inbox view for what matters now
+- **Action Queue** – Messages that are flagged, marked TODO, or marked done
+- **Invite Deck** – Calendar invitation-focused view with unread/total counters
 
 ### ⏰ Calendar Invite Reminders
 Schedule reminders directly from ICS invites and get desktop/system notifications at the right time:
 - **Per-invite reminder controls** – Schedule, modify, and delete reminders from the invite preview
 - **Recurring invite support** – Reminder timing follows recurring event rules (`RRULE` + exceptions)
-- **Cross-client persistence** – Reminders are stored in the account database and visible across clients
+- **Automatic invite update handling** – Reminder records are updated/removed when invite updates or cancellations arrive
 - **Offline-aware delivery** – PWA/service worker delivery with local cache and due-lookback handling
 
 ### 🔐 IMAP-Only Authentication
@@ -55,6 +62,7 @@ Simple, secure authentication using your existing IMAP credentials. No separate 
 - **Attachments** – Inline display and downloadable files
 - **Calendar invites** – Display ICS details (full calendar support in progress 📅)
 - **Calendar reminders** – Schedule notifications for invite events, including recurring meetings
+- **Automatic invite updates** – Apply invite changes/cancellations to existing reminder data
 
 ### 🎨 UI
 - **Three-pane layout** – Folders, message list, and message view
@@ -64,11 +72,13 @@ Simple, secure authentication using your existing IMAP credentials. No separate 
 - **Responsive design** – Resizable panes with independent scrolling
 - **Per-message text scaling** – Adjust font size (or zoom for HTML) for individual messages
 - **Virtualized lists** ⚡ – Blazing-fast display of thousands of emails
+- **Workflow folders** – Focused, Action Queue, and Invite Deck virtual views
 
 ### 🔍 Powerful Search
 - **Full-text search** powered by SQLite FTS5
 - **Field filtering** – Search by `from:` (even `from:me`), `to:`, `subject:`, and more
 - **Related mail search** – Find connected conversations with `related:<mail-id>`
+- **Invitation mail search** – Find invite-related mails via `invite:<uid>` (or `event:<uid>`)
 - **Search across all folders** – Or narrow down to specific folders
 
 ### 💬 Smart Threading

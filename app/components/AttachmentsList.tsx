@@ -22,9 +22,24 @@ const PREVIEW_MIME_TYPES = new Set([
   "text/markdown"
 ]);
 
-const canPreview = (contentType?: string) => {
-  if (!contentType) return false;
-  const lower = contentType.toLowerCase();
+const getFileExtension = (filename?: string) => {
+  return filename?.split(".").pop()?.toLowerCase() ?? "";
+};
+
+const normalizeMimeType = (contentType?: string) => {
+  return contentType?.split(";")[0]?.toLowerCase().trim() ?? "";
+};
+
+const isPdfAttachment = (contentType?: string, filename?: string) => {
+  const lower = normalizeMimeType(contentType);
+  const ext = getFileExtension(filename);
+  return lower === "application/pdf" || (lower === "application/octet-stream" && ext === "pdf");
+};
+
+export const canPreviewAttachment = (contentType?: string, filename?: string) => {
+  if (!contentType && !filename) return false;
+  if (isPdfAttachment(contentType, filename)) return true;
+  const lower = normalizeMimeType(contentType);
   if (PREVIEW_MIME_TYPES.has(lower)) return true;
   return PREVIEW_MIME_PREFIXES.some((prefix) => lower.startsWith(prefix));
 };
@@ -36,14 +51,14 @@ const isImage = (contentType?: string) => {
 const getFileIcon = (contentType?: string, filename?: string) => {
   if (!contentType && !filename) return File;
 
-  const lower = contentType?.toLowerCase() || "";
-  const ext = filename?.split(".").pop()?.toLowerCase() || "";
+  const lower = normalizeMimeType(contentType);
+  const ext = getFileExtension(filename);
 
   // Images
   if (lower.startsWith("image/")) return FileImage;
 
   // PDFs and Documents
-  if (lower === "application/pdf" || ext === "pdf") return FileText;
+  if (isPdfAttachment(contentType, filename) || ext === "pdf") return FileText;
   if (lower.includes("word") || lower.includes("document") ||
       ["doc", "docx", "odt", "rtf"].includes(ext)) return FileText;
 
@@ -120,7 +135,7 @@ export default function AttachmentsList({
                   </span>
                 </span>
               </a>
-            {canPreview(file.contentType) && (file.url || file.dataUrl) && (
+            {canPreviewAttachment(file.contentType, file.filename) && (file.url || file.dataUrl) && (
               <a
                 className="icon-button ghost attachment-preview"
                 href={file.url ?? file.dataUrl ?? "#"}
