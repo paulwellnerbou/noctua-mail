@@ -158,4 +158,6 @@ export type InviteCode = {
   maxUses: number | null;
   uses: number;
   expiresAt: number | null;
+  createdAt: number;
+  usedByUserId?: string | null;
 };

@@ -103,7 +103,7 @@ import TopBar from "./mailclient/TopBar";
 import BottomStatusBar from "./mailclient/status/BottomStatusBar";
 import { useMessageDeleteActions } from "./mailclient/useMessageDeleteActions";
 import { useMessageMoveActions, type UndoMoveTarget } from "./mailclient/useMessageMoveActions";
-import type { Account, AccountSettings, Attachment, Folder, Message } from "@/lib/data";
+import type { Account, AccountSettings, Attachment, Folder, Message, User } from "@/lib/data";
 import AccountSettingsModal, { type ManageTab } from "./AccountSettingsModal";
 import AttachmentsList from "./AttachmentsList";
 import {
@@ -162,17 +162,12 @@ import type {
   SyncJobResult
 } from "./mailclient/types";
 import { formatMessageDate, normalizeAccountDateFormat } from "@/lib/dateFormatting";
-import type { CategoryLearningDebugSnapshot } from "@/lib/mail/categorization/debugTypes";
 
-type CategoryDebugResponse = {
+type AuthMeResponse = {
   ok?: boolean;
-  snapshot?: CategoryLearningDebugSnapshot;
-  message?: string;
-};
-
-type CategoryModelResetResponse = {
-  ok?: boolean;
-  message?: string;
+  user?: User | null;
+  accountId?: string;
+  ttlSeconds?: number;
 };
 
 type DraftSavePayload = {
@@ -277,11 +272,6 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
   const [manageOpen, setManageOpen] = useState(false);
   const [manageTab, setManageTab] = useState<ManageTab>("account");
   const [editingAccount, setEditingAccount] = useState<Account | null>(null);
-  const [categorizationDebug, setCategorizationDebug] =
-    useState<CategoryLearningDebugSnapshot | null>(null);
-  const [categorizationDebugLoading, setCategorizationDebugLoading] = useState(false);
-  const [categorizationDebugError, setCategorizationDebugError] = useState("");
-  const [categorizationResetting, setCategorizationResetting] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
   const [isRecomputingThreads, setIsRecomputingThreads] = useState(false);
   const [isRecomputingCategories, setIsRecomputingCategories] = useState(false);
@@ -349,6 +339,8 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
   const [collapsedMessages, setCollapsedMessages] = useState<Record<string, boolean>>({});
   const [messageFontScale, setMessageFontScale] = useState<Record<string, number>>({});
   const [authState, setAuthState] = useState<"loading" | "ok" | "unauth">("loading");
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const isAdminUser = currentUser?.role === "admin";
   const [initialDataReady, setInitialDataReady] = useState(false);
   const [sessionTtlSeconds, setSessionTtlSeconds] = useState<number | null>(null);
   const [pendingMessageActions, setPendingMessageActions] = useState<Set<string>>(new Set());
@@ -4265,7 +4257,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     if (special === "\\sent" || folder.name.toLowerCase() === "sent") return <Send size={12} />;
     if (special === "\\drafts" || folder.name.toLowerCase() === "drafts")
       return <FileText size={12} />;
-    if (special === "\\trash" || folder.name.toLowerCase() === "trash") return <Trash2 size={12} />;
+    if (special === "\\trash") return <Trash2 size={12} />;
     if (special === "\\junk" || special === "\\spam" || folder.name.toLowerCase() === "junk")
       return <ShieldOff size={12} />;
     if (special === "\\archive" || folder.name.toLowerCase() === "archive")
@@ -4647,10 +4639,12 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
           });
           if (!me.ok) {
             setAuthState("unauth");
+            setCurrentUser(null);
             return;
           }
-          const meData = (await me.json()) as { ttlSeconds?: number; accountId?: string } | null;
+          const meData = (await me.json()) as AuthMeResponse | null;
           setAuthState("ok");
+          setCurrentUser(meData?.user ?? null);
           if (typeof meData?.ttlSeconds === "number") {
             setSessionTtlSeconds(meData.ttlSeconds);
           }
@@ -4693,6 +4687,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
         }
       } catch {
         setAuthState("unauth");
+        setCurrentUser(null);
         reportError("Failed to load mailbox data.");
       }
     },
@@ -4934,13 +4929,15 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
         if (!res.ok) {
           if (res.status === 401) {
             setAuthState("unauth");
+            setCurrentUser(null);
           }
           return;
         }
-        const data = (await res.json()) as { ttlSeconds?: number } | null;
+        const data = (await res.json()) as AuthMeResponse | null;
         if (typeof data?.ttlSeconds === "number") {
           setSessionTtlSeconds(data.ttlSeconds);
         }
+        setCurrentUser(data?.user ?? null);
       } catch {
         // ignore refresh errors
       }
@@ -5660,10 +5657,6 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     setManageTab("account");
     setImapProbe(null);
     setSmtpProbe(null);
-    setCategorizationDebug(null);
-    setCategorizationDebugError("");
-    setCategorizationDebugLoading(false);
-    setCategorizationResetting(false);
     setImapDetecting(false);
     setSmtpDetecting(false);
     setImapSecurity(
@@ -5749,80 +5742,6 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
       reportError(await readErrorMessage(refreshed));
     }
   };
-
-  const loadCategorizationDebug = useCallback(
-    async (accountId: string) => {
-      setCategorizationDebugLoading(true);
-      setCategorizationDebugError("");
-      try {
-        const res = await apiFetch(
-          `/api/categories/debug?accountId=${encodeURIComponent(accountId)}&limit=20`
-        );
-        if (!res.ok) {
-          setCategorizationDebugError(await readErrorMessage(res));
-          return;
-        }
-        const data = (await res.json()) as CategoryDebugResponse;
-        if (!data?.ok || !data.snapshot) {
-          setCategorizationDebugError(data?.message || "Invalid categorization debug response.");
-          return;
-        }
-        setCategorizationDebug(data.snapshot);
-      } catch {
-        setCategorizationDebugError("Failed to load categorization debug data.");
-      } finally {
-        setCategorizationDebugLoading(false);
-      }
-    },
-    [apiFetch, readErrorMessage]
-  );
-
-  const resetCategorizationModel = useCallback(
-    async (accountId: string) => {
-      const confirmed = window.confirm(
-        "Reset the categorization learning model for this account to the default baseline?"
-      );
-      if (!confirmed) return;
-      setCategorizationResetting(true);
-      setCategorizationDebugError("");
-      try {
-        const res = await apiFetch("/api/categories/model/reset", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ accountId })
-        });
-        if (!res.ok) {
-          setCategorizationDebugError(await readErrorMessage(res));
-          return;
-        }
-        const data = (await res.json()) as CategoryModelResetResponse;
-        if (!data?.ok) {
-          setCategorizationDebugError(data?.message || "Failed to reset categorization model.");
-          return;
-        }
-        pushNotice({
-          type: "success",
-          title: "Categorization model reset",
-          description: "Default baseline model restored for this account."
-        });
-        await loadCategorizationDebug(accountId);
-      } catch {
-        setCategorizationDebugError("Failed to reset categorization model.");
-      } finally {
-        setCategorizationResetting(false);
-      }
-    },
-    [apiFetch, loadCategorizationDebug, pushNotice, readErrorMessage]
-  );
-
-  useEffect(() => {
-    const accountId = editingAccount?.id;
-    const accountExists = accountId ? accounts.some((account) => account.id === accountId) : false;
-    if (!manageOpen || manageTab !== "categorization" || !accountExists || !accountId) {
-      return;
-    }
-    void loadCategorizationDebug(accountId);
-  }, [manageOpen, manageTab, accounts, editingAccount?.id, loadCategorizationDebug]);
 
   const updateEditingSettings = (next: AccountSettings) => {
     if (!editingAccount) return;
@@ -7335,6 +7254,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
           setMessages([]);
           setFolders([]);
           setAccounts([]);
+          setCurrentUser(null);
           setInitialDataReady(false);
           setMessagesPage(1);
           setHasMoreMessages(true);
@@ -7345,10 +7265,11 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
               cache: "no-store"
             });
             if (res.ok) {
-              const data = (await res.json()) as { ttlSeconds?: number; accountId?: string } | null;
+              const data = (await res.json()) as AuthMeResponse | null;
               if (typeof data?.ttlSeconds === "number") {
                 setSessionTtlSeconds(data.ttlSeconds);
               }
+              setCurrentUser(data?.user ?? null);
               setAuthState("ok");
               await loadInitialData({
                 skipAuthCheck: true,
@@ -7356,9 +7277,11 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
                   typeof data?.accountId === "string" ? data.accountId : null
               });
             } else {
+              setCurrentUser(null);
               setAuthState("unauth");
             }
           } catch {
+            setCurrentUser(null);
             setAuthState("unauth");
           }
         }}
@@ -7854,18 +7777,16 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
           onUpdateAccount={setEditingAccount}
           onUpdateSettings={updateEditingSettings}
           onRunProbe={runProbe}
-          categorizationDebug={categorizationDebug}
-          categorizationLoading={categorizationDebugLoading}
-          categorizationError={categorizationDebugError}
-          categorizationResetting={categorizationResetting}
-          onRefreshCategorization={() => {
-            if (!editingAccount?.id) return;
-            void loadCategorizationDebug(editingAccount.id);
+          isAdminUser={isAdminUser}
+          onNotifySuccess={(title, description) => {
+            pushNotice({
+              type: "success",
+              title,
+              description
+            });
           }}
-          onResetCategorizationModel={() => {
-            if (!editingAccount?.id) return;
-            void resetCategorizationModel(editingAccount.id);
-          }}
+          apiFetch={apiFetch}
+          readErrorMessage={readErrorMessage}
         />
       )}
 

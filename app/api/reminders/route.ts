@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import {
+  clearCalendarReminders,
   getAccountById,
   deleteCalendarReminderByEvent,
   deleteCalendarReminderById,
@@ -125,6 +126,7 @@ export async function DELETE(request: Request) {
   if (session instanceof NextResponse) return session;
   const payload = (await request.json()) as {
     accountId?: string;
+    clearAll?: boolean;
     reminderId?: string;
     eventUid?: string;
     eventTitle?: string;
@@ -138,6 +140,11 @@ export async function DELETE(request: Request) {
   if (access instanceof NextResponse) return access;
   if (!(await ensureAccountExists(accountId))) {
     return NextResponse.json({ ok: false, message: "Account not found" }, { status: 404 });
+  }
+
+  if (payload.clearAll === true) {
+    const cleared = await clearCalendarReminders(accountId, session.userId);
+    return NextResponse.json({ ok: true, cleared });
   }
 
   if (payload.reminderId?.trim()) {

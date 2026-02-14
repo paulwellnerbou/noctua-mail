@@ -28,6 +28,7 @@ import {
   CALENDAR_MIME_HINTS,
   CRYPTO_SIGNATURE_FILENAME_EXTENSIONS,
   CRYPTO_SIGNATURE_MIME_HINTS,
+  isCalendarAttachment,
   MIN_VISIBLE_ATTACHMENT_SIZE_BYTES,
   TODO_FLAG,
   DONE_FLAG,
@@ -37,6 +38,9 @@ import { normalizeAccountDateFormat } from "./dateFormatting";
 import { withDbWriteRetry } from "./dbWriteRetry";
 import { randomUUID } from "crypto";
 import { normalizeReminderDateList, resolveNextReminderOccurrence } from "./reminderRecurrence";
+import { collectCalendarReminderMutationsFromCalendarInvite } from "./calendarReminderMutations";
+import type { CalendarReminderMutation } from "./calendarReminderMutations";
+import { getAttachmentContentBuffer } from "./mail/syncMessageSanitizer";
 import {
   CATEGORY_KEYS,
   createSeededLinearModel,
@@ -53,6 +57,7 @@ let masterInitialized = false;
 const accountDbInstances = new Map<string, any>();
 const accountDbInitialized = new Set<string>();
 const accountDbIdleTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const calendarReminderSchemaEnsuredByDb = new WeakSet<object>();
 const ACCOUNT_DB_IDLE_MS = (() => {
   const raw = process.env.ACCOUNT_DB_IDLE_MS?.trim();
   if (!raw) return 60 * 60 * 1000;
@@ -72,6 +77,7 @@ function ensureCalendarReminderTableSchema(db: any) {
       userId TEXT NOT NULL,
       messageId TEXT,
       eventUid TEXT,
+      eventUidKey TEXT,
       eventTitle TEXT NOT NULL,
       eventLocation TEXT,
       eventDescription TEXT,
@@ -93,6 +99,40 @@ function ensureCalendarReminderTableSchema(db: any) {
     CREATE INDEX IF NOT EXISTS idx_calendar_reminders_account_user_updated
       ON calendar_reminders(accountId, userId, updatedAtMs DESC);
   `);
+}
+
+function getDbTableColumns(db: any, tableName: string) {
+  return new Set(
+    (db.prepare(`PRAGMA table_info(${tableName})`).all() as Array<{ name?: string }>).map((row) =>
+      String(row.name ?? "")
+    )
+  );
+}
+
+function ensureCalendarReminderOptionalColumns(db: any) {
+  const reminderColumns = getDbTableColumns(db, "calendar_reminders");
+  if (reminderColumns.size === 0) return;
+  if (!reminderColumns.has("eventEndAtMs")) {
+    db.prepare(`ALTER TABLE calendar_reminders ADD COLUMN eventEndAtMs INTEGER`).run();
+  }
+  if (!reminderColumns.has("eventDescription")) {
+    db.prepare(`ALTER TABLE calendar_reminders ADD COLUMN eventDescription TEXT`).run();
+  }
+  const hadEventUidKey = reminderColumns.has("eventUidKey");
+  if (!hadEventUidKey) {
+    db.prepare(`ALTER TABLE calendar_reminders ADD COLUMN eventUidKey TEXT`).run();
+  }
+  backfillCalendarReminderEventUidKeys(db);
+  db.prepare(
+    `CREATE INDEX IF NOT EXISTS idx_calendar_reminders_account_user_uid_key
+     ON calendar_reminders(accountId, userId, eventUidKey)`
+  ).run();
+}
+
+function ensureCalendarReminderRuntimeSchema(db: any) {
+  if (calendarReminderSchemaEnsuredByDb.has(db)) return;
+  ensureCalendarReminderOptionalColumns(db);
+  calendarReminderSchemaEnsuredByDb.add(db);
 }
 
 async function ensureDatabaseCtor() {
@@ -210,7 +250,18 @@ function mapInviteRow(row: any): InviteCode {
     role: row.role,
     maxUses: row.maxUses === null ? null : Number(row.maxUses),
     uses: row.uses ?? 0,
-    expiresAt: row.expiresAt === null ? null : Number(row.expiresAt)
+    expiresAt: row.expiresAt === null ? null : Number(row.expiresAt),
+    createdAt: Number(row.createdAt ?? 0),
+    usedByUserId: row.usedByUserId ?? null
+  };
+}
+
+function mapUserRow(row: any): User {
+  return {
+    id: row.id,
+    email: row.email,
+    role: row.role === "admin" ? "admin" : "user",
+    createdAt: Number(row.createdAt ?? 0)
   };
 }
 
@@ -220,14 +271,21 @@ function createAdminInvite(db: any): InviteCode {
     role: "admin",
     maxUses: 1,
     uses: 0,
-    expiresAt: null
+    expiresAt: null,
+    createdAt: Date.now(),
+    usedByUserId: null
   };
-  db.prepare(`INSERT INTO invite_codes (code, role, maxUses, uses, expiresAt) VALUES (?, ?, ?, ?, ?)`).run(
+  db.prepare(
+    `INSERT INTO invite_codes (code, role, maxUses, uses, expiresAt, createdAt, usedByUserId)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`
+  ).run(
     adminInvite.code,
     adminInvite.role,
     adminInvite.maxUses,
     adminInvite.uses,
-    adminInvite.expiresAt
+    adminInvite.expiresAt,
+    adminInvite.createdAt,
+    adminInvite.usedByUserId
   );
   return adminInvite;
 }
@@ -235,7 +293,7 @@ function createAdminInvite(db: any): InviteCode {
 function getUsableAdminInvite(db: any): InviteCode | null {
   const row = db
     .prepare(
-      `SELECT code, role, maxUses, uses, expiresAt
+      `SELECT code, role, maxUses, uses, expiresAt, createdAt, usedByUserId
        FROM invite_codes
        WHERE role = 'admin'
          AND (expiresAt IS NULL OR expiresAt >= ?)
@@ -292,9 +350,24 @@ function initMasterSchema(db: any) {
       role TEXT NOT NULL,
       maxUses INTEGER,
       uses INTEGER DEFAULT 0,
-      expiresAt INTEGER
+      expiresAt INTEGER,
+      createdAt INTEGER NOT NULL,
+      usedByUserId TEXT
     );
   `);
+
+  const inviteColumns = new Set(
+    (db.prepare(`PRAGMA table_info(invite_codes)`).all() as Array<{ name?: string }>).map((row) =>
+      String(row.name ?? "")
+    )
+  );
+  if (!inviteColumns.has("createdAt")) {
+    db.prepare(`ALTER TABLE invite_codes ADD COLUMN createdAt INTEGER`).run();
+    db.prepare(`UPDATE invite_codes SET createdAt = ? WHERE createdAt IS NULL`).run(Date.now());
+  }
+  if (!inviteColumns.has("usedByUserId")) {
+    db.prepare(`ALTER TABLE invite_codes ADD COLUMN usedByUserId TEXT`).run();
+  }
 
   const userCount = db.prepare(`SELECT COUNT(*) as count FROM users`).get() as { count: number };
   if (userCount.count === 0) {
@@ -417,6 +490,7 @@ function initAccountSchema(db: any) {
       userId TEXT NOT NULL,
       messageId TEXT,
       eventUid TEXT,
+      eventUidKey TEXT,
       eventTitle TEXT NOT NULL,
       eventLocation TEXT,
       eventDescription TEXT,
@@ -487,11 +561,7 @@ function initAccountSchema(db: any) {
     ).run();
   }
 
-  const reminderColumns = new Set(
-    (db.prepare(`PRAGMA table_info(calendar_reminders)`).all() as Array<{ name?: string }>).map(
-      (row) => String(row.name ?? "")
-    )
-  );
+  const reminderColumns = getDbTableColumns(db, "calendar_reminders");
   if (reminderColumns.size > 0) {
     const requiredColumns = [
       "id",
@@ -512,14 +582,8 @@ function initAccountSchema(db: any) {
     const requiresRecreate = requiredColumns.some((column) => !reminderColumns.has(column));
     if (requiresRecreate) {
       ensureCalendarReminderTableSchema(db);
-    } else {
-      if (!reminderColumns.has("eventEndAtMs")) {
-        db.prepare(`ALTER TABLE calendar_reminders ADD COLUMN eventEndAtMs INTEGER`).run();
-      }
-      if (!reminderColumns.has("eventDescription")) {
-        db.prepare(`ALTER TABLE calendar_reminders ADD COLUMN eventDescription TEXT`).run();
-      }
     }
+    ensureCalendarReminderOptionalColumns(db);
   }
 }
 
@@ -573,6 +637,7 @@ async function getAccountDb(accountId: string) {
     initAccountSchema(accountDb);
     accountDbInitialized.add(dbPath);
   }
+  ensureCalendarReminderRuntimeSchema(accountDb);
   scheduleAccountDbIdleClose(dbPath);
   return accountDb;
 }
@@ -782,15 +847,14 @@ function normalizeAccountSettings(settings?: AccountSettings) {
 export async function getUsers() {
   const db = await getDb();
   const rows = db.prepare(`SELECT * FROM users`).all() as any[];
-  return rows.map(
-    (row) =>
-      ({
-        id: row.id,
-        email: row.email,
-        role: row.role,
-        createdAt: row.createdAt
-      }) as User
-  );
+  return rows.map(mapUserRow);
+}
+
+export async function getUserById(userId: string) {
+  const db = await getDb();
+  const row = db.prepare(`SELECT * FROM users WHERE id = ?`).get(userId) as any;
+  if (!row) return null;
+  return mapUserRow(row);
 }
 
 export async function saveUsers(users: User[]) {
@@ -857,16 +921,68 @@ export async function getInviteCodes() {
   return rows.map(mapInviteRow);
 }
 
+export async function createInviteCode(options?: {
+  role?: InviteCode["role"];
+  maxUses?: number | null;
+  expiresAt?: number | null;
+}) {
+  return withDbWriteRetry("createInviteCode", async () => {
+    const db = await getDb();
+    const maxUses =
+      options?.maxUses === undefined
+        ? 1
+        : options.maxUses === null
+          ? null
+          : Math.max(1, Math.floor(options.maxUses));
+    const expiresAt =
+      typeof options?.expiresAt === "number" && Number.isFinite(options.expiresAt)
+        ? Math.floor(options.expiresAt)
+        : null;
+    const invite: InviteCode = {
+      code: randomUUID(),
+      role: options?.role === "admin" ? "admin" : "user",
+      maxUses,
+      uses: 0,
+      expiresAt,
+      createdAt: Date.now(),
+      usedByUserId: null
+    };
+    db.prepare(
+      `INSERT INTO invite_codes (code, role, maxUses, uses, expiresAt, createdAt, usedByUserId)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      invite.code,
+      invite.role,
+      invite.maxUses,
+      invite.uses,
+      invite.expiresAt,
+      invite.createdAt,
+      invite.usedByUserId
+    );
+    return invite;
+  });
+}
+
 export async function saveInviteCodes(items: InviteCode[]) {
   return withDbWriteRetry("saveInviteCodes", async () => {
     const db = await getDb();
     const insert = db.prepare(
-      `INSERT OR REPLACE INTO invite_codes (code, role, maxUses, uses, expiresAt) VALUES (?, ?, ?, ?, ?)`
+      `INSERT OR REPLACE INTO invite_codes
+       (code, role, maxUses, uses, expiresAt, createdAt, usedByUserId)
+       VALUES (?, ?, ?, ?, ?, ?, ?)`
     );
     db.transaction(() => {
       db.exec(`DELETE FROM invite_codes`);
       items.forEach((it) =>
-        insert.run(it.code, it.role, it.maxUses, it.uses, it.expiresAt)
+        insert.run(
+          it.code,
+          it.role,
+          it.maxUses,
+          it.uses,
+          it.expiresAt,
+          Number.isFinite(it.createdAt) ? Math.floor(it.createdAt) : 0,
+          it.usedByUserId ?? null
+        )
       );
     })();
   });
@@ -1285,6 +1401,44 @@ function normalizeReminderEventUid(uid?: string) {
   return value ? value : null;
 }
 
+function normalizeReminderEventUidKey(uid?: string | null) {
+  const normalizedUid = normalizeReminderEventUid(uid ?? undefined)?.toLowerCase() ?? "";
+  if (!normalizedUid) return null;
+  const atIndex = normalizedUid.indexOf("@");
+  const localPart = atIndex >= 0 ? normalizedUid.slice(0, atIndex) : normalizedUid;
+  const domainPart = atIndex >= 0 ? normalizedUid.slice(atIndex) : "";
+  const strippedLocalPart = localPart.replace(/_r\d{8}t\d{6}z?$/i, "");
+  const key = `${strippedLocalPart || localPart}${domainPart}`.trim();
+  return key || null;
+}
+
+function backfillCalendarReminderEventUidKeys(db: any) {
+  const rows = db
+    .prepare(
+      `SELECT id, eventUid
+       FROM calendar_reminders
+       WHERE COALESCE(eventUid, '') <> ''
+         AND COALESCE(eventUidKey, '') = ''`
+    )
+    .all() as Array<{ id?: string | null; eventUid?: string | null }>;
+  if (rows.length === 0) return;
+  const updateStatement = db.prepare(
+    `UPDATE calendar_reminders
+     SET eventUidKey = ?
+     WHERE id = ?`
+  );
+  const runUpdate = db.transaction((items: Array<{ id?: string | null; eventUid?: string | null }>) => {
+    items.forEach((row) => {
+      const reminderId = (row.id ?? "").trim();
+      if (!reminderId) return;
+      const eventUidKey = normalizeReminderEventUidKey(row.eventUid ?? undefined);
+      if (!eventUidKey) return;
+      updateStatement.run(eventUidKey, reminderId);
+    });
+  });
+  runUpdate(rows);
+}
+
 export async function listCalendarReminders(accountId: string, userId: string) {
   const db = await getAccountDb(accountId);
   const nowMs = Date.now();
@@ -1302,138 +1456,93 @@ export async function listCalendarReminders(accountId: string, userId: string) {
     .sort((a, b) => a.triggerAtMs - b.triggerAtMs);
 }
 
-export async function upsertCalendarReminder(
+function upsertCalendarReminderWithDb(
+  db: any,
   accountId: string,
   userId: string,
   input: UpsertCalendarReminderInput
 ) {
-  return withDbWriteRetry("upsertCalendarReminder", async () => {
-    const db = await getAccountDb(accountId);
-    const now = Date.now();
-    const eventUid = normalizeReminderEventUid(input.eventUid);
-    const inputId = input.id?.trim() || null;
-    const messageId =
-      typeof input.messageId === "string" && input.messageId.trim()
-        ? input.messageId.trim()
-        : null;
-    const eventTitle = normalizeReminderEventTitle(input.eventTitle);
-    const eventLocation = input.eventLocation?.trim() || null;
-    const eventDescription = input.eventDescription?.trim() || null;
-    const eventStartAtMs = Number(input.eventStartAtMs);
-    const eventEndAtMsRaw = Number(input.eventEndAtMs);
-    const eventEndAtMs =
-      Number.isFinite(eventEndAtMsRaw) && eventEndAtMsRaw > 0 ? Math.round(eventEndAtMsRaw) : null;
-    const startTimezone = normalizeReminderTimezone(input.startTimezone);
-    const recurrenceRule = normalizeReminderRecurrenceRule(input.recurrenceRule);
-    const recurrenceDates = normalizeReminderDateList(input.recurrenceDates);
-    const excludedDates = normalizeReminderDateList(input.excludedDates);
-    const leadMinutes = Math.max(0, Number(input.leadMinutes));
-    const leadLabel = String(input.leadLabel ?? "").trim();
+  const now = Date.now();
+  const eventUid = normalizeReminderEventUid(input.eventUid);
+  const eventUidKey = normalizeReminderEventUidKey(eventUid);
+  const inputId = input.id?.trim() || null;
+  const messageId =
+    typeof input.messageId === "string" && input.messageId.trim()
+      ? input.messageId.trim()
+      : null;
+  const eventTitle = normalizeReminderEventTitle(input.eventTitle);
+  const eventLocation = input.eventLocation?.trim() || null;
+  const eventDescription = input.eventDescription?.trim() || null;
+  const eventStartAtMs = Number(input.eventStartAtMs);
+  const eventEndAtMsRaw = Number(input.eventEndAtMs);
+  const eventEndAtMs =
+    Number.isFinite(eventEndAtMsRaw) && eventEndAtMsRaw > 0 ? Math.round(eventEndAtMsRaw) : null;
+  const startTimezone = normalizeReminderTimezone(input.startTimezone);
+  const recurrenceRule = normalizeReminderRecurrenceRule(input.recurrenceRule);
+  const recurrenceDates = normalizeReminderDateList(input.recurrenceDates);
+  const excludedDates = normalizeReminderDateList(input.excludedDates);
+  const leadMinutes = Math.max(0, Number(input.leadMinutes));
+  const leadLabel = String(input.leadLabel ?? "").trim();
 
-    if (!Number.isFinite(eventStartAtMs) || eventStartAtMs <= 0) {
-      throw new Error("Invalid eventStartAtMs");
-    }
-    if (input.eventEndAtMs !== undefined && eventEndAtMs === null) {
-      throw new Error("Invalid eventEndAtMs");
-    }
-    if (!Number.isFinite(leadMinutes)) {
-      throw new Error("Invalid leadMinutes");
-    }
-    if (!leadLabel) {
-      throw new Error("Invalid leadLabel");
-    }
+  if (!Number.isFinite(eventStartAtMs) || eventStartAtMs <= 0) {
+    throw new Error("Invalid eventStartAtMs");
+  }
+  if (input.eventEndAtMs !== undefined && eventEndAtMs === null) {
+    throw new Error("Invalid eventEndAtMs");
+  }
+  if (!Number.isFinite(leadMinutes)) {
+    throw new Error("Invalid leadMinutes");
+  }
+  if (!leadLabel) {
+    throw new Error("Invalid leadLabel");
+  }
 
-    const matchingRows = eventUid
-      ? (db
-          .prepare(
-            `SELECT id, createdAtMs, messageId
-             FROM calendar_reminders
-             WHERE accountId = ? AND userId = ? AND deletedAtMs IS NULL
-               AND (
-                 lower(COALESCE(eventUid, '')) = lower(?)
-                 OR (
-                   eventStartAtMs = ?
-                   AND lower(eventTitle) = lower(?)
-                 )
-               )
-             ORDER BY createdAtMs ASC`
-          )
-          .all(accountId, userId, eventUid, eventStartAtMs, eventTitle) as Array<{
-          id: string;
-          createdAtMs: number;
-          messageId?: string | null;
-        }>)
-      : (db
-          .prepare(
-            `SELECT id, createdAtMs, messageId
-             FROM calendar_reminders
-             WHERE accountId = ? AND userId = ? AND deletedAtMs IS NULL
-               AND eventStartAtMs = ?
-               AND lower(eventTitle) = lower(?)
-             ORDER BY createdAtMs ASC`
-          )
-          .all(accountId, userId, eventStartAtMs, eventTitle) as Array<{
-          id: string;
-          createdAtMs: number;
-          messageId?: string | null;
-        }>);
-
-    const primaryRow = matchingRows[0];
-    if (primaryRow) {
-      const nextMessageId = messageId ?? (primaryRow.messageId ? String(primaryRow.messageId) : null);
-      db.prepare(
-        `UPDATE calendar_reminders
-         SET messageId = ?, eventUid = ?, eventTitle = ?, eventLocation = ?, eventDescription = ?, eventStartAtMs = ?, eventEndAtMs = ?, startTimezone = ?, recurrenceRule = ?, recurrenceDates = ?, excludedDates = ?, leadMinutes = ?, leadLabel = ?, updatedAtMs = ?, deletedAtMs = NULL
-         WHERE id = ?`
-      ).run(
-        nextMessageId,
-        eventUid,
-        eventTitle,
-        eventLocation,
-        eventDescription,
-        eventStartAtMs,
-        eventEndAtMs,
-        startTimezone,
-        recurrenceRule,
-        serializeReminderDateList(recurrenceDates),
-        serializeReminderDateList(excludedDates),
-        leadMinutes,
-        leadLabel,
-        now,
-        primaryRow.id
-      );
-      if (matchingRows.length > 1) {
-        const duplicateIds = matchingRows.slice(1).map((row) => row.id);
-        db.prepare(
-          `UPDATE calendar_reminders
-           SET deletedAtMs = ?
-           WHERE id IN (${duplicateIds.map(() => "?").join(",")})`
-        ).run(now, ...duplicateIds);
-      }
-      const row = db
+  const matchingRows = eventUid
+    ? (db
         .prepare(
-          `SELECT id, accountId, userId, messageId, eventUid, eventTitle, eventLocation, eventDescription, eventStartAtMs, eventEndAtMs, startTimezone, recurrenceRule, recurrenceDates, excludedDates, leadMinutes, leadLabel, createdAtMs, updatedAtMs
+          `SELECT id, createdAtMs, messageId
            FROM calendar_reminders
-           WHERE id = ?`
+           WHERE accountId = ? AND userId = ? AND deletedAtMs IS NULL
+             AND (
+               lower(COALESCE(eventUidKey, eventUid, '')) = lower(?)
+               OR (
+                 eventStartAtMs = ?
+                 AND lower(eventTitle) = lower(?)
+               )
+             )
+           ORDER BY createdAtMs ASC`
         )
-        .get(primaryRow.id) as any;
-      return {
-        reminder: mapCalendarReminderRow(row, { allowPastFallback: true })!,
-        replaced: true
-      };
-    }
+        .all(accountId, userId, eventUidKey, eventStartAtMs, eventTitle) as Array<{
+        id: string;
+        createdAtMs: number;
+        messageId?: string | null;
+      }>)
+    : (db
+        .prepare(
+          `SELECT id, createdAtMs, messageId
+           FROM calendar_reminders
+           WHERE accountId = ? AND userId = ? AND deletedAtMs IS NULL
+             AND eventStartAtMs = ?
+             AND lower(eventTitle) = lower(?)
+           ORDER BY createdAtMs ASC`
+        )
+        .all(accountId, userId, eventStartAtMs, eventTitle) as Array<{
+        id: string;
+        createdAtMs: number;
+        messageId?: string | null;
+      }>);
 
-    const id = inputId ?? randomUUID();
+  const primaryRow = matchingRows[0];
+  if (primaryRow) {
+    const nextMessageId = messageId ?? (primaryRow.messageId ? String(primaryRow.messageId) : null);
     db.prepare(
-      `INSERT INTO calendar_reminders (
-         id, accountId, userId, messageId, eventUid, eventTitle, eventLocation, eventDescription, eventStartAtMs, eventEndAtMs, startTimezone, recurrenceRule, recurrenceDates, excludedDates, leadMinutes, leadLabel, createdAtMs, updatedAtMs, deletedAtMs
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`
+      `UPDATE calendar_reminders
+       SET messageId = ?, eventUid = ?, eventUidKey = ?, eventTitle = ?, eventLocation = ?, eventDescription = ?, eventStartAtMs = ?, eventEndAtMs = ?, startTimezone = ?, recurrenceRule = ?, recurrenceDates = ?, excludedDates = ?, leadMinutes = ?, leadLabel = ?, updatedAtMs = ?, deletedAtMs = NULL
+       WHERE id = ?`
     ).run(
-      id,
-      accountId,
-      userId,
-      messageId,
+      nextMessageId,
       eventUid,
+      eventUidKey,
       eventTitle,
       eventLocation,
       eventDescription,
@@ -1446,20 +1555,393 @@ export async function upsertCalendarReminder(
       leadMinutes,
       leadLabel,
       now,
-      now
+      primaryRow.id
     );
+    if (matchingRows.length > 1) {
+      const duplicateIds = matchingRows.slice(1).map((row) => row.id);
+      db.prepare(
+        `UPDATE calendar_reminders
+         SET deletedAtMs = ?
+         WHERE id IN (${duplicateIds.map(() => "?").join(",")})`
+      ).run(now, ...duplicateIds);
+    }
     const row = db
       .prepare(
         `SELECT id, accountId, userId, messageId, eventUid, eventTitle, eventLocation, eventDescription, eventStartAtMs, eventEndAtMs, startTimezone, recurrenceRule, recurrenceDates, excludedDates, leadMinutes, leadLabel, createdAtMs, updatedAtMs
          FROM calendar_reminders
          WHERE id = ?`
       )
-      .get(id) as any;
+      .get(primaryRow.id) as any;
     return {
       reminder: mapCalendarReminderRow(row, { allowPastFallback: true })!,
-      replaced: false
+      replaced: true
     };
+  }
+
+  const id = inputId ?? randomUUID();
+  db.prepare(
+    `INSERT INTO calendar_reminders (
+       id, accountId, userId, messageId, eventUid, eventUidKey, eventTitle, eventLocation, eventDescription, eventStartAtMs, eventEndAtMs, startTimezone, recurrenceRule, recurrenceDates, excludedDates, leadMinutes, leadLabel, createdAtMs, updatedAtMs, deletedAtMs
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`
+  ).run(
+    id,
+    accountId,
+    userId,
+    messageId,
+    eventUid,
+    eventUidKey,
+    eventTitle,
+    eventLocation,
+    eventDescription,
+    eventStartAtMs,
+    eventEndAtMs,
+    startTimezone,
+    recurrenceRule,
+    serializeReminderDateList(recurrenceDates),
+    serializeReminderDateList(excludedDates),
+    leadMinutes,
+    leadLabel,
+    now,
+    now
+  );
+  const row = db
+    .prepare(
+      `SELECT id, accountId, userId, messageId, eventUid, eventTitle, eventLocation, eventDescription, eventStartAtMs, eventEndAtMs, startTimezone, recurrenceRule, recurrenceDates, excludedDates, leadMinutes, leadLabel, createdAtMs, updatedAtMs
+       FROM calendar_reminders
+       WHERE id = ?`
+    )
+    .get(id) as any;
+  return {
+    reminder: mapCalendarReminderRow(row, { allowPastFallback: true })!,
+    replaced: false
+  };
+}
+
+export async function upsertCalendarReminder(
+  accountId: string,
+  userId: string,
+  input: UpsertCalendarReminderInput
+) {
+  return withDbWriteRetry("upsertCalendarReminder", async () => {
+    const db = await getAccountDb(accountId);
+    return upsertCalendarReminderWithDb(db, accountId, userId, input);
   });
+}
+
+type AutomaticCalendarReminderSourceMessage = {
+  eventUid: string;
+  eventUidKey: string;
+  rowMessageId: string;
+  messageId?: string | null;
+  hasSource?: number | null;
+  dateValue?: number | null;
+};
+
+export type AutomaticCalendarReminderCreationResult = {
+  scannedEventUids: number;
+  created: number;
+  updated: number;
+  skippedExistingUid: number;
+  skippedCanceled: number;
+  skippedNoSource: number;
+  skippedNoInviteData: number;
+  skippedNoFutureEvent: number;
+};
+
+const AUTO_REMINDER_EXCLUDED_TRASH_SPECIAL_USES = new Set(["\\trash"]);
+const AUTO_REMINDER_EXCLUDED_SPAM_SPECIAL_USES = new Set(["\\junk", "\\spam"]);
+const AUTO_REMINDER_EXCLUDED_ARCHIVE_SPECIAL_USES = new Set(["\\archive"]);
+const AUTO_REMINDER_EXCLUDED_TRASH_KEYWORDS = [
+  "trash",
+  "deleted",
+  "bin",
+  "wastebasket",
+  "papierkorb"
+];
+const AUTO_REMINDER_EXCLUDED_SPAM_KEYWORDS = ["junk", "spam", "bulk"];
+const AUTO_REMINDER_EXCLUDED_ARCHIVE_KEYWORDS = ["archive", "archiv"];
+
+function getAutomaticReminderExcludedFolderIds(db: any, accountId: string) {
+  const folders = db
+    .prepare(`SELECT id, name, specialUse FROM folders WHERE accountId = ?`)
+    .all(accountId) as Array<{ id: string; name?: string | null; specialUse?: string | null }>;
+  return folders
+    .filter((folder) => {
+      const special = (folder.specialUse ?? "").trim().toLowerCase();
+      if (
+        AUTO_REMINDER_EXCLUDED_TRASH_SPECIAL_USES.has(special) ||
+        AUTO_REMINDER_EXCLUDED_SPAM_SPECIAL_USES.has(special) ||
+        AUTO_REMINDER_EXCLUDED_ARCHIVE_SPECIAL_USES.has(special)
+      ) {
+        return true;
+      }
+      const name = (folder.name ?? "").trim().toLowerCase();
+      const id = folder.id.toLowerCase();
+      const matchesTrash = AUTO_REMINDER_EXCLUDED_TRASH_KEYWORDS.some(
+        (keyword) => name.includes(keyword) || id.includes(keyword)
+      );
+      if (matchesTrash) return true;
+      const matchesSpam = AUTO_REMINDER_EXCLUDED_SPAM_KEYWORDS.some(
+        (keyword) => name.includes(keyword) || id.includes(keyword)
+      );
+      if (matchesSpam) return true;
+      return AUTO_REMINDER_EXCLUDED_ARCHIVE_KEYWORDS.some(
+        (keyword) => name.includes(keyword) || id.includes(keyword)
+      );
+    })
+    .map((folder) => folder.id);
+}
+
+function listLatestCalendarReminderSourceMessages(
+  db: any,
+  accountId: string,
+  excludedFolderIds: string[]
+) {
+  const filters: string[] = [
+    "mce.accountId = ?",
+    "COALESCE(m.deleted, 0) = 0",
+    "COALESCE(mce.eventUid, '') <> ''"
+  ];
+  const args: any[] = [accountId];
+  if (excludedFolderIds.length > 0) {
+    filters.push(`m.folderId NOT IN (${excludedFolderIds.map(() => "?").join(",")})`);
+    args.push(...excludedFolderIds);
+  }
+  const rows = db
+    .prepare(
+      `SELECT eventUid, rowMessageId, messageId, hasSource, dateValue
+       FROM (
+         SELECT lower(mce.eventUid) AS eventUid,
+                m.id AS rowMessageId,
+                m.messageId AS messageId,
+                m.hasSource AS hasSource,
+                m.dateValue AS dateValue,
+                ROW_NUMBER() OVER (
+                  PARTITION BY lower(mce.eventUid)
+                  ORDER BY m.dateValue DESC, m.id DESC
+                ) AS rankIndex
+         FROM message_calendar_events mce
+         JOIN messages m
+           ON m.accountId = mce.accountId
+          AND m.id = mce.messageId
+         WHERE ${filters.join(" AND ")}
+       ) ranked
+       WHERE rankIndex = 1`
+    )
+    .all(...args) as AutomaticCalendarReminderSourceMessage[];
+  const dedupedByEventUidKey = new Map<string, AutomaticCalendarReminderSourceMessage>();
+  rows.forEach((row) => {
+    const eventUid = normalizeCalendarEventUid(row.eventUid) ?? "";
+    if (!eventUid || !row.rowMessageId) return;
+    const eventUidKey = normalizeReminderEventUidKey(eventUid) ?? eventUid;
+    const dateValue = Number(row.dateValue ?? 0);
+    const nextRow: AutomaticCalendarReminderSourceMessage = {
+      eventUid,
+      eventUidKey,
+      rowMessageId: row.rowMessageId,
+      messageId: row.messageId ?? null,
+      hasSource: row.hasSource ?? null,
+      dateValue
+    };
+    const existing = dedupedByEventUidKey.get(eventUidKey);
+    if (!existing) {
+      dedupedByEventUidKey.set(eventUidKey, nextRow);
+      return;
+    }
+    const existingDateValue = Number(existing.dateValue ?? 0);
+    if (dateValue > existingDateValue) {
+      dedupedByEventUidKey.set(eventUidKey, nextRow);
+      return;
+    }
+    if (dateValue === existingDateValue && row.rowMessageId > existing.rowMessageId) {
+      dedupedByEventUidKey.set(eventUidKey, nextRow);
+    }
+  });
+  return Array.from(dedupedByEventUidKey.values());
+}
+
+function listExistingCalendarReminderUids(db: any, accountId: string, userId: string) {
+  const rows = db
+    .prepare(
+      `SELECT lower(COALESCE(eventUidKey, eventUid)) AS eventUid
+       FROM calendar_reminders
+       WHERE accountId = ? AND userId = ? AND deletedAtMs IS NULL
+         AND COALESCE(eventUidKey, eventUid, '') <> ''`
+    )
+    .all(accountId, userId) as Array<{ eventUid?: string | null }>;
+  return new Set(
+    rows
+      .map((row) => normalizeReminderEventUidKey(row.eventUid))
+      .filter((uid): uid is string => Boolean(uid))
+  );
+}
+
+function hasFutureReminderOccurrence(
+  mutation: Extract<CalendarReminderMutation, { kind: "update" }>,
+  nowMs: number
+) {
+  const next = resolveNextReminderOccurrence(
+    {
+      eventStartAtMs: mutation.eventStartAtMs,
+      leadMinutes: 0,
+      startTimezone: mutation.startTimezone,
+      recurrenceRule: mutation.recurrenceRule,
+      recurrenceDates: mutation.recurrenceDates,
+      excludedDates: mutation.excludedDates
+    },
+    nowMs
+  );
+  return Boolean(next && next.eventStartAtMs > nowMs);
+}
+
+async function collectCalendarReminderMutationsByEventUidFromSource(
+  source: string,
+  messageId?: string | null
+) {
+  const mutationsByUid = new Map<string, CalendarReminderMutation>();
+  if (!source.trim()) return mutationsByUid;
+  try {
+    const parsed = await simpleParser(source);
+    const parsedAttachments = (parsed.attachments ?? []) as Attachment[];
+    parsedAttachments.forEach((attachment) => {
+      if (!isCalendarAttachment(attachment)) return;
+      const attachmentBuffer = getAttachmentContentBuffer(attachment);
+      if (!attachmentBuffer) return;
+      const calendarMutations = collectCalendarReminderMutationsFromCalendarInvite(
+        attachmentBuffer.toString("utf8"),
+        messageId
+      );
+      calendarMutations.forEach((mutation) => {
+        const eventUidKey = normalizeReminderEventUidKey(mutation.eventUid);
+        if (!eventUidKey) return;
+        mutationsByUid.set(eventUidKey, mutation);
+      });
+    });
+  } catch {
+    return mutationsByUid;
+  }
+  return mutationsByUid;
+}
+
+export async function autoCreateCalendarRemindersFromInvites(
+  accountId: string,
+  userId: string,
+  input: { leadMinutes: number; leadLabel: string }
+): Promise<AutomaticCalendarReminderCreationResult> {
+  const leadMinutes = Number(input.leadMinutes);
+  const leadLabel = String(input.leadLabel ?? "").trim();
+  if (!Number.isFinite(leadMinutes) || leadMinutes < 0) {
+    throw new Error("Invalid leadMinutes");
+  }
+  if (!leadLabel) {
+    throw new Error("Invalid leadLabel");
+  }
+  const nowMs = Date.now();
+  const db = await getAccountDb(accountId);
+  const excludedFolderIds = getAutomaticReminderExcludedFolderIds(db, accountId);
+  const latestRows = listLatestCalendarReminderSourceMessages(db, accountId, excludedFolderIds);
+  const result: AutomaticCalendarReminderCreationResult = {
+    scannedEventUids: latestRows.length,
+    created: 0,
+    updated: 0,
+    skippedExistingUid: 0,
+    skippedCanceled: 0,
+    skippedNoSource: 0,
+    skippedNoInviteData: 0,
+    skippedNoFutureEvent: 0
+  };
+  if (latestRows.length === 0) {
+    return result;
+  }
+
+  const { getMessageSource } = await import("./storage");
+  const mutationCacheByRowMessageId = new Map<string, Map<string, CalendarReminderMutation>>();
+  const upsertInputs: UpsertCalendarReminderInput[] = [];
+  const existingReminderUids = listExistingCalendarReminderUids(db, accountId, userId);
+
+  for (const row of latestRows) {
+    if (!row.hasSource) {
+      result.skippedNoSource += 1;
+      continue;
+    }
+    let mutationsForMessage = mutationCacheByRowMessageId.get(row.rowMessageId);
+    if (!mutationsForMessage) {
+      const source = await getMessageSource(accountId, row.rowMessageId);
+      if (!source) {
+        result.skippedNoSource += 1;
+        continue;
+      }
+      mutationsForMessage = await collectCalendarReminderMutationsByEventUidFromSource(
+        source,
+        row.messageId
+      );
+      mutationCacheByRowMessageId.set(row.rowMessageId, mutationsForMessage);
+    }
+    const mutation = mutationsForMessage.get(row.eventUidKey);
+    if (!mutation) {
+      result.skippedNoInviteData += 1;
+      continue;
+    }
+    if (mutation.kind === "cancel") {
+      result.skippedCanceled += 1;
+      continue;
+    }
+    if (!hasFutureReminderOccurrence(mutation, nowMs)) {
+      result.skippedNoFutureEvent += 1;
+      continue;
+    }
+    const mutationUidKey = normalizeReminderEventUidKey(mutation.eventUid);
+    if (!mutationUidKey) {
+      result.skippedNoInviteData += 1;
+      continue;
+    }
+    if (existingReminderUids.has(mutationUidKey)) {
+      result.skippedExistingUid += 1;
+      continue;
+    }
+    upsertInputs.push({
+      messageId: row.messageId ?? undefined,
+      eventUid: mutation.eventUid,
+      eventTitle: mutation.eventTitle,
+      eventLocation: mutation.eventLocation,
+      eventDescription: mutation.eventDescription,
+      startTimezone: mutation.startTimezone,
+      recurrenceRule: mutation.recurrenceRule,
+      recurrenceDates: mutation.recurrenceDates,
+      excludedDates: mutation.excludedDates,
+      eventStartAtMs: mutation.eventStartAtMs,
+      eventEndAtMs: mutation.eventEndAtMs,
+      leadMinutes,
+      leadLabel
+    });
+    existingReminderUids.add(mutationUidKey);
+  }
+
+  if (upsertInputs.length === 0) {
+    return result;
+  }
+
+  const writeSummary = await withDbWriteRetry("autoCreateCalendarRemindersFromInvites", async () => {
+    const writableDb = await getAccountDb(accountId);
+    let created = 0;
+    let updated = 0;
+    const applyBatch = writableDb.transaction((batch: UpsertCalendarReminderInput[]) => {
+      batch.forEach((item) => {
+        const upserted = upsertCalendarReminderWithDb(writableDb, accountId, userId, item);
+        if (upserted.replaced) {
+          updated += 1;
+        } else {
+          created += 1;
+        }
+      });
+    });
+    applyBatch(upsertInputs);
+    return { created, updated };
+  });
+  result.created = writeSummary.created;
+  result.updated = writeSummary.updated;
+
+  return result;
 }
 
 export async function deleteCalendarReminderById(accountId: string, userId: string, reminderId: string) {
@@ -1498,14 +1980,21 @@ export async function deleteCalendarReminderByEvent(
              SET deletedAtMs = ?
              WHERE accountId = ? AND userId = ? AND deletedAtMs IS NULL
                AND (
-                 lower(COALESCE(eventUid, '')) = lower(?)
+                 lower(COALESCE(eventUidKey, eventUid, '')) = lower(?)
                  OR (
                    eventStartAtMs = ?
                    AND lower(eventTitle) = lower(?)
                  )
                )`
           )
-          .run(now, accountId, userId, eventUid, eventStartAtMs, eventTitle) as { changes?: number })
+          .run(
+            now,
+            accountId,
+            userId,
+            normalizeReminderEventUidKey(eventUid),
+            eventStartAtMs,
+            eventTitle
+          ) as { changes?: number })
       : (db
           .prepare(
             `UPDATE calendar_reminders
@@ -1517,6 +2006,21 @@ export async function deleteCalendarReminderByEvent(
           .run(now, accountId, userId, eventStartAtMs, eventTitle) as { changes?: number });
 
     return (result?.changes ?? 0) > 0;
+  });
+}
+
+export async function clearCalendarReminders(accountId: string, userId: string) {
+  return withDbWriteRetry("clearCalendarReminders", async () => {
+    const db = await getAccountDb(accountId);
+    const now = Date.now();
+    const result = db
+      .prepare(
+        `UPDATE calendar_reminders
+         SET deletedAtMs = ?, updatedAtMs = ?
+         WHERE accountId = ? AND userId = ? AND deletedAtMs IS NULL`
+      )
+      .run(now, now, accountId, userId) as { changes?: number };
+    return result?.changes ?? 0;
   });
 }
 
@@ -1541,7 +2045,8 @@ export async function rescheduleCalendarRemindersByEventUid(
   return withDbWriteRetry("rescheduleCalendarRemindersByEventUid", async () => {
     const db = await getAccountDb(accountId);
     const normalizedUid = eventUid.trim();
-    if (!normalizedUid) return 0;
+    const normalizedUidKey = normalizeReminderEventUidKey(normalizedUid);
+    if (!normalizedUid || !normalizedUidKey) return 0;
     const eventStartAtMs = Number(input.eventStartAtMs);
     if (!Number.isFinite(eventStartAtMs) || eventStartAtMs <= 0) return 0;
     const eventEndAtMsRaw = Number(input.eventEndAtMs);
@@ -1566,6 +2071,7 @@ export async function rescheduleCalendarRemindersByEventUid(
          SET eventTitle = ?,
              eventLocation = ?,
              eventDescription = ?,
+             eventUidKey = ?,
              eventStartAtMs = ?,
              eventEndAtMs = ?,
              startTimezone = ?,
@@ -1575,12 +2081,13 @@ export async function rescheduleCalendarRemindersByEventUid(
              updatedAtMs = ?,
              messageId = COALESCE(?, messageId)
          WHERE accountId = ? AND deletedAtMs IS NULL
-           AND lower(COALESCE(eventUid, '')) = lower(?)`
+           AND lower(COALESCE(eventUidKey, eventUid, '')) = lower(?)`
       )
       .run(
         eventTitle,
         eventLocation,
         eventDescription,
+        normalizedUidKey,
         eventStartAtMs,
         eventEndAtMs,
         startTimezone,
@@ -1590,7 +2097,7 @@ export async function rescheduleCalendarRemindersByEventUid(
         now,
         messageId,
         accountId,
-        normalizedUid
+        normalizedUidKey
       ) as { changes?: number };
     return result?.changes ?? 0;
   });
@@ -1600,16 +2107,17 @@ export async function cancelCalendarRemindersByEventUid(accountId: string, event
   return withDbWriteRetry("cancelCalendarRemindersByEventUid", async () => {
     const db = await getAccountDb(accountId);
     const normalizedUid = eventUid.trim();
-    if (!normalizedUid) return 0;
+    const normalizedUidKey = normalizeReminderEventUidKey(normalizedUid);
+    if (!normalizedUid || !normalizedUidKey) return 0;
     const now = Date.now();
     const result = db
       .prepare(
         `UPDATE calendar_reminders
          SET deletedAtMs = ?, updatedAtMs = ?
          WHERE accountId = ? AND deletedAtMs IS NULL
-           AND lower(COALESCE(eventUid, '')) = lower(?)`
+           AND lower(COALESCE(eventUidKey, eventUid, '')) = lower(?)`
       )
-      .run(now, now, accountId, normalizedUid) as { changes?: number };
+      .run(now, now, accountId, normalizedUidKey) as { changes?: number };
     return result?.changes ?? 0;
   });
 }
@@ -4007,6 +4515,38 @@ export async function listMessageFileRefs(
   }));
 }
 
+export async function listMessageFileRefsByMessageIds(accountId: string, messageIds: string[]) {
+  const uniqueIds = Array.from(new Set(messageIds.map((id) => id.trim()).filter(Boolean)));
+  if (uniqueIds.length === 0) return [] as Array<{ messageId: string; attachmentIds: string[] }>;
+  const db = await getAccountDb(accountId);
+  const rows = db
+    .prepare(
+      `SELECT m.id as messageId, a.id as attachmentId
+       FROM messages m
+       LEFT JOIN attachments a ON a.messageId = m.id
+       WHERE m.accountId = ? AND m.id IN (${uniqueIds.map(() => "?").join(",")})`
+    )
+    .all(accountId, ...uniqueIds) as Array<{ messageId: string; attachmentId: string | null }>;
+
+  const refs = new Map<string, string[]>();
+  uniqueIds.forEach((id) => {
+    refs.set(id, []);
+  });
+  rows.forEach((row) => {
+    if (!refs.has(row.messageId)) {
+      refs.set(row.messageId, []);
+    }
+    if (row.attachmentId) {
+      refs.get(row.messageId)!.push(row.attachmentId);
+    }
+  });
+
+  return Array.from(refs.entries()).map(([messageId, attachmentIds]) => ({
+    messageId,
+    attachmentIds
+  }));
+}
+
 export async function getLatestMessageDate(accountId: string, mailboxPath?: string) {
   const db = await getAccountDb(accountId);
   if (mailboxPath) {
@@ -4217,6 +4757,44 @@ export async function deleteMessageById(accountId: string, messageId: string) {
     db.prepare(`DELETE FROM messages WHERE accountId = ? AND id = ?`).run(accountId, messageId);
     if (row?.threadId) {
       await recomputeThreadsForAccountInternal(accountId, [row.threadId]);
+    }
+  });
+}
+
+export async function deleteMessagesByIds(accountId: string, messageIds: string[]) {
+  const uniqueIds = Array.from(new Set(messageIds.map((id) => id.trim()).filter(Boolean)));
+  if (uniqueIds.length === 0) return;
+  return withDbWriteRetry("deleteMessagesByIds", async () => {
+    const db = await getAccountDb(accountId);
+    const placeholders = uniqueIds.map(() => "?").join(",");
+    const threadRows = db
+      .prepare(
+        `SELECT DISTINCT threadId
+         FROM messages
+         WHERE accountId = ? AND id IN (${placeholders}) AND threadId IS NOT NULL`
+      )
+      .all(accountId, ...uniqueIds) as Array<{ threadId: string }>;
+    const threadIds = threadRows.map((row) => row.threadId).filter(Boolean);
+    db.prepare(
+      `DELETE FROM attachments
+       WHERE messageId IN (
+         SELECT id FROM messages
+         WHERE accountId = ? AND id IN (${placeholders})
+       )`
+    ).run(accountId, ...uniqueIds);
+    db.prepare(
+      `DELETE FROM message_fts
+       WHERE messageId IN (
+         SELECT id FROM messages
+         WHERE accountId = ? AND id IN (${placeholders})
+       )`
+    ).run(accountId, ...uniqueIds);
+    db.prepare(`DELETE FROM messages WHERE accountId = ? AND id IN (${placeholders})`).run(
+      accountId,
+      ...uniqueIds
+    );
+    if (threadIds.length > 0) {
+      await recomputeThreadsForAccountInternal(accountId, threadIds);
     }
   });
 }

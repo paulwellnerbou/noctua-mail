@@ -1527,6 +1527,10 @@ a {
   padding-right: 2px;
 }
 
+.reminder-auto-notice {
+  margin: 8px 0 12px;
+}
+
 .popover-title-row {
   padding-bottom: 8px;
   border-bottom: 1px solid var(--gray-5);
@@ -1589,6 +1593,11 @@ a {
   border-color: var(--list-row-hover-border);
 }
 
+.reminder-item-card.is-deleting {
+  opacity: 0.6;
+  pointer-events: none;
+}
+
 .reminder-open-button {
   border: none;
   background: transparent;
@@ -1640,6 +1649,23 @@ a {
 .reminder-item-card:hover .reminder-delete-btn,
 .reminder-delete-btn:focus-visible {
   opacity: 1;
+}
+
+.reminder-item-card.is-deleting .reminder-delete-btn {
+  opacity: 1;
+}
+
+.reminder-delete-spinner {
+  animation: reminder-spin 1s linear infinite;
+}
+
+@keyframes reminder-spin {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
 }
 
 .empty-state {

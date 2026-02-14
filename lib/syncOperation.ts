@@ -11,12 +11,13 @@ import {
   saveFoldersForAccount,
   upsertMessages
 } from "@/lib/db";
-import { parseIcsInvite } from "@/lib/calendar";
+import { collectCalendarReminderMutationsFromCalendarInvite } from "@/lib/calendarReminderMutations";
 import { getAttachmentContentBuffer, sanitizeSyncedMessage } from "@/lib/mail/syncMessageSanitizer";
 import { isCalendarAttachment } from "@/lib/messageFlags";
 import { deleteMessageFiles } from "@/lib/storage";
 import { syncImapAccountBatched } from "@/lib/mail/imap";
 import type { Message } from "@/lib/data";
+import type { CalendarReminderMutation } from "@/lib/calendarReminderMutations";
 
 export type SyncPayload = {
   accountId: string;
@@ -65,64 +66,6 @@ export type SyncOperationProgress = {
 export type SyncOperationOptions = {
   onProgress?: (progress: SyncOperationProgress) => void;
 };
-
-type CalendarReminderMutation =
-  | { kind: "cancel"; eventUid: string }
-  | {
-      kind: "update";
-      eventUid: string;
-      eventTitle: string;
-      eventLocation?: string;
-      eventDescription?: string;
-      startTimezone?: string;
-      recurrenceRule?: string;
-      recurrenceDates?: number[];
-      excludedDates?: number[];
-      eventStartAtMs: number;
-      eventEndAtMs?: number;
-      messageId?: string;
-    };
-
-function collectReminderMutationsFromCalendarInvite(
-  icsSource: string,
-  messageId?: string | null
-): CalendarReminderMutation[] {
-  const parsed = parseIcsInvite(icsSource);
-  const method = parsed.method?.trim().toUpperCase() || "";
-  const mutations: CalendarReminderMutation[] = [];
-  parsed.events.forEach((event) => {
-    const eventUid = event.uid?.trim();
-    if (!eventUid) return;
-    const status = event.status?.trim().toUpperCase() || "";
-    const cancelled = method === "CANCEL" || status === "CANCELLED";
-    if (cancelled) {
-      mutations.push({ kind: "cancel", eventUid });
-      return;
-    }
-    const eventStartAtMs = event.start?.getTime();
-    if (!eventStartAtMs || !Number.isFinite(eventStartAtMs) || eventStartAtMs <= 0) {
-      return;
-    }
-    mutations.push({
-      kind: "update",
-      eventUid,
-      eventTitle: event.summary?.trim() || "Calendar event",
-      eventLocation: event.location?.trim() || undefined,
-      eventDescription: event.description?.trim() || undefined,
-      startTimezone: event.startTimezone?.trim() || undefined,
-      recurrenceRule: event.recurrenceRule?.trim() || undefined,
-      recurrenceDates: event.recurrenceDates?.map((value) => value.getTime()),
-      excludedDates: event.excludedDates?.map((value) => value.getTime()),
-      eventStartAtMs,
-      eventEndAtMs:
-        event.end && Number.isFinite(event.end.getTime()) && event.end.getTime() > 0
-          ? event.end.getTime()
-          : undefined,
-      messageId: messageId ?? undefined
-    });
-  });
-  return mutations;
-}
 
 export async function runSyncOperation(
   payload: SyncPayload,
@@ -391,7 +334,10 @@ export async function runSyncOperationBatched(
           if (!attachmentBuffer) return;
           const calendarSource = attachmentBuffer.toString("utf8");
           calendarMutations.push(
-            ...collectReminderMutationsFromCalendarInvite(calendarSource, message.messageId ?? undefined)
+            ...collectCalendarReminderMutationsFromCalendarInvite(
+              calendarSource,
+              message.messageId ?? undefined
+            )
           );
         });
       });

@@ -51,6 +51,17 @@ export type CalendarReminderEventKey = {
   eventStartAtMs: number;
 };
 
+export type AutomaticCalendarReminderCreationResult = {
+  scannedEventUids: number;
+  created: number;
+  updated: number;
+  skippedExistingUid: number;
+  skippedCanceled: number;
+  skippedNoSource: number;
+  skippedNoInviteData: number;
+  skippedNoFutureEvent: number;
+};
+
 type DeliveredReminderMap = Record<string, number>;
 
 type QueuedReminderMutation =
@@ -747,6 +758,41 @@ export async function upsertCalendarReminder(
   }
 }
 
+export async function autoCreateCalendarReminders(
+  accountId: string,
+  input: { leadMinutes: number; leadLabel: string }
+): Promise<AutomaticCalendarReminderCreationResult> {
+  const accountIdValue = accountId.trim();
+  if (!accountIdValue) {
+    throw new Error("Missing accountId");
+  }
+  const res = await fetch("/api/reminders/auto-create", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      accountId: accountIdValue,
+      leadMinutes: input.leadMinutes,
+      leadLabel: input.leadLabel
+    })
+  });
+  if (!res.ok) {
+    throw new Error(`auto reminder creation failed (${res.status})`);
+  }
+  const payload = (await res.json()) as Partial<AutomaticCalendarReminderCreationResult>;
+  await fetchRemindersFromServer(accountIdValue);
+  dispatchReminderUpdateEvent();
+  return {
+    scannedEventUids: Number(payload.scannedEventUids ?? 0) || 0,
+    created: Number(payload.created ?? 0) || 0,
+    updated: Number(payload.updated ?? 0) || 0,
+    skippedExistingUid: Number(payload.skippedExistingUid ?? 0) || 0,
+    skippedCanceled: Number(payload.skippedCanceled ?? 0) || 0,
+    skippedNoSource: Number(payload.skippedNoSource ?? 0) || 0,
+    skippedNoInviteData: Number(payload.skippedNoInviteData ?? 0) || 0,
+    skippedNoFutureEvent: Number(payload.skippedNoFutureEvent ?? 0) || 0
+  };
+}
+
 export async function deleteCalendarReminder(accountId: string, reminderId: string): Promise<boolean> {
   const current = readReminderCache(accountId);
   const local = applyLocalDeleteById(current, reminderId);
@@ -765,6 +811,33 @@ export async function deleteCalendarReminder(accountId: string, reminderId: stri
     // keep local optimistic state, queue will replay
   }
   return local.deleted;
+}
+
+export async function clearCalendarReminders(accountId: string): Promise<number> {
+  const accountIdValue = accountId.trim();
+  if (!accountIdValue) return 0;
+  writeReminderCache(accountIdValue, []);
+  writeReminderQueue(accountIdValue, []);
+  dispatchReminderUpdateEvent();
+  try {
+    const res = await fetch("/api/reminders", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        accountId: accountIdValue,
+        clearAll: true
+      })
+    });
+    if (!res.ok) {
+      throw new Error(`clear reminders failed (${res.status})`);
+    }
+    const payload = (await res.json()) as { cleared?: unknown };
+    await fetchRemindersFromServer(accountIdValue);
+    return Number(payload.cleared ?? 0) || 0;
+  } catch {
+    // optimistic clear already applied
+    return 0;
+  }
 }
 
 export async function deleteCalendarReminderForEvent(

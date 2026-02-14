@@ -74,10 +74,11 @@ export async function POST(request: Request) {
   }
 
   const userId = randomUUID();
+  const assignedRole: "admin" | "user" = users.length === 0 ? "admin" : invite.role;
   const user = {
     id: userId,
     email: account.email,
-    role: invite.role,
+    role: assignedRole,
     createdAt: Date.now()
   };
   const nextUsers = [...users, user];
@@ -98,6 +99,9 @@ export async function POST(request: Request) {
   ];
   const nextLinks = [...links, { userId, accountId }];
   invite.uses += 1;
+  if (!invite.usedByUserId) {
+    invite.usedByUserId = userId;
+  }
   const nextInvites = invites.map((i) => (i.code === invite.code ? invite : i));
 
   await Promise.all([

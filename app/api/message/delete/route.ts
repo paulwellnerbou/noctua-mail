@@ -10,51 +10,8 @@ import {
 } from "@/lib/db";
 import { deleteMessageFiles, moveMessageFiles } from "@/lib/storage";
 import { deleteImapMessage, moveImapMessage } from "@/lib/mail/imap";
-import type { Folder } from "@/lib/data";
 import { requireSessionAccountOr403, requireSessionOr401 } from "@/lib/auth";
-
-const TRASH_NAMES = [
-  "trash",
-  "deleted",
-  "deleted items",
-  "deleted messages",
-  "bin",
-  "wastebasket",
-  "papierkorb",
-  "corbeille",
-  "corbeille papier"
-];
-
-function folderMailboxPath(folder: Folder, accountId: string) {
-  if (folder.id.startsWith(`${accountId}:`)) {
-    return folder.id.slice(accountId.length + 1);
-  }
-  return folder.name;
-}
-
-function findTrashFolder(folders: Folder[], accountId: string) {
-  const candidates = folders.filter((folder) => folder.accountId === accountId);
-  const byName = candidates.find((folder) =>
-    TRASH_NAMES.includes(folder.name.trim().toLowerCase())
-  );
-  if (byName) return byName;
-  const byId = candidates.find((folder) =>
-    TRASH_NAMES.some((name) => folder.id.toLowerCase().includes(name))
-  );
-  if (byId) return byId;
-  const byPartial = candidates.find((folder) =>
-    folder.name.toLowerCase().includes("trash") || folder.name.toLowerCase().includes("deleted")
-  );
-  if (byPartial) return byPartial;
-  return null;
-}
-
-function mailboxPathFromFolderId(folderId: string, accountId: string) {
-  if (folderId.startsWith(`${accountId}:`)) {
-    return folderId.slice(accountId.length + 1);
-  }
-  return folderId;
-}
+import { findTrashFolder, folderMailboxPath, mailboxPathFromFolderId } from "./trashUtils";
 
 export async function POST(request: Request) {
   const session = requireSessionOr401(request);
@@ -85,11 +42,16 @@ export async function POST(request: Request) {
 
   const folders = await getFolders(payload.accountId);
   const trashFolder = findTrashFolder(folders, payload.accountId);
-  const trashMailbox = trashFolder
-    ? folderMailboxPath(trashFolder, payload.accountId)
-    : "Trash";
+  if (!trashFolder) {
+    return NextResponse.json({ ok: false, message: "Trash folder not found" }, { status: 400 });
+  }
+  const trashMailbox = folderMailboxPath(trashFolder, payload.accountId);
   const currentMailbox = message.mailboxPath || mailboxPathFromFolderId(message.folderId, payload.accountId);
-  const isInTrash = trashFolder ? message.folderId === trashFolder.id : currentMailbox.toLowerCase().includes("trash");
+  const delimiter = trashFolder.delimiter ?? "/";
+  const isInTrash =
+    message.folderId === trashFolder.id ||
+    currentMailbox === trashMailbox ||
+    currentMailbox.startsWith(`${trashMailbox}${delimiter}`);
 
   if (isInTrash) {
     await deleteImapMessage(account, currentMailbox, message.imapUid, clientId);

@@ -31,6 +31,7 @@ type SyncJobsRuntimeState = {
 const runtimeState = (
   globalThis as typeof globalThis & {
     __noctuaSyncJobsState?: SyncJobsRuntimeState;
+    __noctuaSyncJobsBootstrapped?: boolean;
   }
 );
 if (!runtimeState.__noctuaSyncJobsState) {
@@ -42,6 +43,23 @@ if (!runtimeState.__noctuaSyncJobsState) {
 
 const jobs = runtimeState.__noctuaSyncJobsState.jobs;
 const accountStates = runtimeState.__noctuaSyncJobsState.accountStates;
+
+if (!runtimeState.__noctuaSyncJobsBootstrapped) {
+  runtimeState.__noctuaSyncJobsBootstrapped = true;
+  const staleJobs = jobs.size;
+  const staleAccountStates = accountStates.size;
+  jobs.clear();
+  accountStates.clear();
+  if (staleJobs > 0 || staleAccountStates > 0) {
+    console.info(
+      `[sync] cleared stale runtime job state on startup ${JSON.stringify({
+        staleJobs,
+        staleAccountStates
+      })}`
+    );
+  }
+}
+
 const JOB_TTL_MS = 1000 * 60 * 30;
 const SYNC_PROGRESS_STALL_MS = Number.parseInt(
   process.env.SYNC_PROGRESS_STALL_MS ?? "",

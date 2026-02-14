@@ -13,48 +13,8 @@ import {
   unsubscribeImapFolder
 } from "@/lib/mail/imap";
 import { notifyFolderDeleted } from "@/lib/mail/imapStreamRegistry";
-import type { Folder } from "@/lib/data";
 import { requireSessionAccountOr403, requireSessionOr401 } from "@/lib/auth";
-
-const TRASH_NAMES = [
-  "trash",
-  "deleted",
-  "deleted items",
-  "deleted messages",
-  "bin",
-  "wastebasket",
-  "papierkorb",
-  "corbeille",
-  "corbeille papier"
-];
-
-function mailboxPathFromFolderId(folderId: string, accountId: string) {
-  if (folderId.startsWith(`${accountId}:`)) {
-    return folderId.slice(accountId.length + 1);
-  }
-  return folderId;
-}
-
-function findTrashFolder(folders: Folder[], accountId: string) {
-  const candidates = folders.filter((folder) => folder.accountId === accountId);
-  const bySpecial = candidates.find(
-    (folder) => (folder.specialUse ?? "").toLowerCase() === "\\trash"
-  );
-  if (bySpecial) return bySpecial;
-  const byName = candidates.find((folder) =>
-    TRASH_NAMES.includes(folder.name.trim().toLowerCase())
-  );
-  if (byName) return byName;
-  const byId = candidates.find((folder) =>
-    TRASH_NAMES.some((name) => folder.id.toLowerCase().includes(name))
-  );
-  if (byId) return byId;
-  const byPartial = candidates.find((folder) =>
-    folder.name.toLowerCase().includes("trash") ||
-    folder.name.toLowerCase().includes("deleted")
-  );
-  return byPartial ?? null;
-}
+import { findTrashFolder, mailboxPathFromFolderId } from "@/app/api/message/delete/trashUtils";
 
 export async function POST(request: Request) {
   const auth = await requireSessionOr401(request);

@@ -6,23 +6,17 @@ import type { Folder, Message } from "@/lib/data";
 import type { SelectionStore } from "./messagelist/selectionStore";
 import type { MoveMessagesToFolder, UndoMoveTarget } from "./useMessageMoveActions";
 
-const TRASH_NAMES = [
-  "trash",
-  "deleted",
-  "deleted items",
-  "deleted messages",
-  "bin",
-  "wastebasket",
-  "papierkorb",
-  "corbeille",
-  "corbeille papier"
-];
-
 type DeleteResponse = {
   action: "deleted" | "moved";
   trashFolderId?: string | null;
   messageId?: string;
   previousMessageId?: string;
+};
+
+type BulkDeleteResponse = {
+  action: "deleted";
+  deleted?: number;
+  deletedIds?: string[];
 };
 
 type DeleteNoticeInput = {
@@ -128,20 +122,7 @@ export function useMessageDeleteActions({
   const findTrashFolderId = useCallback(() => {
     const candidates = folders.filter((folder) => folder.accountId === activeAccountId);
     const bySpecialUse = candidates.find((folder) => (folder.specialUse ?? "").toLowerCase() === "\\trash");
-    if (bySpecialUse) return bySpecialUse.id;
-    const byName = candidates.find((folder) =>
-      TRASH_NAMES.includes(folder.name.trim().toLowerCase())
-    );
-    if (byName) return byName.id;
-    const byId = candidates.find((folder) =>
-      TRASH_NAMES.some((name) => folder.id.toLowerCase().includes(name))
-    );
-    if (byId) return byId.id;
-    const byPartial = candidates.find((folder) => {
-      const name = folder.name.toLowerCase();
-      return name.includes("trash") || name.includes("deleted");
-    });
-    return byPartial?.id ?? null;
+    return bySpecialUse?.id ?? null;
   }, [activeAccountId, folders]);
 
   const deleteSingleMessagePermanently = useCallback(
@@ -192,6 +173,40 @@ export function useMessageDeleteActions({
       searchScope,
       setMessages,
       shouldKeepMessageInResults
+    ]
+  );
+
+  const deleteMessagesPermanently = useCallback(
+    async (targets: Message[]) => {
+      const uniqueIds = Array.from(new Set(targets.map((target) => target.id).filter(Boolean)));
+      if (uniqueIds.length === 0) return [] as string[];
+      if (uniqueIds.length === 1) {
+        const single = targets[0];
+        const result = await deleteSingleMessagePermanently(single);
+        return result.action === "deleted" ? [single.id] : [];
+      }
+      const res = await apiFetch("/api/message/delete/bulk", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ accountId: activeAccountId, messageIds: uniqueIds })
+      });
+      if (!res.ok) {
+        const errorMessage = await readErrorMessage(res);
+        throw new Error(errorMessage || "Failed to delete messages.");
+      }
+      const data = (await res.json()) as BulkDeleteResponse;
+      const deletedIds = new Set((data.deletedIds ?? []).filter(Boolean));
+      markMessagesMutated?.();
+      setMessages((prev) => prev.filter((item) => !deletedIds.has(item.id)));
+      return uniqueIds.filter((id) => deletedIds.has(id));
+    },
+    [
+      activeAccountId,
+      apiFetch,
+      deleteSingleMessagePermanently,
+      markMessagesMutated,
+      readErrorMessage,
+      setMessages
     ]
   );
 
@@ -330,20 +345,10 @@ export function useMessageDeleteActions({
           undoTargets.push(...moveResult.undoTargets);
           removedIds.push(...moveResult.ids);
         }
-        for (const target of hardDeleteTargets) {
-          const result = await deleteSingleMessagePermanently(target);
-          if (result.action === "deleted") {
-            permanentlyDeletedCount += 1;
-          } else {
-            movedToTrashCount += 1;
-            if (result.trashFolderId) {
-              undoTargets.push({
-                messageId: result.messageId ?? target.id,
-                restoreFolderId: target.folderId
-              });
-            }
-          }
-          removedIds.push(target.id);
+        if (hardDeleteTargets.length > 0) {
+          const deletedIds = await deleteMessagesPermanently(hardDeleteTargets);
+          permanentlyDeletedCount += deletedIds.length;
+          removedIds.push(...deletedIds);
         }
         if (activeWasDeleted) {
           if (nextActiveId) {
@@ -378,7 +383,7 @@ export function useMessageDeleteActions({
     },
     [
       clearSelectionState,
-      deleteSingleMessagePermanently,
+      deleteMessagesPermanently,
       findTrashFolderId,
       getMessageSubjectForNotice,
       isPermanentDeleteTarget,

@@ -1101,6 +1101,66 @@ type NewModeRangeDecision = {
   highestKnownUid: number | null;
 };
 
+type NewModeFetchedMessage = {
+  uid: number;
+  source?: Buffer;
+  flags?: Set<string>;
+  envelope?: ImapEnvelope;
+  internalDate?: Date | string | null;
+  bodyStructure?: ImapBodyStructure;
+  headers?: Buffer;
+};
+
+const NEW_MODE_FETCH_QUERY = {
+  source: true,
+  envelope: true,
+  flags: true,
+  uid: true,
+  internalDate: true,
+  bodyStructure: true,
+  headers: true
+} as const;
+
+function describeNewModeFetchRange(startUid: number, uidNext: number | null) {
+  if (typeof uidNext === "number" && Number.isFinite(uidNext)) {
+    return `${startUid}:${Math.max(startUid - 1, uidNext - 1)}`;
+  }
+  return `${startUid}:*`;
+}
+
+function mapNewModeFetchedMessage(raw: any, fallbackUid: number): NewModeFetchedMessage {
+  const parsedUid = toFiniteNumber((raw as { uid?: unknown })?.uid);
+  return {
+    uid: parsedUid ?? fallbackUid,
+    source: (raw as { source?: Buffer | undefined })?.source,
+    flags: (raw as { flags?: Set<string> | undefined })?.flags,
+    envelope: (raw as { envelope?: ImapEnvelope | undefined })?.envelope,
+    internalDate: (raw as { internalDate?: Date | string | null })?.internalDate,
+    bodyStructure: (raw as { bodyStructure?: ImapBodyStructure | undefined })?.bodyStructure,
+    headers: (raw as { headers?: Buffer | undefined })?.headers
+  };
+}
+
+async function* fetchNewModeMessages(
+  client: ImapFlow,
+  startUid: number,
+  uidNext: number | null
+): AsyncGenerator<NewModeFetchedMessage> {
+  if (typeof uidNext === "number" && Number.isFinite(uidNext)) {
+    const endUid = Math.max(startUid - 1, uidNext - 1);
+    for (let uid = startUid; uid <= endUid; uid += 1) {
+      const message = await client.fetchOne(String(uid), NEW_MODE_FETCH_QUERY, { uid: true });
+      if (!message) continue;
+      yield mapNewModeFetchedMessage(message, uid);
+    }
+    return;
+  }
+
+  for await (const message of client.fetch({ uid: `${startUid}:*` }, NEW_MODE_FETCH_QUERY)) {
+    yield mapNewModeFetchedMessage(message, message.uid);
+  }
+}
+
 async function resolveNewModeRange(params: {
   account: Account;
   mailboxPath: string;
@@ -1284,25 +1344,21 @@ export async function* syncImapAccountBatched(
       await logImapOp("logout", { ...logContext }, () => client.logout());
       return;
     }
-    const range = { uid: `${newRange.startUid}:*` };
+    const rangeLabel = describeNewModeFetchRange(newRange.startUid, newRange.uidNext);
+    const fetchStrategy =
+      typeof newRange.uidNext === "number" && Number.isFinite(newRange.uidNext)
+        ? "fetch-one"
+        : "fetch-range";
     const start = Date.now();
 
-    for await (const message of client.fetch(range, {
-      source: true,
-      envelope: true,
-      flags: true,
-      uid: true,
-      internalDate: true,
-      bodyStructure: true,
-      headers: true
-    })) {
+    for await (const message of fetchNewModeMessages(client, newRange.startUid, newRange.uidNext)) {
       const attachmentsWithContent = await resolveAttachmentsForNewMode(
         client,
         message.uid,
-        (message as any).bodyStructure as ImapBodyStructure | undefined,
+        message.bodyStructure,
         account
       );
-      const source = (message as any).source as Buffer | undefined;
+      const source = message.source;
       const nextMessage = source
         ? await parseImapMessage(
             account,
@@ -1311,10 +1367,10 @@ export async function* syncImapAccountBatched(
               uid: message.uid,
               source,
               flags: message.flags,
-              envelope: message.envelope as ImapEnvelope | undefined,
-              internalDate: (message as any).internalDate,
-              bodyStructure: (message as any).bodyStructure as ImapBodyStructure | undefined,
-              headers: (message as any).headers as Buffer | undefined
+              envelope: message.envelope,
+              internalDate: message.internalDate,
+              bodyStructure: message.bodyStructure,
+              headers: message.headers
             },
             client,
             linearModel,
@@ -1326,10 +1382,10 @@ export async function* syncImapAccountBatched(
             folderSpecialUse: mailboxSpecialUse,
             uid: message.uid,
             flags: message.flags,
-            envelope: message.envelope as ImapEnvelope | undefined,
-            internalDate: (message as any).internalDate,
+            envelope: message.envelope,
+            internalDate: message.internalDate,
             attachments: attachmentsWithContent,
-            headers: (message as any).headers as Buffer | undefined,
+            headers: message.headers,
             linearModel
           });
       const nextMessageWithCalendarContent = source
@@ -1359,7 +1415,8 @@ export async function* syncImapAccountBatched(
       logger.info?.({
         op: "fetch",
         mailbox: mailboxToOpen,
-        range: range.uid,
+        range: rangeLabel,
+        strategy: fetchStrategy,
         count: totalProcessed,
         ms: Date.now() - start
       });
@@ -1494,25 +1551,21 @@ export async function syncImapAccount(
       await logImapOp("logout", { ...logContext }, () => client.logout());
       return { messages, folders };
     }
-    const range = { uid: `${newRange.startUid}:*` };
+    const rangeLabel = describeNewModeFetchRange(newRange.startUid, newRange.uidNext);
+    const fetchStrategy =
+      typeof newRange.uidNext === "number" && Number.isFinite(newRange.uidNext)
+        ? "fetch-one"
+        : "fetch-range";
     const start = Date.now();
     let count = 0;
-    for await (const message of client.fetch(range, {
-      source: true,
-      envelope: true,
-      flags: true,
-      uid: true,
-      internalDate: true,
-      bodyStructure: true,
-      headers: true
-    })) {
+    for await (const message of fetchNewModeMessages(client, newRange.startUid, newRange.uidNext)) {
       const attachmentsWithContent = await resolveAttachmentsForNewMode(
         client,
         message.uid,
-        (message as any).bodyStructure as ImapBodyStructure | undefined,
+        message.bodyStructure,
         account
       );
-      const source = (message as any).source as Buffer | undefined;
+      const source = message.source;
       const nextMessage = source
         ? await parseImapMessage(
             account,
@@ -1521,10 +1574,10 @@ export async function syncImapAccount(
               uid: message.uid,
               source,
               flags: message.flags,
-              envelope: message.envelope as ImapEnvelope | undefined,
-              internalDate: (message as any).internalDate,
-              bodyStructure: (message as any).bodyStructure as ImapBodyStructure | undefined,
-              headers: (message as any).headers as Buffer | undefined
+              envelope: message.envelope,
+              internalDate: message.internalDate,
+              bodyStructure: message.bodyStructure,
+              headers: message.headers
             },
             client,
             linearModel,
@@ -1536,10 +1589,10 @@ export async function syncImapAccount(
             folderSpecialUse: mailboxSpecialUse,
             uid: message.uid,
             flags: message.flags,
-            envelope: message.envelope as ImapEnvelope | undefined,
-            internalDate: (message as any).internalDate,
+            envelope: message.envelope,
+            internalDate: message.internalDate,
             attachments: attachmentsWithContent,
-            headers: (message as any).headers as Buffer | undefined,
+            headers: message.headers,
             linearModel
           });
       messages.push(
@@ -1560,7 +1613,8 @@ export async function syncImapAccount(
       logger.info?.({
         op: "fetch",
         mailbox: mailboxToOpen,
-        range: range.uid,
+        range: rangeLabel,
+        strategy: fetchStrategy,
         count,
         ms: Date.now() - start
       });
@@ -1748,12 +1802,38 @@ export async function moveImapMessage(
   }
 }
 
-export async function deleteImapMessage(
+type ImapDeleteTarget = {
+  mailboxPath: string;
+  uid: number;
+};
+
+function groupDeleteTargetsByMailbox(targets: ImapDeleteTarget[]) {
+  const grouped = new Map<string, Set<number>>();
+  targets.forEach((target) => {
+    const mailboxPath = target.mailboxPath.trim();
+    const uid = target.uid;
+    if (!mailboxPath) return;
+    if (!Number.isFinite(uid) || uid <= 0) return;
+    const existing = grouped.get(mailboxPath);
+    if (existing) {
+      existing.add(uid);
+      return;
+    }
+    grouped.set(mailboxPath, new Set([uid]));
+  });
+  return Array.from(grouped.entries()).map(([mailboxPath, uidSet]) => ({
+    mailboxPath,
+    uids: Array.from(uidSet.values())
+  }));
+}
+
+export async function deleteImapMessages(
   account: Account,
-  mailboxPath: string,
-  uid: number,
+  targets: ImapDeleteTarget[],
   clientId?: string
 ) {
+  const groupedTargets = groupDeleteTargetsByMailbox(targets);
+  if (groupedTargets.length === 0) return;
   const logContext = buildLogContext(account, clientId);
   const client = buildImapClient(account, logContext);
 
@@ -1761,12 +1841,16 @@ export async function deleteImapMessage(
     await logImapOp("connect", { host: account.imap.host, ...logContext }, () =>
       client.connect()
     );
-    await logImapOp("mailboxOpen", { mailbox: mailboxPath, ...logContext }, () =>
-      client.mailboxOpen(mailboxPath)
-    );
-    await logImapOp("messageDelete", { mailbox: mailboxPath, uid, ...logContext }, () =>
-      client.messageDelete(uid, { uid: true })
-    );
+    for (const target of groupedTargets) {
+      await logImapOp("mailboxOpen", { mailbox: target.mailboxPath, ...logContext }, () =>
+        client.mailboxOpen(target.mailboxPath)
+      );
+      await logImapOp(
+        "messageDelete",
+        { mailbox: target.mailboxPath, uidCount: target.uids.length, ...logContext },
+        () => client.messageDelete(target.uids, { uid: true })
+      );
+    }
   } finally {
     try {
       await logImapOp("logout", { ...logContext }, () => client.logout());
@@ -1774,6 +1858,15 @@ export async function deleteImapMessage(
       // ignore logout errors
     }
   }
+}
+
+export async function deleteImapMessage(
+  account: Account,
+  mailboxPath: string,
+  uid: number,
+  clientId?: string
+) {
+  await deleteImapMessages(account, [{ mailboxPath, uid }], clientId);
 }
 
 export async function updateImapFlags(
