@@ -56,7 +56,9 @@ export const DEFAULT_CONFIG: ClassifierConfig = {
 };
 
 export const CATEGORY_SOURCE_PARSE_OPTIONS = {
-  skipTextToHtml: true
+  skipTextToHtml: true,
+  // Preserve cid: references so sync can rewrite them to attachment URLs.
+  skipImageLinks: true
 } as const;
 
 export async function parseMailForCategorization(source: Buffer | string) {

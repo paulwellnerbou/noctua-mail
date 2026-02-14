@@ -8,13 +8,7 @@ import { accountIdFromEmail } from "@/lib/accountId";
 export async function GET(request: Request) {
   const session = requireSessionOr401(request);
   if (session instanceof NextResponse) return session;
-  const sessionAccountId = session.accountId?.trim();
-  if (!sessionAccountId) {
-    return NextResponse.json({ ok: false, message: "Forbidden" }, { status: 403 });
-  }
-  const data = (await getAccountsForUser(session.userId)).filter(
-    (account) => account.id === sessionAccountId
-  );
+  const data = await getAccountsForUser(session.userId);
   return NextResponse.json(sanitizeAccountsForClient(data));
 }
 

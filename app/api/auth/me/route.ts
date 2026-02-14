@@ -24,13 +24,13 @@ export async function GET(request: Request) {
     getAccountsForUser(session.userId)
   ]);
   const user = users.find((u) => u.id === session.userId);
-  const sessionScopedAccounts = accounts.filter((account) => account.id === sessionAccountId);
   const rotated = shouldRotateSession(session);
   const nextSession = rotated ? refreshSession(session) : session;
   const response = NextResponse.json({
     ok: true,
     user: user ?? null,
-    accounts: sanitizeAccountsForClient(sessionScopedAccounts),
+    accountId: sessionAccountId,
+    accounts: sanitizeAccountsForClient(accounts),
     exp: nextSession.exp,
     ttlSeconds: getSessionTtlSeconds()
   });

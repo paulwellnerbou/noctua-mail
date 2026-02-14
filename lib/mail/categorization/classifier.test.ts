@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { classifyCategoryFromMetadata } from "./classifier";
+import { classifyCategoryFromMetadata, parseMailForCategorization } from "./classifier";
 import { createDefaultLinearModel, createSeededLinearModel } from "./linearModel";
 
 type HeaderInput = Record<string, string>;
@@ -233,5 +233,40 @@ describe("categorization classifier seeded baseline model", () => {
     expect(result.category).toBeNull();
     expect(result.confidence).toBe(0);
     expect(result.signals).toContain("skip:sender-is-account");
+  });
+});
+
+describe("parseMailForCategorization", () => {
+  it("keeps cid image references for multipart/related html", async () => {
+    const source = `From: Sender <sender@example.com>
+To: User <user@example.com>
+Subject: Inline image
+MIME-Version: 1.0
+Content-Type: multipart/related; boundary="related-boundary"
+
+--related-boundary
+Content-Type: text/html; charset=utf-8
+
+<html><body><p>Hello</p><img src="cid:test-cid"></body></html>
+--related-boundary
+Content-Type: image/png; name="pixel.png"
+Content-Transfer-Encoding: base64
+Content-ID: <test-cid>
+Content-Disposition: inline; filename="pixel.png"
+
+iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO3Z5hQAAAAASUVORK5CYII=
+--related-boundary--
+`;
+    const parsed = await parseMailForCategorization(source);
+    const html =
+      typeof parsed.html === "string"
+        ? parsed.html
+        : Buffer.isBuffer(parsed.html)
+          ? parsed.html.toString("utf8")
+          : "";
+
+    expect(html).toContain("cid:test-cid");
+    expect(html).not.toContain("data:image/");
+    expect(parsed.attachments).toHaveLength(1);
   });
 });

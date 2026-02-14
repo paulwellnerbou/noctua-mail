@@ -4575,6 +4575,112 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     inboxFolderRef.current = inboxFolder ?? null;
   }, [inboxFolder]);
 
+  const loadInitialData = useCallback(
+    async (options?: { skipAuthCheck?: boolean; preferredAccountId?: string | null }) => {
+      const skipAuthCheck = options?.skipAuthCheck === true;
+      let preferredAccountId = options?.preferredAccountId?.trim() ?? "";
+      setInitialDataReady(false);
+      try {
+        if (!skipAuthCheck) {
+          const me = await apiFetch("/api/auth/me", {
+            credentials: "include",
+            cache: "no-store"
+          });
+          if (!me.ok) {
+            setAuthState("unauth");
+            return;
+          }
+          const meData = (await me.json()) as { ttlSeconds?: number; accountId?: string } | null;
+          setAuthState("ok");
+          if (typeof meData?.ttlSeconds === "number") {
+            setSessionTtlSeconds(meData.ttlSeconds);
+          }
+          if (typeof meData?.accountId === "string" && meData.accountId.trim()) {
+            preferredAccountId = meData.accountId.trim();
+          }
+        }
+        const [accountsRes, foldersRes] = await Promise.all([
+          apiFetch("/api/accounts"),
+          apiFetch("/api/folders")
+        ]);
+        let loadedAccounts = false;
+        let loadedFolders = false;
+        if (accountsRes.ok) {
+          const nextAccounts = (await accountsRes.json()) as Account[];
+          setAccounts(nextAccounts);
+          setActiveAccountId((prev) => {
+            if (
+              preferredAccountId &&
+              nextAccounts.some((account) => account.id === preferredAccountId)
+            ) {
+              return preferredAccountId;
+            }
+            if (nextAccounts.find((account) => account.id === prev)) return prev;
+            return nextAccounts[0]?.id ?? prev;
+          });
+          loadedAccounts = true;
+        } else {
+          reportError(await readErrorMessage(accountsRes));
+        }
+        if (foldersRes.ok) {
+          const nextFolders = (await foldersRes.json()) as Folder[];
+          setFolders(nextFolders);
+          loadedFolders = true;
+        } else {
+          reportError(await readErrorMessage(foldersRes));
+        }
+        if (loadedAccounts && loadedFolders) {
+          setInitialDataReady(true);
+        }
+      } catch {
+        setAuthState("unauth");
+        reportError("Failed to load mailbox data.");
+      }
+    },
+    [readErrorMessage, reportError]
+  );
+
+  useEffect(() => {
+    loadInitialData();
+  }, [loadInitialData]);
+
+  const switchAccount = useCallback(
+    async (nextAccountId: string) => {
+      const normalizedAccountId = nextAccountId.trim();
+      if (!normalizedAccountId || normalizedAccountId === activeAccountId) return;
+      try {
+        const response = await apiFetch("/api/auth/switch-account", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ accountId: normalizedAccountId })
+        });
+        if (!response.ok) {
+          reportError(await readErrorMessage(response));
+          return;
+        }
+        const payload = (await response.json().catch(() => null)) as { accountId?: string } | null;
+        const switchedAccountId =
+          typeof payload?.accountId === "string" && payload.accountId.trim()
+            ? payload.accountId.trim()
+            : normalizedAccountId;
+        setExceptionEntries([]);
+        setMessageListError(null);
+        setMessages([]);
+        setMessagesPage(1);
+        setHasMoreMessages(true);
+        setTotalMessages(null);
+        setActiveMessageId("");
+        setActiveFolderId("");
+        setLastFolderId("");
+        setActiveAccountId(switchedAccountId);
+        await loadInitialData({ skipAuthCheck: true, preferredAccountId: switchedAccountId });
+      } catch {
+        reportError("Failed to switch account.");
+      }
+    },
+    [activeAccountId, apiFetch, loadInitialData, readErrorMessage, reportError]
+  );
+
   useEffect(() => {
     if (!("serviceWorker" in navigator)) return;
     navigator.serviceWorker
@@ -4619,7 +4725,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     const messageId = params.get("messageId");
     const localMessageId = params.get("openMessageId");
     if (accountIdParam) {
-      setActiveAccountId(accountIdParam);
+      void switchAccount(accountIdParam);
     }
     if (scopeParam === "all" || scopeParam === "folder") {
       setSearchScope(scopeParam);
@@ -4662,7 +4768,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
           if (hasAccount) {
             pendingJumpMessageIdRef.current = messageId;
             pendingJumpRefreshKeyRef.current = "";
-            setActiveAccountId(targetAccountId);
+            void switchAccount(targetAccountId);
             return;
           }
         }
@@ -4701,7 +4807,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     return () => {
       navigator.serviceWorker.removeEventListener("message", handleServiceWorkerMessage);
     };
-  }, [accounts, activeAccountId, clientId, messageByMessageId]);
+  }, [accounts, activeAccountId, clientId, messageByMessageId, switchAccount]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -4753,64 +4859,6 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
   useEffect(() => {
     void syncReminderStateToServiceWorker(pendingCalendarReminders);
   }, [pendingCalendarReminders, syncReminderStateToServiceWorker]);
-
-  const loadInitialData = useCallback(
-    async (skipAuthCheck = false) => {
-      setInitialDataReady(false);
-      try {
-        if (!skipAuthCheck) {
-          const me = await apiFetch("/api/auth/me", {
-            credentials: "include",
-            cache: "no-store"
-          });
-          if (!me.ok) {
-            setAuthState("unauth");
-            return;
-          }
-          const meData = (await me.json()) as { ttlSeconds?: number } | null;
-          setAuthState("ok");
-          if (typeof meData?.ttlSeconds === "number") {
-            setSessionTtlSeconds(meData.ttlSeconds);
-          }
-        }
-        const [accountsRes, foldersRes] = await Promise.all([
-          apiFetch("/api/accounts"),
-          apiFetch("/api/folders")
-        ]);
-        let loadedAccounts = false;
-        let loadedFolders = false;
-        if (accountsRes.ok) {
-          const nextAccounts = (await accountsRes.json()) as Account[];
-          setAccounts(nextAccounts);
-          setActiveAccountId((prev) => {
-            if (nextAccounts.find((account) => account.id === prev)) return prev;
-            return nextAccounts[0]?.id ?? prev;
-          });
-          loadedAccounts = true;
-        } else {
-          reportError(await readErrorMessage(accountsRes));
-        }
-        if (foldersRes.ok) {
-          const nextFolders = (await foldersRes.json()) as Folder[];
-          setFolders(nextFolders);
-          loadedFolders = true;
-        } else {
-          reportError(await readErrorMessage(foldersRes));
-        }
-        if (loadedAccounts && loadedFolders) {
-          setInitialDataReady(true);
-        }
-      } catch {
-        setAuthState("unauth");
-        reportError("Failed to load mailbox data.");
-      }
-    },
-    [readErrorMessage, reportError]
-  );
-
-  useEffect(() => {
-    loadInitialData();
-  }, [loadInitialData]);
 
   useEffect(() => {
     if (authState !== "ok" || !sessionTtlSeconds) return;
@@ -5319,7 +5367,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     if (pendingAccountId && pendingAccountId !== activeAccountId) {
       const hasPendingAccount = accounts.some((account) => account.id === pendingAccountId);
       if (hasPendingAccount) {
-        setActiveAccountId(pendingAccountId);
+        void switchAccount(pendingAccountId);
         return;
       }
       pendingJumpAccountIdRef.current = null;
@@ -5346,7 +5394,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
       setActiveFolderId(inbox.id);
     }
     void refreshMailboxData();
-  }, [accounts, activeAccountId, authState, messageByMessageId]);
+  }, [accounts, activeAccountId, authState, messageByMessageId, switchAccount]);
 
   // Collapse all messages in the active thread except the selected one
   useEffect(() => {
@@ -5607,9 +5655,9 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
       const nextAccounts = (await refreshed.json()) as Account[];
       setAccounts(nextAccounts);
       if (isNew) {
-        setActiveAccountId(newAccountId);
+        await switchAccount(newAccountId);
         await refreshFolders();
-        await syncAccount(undefined, "full");
+        await runSyncJob({ accountId: newAccountId, fullSync: true, mode: "full" });
       }
     } else {
       reportError(await readErrorMessage(refreshed));
@@ -5735,7 +5783,12 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     if (refreshed.ok) {
       const nextAccounts = (await refreshed.json()) as Account[];
       setAccounts(nextAccounts);
-      setActiveAccountId(nextAccounts[0]?.id ?? "");
+      const nextAccountId = nextAccounts[0]?.id ?? "";
+      if (nextAccountId) {
+        await switchAccount(nextAccountId);
+      } else {
+        setActiveAccountId("");
+      }
     } else {
       reportError(await readErrorMessage(refreshed));
     }
@@ -5995,7 +6048,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
         pendingJumpMessageIdRef.current = messageId;
         pendingJumpAccountIdRef.current = targetAccountId;
         pendingJumpRefreshKeyRef.current = "";
-        setActiveAccountId(targetAccountId);
+        void switchAccount(targetAccountId);
         return false;
       }
     }
@@ -7217,12 +7270,16 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
               cache: "no-store"
             });
             if (res.ok) {
-              const data = (await res.json()) as { ttlSeconds?: number } | null;
+              const data = (await res.json()) as { ttlSeconds?: number; accountId?: string } | null;
               if (typeof data?.ttlSeconds === "number") {
                 setSessionTtlSeconds(data.ttlSeconds);
               }
               setAuthState("ok");
-              await loadInitialData(true);
+              await loadInitialData({
+                skipAuthCheck: true,
+                preferredAccountId:
+                  typeof data?.accountId === "string" ? data.accountId : null
+              });
             } else {
               setAuthState("unauth");
             }
@@ -7249,7 +7306,6 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
           isRelatedSearch,
           accounts,
           currentAccount: currentAccount ?? null,
-          messages,
           draftsFolder,
           draftsCount,
           activeFolderId,
@@ -7269,10 +7325,11 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
           openCompose,
           setActiveFolderId,
           setLastFolderId,
-          setActiveMessageId,
           startEditAccount,
           deleteAccount,
-          setActiveAccountId,
+          switchAccount: (accountId: string) => {
+            void switchAccount(accountId);
+          },
           syncAccount
         }}
       />

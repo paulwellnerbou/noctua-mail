@@ -20,7 +20,7 @@ import {
 import { Badge, Button, DropdownMenu, IconButton, TextField } from "@radix-ui/themes";
 import { badgeColors } from "@/lib/ui/badgeColors";
 import { SEARCH_BADGE_OPTIONS, SEARCH_FIELD_OPTIONS } from "@/lib/ui/searchFilters";
-import type { Account, Folder, Message } from "@/lib/data";
+import type { Account, Folder } from "@/lib/data";
 import styles from "./TopBar.module.css";
 
 type SearchFields = {
@@ -58,7 +58,6 @@ type TopBarProps = {
     isRelatedSearch: boolean;
     accounts: Account[];
     currentAccount: Account | null;
-    messages: Message[];
     draftsFolder?: Folder | null;
     draftsCount: number;
     activeFolderId: string;
@@ -81,10 +80,9 @@ type TopBarProps = {
     openCompose: (mode: ComposeMode) => void;
     setActiveFolderId: React.Dispatch<React.SetStateAction<string>>;
     setLastFolderId: React.Dispatch<React.SetStateAction<string>>;
-    setActiveMessageId: React.Dispatch<React.SetStateAction<string>>;
     startEditAccount: (account?: Account) => void;
     deleteAccount: (accountId: string) => void;
-    setActiveAccountId: React.Dispatch<React.SetStateAction<string>>;
+    switchAccount: (accountId: string) => void;
     syncAccount: (
       folderId?: string,
       mode?: "new" | "full",
@@ -105,7 +103,6 @@ export default function TopBar({ buildVersionLabel = "", state, ui, actions }: T
     isRelatedSearch,
     accounts,
     currentAccount,
-    messages,
     draftsFolder,
     draftsCount,
     activeFolderId,
@@ -124,10 +121,9 @@ export default function TopBar({ buildVersionLabel = "", state, ui, actions }: T
     openCompose,
     setActiveFolderId,
     setLastFolderId,
-    setActiveMessageId,
     startEditAccount,
     deleteAccount,
-    setActiveAccountId,
+    switchAccount,
     syncAccount
   } = actions;
   const { searchFieldsLabel, searchBadgesLabel } = ui;
@@ -145,10 +141,7 @@ export default function TopBar({ buildVersionLabel = "", state, ui, actions }: T
 
   const handleAccountChange = (accountId: string) => {
     if (!accountId) return;
-    setActiveAccountId(accountId);
-    setActiveMessageId(
-      messages.find((message) => message.accountId === accountId)?.id ?? messages[0]?.id ?? ""
-    );
+    switchAccount(accountId);
   };
   const scopeLabel = searchScope === "all" ? "Everywhere" : "Current folder";
   const folderById = new Map(accountFolders.map((folder) => [folder.id, folder]));
