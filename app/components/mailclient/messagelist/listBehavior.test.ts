@@ -316,7 +316,7 @@ describe("collapsed-thread bulk behavior", () => {
       collapsedThreads: { "thread-1": true },
       threadScopeMessages: [m1, m2]
     });
-    expect(nonRoot).toBeNull();
+    expect(nonRoot).toEqual(["m2", "m1"]);
   });
 
   it("expands every selected collapsed thread root", () => {
@@ -335,5 +335,35 @@ describe("collapsed-thread bulk behavior", () => {
     });
 
     expect(ids).toEqual(["a1", "b1", "a2", "b2"]);
+  });
+
+  it("expands a collapsed thread when a non-root thread member is selected", () => {
+    const root = makeMessage("root", 1000, { threadId: "thread-1" });
+    const child = makeMessage("child", 2000, { threadId: "thread-1", parentId: "root" });
+    const ids = getCollapsedRootThreadMessageIds({
+      selectedIds: ["child"],
+      visibleMessages: [{ message: root, depth: 0, threadId: "thread-1" }],
+      collapsedThreads: { "thread-1": true },
+      threadScopeMessages: [root, child]
+    });
+
+    expect(ids).toEqual(["child", "root"]);
+  });
+
+  it("does not expand when selected thread is not a visible collapsed thread", () => {
+    const visibleRoot = makeMessage("visible-root", 1000, { threadId: "thread-visible" });
+    const hiddenRoot = makeMessage("hidden-root", 2000, { threadId: "thread-hidden" });
+    const hiddenChild = makeMessage("hidden-child", 3000, {
+      threadId: "thread-hidden",
+      parentId: "hidden-root"
+    });
+    const ids = getCollapsedRootThreadMessageIds({
+      selectedIds: ["hidden-child"],
+      visibleMessages: [{ message: visibleRoot, depth: 0, threadId: "thread-visible" }],
+      collapsedThreads: { "thread-visible": true, "thread-hidden": true },
+      threadScopeMessages: [visibleRoot, hiddenRoot, hiddenChild]
+    });
+
+    expect(ids).toBeNull();
   });
 });

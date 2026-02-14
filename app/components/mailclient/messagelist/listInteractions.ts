@@ -190,20 +190,38 @@ export function getCollapsedRootThreadMessageIds(params: {
   const { selectedIds, visibleMessages, collapsedThreads, threadScopeMessages } = params;
   if (selectedIds.length === 0) return null;
 
-  const selectedSet = new Set(selectedIds);
+  const visibleThreadIdByMessageId = new Map<string, string>();
+  const collapsedVisibleThreadIds = new Set<string>();
+  visibleMessages.forEach((item) => {
+    visibleThreadIdByMessageId.set(item.message.id, item.threadId);
+    if (item.depth !== 0) return;
+    const isThreadCollapsed = collapsedThreads[item.threadId] ?? true;
+    if (!isThreadCollapsed) return;
+    collapsedVisibleThreadIds.add(item.threadId);
+  });
+
+  const threadIdByMessageId = new Map<string, string>();
+  const messageIdsByThreadId = new Map<string, string[]>();
+  threadScopeMessages.forEach((message) => {
+    const threadId = message.threadId ?? message.messageId ?? message.id;
+    threadIdByMessageId.set(message.id, threadId);
+    const list = messageIdsByThreadId.get(threadId);
+    if (list) {
+      list.push(message.id);
+    } else {
+      messageIdsByThreadId.set(threadId, [message.id]);
+    }
+  });
+
   const expandedIds = new Set(selectedIds);
   let hasCollapsedRootSelection = false;
 
-  visibleMessages.forEach((item) => {
-    if (!selectedSet.has(item.message.id) || item.depth !== 0) return;
-    const isThreadCollapsed = collapsedThreads[item.threadId] ?? true;
-    if (!isThreadCollapsed) return;
-    const threadMessageIds = threadScopeMessages
-      .filter((message) => {
-        const key = message.threadId ?? message.messageId ?? message.id;
-        return key === item.threadId;
-      })
-      .map((message) => message.id);
+  selectedIds.forEach((selectedId) => {
+    const threadId =
+      visibleThreadIdByMessageId.get(selectedId) ?? threadIdByMessageId.get(selectedId);
+    if (!threadId) return;
+    if (!collapsedVisibleThreadIds.has(threadId)) return;
+    const threadMessageIds = messageIdsByThreadId.get(threadId) ?? [];
     if (threadMessageIds.length <= 1) return;
     hasCollapsedRootSelection = true;
     threadMessageIds.forEach((id) => expandedIds.add(id));
