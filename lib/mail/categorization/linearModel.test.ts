@@ -35,6 +35,28 @@ describe("categorization linear model", () => {
     expect(features["has:list_unsubscribe"]).toBe(1);
   });
 
+  it("extracts strong list bundle features from explicit list headers", () => {
+    const parsed = makeParsed();
+    const headers = new Map<string, any>([
+      ["List-Id", "<digest.example.com>"],
+      ["List-Post", "<https://example.com/p/42>"],
+      ["List-Archive", "<https://example.com/archive>"],
+      ["List-Url", "<https://example.com/>"],
+      ["List-Unsubscribe", "<https://example.com/unsubscribe>"],
+      ["List-Unsubscribe-Post", "List-Unsubscribe=One-Click"]
+    ]);
+
+    const features = extractLinearFeatures(parsed as any, headers);
+    expect(features["has:list_header"]).toBe(1);
+    expect(features["has:list_id"]).toBe(1);
+    expect(features["has:list_post"]).toBe(1);
+    expect(features["has:list_archive"]).toBe(1);
+    expect(features["has:list_url"]).toBe(1);
+    expect(features["has:list_unsubscribe"]).toBe(1);
+    expect(features["has:list_unsubscribe_one_click"]).toBe(1);
+    expect(features["has:strong_list_bundle"]).toBe(1);
+  });
+
   it("online training increases score for selected category", () => {
     const parsed = makeParsed({
       from: { value: [{ address: "noreply@billing.example.invalid" }] },

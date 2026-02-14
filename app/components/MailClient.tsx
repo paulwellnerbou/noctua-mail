@@ -18,6 +18,7 @@ import {
   FileText,
   ListTodo,
   Paperclip,
+  Target,
   Send,
   Search,
   ShieldOff,
@@ -217,7 +218,7 @@ const DEFAULT_SEARCH_BADGES: SearchBadgesState = {
 };
 
 type VirtualFolderDefinition = {
-  id: "virtual:action-queue" | "virtual:invite-deck";
+  id: "virtual:focused" | "virtual:action-queue" | "virtual:invite-deck";
   name: string;
   description: string;
   badgeLabel: string;
@@ -225,6 +226,13 @@ type VirtualFolderDefinition = {
 };
 
 const VIRTUAL_FOLDERS: readonly VirtualFolderDefinition[] = [
+  {
+    id: "virtual:focused",
+    name: "Focused",
+    description: "Unread, unanswered, not newsletters",
+    badgeLabel: "Focused",
+    queryBadges: ["focused"]
+  },
   {
     id: "virtual:action-queue",
     name: "Action Queue",
@@ -451,6 +459,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
   const [searchBadges, setSearchBadges] = useState<SearchBadgesState>(DEFAULT_SEARCH_BADGES);
   const [activeVirtualFolderId, setActiveVirtualFolderId] =
     useState<VirtualFolderDefinition["id"] | null>(null);
+  const [focusedUnreadCount, setFocusedUnreadCount] = useState<number | null>(null);
   const [actionQueueTodoCount, setActionQueueTodoCount] = useState<number | null>(null);
   const [inviteDeckTotalCount, setInviteDeckTotalCount] = useState<number | null>(null);
   const [inviteDeckUnreadCount, setInviteDeckUnreadCount] = useState<number | null>(null);
@@ -549,7 +558,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
         .map((folder) => folder.id),
     [accountFolders, includeSentInEverywhere]
   );
-  const virtualExcludedFolderIds = useMemo(
+  const virtualDefaultExcludedFolderIds = useMemo(
     () =>
       accountFolders
         .filter((folder) => {
@@ -564,13 +573,41 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
         .map((folder) => folder.id),
     [accountFolders]
   );
-  const virtualExcludedFolderIdsKey = useMemo(
-    () => [...virtualExcludedFolderIds].sort().join(","),
-    [virtualExcludedFolderIds]
+  const focusedExcludedFolderIds = useMemo(
+    () =>
+      accountFolders
+        .filter((folder) => {
+          const special = (folder.specialUse ?? "").toLowerCase();
+          const bySpecial =
+            special === "\\trash" ||
+            special === "\\junk" ||
+            special === "\\spam" ||
+            special === "\\sent" ||
+            special === "\\archive";
+          const byName = folder.name.trim().toLowerCase() === "archive";
+          return bySpecial || byName;
+        })
+        .map((folder) => folder.id),
+    [accountFolders]
+  );
+  const virtualDefaultExcludedFolderIdsKey = useMemo(
+    () => [...virtualDefaultExcludedFolderIds].sort().join(","),
+    [virtualDefaultExcludedFolderIds]
+  );
+  const focusedExcludedFolderIdsKey = useMemo(
+    () => [...focusedExcludedFolderIds].sort().join(","),
+    [focusedExcludedFolderIds]
+  );
+  const activeVirtualExcludedFolderIds = useMemo(
+    () =>
+      activeVirtualFolder?.id === "virtual:focused"
+        ? focusedExcludedFolderIds
+        : virtualDefaultExcludedFolderIds,
+    [activeVirtualFolder?.id, focusedExcludedFolderIds, virtualDefaultExcludedFolderIds]
   );
   const currentSearchExcludedFolderIds = useMemo(
-    () => (activeVirtualFolder ? virtualExcludedFolderIds : excludedEverywhereFolderIds),
-    [activeVirtualFolder, excludedEverywhereFolderIds, virtualExcludedFolderIds]
+    () => (activeVirtualFolder ? activeVirtualExcludedFolderIds : excludedEverywhereFolderIds),
+    [activeVirtualFolder, activeVirtualExcludedFolderIds, excludedEverywhereFolderIds]
   );
   const everywhereExclusionKey = useMemo(
     () => [...currentSearchExcludedFolderIds].sort().join(","),
@@ -931,6 +968,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
   );
   useEffect(() => {
     if (!activeAccountId) {
+      setFocusedUnreadCount(null);
       setActionQueueTodoCount(null);
       setInviteDeckTotalCount(null);
       setInviteDeckUnreadCount(null);
@@ -938,7 +976,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     }
     const controller = new AbortController();
     const timer = window.setTimeout(() => {
-      const fetchCount = async (badges: string) => {
+      const fetchCount = async (badges: string, excludedFolderIdsKey: string) => {
         const params = new URLSearchParams({
           accountId: activeAccountId,
           page: "1",
@@ -946,8 +984,8 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
           groupBy: "date",
           badges
         });
-        if (virtualExcludedFolderIdsKey) {
-          params.set("excludeFolderIds", virtualExcludedFolderIdsKey);
+        if (excludedFolderIdsKey) {
+          params.set("excludeFolderIds", excludedFolderIdsKey);
         }
         const response = await apiFetch(`/api/messages?${params.toString()}`, {
           signal: controller.signal
@@ -958,15 +996,22 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
         return typeof data.total === "number" ? data.total : 0;
       };
 
-      void Promise.all([fetchCount("todo"), fetchCount("calendar"), fetchCount("calendar,unread")])
-        .then(([todoCount, inviteTotalCount, inviteUnreadCount]) => {
+      void Promise.all([
+        fetchCount("focused", focusedExcludedFolderIdsKey),
+        fetchCount("todo", virtualDefaultExcludedFolderIdsKey),
+        fetchCount("calendar", virtualDefaultExcludedFolderIdsKey),
+        fetchCount("calendar,unread", virtualDefaultExcludedFolderIdsKey)
+      ])
+        .then(([focusedCount, todoCount, inviteTotalCount, inviteUnreadCount]) => {
           if (controller.signal.aborted) return;
+          setFocusedUnreadCount(focusedCount);
           setActionQueueTodoCount(todoCount);
           setInviteDeckTotalCount(inviteTotalCount);
           setInviteDeckUnreadCount(inviteUnreadCount);
         })
         .catch(() => {
           if (controller.signal.aborted) return;
+          setFocusedUnreadCount(null);
           setActionQueueTodoCount(null);
           setInviteDeckTotalCount(null);
           setInviteDeckUnreadCount(null);
@@ -977,7 +1022,13 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [activeAccountId, apiFetch, messages, virtualExcludedFolderIdsKey]);
+  }, [
+    activeAccountId,
+    apiFetch,
+    focusedExcludedFolderIdsKey,
+    messages,
+    virtualDefaultExcludedFolderIdsKey
+  ]);
   useEffect(() => {
     if (!activeVirtualFolderId) return;
     if (searchScope !== "all" || trimmedQuery.length > 0 || isRelatedSearch) {
@@ -3206,6 +3257,14 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
         }
         if (badge === "transactional" && message.category !== "transactional") {
           return { keep: false, reason: `badge-transactional:${message.category ?? "none"}` };
+        }
+        if (
+          badge === "focused" &&
+          (!Boolean(message.unread ?? !message.seen) ||
+            Boolean(message.answered) ||
+            message.category === "newsletter")
+        ) {
+          return { keep: false, reason: "badge-focused" };
         }
         if (badge === "attention" && !(isMessageFlagged(message) || hasTodoFlag(message) || hasDoneFlag(message))) {
           return { keep: false, reason: "badge-attention" };
@@ -7202,17 +7261,23 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
         ...folder,
         active: activeVirtualFolder?.id === folder.id,
         count:
-          folder.id === "virtual:action-queue"
+          folder.id === "virtual:focused"
+            ? focusedUnreadCount
+            : folder.id === "virtual:action-queue"
             ? actionQueueTodoCount
             : folder.id === "virtual:invite-deck"
               ? inviteDeckUnreadCount
               : null,
         countLabel:
-          folder.id === "virtual:action-queue"
+          folder.id === "virtual:focused"
+            ? `Unread: ${focusedUnreadCount ?? 0}`
+            : folder.id === "virtual:action-queue"
             ? `To-Do: ${actionQueueTodoCount ?? 0}`
             : undefined,
         countAriaLabel:
-          folder.id === "virtual:action-queue"
+          folder.id === "virtual:focused"
+            ? `${focusedUnreadCount ?? 0} unread`
+            : folder.id === "virtual:action-queue"
             ? `${actionQueueTodoCount ?? 0} to-do`
             : `${inviteDeckUnreadCount ?? 0} unread`,
         countTitle:
@@ -7228,17 +7293,27 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
             ? `${folder.description} (${inviteDeckTotalCount} Messages, ${inviteDeckUnreadCount} unread)`
             : `${folder.name}: ${folder.description}`,
         emphasize:
-          folder.id === "virtual:action-queue"
-            ? (actionQueueTodoCount ?? 0) > 0
-            : (inviteDeckUnreadCount ?? 0) > 0,
+          folder.id === "virtual:focused"
+            ? (focusedUnreadCount ?? 0) > 0
+            : folder.id === "virtual:action-queue"
+              ? (actionQueueTodoCount ?? 0) > 0
+              : (inviteDeckUnreadCount ?? 0) > 0,
         icon:
-          folder.id === "virtual:action-queue" ? (
+          folder.id === "virtual:focused" ? (
+            <Target size={13} />
+          ) : folder.id === "virtual:action-queue" ? (
             <ListTodo size={13} />
           ) : (
             <CalendarClock size={13} />
           )
       })),
-    [actionQueueTodoCount, activeVirtualFolder?.id, inviteDeckTotalCount, inviteDeckUnreadCount]
+    [
+      actionQueueTodoCount,
+      activeVirtualFolder?.id,
+      focusedUnreadCount,
+      inviteDeckTotalCount,
+      inviteDeckUnreadCount
+    ]
   );
   const isExistingAccount = Boolean(
     editingAccount && accounts.some((account) => account.id === editingAccount.id)

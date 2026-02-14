@@ -126,6 +126,39 @@ describe("categorization classifier seeded baseline model", () => {
     expect(result.confidence).toBeGreaterThanOrEqual(0.7);
   });
 
+  it("keeps threaded list newsletters categorized when strong list bundle is present", () => {
+    const parsed = makeParsed({
+      from: { value: [{ address: "tidyfirst@substack.com" }] },
+      subject: "Genie Session: Codex for Mac/GPUSortedMap",
+      text: "Read online and unsubscribe at any time."
+    });
+    const headers = toHeaderMap({
+      "List-Id": "<tidyfirst.substack.com>",
+      "List-Url": "<https://tidyfirst.substack.com/>",
+      "List-Archive": "<https://tidyfirst.substack.com/archive>",
+      "List-Post": "<https://tidyfirst.substack.com/p/genie-session-codex-for-macgpusortedmap>",
+      "List-Unsubscribe":
+        "<https://tidyfirst.substack.com/action/disable_email/disable?token=example>",
+      "List-Unsubscribe-Post": "List-Unsubscribe=One-Click",
+      "In-Reply-To": "<post-187889267@substack.com>",
+      References: "<post-187889267@substack.com>",
+      "Reply-To": "<reply+abc@mg1.substack.com>"
+    });
+
+    const result = classifyCategoryFromMetadata(
+      {
+        subject: parsed.subject,
+        from: parsed.from,
+        attachments: parsed.attachments ?? [],
+        headers: headers as Map<string, unknown>
+      },
+      { linearModel: createSeededLinearModel() }
+    );
+    expect(result.category).toBe("newsletter");
+    expect(result.confidence).toBeGreaterThanOrEqual(0.7);
+    expect(result.signals).toContain("skip-suppress:thread-reply:strong-list-bundle");
+  });
+
   it("strongly suppresses reply-thread messages", () => {
     const parsed = makeParsed({
       subject: "Re: Issue update #123",

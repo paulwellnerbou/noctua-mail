@@ -46,7 +46,9 @@ export default function QuoteRenderer({ body }: { body: string }) {
         );
         const wrapped = Array.from({ length: block.level }).reduceRight<React.ReactNode>(
           (child, _, depthIndex) => {
-            const level = block.level - depthIndex;
+            // reduceRight builds from inner-most child outward, so depth index maps
+            // directly to visual nesting level (outer = 1, next = 2, ...).
+            const level = depthIndex + 1;
             const levelClass =
               level >= 3 ? "quote-level-3" : level === 2 ? "quote-level-2" : "";
             return (

@@ -1905,6 +1905,11 @@ function applyBadgeFilters(where: string, args: any[], badges?: string[] | null)
     where += " AND m.category = ?";
     args.push("newsletter");
   }
+  if (normalized.includes("focused")) {
+    where +=
+      " AND m.unread = 1 AND COALESCE(m.answered, 0) = 0 AND COALESCE(m.category, '') <> ?";
+    args.push("newsletter");
+  }
   if (normalized.includes("notification")) {
     where += " AND m.category = ?";
     args.push("notification");

@@ -1322,7 +1322,7 @@ a {
 .quote-block {
   border-left: 3px solid var(--accent);
   padding-left: 12px;
-  margin: 10px 0;
+  margin: 0;
 }
 
 .quote-level-2 {

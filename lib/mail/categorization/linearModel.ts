@@ -78,7 +78,13 @@ export function createSeededLinearModel(): CategoryLinearModel {
 
   setWeights(newsletter, [
     ["has:list_header", 0.55],
+    ["has:list_id", 0.18],
+    ["has:list_post", 0.16],
+    ["has:list_archive", 0.16],
+    ["has:list_url", 0.12],
     ["has:list_unsubscribe", 0.35],
+    ["has:list_unsubscribe_one_click", 0.1],
+    ["has:strong_list_bundle", 0.32],
     ["sender_local:newsletter", 0.55],
     ["sender_local:digest", 0.45],
     ["sender_local:updates", 0.35],
@@ -117,7 +123,13 @@ export function createSeededLinearModel(): CategoryLinearModel {
     ["subject:thread_marker", 0.3],
     ["subject:long_number", 0.05],
     ["has:list_header", 0.08],
+    ["has:list_id", -0.05],
+    ["has:list_post", -0.06],
+    ["has:list_archive", -0.05],
+    ["has:list_url", -0.04],
     ["has:list_unsubscribe", -0.08],
+    ["has:list_unsubscribe_one_click", -0.03],
+    ["has:strong_list_bundle", -0.22],
     ["sender_local:notifications", 0.55],
     ["sender_local:notification", 0.55],
     ["sender_local:no-reply", 0.22],
@@ -134,7 +146,13 @@ export function createSeededLinearModel(): CategoryLinearModel {
 
   setWeights(transactional, [
     ["has:list_header", -0.28],
+    ["has:list_id", -0.08],
+    ["has:list_post", -0.06],
+    ["has:list_archive", -0.06],
+    ["has:list_url", -0.05],
     ["has:list_unsubscribe", -0.2],
+    ["has:list_unsubscribe_one_click", -0.08],
+    ["has:strong_list_bundle", -0.2],
     ["has:in_reply_to", -0.1],
     ["has:references", -0.08],
     ["has:pdf_attachment", 0.32],
@@ -241,7 +259,18 @@ function featureLearningScale(feature: string) {
   // Keep category bias as the single global offset term.
   if (feature === "bias") return 0;
   // These broad signals are useful priors but should not be moved too quickly.
-  if (feature === "has:list_header" || feature === "has:list_unsubscribe") return 0.2;
+  if (
+    feature === "has:list_header" ||
+    feature === "has:list_id" ||
+    feature === "has:list_post" ||
+    feature === "has:list_archive" ||
+    feature === "has:list_url" ||
+    feature === "has:list_unsubscribe" ||
+    feature === "has:list_unsubscribe_one_click" ||
+    feature === "has:strong_list_bundle"
+  ) {
+    return 0.2;
+  }
   if (feature.startsWith("has:")) return 0.5;
   if (feature.startsWith("sender_domain:") || feature.startsWith("sender_root_domain:")) return 0.5;
   if (feature.startsWith("sender_local:")) return 0.75;
@@ -263,8 +292,19 @@ export function extractLinearFeatures(
     .map((att: { filename?: string | null }) => (att.filename ?? "").toLowerCase())
     .filter(Boolean);
 
+  const hasListId = hasHeader(headers, "list-id");
+  const hasListPost = hasHeader(headers, "list-post");
+  const hasListArchive = hasHeader(headers, "list-archive");
+  const hasListUrl = hasHeader(headers, "list-url");
+  const hasListOwner = hasHeader(headers, "list-owner");
   const hasListHeader =
-    hasHeader(headers, "list") || hasHeader(headers, "list-id") || hasHeader(headers, "list-unsubscribe");
+    hasHeader(headers, "list") ||
+    hasListId ||
+    hasHeader(headers, "list-unsubscribe") ||
+    hasListPost ||
+    hasListArchive ||
+    hasListUrl ||
+    hasListOwner;
   const listRaw = getHeaderRaw(headers, "list");
   const listSerialized =
     typeof listRaw === "string"
@@ -272,13 +312,31 @@ export function extractLinearFeatures(
       : listRaw
         ? JSON.stringify(listRaw).toLowerCase()
         : "";
+  const listUnsubscribePostRaw = getHeaderRaw(headers, "list-unsubscribe-post");
+  const listUnsubscribePostSerialized =
+    typeof listUnsubscribePostRaw === "string"
+      ? listUnsubscribePostRaw.toLowerCase()
+      : listUnsubscribePostRaw
+        ? JSON.stringify(listUnsubscribePostRaw).toLowerCase()
+        : "";
   const hasListUnsubscribe =
     hasHeader(headers, "list-unsubscribe") ||
     hasHeader(headers, "list-unsubscribe-post") ||
     listSerialized.includes("unsubscribe");
+  const hasListUnsubscribeOneClick = listUnsubscribePostSerialized.includes(
+    "list-unsubscribe=one-click"
+  );
+  const hasStrongListBundle =
+    hasListId && hasListUnsubscribe && (hasListPost || hasListArchive || hasListUrl);
 
   if (hasListHeader) addFeature(features, "has:list_header");
+  if (hasListId) addFeature(features, "has:list_id");
+  if (hasListPost) addFeature(features, "has:list_post");
+  if (hasListArchive) addFeature(features, "has:list_archive");
+  if (hasListUrl) addFeature(features, "has:list_url");
   if (hasListUnsubscribe) addFeature(features, "has:list_unsubscribe");
+  if (hasListUnsubscribeOneClick) addFeature(features, "has:list_unsubscribe_one_click");
+  if (hasStrongListBundle) addFeature(features, "has:strong_list_bundle");
   if (hasHeader(headers, "in-reply-to")) addFeature(features, "has:in_reply_to");
   if (hasHeader(headers, "references")) addFeature(features, "has:references");
   if (hasHeader(headers, "auto-submitted")) addFeature(features, "has:auto_submitted");

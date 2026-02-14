@@ -198,13 +198,17 @@ function classifyEmailInput(
   );
 
   let scores = linear.scores;
-  if (hasHeader(headers, "in-reply-to") || hasHeader(headers, "references")) {
+  const hasThreadHeaders = hasHeader(headers, "in-reply-to") || hasHeader(headers, "references");
+  const hasStrongListBundle = Number(features["has:strong_list_bundle"] ?? 0) > 0;
+  if (hasThreadHeaders && !hasStrongListBundle) {
     scores = {
       newsletter: scores.newsletter * THREAD_SUPPRESSION_FACTOR,
       notification: scores.notification * THREAD_SUPPRESSION_FACTOR,
       transactional: scores.transactional * THREAD_SUPPRESSION_FACTOR
     };
     signals.push(`suppress:thread-reply:x${THREAD_SUPPRESSION_FACTOR.toFixed(2)}`);
+  } else if (hasThreadHeaders && hasStrongListBundle) {
+    signals.push("skip-suppress:thread-reply:strong-list-bundle");
   }
 
   const entries = (Object.entries(scores) as Array<[EmailCategory, number]>).filter(
