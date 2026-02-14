@@ -2,11 +2,6 @@ name: Deploy to Production
 
 on:
   workflow_dispatch:  # Manual trigger only
-    inputs:
-      confirm:
-        description: 'Type "deploy" to confirm production deployment'
-        required: true
-        default: ''
 
 env:
   REGISTRY: ghcr.io
@@ -20,12 +15,6 @@ jobs:
       url: https://${{ vars.DOMAIN }}
 
     steps:
-      - name: Validate confirmation
-        if: github.event.inputs.confirm != 'deploy'
-        run: |
-          echo "::error::Production deployment not confirmed. You must type 'deploy' to proceed."
-          exit 1
-
       - name: Checkout repository
         uses: actions/checkout@v4
 
