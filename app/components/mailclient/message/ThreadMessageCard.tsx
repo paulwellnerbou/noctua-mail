@@ -77,6 +77,7 @@ type ThreadMessageCardProps = {
   messageByMessageId: Map<string, Message>;
   getPrimaryEmail: (value?: string) => string | null;
   extractEmails: (value?: string) => string[];
+  onFindRelatedByCalendarInviteUid?: (uid: string) => void;
   dateFormat?: AccountDateFormat;
 };
 
@@ -117,6 +118,7 @@ export default function ThreadMessageCard({
   messageByMessageId,
   getPrimaryEmail,
   extractEmails,
+  onFindRelatedByCalendarInviteUid,
   dateFormat
 }: ThreadMessageCardProps) {
   const [menuOpen, setMenuOpen] = useState(false);
@@ -586,6 +588,7 @@ export default function ThreadMessageCard({
                   attachments={message.attachments ?? []}
                   accountId={message.accountId}
                   sourceMessageId={message.messageId}
+                  onFindRelatedByInviteUid={onFindRelatedByCalendarInviteUid}
                 />
                 <AttachmentsList attachments={message.attachments ?? []} />
               </div>

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireAccountAccessOr403, requireSessionOr401 } from "@/lib/auth";
+import { requireSessionAccountOr403, requireSessionOr401 } from "@/lib/auth";
 import { getThreadRecomputeJob } from "@/lib/threadRecomputeJobs";
 
 export async function GET(request: Request) {
@@ -14,7 +14,7 @@ export async function GET(request: Request) {
   if (!job) {
     return NextResponse.json({ ok: false, message: "Job not found" }, { status: 404 });
   }
-  const access = await requireAccountAccessOr403(session, job.accountId);
+  const access = await requireSessionAccountOr403(session, job.accountId);
   if (access instanceof NextResponse) {
     return NextResponse.json({ ok: false, message: "Job not found" }, { status: 404 });
   }

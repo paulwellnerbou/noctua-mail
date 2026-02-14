@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getMessageById } from "@/lib/db";
-import { requireAccountAccessOr403, requireSessionOr401 } from "@/lib/auth";
+import { requireSessionAccountOr403, requireSessionOr401 } from "@/lib/auth";
 import {
   appendUnreferencedInlineImages,
   escapeHtml,
@@ -79,7 +79,7 @@ export async function GET(request: Request) {
   if (!accountId || !messageId) {
     return htmlError(400, "Missing accountId or messageId.");
   }
-  const access = await requireAccountAccessOr403(session, accountId);
+  const access = requireSessionAccountOr403(session, accountId);
   if (access instanceof NextResponse) return htmlError(403, "Forbidden.");
 
   const message = await getMessageById(accountId, messageId);

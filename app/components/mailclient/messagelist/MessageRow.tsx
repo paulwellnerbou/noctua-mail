@@ -327,8 +327,8 @@ function MessageRow({
                 size="1"
                 variant="ghost"
                 color="gray"
-                title="Show related"
-                aria-label="Show related"
+                title="Find related"
+                aria-label="Find related"
                 disabled={isDisabled}
                 onClick={onShowRelated}
               >

@@ -1515,6 +1515,12 @@ a {
   flex-direction: column;
 }
 
+.bottom-popover-process {
+  width: min(460px, calc(100vw - 24px));
+  display: flex;
+  flex-direction: column;
+}
+
 .bottom-popover-reminders .popover-body {
   max-height: min(64vh, 560px);
   overflow: auto;
@@ -1723,12 +1729,30 @@ a {
 }
 
 .process-list {
-  margin-top: 6px;
-  color: var(--muted);
-  font-size: 11px;
+  margin-top: 2px;
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 8px;
+}
+
+.process-item-card {
+  padding: 10px 12px;
+}
+
+.process-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.process-row-title {
+  color: var(--gray-12);
+  line-height: 1.25;
+}
+
+.process-row-detail {
+  color: var(--gray-10);
+  line-height: 1.25;
 }
 
 

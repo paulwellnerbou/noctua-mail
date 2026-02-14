@@ -3,7 +3,6 @@ import { NextResponse, type NextRequest } from "next/server";
 import type { Account } from "./data";
 import { cacheSessionCredentials } from "./credentials";
 import { shouldIncludeSessionCredentials } from "./secret";
-import { listAccessibleAccountIdsForUser } from "./db";
 
 const SESSION_KEY = process.env.SESSION_SEAL_KEY ?? "";
 const SESSION_COOKIE = "noctua_session";
@@ -125,17 +124,20 @@ export function requireSessionOr401(
 }
 
 export async function listSessionAccountIds(session: SessionData) {
-  const ids = new Set<string>(await listAccessibleAccountIdsForUser(session.userId));
-  if (session.accountId?.trim()) {
-    ids.add(session.accountId.trim());
-  }
+  const ids = new Set<string>();
+  const accountId = session.accountId?.trim();
+  if (accountId) ids.add(accountId);
   return ids;
 }
 
 export async function requireAccountAccessOr403(session: SessionData, accountId: string) {
+  return requireSessionAccountOr403(session, accountId);
+}
+
+export function requireSessionAccountOr403(session: SessionData, accountId: string) {
   const normalizedAccountId = accountId.trim();
-  const accountIds = await listSessionAccountIds(session);
-  if (accountIds.has(normalizedAccountId)) {
+  const sessionAccountId = session.accountId?.trim() ?? "";
+  if (sessionAccountId && sessionAccountId === normalizedAccountId) {
     return true;
   }
   return new NextResponse(JSON.stringify({ ok: false, message: "Forbidden" }), {

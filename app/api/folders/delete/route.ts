@@ -14,7 +14,7 @@ import {
 } from "@/lib/mail/imap";
 import { notifyFolderDeleted } from "@/lib/mail/imapStreamRegistry";
 import type { Folder } from "@/lib/data";
-import { requireAccountAccessOr403, requireSessionOr401 } from "@/lib/auth";
+import { requireSessionAccountOr403, requireSessionOr401 } from "@/lib/auth";
 
 const TRASH_NAMES = [
   "trash",
@@ -65,7 +65,7 @@ export async function POST(request: Request) {
   if (!payload?.accountId || !payload?.folderId) {
     return NextResponse.json({ ok: false, message: "Missing accountId or folderId" }, { status: 400 });
   }
-  const access = await requireAccountAccessOr403(auth, payload.accountId);
+  const access = await requireSessionAccountOr403(auth, payload.accountId);
   if (access instanceof NextResponse) return access;
   const accounts = await getAccounts();
   const account = accounts.find((item) => item.id === payload.accountId);

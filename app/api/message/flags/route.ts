@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getAccounts, getMessageById, updateMessageFlags } from "@/lib/db";
 import { updateImapFlags } from "@/lib/mail/imap";
-import { requireAccountAccessOr403, requireSessionOr401 } from "@/lib/auth";
+import { requireSessionAccountOr403, requireSessionOr401 } from "@/lib/auth";
 
 const flagMap: Record<string, string> = {
   seen: "\\Seen",
@@ -25,7 +25,7 @@ export async function POST(request: Request) {
   if (!payload?.accountId || !payload?.messageId) {
     return NextResponse.json({ ok: false, message: "Missing accountId or messageId" }, { status: 400 });
   }
-  const access = await requireAccountAccessOr403(session, payload.accountId);
+  const access = await requireSessionAccountOr403(session, payload.accountId);
   if (access instanceof NextResponse) return access;
   const accounts = await getAccounts();
   const account = accounts.find((item) => item.id === payload.accountId);

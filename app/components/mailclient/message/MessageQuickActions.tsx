@@ -52,8 +52,8 @@ export default function MessageQuickActions({
           size={buttonSize}
           variant="ghost"
           color="gray"
-          title="Show related"
-          aria-label="Show related"
+          title="Find related"
+          aria-label="Find related"
           disabled={pendingMessageActions.has(message.id)}
           onClick={(event) => {
             event.stopPropagation();
@@ -128,8 +128,8 @@ export default function MessageQuickActions({
         size={buttonSize}
         variant="ghost"
         color="gray"
-        title="Show related"
-        aria-label="Show related"
+        title="Find related"
+        aria-label="Find related"
         disabled={pendingMessageActions.has(message.id)}
         onClick={(event) => {
           event.stopPropagation();

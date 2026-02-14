@@ -321,7 +321,7 @@ export default function MessageMenu({
             isVisible("showRelated")
               ? buildItem(
                   "showRelated",
-                  "Show related",
+                  "Find related",
                   <Search size={14} />,
                   () => onShowRelated(message),
                   isDisabled("showRelated")

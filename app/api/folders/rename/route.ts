@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getAccounts, getFolders, saveFoldersForAccount, updateMessagesFolderPrefix } from "@/lib/db";
 import { listImapFolders, renameImapFolder } from "@/lib/mail/imap";
-import { requireAccountAccessOr403, requireSessionOr401 } from "@/lib/auth";
+import { requireSessionAccountOr403, requireSessionOr401 } from "@/lib/auth";
 
 export async function POST(request: Request) {
   const auth = await requireSessionOr401(request);
@@ -15,7 +15,7 @@ export async function POST(request: Request) {
   if (!payload?.accountId || !payload?.folderId || !payload?.name) {
     return NextResponse.json({ ok: false, message: "Missing accountId, folderId, or name" }, { status: 400 });
   }
-  const access = await requireAccountAccessOr403(auth, payload.accountId);
+  const access = await requireSessionAccountOr403(auth, payload.accountId);
   if (access instanceof NextResponse) return access;
   const accounts = await getAccounts();
   const account = accounts.find((item) => item.id === payload.accountId);

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { AlarmClock, AlarmClockPlus, CalendarDays, Clock, Info, MapPin, Trash2 } from "lucide-react";
+import { AlarmClock, AlarmClockPlus, CalendarDays, Clock, Info, MapPin, Search, Trash2 } from "lucide-react";
 import { Badge, Button, Dialog, Flex, IconButton, Select, Text } from "@radix-ui/themes";
 import type { Attachment } from "@/lib/data";
 import {
@@ -173,11 +173,13 @@ type ReminderModalState = {
 export default function CalendarEventPreview({
   attachments,
   accountId,
-  sourceMessageId
+  sourceMessageId,
+  onFindRelatedByInviteUid
 }: {
   attachments: Attachment[];
   accountId: string;
   sourceMessageId?: string;
+  onFindRelatedByInviteUid?: (uid: string) => void;
 }) {
   const attachment = useMemo(
     () => attachments.find((item) => isCalendarAttachment(item) && Boolean(item.url || item.dataUrl)) ?? null,
@@ -278,6 +280,7 @@ export default function CalendarEventPreview({
   const rawIcsUid =
     events.find((event) => (event.uid ?? "").trim().length > 0)?.uid?.trim() ??
     extractIcsUid(normalizedRawSource);
+  const relatedInviteUid = rawIcsUid?.trim() ?? "";
   const groupedEvents = useMemo(() => {
     const nowMs = Date.now();
     const sourceEvents = (hasCurrentResult ? result.events : []).slice(0, 3);
@@ -421,6 +424,21 @@ export default function CalendarEventPreview({
             </Badge>
           </a>
           <Dialog.Root open={rawIcsOpen} onOpenChange={setRawIcsOpen}>
+            <IconButton
+              size="1"
+              variant="soft"
+              color="gray"
+              className={styles.infoButton}
+              title="Find related"
+              aria-label="Find related"
+              disabled={!relatedInviteUid || !onFindRelatedByInviteUid}
+              onClick={() => {
+                if (!relatedInviteUid) return;
+                onFindRelatedByInviteUid?.(relatedInviteUid);
+              }}
+            >
+              <Search size={12} />
+            </IconButton>
             <IconButton
               size="1"
               variant="soft"

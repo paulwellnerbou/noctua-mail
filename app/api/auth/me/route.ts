@@ -15,14 +15,22 @@ export async function GET(request: Request) {
   if (!session) {
     return NextResponse.json({ ok: false }, { status: 401 });
   }
-  const [users, accounts] = await Promise.all([getUsers(), getAccountsForUser(session.userId)]);
+  const sessionAccountId = session.accountId?.trim();
+  if (!sessionAccountId) {
+    return NextResponse.json({ ok: false }, { status: 403 });
+  }
+  const [users, accounts] = await Promise.all([
+    getUsers(),
+    getAccountsForUser(session.userId)
+  ]);
   const user = users.find((u) => u.id === session.userId);
+  const sessionScopedAccounts = accounts.filter((account) => account.id === sessionAccountId);
   const rotated = shouldRotateSession(session);
   const nextSession = rotated ? refreshSession(session) : session;
   const response = NextResponse.json({
     ok: true,
     user: user ?? null,
-    accounts: sanitizeAccountsForClient(accounts),
+    accounts: sanitizeAccountsForClient(sessionScopedAccounts),
     exp: nextSession.exp,
     ttlSeconds: getSessionTtlSeconds()
   });

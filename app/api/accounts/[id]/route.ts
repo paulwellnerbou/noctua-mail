@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { deleteAccountControlPlane, patchAccount } from "@/lib/db";
 import type { Account } from "@/lib/data";
-import { requireAccountAccessOr403, requireSessionOr401 } from "@/lib/auth";
+import { requireSessionAccountOr403, requireSessionOr401 } from "@/lib/auth";
 import { sanitizeAccountForClient } from "@/lib/accountPresentation";
 
 type Params = { params: Promise<{ id: string }> };
@@ -10,7 +10,7 @@ export async function PUT(request: Request, { params }: Params) {
   const session = requireSessionOr401(request);
   if (session instanceof NextResponse) return session;
   const { id } = await params;
-  const access = await requireAccountAccessOr403(session, id);
+  const access = await requireSessionAccountOr403(session, id);
   if (access instanceof NextResponse) return access;
   const payload = (await request.json()) as Partial<Account>;
   const updated = await patchAccount(id, payload);
@@ -24,7 +24,7 @@ export async function DELETE(request: Request, { params }: Params) {
   const session = requireSessionOr401(request);
   if (session instanceof NextResponse) return session;
   const { id } = await params;
-  const access = await requireAccountAccessOr403(session, id);
+  const access = await requireSessionAccountOr403(session, id);
   if (access instanceof NextResponse) return access;
   const deleted = await deleteAccountControlPlane(id);
   if (!deleted) {

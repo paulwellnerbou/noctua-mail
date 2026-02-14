@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { getAttachmentData, getMessageSource, saveAttachmentData } from "@/lib/storage";
 import { getAttachmentMeta } from "@/lib/db";
-import { requireAccountAccessOr403, requireSessionOr401 } from "@/lib/auth";
+import { requireSessionAccountOr403, requireSessionOr401 } from "@/lib/auth";
 import { extractAttachmentBufferFromSource } from "@/lib/mail/attachmentFromSource";
 
 export async function GET(request: Request) {
@@ -15,7 +15,7 @@ export async function GET(request: Request) {
   if (!accountId || !messageId || !attachmentId) {
     return NextResponse.json({ ok: false, message: "Missing parameters" }, { status: 400 });
   }
-  const access = await requireAccountAccessOr403(session, accountId);
+  const access = requireSessionAccountOr403(session, accountId);
   if (access instanceof NextResponse) return access;
 
   const attachment = await getAttachmentMeta(accountId, messageId, attachmentId);

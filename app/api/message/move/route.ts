@@ -3,13 +3,11 @@ import { NextResponse } from "next/server";
 import {
   getAccounts,
   getFolders,
-  getMessageById,
-  relocateMovedMessage
+  stageMessageMoves
 } from "@/lib/db";
-import { moveImapMessage } from "@/lib/mail/imap";
-import { moveMessageFiles } from "@/lib/storage";
+import { enqueueMessageMoveJobs } from "@/lib/messageMoveJobs";
 import type { Folder } from "@/lib/data";
-import { requireAccountAccessOr403, requireSessionOr401 } from "@/lib/auth";
+import { requireSessionAccountOr403, requireSessionOr401 } from "@/lib/auth";
 
 type MovePayload = {
   accountId: string;
@@ -34,7 +32,7 @@ export async function POST(request: Request) {
   if (!accountId || !Array.isArray(messageIds) || messageIds.length === 0 || !destinationFolderId) {
     return NextResponse.json({ ok: false, message: "Invalid payload" }, { status: 400 });
   }
-  const access = await requireAccountAccessOr403(session, accountId);
+  const access = await requireSessionAccountOr403(session, accountId);
   if (access instanceof NextResponse) return access;
 
   const accounts = await getAccounts();
@@ -53,51 +51,29 @@ export async function POST(request: Request) {
   }
 
   const destinationMailbox = mailboxPathFromFolder(destinationFolder, accountId);
-  const movedIds: Array<{ previousId: string; nextId: string }> = [];
-
-  for (const messageId of messageIds) {
-    const message = await getMessageById(accountId, messageId);
-    if (!message) continue;
-    if (typeof message.imapUid !== "number" || !message.mailboxPath) continue;
-
-    try {
-      const destinationUid = await moveImapMessage(
-        account,
-        message.mailboxPath,
-        message.imapUid,
-        destinationMailbox,
-        clientId
-      );
-      const relocated = await relocateMovedMessage({
+  const staged = await stageMessageMoves({
+    accountId,
+    messageIds,
+    destinationFolderId,
+    destinationMailboxPath: destinationMailbox
+  });
+  if (staged.length > 0) {
+    enqueueMessageMoveJobs(
+      staged.map((item) => ({
+        ...item,
         accountId,
-        previousId: message.id,
-        destinationFolderId,
-        destinationMailboxPath: destinationMailbox,
-        destinationUid
-      });
-      if (!relocated) continue;
-      if (relocated.changed) {
-        await moveMessageFiles(
-          accountId,
-          relocated.previousId,
-          relocated.nextId,
-          relocated.attachmentIds
-        );
-      }
-      movedIds.push({
-        previousId: relocated.previousId,
-        nextId: relocated.nextId
-      });
-    } catch (error) {
-      return NextResponse.json(
-        { ok: false, message: (error as Error).message ?? "Failed to move message" },
-        { status: 500 }
-      );
-    }
+        clientId
+      }))
+    );
   }
+  const movedIds = staged.map((item) => ({
+    previousId: item.messageId,
+    nextId: item.messageId
+  }));
 
   return NextResponse.json({
     ok: true,
+    queued: true,
     destinationFolderId,
     destinationMailbox,
     moved: movedIds.length,

@@ -148,9 +148,9 @@ import {
 import {
   CALENDAR_REMINDER_REFRESH_INTERVAL_MS,
   NOTICE_TIMEOUTS,
-  SYNC_STATUS_POLL_MAX_INTERVAL_MS,
   THREAD_COLLAPSE_SETTLE_MS,
-  SYNC_STATUS_POLL_INTERVAL_MS
+  SYNC_STATUS_POLL_INTERVAL_MS,
+  SYNC_STATUS_RUNNING_POLL_INTERVAL_MS
 } from "./mailclient/constants";
 import type {
   ExceptionEntry,
@@ -189,6 +189,7 @@ type DraftSavePayload = {
 
 const LIST_DEBUG_SAMPLE_LIMIT = 12;
 const LOCAL_DELETE_RECONCILE_SUPPRESS_MS = 15_000;
+const RELATED_NOTICE_SUBJECT_MAX_CHARS = 96;
 
 type SearchFieldKey = (typeof SEARCH_FIELD_ORDER)[number];
 type SearchBadgeKey = (typeof SEARCH_BADGE_ORDER)[number];
@@ -244,6 +245,12 @@ type CurrentResultDecision = { keep: true } | { keep: false; reason: string };
 
 function filterUpcomingCalendarReminders(reminders: CalendarReminder[], nowMs = Date.now()) {
   return reminders.filter((reminder) => getCalendarReminderEndAtMs(reminder) > nowMs);
+}
+
+function shortenRelatedNoticeSubject(subject: string, maxChars: number) {
+  if (subject.length <= maxChars) return subject;
+  if (maxChars <= 3) return ".".repeat(Math.max(0, maxChars));
+  return `${subject.slice(0, maxChars - 3).trimEnd()}...`;
 }
 
 type MailClientProps = {
@@ -884,8 +891,10 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
   const relatedNotice = useMemo(() => {
     if (!isRelatedSearch) return "";
     const subject = relatedContext?.subject?.trim();
-    const label = subject ? `"${subject}"` : relatedQueryId || "this message";
-    return `Showing related mails for ${label} (based on subject similarity, sender/recipient overlap, and conversation references).`;
+    const label = subject
+      ? `"${shortenRelatedNoticeSubject(subject, RELATED_NOTICE_SUBJECT_MAX_CHARS)}"`
+      : relatedQueryId || "this message";
+    return `Showing related mails for ${label} (based on calendar invite UID matches, subject similarity, sender/recipient overlap, and conversation references).`;
   }, [isRelatedSearch, relatedContext, relatedQueryId]);
   const clearSearch = () => {
     const relatedRestore =
@@ -3636,6 +3645,17 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     setActiveFolderId("");
     setQuery(`related:${message.id}`);
   };
+  const handleFindRelatedByCalendarInviteUid = (eventUid: string) => {
+    const normalizedUid = eventUid.trim().replace(/"/g, "");
+    if (!normalizedUid) return;
+    if (searchScope === "folder" && activeFolderId) {
+      setLastFolderId(activeFolderId);
+    }
+    const uidQueryTerm = /\s/.test(normalizedUid) ? `"${normalizedUid}"` : normalizedUid;
+    setSearchScope("all");
+    setActiveFolderId("");
+    setQuery(`invite:${uidQueryTerm}`);
+  };
 
   const renderQuickActions = (
     message: Message,
@@ -6110,7 +6130,6 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
   const waitForSyncJob = async (jobId: string): Promise<SyncJobResult> => {
     const startedAt = Date.now();
     const timeoutMs = 1000 * 60 * 10;
-    let pollDelayMs = SYNC_STATUS_POLL_INTERVAL_MS;
     const clearProgress = () => {
       setSyncProgressByJobId((prev) => {
         if (!prev[jobId]) return prev;
@@ -6120,7 +6139,9 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
       });
     };
     while (Date.now() - startedAt < timeoutMs) {
-      const statusRes = await apiFetch(`/api/sync/status?jobId=${encodeURIComponent(jobId)}`);
+      const statusRes = await apiFetch(`/api/sync/status?jobId=${encodeURIComponent(jobId)}`, {
+        cache: "no-store"
+      });
       if (!statusRes.ok) {
         clearProgress();
         throw new Error(await readErrorMessage(statusRes));
@@ -6153,12 +6174,12 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
         throw new Error(data.job?.error || "Sync job failed.");
       }
       await new Promise<void>((resolve) => {
-        window.setTimeout(resolve, pollDelayMs);
+        const delayMs =
+          status === "running"
+            ? SYNC_STATUS_RUNNING_POLL_INTERVAL_MS
+            : SYNC_STATUS_POLL_INTERVAL_MS;
+        window.setTimeout(resolve, delayMs);
       });
-      pollDelayMs = Math.min(
-        SYNC_STATUS_POLL_MAX_INTERVAL_MS,
-        Math.round(pollDelayMs * 1.5)
-      );
     }
     clearProgress();
     throw new Error("Sync timed out.");
@@ -7670,6 +7691,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
                       messageByMessageId,
                       getPrimaryEmail,
                       extractEmails,
+                      onFindRelatedByCalendarInviteUid: handleFindRelatedByCalendarInviteUid,
                       dateFormat: accountDateFormat
                     }}
                   />

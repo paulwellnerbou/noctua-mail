@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { listThreadMessages } from "@/lib/db";
-import { requireAccountAccessOr403, requireSessionOr401 } from "@/lib/auth";
+import { requireSessionAccountOr403, requireSessionOr401 } from "@/lib/auth";
 
 export async function POST(request: Request) {
   const session = requireSessionOr401(request);
@@ -24,7 +24,7 @@ export async function POST(request: Request) {
       { status: 400 }
     );
   }
-  const access = await requireAccountAccessOr403(session, accountId);
+  const access = await requireSessionAccountOr403(session, accountId);
   if (access instanceof NextResponse) return access;
   const groupBy = payload.groupBy ?? "date";
   const data = await listThreadMessages({ accountId, threadIds, messageIds, groupBy });

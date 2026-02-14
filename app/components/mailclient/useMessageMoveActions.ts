@@ -21,6 +21,7 @@ type MoveNoticeInput = {
 
 type MoveApiResponse = {
   ok: boolean;
+  queued?: boolean;
   destinationFolderId: string;
   destinationMailbox?: string;
   movedIds?: Array<{ previousId: string; nextId: string }>;
@@ -186,6 +187,7 @@ export function useMessageMoveActions({
           return null;
         }
         const data = (await res.json()) as MoveApiResponse;
+        const queued = Boolean(data.queued);
         const idRemap = new Map<string, string>();
         (data.movedIds ?? []).forEach((item) => {
           if (!item?.previousId || !item?.nextId) return;
@@ -199,12 +201,14 @@ export function useMessageMoveActions({
             )
           : new Set(uniqueIds);
         const resolveMovedId = (id: string) => idRemap.get(id) ?? id;
-        const mappedUndoTargets = undoTargets
-          .filter((target) => movedPreviousIds.has(target.messageId))
-          .map((target) => ({
-            ...target,
-            messageId: resolveMovedId(target.messageId)
-          }));
+        const mappedUndoTargets = queued
+          ? []
+          : undoTargets
+              .filter((target) => movedPreviousIds.has(target.messageId))
+              .map((target) => ({
+                ...target,
+                messageId: resolveMovedId(target.messageId)
+              }));
         markMessagesMutated?.();
         setMessages((prev) => {
           let changed = false;
@@ -219,7 +223,8 @@ export function useMessageMoveActions({
               ...item,
               id: resolvedId,
               folderId: data.destinationFolderId,
-              mailboxPath: data.destinationMailbox ?? item.mailboxPath
+              mailboxPath: data.destinationMailbox ?? item.mailboxPath,
+              imapUid: queued ? undefined : item.imapUid
             };
             const updated = remapMessageReferenceIds(updatedBase, item.id, resolvedId);
             const keep = shouldKeepMessageInResults
@@ -247,7 +252,8 @@ export function useMessageMoveActions({
                   ...activeMessage,
                   id: resolvedActiveId,
                   folderId: data.destinationFolderId,
-                  mailboxPath: data.destinationMailbox ?? activeMessage.mailboxPath
+                  mailboxPath: data.destinationMailbox ?? activeMessage.mailboxPath,
+                  imapUid: queued ? undefined : activeMessage.imapUid
                 },
                 activeMessage.id,
                 resolvedActiveId
@@ -276,9 +282,13 @@ export function useMessageMoveActions({
           pushNotice({
             type: "success",
             title:
-              uniqueIds.length === 1
-                ? `Moved message to ${destinationName}.`
-                : `Moved ${uniqueIds.length} messages to ${destinationName}.`,
+              queued
+                ? uniqueIds.length === 1
+                  ? `Moving message to ${destinationName} in background.`
+                  : `Moving ${uniqueIds.length} messages to ${destinationName} in background.`
+                : uniqueIds.length === 1
+                  ? `Moved message to ${destinationName}.`
+                  : `Moved ${uniqueIds.length} messages to ${destinationName}.`,
             description: singleSubject,
             actionLabel: mappedUndoTargets.length > 0 ? "Undo" : undefined,
             onAction:

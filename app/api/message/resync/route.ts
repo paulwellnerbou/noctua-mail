@@ -8,7 +8,7 @@ import {
 } from "@/lib/db";
 import { syncImapMessage } from "@/lib/mail/imap";
 import { sanitizeSyncedMessage } from "@/lib/mail/syncMessageSanitizer";
-import { requireAccountAccessOr403, requireSessionOr401 } from "@/lib/auth";
+import { requireSessionAccountOr403, requireSessionOr401 } from "@/lib/auth";
 
 export async function POST(request: Request) {
   const session = requireSessionOr401(request);
@@ -18,7 +18,7 @@ export async function POST(request: Request) {
   if (!payload?.accountId || !payload?.messageId) {
     return NextResponse.json({ ok: false, message: "Missing accountId/messageId" }, { status: 400 });
   }
-  const access = await requireAccountAccessOr403(session, payload.accountId);
+  const access = await requireSessionAccountOr403(session, payload.accountId);
   if (access instanceof NextResponse) return access;
 
   const accounts = await getAccounts();

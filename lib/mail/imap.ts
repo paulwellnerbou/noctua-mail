@@ -7,6 +7,7 @@ import {
 } from "@/lib/db";
 import { extractHtmlBody } from "@/lib/html";
 import { isCalendarAttachment, withCalendarInviteFlag } from "@/lib/messageFlags";
+import { parseIcsInvite } from "@/lib/calendar";
 import {
   classifyCategoryFromMetadata,
   getCategorizationConfig,
@@ -591,6 +592,60 @@ function mergeAttachmentContentForNewMode(
   });
 }
 
+type CalendarAttachmentCandidate = {
+  filename?: string | null;
+  contentType?: string | null;
+  content?: Buffer | Uint8Array | ArrayBuffer | null;
+  dataUrl?: string | null;
+};
+
+function resolveCalendarAttachmentBuffer(candidate?: CalendarAttachmentCandidate | null) {
+  const content = candidate?.content;
+  if (Buffer.isBuffer(content)) return content;
+  if (content instanceof Uint8Array) {
+    return Buffer.from(content.buffer, content.byteOffset, content.byteLength);
+  }
+  if (content instanceof ArrayBuffer) return Buffer.from(content);
+  const dataUrl = candidate?.dataUrl?.trim();
+  if (!dataUrl || !dataUrl.startsWith("data:")) return null;
+  const commaIndex = dataUrl.indexOf(",");
+  if (commaIndex < 0) return null;
+  const header = dataUrl.slice(0, commaIndex).toLowerCase();
+  const payload = dataUrl.slice(commaIndex + 1);
+  if (header.includes(";base64")) {
+    try {
+      return Buffer.from(payload, "base64");
+    } catch {
+      return null;
+    }
+  }
+  try {
+    return Buffer.from(decodeURIComponent(payload), "utf8");
+  } catch {
+    return Buffer.from(payload, "utf8");
+  }
+}
+
+function collectCalendarEventUidsFromAttachments(
+  attachments: CalendarAttachmentCandidate[] | undefined
+) {
+  if (!attachments || attachments.length === 0) return undefined;
+  const eventUids = new Set<string>();
+  attachments.forEach((attachment) => {
+    if (!isCalendarAttachment(attachment as any)) return;
+    const content = resolveCalendarAttachmentBuffer(attachment);
+    if (!content) return;
+    const parsed = parseIcsInvite(content.toString("utf8"));
+    parsed.events.forEach((event) => {
+      const uid = event.uid?.trim().toLowerCase();
+      if (uid) {
+        eventUids.add(uid);
+      }
+    });
+  });
+  return eventUids.size > 0 ? Array.from(eventUids) : undefined;
+}
+
 function buildLightweightImapMessage(params: {
   account: Account;
   mailboxToOpen: string;
@@ -633,7 +688,14 @@ function buildLightweightImapMessage(params: {
     htmlBody: undefined
   });
   const { seen, answered, flagged, deleted, draft, recent, unread } = deriveFlagState(flagList);
+  const from = formatEnvelopeAddresses(envelope?.from) || account.email;
+  const to = formatEnvelopeAddresses(envelope?.to);
+  const cc = formatEnvelopeAddresses(envelope?.cc);
+  const bcc = formatEnvelopeAddresses(envelope?.bcc);
   const headers = parseHeaderMap(rawHeaders);
+  const calendarEventUids = collectCalendarEventUidsFromAttachments(
+    attachments as CalendarAttachmentCandidate[]
+  );
   const classification = classifyImapMessageCategory({
     account,
     mailboxPath: mailboxToOpen,
@@ -645,17 +707,23 @@ function buildLightweightImapMessage(params: {
   });
 
   return {
-    id: buildImapMessageRowId(account.id, mailboxToOpen, uid),
+    id: buildImapMessageRowId(messageId, {
+      dateValue,
+      from,
+      to,
+      subject: envelope?.subject ?? "",
+      inReplyTo
+    }),
     threadId: inReplyTo ?? messageId ?? `imap-thread-${uid}`,
     messageId,
     inReplyTo,
     references: undefined,
     xForwardedMessageId: undefined,
     subject: envelope?.subject?.trim() || "(no subject)",
-    from: formatEnvelopeAddresses(envelope?.from) || account.email,
-    to: formatEnvelopeAddresses(envelope?.to),
-    cc: formatEnvelopeAddresses(envelope?.cc),
-    bcc: formatEnvelopeAddresses(envelope?.bcc),
+    from,
+    to,
+    cc,
+    bcc,
     preview: "",
     date: new Date(dateValue).toLocaleString(),
     dateValue,
@@ -679,7 +747,8 @@ function buildLightweightImapMessage(params: {
     unread,
     category: classification.category,
     categoryScore: classification.categoryScore,
-    categorySignals: classification.categorySignals
+    categorySignals: classification.categorySignals,
+    calendarEventUids
   } as Message;
 }
 
@@ -699,6 +768,9 @@ async function parseImapMessage(
     attachments
   } = extractMessageStructureMetadata(account, message.uid, message.bodyStructure);
   const parsedSource = await parseMailForCategorization(message.source);
+  const calendarEventUids = collectCalendarEventUidsFromAttachments(
+    parsedSource.attachments as CalendarAttachmentCandidate[]
+  );
   const body = typeof parsedSource.text === "string" ? parsedSource.text : "";
   const htmlBody =
     typeof parsedSource.html === "string"
@@ -812,7 +884,13 @@ async function parseImapMessage(
   });
 
   return {
-    id: buildImapMessageRowId(account.id, mailboxToOpen, message.uid),
+    id: buildImapMessageRowId(messageId, {
+      dateValue,
+      from: formatEnvelopeAddresses(envelope?.from) || account.email,
+      to: formatEnvelopeAddresses(envelope?.to),
+      subject: envelope?.subject?.trim() || headerValue("subject") || "(no subject)",
+      inReplyTo
+    }),
     threadId: inReplyTo ?? messageId ?? `imap-thread-${message.uid}`,
     messageId,
     inReplyTo: inReplyTo ?? undefined,
@@ -846,7 +924,8 @@ async function parseImapMessage(
     unread,
     category: classification.category,
     categoryScore: classification.categoryScore,
-    categorySignals: classification.categorySignals
+    categorySignals: classification.categorySignals,
+    calendarEventUids
   } as Message;
 }
 

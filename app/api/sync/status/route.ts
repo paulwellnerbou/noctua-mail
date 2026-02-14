@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireAccountAccessOr403, requireSessionOr401 } from "@/lib/auth";
+import { requireSessionAccountOr403, requireSessionOr401 } from "@/lib/auth";
 import { getSyncJob } from "@/lib/syncJobs";
 
 export async function GET(request: Request) {
@@ -31,7 +31,7 @@ export async function GET(request: Request) {
     logStatus("job-not-found");
     return NextResponse.json({ ok: false, message: "Job not found" }, { status: 404 });
   }
-  const access = await requireAccountAccessOr403(session, job.payload.accountId);
+  const access = await requireSessionAccountOr403(session, job.payload.accountId);
   if (access instanceof NextResponse) {
     logStatus("forbidden", { accountId: job.payload.accountId });
     return NextResponse.json({ ok: false, message: "Job not found" }, { status: 404 });

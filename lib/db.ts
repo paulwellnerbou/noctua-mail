@@ -37,7 +37,6 @@ import { normalizeAccountDateFormat } from "./dateFormatting";
 import { withDbWriteRetry } from "./dbWriteRetry";
 import { randomUUID } from "crypto";
 import { normalizeReminderDateList, resolveNextReminderOccurrence } from "./reminderRecurrence";
-import { buildImapMessageRowId } from "./messageIds";
 import {
   CATEGORY_KEYS,
   createSeededLinearModel,
@@ -368,6 +367,14 @@ function initAccountSchema(db: any) {
       FOREIGN KEY(messageId) REFERENCES messages(id) ON DELETE CASCADE
     );
 
+    CREATE TABLE IF NOT EXISTS message_calendar_events (
+      accountId TEXT NOT NULL,
+      messageId TEXT NOT NULL,
+      eventUid TEXT NOT NULL,
+      PRIMARY KEY (accountId, messageId, eventUid),
+      FOREIGN KEY(messageId) REFERENCES messages(id) ON DELETE CASCADE
+    );
+
     CREATE TABLE IF NOT EXISTS threads (
       threadId TEXT PRIMARY KEY,
       accountId TEXT NOT NULL,
@@ -449,6 +456,10 @@ function initAccountSchema(db: any) {
       ON threads(accountId, latestDateValue DESC);
     CREATE INDEX IF NOT EXISTS idx_attachments_message
       ON attachments(messageId);
+    CREATE INDEX IF NOT EXISTS idx_message_calendar_events_account_uid
+      ON message_calendar_events(accountId, eventUid);
+    CREATE INDEX IF NOT EXISTS idx_message_calendar_events_account_message
+      ON message_calendar_events(accountId, messageId);
     CREATE INDEX IF NOT EXISTS idx_calendar_reminders_account_user_uid
       ON calendar_reminders(accountId, userId, eventUid);
     CREATE INDEX IF NOT EXISTS idx_calendar_reminders_account_user_updated
@@ -1723,18 +1734,36 @@ function parseSearchInput(
     return lead ? " " : "";
   });
 
-  const rawQuery = withoutIn.trim();
-  const baseQuery = buildFtsQuery(withoutIn);
+  // Extract "invite:" / "event:" terms (calendar invite UID)
+  const inviteUidTerms: string[] = [];
+  const withoutInviteUid = withoutIn.replace(
+    /(^|\s)(invite|event):("([^"]+)"|\S+)/gi,
+    (match, lead, _prefix, term) => {
+      const cleaned = term.replace(/^"|"$/g, "").trim().toLowerCase();
+      if (cleaned) inviteUidTerms.push(cleaned);
+      return lead ? " " : "";
+    }
+  );
+
+  const rawQuery = withoutInviteUid.trim();
+  const baseQuery = buildFtsQuery(withoutInviteUid);
   const columns = normalizeSearchFields(fields);
   if (!baseQuery) {
-    return { ftsQuery: null, fromTerms, toTerms, inTerms, rawQuery };
+    return { ftsQuery: null, fromTerms, toTerms, inTerms, inviteUidTerms, rawQuery };
   }
   const tokens = baseQuery.split(/\s+AND\s+/);
   const scoped = tokens.map((token) => {
     const orParts = columns.map((col) => `${col}:${token}`);
     return orParts.length > 1 ? `(${orParts.join(" OR ")})` : orParts[0];
   });
-  return { ftsQuery: scoped.join(" AND "), fromTerms, toTerms, inTerms, rawQuery };
+  return {
+    ftsQuery: scoped.join(" AND "),
+    fromTerms,
+    toTerms,
+    inTerms,
+    inviteUidTerms,
+    rawQuery
+  };
 }
 
 function parseReferences(value?: string | null) {
@@ -1762,6 +1791,22 @@ function parseStringArray(value?: string | null) {
     return undefined;
   }
   return undefined;
+}
+
+function normalizeCalendarEventUid(value?: string | null) {
+  const normalized = (value ?? "").trim().toLowerCase();
+  return normalized || null;
+}
+
+function normalizeCalendarEventUids(values?: Array<string | null | undefined> | null) {
+  if (!Array.isArray(values) || values.length === 0) return [];
+  return Array.from(
+    new Set(
+      values
+        .map((value) => normalizeCalendarEventUid(value))
+        .filter((value): value is string => Boolean(value))
+    )
+  );
 }
 
 function normalizeCategory(value?: string | null): CategoryKey | null {
@@ -1982,7 +2027,7 @@ async function getGroupCounts(params: {
   const db = await getAccountDb(accountId);
   const accountEmail = await getAccountEmail(accountId);
 
-  const { ftsQuery, fromTerms, toTerms, inTerms, rawQuery } = parseSearchInput(
+  const { ftsQuery, fromTerms, toTerms, inTerms, inviteUidTerms, rawQuery } = parseSearchInput(
     query,
     fields,
     accountEmail
@@ -2047,6 +2092,18 @@ async function getGroupCounts(params: {
       args.push(pattern, pattern, pattern);
     }
   }
+  inviteUidTerms.forEach(() => {
+    where += ` AND EXISTS (
+      SELECT 1
+      FROM message_calendar_events mce
+      WHERE mce.accountId = ?
+        AND mce.messageId = m.id
+        AND lower(mce.eventUid) LIKE ?
+    )`;
+  });
+  inviteUidTerms.forEach((term) => {
+    args.push(accountId, `%${term}%`);
+  });
   where = applyBadgeFilters(where, args, badges);
   where = applyExcludedFolderFilters(where, args, excludedFolderIds);
   const attachmentsFilter = attachmentsOnly ?? badges?.includes("attachments");
@@ -2193,7 +2250,7 @@ async function getTotalCount(params: {
     params;
   const accountEmail = await getAccountEmail(accountId);
 
-  const { ftsQuery, fromTerms, toTerms, inTerms, rawQuery } = parseSearchInput(
+  const { ftsQuery, fromTerms, toTerms, inTerms, inviteUidTerms, rawQuery } = parseSearchInput(
     query,
     fields,
     accountEmail
@@ -2258,6 +2315,18 @@ async function getTotalCount(params: {
       args.push(pattern, pattern, pattern);
     }
   }
+  inviteUidTerms.forEach(() => {
+    where += ` AND EXISTS (
+      SELECT 1
+      FROM message_calendar_events mce
+      WHERE mce.accountId = ?
+        AND mce.messageId = m.id
+        AND lower(mce.eventUid) LIKE ?
+    )`;
+  });
+  inviteUidTerms.forEach((term) => {
+    args.push(accountId, `%${term}%`);
+  });
   where = applyBadgeFilters(where, args, badges);
   where = applyExcludedFolderFilters(where, args, excludedFolderIds);
   const attachmentsFilter = attachmentsOnly ?? badges?.includes("attachments");
@@ -2352,6 +2421,17 @@ export async function listRelatedMessages(params: {
       .filter(Boolean)
       .map((value: string) => value.toLowerCase())
   );
+  const targetCalendarEventUids = normalizeCalendarEventUids(
+    (
+      db
+        .prepare(
+          `SELECT eventUid
+           FROM message_calendar_events
+           WHERE accountId = ? AND messageId = ?`
+        )
+        .all(accountId, target.id) as Array<{ eventUid?: string | null }>
+    ).map((row) => row.eventUid ?? undefined)
+  );
 
   // Always include the reference message itself in related results.
   const clauses: string[] = ["m.id = ?"];
@@ -2385,6 +2465,17 @@ export async function listRelatedMessages(params: {
     );
     args.push(ref, ref, `%${ref}%`);
   });
+  if (targetCalendarEventUids.length > 0) {
+    clauses.push(
+      `m.id IN (
+         SELECT mce.messageId
+         FROM message_calendar_events mce
+         WHERE mce.accountId = ?
+           AND mce.eventUid IN (${targetCalendarEventUids.map(() => "?").join(",")})
+       )`
+    );
+    args.push(accountId, ...targetCalendarEventUids);
+  }
 
   let where = `m.accountId = ? AND (${clauses.join(" OR ")})`;
   where = applyVisibleMessageFilters(where);
@@ -2443,6 +2534,23 @@ export async function listRelatedMessages(params: {
     `
     )
     .all(...args) as any[];
+  const calendarUidMatchMessageIds =
+    targetCalendarEventUids.length === 0
+      ? new Set<string>()
+      : new Set(
+          (
+            db
+              .prepare(
+                `SELECT DISTINCT messageId
+                 FROM message_calendar_events
+                 WHERE accountId = ?
+                   AND eventUid IN (${targetCalendarEventUids.map(() => "?").join(",")})`
+              )
+              .all(accountId, ...targetCalendarEventUids) as Array<{ messageId?: string | null }>
+          )
+            .map((row) => (row.messageId ?? "").trim())
+            .filter(Boolean)
+        );
 
   const targetParticipantSet = new Set(participantEmails);
   const targetRefSet = targetRefs;
@@ -2497,6 +2605,9 @@ export async function listRelatedMessages(params: {
       parseReferences(row.references)?.map((ref) => ref.toLowerCase()) ?? [];
     if (candidateRefs.some((ref) => targetRefSet.has(ref))) {
       score += 3;
+    }
+    if (calendarUidMatchMessageIds.has(row.id)) {
+      score += 18;
     }
     return { row, score };
   });
@@ -2630,12 +2741,13 @@ export async function listMessages(params: {
   const offset = (page - 1) * pageSize;
   const accountEmail = await getAccountEmail(accountId);
 
-  const { ftsQuery, fromTerms, toTerms, inTerms, rawQuery } = parseSearchInput(
+  const { ftsQuery, fromTerms, toTerms, inTerms, inviteUidTerms, rawQuery } = parseSearchInput(
     query,
     fields,
     accountEmail
   );
   const hasQuery = Boolean(ftsQuery);
+  const hasInviteUidQuery = inviteUidTerms.length > 0;
   const idQuery = rawQuery.trim();
   const hasIdQuery = Boolean(idQuery);
   const baseWhere = `m.accountId = ? ${folderId ? "AND m.folderId = ?" : ""}`;
@@ -2695,6 +2807,18 @@ export async function listMessages(params: {
       args.push(pattern, pattern, pattern);
     }
   }
+  inviteUidTerms.forEach(() => {
+    where += ` AND EXISTS (
+      SELECT 1
+      FROM message_calendar_events mce
+      WHERE mce.accountId = ?
+        AND mce.messageId = m.id
+        AND lower(mce.eventUid) LIKE ?
+    )`;
+  });
+  inviteUidTerms.forEach((term) => {
+    args.push(accountId, `%${term}%`);
+  });
   where = applyBadgeFilters(where, args, badges);
   where = applyExcludedFolderFilters(where, args, excludedFolderIds);
   const attachmentsFilter = attachmentsOnly ?? badges?.includes("attachments");
@@ -2703,6 +2827,7 @@ export async function listMessages(params: {
   }
   const shouldPrioritizeFlaggedMessages =
     !hasQuery &&
+    !hasInviteUidQuery &&
     !hasIdQuery &&
     fromTerms.length === 0 &&
     toTerms.length === 0 &&
@@ -2854,12 +2979,13 @@ export async function listThreads(params: {
   const offset = (page - 1) * pageSize;
   const accountEmail = await getAccountEmail(accountId);
 
-  const { ftsQuery, fromTerms, toTerms, inTerms, rawQuery } = parseSearchInput(
+  const { ftsQuery, fromTerms, toTerms, inTerms, inviteUidTerms, rawQuery } = parseSearchInput(
     query,
     fields,
     accountEmail
   );
   const hasQuery = Boolean(ftsQuery);
+  const hasInviteUidQuery = inviteUidTerms.length > 0;
   const idQuery = rawQuery.trim();
   const hasIdQuery = Boolean(idQuery);
   const baseWhere = `m.accountId = ? ${folderId ? "AND m.folderId = ?" : ""}`;
@@ -2919,6 +3045,18 @@ export async function listThreads(params: {
       args.push(pattern, pattern, pattern);
     }
   }
+  inviteUidTerms.forEach(() => {
+    where += ` AND EXISTS (
+      SELECT 1
+      FROM message_calendar_events mce
+      WHERE mce.accountId = ?
+        AND mce.messageId = m.id
+        AND lower(mce.eventUid) LIKE ?
+    )`;
+  });
+  inviteUidTerms.forEach((term) => {
+    args.push(accountId, `%${term}%`);
+  });
   where = applyBadgeFilters(where, args, badges);
   where = applyExcludedFolderFilters(where, args, excludedFolderIds);
   const attachmentsFilter = attachmentsOnly ?? badges?.includes("attachments");
@@ -2931,6 +3069,7 @@ export async function listThreads(params: {
   );
   const shouldPrioritizeFlaggedThreads =
     !hasQuery &&
+    !hasInviteUidQuery &&
     !hasIdQuery &&
     fromTerms.length === 0 &&
     toTerms.length === 0 &&
@@ -2940,6 +3079,7 @@ export async function listThreads(params: {
   const isUnfilteredThreadList =
     !folderId &&
     !hasQuery &&
+    !hasInviteUidQuery &&
     !hasIdQuery &&
     fromTerms.length === 0 &&
     toTerms.length === 0 &&
@@ -3433,8 +3573,18 @@ export async function upsertMessages(
       : db.prepare(
           `DELETE FROM attachments WHERE messageId IN (SELECT id FROM messages WHERE accountId = ?)`
         );
+    const deleteCalendarEventsByScope = folderId
+      ? db.prepare(
+          `DELETE FROM message_calendar_events
+           WHERE accountId = ?
+             AND messageId IN (SELECT id FROM messages WHERE accountId = ? AND folderId = ?)`
+        )
+      : db.prepare(`DELETE FROM message_calendar_events WHERE accountId = ?`);
     const deleteAttachmentsForMessage = db.prepare(
       `DELETE FROM attachments WHERE messageId = ?`
+    );
+    const deleteCalendarEventsForMessage = db.prepare(
+      `DELETE FROM message_calendar_events WHERE accountId = ? AND messageId = ?`
     );
     const deleteMessageById = db.prepare(`DELETE FROM messages WHERE accountId = ? AND id = ?`);
     const findFolderMessageDuplicates = db.prepare(
@@ -3452,6 +3602,10 @@ export async function upsertMessages(
     const insertAttachment = db.prepare(
       `INSERT OR REPLACE INTO attachments (id, messageId, filename, contentType, size, inline, cid, url)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    );
+    const insertCalendarEvent = db.prepare(
+      `INSERT OR REPLACE INTO message_calendar_events (accountId, messageId, eventUid)
+       VALUES (?, ?, ?)`
     );
 
     const insertMessage = db.prepare(`
@@ -3546,6 +3700,7 @@ export async function upsertMessages(
           ) as Array<{ id: string; threadId: string | null }>;
           duplicates.forEach((row) => {
             deleteAttachmentsForMessage.run(row.id);
+            deleteCalendarEventsForMessage.run(accountId, row.id);
             deleteFts.run(row.id);
             deleteMessageById.run(accountId, row.id);
             if (row.threadId) {
@@ -3556,6 +3711,7 @@ export async function upsertMessages(
         if (shouldDeleteAttachments) {
           deleteAttachmentsForMessage.run(message.id);
         }
+        deleteCalendarEventsForMessage.run(accountId, message.id);
         const normalizedFlags = normalizeImapFlags(message.flags);
         const hasRawFlags = Array.isArray(message.flags);
         const normalizedSystemFlags = deriveSystemFlagState(normalizedFlags);
@@ -3638,6 +3794,9 @@ export async function upsertMessages(
           message.body,
           message.preview
         );
+        normalizeCalendarEventUids(message.calendarEventUids).forEach((eventUid) => {
+          insertCalendarEvent.run(accountId, message.id, eventUid);
+        });
         (message.attachments ?? []).forEach((att) => {
           insertAttachment.run(
             att.id,
@@ -3656,6 +3815,11 @@ export async function upsertMessages(
     if (replaceExisting) {
       db.transaction(() => {
         deleteAttachmentsByScope.run(...deleteArgs);
+        if (folderId) {
+          deleteCalendarEventsByScope.run(accountId, accountId, folderId);
+        } else {
+          deleteCalendarEventsByScope.run(accountId);
+        }
         deleteFtsByScope.run(...deleteArgs);
         deleteMessages.run(...deleteArgs);
       })();
@@ -3877,6 +4041,14 @@ export async function updateMessageFolder(
 ) {
   return withDbWriteRetry("updateMessageFolder", async () => {
     const db = await getAccountDb(accountId);
+    if (imapUid === null) {
+      db.prepare(
+        `UPDATE messages
+         SET folderId = ?, mailboxPath = ?, imapUid = NULL
+         WHERE accountId = ? AND id = ?`
+      ).run(folderId, mailboxPath, accountId, messageId);
+      return;
+    }
     if (typeof imapUid === "number" && Number.isFinite(imapUid)) {
       db.prepare(
         `UPDATE messages
@@ -3888,6 +4060,75 @@ export async function updateMessageFolder(
     db.prepare(
       `UPDATE messages SET folderId = ?, mailboxPath = ? WHERE accountId = ? AND id = ?`
     ).run(folderId, mailboxPath, accountId, messageId);
+  });
+}
+
+export type StagedMessageMove = {
+  messageId: string;
+  sourceFolderId: string;
+  sourceMailboxPath: string;
+  sourceUid: number;
+  destinationFolderId: string;
+  destinationMailboxPath: string;
+};
+
+export async function stageMessageMoves(params: {
+  accountId: string;
+  messageIds: string[];
+  destinationFolderId: string;
+  destinationMailboxPath: string;
+}) {
+  const { accountId, messageIds, destinationFolderId, destinationMailboxPath } = params;
+  const uniqueIds = Array.from(new Set(messageIds.map((id) => id.trim()).filter(Boolean)));
+  if (uniqueIds.length === 0) return [] as StagedMessageMove[];
+  return withDbWriteRetry("stageMessageMoves", async () => {
+    const db = await getAccountDb(accountId);
+    const rows = db
+      .prepare(
+        `SELECT id, folderId, mailboxPath, imapUid
+         FROM messages
+         WHERE accountId = ? AND id IN (${uniqueIds.map(() => "?").join(",")})`
+      )
+      .all(accountId, ...uniqueIds) as Array<{
+      id: string;
+      folderId: string;
+      mailboxPath?: string | null;
+      imapUid?: number | null;
+    }>;
+    const updateMessage = db.prepare(
+      `UPDATE messages
+       SET folderId = ?, mailboxPath = ?, imapUid = NULL
+       WHERE accountId = ? AND id = ?`
+    );
+    const staged: StagedMessageMove[] = [];
+    db.transaction(() => {
+      rows.forEach((row) => {
+        if (
+          typeof row.imapUid !== "number" ||
+          !Number.isFinite(row.imapUid) ||
+          !row.mailboxPath ||
+          !row.folderId
+        ) {
+          return;
+        }
+        if (
+          row.folderId === destinationFolderId &&
+          row.mailboxPath === destinationMailboxPath
+        ) {
+          return;
+        }
+        updateMessage.run(destinationFolderId, destinationMailboxPath, accountId, row.id);
+        staged.push({
+          messageId: row.id,
+          sourceFolderId: row.folderId,
+          sourceMailboxPath: row.mailboxPath,
+          sourceUid: row.imapUid,
+          destinationFolderId,
+          destinationMailboxPath
+        });
+      });
+    })();
+    return staged;
   });
 }
 
@@ -3916,10 +4157,8 @@ export async function relocateMovedMessage(params: {
     const db = await getAccountDb(accountId);
     const normalizedPreviousId = previousId.trim();
     const existing = db
-      .prepare(`SELECT id, threadId FROM messages WHERE accountId = ? AND id = ?`)
-      .get(accountId, normalizedPreviousId) as
-      | { id: string; threadId?: string | null }
-      | undefined;
+      .prepare(`SELECT id FROM messages WHERE accountId = ? AND id = ?`)
+      .get(accountId, normalizedPreviousId) as { id: string } | undefined;
     if (!existing) return null;
 
     const attachmentIds = (db
@@ -3927,177 +4166,37 @@ export async function relocateMovedMessage(params: {
       .all(normalizedPreviousId) as Array<{ id?: string | null }>)
       .map((row) => (row.id ? String(row.id) : ""))
       .filter(Boolean);
-    const nextId =
-      typeof destinationUid === "number" && Number.isFinite(destinationUid)
-        ? buildImapMessageRowId(accountId, destinationMailboxPath, destinationUid)
-        : normalizedPreviousId;
-    const changed = nextId !== normalizedPreviousId;
-
-    if (!changed) {
-      if (typeof destinationUid === "number" && Number.isFinite(destinationUid)) {
-        db.prepare(
-          `UPDATE messages
-           SET folderId = ?, mailboxPath = ?, imapUid = ?
-           WHERE accountId = ? AND id = ?`
-        ).run(
-          destinationFolderId,
-          destinationMailboxPath,
-          destinationUid,
-          accountId,
-          normalizedPreviousId
-        );
-      } else {
-        db.prepare(
-          `UPDATE messages
-           SET folderId = ?, mailboxPath = ?
-           WHERE accountId = ? AND id = ?`
-        ).run(destinationFolderId, destinationMailboxPath, accountId, normalizedPreviousId);
-      }
-      return {
-        previousId: normalizedPreviousId,
-        nextId,
-        attachmentIds,
-        changed
-      } satisfies RelocateMovedMessageResult;
-    }
-
-    const targetExisting = db
-      .prepare(`SELECT id, threadId FROM messages WHERE accountId = ? AND id = ?`)
-      .get(accountId, nextId) as { id: string; threadId?: string | null } | undefined;
-    const parentThreadRows = db
-      .prepare(
-        `SELECT DISTINCT threadId
-         FROM messages
-         WHERE accountId = ? AND parentId = ?`
-      )
-      .all(accountId, normalizedPreviousId) as Array<{ threadId?: string | null }>;
-    const affectedThreadIds = new Set<string>();
-    if (existing.threadId) affectedThreadIds.add(existing.threadId);
-    if (targetExisting?.threadId) affectedThreadIds.add(targetExisting.threadId);
-    parentThreadRows.forEach((row) => {
-      if (row.threadId) {
-        affectedThreadIds.add(row.threadId);
-      }
-    });
-
-    const updateFlagsAndCategoryRefs = db.prepare(
-      `UPDATE category_feedback_events
-       SET messageId = ?
-       WHERE accountId = ? AND messageId = ?`
-    );
-    const updateReminderRefs = db.prepare(
-      `UPDATE calendar_reminders
-       SET messageId = ?
-       WHERE accountId = ? AND messageId = ?`
-    );
-    const updateParentRefs = db.prepare(
-      `UPDATE messages
-       SET parentId = ?
-       WHERE accountId = ? AND parentId = ?`
-    );
-    const deleteOldMessage = db.prepare(
-      `DELETE FROM messages WHERE accountId = ? AND id = ?`
-    );
-    const updateMovedMessage = db.prepare(
-      `UPDATE messages
-       SET folderId = ?, mailboxPath = ?, imapUid = ?
-       WHERE accountId = ? AND id = ?`
-    );
-    const updateMovedMessageWithoutUid = db.prepare(
-      `UPDATE messages
-       SET folderId = ?, mailboxPath = ?
-       WHERE accountId = ? AND id = ?`
-    );
-
-    if (targetExisting) {
-      db.transaction(() => {
-        if (typeof destinationUid === "number" && Number.isFinite(destinationUid)) {
-          updateMovedMessage.run(
-            destinationFolderId,
-            destinationMailboxPath,
-            destinationUid,
-            accountId,
-            nextId
-          );
-        } else {
-          updateMovedMessageWithoutUid.run(
-            destinationFolderId,
-            destinationMailboxPath,
-            accountId,
-            nextId
-          );
-        }
-        db.prepare(`UPDATE OR REPLACE attachments SET messageId = ? WHERE messageId = ?`).run(
-          nextId,
-          normalizedPreviousId
-        );
-        const targetFtsExists = db
-          .prepare(`SELECT 1 FROM message_fts WHERE messageId = ? LIMIT 1`)
-          .get(nextId);
-        if (targetFtsExists) {
-          db.prepare(`DELETE FROM message_fts WHERE messageId = ?`).run(normalizedPreviousId);
-        } else {
-          db.prepare(`UPDATE message_fts SET messageId = ? WHERE messageId = ?`).run(
-            nextId,
-            normalizedPreviousId
-          );
-        }
-        updateParentRefs.run(nextId, accountId, normalizedPreviousId);
-        updateFlagsAndCategoryRefs.run(nextId, accountId, normalizedPreviousId);
-        updateReminderRefs.run(nextId, accountId, normalizedPreviousId);
-        deleteOldMessage.run(accountId, normalizedPreviousId);
-      })();
+    if (destinationUid === null) {
+      db.prepare(
+        `UPDATE messages
+         SET folderId = ?, mailboxPath = ?, imapUid = NULL
+         WHERE accountId = ? AND id = ?`
+      ).run(destinationFolderId, destinationMailboxPath, accountId, normalizedPreviousId);
+    } else if (typeof destinationUid === "number" && Number.isFinite(destinationUid)) {
+      db.prepare(
+        `UPDATE messages
+         SET folderId = ?, mailboxPath = ?, imapUid = ?
+         WHERE accountId = ? AND id = ?`
+      ).run(
+        destinationFolderId,
+        destinationMailboxPath,
+        destinationUid,
+        accountId,
+        normalizedPreviousId
+      );
     } else {
-      db.transaction(() => {
-        db.prepare(
-          `INSERT INTO messages (
-             id, accountId, folderId, threadId, parentId, messageId, inReplyTo, "references", xForwardedMessageId,
-             subject, fromAddr, fromEmail, toAddr, ccAddr, bccAddr, mailboxPath, imapUid, preview, date, dateValue,
-             body, htmlBody, priority, hasSource, unread, flags, seen, answered, flagged, deleted, draft, recent,
-             category, categoryScore, categorySignals
-           )
-           SELECT
-             ?, accountId, ?, threadId, parentId, messageId, inReplyTo, "references", xForwardedMessageId,
-             subject, fromAddr, fromEmail, toAddr, ccAddr, bccAddr, ?, ?, preview, date, dateValue,
-             body, htmlBody, priority, hasSource, unread, flags, seen, answered, flagged, deleted, draft, recent,
-             category, categoryScore, categorySignals
-           FROM messages
-           WHERE accountId = ? AND id = ?`
-        ).run(
-          nextId,
-          destinationFolderId,
-          destinationMailboxPath,
-          typeof destinationUid === "number" && Number.isFinite(destinationUid)
-            ? destinationUid
-            : null,
-          accountId,
-          normalizedPreviousId
-        );
-        db.prepare(`UPDATE attachments SET messageId = ? WHERE messageId = ?`).run(
-          nextId,
-          normalizedPreviousId
-        );
-        db.prepare(`UPDATE message_fts SET messageId = ? WHERE messageId = ?`).run(
-          nextId,
-          normalizedPreviousId
-        );
-        updateParentRefs.run(nextId, accountId, normalizedPreviousId);
-        updateFlagsAndCategoryRefs.run(nextId, accountId, normalizedPreviousId);
-        updateReminderRefs.run(nextId, accountId, normalizedPreviousId);
-        deleteOldMessage.run(accountId, normalizedPreviousId);
-      })();
-    }
-
-    const recomputeTargets = Array.from(affectedThreadIds);
-    if (recomputeTargets.length > 0) {
-      await recomputeThreadsForAccountInternal(accountId, recomputeTargets);
+      db.prepare(
+        `UPDATE messages
+         SET folderId = ?, mailboxPath = ?
+         WHERE accountId = ? AND id = ?`
+      ).run(destinationFolderId, destinationMailboxPath, accountId, normalizedPreviousId);
     }
 
     return {
       previousId: normalizedPreviousId,
-      nextId,
+      nextId: normalizedPreviousId,
       attachmentIds,
-      changed
+      changed: false
     } satisfies RelocateMovedMessageResult;
   });
 }

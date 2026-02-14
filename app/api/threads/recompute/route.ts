@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireAccountAccessOr403, requireSessionOr401 } from "@/lib/auth";
+import { requireSessionAccountOr403, requireSessionOr401 } from "@/lib/auth";
 import { startThreadRecomputeJob } from "@/lib/threadRecomputeJobs";
 
 export async function POST(request: Request) {
@@ -12,7 +12,7 @@ export async function POST(request: Request) {
   if (!accountId) {
     return NextResponse.json({ ok: false, message: "Missing accountId" }, { status: 400 });
   }
-  const access = await requireAccountAccessOr403(auth, accountId);
+  const access = await requireSessionAccountOr403(auth, accountId);
   if (access instanceof NextResponse) return access;
   const job = startThreadRecomputeJob(accountId);
   if (job.status === "failed") {

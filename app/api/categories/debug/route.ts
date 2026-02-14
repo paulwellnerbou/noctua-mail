@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { requireAccountAccessOr403, requireSessionOr401 } from "@/lib/auth";
+import { requireSessionAccountOr403, requireSessionOr401 } from "@/lib/auth";
 import { getCategoryLearningDebugSnapshot } from "@/lib/db";
 
 export async function GET(request: Request) {
@@ -11,7 +11,7 @@ export async function GET(request: Request) {
   if (!accountId) {
     return NextResponse.json({ ok: false, message: "Missing accountId" }, { status: 400 });
   }
-  const access = await requireAccountAccessOr403(session, accountId);
+  const access = await requireSessionAccountOr403(session, accountId);
   if (access instanceof NextResponse) return access;
   const limitRaw = searchParams.get("limit");
   const parsedLimit = limitRaw ? Number.parseInt(limitRaw, 10) : NaN;
