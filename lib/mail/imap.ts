@@ -110,6 +110,17 @@ function toFiniteNumber(value: unknown) {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
+function normalizeImapInternalDate(value?: Date | string | null) {
+  if (value instanceof Date) {
+    return Number.isFinite(value.getTime()) ? value : undefined;
+  }
+  if (typeof value === "string") {
+    const parsed = new Date(value);
+    return Number.isFinite(parsed.getTime()) ? parsed : undefined;
+  }
+  return undefined;
+}
+
 function formatEnvelopeAddresses(addresses?: ImapEnvelopeAddress[] | null) {
   if (!addresses || addresses.length === 0) return "";
   const parts = addresses.map((addr) => {
@@ -653,7 +664,7 @@ function buildLightweightImapMessage(params: {
   uid: number;
   flags?: Set<string> | string[];
   envelope?: ImapEnvelope;
-  internalDate?: Date | null;
+  internalDate?: Date | string | null;
   attachments?: Message["attachments"];
   headers?: Buffer;
   linearModel?: CategoryLinearModel | null;
@@ -677,10 +688,8 @@ function buildLightweightImapMessage(params: {
     envelope?.date instanceof Date && Number.isFinite(envelope.date.getTime())
       ? envelope.date.getTime()
       : null;
-  const internalDateMs =
-    internalDate instanceof Date && Number.isFinite(internalDate.getTime())
-      ? internalDate.getTime()
-      : null;
+  const normalizedInternalDate = normalizeImapInternalDate(internalDate);
+  const internalDateMs = normalizedInternalDate?.getTime() ?? null;
   const dateValue = envelopeDateMs ?? internalDateMs ?? Date.now();
   const messageFlags = withCalendarInviteFlag(flagList, {
     attachments,
@@ -801,15 +810,10 @@ async function parseImapMessage(
     normalizePriority(headerValue("importance"));
   const envelopeDate =
     envelope?.date instanceof Date && !Number.isNaN(envelope.date.getTime()) ? envelope.date : undefined;
-  const internalDate =
-    message.internalDate instanceof Date
-      ? message.internalDate
-      : typeof message.internalDate === "string"
-        ? new Date(message.internalDate)
-        : undefined;
+  const internalDate = normalizeImapInternalDate(message.internalDate);
   const resolvedDate =
     envelopeDate ??
-    (internalDate && !Number.isNaN(internalDate.getTime()) ? internalDate : undefined) ??
+    internalDate ??
     resolveHeaderDate(headers) ??
     new Date();
   const dateValue = resolvedDate.getTime();
