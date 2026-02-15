@@ -1,6 +1,9 @@
 .composeWriting {
+  --compose-editor-default-height: 440px;
+  --compose-editor-min-height: 60px;
   overflow: auto;
-  min-height: 440px;
+  min-height: var(--compose-editor-min-height);
+  height: var(--compose-editor-default-height);
   flex: 1;
   width: 100%;
   display: flex;
@@ -21,12 +24,12 @@
 
 .composeWritingHtml > * {
   height: 100%;
-  min-height: 440px;
+  min-height: var(--compose-editor-min-height);
   width: 100%;
 }
 
 .composeWritingText > * {
   height: 100%;
-  min-height: 440px;
+  min-height: var(--compose-editor-min-height);
   width: 100%;
 }

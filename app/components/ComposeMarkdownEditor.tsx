@@ -17,7 +17,8 @@ type ComposeMarkdownEditorProps = {
   resetKey?: number | string;
 };
 
-const MIN_EDITOR_HEIGHT = 440;
+const DEFAULT_EDITOR_HEIGHT = 440;
+const MIN_EDITOR_HEIGHT = 60;
 
 export default function ComposeMarkdownEditor({
   value,
@@ -25,7 +26,7 @@ export default function ComposeMarkdownEditor({
   resetKey,
 }: ComposeMarkdownEditorProps) {
   const [colorMode, setColorMode] = useState<"light" | "dark">("light");
-  const [editorHeight, setEditorHeight] = useState(MIN_EDITOR_HEIGHT);
+  const [editorHeight, setEditorHeight] = useState(DEFAULT_EDITOR_HEIGHT);
   const containerRef = useRef<HTMLDivElement | null>(null);
 
   // Detect dark mode from Radix theme
