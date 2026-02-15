@@ -15,6 +15,10 @@ export function stripConditionalComments(input: string) {
   return input.replace(/<!--\s*\[if[\s\S]*?<!\s*\[endif\s*\]\s*-->/gi, "");
 }
 
+export function stripStyleTags(input: string) {
+  return input.replace(/<style[\s\S]*?<\/style>/gi, "");
+}
+
 export function sanitizeHtmlForDisplay(input: string) {
   return input
     .replace(/<script[\s\S]*?>[\s\S]*?<\/script>/gi, "")
@@ -126,5 +130,33 @@ export function assembleQuotedHtml(parts: QuotedHtmlParts, quoteHtml: boolean) {
   if (!quoteHtml) {
     return `${parts.styles}${parts.headerHtml}${parts.bodyHtml}`;
   }
-  return `${parts.styles}${parts.headerHtml}<blockquote type="cite" style="margin:0 0 0 .8ex;border-left:2px solid #cfcfcf;padding-left:1ex;">${parts.bodyHtml}</blockquote>`;
+  // Wrap the entire quoted section (styles + header + blockquote) in a div for easy extraction
+  return `<div id="noctua-quoted-html">${parts.styles}${parts.headerHtml}<blockquote type="cite" style="margin:0 0 0 .8ex;border-left:2px solid #cfcfcf;padding-left:1ex;">${parts.bodyHtml}</blockquote></div>`;
+}
+
+/**
+ * Extracts quoted HTML from a draft's combined HTML body.
+ * Returns the user's HTML and the quoted HTML separately.
+ */
+export function extractQuotedHtmlFromDraft(combinedHtml: string): {
+  userHtml: string;
+  quotedHtml: string;
+} {
+  // Look for the marked quoted HTML container div
+  const quotedDivRegex = /<div[^>]*id="noctua-quoted-html"[^>]*>[\s\S]*?<\/div>/i;
+  const match = combinedHtml.match(quotedDivRegex);
+
+  if (!match) {
+    // No marked quoted HTML found, return all as user HTML
+    return { userHtml: combinedHtml, quotedHtml: "" };
+  }
+
+  const quotedSection = match[0];
+  // Find where the quoted section starts
+  const quotedIndex = combinedHtml.indexOf(quotedSection);
+
+  // Everything before the quoted section is user HTML
+  const userHtml = combinedHtml.slice(0, quotedIndex).trim();
+
+  return { userHtml, quotedHtml: quotedSection };
 }

@@ -68,6 +68,7 @@ type ComposeMessageFieldProps = {
   setComposeQuoteHtml: React.Dispatch<React.SetStateAction<boolean>>;
   setComposeQuotedHtml: React.Dispatch<React.SetStateAction<string>>;
   setComposeQuotedText: React.Dispatch<React.SetStateAction<string>>;
+  setComposeQuotedHtmlEdited: React.Dispatch<React.SetStateAction<boolean>>;
   setComposeQuotedParts: React.Dispatch<React.SetStateAction<QuotedParts | null>>;
   setComposeStripImages: React.Dispatch<React.SetStateAction<boolean>>;
   setComposeSignatureId: React.Dispatch<React.SetStateAction<string>>;
@@ -116,6 +117,7 @@ export default function ComposeMessageField({
   setComposeQuoteHtml,
   setComposeQuotedHtml,
   setComposeQuotedText,
+  setComposeQuotedHtmlEdited,
   setComposeQuotedParts,
   setComposeStripImages,
   setComposeSignatureId,
@@ -156,8 +158,8 @@ export default function ComposeMessageField({
         }
       } else if (lastEdited === "markdown") {
         const currentMd = composeMarkdown;
-        const html = markdownToHtml(currentMd);
-        const nextText = stripHtml(html);
+        // Keep markdown syntax, only strip embedded HTML tags
+        const nextText = currentMd.replace(/<[^>]+>/g, "").trim();
         setComposeBody(nextText);
       }
       setComposeTab("text");
@@ -228,9 +230,12 @@ export default function ComposeMessageField({
       composeQuoteHtml && !/<blockquote\b/i.test(quoted)
         ? `<blockquote class=\"compose-quote\">${quoted}</blockquote>`
         : quoted;
-    const nextHtml = `${baseHtml}${glue}${quotedWithLine}`;
+    // Wrap in data-noctua-html-block div to preserve raw HTML through Lexical editor
+    const preservedQuoted = `<div data-noctua-html-block="true">${quotedWithLine}</div>`;
+    const nextHtml = `${baseHtml}${glue}${preservedQuoted}`;
     setComposeHtml(nextHtml);
     setComposeHtmlText(stripHtml(nextHtml));
+    setComposeQuotedHtmlEdited(true);
     setComposeEditorReset((prev) => prev + 1);
     setComposeIncludeOriginal(false);
     setComposeQuoteHtml(false);
@@ -421,7 +426,7 @@ export default function ComposeMessageField({
           />
         </div>
       )}
-      {composeTab === "html" && composeQuotedParts && (
+      {(composeTab === "html" || composeTab === "markdown") && composeQuotedParts && (
         <Collapsible.Root
           className={composeStyles.composeQuotedBlock}
           open={composeIncludeOriginal}

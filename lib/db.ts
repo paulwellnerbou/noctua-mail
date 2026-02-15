@@ -399,6 +399,8 @@ function initAccountSchema(db: any) {
       inReplyTo TEXT,
       "references" TEXT,
       xForwardedMessageId TEXT,
+      xComposeFormat TEXT,
+      quotedHtmlEdited INTEGER DEFAULT 0,
       subject TEXT NOT NULL,
       fromAddr TEXT NOT NULL,
       fromEmail TEXT,
@@ -562,6 +564,12 @@ function initAccountSchema(db: any) {
   }
   if (!messageColumns.has("listUnsubscribe")) {
     db.prepare(`ALTER TABLE messages ADD COLUMN listUnsubscribe TEXT`).run();
+  }
+  if (!messageColumns.has("xComposeFormat")) {
+    db.prepare(`ALTER TABLE messages ADD COLUMN xComposeFormat TEXT`).run();
+  }
+  if (!messageColumns.has("quotedHtmlEdited")) {
+    db.prepare(`ALTER TABLE messages ADD COLUMN quotedHtmlEdited INTEGER DEFAULT 0`).run();
   }
 
   const reminderColumns = getDbTableColumns(db, "calendar_reminders");
@@ -3080,6 +3088,8 @@ export async function listRelatedMessages(params: {
         m.inReplyTo,
         m."references" as "references",
         m.xForwardedMessageId,
+        m.xComposeFormat,
+        m.quotedHtmlEdited,
         m.subject,
         m.fromAddr,
         m.toAddr,
@@ -3213,6 +3223,8 @@ export async function listRelatedMessages(params: {
       inReplyTo: row.inReplyTo ?? undefined,
       references: parseReferences(row.references),
       xForwardedMessageId: row.xForwardedMessageId ?? undefined,
+      xComposeFormat: row.xComposeFormat ?? undefined,
+      quotedHtmlEdited: row.quotedHtmlEdited ? true : false,
       subject: row.subject,
       from: row.fromAddr,
       to: row.toAddr,
@@ -3419,6 +3431,8 @@ export async function listMessages(params: {
         m.inReplyTo,
         m."references" as "references",
         m.xForwardedMessageId,
+        m.xComposeFormat,
+        m.quotedHtmlEdited,
         m.subject,
         m.fromAddr,
         m.toAddr,
@@ -3464,6 +3478,8 @@ export async function listMessages(params: {
       inReplyTo: row.inReplyTo ?? undefined,
       references: parseReferences(row.references),
       xForwardedMessageId: row.xForwardedMessageId ?? undefined,
+      xComposeFormat: row.xComposeFormat ?? undefined,
+      quotedHtmlEdited: row.quotedHtmlEdited ? true : false,
       subject: row.subject,
       from: row.fromAddr,
       to: row.toAddr,
@@ -3892,6 +3908,8 @@ export async function listThreads(params: {
       inReplyTo: row.inReplyTo ?? undefined,
       references: parseReferences(row.references),
       xForwardedMessageId: row.xForwardedMessageId ?? undefined,
+      xComposeFormat: row.xComposeFormat ?? undefined,
+      quotedHtmlEdited: row.quotedHtmlEdited ? true : false,
       subject: row.subject,
       from: row.fromAddr,
       to: row.toAddr,
@@ -4010,6 +4028,8 @@ export async function listThreadMessages(params: {
       inReplyTo: row.inReplyTo ?? undefined,
       references: parseReferences(row.references),
       xForwardedMessageId: row.xForwardedMessageId ?? undefined,
+      xComposeFormat: row.xComposeFormat ?? undefined,
+      quotedHtmlEdited: row.quotedHtmlEdited ? true : false,
       subject: row.subject,
       from: row.fromAddr,
       to: row.toAddr,
@@ -4033,7 +4053,8 @@ export async function listThreadMessages(params: {
       recent: Boolean(row.recent),
       category: row.category ?? undefined,
       categoryScore: typeof row.categoryScore === "number" ? row.categoryScore : undefined,
-      categorySignals: parseStringArray(row.categorySignals)
+      categorySignals: parseStringArray(row.categorySignals),
+      listUnsubscribe: row.listUnsubscribe ?? undefined
     };
     (message as any).groupKey = buildGroupKey(message, groupBy);
     return message;
@@ -4170,11 +4191,11 @@ export async function upsertMessages(
 
     const insertMessage = db.prepare(`
       INSERT OR REPLACE INTO messages (
-        id, accountId, folderId, threadId, parentId, messageId, inReplyTo, "references", xForwardedMessageId,
+        id, accountId, folderId, threadId, parentId, messageId, inReplyTo, "references", xForwardedMessageId, xComposeFormat, quotedHtmlEdited,
         subject, fromAddr, fromEmail, toAddr, ccAddr, bccAddr, mailboxPath, imapUid, preview, date, dateValue,
         body, htmlBody, priority, hasSource, unread, flags, seen, answered, flagged, deleted, draft, recent,
         category, categoryScore, categorySignals, categoryManualState, listUnsubscribe
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     const insertFts = db.prepare(`
       INSERT INTO message_fts (messageId, subject, fromAddr, toAddr, ccAddr, bccAddr, body, preview)
@@ -4315,6 +4336,8 @@ export async function upsertMessages(
           message.inReplyTo ?? null,
           message.references ? JSON.stringify(message.references) : null,
           message.xForwardedMessageId ?? null,
+          message.xComposeFormat ?? null,
+          message.quotedHtmlEdited ? 1 : 0,
           message.subject,
           message.from,
           fromEmail,
@@ -4506,7 +4529,8 @@ export async function getMessageById(accountId: string, messageId: string) {
     recent: Boolean(row.recent),
     category: row.category ?? undefined,
     categoryScore: typeof row.categoryScore === "number" ? row.categoryScore : undefined,
-    categorySignals: parseStringArray(row.categorySignals)
+    categorySignals: parseStringArray(row.categorySignals),
+    listUnsubscribe: row.listUnsubscribe ?? undefined
   } as Message;
 }
 

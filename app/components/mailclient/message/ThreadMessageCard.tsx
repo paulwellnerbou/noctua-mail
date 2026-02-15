@@ -558,6 +558,7 @@ export default function ThreadMessageCard({
               ))}
               {(() => {
                 const refId =
+                  message.xForwardedMessageId ??
                   message.inReplyTo ??
                   (message.references && message.references.length > 0
                     ? message.references[message.references.length - 1]
@@ -583,7 +584,7 @@ export default function ThreadMessageCard({
                 ) : null;
               })()}
             </div>
-            {getUnsubscribeCapability(message) && (
+            {getUnsubscribeCapability(message) && !isCollapsed && (
               <div className={styles.unsubscribeBanner}>
                 <span className={styles.unsubscribeText}>
                   This message is from a mailing list.

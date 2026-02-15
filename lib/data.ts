@@ -76,6 +76,8 @@ export type Message = {
   inReplyTo?: string;
   references?: string[];
   xForwardedMessageId?: string;
+  xComposeFormat?: string;
+  quotedHtmlEdited?: boolean;
   subject: string;
   from: string;
   to: string;

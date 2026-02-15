@@ -16,6 +16,10 @@
   border-bottom: 1px solid var(--border);
 }
 
+.container :global(.w-md-editor-text) {
+  height: 100%;
+}
+
 .container :global(.w-md-editor-text),
 .container :global(.w-md-editor-text-pre),
 .container :global(.w-md-editor-text-input) {

@@ -4,7 +4,6 @@
   flex-direction: column;
   flex: 1;
   background-color: var(--color-panel-solid);
-  border: 1px solid var(--gray-5);
   border-radius: var(--radius-3);
   overflow: hidden; /* Ensure children don't overflow the rounded corners */
 }

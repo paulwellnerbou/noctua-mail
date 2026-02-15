@@ -1,8 +1,10 @@
 import type React from "react";
 import { X } from "lucide-react";
 import { MinusIcon, RowsIcon } from "@radix-ui/react-icons";
+import type { Message } from "@/lib/data";
 import ComposeFields from "./ComposeFields";
-import { Button, Heading, IconButton, Text } from "@radix-ui/themes";
+import ComposeActions from "./ComposeActions";
+import { Heading, IconButton, Text } from "@radix-ui/themes";
 import styles from "./Compose.module.css";
 
 type ComposeMode = "new" | "reply" | "replyAll" | "forward" | "edit" | "editAsNew";
@@ -29,6 +31,7 @@ type ComposeModalProps = {
     composeDragActive: boolean;
     fromValue: string;
     composeSize: { width: number; height: number | null };
+    inReplyToMessage: Message | null;
   };
   ui: {
     composeMessageField: React.ReactNode;
@@ -53,6 +56,7 @@ type ComposeModalProps = {
     setComposeResizing: React.Dispatch<React.SetStateAction<boolean>>;
     handleSendMail: () => void;
     handleDiscardDraft: () => void;
+    handleSaveDraft: () => void;
     applyRecipientSelection: (
       current: string,
       selection: string,
@@ -63,6 +67,7 @@ type ComposeModalProps = {
     markComposeDirty: () => void;
     popInCompose: () => void;
     minimizeCompose: () => void;
+    jumpToMessage: (messageId: string) => void;
   };
   helpers: {
     getComposeToken: (value: string) => string;
@@ -106,7 +111,8 @@ export default function ComposeModal({
     discardingDraft,
     composeDragActive,
     fromValue,
-    composeSize
+    composeSize,
+    inReplyToMessage
   } = state;
   const { composeModalRef, composeResizeRef } = refs;
   const {
@@ -120,11 +126,13 @@ export default function ComposeModal({
     setComposeResizing,
     handleSendMail,
     handleDiscardDraft,
+    handleSaveDraft,
     applyRecipientSelection,
     loadRecipientOptions,
     markComposeDirty,
     popInCompose,
-    minimizeCompose
+    minimizeCompose,
+    jumpToMessage
   } = actions;
   const { getComposeToken, formatRelativeTime } = helpers;
   const { handleComposeDragEnter, handleComposeDragLeave, handleComposeDragOver, handleComposeDrop } =
@@ -221,6 +229,8 @@ export default function ComposeModal({
             composeShowBcc={composeShowBcc}
             composeOpenedAt={composeOpenedAt}
             activeAccountId={activeAccountId}
+            inReplyToMessage={inReplyToMessage}
+            onJumpToMessage={jumpToMessage}
             setComposeSubject={setComposeSubject}
             setComposeTo={setComposeTo}
             setComposeCc={setComposeCc}
@@ -233,62 +243,23 @@ export default function ComposeModal({
           />
           {ui.composeMessageField}
         </div>
-        <div className={styles.composeFooter}>
-          <div className={styles.composeDraftMeta}>
-            {composeDraftId && (
-              <Text size="1" color="gray" className={styles.composeDraft}>
-                Draft: {composeDraftId}
-              </Text>
-            )}
-            {composeOpen && (
-              <Text
-                size="1"
-                className={`${styles.composeDraftStatus} ${
-                  draftSaveError
-                    ? styles.composeDraftStatusError
-                    : draftSaving
-                      ? styles.composeDraftStatusSaving
-                      : ""
-                }`}
-              >
-                {draftSaving
-                  ? "Saving draft…"
-                  : draftSaveError
-                    ? "Draft save failed"
-                    : draftSavedAt
-                      ? `Draft saved ${formatRelativeTime(draftSavedAt)}`
-                      : "Draft not saved yet"}
-              </Text>
-            )}
-          </div>
-          <div className={styles.composeActions}>
-            {composeDraftId && (
-              <Button
-                size="2"
-                variant="soft"
-                color="red"
-                onClick={handleDiscardDraft}
-                disabled={discardingDraft || draftSaving}
-              >
-                Discard Draft
-              </Button>
-            )}
-            <Button
-              size="2"
-              variant="soft"
-              color="gray"
-              onClick={() => {
-                setComposeOpen(false);
-                setComposeView("inline");
-              }}
-            >
-              Cancel
-            </Button>
-            <Button size="2" onClick={handleSendMail} disabled={sendingMail}>
-              {sendingMail ? "Sending..." : "Send"}
-            </Button>
-          </div>
-        </div>
+        <ComposeActions
+          composeDraftId={composeDraftId}
+          composeOpen={composeOpen}
+          draftSaving={draftSaving}
+          draftSaveError={draftSaveError}
+          draftSavedAt={draftSavedAt}
+          sendingMail={sendingMail}
+          discardingDraft={discardingDraft}
+          handleDiscardDraft={handleDiscardDraft}
+          handleSaveDraft={handleSaveDraft}
+          handleCancel={() => {
+            setComposeOpen(false);
+            setComposeView("inline");
+          }}
+          handleSendMail={handleSendMail}
+          formatRelativeTime={formatRelativeTime}
+        />
         <div
           className={styles.composeResizer}
           onPointerDown={(event) => {

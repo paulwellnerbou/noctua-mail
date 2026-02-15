@@ -1,6 +1,7 @@
 import { startTransition, useEffect, useState } from "react";
 import type React from "react";
-import { Button, Text, TextField } from "@radix-ui/themes";
+import { Button, Link, Text, TextField } from "@radix-ui/themes";
+import type { Message } from "@/lib/data";
 import styles from "./Compose.module.css";
 
 type RecipientFocus = "to" | "cc" | "bcc" | null;
@@ -15,6 +16,8 @@ type ComposeFieldsProps = {
   composeOpenedAt?: string;
   activeAccountId: string | null;
   fromValue?: string;
+  inReplyToMessage?: Message | null;
+  onJumpToMessage?: (messageId: string) => void;
   setComposeSubject: React.Dispatch<React.SetStateAction<string>>;
   setComposeTo: React.Dispatch<React.SetStateAction<string>>;
   setComposeCc: React.Dispatch<React.SetStateAction<string>>;
@@ -186,6 +189,8 @@ export default function ComposeFields({
   composeShowBcc,
   activeAccountId,
   fromValue,
+  inReplyToMessage,
+  onJumpToMessage,
   setComposeSubject,
   setComposeTo,
   setComposeCc,
@@ -299,6 +304,30 @@ export default function ComposeFields({
       : "Clear Cc/Bcc to hide fields"
     : "Show Cc and Bcc";
   const showFrom = variant === "inline";
+  const inReplyToRow = inReplyToMessage && (
+    <div className={styles.composeGridRow}>
+      <Text size="2" weight="medium" className={styles.label}>
+        In reply to:
+      </Text>
+      <div className={styles.composeInReplyTo}>
+        <Text size="2" color="gray">
+          {onJumpToMessage ? (
+            <Link
+              size="2"
+              onClick={() => onJumpToMessage(inReplyToMessage.id)}
+              style={{ cursor: "pointer" }}
+            >
+              {inReplyToMessage.subject || "(no subject)"} — {inReplyToMessage.from}
+            </Link>
+          ) : (
+            <>
+              {inReplyToMessage.subject || "(no subject)"} — {inReplyToMessage.from}
+            </>
+          )}
+        </Text>
+      </div>
+    </div>
+  );
   const subjectRow = (
     <div className={styles.composeGridRow}>
       <Text size="2" weight="medium" className={styles.label}>
@@ -333,6 +362,7 @@ export default function ComposeFields({
 
   return (
     <div className={styles.composeGrid}>
+      {inReplyToRow}
       {showFrom && fromRow}
       <RecipientField
         variant={variant}

@@ -1,8 +1,10 @@
 import type React from "react";
 import { ArrowUpRight } from "lucide-react";
-import { Badge, Button, Card, IconButton, Text } from "@radix-ui/themes";
+import { Badge, Card, IconButton } from "@radix-ui/themes";
 import { badgeColors } from "@/lib/ui/badgeColors";
+import type { Message } from "@/lib/data";
 import ComposeFields from "./ComposeFields";
+import ComposeActions from "./ComposeActions";
 import threadStyles from "../message/ThreadMessageCard.module.css";
 import styles from "./ComposeInlineCard.module.css";
 import composeStyles from "./Compose.module.css";
@@ -28,6 +30,7 @@ type ComposeInlineCardProps = {
     discardingDraft: boolean;
     composeDragActive: boolean;
     fromValue: string;
+    inReplyToMessage: Message | null;
   };
   ui: {
     composeMessageField: React.ReactNode;
@@ -43,6 +46,7 @@ type ComposeInlineCardProps = {
     setComposeView: React.Dispatch<React.SetStateAction<"inline" | "modal" | "minimized">>;
     handleSendMail: () => void;
     handleDiscardDraft: () => void;
+    handleSaveDraft: () => void;
     applyRecipientSelection: (
       current: string,
       selection: string,
@@ -51,6 +55,7 @@ type ComposeInlineCardProps = {
     ) => string;
     loadRecipientOptions: (query: string, signal: AbortSignal) => Promise<string[]>;
     markComposeDirty: () => void;
+    jumpToMessage: (messageId: string) => void;
   };
   helpers: {
     getComposeToken: (value: string) => string;
@@ -88,7 +93,8 @@ export default function ComposeInlineCard({
     sendingMail,
     discardingDraft,
     composeDragActive,
-    fromValue
+    fromValue,
+    inReplyToMessage
   } = state;
   const {
     popOutCompose,
@@ -101,9 +107,11 @@ export default function ComposeInlineCard({
     setComposeView,
     handleSendMail,
     handleDiscardDraft,
+    handleSaveDraft,
     applyRecipientSelection,
     loadRecipientOptions,
-    markComposeDirty
+    markComposeDirty,
+    jumpToMessage
   } = actions;
   const { getComposeToken, formatRelativeTime } = helpers;
   const { handleComposeDragEnter, handleComposeDragLeave, handleComposeDragOver, handleComposeDrop } =
@@ -168,6 +176,8 @@ export default function ComposeInlineCard({
               composeShowBcc={composeShowBcc}
               activeAccountId={activeAccountId}
               fromValue={fromValue}
+              inReplyToMessage={inReplyToMessage}
+              onJumpToMessage={jumpToMessage}
               setComposeSubject={setComposeSubject}
               setComposeTo={setComposeTo}
               setComposeCc={setComposeCc}
@@ -181,62 +191,23 @@ export default function ComposeInlineCard({
           </div>
         </div>
         <div className={`${composeStyles.composeBody} ${styles.body}`}>{ui.composeMessageField}</div>
-        <div className={composeStyles.composeFooter}>
-          <div className={composeStyles.composeDraftMeta}>
-            {composeDraftId && (
-              <Text size="1" color="gray" className={composeStyles.composeDraft}>
-                Draft: {composeDraftId}
-              </Text>
-            )}
-            {composeOpen && (
-              <Text
-                size="1"
-                className={`${composeStyles.composeDraftStatus} ${
-                  draftSaveError
-                    ? composeStyles.composeDraftStatusError
-                    : draftSaving
-                      ? composeStyles.composeDraftStatusSaving
-                      : ""
-                }`}
-              >
-                {draftSaving
-                  ? "Saving draft…"
-                  : draftSaveError
-                    ? "Draft save failed"
-                    : draftSavedAt
-                      ? `Draft saved ${formatRelativeTime(draftSavedAt)}`
-                      : "Draft not saved yet"}
-              </Text>
-            )}
-          </div>
-          <div className={composeStyles.composeActions}>
-            {composeDraftId && (
-              <Button
-                size="2"
-                variant="soft"
-                color="red"
-                onClick={handleDiscardDraft}
-                disabled={discardingDraft || draftSaving}
-              >
-                Discard Draft
-              </Button>
-            )}
-            <Button
-              size="2"
-              variant="soft"
-              color="gray"
-              onClick={() => {
-                setComposeOpen(false);
-                setComposeView("inline");
-              }}
-            >
-              {composeMode === "edit" ? "Cancel editing" : "Cancel"}
-            </Button>
-            <Button size="2" onClick={handleSendMail} disabled={sendingMail}>
-              {sendingMail ? "Sending..." : "Send"}
-            </Button>
-          </div>
-        </div>
+        <ComposeActions
+          composeDraftId={composeDraftId}
+          composeOpen={composeOpen}
+          draftSaving={draftSaving}
+          draftSaveError={draftSaveError}
+          draftSavedAt={draftSavedAt}
+          sendingMail={sendingMail}
+          discardingDraft={discardingDraft}
+          handleDiscardDraft={handleDiscardDraft}
+          handleSaveDraft={handleSaveDraft}
+          handleCancel={() => {
+            setComposeOpen(false);
+            setComposeView("inline");
+          }}
+          handleSendMail={handleSendMail}
+          formatRelativeTime={formatRelativeTime}
+        />
       </article>
     </Card>
   );

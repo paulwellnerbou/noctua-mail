@@ -58,6 +58,11 @@ export class HtmlBlockNode extends DecoratorNode<JSX.Element> {
   exportDOM(): DOMExportOutput {
     const element = document.createElement("div");
     element.setAttribute("data-noctua-html-block", "true");
+    // Store the raw HTML in a data attribute to preserve it through Lexical export
+    // Base64 encode to avoid issues with quotes and special characters
+    const encoded = btoa(unescape(encodeURIComponent(this.__html)));
+    element.setAttribute("data-html-content", encoded);
+    // Also set innerHTML for immediate rendering (will be ignored by our importer)
     element.innerHTML = this.__html;
     return { element };
   }
@@ -105,6 +110,17 @@ function HtmlBlockPreview({ html }: { html: string }) {
 const convertHtmlBlock = (domNode: Node): DOMConversionOutput | null => {
   if (!(domNode instanceof HTMLDivElement)) return null;
   if (!domNode.dataset.noctuaHtmlBlock) return null;
+  // First try to get HTML from data attribute (preserved raw HTML)
+  const encoded = domNode.dataset.htmlContent;
+  if (encoded) {
+    try {
+      const decoded = decodeURIComponent(escape(atob(encoded)));
+      return { node: new HtmlBlockNode(decoded) };
+    } catch {
+      // Fall back to innerHTML if decoding fails
+    }
+  }
+  // Fallback to innerHTML for backwards compatibility
   return { node: new HtmlBlockNode(domNode.innerHTML) };
 };
 

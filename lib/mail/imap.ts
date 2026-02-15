@@ -705,8 +705,10 @@ function buildLightweightImapMessage(params: {
   const unsubParts: string[] = [];
   const listUnsubVal = getHeaderValue(headers, "list-unsubscribe");
   const listUnsubPostVal = getHeaderValue(headers, "list-unsubscribe-post");
+  const listIdVal = getHeaderValue(headers, "list-id");
   if (listUnsubVal) unsubParts.push(`List-Unsubscribe: ${listUnsubVal}`);
   if (listUnsubPostVal) unsubParts.push(`List-Unsubscribe-Post: ${listUnsubPostVal}`);
+  if (listIdVal) unsubParts.push(`List-Id: ${listIdVal}`);
   const listUnsubscribe = unsubParts.length > 0 ? unsubParts.join("\n") : null;
   const calendarEventUids = collectCalendarEventUidsFromAttachments(
     attachments as CalendarAttachmentCandidate[]
@@ -887,8 +889,10 @@ async function parseImapMessage(
   const unsubParts: string[] = [];
   const listUnsubVal = headerValue("list-unsubscribe");
   const listUnsubPostVal = headerValue("list-unsubscribe-post");
+  const listIdVal = headerValue("list-id");
   if (listUnsubVal) unsubParts.push(`List-Unsubscribe: ${listUnsubVal}`);
   if (listUnsubPostVal) unsubParts.push(`List-Unsubscribe-Post: ${listUnsubPostVal}`);
+  if (listIdVal) unsubParts.push(`List-Id: ${listIdVal}`);
   const listUnsubscribe = unsubParts.length > 0 ? unsubParts.join("\n") : null;
 
   const classification = classifyImapMessageCategory({

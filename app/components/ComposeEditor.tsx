@@ -70,11 +70,18 @@ import {
   $insertTableRowAtSelection,
   $isTableSelection,
   INSERT_TABLE_COMMAND,
-  TableCellNode,
   TableNode,
+  TableCellNode,
   TableRowNode
 } from "@lexical/table";
 import { $createImageNode, ImageNode } from "./lexical/ImageNode";
+import { HtmlBlockNode } from "./lexical/HtmlBlockNode";
+import {
+  ExtendedTableNode,
+  ExtendedTableCellNode,
+  ExtendedTableRowNode
+} from "./lexical/ExtendedTableNodes";
+import { CenterNode } from "./lexical/CenterNode";
 
 type ComposeEditorProps = {
   initialHtml?: string;
@@ -548,7 +555,12 @@ export default function ComposeEditor({
         TableNode,
         TableCellNode,
         TableRowNode,
-        ImageNode
+        ExtendedTableNode,
+        ExtendedTableCellNode,
+        ExtendedTableRowNode,
+        CenterNode,
+        ImageNode,
+        HtmlBlockNode
       ],
       onError(error: Error) {
         throw error;

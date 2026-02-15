@@ -1,3 +1,9 @@
+.threadItem {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
 .loading {
   padding: var(--space-3) var(--space-2);
   color: var(--gray-11);

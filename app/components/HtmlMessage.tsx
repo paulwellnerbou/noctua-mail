@@ -180,7 +180,7 @@ function HtmlMessage({
         :host { display: block; width: 100%; ${hostTextColor} color-scheme: ${
           darkMode ? "dark" : "light"
         }; font-size: 100%; }
-        .content {
+        :where(.content) {
           font-family: "Sora", system-ui, -apple-system, sans-serif;
           color: inherit;
           background: transparent;
@@ -192,9 +192,9 @@ function HtmlMessage({
           width: calc(100% / var(--zoom));
         }
         :where(.email-body) a { color: ${linkColor}; }
-        img { max-width: 100%; height: auto; }
-        blockquote { border-left: 3px solid ${blockquoteBorder}; margin: 8px 0; padding-left: 12px; }
-        pre { white-space: pre-wrap; }
+        :where(img) { max-width: 100%; height: auto; }
+        :where(blockquote) { border-left: 3px solid ${blockquoteBorder}; margin: 8px 0; padding-left: 12px; }
+        :where(pre) { white-space: pre-wrap; }
         ${injectedCss}
       </style>
       <style id="external-email-css">${rewriteBodySelectors(cachedExternalCss)}</style>

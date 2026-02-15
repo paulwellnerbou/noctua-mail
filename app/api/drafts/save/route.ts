@@ -59,6 +59,8 @@ export async function POST(request: Request) {
     subject: string;
     text: string;
     html?: string;
+    composeFormat?: string;
+    quotedHtmlEdited?: boolean;
     inReplyTo?: string;
     references?: string[];
     xForwardedMessageId?: string;
@@ -146,6 +148,13 @@ export async function POST(request: Request) {
   if (uid) {
     const message = await syncImapMessage(account, draftsMailbox, uid, clientId);
     if (message) {
+      // Add compose format and quoted HTML edited flag to the message (local DB only, not stored in IMAP)
+      if (payload.composeFormat) {
+        message.xComposeFormat = payload.composeFormat;
+      }
+      if (typeof payload.quotedHtmlEdited === "boolean") {
+        message.quotedHtmlEdited = payload.quotedHtmlEdited;
+      }
       if (message.source) {
         await saveMessageSource(account.id, message.id, message.source);
       }
