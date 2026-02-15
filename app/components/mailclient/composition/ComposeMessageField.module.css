@@ -12,7 +12,7 @@
 }
 
 .composeWritingText {
-  resize: none;
+  resize: vertical;
 }
 
 .composeWritingMarkdown {
@@ -20,6 +20,12 @@
 }
 
 .composeWritingHtml > * {
+  height: 100%;
+  min-height: 440px;
+  width: 100%;
+}
+
+.composeWritingText > * {
   height: 100%;
   min-height: 440px;
   width: 100%;

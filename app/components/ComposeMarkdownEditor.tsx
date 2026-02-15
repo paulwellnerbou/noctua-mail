@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import "@uiw/react-md-editor/markdown-editor.css";
 import "@uiw/react-markdown-preview/markdown.css";
@@ -17,12 +17,16 @@ type ComposeMarkdownEditorProps = {
   resetKey?: number | string;
 };
 
+const MIN_EDITOR_HEIGHT = 440;
+
 export default function ComposeMarkdownEditor({
   value,
   onChange,
   resetKey,
 }: ComposeMarkdownEditorProps) {
   const [colorMode, setColorMode] = useState<"light" | "dark">("light");
+  const [editorHeight, setEditorHeight] = useState(MIN_EDITOR_HEIGHT);
+  const containerRef = useRef<HTMLDivElement | null>(null);
 
   // Detect dark mode from Radix theme
   useEffect(() => {
@@ -43,14 +47,44 @@ export default function ComposeMarkdownEditor({
     return () => observer.disconnect();
   }, []);
 
+  useEffect(() => {
+    const node = containerRef.current;
+    if (!node) return;
+
+    const syncHeight = (nextHeight: number) => {
+      const normalizedHeight = Math.max(MIN_EDITOR_HEIGHT, Math.round(nextHeight));
+      setEditorHeight((currentHeight) =>
+        currentHeight === normalizedHeight ? currentHeight : normalizedHeight
+      );
+    };
+
+    syncHeight(node.getBoundingClientRect().height);
+
+    if (typeof ResizeObserver === "undefined") {
+      const handleWindowResize = () => {
+        syncHeight(node.getBoundingClientRect().height);
+      };
+      window.addEventListener("resize", handleWindowResize);
+      return () => window.removeEventListener("resize", handleWindowResize);
+    }
+
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (!entry) return;
+      syncHeight(entry.contentRect.height);
+    });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
+
   return (
-    <div className={styles.container} data-color-mode={colorMode}>
+    <div ref={containerRef} className={styles.container} data-color-mode={colorMode}>
       <MDEditor
         value={value}
         onChange={(val) => onChange(val || "")}
         preview="live"
-        height={440}
-        visibleDragbar={true}
+        height={editorHeight}
+        visibleDragbar={false}
         key={resetKey}
       />
     </div>

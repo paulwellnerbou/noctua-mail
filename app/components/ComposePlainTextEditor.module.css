@@ -1,7 +1,6 @@
 .textarea {
-  resize: vertical;
-  min-height: 0;
-  flex: 1;
+  resize: none;
+  height: 100%;
   padding: 10px 12px;
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
     monospace;
