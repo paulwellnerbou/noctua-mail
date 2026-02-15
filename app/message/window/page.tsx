@@ -371,6 +371,7 @@ export default function MessageWindowPage() {
                     handleArchiveMessage={noop}
                     handleSetCategory={noop}
                     handleDeleteMessage={noop}
+                    handleUnsubscribe={noop}
                     handleDownloadEml={handleDownloadEml}
                     handleResyncMessage={noop}
                     handleOpenInNewWindow={noop}
@@ -381,6 +382,7 @@ export default function MessageWindowPage() {
                     onOpenChange={onOpenChange}
                   />
                 ),
+                handleUnsubscribe: noop,
                 collapsedMessages,
                 setCollapsedMessages,
                 messageTabs,

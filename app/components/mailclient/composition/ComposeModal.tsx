@@ -3,6 +3,7 @@ import { X } from "lucide-react";
 import { MinusIcon, RowsIcon } from "@radix-ui/react-icons";
 import ComposeFields from "./ComposeFields";
 import { Button, Heading, IconButton, Text } from "@radix-ui/themes";
+import styles from "./Compose.module.css";
 
 type ComposeMode = "new" | "reply" | "replyAll" | "forward" | "edit" | "editAsNew";
 
@@ -153,8 +154,8 @@ export default function ComposeModal({
       }}
     >
       <div
-        className={`compose-modal ${discardingDraft ? "disabled" : ""}${
-          composeDragActive ? " compose-drop-active" : ""
+        className={`${styles.composeModal} ${discardingDraft ? styles.disabled : ""} ${
+          composeDragActive ? styles.composeDropActive : ""
         }`}
         ref={composeModalRef}
         style={{
@@ -167,16 +168,16 @@ export default function ComposeModal({
         onDragOver={handleComposeDragOver}
         onDrop={handleComposeDrop}
       >
-        <div className="compose-header">
+        <div className={styles.composeHeader}>
           <div>
-            <Heading size="5" weight="bold" className="compose-title">
+            <Heading size="5" weight="bold" className={styles.composeTitle}>
               {composeTitle}
             </Heading>
-            <Text size="2" color="gray" className="compose-subtitle">
+            <Text size="2" color="gray" className={styles.composeSubtitle}>
               From {fromValue}
             </Text>
           </div>
-          <div className="compose-header-actions">
+          <div className={styles.composeHeaderActions}>
             <IconButton
               variant="ghost"
               size="2"
@@ -209,7 +210,7 @@ export default function ComposeModal({
             </IconButton>
           </div>
         </div>
-        <div className="compose-body">
+        <div className={styles.composeBody}>
           <ComposeFields
             key={`modal-fields-${composeFieldsReset}`}
             variant="modal"
@@ -232,18 +233,22 @@ export default function ComposeModal({
           />
           {ui.composeMessageField}
         </div>
-        <div className="compose-footer">
-          <div className="compose-draft-meta">
+        <div className={styles.composeFooter}>
+          <div className={styles.composeDraftMeta}>
             {composeDraftId && (
-              <Text size="1" color="gray" className="compose-draft">
+              <Text size="1" color="gray" className={styles.composeDraft}>
                 Draft: {composeDraftId}
               </Text>
             )}
             {composeOpen && (
               <Text
                 size="1"
-                className={`compose-draft-status ${
-                  draftSaveError ? "error" : draftSaving ? "saving" : ""
+                className={`${styles.composeDraftStatus} ${
+                  draftSaveError
+                    ? styles.composeDraftStatusError
+                    : draftSaving
+                      ? styles.composeDraftStatusSaving
+                      : ""
                 }`}
               >
                 {draftSaving
@@ -256,7 +261,7 @@ export default function ComposeModal({
               </Text>
             )}
           </div>
-          <div className="compose-actions">
+          <div className={styles.composeActions}>
             {composeDraftId && (
               <Button
                 size="2"
@@ -285,7 +290,7 @@ export default function ComposeModal({
           </div>
         </div>
         <div
-          className="compose-resizer"
+          className={styles.composeResizer}
           onPointerDown={(event) => {
             event.preventDefault();
             event.stopPropagation();

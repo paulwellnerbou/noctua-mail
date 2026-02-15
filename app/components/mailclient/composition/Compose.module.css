@@ -1,0 +1,395 @@
+.composeModal {
+  width: 980px;
+  height: 820px;
+  max-width: 95vw;
+  max-height: 90vh;
+  min-height: 520px;
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  background: var(--color-panel-solid);
+  border-radius: var(--radius-5);
+  box-shadow: var(--shadow-6);
+  padding: var(--space-6);
+  overflow: hidden;
+}
+
+.disabled {
+  opacity: 0.6;
+  pointer-events: none;
+}
+
+.composeHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: var(--space-4);
+  border-bottom: 1px solid var(--gray-a5);
+}
+
+.composeHeaderActions {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.composeTitle {
+  margin: 0;
+}
+
+.composeSubtitle {
+  margin: 4px 0 0 0;
+  font-size: 12px;
+  color: var(--gray-a11);
+}
+
+.composeBody {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  margin: 0;
+  padding: var(--space-4) 0;
+  min-height: 0;
+  flex: 1;
+}
+
+.composeMessageField {
+  flex: 1;
+  min-height: 0;
+}
+
+.composeTabs {
+  display: inline-flex;
+  gap: 6px;
+  margin-bottom: 0;
+}
+
+.composeTabsRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.composeAttach {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.composeSignatureMenu {
+  min-width: 180px;
+  background: var(--gray-1);
+  border: 1px solid var(--gray-a6);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-4);
+  max-height: 240px;
+  overflow: auto;
+}
+
+.composeSignatureMenu :global(.rt-DropdownMenuItem) {
+  font-size: 12px;
+}
+
+.composeGrid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: var(--space-3);
+  width: 100%;
+}
+
+.composeGridRow {
+  display: grid;
+  grid-template-columns: 84px 1fr;
+  gap: var(--space-3);
+  align-items: center;
+}
+
+.label {
+  font-size: 13px;
+  color: var(--gray-a11);
+  font-weight: 500;
+}
+
+.composeInputWrap {
+  position: relative;
+  flex: 1;
+}
+
+.composeInputWrap :global(.rt-TextFieldInput),
+.composeGridRow :global(.rt-TextFieldInput) {
+  color: var(--input-fg);
+}
+
+.composeRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.composeRow :global(.rt-TextFieldRoot) {
+  flex: 1;
+}
+
+.composeSuggestions {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 50;
+  background: var(--gray-1);
+  border: 1px solid var(--gray-a6);
+  border-radius: var(--radius-3);
+  box-shadow: var(--shadow-4);
+  max-height: 220px;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.composeSuggestion {
+  border: none;
+  background: transparent;
+  text-align: left;
+  padding: 8px 10px;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--gray-12);
+}
+
+.composeSuggestion:hover,
+.composeSuggestionActive {
+  background: var(--gray-3);
+}
+
+.composeSuggestionMuted {
+  color: var(--gray-10);
+  cursor: default;
+}
+
+.composeMinimized {
+  position: fixed;
+  right: 18px;
+  bottom: 16px;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 220px;
+  max-width: 420px;
+  padding: 10px 12px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow);
+  cursor: pointer;
+}
+
+.composeMinimizedTitle {
+  flex: 1;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.composeMinimizedActions {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.composeQuotedBlock {
+  border: 1px solid var(--gray-a6);
+  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  background: var(--gray-2);
+  color: var(--gray-12);
+  margin-top: 8px;
+}
+
+.composeQuotedSummary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.composeQuotedTrigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  box-shadow: none;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--gray-11);
+}
+
+.composeQuotedTrigger:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.summaryText {
+  display: inline-flex;
+  align-items: center;
+}
+
+.summaryCaret {
+  display: inline-flex;
+  transition: transform 0.2s ease;
+}
+
+.composeQuotedTrigger[data-state="open"] .summaryCaret {
+  transform: rotate(90deg);
+}
+
+.summaryActions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-left: auto;
+}
+
+.quoteActions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.composeQuotedBlock[data-state="closed"] .summaryActions .quoteActions {
+  display: none;
+}
+
+.composeQuotedContent {
+  margin-top: 10px;
+  border-top: 1px solid var(--gray-a5);
+  padding-top: 10px;
+  max-height: min(260px, 30vh);
+  overflow: auto;
+}
+
+.composeQuotedContent :global(img) {
+  max-width: 100%;
+  height: auto;
+}
+
+.composeQuotedContent :global(table) {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 8px 0;
+}
+
+.composeQuotedContent :global(td),
+.composeQuotedContent :global(th) {
+  border: 1px solid var(--gray-a6);
+  padding: 6px 8px;
+}
+
+.composeQuotedToolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 6px;
+}
+
+.composeQuotedText {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border-left: 2px solid var(--gray-a7);
+  background: var(--gray-2);
+  color: var(--gray-12);
+  white-space: pre-wrap;
+  font-size: 12px;
+}
+
+.composeFooter {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--gray-a5);
+}
+
+.composeDraftMeta {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.composeDraftStatus {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.composeDraftStatusSaving {
+  color: var(--accent);
+}
+
+.composeDraftStatusError {
+  color: var(--red-11);
+}
+
+.composeDraft {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.composeActions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.composeResizer {
+  position: absolute;
+  right: 6px;
+  bottom: 6px;
+  width: 18px;
+  height: 18px;
+  cursor: nwse-resize;
+  color: var(--muted);
+  opacity: 0.9;
+  z-index: 10;
+}
+
+.composeResizer::before {
+  content: "⤡";
+  position: absolute;
+  right: 0;
+  bottom: -1px;
+  font-size: 18px;
+  line-height: 1;
+  transform: rotate(0deg);
+  color: currentColor;
+}
+
+.composeAttachments {
+  margin-top: 10px;
+}
+
+.composeAttachments :global(.attachment-name) {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.composeAttachments :global(.icon-button) {
+  padding: 4px 6px;
+}
+
+.composeDropActive {
+  outline: 2px dashed var(--accent);
+  outline-offset: 4px;
+}

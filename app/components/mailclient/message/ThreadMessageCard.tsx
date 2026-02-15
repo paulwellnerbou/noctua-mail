@@ -24,7 +24,7 @@ import CalendarEventPreview from "./CalendarEventPreview";
 import MessageRecipientMetaField from "./MessageRecipientMetaField";
 import CategoryBadge from "../CategoryBadge";
 import FlagBadge from "./FlagBadge";
-import { hasNonInlineAttachments } from "../utils/messageHelpers";
+import { hasNonInlineAttachments, getUnsubscribeCapability } from "../utils/messageHelpers";
 
 type MessageTab = "html" | "text" | "markdown" | "source";
 
@@ -78,6 +78,7 @@ type ThreadMessageCardProps = {
   getPrimaryEmail: (value?: string) => string | null;
   extractEmails: (value?: string) => string[];
   onFindRelatedByCalendarInviteUid?: (uid: string) => void;
+  handleUnsubscribe: (message: Message) => void;
   dateFormat?: AccountDateFormat;
 };
 
@@ -119,6 +120,7 @@ export default function ThreadMessageCard({
   getPrimaryEmail,
   extractEmails,
   onFindRelatedByCalendarInviteUid,
+  handleUnsubscribe,
   dateFormat
 }: ThreadMessageCardProps) {
   const [menuOpen, setMenuOpen] = useState(false);
@@ -581,6 +583,24 @@ export default function ThreadMessageCard({
                 ) : null;
               })()}
             </div>
+            {getUnsubscribeCapability(message) && (
+              <div className={styles.unsubscribeBanner}>
+                <span className={styles.unsubscribeText}>
+                  This message is from a mailing list.
+                </span>
+                <Button
+                  size="1"
+                  variant="soft"
+                  color="gray"
+                  onClick={() => handleUnsubscribe(message)}
+                  disabled={pendingMessageActions.has(message.id)}
+                >
+                  {getUnsubscribeCapability(message) === "one-click"
+                    ? "Unsubscribe"
+                    : "Unsubscribe page"}
+                </Button>
+              </div>
+            )}
             <Collapsible.Content className={`${styles.content} ${styles.collapsibleContent}`}>
               <div className={styles.collapsibleInner}>
                 {content}

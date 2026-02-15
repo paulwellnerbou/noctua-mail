@@ -560,6 +560,9 @@ function initAccountSchema(db: any) {
          AND COALESCE(categorySignals, '') LIKE '%manual-category:cleared%'`
     ).run();
   }
+  if (!messageColumns.has("listUnsubscribe")) {
+    db.prepare(`ALTER TABLE messages ADD COLUMN listUnsubscribe TEXT`).run();
+  }
 
   const reminderColumns = getDbTableColumns(db, "calendar_reminders");
   if (reminderColumns.size > 0) {
@@ -3235,7 +3238,8 @@ export async function listRelatedMessages(params: {
       recent: Boolean(row.recent),
       category: row.category ?? undefined,
       categoryScore: typeof row.categoryScore === "number" ? row.categoryScore : undefined,
-      categorySignals: parseStringArray(row.categorySignals)
+      categorySignals: parseStringArray(row.categorySignals),
+      listUnsubscribe: row.listUnsubscribe ?? undefined
     };
     (message as any).groupKey = buildGroupKey(message, groupBy);
     return message;
@@ -3485,7 +3489,8 @@ export async function listMessages(params: {
       recent: Boolean(row.recent),
       category: row.category ?? undefined,
       categoryScore: typeof row.categoryScore === "number" ? row.categoryScore : undefined,
-      categorySignals: parseStringArray(row.categorySignals)
+      categorySignals: parseStringArray(row.categorySignals),
+      listUnsubscribe: row.listUnsubscribe ?? undefined
     };
     (message as any).groupKey = buildGroupKey(message, groupBy);
     return message;
@@ -3912,7 +3917,8 @@ export async function listThreads(params: {
       recent: Boolean(row.recent),
       category: row.category ?? undefined,
       categoryScore: typeof row.categoryScore === "number" ? row.categoryScore : undefined,
-      categorySignals: parseStringArray(row.categorySignals)
+      categorySignals: parseStringArray(row.categorySignals),
+      listUnsubscribe: row.listUnsubscribe ?? undefined
     };
     (message as any).groupKey = buildGroupKey(message, groupBy);
     return message;
@@ -4167,8 +4173,8 @@ export async function upsertMessages(
         id, accountId, folderId, threadId, parentId, messageId, inReplyTo, "references", xForwardedMessageId,
         subject, fromAddr, fromEmail, toAddr, ccAddr, bccAddr, mailboxPath, imapUid, preview, date, dateValue,
         body, htmlBody, priority, hasSource, unread, flags, seen, answered, flagged, deleted, draft, recent,
-        category, categoryScore, categorySignals, categoryManualState
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        category, categoryScore, categorySignals, categoryManualState, listUnsubscribe
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     const insertFts = db.prepare(`
       INSERT INTO message_fts (messageId, subject, fromAddr, toAddr, ccAddr, bccAddr, body, preview)
@@ -4335,7 +4341,8 @@ export async function upsertMessages(
           category,
           categoryScore,
           categorySignals ? JSON.stringify(categorySignals) : null,
-          manualCategoryState
+          manualCategoryState,
+          message.listUnsubscribe ?? null
         );
         deleteFts.run(message.id);
         insertFts.run(

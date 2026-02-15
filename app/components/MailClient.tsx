@@ -17,7 +17,6 @@ import {
   CalendarClock,
   FileText,
   ListTodo,
-  Paperclip,
   Target,
   Send,
   Search,
@@ -26,10 +25,7 @@ import {
   Trash2,
   X
 } from "lucide-react";
-import * as Collapsible from "@radix-ui/react-collapsible";
-import { CaretRightIcon, ChevronDownIcon } from "@radix-ui/react-icons";
-import ComposeEditor from "./ComposeEditor";
-import HtmlMessage from "./HtmlMessage";
+import { markdownToHtml } from "@/lib/markdownConvert";
 import LoginOverlay from "./auth/LoginOverlay";
 import FolderPane from "./mailclient/folder/FolderPane";
 import FolderTree from "./mailclient/folder/FolderTree";
@@ -39,7 +35,9 @@ import InAppNoticeStack, {
 } from "./mailclient/InAppNoticeStack";
 import ComposeInlineCard from "./mailclient/composition/ComposeInlineCard";
 import ComposeMinimized from "./mailclient/composition/ComposeMinimized";
+import ComposeMessageField from "./mailclient/composition/ComposeMessageField";
 import ComposeModal from "./mailclient/composition/ComposeModal";
+import { useComposeViewEffects } from "./mailclient/composition/useComposeViewEffects";
 import MessageListHeader from "./mailclient/messagelist/MessageListHeader";
 import MessageListPane from "./mailclient/messagelist/MessageListPane";
 import MessageListView from "./mailclient/messagelist/MessageListView";
@@ -66,17 +64,7 @@ import {
   type ThreadNode
 } from "./mailclient/messagelist/threadTree";
 import threadStyles from "./mailclient/message/ThreadMessageCard.module.css";
-import {
-  AlertDialog,
-  Badge,
-  Button,
-  Card,
-  DropdownMenu,
-  Flex,
-  IconButton,
-  Tabs,
-  Text
-} from "@radix-ui/themes";
+import { AlertDialog, Badge, Button, Card, Flex, IconButton, Text } from "@radix-ui/themes";
 import MessageMenu from "./mailclient/message/MessageMenu";
 import MessageQuickActions from "./mailclient/message/MessageQuickActions";
 import MessageViewPane from "./mailclient/message/MessageViewPane";
@@ -114,7 +102,6 @@ import { useMessageDeleteActions } from "./mailclient/useMessageDeleteActions";
 import { useMessageMoveActions, type UndoMoveTarget } from "./mailclient/useMessageMoveActions";
 import type { Account, AccountSettings, Attachment, Folder, Message, User } from "@/lib/data";
 import AccountSettingsModal, { type ManageTab } from "./AccountSettingsModal";
-import AttachmentsList from "./AttachmentsList";
 import {
   computeGroupMeta,
   isFlaggedMessage,
@@ -125,7 +112,8 @@ import {
   hasTodoFlag,
   hasDoneFlag,
   hasCalendarFlag,
-  hasNonInlineAttachments
+  hasNonInlineAttachments,
+  getUnsubscribeCapability
 } from "./mailclient/utils/messageHelpers";
 import {
   buildFolderTree,
@@ -325,12 +313,13 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
   const composeBodyLastUpdateRef = useRef<number>(0);
   const [composeHtml, setComposeHtml] = useState("");
   const [composeHtmlText, setComposeHtmlText] = useState("");
+  const [composeMarkdown, setComposeMarkdown] = useState("");
   const [composeOpenedAt, setComposeOpenedAt] = useState("");
   const [composeSignatureId, setComposeSignatureId] = useState<string>("");
   const [signatureMenuOpen, setSignatureMenuOpen] = useState(false);
   const composeSignatureRef = useRef<{ id: string; text: string; html: string } | null>(null);
   const [composeReplyMessage, setComposeReplyMessage] = useState<Message | null>(null);
-  const [composeTab, setComposeTab] = useState<"text" | "html">("html");
+  const [composeTab, setComposeTab] = useState<"text" | "html" | "markdown">("html");
   const [composeShowBcc, setComposeShowBcc] = useState(false);
   const [composeStripImages, setComposeStripImages] = useState(false);
   const [composeIncludeOriginal, setComposeIncludeOriginal] = useState(true);
@@ -403,7 +392,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
   const composeBaselineHashRef = useRef<string | null>(null);
   const composeDirtyRef = useRef(false);
   const composeEditorInitRef = useRef(false);
-  const composeLastEditedRef = useRef<"html" | "text">("html");
+  const composeLastEditedRef = useRef<"html" | "text" | "markdown">("html");
   const listIsNarrow = listWidth < 360;
   // searchFields, searchBadges, activeVirtualFolderId, and virtual folder counts moved to useSearchState hook
   const [relatedContext, setRelatedContext] = useState<{
@@ -1503,6 +1492,18 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
         const glue = base ? "\n\n" : "";
         return `${base}${glue}${next.text}`;
       });
+    } else if (composeTab === "markdown") {
+      setComposeMarkdown((prev) => {
+        let base = prev;
+        if (previous?.text && base.trimEnd().endsWith(previous.text)) {
+          base = base.trimEnd().slice(0, -previous.text.length).trimEnd();
+        }
+        if (!signature || !next.text) {
+          return base;
+        }
+        const glue = base ? "\n\n" : "";
+        return `${base}${glue}${next.text}`;
+      });
     } else {
       setComposeHtml((prev) => {
         let base = prev;
@@ -1535,6 +1536,33 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
 
   const buildComposePayload = (options?: { preferText?: boolean }) => {
     const useHtml = composeTab === "html" && !options?.preferText;
+    const useMarkdown = composeTab === "markdown" && !options?.preferText;
+
+    // Handle markdown mode
+    if (useMarkdown) {
+      const currentMd = composeMarkdown.trim();
+      const generatedHtml = markdownToHtml(currentMd);
+      const quoted = composeIncludeOriginal ? composeQuotedHtml.trim() : "";
+      let html: string | undefined = generatedHtml || quoted ? `${generatedHtml}${quoted}` : undefined;
+      const textBody = currentMd;
+
+      // Handle inline attachments (same as HTML mode)
+      const inlineAttachments = composeAttachments.filter(
+        (attachment) => attachment.inline && attachment.dataUrl && attachment.cid
+      );
+      if (html && inlineAttachments.length > 0) {
+        inlineAttachments.forEach((attachment) => {
+          if (!attachment.dataUrl || !attachment.cid) return;
+          html = html?.split(attachment.dataUrl).join(`cid:${attachment.cid}`);
+        });
+      }
+      if (html) {
+        html = normalizeOutboundTableMarkup(html);
+      }
+
+      return { text: textBody, html, attachments: composeAttachments };
+    }
+
     let html: string | undefined;
     if (useHtml) {
       const baseHtml = composeHtml.trim();
@@ -2011,15 +2039,23 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
       ? undefined
       : filteredMessages.find((message) => message.id === activeMessageId);
 
-  // Scroll to compose form when replying to a message in thread view
-  useEffect(() => {
-    if (showComposeInline && composeReplyMessage && composeCardRef.current) {
-      // Use setTimeout to ensure the DOM has been updated
-      setTimeout(() => {
-        composeCardRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-      }, 100);
-    }
-  }, [showComposeInline, composeReplyMessage?.id]);
+  useComposeViewEffects({
+    showComposeInline,
+    composeReplyMessageId: composeReplyMessage?.id ?? null,
+    composeCardRef,
+    composeTab,
+    composeOpen,
+    composeView,
+    composeMode,
+    activeFolderId,
+    composeModalRef,
+    composeTextRef,
+    composeResizeRef,
+    composeResizing,
+    setComposeOpen,
+    setComposeSize,
+    setComposeResizing
+  });
   const threadForest = useMemo(() => buildThreadTree(threadScopeMessages), [threadScopeMessages]);
 
   const activeThread = useMemo(() => {
@@ -2150,6 +2186,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
       setComposeBody("");
       setComposeHtml("");
       setComposeHtmlText("");
+      setComposeMarkdown("");
       setComposeQuotedHtml("");
       setComposeShowBcc(false);
       setComposeStripImages(false);
@@ -2408,35 +2445,6 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     setComposeView("minimized");
   };
 
-  const handleStripImages = () => {
-    if (composeStripImages) return;
-    const strip = (value: string) => value.replace(/<img[\s\S]*?>/gi, "");
-    setComposeStripImages(true);
-    setComposeHtml((prev) => (prev ? strip(prev) : prev));
-    setComposeQuotedParts((prev) => {
-      if (!prev) return prev;
-      const next = { ...prev, bodyHtml: strip(prev.bodyHtml) };
-      const nextHtml = assembleQuotedHtml(next, composeQuoteHtml);
-      if (composeIncludeOriginal) {
-        setComposeQuotedHtml(nextHtml);
-        setComposeHtmlText(stripHtml(nextHtml));
-      }
-      return next;
-    });
-  };
-
-  const toggleQuoteHtml = () => {
-    setComposeQuoteHtml((prev) => {
-      const next = !prev;
-      if (composeQuotedParts && composeIncludeOriginal) {
-        const nextHtml = assembleQuotedHtml(composeQuotedParts, next);
-        setComposeQuotedHtml(nextHtml);
-        setComposeHtmlText(stripHtml(nextHtml));
-      }
-      return next;
-    });
-  };
-
   const saveDraftNow = async (payload: DraftSavePayload, hash: string) => {
     if (!activeAccountId) return;
     if (composeTab === "text" && composeTextRef.current) {
@@ -2568,313 +2576,55 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     setComposeView("inline");
   };
 
-  const toggleIncludeOriginal = () => {
-    setComposeIncludeOriginal((prev) => {
-      const next = !prev;
-      if (!next) {
-        setComposeQuotedHtml("");
-      } else if (composeQuotedParts) {
-        const nextHtml = assembleQuotedHtml(composeQuotedParts, composeQuoteHtml);
-        setComposeQuotedHtml(nextHtml);
-        setComposeHtmlText(stripHtml(nextHtml));
-      }
-      return next;
-    });
-  };
-
-  const handleEditQuotedHtml = () => {
-    const quoted = composeQuotedHtml.trim();
-    if (!quoted) return;
-    const baseHtml = composeHtml.trim();
-    const glue = baseHtml ? "<p><br></p>" : "";
-    const quotedWithLine =
-      composeQuoteHtml && !/<blockquote\b/i.test(quoted)
-        ? `<blockquote class=\"compose-quote\">${quoted}</blockquote>`
-        : quoted;
-    const nextHtml = `${baseHtml}${glue}${quotedWithLine}`;
-    setComposeHtml(nextHtml);
-    setComposeHtmlText(stripHtml(nextHtml));
-    setComposeEditorReset((prev) => prev + 1);
-    setComposeIncludeOriginal(false);
-    setComposeQuoteHtml(false);
-    setComposeQuotedHtml("");
-    setComposeQuotedText("");
-    setComposeQuotedParts(null);
-    composeDirtyRef.current = true;
-    composeLastEditedRef.current = "html";
-  };
-
   const visibleComposeAttachments = composeAttachments.filter((item) => !item.inline);
-  const switchComposeTab = (nextTab: "text" | "html") => {
-    if (nextTab === composeTab) return;
-    if (nextTab === "html") {
-      composeEditorInitRef.current = false;
-      if (composeLastEditedRef.current === "text") {
-        const currentBody = composeTextRef.current?.value || composeBody;
-        const nextHtml = currentBody ? `<p>${escapeHtml(currentBody).replace(/\n/g, "<br>")}</p>` : "";
-        setComposeHtml(nextHtml);
-        setComposeHtmlText(stripHtml(nextHtml));
-        setComposeBody(currentBody);
-      }
-      setComposeTab("html");
-      return;
-    }
-    if (composeLastEditedRef.current === "html") {
-      const nextText = composeHtmlText || stripHtml(composeHtml);
-      const currentBody = composeTextRef.current?.value || composeBody;
-      if (nextText.trim().length > 0 || currentBody.trim().length === 0) {
-        setComposeBody(nextText);
-      }
-    }
-    setComposeTab("text");
-  };
-
   const composeMessageField = (
-    <div className="form-field compose-message-field">
-      <div className="compose-tabs-row">
-        <div className="compose-tabs">
-          <Tabs.Root value={composeTab} onValueChange={(value) => switchComposeTab(value as "text" | "html")}>
-            <Tabs.List size="1" className={threadStyles.tabsList}>
-              <Tabs.Trigger value="html" className={threadStyles.tabTrigger}>
-                HTML
-              </Tabs.Trigger>
-              <Tabs.Trigger value="text" className={threadStyles.tabTrigger}>
-                Text
-              </Tabs.Trigger>
-            </Tabs.List>
-          </Tabs.Root>
-        </div>
-        <div className="compose-attach">
-          <DropdownMenu.Root open={signatureMenuOpen} onOpenChange={setSignatureMenuOpen}>
-            <DropdownMenu.Trigger>
-              <Button type="button" size="1" variant="soft" color="gray" title="Choose signature">
-                {selectedSignature ? selectedSignature.name : "Signature"}
-                <ChevronDownIcon width={14} height={14} />
-              </Button>
-            </DropdownMenu.Trigger>
-            <DropdownMenu.Content align="end" className="compose-signature-menu">
-              <DropdownMenu.RadioGroup
-                value={composeSignatureId || "__none"}
-                onValueChange={(value) => {
-                  if (value === "__none") {
-                    setComposeSignatureId("");
-                    applySignatureToCompose(null);
-                    setSignatureMenuOpen(false);
-                    return;
-                  }
-                  const signature = accountSignatures.find((entry) => entry.id === value);
-                  if (!signature) return;
-                  setComposeSignatureId(signature.id);
-                  applySignatureToCompose(signature);
-                  setSignatureMenuOpen(false);
-                }}
-              >
-                <DropdownMenu.RadioItem value="__none">No signature</DropdownMenu.RadioItem>
-                {accountSignatures.map((signature) => (
-                  <DropdownMenu.RadioItem key={signature.id} value={signature.id}>
-                    {signature.name}
-                  </DropdownMenu.RadioItem>
-                ))}
-              </DropdownMenu.RadioGroup>
-            </DropdownMenu.Content>
-          </DropdownMenu.Root>
-          <Button
-            type="button"
-            size="1"
-            variant="soft"
-            color="gray"
-            title="Add attachment"
-            onClick={() => composeAttachmentInputRef.current?.click()}
-          >
-            <Paperclip size={12} />
-            Attach
-          </Button>
-          <input
-            ref={composeAttachmentInputRef}
-            type="file"
-            multiple
-            id="compose-attachment-input"
-            name="compose_attachments"
-            style={{ display: "none" }}
-            onChange={handleComposeAttachmentPick}
-          />
-        </div>
-      </div>
-      {composeTab === "text" && (
-        <>
-          <div className="compose-writing text">
-            <textarea
-              key={`text-body-${composeEditorReset}`}
-              id="compose-text-body"
-              name="compose_body"
-              ref={composeTextRef}
-              defaultValue={
-                `${composeBody}${
-                  composeIncludeOriginal && composeQuotedText ? `\n\n${composeQuotedText}` : ""
-                }`
-              }
-              onChange={(event) => {
-                composeDirtyRef.current = true;
-                composeLastEditedRef.current = "text";
-
-                const now = Date.now();
-                const timeSinceLastUpdate = now - composeBodyLastUpdateRef.current;
-                const nextValue = event.target.value;
-
-                const updateState = () => {
-                  if (composeIncludeOriginal && composeQuotedText) {
-                    const suffix = `\n\n${composeQuotedText}`;
-                    if (nextValue.endsWith(suffix)) {
-                      setComposeBody(nextValue.slice(0, -suffix.length));
-                    } else {
-                      setComposeBody(nextValue);
-                    }
-                  } else {
-                    setComposeBody(nextValue);
-                  }
-                  composeBodyLastUpdateRef.current = now;
-                };
-
-                // Throttle: if it's been more than 10 seconds since last update, update immediately
-                if (timeSinceLastUpdate >= 10000) {
-                  if (composeBodyDebounceRef.current) {
-                    clearTimeout(composeBodyDebounceRef.current);
-                    composeBodyDebounceRef.current = null;
-                  }
-                  updateState();
-                } else {
-                  // Otherwise, debounce with a 2 second delay
-                  if (composeBodyDebounceRef.current) {
-                    clearTimeout(composeBodyDebounceRef.current);
-                  }
-                  composeBodyDebounceRef.current = setTimeout(() => {
-                    updateState();
-                  }, 2000);
-                }
-              }}
-            />
-          </div>
-          {composeMode !== "new" && composeQuotedText && (
-            <div className="compose-quoted-toolbar">
-              <Button
-                type="button"
-                size="1"
-                color="gray"
-                variant={composeIncludeOriginal ? "solid" : "soft"}
-                title="Toggle original message"
-                onClick={toggleIncludeOriginal}
-              >
-                Include original
-              </Button>
-            </div>
-          )}
-        </>
-      )}
-      {composeTab === "html" && (
-        <div className="compose-writing html">
-          <ComposeEditor
-            initialHtml={composeHtml}
-            resetKey={composeEditorReset}
-            onInlineImage={handleInlineImage}
-            onChange={(nextHtml, nextText) => {
-              setComposeHtml(nextHtml);
-              setComposeHtmlText(nextText);
-              if (!composeEditorInitRef.current) {
-                composeEditorInitRef.current = true;
-                return;
-              }
-              composeDirtyRef.current = true;
-              composeLastEditedRef.current = "html";
-            }}
-          />
-        </div>
-      )}
-      {visibleComposeAttachments.length > 0 && (
-        <div className="compose-attachments">
-          <AttachmentsList
-            attachments={visibleComposeAttachments}
-            onRemove={removeComposeAttachment}
-          />
-        </div>
-      )}
-      {composeTab === "html" && composeQuotedParts && (
-        <Collapsible.Root
-          className={`compose-quoted-block ${composeIncludeOriginal ? "expanded" : ""}`}
-          open={composeIncludeOriginal}
-          onOpenChange={(open) => {
-            if (open !== composeIncludeOriginal) {
-              toggleIncludeOriginal();
-            }
-          }}
-        >
-          <div className="compose-quoted-summary">
-            <Collapsible.Trigger asChild>
-              <button
-                type="button"
-                className="compose-quoted-trigger"
-                title={composeIncludeOriginal ? "Hide quoted message" : "Show quoted message"}
-              >
-                <CaretRightIcon className="summary-caret" />
-                <span className="summary-text">
-                  Quoted Message
-                </span>
-              </button>
-            </Collapsible.Trigger>
-            <span className="summary-actions">
-              <Button
-                type="button"
-                size="1"
-                color="gray"
-                variant={composeIncludeOriginal ? "solid" : "soft"}
-                title="Toggle original message"
-                onClick={toggleIncludeOriginal}
-              >
-                Include original
-              </Button>
-              <span className="quote-actions">
-                <Button
-                  type="button"
-                  size="1"
-                  variant="soft"
-                  color="gray"
-                  title="Edit quoted HTML"
-                  onClick={handleEditQuotedHtml}
-                  disabled={!composeQuotedHtml.trim()}
-                >
-                  Edit quoted HTML
-                </Button>
-                <Button
-                  type="button"
-                  size="1"
-                  variant="soft"
-                  color="gray"
-                  title={
-                    composeStripImages ? "Images already stripped" : "Strip images from quoted HTML"
-                  }
-                  disabled={composeStripImages}
-                  onClick={handleStripImages}
-                >
-                  Strip images
-                </Button>
-                <Button
-                  type="button"
-                  size="1"
-                  color="gray"
-                  variant={composeQuoteHtml ? "solid" : "soft"}
-                  title="Toggle HTML quoting"
-                  onClick={toggleQuoteHtml}
-                >
-                  Quote HTML
-                </Button>
-              </span>
-            </span>
-          </div>
-          <Collapsible.Content className="compose-quoted-content">
-            <HtmlMessage html={composeQuotedHtml} darkMode={darkMode} />
-          </Collapsible.Content>
-        </Collapsible.Root>
-      )}
-    </div>
+    <ComposeMessageField
+      darkMode={darkMode}
+      composeMode={composeMode}
+      composeTab={composeTab}
+      composeBody={composeBody}
+      composeHtml={composeHtml}
+      composeHtmlText={composeHtmlText}
+      composeMarkdown={composeMarkdown}
+      composeIncludeOriginal={composeIncludeOriginal}
+      composeQuoteHtml={composeQuoteHtml}
+      composeQuotedHtml={composeQuotedHtml}
+      composeQuotedText={composeQuotedText}
+      composeQuotedParts={composeQuotedParts}
+      composeStripImages={composeStripImages}
+      composeEditorReset={composeEditorReset}
+      visibleComposeAttachments={visibleComposeAttachments}
+      composeSignatureId={composeSignatureId}
+      signatureMenuOpen={signatureMenuOpen}
+      selectedSignature={selectedSignature}
+      accountSignatures={accountSignatures}
+      composeTextRef={composeTextRef}
+      composeAttachmentInputRef={composeAttachmentInputRef}
+      composeBodyDebounceRef={composeBodyDebounceRef}
+      composeBodyLastUpdateRef={composeBodyLastUpdateRef}
+      composeDirtyRef={composeDirtyRef}
+      composeEditorInitRef={composeEditorInitRef}
+      composeLastEditedRef={composeLastEditedRef}
+      stripHtml={stripHtml}
+      setComposeBody={setComposeBody}
+      setComposeHtml={setComposeHtml}
+      setComposeHtmlText={setComposeHtmlText}
+      setComposeMarkdown={setComposeMarkdown}
+      setComposeTab={setComposeTab}
+      setComposeEditorReset={setComposeEditorReset}
+      setComposeIncludeOriginal={setComposeIncludeOriginal}
+      setComposeQuoteHtml={setComposeQuoteHtml}
+      setComposeQuotedHtml={setComposeQuotedHtml}
+      setComposeQuotedText={setComposeQuotedText}
+      setComposeQuotedParts={setComposeQuotedParts}
+      setComposeStripImages={setComposeStripImages}
+      setComposeSignatureId={setComposeSignatureId}
+      setSignatureMenuOpen={setSignatureMenuOpen}
+      applySignatureToCompose={applySignatureToCompose}
+      handleInlineImage={handleInlineImage}
+      handleComposeAttachmentPick={handleComposeAttachmentPick}
+      removeComposeAttachment={removeComposeAttachment}
+    />
   );
 
   const handleSendMail = async () => {
@@ -3311,6 +3061,67 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     }
   };
 
+  const handleUnsubscribe = useCallback(
+    async (message: Message) => {
+      const capability = getUnsubscribeCapability(message);
+      if (!capability) return;
+
+      // For one-click, show a confirmation dialog
+      if (capability === "one-click") {
+        const confirmed = window.confirm(
+          "Unsubscribe from this mailing list?\n\nThis will send an unsubscribe request to the sender."
+        );
+        if (!confirmed) return;
+      }
+
+      setPendingMessageActions((prev) => new Set(prev).add(message.id));
+      try {
+        const res = await apiFetch("/api/message/unsubscribe", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            accountId: activeAccountId,
+            messageId: message.id
+          })
+        });
+
+        if (!res.ok) {
+          const errMsg = await readErrorMessage(res);
+          reportError(errMsg || "Failed to unsubscribe");
+          return;
+        }
+
+        const data = (await res.json()) as {
+          ok: boolean;
+          method: "one-click" | "browser" | "mailto";
+          url?: string;
+        };
+
+        if (data.method === "one-click") {
+          pushNotice({
+            type: "success",
+            title: "Unsubscribed",
+            description: "Unsubscribe request sent successfully.",
+            durationMs: NOTICE_TIMEOUTS.success
+          });
+        } else if (data.method === "browser" && data.url) {
+          window.open(data.url, "_blank", "noopener,noreferrer");
+        } else if (data.method === "mailto" && data.url) {
+          window.location.href = data.url;
+        }
+      } catch (error) {
+        reportError(error instanceof Error ? error.message : "Unsubscribe failed");
+      } finally {
+        setPendingMessageActions((prev) => {
+          const next = new Set(prev);
+          next.delete(message.id);
+          return next;
+        });
+      }
+    },
+    [activeAccountId, apiFetch, readErrorMessage, reportError, pushNotice]
+  );
+
   const handleMarkSpam = async (message: Message) => {
     setPendingMessageActions((prev) => new Set(prev).add(message.id));
     try {
@@ -3561,6 +3372,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
       handleArchiveMessage={handleArchiveMessage}
       handleSetCategory={handleSetCategory}
       handleDeleteMessage={handleDeleteMessage}
+      handleUnsubscribe={handleUnsubscribe}
       handleDownloadEml={handleDownloadEml}
       handleResyncMessage={handleResyncMessage}
       handleOpenInNewWindow={handleOpenInNewWindow}
@@ -4081,25 +3893,6 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
       return <Archive size={12} />;
     return null;
   };
-
-  useEffect(() => {
-    if (composeTab !== "text") return;
-    if (!composeTextRef.current) return;
-    const element = composeTextRef.current;
-    requestAnimationFrame(() => {
-      if (document.activeElement !== element) {
-        element.focus();
-      }
-      element.setSelectionRange(0, 0);
-      element.scrollTop = 0;
-    });
-  }, [composeTab, composeOpen]);
-
-  useEffect(() => {
-    if (!composeOpen || composeView !== "inline") return;
-    if (composeMode === "new") return;
-    setComposeOpen(false);
-  }, [activeFolderId]);
 
   useEffect(() => {
     const isTypingTarget = (target: EventTarget | null) => {
@@ -5197,6 +4990,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     composeBody,
     composeHtml,
     composeHtmlText,
+    composeMarkdown,
     composeQuotedHtml,
     composeQuotedText,
     composeIncludeOriginal,
@@ -5402,38 +5196,6 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     setSearchScope,
     setActiveFolderId
   });
-
-  useEffect(() => {
-    if (!composeOpen) return;
-    setTimeout(() => {
-      const selector = composeView === "modal" ? ".compose-modal input" : ".compose-inline input";
-      const firstField = document.querySelector<HTMLInputElement>(selector);
-      firstField?.focus();
-    }, 0);
-  }, [composeOpen, composeView]);
-
-  useEffect(() => {
-    if (!composeResizing || composeView !== "modal") return;
-    const handleMove = (event: PointerEvent) => {
-      if (!composeResizeRef.current) return;
-      const { startX, startY, startWidth, startHeight } = composeResizeRef.current;
-      const deltaX = event.clientX - startX;
-      const deltaY = event.clientY - startY;
-      const nextWidth = Math.max(640, Math.min(window.innerWidth - 80, startWidth + deltaX));
-      const nextHeight = Math.max(420, Math.min(window.innerHeight - 120, startHeight + deltaY));
-      setComposeSize({ width: nextWidth, height: nextHeight });
-    };
-    const handleUp = () => {
-      setComposeResizing(false);
-      composeResizeRef.current = null;
-    };
-    window.addEventListener("pointermove", handleMove);
-    window.addEventListener("pointerup", handleUp);
-    return () => {
-      window.removeEventListener("pointermove", handleMove);
-      window.removeEventListener("pointerup", handleUp);
-    };
-  }, [composeResizing, composeView]);
 
   useEffect(() => {
     if (!dragging) return;
@@ -7486,15 +7248,15 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
                         composeDirtyRef.current = true;
                       }
                     }}
-                    helpers={{
-                      getComposeToken,
-                      formatRelativeTime
-                    }}
                     dragHandlers={{
                       handleComposeDragEnter,
                       handleComposeDragLeave,
                       handleComposeDragOver,
                       handleComposeDrop
+                    }}
+                    helpers={{
+                      getComposeToken,
+                      formatRelativeTime
                     }}
                   />
                 </div>
@@ -7545,6 +7307,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
                       openCompose,
                       renderQuickActions,
                       renderMessageMenu,
+                      handleUnsubscribe,
                       collapsedMessages,
                       setCollapsedMessages,
                       messageTabs,

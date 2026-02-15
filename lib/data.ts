@@ -108,6 +108,7 @@ export type Message = {
   categoryScore?: number | null;
   categorySignals?: string[];
   calendarEventUids?: string[];
+  listUnsubscribe?: string | null;
   groupKey?: string;
 };
 

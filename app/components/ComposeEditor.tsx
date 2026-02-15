@@ -24,6 +24,7 @@ import {
   Trash2,
   Underline as UnderlineIcon
 } from "lucide-react";
+import styles from "./ComposeEditor.module.css";
 import { LexicalComposer } from "@lexical/react/LexicalComposer";
 import { RichTextPlugin } from "@lexical/react/LexicalRichTextPlugin";
 import { ContentEditable } from "@lexical/react/LexicalContentEditable";
@@ -78,17 +79,18 @@ import { $createImageNode, ImageNode } from "./lexical/ImageNode";
 type ComposeEditorProps = {
   initialHtml?: string;
   resetKey?: number | string;
+  className?: string;
   onChange: (html: string, text: string) => void;
   onInlineImage?: (file: File, dataUrl: string) => void;
 };
 
 const theme = {
-  paragraph: "compose-paragraph",
+  paragraph: styles.composeParagraph,
   text: {
-    bold: "compose-text-bold",
-    italic: "compose-text-italic",
-    underline: "compose-text-underline",
-    strikethrough: "compose-text-strike"
+    bold: styles.composeTextBold,
+    italic: styles.composeTextItalic,
+    underline: styles.composeTextUnderline,
+    strikethrough: styles.composeTextStrike
   }
 };
 
@@ -120,13 +122,19 @@ function ComposeToolbarIcon({
   base: React.ReactNode;
   badges?: Array<{ icon: React.ReactNode; position: ToolbarBadgePosition }>;
 }) {
+  const badgePositionClass: Record<ToolbarBadgePosition, string> = {
+    "top-right": styles.composeToolbarIconBadgeTopRight,
+    "bottom-right": styles.composeToolbarIconBadgeBottomRight,
+    "top-left": styles.composeToolbarIconBadgeTopLeft,
+    "bottom-left": styles.composeToolbarIconBadgeBottomLeft
+  };
   return (
-    <span className="compose-toolbar-icon" aria-hidden="true">
-      <span className="compose-toolbar-icon-base">{base}</span>
+    <span className={styles.composeToolbarIcon} aria-hidden="true">
+      <span className={styles.composeToolbarIconBase}>{base}</span>
       {badges?.map((badge, index) => (
         <span
           key={`${badge.position}-${index}`}
-          className={`compose-toolbar-icon-badge compose-toolbar-icon-badge--${badge.position}`}
+          className={`${styles.composeToolbarIconBadge} ${badgePositionClass[badge.position]}`}
         >
           {badge.icon}
         </span>
@@ -388,7 +396,7 @@ function ComposeToolbar({ toolbarRef }: { toolbarRef: React.Ref<HTMLDivElement> 
   ];
 
   return (
-    <div className="compose-toolbar" ref={toolbarRef}>
+    <div className={styles.composeToolbar} ref={toolbarRef}>
       {toolbarButtons.map((item) => (
         <Button
           key={item.title}
@@ -396,7 +404,7 @@ function ComposeToolbar({ toolbarRef }: { toolbarRef: React.Ref<HTMLDivElement> 
           size="1"
           variant="soft"
           color="gray"
-          className="compose-toolbar-button"
+          className={styles.composeToolbarButton}
           title={item.title}
           aria-label={item.title}
           onClick={item.onClick}
@@ -444,7 +452,7 @@ function ComposeEditable({
 
   return (
     <ContentEditable
-      className="compose-editor-input"
+      className={styles.composeEditorInput}
       onPaste={(event) => {
         const items = Array.from(event.clipboardData?.items ?? []);
         const imageItems = items.filter(
@@ -516,6 +524,7 @@ function ComposerInitializer({
 export default function ComposeEditor({
   initialHtml,
   resetKey,
+  className,
   onChange,
   onInlineImage
 }: ComposeEditorProps) {
@@ -569,7 +578,7 @@ export default function ComposeEditor({
 
   return (
     <div
-      className="compose-editor"
+      className={[styles.composeEditor, className].filter(Boolean).join(" ")}
       style={{ ["--compose-toolbar-height" as any]: `${toolbarHeight}px` }}
     >
       <LexicalComposer initialConfig={initialConfig}>
@@ -577,7 +586,7 @@ export default function ComposeEditor({
         <ComposerInitializer initialHtml={initialHtml} resetKey={resetKey} />
         <RichTextPlugin
           contentEditable={<ComposeEditable onInlineImage={onInlineImage} />}
-          placeholder={<div className="compose-editor-placeholder">Write your message…</div>}
+          placeholder={<div className={styles.composeEditorPlaceholder}>Write your message…</div>}
           ErrorBoundary={LexicalErrorBoundary}
         />
         <HistoryPlugin />

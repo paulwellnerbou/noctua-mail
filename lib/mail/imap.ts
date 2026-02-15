@@ -702,6 +702,12 @@ function buildLightweightImapMessage(params: {
   const cc = formatEnvelopeAddresses(envelope?.cc);
   const bcc = formatEnvelopeAddresses(envelope?.bcc);
   const headers = parseHeaderMap(rawHeaders);
+  const unsubParts: string[] = [];
+  const listUnsubVal = getHeaderValue(headers, "list-unsubscribe");
+  const listUnsubPostVal = getHeaderValue(headers, "list-unsubscribe-post");
+  if (listUnsubVal) unsubParts.push(`List-Unsubscribe: ${listUnsubVal}`);
+  if (listUnsubPostVal) unsubParts.push(`List-Unsubscribe-Post: ${listUnsubPostVal}`);
+  const listUnsubscribe = unsubParts.length > 0 ? unsubParts.join("\n") : null;
   const calendarEventUids = collectCalendarEventUidsFromAttachments(
     attachments as CalendarAttachmentCandidate[]
   );
@@ -757,6 +763,7 @@ function buildLightweightImapMessage(params: {
     category: classification.category,
     categoryScore: classification.categoryScore,
     categorySignals: classification.categorySignals,
+    listUnsubscribe,
     calendarEventUids
   } as Message;
 }
@@ -877,6 +884,13 @@ async function parseImapMessage(
     ]
   });
 
+  const unsubParts: string[] = [];
+  const listUnsubVal = headerValue("list-unsubscribe");
+  const listUnsubPostVal = headerValue("list-unsubscribe-post");
+  if (listUnsubVal) unsubParts.push(`List-Unsubscribe: ${listUnsubVal}`);
+  if (listUnsubPostVal) unsubParts.push(`List-Unsubscribe-Post: ${listUnsubPostVal}`);
+  const listUnsubscribe = unsubParts.length > 0 ? unsubParts.join("\n") : null;
+
   const classification = classifyImapMessageCategory({
     account,
     mailboxPath: mailboxToOpen,
@@ -929,6 +943,7 @@ async function parseImapMessage(
     category: classification.category,
     categoryScore: classification.categoryScore,
     categorySignals: classification.categorySignals,
+    listUnsubscribe,
     calendarEventUids
   } as Message;
 }
@@ -1056,6 +1071,12 @@ export async function planImapNewSyncFolders(
   const client = buildImapClient(account, logContext);
   const uniqueFolderIds = Array.from(new Set(folderIds.filter(Boolean)));
   if (uniqueFolderIds.length === 0) return [];
+
+  // Validate and fix UID mismatches for all folders before planning
+  for (const folderId of uniqueFolderIds) {
+    const mailboxPath = mailboxPathFromFolderId(account.id, folderId);
+    await validateAndFixMailboxHighestUid(account, folderId, mailboxPath);
+  }
 
   try {
     await logImapOp("connect", { host: account.imap.host, ...logContext }, () => client.connect());

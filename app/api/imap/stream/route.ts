@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { getAccounts, getFolders, getMailboxState, saveMailboxState } from "@/lib/db";
+import { getAccounts, getFolders, getLatestMessageUid, getMailboxState, saveMailboxState } from "@/lib/db";
 import { logImapOp } from "@/lib/mail/imapLogger";
 import { bindImapClientError, buildImapFlowOptions } from "@/lib/mail/imapClientOptions";
 import { registerStream } from "@/lib/mail/imapStreamRegistry";
@@ -203,6 +203,8 @@ export async function GET(request: Request) {
           async () => await client.mailboxOpen(mailbox, mailboxOptions)
         );
         const lastUidNext = mailboxInfo?.uidNext ?? 0;
+        // Don't update highestUid based on server's uidNext - keep existing value
+        // highestUid should only be updated after successfully storing messages
         await saveMailboxState({
           accountId,
           folderId: folder.id,
@@ -211,7 +213,7 @@ export async function GET(request: Request) {
           highestModSeq: (mailboxInfo as any)?.highestModseq
             ? (mailboxInfo as any).highestModseq.toString()
             : storedState?.highestModSeq ?? null,
-          highestUid: lastUidNext ? lastUidNext - 1 : storedState?.highestUid ?? null,
+          highestUid: storedState?.highestUid ?? null,
           supportsQresync
         });
         sessions.set(folder.id, {
@@ -275,6 +277,10 @@ export async function GET(request: Request) {
           }
           const activeWatcher = sessions.get(folder.id);
           if (activeWatcher) activeWatcher.lastUidNext = uidNext;
+          // Only update highestUid if messages were detected
+          // The actual sync job will update it based on stored messages
+          // Don't blindly trust server's uidNext to prevent gaps
+          const currentHighestUid = await getLatestMessageUid(accountId, mailbox);
           await saveMailboxState({
             accountId,
             folderId: folder.id,
@@ -285,7 +291,7 @@ export async function GET(request: Request) {
             highestModSeq: (status as any)?.highestModseq
               ? (status as any).highestModseq.toString()
               : null,
-            highestUid: uidNext ? uidNext - 1 : null,
+            highestUid: currentHighestUid ?? (storedState?.highestUid ?? null),
             supportsQresync
           });
         };

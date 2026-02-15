@@ -82,3 +82,30 @@ export function hasNonInlineAttachments(message: Message) {
 export function shouldShowAttachmentIcon(message: Message) {
   return hasNonInlineAttachments(message);
 }
+
+export type UnsubscribeCapability = "one-click" | "browser" | "mailto" | null;
+
+export function getUnsubscribeCapability(message: Message): UnsubscribeCapability {
+  if (!message.listUnsubscribe) return null;
+
+  // Parse HTTP header format string
+  const lines = message.listUnsubscribe.split("\n");
+  let unsubscribeValue = "";
+  let hasPostHeader = false;
+
+  for (const line of lines) {
+    if (line.startsWith("List-Unsubscribe:")) {
+      unsubscribeValue = line.substring("List-Unsubscribe:".length).trim();
+    } else if (line.startsWith("List-Unsubscribe-Post:")) {
+      hasPostHeader = line.toLowerCase().includes("one-click");
+    }
+  }
+
+  const hasHttpsUrl = /<https?:\/\/[^>]+>/.test(unsubscribeValue);
+  const hasMailto = /<mailto:[^>]+>/.test(unsubscribeValue);
+
+  if (hasPostHeader && hasHttpsUrl) return "one-click";
+  if (hasHttpsUrl) return "browser";
+  if (hasMailto) return "mailto";
+  return null;
+}

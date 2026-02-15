@@ -13,6 +13,7 @@ import {
   Mail,
   MailCheck,
   MailOpen,
+  MailX,
   MoreVertical,
   SquareArrowOutUpRight,
   Search,
@@ -28,7 +29,7 @@ import {
 } from "lucide-react";
 import { DropdownMenu, IconButton } from "@radix-ui/themes";
 import type { Message } from "@/lib/data";
-import { hasTodoFlag, hasDoneFlag } from "../utils/messageHelpers";
+import { hasTodoFlag, hasDoneFlag, getUnsubscribeCapability } from "../utils/messageHelpers";
 import styles from "./MessageMenu.module.css";
 
 type ComposeMode = "new" | "reply" | "replyAll" | "forward" | "edit" | "editAsNew";
@@ -46,6 +47,7 @@ type MessageMenuAction =
   | "archive"
   | "category"
   | "delete"
+  | "unsubscribe"
   | "showRelated"
   | "openWindow"
   | "openHtmlWindow"
@@ -74,6 +76,7 @@ type MessageMenuProps = {
     category: "newsletter" | "notification" | "transactional" | null
   ) => void;
   handleDeleteMessage: (message: Message, options?: { allowThreadDeletion?: boolean }) => void;
+  handleUnsubscribe: (message: Message) => void;
   handleDownloadEml: (message: Message) => void;
   handleResyncMessage: (message: Message) => void;
   handleOpenInNewWindow: (message: Message) => void;
@@ -99,6 +102,7 @@ export default function MessageMenu({
   handleArchiveMessage,
   handleSetCategory,
   handleDeleteMessage,
+  handleUnsubscribe,
   handleDownloadEml,
   handleResyncMessage,
   handleOpenInNewWindow,
@@ -305,6 +309,15 @@ export default function MessageMenu({
                       </DropdownMenu.Item>
                     </DropdownMenu.SubContent>
                   </DropdownMenu.Sub>
+                )
+              : null,
+            isVisible("unsubscribe") && getUnsubscribeCapability(message)
+              ? buildItem(
+                  "unsubscribe",
+                  "Unsubscribe",
+                  <MailX size={14} />,
+                  () => handleUnsubscribe(message),
+                  isDisabled("unsubscribe")
                 )
               : null,
             showDeleteInMenu && isVisible("delete")

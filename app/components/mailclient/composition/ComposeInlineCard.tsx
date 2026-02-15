@@ -5,6 +5,7 @@ import { badgeColors } from "@/lib/ui/badgeColors";
 import ComposeFields from "./ComposeFields";
 import threadStyles from "../message/ThreadMessageCard.module.css";
 import styles from "./ComposeInlineCard.module.css";
+import composeStyles from "./Compose.module.css";
 
 type ComposeMode = "new" | "reply" | "replyAll" | "forward" | "edit" | "editAsNew";
 
@@ -128,9 +129,10 @@ export default function ComposeInlineCard({
       variant="surface"
       className={`${threadStyles.card} ${styles.card} ${
         discardingDraft ? styles.disabled : ""
-      }${composeDragActive ? " compose-drop-active" : ""}`}
+      } ${composeDragActive ? composeStyles.composeDropActive : ""}`}
     >
       <article
+        className={styles.article}
         onDragEnter={handleComposeDragEnter}
         onDragLeave={handleComposeDragLeave}
         onDragOver={handleComposeDragOver}
@@ -139,98 +141,102 @@ export default function ComposeInlineCard({
         <div className={threadStyles.header}>
           <div className={threadStyles.topRow}>
             <div className={threadStyles.badges}>
-            <Badge size="1" variant="soft" color={badgeColors.compose}>
-              {composeModeLabel}
-            </Badge>
+              <Badge size="1" variant="soft" color={badgeColors.compose}>
+                {composeModeLabel}
+              </Badge>
             </div>
             <div className={threadStyles.actions}>
-            <IconButton
-              variant="ghost"
-              size="2"
-              title="Open in modal"
-              aria-label="Open in modal"
-              onClick={popOutCompose}
-            >
-              <ArrowUpRight size={14} />
-            </IconButton>
+              <IconButton
+                variant="ghost"
+                size="2"
+                title="Open in modal"
+                aria-label="Open in modal"
+                onClick={popOutCompose}
+              >
+                <ArrowUpRight size={14} />
+              </IconButton>
             </div>
           </div>
           <div className={`${threadStyles.info} ${styles.info}`}>
-          <ComposeFields
-            key={`inline-fields-${composeFieldsReset}`}
-            variant="inline"
-            composeSubject={composeSubject}
-            composeTo={composeTo}
-            composeCc={composeCc}
-            composeBcc={composeBcc}
-            composeShowBcc={composeShowBcc}
-            activeAccountId={activeAccountId}
-            fromValue={fromValue}
-            setComposeSubject={setComposeSubject}
-            setComposeTo={setComposeTo}
-            setComposeCc={setComposeCc}
-            setComposeBcc={setComposeBcc}
-            setComposeShowBcc={setComposeShowBcc}
-            applyRecipientSelection={applyRecipientSelection}
-            loadRecipientOptions={loadRecipientOptions}
-            getComposeToken={getComposeToken}
-            markComposeDirty={markComposeDirty}
-          />
+            <ComposeFields
+              key={`inline-fields-${composeFieldsReset}`}
+              variant="inline"
+              composeSubject={composeSubject}
+              composeTo={composeTo}
+              composeCc={composeCc}
+              composeBcc={composeBcc}
+              composeShowBcc={composeShowBcc}
+              activeAccountId={activeAccountId}
+              fromValue={fromValue}
+              setComposeSubject={setComposeSubject}
+              setComposeTo={setComposeTo}
+              setComposeCc={setComposeCc}
+              setComposeBcc={setComposeBcc}
+              setComposeShowBcc={setComposeShowBcc}
+              applyRecipientSelection={applyRecipientSelection}
+              loadRecipientOptions={loadRecipientOptions}
+              getComposeToken={getComposeToken}
+              markComposeDirty={markComposeDirty}
+            />
           </div>
         </div>
-        <div className={`compose-body ${styles.body}`}>{ui.composeMessageField}</div>
-      <div className="compose-footer">
-        <div className="compose-draft-meta">
-          {composeDraftId && (
-            <Text size="1" color="gray" className="compose-draft">
-              Draft: {composeDraftId}
-            </Text>
-          )}
-          {composeOpen && (
-            <Text
-              size="1"
-              className={`compose-draft-status ${
-                draftSaveError ? "error" : draftSaving ? "saving" : ""
-              }`}
-            >
-              {draftSaving
-                ? "Saving draft…"
-                : draftSaveError
-                  ? "Draft save failed"
-                  : draftSavedAt
-                    ? `Draft saved ${formatRelativeTime(draftSavedAt)}`
-                    : "Draft not saved yet"}
-            </Text>
-          )}
-        </div>
-        <div className="compose-actions">
-          {composeDraftId && (
+        <div className={`${composeStyles.composeBody} ${styles.body}`}>{ui.composeMessageField}</div>
+        <div className={composeStyles.composeFooter}>
+          <div className={composeStyles.composeDraftMeta}>
+            {composeDraftId && (
+              <Text size="1" color="gray" className={composeStyles.composeDraft}>
+                Draft: {composeDraftId}
+              </Text>
+            )}
+            {composeOpen && (
+              <Text
+                size="1"
+                className={`${composeStyles.composeDraftStatus} ${
+                  draftSaveError
+                    ? composeStyles.composeDraftStatusError
+                    : draftSaving
+                      ? composeStyles.composeDraftStatusSaving
+                      : ""
+                }`}
+              >
+                {draftSaving
+                  ? "Saving draft…"
+                  : draftSaveError
+                    ? "Draft save failed"
+                    : draftSavedAt
+                      ? `Draft saved ${formatRelativeTime(draftSavedAt)}`
+                      : "Draft not saved yet"}
+              </Text>
+            )}
+          </div>
+          <div className={composeStyles.composeActions}>
+            {composeDraftId && (
+              <Button
+                size="2"
+                variant="soft"
+                color="red"
+                onClick={handleDiscardDraft}
+                disabled={discardingDraft || draftSaving}
+              >
+                Discard Draft
+              </Button>
+            )}
             <Button
               size="2"
               variant="soft"
-              color="red"
-              onClick={handleDiscardDraft}
-              disabled={discardingDraft || draftSaving}
+              color="gray"
+              onClick={() => {
+                setComposeOpen(false);
+                setComposeView("inline");
+              }}
             >
-              Discard Draft
+              {composeMode === "edit" ? "Cancel editing" : "Cancel"}
             </Button>
-          )}
-          <Button
-            size="2"
-            variant="soft"
-            color="gray"
-            onClick={() => {
-              setComposeOpen(false);
-              setComposeView("inline");
-            }}
-          >
-            {composeMode === "edit" ? "Cancel editing" : "Cancel"}
-          </Button>
-          <Button size="2" onClick={handleSendMail} disabled={sendingMail}>
-            {sendingMail ? "Sending..." : "Send"}
-          </Button>
+            <Button size="2" onClick={handleSendMail} disabled={sendingMail}>
+              {sendingMail ? "Sending..." : "Send"}
+            </Button>
+          </div>
         </div>
-      </div>
       </article>
     </Card>
   );

@@ -58,7 +58,7 @@ export default function ThreadView({
               ? [activeMessageFromThread]
               : activeThread;
           return visibleThread.map((message) => (
-            <React.Fragment key={message.id}>
+            <div key={message.id} className={styles.threadItem}>
               <ThreadMessageCard
                 message={message}
                 bodyLoading={activeMessageBodyLoading && message.id === activeMessageFromThread.id}
@@ -70,7 +70,7 @@ export default function ThreadView({
                 {...messageCardProps}
               />
               {composeReplyMessageId === message.id && renderComposeInlineCard?.()}
-            </React.Fragment>
+            </div>
           ));
         })()
       ) : showComposeInline ? null : (

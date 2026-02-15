@@ -1,6 +1,7 @@
 import { startTransition, useEffect, useState } from "react";
 import type React from "react";
 import { Button, Text, TextField } from "@radix-ui/themes";
+import styles from "./Compose.module.css";
 
 type RecipientFocus = "to" | "cc" | "bcc" | null;
 
@@ -78,12 +79,12 @@ function RecipientField({
   const [showSuggestions, setShowSuggestions] = useState(false);
 
   return (
-    <div className="compose-grid-row">
-      <Text size="2" weight="medium" className="label">
+    <div className={styles.composeGridRow}>
+      <Text size="2" weight="medium" className={styles.label}>
         {label}
       </Text>
-      <div className="compose-row">
-        <div className="compose-input-wrap">
+      <div className={styles.composeRow}>
+        <div className={styles.composeInputWrap}>
           <TextField.Root
             id={`compose-${variant}-${focusKey}`}
             name={`compose_${focusKey}`}
@@ -133,12 +134,14 @@ function RecipientField({
             placeholder={placeholder}
           />
           {recipientFocus === focusKey && showSuggestions && recipientOptions.length > 0 && (
-            <div className="compose-suggestions">
+            <div className={styles.composeSuggestions}>
               {recipientOptions.map((option, index) => (
                 <button
                   key={`${option}-${index}`}
                   type="button"
-                  className={`compose-suggestion ${index === recipientActiveIndex ? "active" : ""}`}
+                  className={`${styles.composeSuggestion} ${
+                    index === recipientActiveIndex ? styles.composeSuggestionActive : ""
+                  }`}
                   onMouseDown={(event) => {
                     event.preventDefault();
                     setShowSuggestions(false);
@@ -148,7 +151,11 @@ function RecipientField({
                   {option}
                 </button>
               ))}
-              {recipientLoading && <span className="compose-suggestion muted">Loading…</span>}
+              {recipientLoading && (
+                <span className={`${styles.composeSuggestion} ${styles.composeSuggestionMuted}`}>
+                  Loading…
+                </span>
+              )}
             </div>
           )}
         </div>
@@ -293,8 +300,8 @@ export default function ComposeFields({
     : "Show Cc and Bcc";
   const showFrom = variant === "inline";
   const subjectRow = (
-    <div className="compose-grid-row">
-      <Text size="2" weight="medium" className="label">
+    <div className={styles.composeGridRow}>
+      <Text size="2" weight="medium" className={styles.label}>
         Subject:
       </Text>
       <TextField.Root
@@ -310,8 +317,8 @@ export default function ComposeFields({
     </div>
   );
   const fromRow = (
-    <div className="compose-grid-row">
-      <Text size="2" weight="medium" className="label">
+    <div className={styles.composeGridRow}>
+      <Text size="2" weight="medium" className={styles.label}>
         From:
       </Text>
       <TextField.Root
@@ -325,7 +332,7 @@ export default function ComposeFields({
   );
 
   return (
-    <div className="compose-grid">
+    <div className={styles.composeGrid}>
       {showFrom && fromRow}
       <RecipientField
         variant={variant}

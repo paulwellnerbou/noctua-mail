@@ -1,0 +1,148 @@
+.composeEditor {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  border: 1px solid var(--gray-a6);
+  border-radius: var(--radius-sm);
+  background: var(--input-bg);
+  padding: 10px 12px;
+  overflow: hidden;
+}
+
+.composeEditor:focus-within {
+  border-color: var(--accent-9);
+  outline: 2px solid var(--accent-8);
+  outline-offset: -1px;
+}
+
+.composeToolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: -10px -12px 8px;
+  padding: 6px 10px;
+  background: var(--gray-2);
+  border-bottom: 1px solid var(--gray-a6);
+}
+
+.composeToolbarButton {
+  padding: 4px 6px;
+  font-size: 11px;
+  line-height: 1;
+}
+
+.composeToolbarIcon {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+}
+
+.composeToolbarIconBase {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.composeToolbarIconBadge {
+  position: absolute;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  background: var(--gray-1);
+  box-shadow: 0 0 0 1px var(--gray-a7);
+}
+
+.composeToolbarIconBadgeTopRight {
+  top: -4px;
+  right: -4px;
+}
+
+.composeToolbarIconBadgeBottomRight {
+  bottom: -4px;
+  right: -4px;
+}
+
+.composeToolbarIconBadgeTopLeft {
+  top: -4px;
+  left: -4px;
+}
+
+.composeToolbarIconBadgeBottomLeft {
+  bottom: -4px;
+  left: -4px;
+}
+
+.composeEditorInput {
+  flex: 1;
+  min-height: 0;
+  outline: none;
+  font-family: "Sora", system-ui, -apple-system, sans-serif;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--input-fg);
+}
+
+.composeEditorInput :global(img) {
+  max-width: 100%;
+  height: auto;
+}
+
+.composeEditorInput :global(table) {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 8px 0;
+}
+
+.composeEditorInput :global(blockquote),
+.composeEditorInput :global(.compose-quote) {
+  border-left: 2px solid var(--gray-a7);
+  margin: 0 0 0 0.8ex;
+  padding-left: 1ex;
+}
+
+.composeEditorInput :global(td),
+.composeEditorInput :global(th) {
+  border: 1px solid var(--gray-a6);
+  padding: 6px 8px;
+}
+
+.composeEditorPlaceholder {
+  color: var(--gray-9);
+  overflow: hidden;
+  position: absolute;
+  text-overflow: ellipsis;
+  top: calc(var(--compose-toolbar-height) + 10px);
+  left: 12px;
+  font-size: 14px;
+  user-select: none;
+  display: inline-block;
+  pointer-events: none;
+}
+
+.composeParagraph {
+  margin: 0 0 10px 0;
+}
+
+.composeTextBold {
+  font-weight: 600;
+}
+
+.composeTextItalic {
+  font-style: italic;
+}
+
+.composeTextUnderline {
+  text-decoration: underline;
+}
+
+.composeTextStrike {
+  text-decoration: line-through;
+}

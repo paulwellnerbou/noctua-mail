@@ -1,5 +1,6 @@
 import type React from "react";
 import { Maximize2, X } from "lucide-react";
+import styles from "./Compose.module.css";
 
 type ComposeMinimizedProps = {
   open: boolean;
@@ -18,7 +19,7 @@ export default function ComposeMinimized({
 
   return (
     <div
-      className="compose-minimized"
+      className={styles.composeMinimized}
       role="button"
       tabIndex={0}
       onClick={() => setComposeView("modal")}
@@ -29,10 +30,10 @@ export default function ComposeMinimized({
         }
       }}
     >
-      <span className="compose-minimized-title">
+      <span className={styles.composeMinimizedTitle}>
         {composeSubject.trim() || "New message"}
       </span>
-      <div className="compose-minimized-actions">
+      <div className={styles.composeMinimizedActions}>
         <button
           className="icon-button small"
           title="Restore"

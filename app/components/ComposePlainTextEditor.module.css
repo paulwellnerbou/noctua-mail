@@ -1,0 +1,21 @@
+.textarea {
+  resize: vertical;
+  min-height: 0;
+  flex: 1;
+  padding: 10px 12px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
+    monospace;
+  font-size: 14px;
+  line-height: 1.5;
+  background: var(--input-bg);
+  color: var(--input-fg);
+  border: 1px solid var(--gray-a6);
+  border-radius: var(--radius-md);
+  width: 100%;
+  min-height: 440px;
+}
+
+.textarea:focus {
+  outline: none;
+  border-color: var(--accent-9);
+}

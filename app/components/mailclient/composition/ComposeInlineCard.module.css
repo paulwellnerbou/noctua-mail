@@ -1,5 +1,12 @@
 .card {
   width: 100%;
+  display: flex !important;
+  flex-direction: column;
+  flex: 1;
+  background-color: var(--color-panel-solid);
+  border: 1px solid var(--gray-5);
+  border-radius: var(--radius-3);
+  overflow: hidden; /* Ensure children don't overflow the rounded corners */
 }
 
 .disabled {
@@ -13,4 +20,15 @@
 
 .body {
   margin-top: var(--space-2);
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.article {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
 }
