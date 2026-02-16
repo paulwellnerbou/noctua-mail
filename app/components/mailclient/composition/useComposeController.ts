@@ -11,7 +11,6 @@ import {
   extractQuotedHtmlFromDraft,
   stripStyleTags
 } from "@/lib/html";
-import { markdownToHtml } from "@/lib/markdownConvert";
 import { hasHtmlContent } from "@/lib/ui/messageView";
 import { extractEmails } from "../utils/clientHelpers";
 import type { ComposeMode } from "./composeTypes";
@@ -204,25 +203,23 @@ export function useComposeController({
 
     if (useMarkdown) {
       const currentMd = compose.composeMarkdown.trim();
-      const generatedHtml = markdownToHtml(currentMd);
-      const quoted = compose.composeIncludeOriginal && !compose.composeQuotedHtmlEdited ? compose.composeQuotedHtml.trim() : "";
-      let html: string | undefined = generatedHtml || quoted ? `${generatedHtml}${quoted}` : undefined;
+      const quoted = compose.composeIncludeOriginal && !compose.composeQuotedHtmlEdited
+        ? compose.composeQuotedHtml.trim()
+        : "";
+      let html: string | undefined = quoted || undefined;
       // Strip any embedded HTML from markdown for the text/plain part, keeping markdown syntax intact
       const textBody = currentMd.replace(/<[^>]+>/g, "").trim();
-      const inlineAttachments = compose.composeAttachments.filter(
-        (attachment) => attachment.inline && attachment.dataUrl && attachment.cid
-      );
-      if (html && inlineAttachments.length > 0) {
-        inlineAttachments.forEach((attachment) => {
-          if (!attachment.dataUrl || !attachment.cid) return;
-          html = html?.split(attachment.dataUrl).join(`cid:${attachment.cid}`);
-        });
-      }
       if (html) {
         html = normalizeOutboundTableMarkup(html);
       }
 
-      return { text: textBody, html, attachments: compose.composeAttachments, composeFormat: "markdown" };
+      return {
+        text: textBody,
+        html,
+        markdown: currentMd,
+        attachments: compose.composeAttachments,
+        composeFormat: "markdown"
+      };
     }
 
     let html: string | undefined;
@@ -258,7 +255,13 @@ export function useComposeController({
           textFromHtml = normalizeHtmlDerivedText(stripHtml(htmlWithoutStyles));
         }
       }
-      return { text: textFromHtml, html, attachments: compose.composeAttachments, composeFormat: "html" };
+      return {
+        text: textFromHtml,
+        html,
+        markdown: undefined,
+        attachments: compose.composeAttachments,
+        composeFormat: "html"
+      };
     }
 
     const currentBody = compose.composeTextRef.current?.value || compose.composeBody;
@@ -270,7 +273,13 @@ export function useComposeController({
       }
       textBody = `${textBody}${textBody ? "\n\n" : ""}${compose.composeQuotedText}`.trim();
     }
-    return { text: textBody, html: undefined, attachments: compose.composeAttachments, composeFormat: "text" };
+    return {
+      text: textBody,
+      html: undefined,
+      markdown: undefined,
+      attachments: compose.composeAttachments,
+      composeFormat: "text"
+    };
   };
 
   const openCompose = (mode: ComposeMode, message?: Message, asNew = false) => {

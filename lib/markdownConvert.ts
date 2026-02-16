@@ -8,8 +8,8 @@ marked.setOptions({
 });
 
 /**
- * Convert markdown source to HTML suitable for email sending.
- * Uses marked library with GFM (GitHub Flavored Markdown) and breaks enabled.
+ * Convert markdown source to plain HTML using marked.
+ * Useful for lightweight conversions without preview styling.
  */
 export function markdownToHtml(markdown: string): string {
   if (!markdown.trim()) return "";

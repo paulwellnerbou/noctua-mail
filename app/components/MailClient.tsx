@@ -2089,8 +2089,9 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
   const handleSaveDraft = () => {
     if (!composeOpen || !activeAccountId) return;
     const preferText = composeTab === "html" && composeLastEditedRef.current === "text";
-    const { text, html, attachments, composeFormat } = buildComposePayload({ preferText });
+    const { text, markdown, html, attachments, composeFormat } = buildComposePayload({ preferText });
     const normalizedHtml = html ?? "";
+    const normalizedMarkdown = markdown ?? "";
     const attachmentsHash = attachments
       .map((att) => `${att.filename}:${att.size}:${att.inline ? "1" : "0"}:${att.cid ?? ""}`)
       .join("|");
@@ -2100,6 +2101,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
       bcc: composeBcc,
       subject: composeSubject,
       text,
+      markdown: normalizedMarkdown,
       html: normalizedHtml,
       attachments: attachmentsHash
     });
@@ -2109,6 +2111,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
       bcc: composeBcc,
       subject: composeSubject,
       text,
+      markdown,
       html: normalizedHtml,
       composeFormat,
       quotedHtmlEdited: composeQuotedHtmlEdited,
@@ -2179,7 +2182,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     }
     setSendingMail(true);
     try {
-      const { text, html, attachments } = buildComposePayload();
+      const { text, markdown, html, attachments, composeFormat } = buildComposePayload();
       const replyHeaders = composeReplyHeaders ?? {
         inReplyTo: composeReplyMessage?.messageId ?? undefined,
         references:
@@ -2216,7 +2219,9 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
           bcc: composeBcc,
           subject: composeSubject,
           text,
+          markdown,
           html,
+          composeFormat,
           attachments,
           inReplyTo: shouldThreadCompose ? replyHeaders.inReplyTo : undefined,
           references: shouldThreadCompose ? replyHeaders.references : undefined,
@@ -4496,17 +4501,19 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
   useEffect(() => {
     if (!composeOpen || sendingMail) return;
     const preferText = composeTab === "html" && composeLastEditedRef.current === "text";
-    const { text, html, attachments, composeFormat } = buildComposePayload({ preferText });
+    const { text, markdown, html, attachments, composeFormat } = buildComposePayload({ preferText });
     const hasContent = [
       composeTo,
       composeCc,
       composeBcc,
       composeSubject,
+      markdown ?? "",
       text,
       html ?? ""
     ].some((value) => (value ?? "").toString().trim().length > 0);
     if (!hasContent) return;
     const normalizedHtml = html ?? "";
+    const normalizedMarkdown = markdown ?? "";
     const attachmentsHash = attachments
       .map((att) => `${att.filename}:${att.size}:${att.inline ? "1" : "0"}:${att.cid ?? ""}`)
       .join("|");
@@ -4516,6 +4523,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
       bcc: composeBcc,
       subject: composeSubject,
       text,
+      markdown: normalizedMarkdown,
       html: normalizedHtml,
       attachments: attachmentsHash
     });
@@ -4548,6 +4556,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
           bcc: composeBcc,
           subject: composeSubject,
           text,
+          markdown,
           html,
           composeFormat,
           quotedHtmlEdited: composeQuotedHtmlEdited,

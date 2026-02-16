@@ -54,6 +54,7 @@ export type DraftSavePayload = {
   bcc?: string;
   subject: string;
   text: string;
+  markdown?: string;
   html?: string;
   composeFormat?: string;
   quotedHtmlEdited?: boolean;

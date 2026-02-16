@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { randomUUID } from "crypto";
 import { getAccounts, getFolders } from "@/lib/db";
 import { appendImapMessage } from "@/lib/mail/imap";
+import { parseComposeAttachments, resolveComposeHtml } from "@/lib/mail/composePayload";
 import { sendSmtpMessage } from "@/lib/mail/smtp";
 import type { Folder } from "@/lib/data";
 import { requireSessionAccountOr403, requireSessionOr401 } from "@/lib/auth";
@@ -62,7 +63,9 @@ export async function POST(request: Request) {
     bcc?: string;
     subject: string;
     text: string;
+    markdown?: string;
     html?: string;
+    composeFormat?: string;
     inReplyTo?: string;
     references?: string[];
     replyTo?: string;
@@ -97,33 +100,13 @@ export async function POST(request: Request) {
   }
   const outboundTo = !to && !cc && bcc ? "undisclosed-recipients:;" : to;
 
-  const parseDataUrl = (dataUrl: string) => {
-    const match = dataUrl.match(/^data:([^;]+);base64,(.+)$/);
-    if (!match) return null;
-    const buffer = Buffer.from(match[2], "base64");
-    return { contentType: match[1], buffer };
-  };
-  const attachments =
-    payload.attachments
-      ?.map((attachment) => {
-        if (!attachment.dataUrl) return null;
-        const parsed = parseDataUrl(attachment.dataUrl);
-        if (!parsed) return null;
-        return {
-          filename: attachment.filename,
-          contentType: attachment.contentType || parsed.contentType,
-          content: parsed.buffer as Buffer<ArrayBufferLike>,
-          inline: Boolean(attachment.inline),
-          cid: attachment.cid
-        };
-      })
-      .filter(Boolean) as {
-        filename: string;
-        contentType: string;
-        content: Buffer<ArrayBufferLike>;
-        inline?: boolean;
-        cid?: string;
-      }[] ?? [];
+  const attachments = parseComposeAttachments(payload.attachments);
+  const html = await resolveComposeHtml({
+    composeFormat: payload.composeFormat,
+    markdown: payload.markdown,
+    html: payload.html,
+    attachments: payload.attachments
+  });
 
   const messageId = buildMessageId(account.email);
   const result = await sendSmtpMessage(account, {
@@ -133,7 +116,7 @@ export async function POST(request: Request) {
     keepBcc: true,
     subject: payload.subject,
     text: payload.text,
-    html: payload.html,
+    html,
     messageId,
     inReplyTo: payload.inReplyTo,
     references: payload.references,
