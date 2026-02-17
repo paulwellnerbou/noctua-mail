@@ -118,6 +118,7 @@ function resolveEventReminderOccurrence(
   if (!event.start) return null;
   return resolveNextReminderOccurrence({
     eventStartAtMs: event.start.getTime(),
+    eventEndAtMs: event.end?.getTime(),
     leadMinutes,
     startTimezone: event.startTimezone,
     recurrenceRule: event.recurrenceRule,

@@ -430,6 +430,7 @@ function buildLocalReminder(accountId: string, input: CreateCalendarReminderInpu
   const startTimezone = normalizeReminderTimezone(input.startTimezone);
   const nextOccurrence = resolveNextReminderOccurrence({
     eventStartAtMs,
+    eventEndAtMs,
     leadMinutes,
     recurrenceRule,
     recurrenceDates,

@@ -1371,6 +1371,7 @@ function mapCalendarReminderRow(
   const nextOccurrence = resolveNextReminderOccurrence(
     {
       eventStartAtMs,
+      eventEndAtMs,
       leadMinutes,
       recurrenceRule: recurrenceRule ?? undefined,
       recurrenceDates,

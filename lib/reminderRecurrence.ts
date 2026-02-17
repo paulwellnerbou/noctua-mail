@@ -8,6 +8,7 @@ export const REMINDER_DUE_LOOKBACK_MS = 7 * 24 * 60 * 60 * 1000;
 
 type ReminderRuleLike = {
   eventStartAtMs: number;
+  eventEndAtMs?: number;
   leadMinutes: number;
   recurrenceRule?: string;
   recurrenceDates?: number[];
@@ -44,6 +45,7 @@ export function normalizeReminderDateList(values?: number[]) {
 
 type RecurrenceQuery = {
   after: (date: Date, inc?: boolean) => Date | null;
+  before: (date: Date, inc?: boolean) => Date | null;
 };
 
 function buildRecurrenceQuery(reminder: ReminderRuleLike): RecurrenceQuery | null {
@@ -89,6 +91,11 @@ export function resolveNextReminderOccurrence(
   nowMs = Date.now()
 ): { eventStartAtMs: number; triggerAtMs: number } | null {
   const eventStartAtMs = Number(reminder.eventStartAtMs);
+  const eventEndAtMsRaw = Number(reminder.eventEndAtMs);
+  const durationMs =
+    Number.isFinite(eventEndAtMsRaw) && eventEndAtMsRaw > eventStartAtMs
+      ? eventEndAtMsRaw - eventStartAtMs
+      : Number.NaN;
   const leadMinutes = Math.max(0, Number(reminder.leadMinutes));
   if (!Number.isFinite(eventStartAtMs) || eventStartAtMs <= 0 || !Number.isFinite(leadMinutes)) {
     return null;
@@ -104,6 +111,23 @@ export function resolveNextReminderOccurrence(
       return null;
     }
     return { eventStartAtMs, triggerAtMs };
+  }
+
+  if (Number.isFinite(durationMs) && durationMs > 0) {
+    const currentOccurrenceStart = recurrence.before(new Date(nowMs), true);
+    if (currentOccurrenceStart) {
+      const currentOccurrenceStartAtMs = currentOccurrenceStart.getTime();
+      if (
+        Number.isFinite(currentOccurrenceStartAtMs) &&
+        currentOccurrenceStartAtMs > 0 &&
+        nowMs < currentOccurrenceStartAtMs + durationMs
+      ) {
+        return {
+          eventStartAtMs: currentOccurrenceStartAtMs,
+          triggerAtMs: currentOccurrenceStartAtMs - leadMs
+        };
+      }
+    }
   }
 
   const nextUpcoming = recurrence.after(new Date(nowMs + leadMs), true);
