@@ -16,6 +16,7 @@ import {
   Text
 } from "@radix-ui/themes";
 import { buildCalendarRecurrenceSummary, formatCalendarEventDate } from "@/lib/calendar";
+import { formatCalendarTimeZoneShortLabel } from "@/lib/calendarTimezones";
 import {
   autoCreateCalendarReminders,
   CALENDAR_REMINDER_LEAD_OPTIONS,
@@ -44,6 +45,11 @@ type ReminderStatusPopoverProps = {
 function formatEventStartTime(eventStartAtMs: number, timeZone?: string) {
   if (!Number.isFinite(eventStartAtMs)) return "";
   return formatCalendarEventDate(new Date(eventStartAtMs), { timeZone });
+}
+
+function formatReminderTimeZoneLabel(eventStartAtMs: number, timeZone?: string) {
+  if (!Number.isFinite(eventStartAtMs)) return "";
+  return formatCalendarTimeZoneShortLabel(timeZone, new Date(eventStartAtMs));
 }
 
 function buildReminderRecurrenceSummary(reminder: CalendarReminder) {
@@ -318,6 +324,10 @@ export default function ReminderStatusPopover({
                     {group.items.map((reminder) => {
                       const isDeletingReminder = deletingReminderIds.has(reminder.id);
                       const startAtMs = getCalendarReminderStartAtMs(reminder);
+                      const timeZoneLabel = formatReminderTimeZoneLabel(
+                        startAtMs,
+                        reminder.startTimezone
+                      );
                       const recurrenceSummary = buildReminderRecurrenceSummary(reminder);
                       return (
                         <Card
@@ -359,6 +369,11 @@ export default function ReminderStatusPopover({
                                     <Text size="1" weight="bold" color="gray" highContrast>
                                         {formatEventStartTime(startAtMs, reminder.startTimezone)}
                                     </Text>
+                                    {timeZoneLabel ? (
+                                      <Text size="1" color="gray" className="reminder-timezone-label">
+                                        {timeZoneLabel}
+                                      </Text>
+                                    ) : null}
                                     <Text size="1" color="gray">
                                         (Reminder: {reminder.leadLabel} before)
                                     </Text>

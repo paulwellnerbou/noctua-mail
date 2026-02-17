@@ -1,4 +1,9 @@
 import { RRule } from "rrule";
+import {
+  isValidCalendarTimeZone,
+  resolveCalendarTimeZoneId,
+  toCalendarTimeZoneWallDate
+} from "./calendarTimezones";
 
 export type CalendarEventPreview = {
   uid?: string;
@@ -34,16 +39,6 @@ type CalendarEventDateFormatInput = {
   allDay?: boolean;
   timeZone?: string;
 };
-
-const WINDOWS_TIMEZONE_MAP: Record<string, string> = {
-  "W. EUROPE STANDARD TIME": "Europe/Berlin",
-  "CENTRAL EUROPE STANDARD TIME": "Europe/Budapest",
-  "ROMANCE STANDARD TIME": "Europe/Paris",
-  "GMT STANDARD TIME": "Europe/London",
-  "UTC": "UTC"
-};
-
-const timezoneValidityCache = new Map<string, boolean>();
 
 function unfoldLines(input: string) {
   const lines = input.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
@@ -119,33 +114,6 @@ export function formatCalendarEventDate(
   }
 }
 
-function resolveTimeZoneId(tzid?: string) {
-  const raw = tzid?.trim();
-  if (!raw) return undefined;
-  const unquoted = raw.replace(/^"|"$/g, "");
-  const compact = unquoted.replace(/^\/+/, "");
-  const slashIndex = compact.lastIndexOf("/");
-  const candidate = slashIndex > 0 ? compact.slice(slashIndex + 1) : compact;
-  const mapped = WINDOWS_TIMEZONE_MAP[unquoted.toUpperCase()];
-  if (mapped) return mapped;
-  if (candidate.includes("/") && isValidTimeZone(candidate)) return candidate;
-  if (isValidTimeZone(unquoted)) return unquoted;
-  return undefined;
-}
-
-function isValidTimeZone(timeZone: string) {
-  const cached = timezoneValidityCache.get(timeZone);
-  if (typeof cached === "boolean") return cached;
-  try {
-    new Intl.DateTimeFormat(undefined, { timeZone }).format(new Date());
-    timezoneValidityCache.set(timeZone, true);
-    return true;
-  } catch {
-    timezoneValidityCache.set(timeZone, false);
-    return false;
-  }
-}
-
 function getTimeZoneOffsetMinutes(date: Date, timeZone: string) {
   try {
     const parts = new Intl.DateTimeFormat("en-CA", {
@@ -206,7 +174,7 @@ function parseMultiDateValues(value: string, tzid?: string) {
 function parseCalendarDate(value: string, tzid?: string): { date?: Date; allDay: boolean; tzid?: string } {
   const trimmed = value.trim();
   if (!trimmed) return { allDay: false };
-  const resolvedTimezone = resolveTimeZoneId(tzid);
+  const resolvedTimezone = resolveCalendarTimeZoneId(tzid);
   const displayTimezone = resolvedTimezone ?? tzid?.trim();
 
   if (/^\d{8}$/.test(trimmed)) {
@@ -234,7 +202,7 @@ function parseCalendarDate(value: string, tzid?: string): { date?: Date; allDay:
       tzid: "UTC"
     };
   }
-  if (resolvedTimezone && isValidTimeZone(resolvedTimezone)) {
+  if (resolvedTimezone && isValidCalendarTimeZone(resolvedTimezone)) {
     return {
       allDay: false,
       date: createDateInTimeZone(
@@ -360,7 +328,7 @@ function formatRecurrenceBoundaryDate(event: CalendarEventPreview, value: Date) 
   try {
     return new Intl.DateTimeFormat(undefined, {
       dateStyle: "medium",
-      timeZone: event.allDay ? "UTC" : resolveTimeZoneId(event.startTimezone)
+      timeZone: event.allDay ? "UTC" : resolveCalendarTimeZoneId(event.startTimezone)
     }).format(value);
   } catch {
     return new Intl.DateTimeFormat(undefined, { dateStyle: "medium" }).format(value);
@@ -368,9 +336,9 @@ function formatRecurrenceBoundaryDate(event: CalendarEventPreview, value: Date) 
 }
 
 function formatTimeZoneLabel(timeZone: string, referenceDate: Date) {
-  const resolved = resolveTimeZoneId(timeZone) ?? timeZone;
+  const resolved = resolveCalendarTimeZoneId(timeZone) ?? timeZone;
   const city = resolved.includes("/") ? resolved.split("/").pop()?.replace(/_/g, " ") ?? resolved : resolved;
-  if (!isValidTimeZone(resolved)) return city;
+  if (!isValidCalendarTimeZone(resolved)) return city;
   try {
     const parts = new Intl.DateTimeFormat(undefined, {
       timeZone: resolved,
@@ -401,10 +369,14 @@ function parseRecurrenceRule(event: CalendarEventPreview): RRule | null {
       : recurrenceRule;
     const parsed = RRule.fromString(normalizedRule);
     if (!event.start) return parsed;
+    const parsedTzid =
+      typeof parsed.origOptions.tzid === "string" ? parsed.origOptions.tzid : undefined;
+    const ruleTimeZone =
+      resolveCalendarTimeZoneId(event.startTimezone) ?? resolveCalendarTimeZoneId(parsedTzid);
     return new RRule({
       ...parsed.origOptions,
-      dtstart: event.start,
-      tzid: resolveTimeZoneId(event.startTimezone) ?? parsed.origOptions.tzid
+      dtstart: ruleTimeZone ? toCalendarTimeZoneWallDate(event.start, ruleTimeZone) : event.start,
+      tzid: ruleTimeZone ?? parsed.origOptions.tzid
     });
   } catch {
     return null;

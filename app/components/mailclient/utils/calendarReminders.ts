@@ -1,5 +1,6 @@
 import type { CalendarReminder } from "@/lib/data";
 import { normalizeReminderDateList, resolveNextReminderOccurrence } from "@/lib/reminderRecurrence";
+import { resolveCalendarTimeZoneId } from "@/lib/calendarTimezones";
 
 export const CALENDAR_REMINDERS_UPDATED_EVENT = "noctua:calendar-reminders-updated";
 const CALENDAR_REMINDER_DELIVERED_PREFIX = "noctua:calendar-reminder-delivered";
@@ -169,7 +170,8 @@ function generateId(prefix: string) {
 
 function normalizeReminderTimezone(value?: string) {
   const normalized = value?.trim();
-  return normalized || undefined;
+  if (!normalized) return undefined;
+  return resolveCalendarTimeZoneId(normalized) ?? normalized.replace(/^"|"$/g, "");
 }
 
 function normalizeReminderRule(value?: string) {

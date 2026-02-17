@@ -974,6 +974,14 @@ a {
   min-width: 0;
 }
 
+.reminder-timezone-label {
+  padding: 0 6px;
+  border: 1px solid var(--gray-6);
+  border-radius: 999px;
+  font-size: 10px;
+  line-height: 1.4;
+}
+
 .reminder-icon {
   color: var(--gray-10);
   flex-shrink: 0;

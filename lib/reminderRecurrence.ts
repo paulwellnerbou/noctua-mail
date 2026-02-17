@@ -1,4 +1,8 @@
 import { RRule, RRuleSet } from "rrule";
+import {
+  resolveCalendarTimeZoneId,
+  toCalendarTimeZoneWallDate
+} from "./calendarTimezones";
 
 export const REMINDER_DUE_LOOKBACK_MS = 7 * 24 * 60 * 60 * 1000;
 
@@ -11,37 +15,8 @@ type ReminderRuleLike = {
   startTimezone?: string;
 };
 
-const WINDOWS_TIMEZONE_MAP: Record<string, string> = {
-  "W. EUROPE STANDARD TIME": "Europe/Berlin",
-  "CENTRAL EUROPE STANDARD TIME": "Europe/Budapest",
-  "ROMANCE STANDARD TIME": "Europe/Paris",
-  "GMT STANDARD TIME": "Europe/London",
-  UTC: "UTC"
-};
-
-const timezoneValidityCache = new Map<string, boolean>();
-
-function isValidTimeZone(timeZone: string) {
-  const cached = timezoneValidityCache.get(timeZone);
-  if (typeof cached === "boolean") return cached;
-  try {
-    new Intl.DateTimeFormat(undefined, { timeZone }).format(new Date());
-    timezoneValidityCache.set(timeZone, true);
-    return true;
-  } catch {
-    timezoneValidityCache.set(timeZone, false);
-    return false;
-  }
-}
-
 export function resolveTimeZoneId(timeZone?: string) {
-  const raw = timeZone?.trim();
-  if (!raw) return undefined;
-  const unquoted = raw.replace(/^"|"$/g, "");
-  const mapped = WINDOWS_TIMEZONE_MAP[unquoted.toUpperCase()];
-  if (mapped) return mapped;
-  if (isValidTimeZone(unquoted)) return unquoted;
-  return undefined;
+  return resolveCalendarTimeZoneId(timeZone);
 }
 
 function normalizeRecurrenceRule(rule?: string) {
@@ -78,10 +53,17 @@ function buildRecurrenceQuery(reminder: ReminderRuleLike): RecurrenceQuery | nul
   if (!Number.isFinite(startAtMs) || startAtMs <= 0) return null;
   try {
     const parsed = RRule.fromString(normalizedRule);
+    const parsedTzid =
+      typeof parsed.origOptions.tzid === "string" ? parsed.origOptions.tzid : undefined;
+    const ruleTimeZone = resolveTimeZoneId(reminder.startTimezone) ?? resolveTimeZoneId(parsedTzid);
+    const toRuleDate = (value: number) => {
+      const date = new Date(value);
+      return ruleTimeZone ? toCalendarTimeZoneWallDate(date, ruleTimeZone) : date;
+    };
     const rule = new RRule({
       ...parsed.origOptions,
-      dtstart: new Date(startAtMs),
-      tzid: resolveTimeZoneId(reminder.startTimezone) ?? parsed.origOptions.tzid
+      dtstart: toRuleDate(startAtMs),
+      tzid: ruleTimeZone ?? parsed.origOptions.tzid
     });
     const recurrenceDates = normalizeReminderDateList(reminder.recurrenceDates);
     const excludedDates = normalizeReminderDateList(reminder.excludedDates);
@@ -91,10 +73,10 @@ function buildRecurrenceQuery(reminder: ReminderRuleLike): RecurrenceQuery | nul
     const ruleSet = new RRuleSet();
     ruleSet.rrule(rule);
     recurrenceDates?.forEach((value) => {
-      ruleSet.rdate(new Date(value));
+      ruleSet.rdate(toRuleDate(value));
     });
     excludedDates?.forEach((value) => {
-      ruleSet.exdate(new Date(value));
+      ruleSet.exdate(toRuleDate(value));
     });
     return ruleSet;
   } catch {

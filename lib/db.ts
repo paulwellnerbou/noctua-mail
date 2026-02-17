@@ -38,6 +38,7 @@ import { normalizeAccountDateFormat } from "./dateFormatting";
 import { withDbWriteRetry } from "./dbWriteRetry";
 import { randomUUID } from "crypto";
 import { normalizeReminderDateList, resolveNextReminderOccurrence } from "./reminderRecurrence";
+import { resolveCalendarTimeZoneId } from "./calendarTimezones";
 import { collectCalendarReminderMutationsFromCalendarInvite } from "./calendarReminderMutations";
 import type { CalendarReminderMutation } from "./calendarReminderMutations";
 import { getAttachmentContentBuffer } from "./mail/syncMessageSanitizer";
@@ -1314,7 +1315,8 @@ type CalendarReminderEventMatch = {
 
 function normalizeReminderTimezone(value?: string) {
   const normalized = value?.trim();
-  return normalized || null;
+  if (!normalized) return null;
+  return resolveCalendarTimeZoneId(normalized) ?? normalized.replace(/^"|"$/g, "");
 }
 
 function normalizeReminderRecurrenceRule(value?: string) {
