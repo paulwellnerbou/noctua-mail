@@ -47,6 +47,9 @@ Schedule reminders directly from ICS invites and get desktop/system notification
 - **Automatic invite update handling** – Reminder records are updated/removed when invite updates or cancellations arrive
 - **Offline-aware delivery** – PWA/service worker delivery with local cache and due-lookback handling
 
+### ✍️ Markdown Composing
+Write emails in **Markdown** with a dedicated compose mode and send them as fully rendered HTML (with plain-text fallback), while preserving clean markdown source in drafts.
+
 ### 🔐 IMAP-Only Authentication
 Simple, secure authentication using your existing IMAP credentials. No separate user accounts and no stored passwords to manage – just connect with your email server credentials and start using Noctua Mail immediately.
 

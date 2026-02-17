@@ -142,6 +142,7 @@ import {
   pruneDeliveredReminderMap
 } from "./mailclient/utils/calendarReminders";
 import {
+  BUILD_VERSION_POLL_INTERVAL_MS,
   CALENDAR_REMINDER_REFRESH_INTERVAL_MS,
   NOTICE_TIMEOUTS,
   THREAD_COLLAPSE_SETTLE_MS,
@@ -390,6 +391,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
   const [refreshingMessages, setRefreshingMessages] = useState(false);
   const [messageListError, setMessageListError] = useState<string | null>(null);
   const filteredSearchRefreshTimerRef = useRef<number | null>(null);
+  const queueFilteredSearchRefreshRef = useRef<() => void>(() => {});
   const lastRequestRef = useRef<{ key: string; page: number } | null>(null);
   const currentKeyRef = useRef("");
   const [loadingSource, setLoadingSource] = useState<Record<string, boolean>>({});
@@ -436,6 +438,8 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
   const duplicateMessageIdLogFingerprintRef = useRef("");
   const activeVisibilityLogFingerprintRef = useRef("");
   const swRegistrationRef = useRef<ServiceWorkerRegistration | null>(null);
+  const currentBuildVersionRef = useRef(buildVersionLabel.trim());
+  const promptedBuildVersionRef = useRef("");
   const threadPreferenceByFolderRef = useRef<Record<string, boolean>>({});
   const syncStateRef = useRef<{ isSyncing: boolean; syncingFolders: Set<string> }>({
     isSyncing: false,
@@ -921,6 +925,23 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     };
     setInAppNotices((prev) => [...prev, nextNotice].slice(-8));
   }, []);
+  const promptBuildRefreshNotice = useCallback((nextBuildVersion: string) => {
+    const normalizedVersion = nextBuildVersion.trim();
+    if (!normalizedVersion) return;
+    if (promptedBuildVersionRef.current === normalizedVersion) return;
+    promptedBuildVersionRef.current = normalizedVersion;
+    pushNotice({
+      type: "info",
+      title: "Update available",
+      description: `A newer build (${normalizedVersion}) is available.`,
+      actionLabel: "Refresh",
+      onAction: () => {
+        if (typeof window === "undefined") return;
+        window.location.reload();
+      },
+      durationMs: null
+    });
+  }, [pushNotice]);
   const dismissNotice = useCallback((noticeId: string) => {
     setInAppNotices((prev) => prev.filter((item) => item.id !== noticeId));
   }, []);
@@ -999,6 +1020,33 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     const days = Math.floor(hours / 24);
     return `${days}d ago`;
   };
+
+  const checkForBuildUpdate = useCallback(async () => {
+    try {
+      const response = await apiFetch("/api/version", {
+        credentials: "include",
+        cache: "no-store"
+      });
+      if (!response.ok) return;
+      const payload = (await response.json().catch(() => null)) as
+        | {
+            buildVersionLabel?: string;
+          }
+        | null;
+      const latestBuildVersion =
+        typeof payload?.buildVersionLabel === "string" ? payload.buildVersionLabel.trim() : "";
+      if (!latestBuildVersion) return;
+      const currentBuildVersion = currentBuildVersionRef.current;
+      if (!currentBuildVersion) {
+        currentBuildVersionRef.current = latestBuildVersion;
+        return;
+      }
+      if (latestBuildVersion === currentBuildVersion) return;
+      promptBuildRefreshNotice(latestBuildVersion);
+    } catch {
+      // ignore build version check failures
+    }
+  }, [apiFetch, promptBuildRefreshNotice]);
 
   const ensureNotificationPermission = useCallback(async () => {
     if (typeof window === "undefined" || !("Notification" in window)) return "denied";
@@ -4062,6 +4110,35 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
 
   useEffect(() => {
     if (typeof window === "undefined") return;
+    currentBuildVersionRef.current = buildVersionLabel.trim();
+  }, [buildVersionLabel]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    let active = true;
+    const run = () => {
+      if (!active) return;
+      void checkForBuildUpdate();
+    };
+    void run();
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        run();
+      }
+    };
+    const interval = window.setInterval(run, BUILD_VERSION_POLL_INTERVAL_MS);
+    window.addEventListener("focus", run);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => {
+      active = false;
+      window.clearInterval(interval);
+      window.removeEventListener("focus", run);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, [checkForBuildUpdate]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
     let active = true;
     const run = () => {
       if (!active) return;
@@ -5131,6 +5208,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
       void refreshMailboxData();
     }, 120);
   };
+  queueFilteredSearchRefreshRef.current = queueFilteredSearchRefresh;
 
   const resolveMessageByExternalMessageId = useCallback(
     async (messageId: string, accountId: string) => {
@@ -5644,8 +5722,8 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
         await syncNewlyDetectedFolders(knownFolderIds, "new");
         if (
           currentKeyRef.current === selectionKey &&
-          searchScope === "folder" &&
-          activeFolderId
+          ((searchScope === "folder" && activeFolderId) ||
+            (searchScope === "all" && Boolean(activeVirtualFolderId)))
         ) {
           await refreshMailboxData();
         }
@@ -5994,14 +6072,20 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
       if (foldersToSync.length === 0) return;
 
       const syncedMessages: SyncNotificationMessage[] = [];
+      let syncedAnyFolder = false;
       for (const folderId of foldersToSync) {
         const result = await syncFolderWithBackground(folderId, false, true, "new", false);
-        if (!result?.newMessages?.length) continue;
+        if (!result) continue;
+        syncedAnyFolder = true;
+        if (!result.newMessages?.length) continue;
         syncedMessages.push(...result.newMessages);
       }
-      if (syncedMessages.length === 0) return;
+      if (!syncedAnyFolder) return;
+      queueFilteredSearchRefreshRef.current();
       await refreshPendingCalendarReminders();
-      await notifyNewMessages(syncedMessages);
+      if (syncedMessages.length > 0) {
+        await notifyNewMessages(syncedMessages);
+      }
     };
 
     const pollOnce = async () => {
