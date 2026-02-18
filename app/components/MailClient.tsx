@@ -142,9 +142,9 @@ import {
   pruneDeliveredReminderMap
 } from "./mailclient/utils/calendarReminders";
 import {
-  BUILD_VERSION_POLL_INTERVAL_MS,
   CALENDAR_REMINDER_REFRESH_INTERVAL_MS,
   NOTICE_TIMEOUTS,
+  NOTICE_TIMEOUTS_NO_UNDO,
   THREAD_COLLAPSE_SETTLE_MS,
   SYNC_STATUS_POLL_INTERVAL_MS,
   SYNC_STATUS_RUNNING_POLL_INTERVAL_MS,
@@ -391,7 +391,6 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
   const [refreshingMessages, setRefreshingMessages] = useState(false);
   const [messageListError, setMessageListError] = useState<string | null>(null);
   const filteredSearchRefreshTimerRef = useRef<number | null>(null);
-  const queueFilteredSearchRefreshRef = useRef<() => void>(() => {});
   const lastRequestRef = useRef<{ key: string; page: number } | null>(null);
   const currentKeyRef = useRef("");
   const [loadingSource, setLoadingSource] = useState<Record<string, boolean>>({});
@@ -438,8 +437,6 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
   const duplicateMessageIdLogFingerprintRef = useRef("");
   const activeVisibilityLogFingerprintRef = useRef("");
   const swRegistrationRef = useRef<ServiceWorkerRegistration | null>(null);
-  const currentBuildVersionRef = useRef(buildVersionLabel.trim());
-  const promptedBuildVersionRef = useRef("");
   const threadPreferenceByFolderRef = useRef<Record<string, boolean>>({});
   const syncStateRef = useRef<{ isSyncing: boolean; syncingFolders: Set<string> }>({
     isSyncing: false,
@@ -912,12 +909,21 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
   // clearSearch, activateVirtualFolder, and virtual folder count effects moved to useSearchState hook
   const pushNotice = useCallback((input: NoticeInput) => {
     const { durationMs, ...notice } = input;
-    const timeoutMs =
+    const baseTimeoutMs =
       durationMs === null
         ? null
         : typeof durationMs === "number"
           ? durationMs
           : NOTICE_TIMEOUTS[notice.type];
+    const hasUndoAction =
+      notice.actionLabel?.trim().toLowerCase() === "undo" &&
+      typeof notice.onAction === "function";
+    const timeoutMs =
+      baseTimeoutMs == null
+        ? null
+        : hasUndoAction
+          ? baseTimeoutMs
+          : Math.min(baseTimeoutMs, NOTICE_TIMEOUTS_NO_UNDO[notice.type]);
     const nextNotice: InAppNotice = {
       ...notice,
       id: makeClientId(),
@@ -925,23 +931,6 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     };
     setInAppNotices((prev) => [...prev, nextNotice].slice(-8));
   }, []);
-  const promptBuildRefreshNotice = useCallback((nextBuildVersion: string) => {
-    const normalizedVersion = nextBuildVersion.trim();
-    if (!normalizedVersion) return;
-    if (promptedBuildVersionRef.current === normalizedVersion) return;
-    promptedBuildVersionRef.current = normalizedVersion;
-    pushNotice({
-      type: "info",
-      title: "Update available",
-      description: `A newer build (${normalizedVersion}) is available.`,
-      actionLabel: "Refresh",
-      onAction: () => {
-        if (typeof window === "undefined") return;
-        window.location.reload();
-      },
-      durationMs: null
-    });
-  }, [pushNotice]);
   const dismissNotice = useCallback((noticeId: string) => {
     setInAppNotices((prev) => prev.filter((item) => item.id !== noticeId));
   }, []);
@@ -1020,33 +1009,6 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     const days = Math.floor(hours / 24);
     return `${days}d ago`;
   };
-
-  const checkForBuildUpdate = useCallback(async () => {
-    try {
-      const response = await apiFetch("/api/version", {
-        credentials: "include",
-        cache: "no-store"
-      });
-      if (!response.ok) return;
-      const payload = (await response.json().catch(() => null)) as
-        | {
-            buildVersionLabel?: string;
-          }
-        | null;
-      const latestBuildVersion =
-        typeof payload?.buildVersionLabel === "string" ? payload.buildVersionLabel.trim() : "";
-      if (!latestBuildVersion) return;
-      const currentBuildVersion = currentBuildVersionRef.current;
-      if (!currentBuildVersion) {
-        currentBuildVersionRef.current = latestBuildVersion;
-        return;
-      }
-      if (latestBuildVersion === currentBuildVersion) return;
-      promptBuildRefreshNotice(latestBuildVersion);
-    } catch {
-      // ignore build version check failures
-    }
-  }, [apiFetch, promptBuildRefreshNotice]);
 
   const ensureNotificationPermission = useCallback(async () => {
     if (typeof window === "undefined" || !("Notification" in window)) return "denied";
@@ -2137,9 +2099,8 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
   const handleSaveDraft = () => {
     if (!composeOpen || !activeAccountId) return;
     const preferText = composeTab === "html" && composeLastEditedRef.current === "text";
-    const { text, markdown, html, attachments, composeFormat } = buildComposePayload({ preferText });
+    const { text, html, attachments, composeFormat } = buildComposePayload({ preferText });
     const normalizedHtml = html ?? "";
-    const normalizedMarkdown = markdown ?? "";
     const attachmentsHash = attachments
       .map((att) => `${att.filename}:${att.size}:${att.inline ? "1" : "0"}:${att.cid ?? ""}`)
       .join("|");
@@ -2149,7 +2110,6 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
       bcc: composeBcc,
       subject: composeSubject,
       text,
-      markdown: normalizedMarkdown,
       html: normalizedHtml,
       attachments: attachmentsHash
     });
@@ -2159,7 +2119,6 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
       bcc: composeBcc,
       subject: composeSubject,
       text,
-      markdown,
       html: normalizedHtml,
       composeFormat,
       quotedHtmlEdited: composeQuotedHtmlEdited,
@@ -2230,7 +2189,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     }
     setSendingMail(true);
     try {
-      const { text, markdown, html, attachments, composeFormat } = buildComposePayload();
+      const { text, html, attachments } = buildComposePayload();
       const replyHeaders = composeReplyHeaders ?? {
         inReplyTo: composeReplyMessage?.messageId ?? undefined,
         references:
@@ -2267,9 +2226,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
           bcc: composeBcc,
           subject: composeSubject,
           text,
-          markdown,
           html,
-          composeFormat,
           attachments,
           inReplyTo: shouldThreadCompose ? replyHeaders.inReplyTo : undefined,
           references: shouldThreadCompose ? replyHeaders.references : undefined,
@@ -3425,6 +3382,9 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     }
   };
 
+  const toggleTodoFlagRef = useRef(toggleTodoFlag);
+  toggleTodoFlagRef.current = toggleTodoFlag;
+
   const toggleFlaggedFlag = async (
     message: Message,
     collapsedThreadMessages?: Message[]
@@ -3567,6 +3527,17 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
         )
       );
     };
+    const toggleTodoByIds = async (messageIds: string[]) => {
+      const uniqueIds = Array.from(new Set(messageIds));
+      if (uniqueIds.length === 0) return;
+      const targets = uniqueIds
+        .map((id) => resolveMessageById(id))
+        .filter((message): message is Message => Boolean(message));
+      if (targets.length === 0) return;
+      await Promise.all(
+        targets.map((message) => toggleTodoFlagRef.current(message))
+      );
+    };
     const handleKeyDown = (event: KeyboardEvent) => {
       const rawKey = typeof event.key === "string" ? event.key : "";
       const key = rawKey.toLowerCase();
@@ -3574,8 +3545,9 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
       const isMarkReadKey = key === "r" && !event.metaKey && !event.ctrlKey && !event.altKey;
       const isMarkUnreadKey = key === "u" && !event.metaKey && !event.ctrlKey && !event.altKey;
       const isFlagKey = key === "f" && !event.metaKey && !event.ctrlKey && !event.altKey;
-      const isFlagShortcut = isMarkReadKey || isMarkUnreadKey || isFlagKey;
-      if (!isDeleteKey && !isFlagShortcut) return;
+      const isTodoKey = key === "t" && !event.metaKey && !event.ctrlKey && !event.altKey;
+      const isActionShortcut = isMarkReadKey || isMarkUnreadKey || isFlagKey || isTodoKey;
+      if (!isDeleteKey && !isActionShortcut) return;
       if (isTypingTarget(event.target)) return;
       const selected = selectionStore.getIds();
       const ids =
@@ -3585,7 +3557,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
             ? [activeMessageId]
             : [];
       if (ids.length === 0) return;
-      if (isFlagShortcut) {
+      if (isActionShortcut) {
         event.preventDefault();
         if (isMarkReadKey) {
           const collapsedRootThreadIds = getCollapsedRootThreadMessageIds({
@@ -3607,6 +3579,10 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
           });
           const targetIds = collapsedRootThreadIds ?? ids;
           void updateFlagStateByIds(targetIds, { flag: "seen", value: false });
+          return;
+        }
+        if (isTodoKey) {
+          void toggleTodoByIds(ids);
           return;
         }
         void toggleFlaggedByIds(ids);
@@ -4110,35 +4086,6 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    currentBuildVersionRef.current = buildVersionLabel.trim();
-  }, [buildVersionLabel]);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    let active = true;
-    const run = () => {
-      if (!active) return;
-      void checkForBuildUpdate();
-    };
-    void run();
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === "visible") {
-        run();
-      }
-    };
-    const interval = window.setInterval(run, BUILD_VERSION_POLL_INTERVAL_MS);
-    window.addEventListener("focus", run);
-    document.addEventListener("visibilitychange", handleVisibilityChange);
-    return () => {
-      active = false;
-      window.clearInterval(interval);
-      window.removeEventListener("focus", run);
-      document.removeEventListener("visibilitychange", handleVisibilityChange);
-    };
-  }, [checkForBuildUpdate]);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
     let active = true;
     const run = () => {
       if (!active) return;
@@ -4578,19 +4525,17 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
   useEffect(() => {
     if (!composeOpen || sendingMail) return;
     const preferText = composeTab === "html" && composeLastEditedRef.current === "text";
-    const { text, markdown, html, attachments, composeFormat } = buildComposePayload({ preferText });
+    const { text, html, attachments, composeFormat } = buildComposePayload({ preferText });
     const hasContent = [
       composeTo,
       composeCc,
       composeBcc,
       composeSubject,
-      markdown ?? "",
       text,
       html ?? ""
     ].some((value) => (value ?? "").toString().trim().length > 0);
     if (!hasContent) return;
     const normalizedHtml = html ?? "";
-    const normalizedMarkdown = markdown ?? "";
     const attachmentsHash = attachments
       .map((att) => `${att.filename}:${att.size}:${att.inline ? "1" : "0"}:${att.cid ?? ""}`)
       .join("|");
@@ -4600,7 +4545,6 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
       bcc: composeBcc,
       subject: composeSubject,
       text,
-      markdown: normalizedMarkdown,
       html: normalizedHtml,
       attachments: attachmentsHash
     });
@@ -4633,7 +4577,6 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
           bcc: composeBcc,
           subject: composeSubject,
           text,
-          markdown,
           html,
           composeFormat,
           quotedHtmlEdited: composeQuotedHtmlEdited,
@@ -5208,7 +5151,6 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
       void refreshMailboxData();
     }, 120);
   };
-  queueFilteredSearchRefreshRef.current = queueFilteredSearchRefresh;
 
   const resolveMessageByExternalMessageId = useCallback(
     async (messageId: string, accountId: string) => {
@@ -5426,51 +5368,51 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
         return next;
       });
     };
-    while (Date.now() - startedAt < timeoutMs) {
-      const statusRes = await apiFetch(`/api/sync/status?jobId=${encodeURIComponent(jobId)}`, {
-        cache: "no-store"
-      });
-      if (!statusRes.ok) {
-        clearProgress();
-        throw new Error(await readErrorMessage(statusRes));
-      }
-      const data = (await statusRes.json()) as {
-        ok: boolean;
-        job?: {
-          status?: "queued" | "running" | "done" | "failed";
-          error?: string;
-          result?: SyncJobResult;
-          progress?: Omit<SyncJobProgress, "jobId">;
+    try {
+      while (Date.now() - startedAt < timeoutMs) {
+        const statusRes = await apiFetch(`/api/sync/status?jobId=${encodeURIComponent(jobId)}`, {
+          cache: "no-store"
+        });
+        if (!statusRes.ok) {
+          throw new Error(await readErrorMessage(statusRes));
+        }
+        const data = (await statusRes.json()) as {
+          ok: boolean;
+          job?: {
+            status?: "queued" | "running" | "done" | "failed";
+            error?: string;
+            result?: SyncJobResult;
+            progress?: Omit<SyncJobProgress, "jobId">;
+          };
         };
-      };
-      const progress = data.job?.progress;
-      if (progress) {
-        const nextProgress: SyncJobProgress = {
-          ...progress,
-          jobId,
-          updatedAt: typeof progress.updatedAt === "number" ? progress.updatedAt : Date.now()
-        };
-        setSyncProgressByJobId((prev) => ({ ...prev, [jobId]: nextProgress }));
+        const progress = data.job?.progress;
+        if (progress) {
+          const nextProgress: SyncJobProgress = {
+            ...progress,
+            jobId,
+            updatedAt: typeof progress.updatedAt === "number" ? progress.updatedAt : Date.now()
+          };
+          setSyncProgressByJobId((prev) => ({ ...prev, [jobId]: nextProgress }));
+        }
+        const status = data.job?.status;
+        if (status === "done") {
+          return data.job?.result ?? { count: 0 };
+        }
+        if (status === "failed") {
+          throw new Error(data.job?.error || "Sync job failed.");
+        }
+        await new Promise<void>((resolve) => {
+          const delayMs =
+            status === "running"
+              ? SYNC_STATUS_RUNNING_POLL_INTERVAL_MS
+              : SYNC_STATUS_POLL_INTERVAL_MS;
+          window.setTimeout(resolve, delayMs);
+        });
       }
-      const status = data.job?.status;
-      if (status === "done") {
-        clearProgress();
-        return data.job?.result ?? { count: 0 };
-      }
-      if (status === "failed") {
-        clearProgress();
-        throw new Error(data.job?.error || "Sync job failed.");
-      }
-      await new Promise<void>((resolve) => {
-        const delayMs =
-          status === "running"
-            ? SYNC_STATUS_RUNNING_POLL_INTERVAL_MS
-            : SYNC_STATUS_POLL_INTERVAL_MS;
-        window.setTimeout(resolve, delayMs);
-      });
+      throw new Error("Sync timed out.");
+    } finally {
+      clearProgress();
     }
-    clearProgress();
-    throw new Error("Sync timed out.");
   };
 
   const runSyncJob = async (payload: {
@@ -5722,8 +5664,8 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
         await syncNewlyDetectedFolders(knownFolderIds, "new");
         if (
           currentKeyRef.current === selectionKey &&
-          ((searchScope === "folder" && activeFolderId) ||
-            (searchScope === "all" && Boolean(activeVirtualFolderId)))
+          searchScope === "folder" &&
+          activeFolderId
         ) {
           await refreshMailboxData();
         }
@@ -6072,20 +6014,14 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
       if (foldersToSync.length === 0) return;
 
       const syncedMessages: SyncNotificationMessage[] = [];
-      let syncedAnyFolder = false;
       for (const folderId of foldersToSync) {
         const result = await syncFolderWithBackground(folderId, false, true, "new", false);
-        if (!result) continue;
-        syncedAnyFolder = true;
-        if (!result.newMessages?.length) continue;
+        if (!result?.newMessages?.length) continue;
         syncedMessages.push(...result.newMessages);
       }
-      if (!syncedAnyFolder) return;
-      queueFilteredSearchRefreshRef.current();
+      if (syncedMessages.length === 0) return;
       await refreshPendingCalendarReminders();
-      if (syncedMessages.length > 0) {
-        await notifyNewMessages(syncedMessages);
-      }
+      await notifyNewMessages(syncedMessages);
     };
 
     const pollOnce = async () => {
@@ -6594,10 +6530,6 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
           syncAccount
         }}
       />
-      <InAppNoticeStack
-        state={{ inAppNotices }}
-        actions={{ onOpenNotice: handleNoticeOpen, onDismissNotice: handleDismissNotice }}
-      />
       <AlertDialog.Root
         open={Boolean(threadDeleteConfirm)}
         onOpenChange={handleThreadDeleteDialogOpenChange}
@@ -6751,6 +6683,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
                 listWidth,
                 searchScope,
                 activeFolderName,
+                activeVirtualFolderName: activeVirtualFolder?.name,
                 loadedMessageCount,
                 totalMessages,
                 listLoading,
@@ -6908,6 +6841,11 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
               </Card>
             )}
           </div>
+          <InAppNoticeStack
+            className="inapp-notice-stack-pane"
+            state={{ inAppNotices }}
+            actions={{ onOpenNotice: handleNoticeOpen, onDismissNotice: handleDismissNotice }}
+          />
         </MessageListPane>
 
         <div

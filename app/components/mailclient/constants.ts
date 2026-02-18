@@ -10,6 +10,13 @@ export const NOTICE_TIMEOUTS: Record<InAppNoticeType, number> = {
   error: 10000
 };
 
+export const NOTICE_TIMEOUTS_NO_UNDO: Record<InAppNoticeType, number> = {
+  info: 4500,
+  success: 3500,
+  warning: 5000,
+  error: 6500
+};
+
 export const THREAD_COLLAPSE_SETTLE_MS = 220;
 export const SYNC_STATUS_POLL_INTERVAL_MS = 1200;
 export const SYNC_STATUS_RUNNING_POLL_INTERVAL_MS = 450;

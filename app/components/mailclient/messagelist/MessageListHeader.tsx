@@ -13,6 +13,7 @@ type MessageListHeaderProps = {
     listWidth: number;
     searchScope: "folder" | "all";
     activeFolderName?: string;
+    activeVirtualFolderName?: string;
     loadedMessageCount: number;
     totalMessages: number | null;
     listLoading: boolean;
@@ -41,6 +42,7 @@ export default function MessageListHeader({ state, actions }: MessageListHeaderP
     listWidth,
     searchScope,
     activeFolderName,
+    activeVirtualFolderName,
     loadedMessageCount,
     totalMessages,
     listLoading,
@@ -98,30 +100,27 @@ export default function MessageListHeader({ state, actions }: MessageListHeaderP
   };
   const collapseViewSwitcher = listWidth < 720;
   const title =
-    searchScope === "folder" && activeFolderName
-      ? collapseViewSwitcher
-        ? activeFolderName
-        : `Messages in ${activeFolderName}`
-      : "Messages";
+    activeVirtualFolderName?.trim() ||
+    (searchScope === "folder" ? activeFolderName?.trim() || "Everything" : "Everything");
 
   return (
     <div className={styles.header}>
       <div className={styles.titleBlock}>
-        <Text as="span" size="3" weight="bold">
+        <Text as="div" size="3" weight="bold">
           {title}
         </Text>
-        <span className={styles.meta}>
+        <div className={styles.meta}>
           <Text as="span" size="1" color="gray">
             {(() => {
-            const countLabel =
-              totalMessages !== null
-                ? `${loadedMessageCount} of ${totalMessages} items`
-                : `${loadedMessageCount} items`;
-            if (listLoading) {
-              return `Loading… ${countLabel}`;
-            }
-            return searchScope === "all" ? `${countLabel} · Everywhere` : countLabel;
-          })()}
+              const countLabel =
+                totalMessages !== null
+                  ? `${loadedMessageCount} of ${totalMessages} items`
+                  : `${loadedMessageCount} items`;
+              if (listLoading) {
+                return `Loading… ${countLabel}`;
+              }
+              return countLabel;
+            })()}
           </Text>
           {hasMoreMessages && !loadingMessages && (
             <IconButton
@@ -135,7 +134,7 @@ export default function MessageListHeader({ state, actions }: MessageListHeaderP
               <RefreshCw size={12} />
             </IconButton>
           )}
-        </span>
+        </div>
       </div>
       <div className={styles.actions}>
         {collapseViewSwitcher ? (
