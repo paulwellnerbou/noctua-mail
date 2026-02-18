@@ -1,5 +1,4 @@
 .pane {
-  position: relative;
   padding: 18px 10px;
   border-right: 1px solid var(--gray-5);
   background: var(--gray-1);

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
 import {
   AlertCircle,
   CheckCircle2,
@@ -27,6 +27,7 @@ export type InAppNotice = {
 
 type InAppNoticeStackProps = {
   className?: string;
+  style?: CSSProperties;
   state: {
     inAppNotices: InAppNotice[];
   };
@@ -48,7 +49,7 @@ const ICON_BY_NAME: Record<InAppNoticeIcon, LucideIcon> = {
 
 const DISMISS_ANIMATION_DURATION = 140; // ms
 
-export default function InAppNoticeStack({ className, state, actions }: InAppNoticeStackProps) {
+export default function InAppNoticeStack({ className, style, state, actions }: InAppNoticeStackProps) {
   const { inAppNotices } = state;
   const { onOpenNotice, onDismissNotice } = actions;
   const [dismissingIds, setDismissingIds] = useState<Set<string>>(new Set());
@@ -107,7 +108,7 @@ export default function InAppNoticeStack({ className, state, actions }: InAppNot
   };
 
   return (
-    <div className={`inapp-notice-stack${className ? ` ${className}` : ""}`}>
+    <div className={`inapp-notice-stack${className ? ` ${className}` : ""}`} style={style}>
       {inAppNotices.map((notice) => {
         const openable = Boolean(notice.messageId || (notice.ids && notice.ids.length > 0));
         const TypeIcon = notice.icon ? ICON_BY_NAME[notice.icon] : ICON_BY_TYPE[notice.type];

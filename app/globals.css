@@ -247,13 +247,13 @@ a {
 }
 
 .inapp-notice-stack.inapp-notice-stack-pane {
-  position: absolute;
+  position: fixed;
   left: auto;
-  right: 12px;
+  right: 16px;
   transform: none;
-  bottom: 12px;
+  bottom: 44px;
   align-items: flex-end;
-  width: min(470px, calc(100% - 24px));
+  width: min(470px, calc(100vw - 24px));
 }
 
 .inapp-notice {
@@ -409,10 +409,8 @@ a {
 
   .inapp-notice-stack.inapp-notice-stack-pane {
     left: auto;
-    right: 8px;
     transform: none;
-    bottom: 8px;
-    width: calc(100% - 16px);
+    bottom: 40px;
   }
 }
 

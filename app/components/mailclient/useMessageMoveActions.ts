@@ -172,14 +172,12 @@ export function useMessageMoveActions({
             )
           : new Set(uniqueIds);
         const resolveMovedId = (id: string) => idRemap.get(id) ?? id;
-        const mappedUndoTargets = queued
-          ? []
-          : undoTargets
-              .filter((target) => movedPreviousIds.has(target.messageId))
-              .map((target) => ({
-                ...target,
-                messageId: resolveMovedId(target.messageId)
-              }));
+        const mappedUndoTargets = undoTargets
+          .filter((target) => movedPreviousIds.has(target.messageId))
+          .map((target) => ({
+            ...target,
+            messageId: resolveMovedId(target.messageId)
+          }));
         markMessagesMutated?.();
         setMessages((prev) => {
           let changed = false;

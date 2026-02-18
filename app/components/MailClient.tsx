@@ -383,6 +383,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
   } = compose;
   const messageRefs = useRef<Map<string, HTMLElement>>(new Map());
   const listPaneRef = useRef<HTMLDivElement | null>(null);
+  const [noticePaneRightOffset, setNoticePaneRightOffset] = useState(16);
   const [messagesPage, setMessagesPage] = useState(1);
   const [hasMoreMessages, setHasMoreMessages] = useState(true);
   const [loadedMessageCount, setLoadedMessageCount] = useState(0);
@@ -4747,6 +4748,45 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     return () => pane.removeEventListener("scroll", handleScroll);
   }, [hasMoreMessages, loadingMessages]);
 
+  const syncNoticePaneRightOffset = useCallback(() => {
+    if (typeof window === "undefined") return;
+    const pane = listPaneRef.current;
+    if (!pane) {
+      setNoticePaneRightOffset(16);
+      return;
+    }
+    const rect = pane.getBoundingClientRect();
+    const next = Math.max(0, Math.round(window.innerWidth - rect.right));
+    setNoticePaneRightOffset((prev) => (prev === next ? prev : next));
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    let frame = 0;
+    const scheduleSync = () => {
+      if (frame) window.cancelAnimationFrame(frame);
+      frame = window.requestAnimationFrame(() => {
+        frame = 0;
+        syncNoticePaneRightOffset();
+      });
+    };
+    scheduleSync();
+    const pane = listPaneRef.current;
+    let observer: ResizeObserver | null = null;
+    if (pane && typeof ResizeObserver !== "undefined") {
+      observer = new ResizeObserver(() => {
+        scheduleSync();
+      });
+      observer.observe(pane);
+    }
+    window.addEventListener("resize", scheduleSync);
+    return () => {
+      if (frame) window.cancelAnimationFrame(frame);
+      if (observer) observer.disconnect();
+      window.removeEventListener("resize", scheduleSync);
+    };
+  }, [leftWidth, listWidth, syncNoticePaneRightOffset]);
+
   const prevAccountIdRef = useRef(activeAccountId);
   useEffect(() => {
     if (prevAccountIdRef.current !== activeAccountId) {
@@ -6530,6 +6570,12 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
           syncAccount
         }}
       />
+      <InAppNoticeStack
+        className="inapp-notice-stack-pane"
+        style={{ right: `${noticePaneRightOffset}px` }}
+        state={{ inAppNotices }}
+        actions={{ onOpenNotice: handleNoticeOpen, onDismissNotice: handleDismissNotice }}
+      />
       <AlertDialog.Root
         open={Boolean(threadDeleteConfirm)}
         onOpenChange={handleThreadDeleteDialogOpenChange}
@@ -6841,11 +6887,6 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
               </Card>
             )}
           </div>
-          <InAppNoticeStack
-            className="inapp-notice-stack-pane"
-            state={{ inAppNotices }}
-            actions={{ onOpenNotice: handleNoticeOpen, onDismissNotice: handleDismissNotice }}
-          />
         </MessageListPane>
 
         <div
