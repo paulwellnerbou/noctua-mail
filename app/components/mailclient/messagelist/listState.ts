@@ -15,6 +15,7 @@ type UseMessageListDerivedStateParams = {
   includeThreadAcrossFoldersForList: boolean;
   isThreadExcludedFolder: (folderId?: string | null) => boolean;
   supportsThreads: boolean;
+  groupBy: string;
   groupMeta: MessageGroupMeta[];
   isFlaggedMessage: (message: Message) => boolean;
   hasDoneFlag?: (message: Message) => boolean;
@@ -69,6 +70,7 @@ export function useMessageListDerivedState({
   includeThreadAcrossFoldersForList,
   isThreadExcludedFolder,
   supportsThreads,
+  groupBy,
   groupMeta,
   isFlaggedMessage,
   hasDoneFlag,
@@ -120,6 +122,7 @@ export function useMessageListDerivedState({
         listScopeMessages,
         supportsThreads,
         groupMeta,
+        groupBy,
         buildThreadTree,
         flattenThread,
         isFlaggedMessage,
@@ -134,6 +137,7 @@ export function useMessageListDerivedState({
       flattenThread,
       includeFlaggedGroup,
       includeDoneGroup,
+      groupBy,
       groupMeta,
       hasDoneFlag,
       isFlaggedMessage,

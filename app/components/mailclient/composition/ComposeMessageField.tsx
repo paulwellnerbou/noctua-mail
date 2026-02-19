@@ -408,9 +408,14 @@ export default function ComposeMessageField({
             onChange={(nextHtml, nextText) => {
               setComposeHtml(nextHtml);
               setComposeHtmlText(nextText);
-              if (!composeEditorInitRef.current) {
-                composeEditorInitRef.current = true;
-                return;
+              const isInitChange = !composeEditorInitRef.current;
+              composeEditorInitRef.current = true;
+              if (isInitChange) {
+                const htmlUnchanged = nextHtml === composeHtml;
+                const textUnchanged = nextText === composeHtmlText;
+                if (htmlUnchanged && textUnchanged) {
+                  return;
+                }
               }
               composeDirtyRef.current = true;
               composeLastEditedRef.current = "html";

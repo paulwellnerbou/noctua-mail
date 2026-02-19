@@ -1751,6 +1751,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     includeThreadAcrossFoldersForList,
     isThreadExcludedFolder: checkIsThreadExcludedFolder,
     supportsThreads,
+    groupBy,
     groupMeta,
     isFlaggedMessage,
     hasDoneFlag,

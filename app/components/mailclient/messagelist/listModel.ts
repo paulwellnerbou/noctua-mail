@@ -95,6 +95,7 @@ export function buildGroupedMessages(params: {
   listScopeMessages: Message[];
   supportsThreads: boolean;
   groupMeta: MessageGroupMeta[];
+  groupBy: string;
   buildThreadTree: (items: Message[]) => ThreadNode[];
   flattenThread: (
     node: ThreadNode,
@@ -111,6 +112,7 @@ export function buildGroupedMessages(params: {
     listScopeMessages,
     supportsThreads,
     groupMeta,
+    groupBy,
     buildThreadTree,
     flattenThread,
     isFlaggedMessage,
@@ -173,36 +175,53 @@ export function buildGroupedMessages(params: {
   // count flagged messages only, not every message inside flagged threads.
   const flaggedCount = base.filter((message) => isFlaggedMessage(message)).length;
   const doneCount = includeDoneGroup ? base.filter((message) => isDoneMessage(message)).length : 0;
-  
-  // Build ordered meta with Flagged at the beginning
-  let orderedMeta = includeFlaggedGroup && flaggedCount > 0
-    ? [
-        { key: "Flagged", label: "Flagged", count: flaggedCount },
-        ...normalizedMeta.filter((group) => group.key !== "Flagged" && group.key !== "Done")
-      ]
-    : normalizedMeta.filter((group) => group.key !== "Done");
-  
-  const metaKeys = new Set(orderedMeta.map((group) => group.key));
+
+  const baseMeta = normalizedMeta.filter((group) => group.key !== "Flagged" && group.key !== "Done");
+  const metaKeys = new Set(baseMeta.map((group) => group.key));
   const missingMeta = Array.from(groups.entries())
-    .filter(([key]) => !metaKeys.has(key) && key !== "Done")
+    .filter(([key]) => !metaKeys.has(key) && key !== "Flagged" && key !== "Done")
     .map(([key, items]) => ({
       key,
       label: key,
       count: items.length
     }));
-  const mergedMeta = [...orderedMeta, ...missingMeta];
-  
+
+  const sortableMeta = [...baseMeta, ...missingMeta];
+  const orderedMeta = sortGroupMetaForGroupBy(sortableMeta, groupBy);
+  const mergedMeta: MessageGroupMeta[] = [];
+  if (includeFlaggedGroup && flaggedCount > 0) {
+    mergedMeta.push({ key: "Flagged", label: "Flagged", count: flaggedCount });
+  }
+  mergedMeta.push(...orderedMeta);
   // Add Done group at the end if there are done messages
   if (includeDoneGroup && doneCount > 0) {
     mergedMeta.push({ key: "Done", label: "Done", count: doneCount });
   }
-  
+
   return mergedMeta.map((group) => ({
     key: group.key,
     label: group.label,
     count: group.count,
     items: groups.get(group.key) ?? []
   }));
+}
+
+const DATE_GROUP_ORDER = ["Today", "Yesterday", "This Week", "Older"];
+
+function sortGroupMetaForGroupBy(groups: MessageGroupMeta[], groupBy: string) {
+  if (groupBy !== "date") {
+    return groups;
+  }
+  const orderIndex = new Map<string, number>();
+  DATE_GROUP_ORDER.forEach((key, index) => orderIndex.set(key, index));
+  return groups
+    .map((group, index) => ({
+      group,
+      index,
+      order: orderIndex.get(group.key) ?? Number.POSITIVE_INFINITY
+    }))
+    .sort((a, b) => (a.order === b.order ? a.index - b.index : a.order - b.order))
+    .map((entry) => entry.group);
 }
 
 export function buildMessageListItems(
