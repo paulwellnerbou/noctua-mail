@@ -61,9 +61,9 @@ const accountDbIdleTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const calendarReminderSchemaEnsuredByDb = new WeakSet<object>();
 const ACCOUNT_DB_IDLE_MS = (() => {
   const raw = process.env.ACCOUNT_DB_IDLE_MS?.trim();
-  if (!raw) return 60 * 60 * 1000;
+  if (!raw) return 5 * 60 * 1000; // 5 minutes: releases SQLite page cache sooner after syncs
   const parsed = Number.parseInt(raw, 10);
-  if (!Number.isFinite(parsed) || parsed < 0) return 60 * 60 * 1000;
+  if (!Number.isFinite(parsed) || parsed < 0) return 5 * 60 * 1000;
   return parsed;
 })();
 let shutdownHooksRegistered = false;
