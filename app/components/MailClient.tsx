@@ -5475,7 +5475,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
 
   const waitForSyncJob = async (jobId: string): Promise<SyncJobResult> => {
     const startedAt = Date.now();
-    const timeoutMs = 1000 * 60 * 10;
+    const timeoutMs = 1000 * 60 * 60;
     const clearProgress = () => {
       setSyncProgressByJobId((prev) => {
         if (!prev[jobId]) return prev;

@@ -149,6 +149,21 @@ export function resolveNextReminderOccurrence(
     }
   }
 
+  const nextByStart = recurrence.after(new Date(nowMs), true);
+  if (nextByStart) {
+    const nextStartAtMs = nextByStart.getTime();
+    if (
+      Number.isFinite(nextStartAtMs) &&
+      nextStartAtMs > 0 &&
+      nextStartAtMs - leadMs <= nowMs
+    ) {
+      return {
+        eventStartAtMs: nextStartAtMs,
+        triggerAtMs: nextStartAtMs - leadMs
+      };
+    }
+  }
+
   const nextUpcoming = recurrence.after(new Date(nowMs + leadMs), true);
   if (nextUpcoming) {
     const nextEventStartAtMs = nextUpcoming.getTime();

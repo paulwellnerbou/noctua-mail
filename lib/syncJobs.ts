@@ -61,10 +61,6 @@ if (!runtimeState.__noctuaSyncJobsBootstrapped) {
 }
 
 const JOB_TTL_MS = 1000 * 60 * 30;
-const SYNC_PROGRESS_STALL_MS = Number.parseInt(
-  process.env.SYNC_PROGRESS_STALL_MS ?? "",
-  10
-) || 1000 * 12;
 
 const MODE_PRIORITY: Record<"new" | "recent" | "full", number> = {
   new: 1,
@@ -351,8 +347,7 @@ function spawnSyncWorker(job: SyncJob, clientId?: string) {
         accountId: job.payload.accountId,
         folderId: job.payload.folderId,
         mode: getSyncMode(job.payload),
-        pid: job.pid,
-        configuredStallMs: SYNC_PROGRESS_STALL_MS
+        pid: job.pid
       })}`
     );
 

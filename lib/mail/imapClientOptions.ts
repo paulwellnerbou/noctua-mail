@@ -10,7 +10,7 @@ export type ImapClientLogContext = {
   mailbox?: string;
 };
 
-const DEFAULT_SOCKET_TIMEOUT_MS = 11 * 60 * 1000;
+const DEFAULT_SOCKET_TIMEOUT_MS = 8 * 60 * 1000;
 const DEFAULT_CONNECTION_TIMEOUT_MS = 90 * 1000;
 const DEFAULT_GREETING_TIMEOUT_MS = 16 * 1000;
 

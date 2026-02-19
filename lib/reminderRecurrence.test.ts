@@ -60,6 +60,21 @@ describe("reminder recurrence timezone scheduling", () => {
     expect(occurrence?.triggerAtMs).toBe(Date.UTC(2026, 0, 5, 14, 45, 0));
   });
 
+  test("keeps upcoming recurring occurrence after trigger time but before start", () => {
+    const eventStartAtMs = Date.UTC(2026, 0, 5, 15, 0, 0);
+    const occurrence = resolveNextReminderOccurrence(
+      {
+        eventStartAtMs,
+        leadMinutes: 30,
+        recurrenceRule: "FREQ=WEEKLY;COUNT=4"
+      },
+      Date.UTC(2026, 0, 5, 14, 45, 0)
+    );
+    expect(occurrence).not.toBeNull();
+    expect(occurrence?.eventStartAtMs).toBe(eventStartAtMs);
+    expect(occurrence?.triggerAtMs).toBe(Date.UTC(2026, 0, 5, 14, 30, 0));
+  });
+
   test("keeps Europe/Berlin recurrence at 10:45 local wall time", () => {
     const occurrence = resolveNextReminderOccurrence(
       {
