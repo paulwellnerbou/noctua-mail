@@ -114,34 +114,81 @@ export function formatCalendarTimeZoneShortLabel(timeZone: string | undefined, r
   return resolveLocalTimeZoneLabel(referenceDate);
 }
 
+function extractDateTimePartsInTimeZone(date: Date, timeZone: string) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    hour12: false,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit"
+  }).formatToParts(date);
+  const get = (type: string) =>
+    Number.parseInt(parts.find((part) => part.type === type)?.value ?? "", 10);
+  const year = get("year");
+  const month = get("month");
+  const day = get("day");
+  const hour = get("hour");
+  const minute = get("minute");
+  const second = get("second");
+  if ([year, month, day, hour, minute, second].some((value) => Number.isNaN(value))) {
+    return null;
+  }
+  return { year, month, day, hour, minute, second };
+}
+
+function getTimeZoneOffsetMinutes(date: Date, timeZone: string) {
+  const parts = extractDateTimePartsInTimeZone(date, timeZone);
+  if (!parts) return 0;
+  const zonedAsUtc = Date.UTC(
+    parts.year,
+    parts.month - 1,
+    parts.day,
+    parts.hour,
+    parts.minute,
+    parts.second
+  );
+  return Math.round((zonedAsUtc - date.getTime()) / 60000);
+}
+
 export function toCalendarTimeZoneWallDate(date: Date, timeZone: string) {
   const resolved = resolveCalendarTimeZoneId(timeZone);
   if (!resolved || !isValidCalendarTimeZone(resolved)) {
     return new Date(date.getTime());
   }
   try {
-    const parts = new Intl.DateTimeFormat("en-CA", {
-      timeZone: resolved,
-      hour12: false,
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit"
-    }).formatToParts(date);
-    const get = (type: string) =>
-      Number.parseInt(parts.find((part) => part.type === type)?.value ?? "", 10);
-    const year = get("year");
-    const month = get("month");
-    const day = get("day");
-    const hour = get("hour");
-    const minute = get("minute");
-    const second = get("second");
-    if ([year, month, day, hour, minute, second].some((value) => Number.isNaN(value))) {
-      return new Date(date.getTime());
+    const parts = extractDateTimePartsInTimeZone(date, resolved);
+    if (!parts) return new Date(date.getTime());
+    return new Date(
+      Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second)
+    );
+  } catch {
+    return new Date(date.getTime());
+  }
+}
+
+export function fromCalendarTimeZoneWallDate(date: Date, timeZone: string) {
+  const resolved = resolveCalendarTimeZoneId(timeZone);
+  if (!resolved || !isValidCalendarTimeZone(resolved)) {
+    return new Date(date.getTime());
+  }
+  try {
+    const year = date.getUTCFullYear();
+    const month = date.getUTCMonth() + 1;
+    const day = date.getUTCDate();
+    const hour = date.getUTCHours();
+    const minute = date.getUTCMinutes();
+    const second = date.getUTCSeconds();
+    const localAsUtc = Date.UTC(year, month - 1, day, hour, minute, second);
+    const firstOffset = getTimeZoneOffsetMinutes(new Date(localAsUtc), resolved);
+    let resolvedEpoch = localAsUtc - firstOffset * 60 * 1000;
+    const secondOffset = getTimeZoneOffsetMinutes(new Date(resolvedEpoch), resolved);
+    if (secondOffset !== firstOffset) {
+      resolvedEpoch = localAsUtc - secondOffset * 60 * 1000;
     }
-    return new Date(Date.UTC(year, month - 1, day, hour, minute, second));
+    return new Date(resolvedEpoch);
   } catch {
     return new Date(date.getTime());
   }

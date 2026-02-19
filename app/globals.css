@@ -992,6 +992,13 @@ a {
   transition: color 0.2s ease;
 }
 
+.reminder-uid-label {
+  max-width: min(64ch, 100%);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .reminder-meta-row {
   min-width: 0;
 }

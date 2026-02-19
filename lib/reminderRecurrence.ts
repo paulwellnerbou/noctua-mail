@@ -1,5 +1,6 @@
 import { RRule, RRuleSet } from "rrule";
 import {
+  fromCalendarTimeZoneWallDate,
   resolveCalendarTimeZoneId,
   toCalendarTimeZoneWallDate
 } from "./calendarTimezones";
@@ -62,25 +63,43 @@ function buildRecurrenceQuery(reminder: ReminderRuleLike): RecurrenceQuery | nul
       const date = new Date(value);
       return ruleTimeZone ? toCalendarTimeZoneWallDate(date, ruleTimeZone) : date;
     };
+    const fromRuleDate = (date: Date) =>
+      ruleTimeZone ? fromCalendarTimeZoneWallDate(date, ruleTimeZone) : date;
     const rule = new RRule({
       ...parsed.origOptions,
       dtstart: toRuleDate(startAtMs),
-      tzid: ruleTimeZone ?? parsed.origOptions.tzid
+      // Expand recurrence in wall-clock space so output is stable across process TZ.
+      tzid: ruleTimeZone ? undefined : parsed.origOptions.tzid
     });
     const recurrenceDates = normalizeReminderDateList(reminder.recurrenceDates);
     const excludedDates = normalizeReminderDateList(reminder.excludedDates);
-    if (!recurrenceDates?.length && !excludedDates?.length) {
-      return rule;
+    const recurrenceSource: RecurrenceQuery = (() => {
+      if (!recurrenceDates?.length && !excludedDates?.length) {
+        return rule;
+      }
+      const ruleSet = new RRuleSet();
+      ruleSet.rrule(rule);
+      recurrenceDates?.forEach((value) => {
+        ruleSet.rdate(toRuleDate(value));
+      });
+      excludedDates?.forEach((value) => {
+        ruleSet.exdate(toRuleDate(value));
+      });
+      return ruleSet;
+    })();
+    if (!ruleTimeZone) {
+      return recurrenceSource;
     }
-    const ruleSet = new RRuleSet();
-    ruleSet.rrule(rule);
-    recurrenceDates?.forEach((value) => {
-      ruleSet.rdate(toRuleDate(value));
-    });
-    excludedDates?.forEach((value) => {
-      ruleSet.exdate(toRuleDate(value));
-    });
-    return ruleSet;
+    return {
+      after(date: Date, inc?: boolean) {
+        const next = recurrenceSource.after(toCalendarTimeZoneWallDate(date, ruleTimeZone), inc);
+        return next ? fromRuleDate(next) : null;
+      },
+      before(date: Date, inc?: boolean) {
+        const previous = recurrenceSource.before(toCalendarTimeZoneWallDate(date, ruleTimeZone), inc);
+        return previous ? fromRuleDate(previous) : null;
+      }
+    };
   } catch {
     return null;
   }

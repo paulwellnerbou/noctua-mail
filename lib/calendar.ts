@@ -1,5 +1,6 @@
 import { RRule } from "rrule";
 import {
+  fromCalendarTimeZoneWallDate,
   isValidCalendarTimeZone,
   resolveCalendarTimeZoneId,
   toCalendarTimeZoneWallDate
@@ -114,56 +115,6 @@ export function formatCalendarEventDate(
   }
 }
 
-function getTimeZoneOffsetMinutes(date: Date, timeZone: string) {
-  try {
-    const parts = new Intl.DateTimeFormat("en-CA", {
-      timeZone,
-      hour12: false,
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit"
-    }).formatToParts(date);
-    const get = (type: string) => Number(parts.find((part) => part.type === type)?.value ?? NaN);
-    const year = get("year");
-    const month = get("month");
-    const day = get("day");
-    const hour = get("hour");
-    const minute = get("minute");
-    const second = get("second");
-    if (
-      [year, month, day, hour, minute, second].some((value) => Number.isNaN(value))
-    ) {
-      return 0;
-    }
-    const zonedAsUtc = Date.UTC(year, month - 1, day, hour, minute, second);
-    return Math.round((zonedAsUtc - date.getTime()) / 60000);
-  } catch {
-    return 0;
-  }
-}
-
-function createDateInTimeZone(
-  year: number,
-  month: number,
-  day: number,
-  hour: number,
-  minute: number,
-  second: number,
-  timeZone: string
-) {
-  const localAsUtc = Date.UTC(year, month - 1, day, hour, minute, second);
-  const firstOffset = getTimeZoneOffsetMinutes(new Date(localAsUtc), timeZone);
-  let resolved = localAsUtc - firstOffset * 60 * 1000;
-  const secondOffset = getTimeZoneOffsetMinutes(new Date(resolved), timeZone);
-  if (secondOffset !== firstOffset) {
-    resolved = localAsUtc - secondOffset * 60 * 1000;
-  }
-  return new Date(resolved);
-}
-
 function parseMultiDateValues(value: string, tzid?: string) {
   return value
     .split(",")
@@ -203,17 +154,12 @@ function parseCalendarDate(value: string, tzid?: string): { date?: Date; allDay:
     };
   }
   if (resolvedTimezone && isValidCalendarTimeZone(resolvedTimezone)) {
+    const wallDate = new Date(
+      Date.UTC(Number(y), Number(m) - 1, Number(d), Number(hh), Number(mm), Number(ss))
+    );
     return {
       allDay: false,
-      date: createDateInTimeZone(
-        Number(y),
-        Number(m),
-        Number(d),
-        Number(hh),
-        Number(mm),
-        Number(ss),
-        resolvedTimezone
-      ),
+      date: fromCalendarTimeZoneWallDate(wallDate, resolvedTimezone),
       tzid: resolvedTimezone
     };
   }

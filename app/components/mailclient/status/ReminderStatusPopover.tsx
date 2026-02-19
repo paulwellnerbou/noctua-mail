@@ -22,6 +22,7 @@ import {
   CALENDAR_REMINDER_LEAD_OPTIONS,
   clearCalendarReminders,
   deleteCalendarReminder,
+  getCalendarReminderEndAtMs,
   getCalendarReminderLeadOption,
   getCalendarReminderStartAtMs,
   type CalendarReminder
@@ -45,6 +46,62 @@ type ReminderStatusPopoverProps = {
 function formatEventStartTime(eventStartAtMs: number, timeZone?: string) {
   if (!Number.isFinite(eventStartAtMs)) return "";
   return formatCalendarEventDate(new Date(eventStartAtMs), { timeZone });
+}
+
+function formatEventTimeOnly(eventAtMs: number, timeZone?: string) {
+  if (!Number.isFinite(eventAtMs)) return "";
+  try {
+    return new Intl.DateTimeFormat(undefined, {
+      hour: "numeric",
+      minute: "2-digit",
+      ...(timeZone ? { timeZone } : {})
+    }).format(new Date(eventAtMs));
+  } catch {
+    return new Intl.DateTimeFormat(undefined, {
+      hour: "numeric",
+      minute: "2-digit"
+    }).format(new Date(eventAtMs));
+  }
+}
+
+function isSameEventDay(leftAtMs: number, rightAtMs: number, timeZone?: string) {
+  if (!Number.isFinite(leftAtMs) || !Number.isFinite(rightAtMs)) return false;
+  const formatter = new Intl.DateTimeFormat("en-CA", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    ...(timeZone ? { timeZone } : {})
+  });
+  return formatter.format(new Date(leftAtMs)) === formatter.format(new Date(rightAtMs));
+}
+
+function formatEventTimeRange(startAtMs: number, endAtMs: number, timeZone?: string) {
+  const startLabel = formatEventStartTime(startAtMs, timeZone);
+  if (!Number.isFinite(endAtMs) || endAtMs <= startAtMs) return startLabel;
+  const endLabel = isSameEventDay(startAtMs, endAtMs, timeZone)
+    ? formatEventTimeOnly(endAtMs, timeZone)
+    : formatEventStartTime(endAtMs, timeZone);
+  return `${startLabel} - ${endLabel}`;
+}
+
+function formatEventDuration(startAtMs: number, endAtMs: number) {
+  if (!Number.isFinite(startAtMs) || !Number.isFinite(endAtMs) || endAtMs <= startAtMs) return "";
+  const totalMinutes = Math.round((endAtMs - startAtMs) / 60_000);
+  const days = Math.floor(totalMinutes / (24 * 60));
+  const hours = Math.floor((totalMinutes % (24 * 60)) / 60);
+  const minutes = totalMinutes % 60;
+  const parts: string[] = [];
+  if (days > 0) parts.push(`${days}d`);
+  if (hours > 0) parts.push(`${hours}h`);
+  if (minutes > 0 || parts.length === 0) parts.push(`${minutes}m`);
+  return parts.join(" ");
+}
+
+function formatReminderUid(uid: string) {
+  const MAX_UID_DISPLAY_LENGTH = 40;
+  const normalizedUid = uid.trim();
+  if (normalizedUid.length <= MAX_UID_DISPLAY_LENGTH) return normalizedUid;
+  return `${normalizedUid.slice(0, 24)}...${normalizedUid.slice(-13)}`;
 }
 
 function formatReminderTimeZoneLabel(eventStartAtMs: number, timeZone?: string) {
@@ -81,8 +138,10 @@ export default function ReminderStatusPopover({
   const remindersStatusValue = (() => {
     if (!nextReminder) return "None";
     const reminderTitle = nextReminder.eventTitle || "Calendar event";
+    const eventStartAtMs = getCalendarReminderStartAtMs(nextReminder);
+    const displayAtMs = Number.isFinite(eventStartAtMs) ? eventStartAtMs : nextReminder.triggerAtMs;
     const time = new Intl.DateTimeFormat(undefined, { timeStyle: "short" }).format(
-      new Date(nextReminder.triggerAtMs)
+      new Date(displayAtMs)
     );
     return `${reminderCount} · ${reminderTitle} @ ${time}`;
   })();
@@ -324,8 +383,18 @@ export default function ReminderStatusPopover({
                     {group.items.map((reminder) => {
                       const isDeletingReminder = deletingReminderIds.has(reminder.id);
                       const startAtMs = getCalendarReminderStartAtMs(reminder);
+                      const endAtMs = getCalendarReminderEndAtMs(reminder);
                       const timeZoneLabel = formatReminderTimeZoneLabel(
                         startAtMs,
+                        reminder.startTimezone
+                      );
+                      const eventDurationLabel =
+                        Number.isFinite(endAtMs) && endAtMs > startAtMs
+                          ? formatEventDuration(startAtMs, endAtMs)
+                          : "";
+                      const eventTimeLabel = formatEventTimeRange(
+                        startAtMs,
+                        endAtMs,
                         reminder.startTimezone
                       );
                       const recurrenceSummary = buildReminderRecurrenceSummary(reminder);
@@ -360,18 +429,29 @@ export default function ReminderStatusPopover({
                                   {reminder.eventTitle}
                                 </Text>
                                 {reminder.eventUid ? (
-                                  <Text as="div" size="1" color="gray">
-                                    UID: {reminder.eventUid}
+                                  <Text
+                                    as="div"
+                                    size="1"
+                                    color="gray"
+                                    className="reminder-uid-label"
+                                    title={`UID: ${reminder.eventUid}`}
+                                  >
+                                    UID: {formatReminderUid(reminder.eventUid)}
                                   </Text>
                                 ) : null}
                                 <Flex align="center" gap="1" className="reminder-meta-row" wrap="wrap">
                                     <Clock size={12} className="reminder-icon" />
                                     <Text size="1" weight="bold" color="gray" highContrast>
-                                        {formatEventStartTime(startAtMs, reminder.startTimezone)}
+                                        {eventTimeLabel}
                                     </Text>
                                     {timeZoneLabel ? (
                                       <Text size="1" color="gray" className="reminder-timezone-label">
                                         {timeZoneLabel}
+                                      </Text>
+                                    ) : null}
+                                    {eventDurationLabel ? (
+                                      <Text size="1" color="gray">
+                                        (Duration: {eventDurationLabel})
                                       </Text>
                                     ) : null}
                                     <Text size="1" color="gray">
