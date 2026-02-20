@@ -409,6 +409,17 @@
   line-height: 1.4;
 }
 
+.bodyEmpty {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-2);
+  background: var(--mail-view-bg);
+  color: var(--gray-10);
+  min-height: 140px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
 .textView {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono",
     monospace;

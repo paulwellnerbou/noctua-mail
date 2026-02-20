@@ -397,6 +397,8 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
   const currentKeyRef = useRef("");
   const [loadingSource, setLoadingSource] = useState<Record<string, boolean>>({});
   const loadingSourceRef = useRef<Record<string, boolean>>({});
+  const [messageContentLoading, setMessageContentLoading] = useState<Record<string, boolean>>({});
+  const messageContentLoadingRef = useRef<Record<string, boolean>>({});
   const sourceFetchRef = useRef<Map<string, Promise<string | null>>>(new Map());
   const [messageTabs, setMessageTabs] = useState<
     Record<string, "html" | "text" | "markdown" | "source">
@@ -429,7 +431,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
   const lastUidNextByFolderRef = useRef<Record<string, number>>({});
   const lastNotifiedUidRef = useRef<Record<string, number>>({});
   const notifiedKeysRef = useRef<Set<string>>(new Set());
-  const autoHydrationInFlightRef = useRef<Map<string, Promise<boolean | null>>>(new Map());
+  const autoHydrationInFlightRef = useRef<Map<string, Promise<Message | null>>>(new Map());
   const autoHydrationAttemptAtRef = useRef<Record<string, number>>({});
   const lastDeleteReconcileAtRef = useRef<Record<string, number>>({});
   const localDeleteReconcileByFolderRef = useRef<Record<string, number>>({});
@@ -1626,6 +1628,36 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     },
     []
   );
+  const setMessageContentLoadingState = useCallback((messageId: string, loading: boolean) => {
+    setMessageContentLoading((prev) => {
+      const isLoading = Boolean(prev[messageId]);
+      if (loading && isLoading) return prev;
+      if (!loading && !isLoading) return prev;
+      const next = { ...prev };
+      if (loading) {
+        next[messageId] = true;
+      } else {
+        delete next[messageId];
+      }
+      return next;
+    });
+  }, []);
+  const updateThreadCacheWithMessage = useCallback((message: Message) => {
+    const threadId = message.threadId ?? message.messageId ?? message.id;
+    if (!threadId) return;
+    setThreadContentById((prev) => {
+      const cached = prev[threadId];
+      if (!cached || cached.length === 0) return prev;
+      let updated = false;
+      const nextThread = cached.map((item) => {
+        if (item.id !== message.id) return item;
+        updated = true;
+        return { ...item, ...message, groupKey: item.groupKey ?? message.groupKey };
+      });
+      if (!updated) return prev;
+      return { ...prev, [threadId]: nextThread };
+    });
+  }, []);
   const evictMessagesFromThreadCache = useCallback((messageIds: string[]) => {
     if (messageIds.length === 0) return;
     const idSet = new Set(messageIds);
@@ -1658,6 +1690,17 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
         return prev.filter((item) => !idSet.has(item.id));
       });
       setLoadingSource((prev) => {
+        let changed = false;
+        const next = { ...prev };
+        unique.forEach((id) => {
+          if (id in next) {
+            delete next[id];
+            changed = true;
+          }
+        });
+        return changed ? next : prev;
+      });
+      setMessageContentLoading((prev) => {
         let changed = false;
         const next = { ...prev };
         unique.forEach((id) => {
@@ -2594,12 +2637,14 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     activeMessageId,
     supportsThreads,
     collapsedThreads,
+    includeFlaggedGroup: !(searchScope === "folder" && isTrashFolder(activeFolderId)),
     searchScope,
     folders,
     messages,
     threadScopeMessages,
     visibleMessages,
     sortedMessages,
+    isFlaggedMessage,
     isTrashFolder,
     moveMessagesToFolder,
     selectionStore,
@@ -3797,7 +3842,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
   );
 
   const hydrateMessageOnOpenIfNeeded = useCallback(
-    async (message: Message) => {
+    (message: Message) => {
       const hasText = (message.body ?? "").trim().length > 0;
       const hasHtml = hasHtmlContent(message.htmlBody);
       if (hasText || hasHtml) return null;
@@ -3816,16 +3861,57 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
         return inFlight;
       }
       autoHydrationAttemptAtRef.current[key] = now;
-      const promise = (async () => {
-        const hydrated = await hydrateMessageFromServer(message, { silent: true });
-        return Boolean(hydrated);
-      })().finally(() => {
+      const promise = hydrateMessageFromServer(message, { silent: true }).finally(() => {
         autoHydrationInFlightRef.current.delete(key);
       });
       autoHydrationInFlightRef.current.set(key, promise);
       return promise;
     },
     [hydrateMessageFromServer]
+  );
+
+  const ensureMessageContent = useCallback(
+    async (message: Message, options?: { manual?: boolean }) => {
+      const resolved = messageById.get(message.id) ?? message;
+      const hasText = (resolved.body ?? "").trim().length > 0;
+      const hasHtml = hasHtmlContent(resolved.htmlBody);
+      if (hasText || hasHtml) return true;
+      if (messageContentLoadingRef.current[message.id]) return false;
+
+      if (!options?.manual) {
+        const hydrationPromise = hydrateMessageOnOpenIfNeeded(resolved);
+        if (!hydrationPromise) return false;
+        setMessageContentLoadingState(message.id, true);
+        try {
+          const hydrated = await hydrationPromise;
+          if (hydrated) {
+            updateThreadCacheWithMessage(hydrated);
+          }
+          return Boolean(hydrated);
+        } finally {
+          setMessageContentLoadingState(message.id, false);
+        }
+      }
+
+      setMessageContentLoadingState(message.id, true);
+      try {
+        const hydrated = await hydrateMessageFromServer(resolved);
+        if (hydrated) {
+          updateThreadCacheWithMessage(hydrated);
+        }
+        return Boolean(hydrated);
+      } finally {
+        setMessageContentLoadingState(message.id, false);
+      }
+    },
+    [
+      hasHtmlContent,
+      hydrateMessageFromServer,
+      hydrateMessageOnOpenIfNeeded,
+      messageById,
+      setMessageContentLoadingState,
+      updateThreadCacheWithMessage
+    ]
   );
 
   const jsonPayload = useMemo(() => {
@@ -3843,6 +3929,10 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
   useEffect(() => {
     loadingSourceRef.current = loadingSource;
   }, [loadingSource]);
+
+  useEffect(() => {
+    messageContentLoadingRef.current = messageContentLoading;
+  }, [messageContentLoading]);
 
   useEffect(() => {
     const stored = localStorage.getItem("noctua:theme");
@@ -4518,7 +4608,11 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
       if (!activeHasContent) {
         clearThreadContentError(threadId);
         setThreadContentLoading(threadId);
-        hydrationResult = await hydrateMessageOnOpenIfNeeded(activeMessage);
+        const hydrationPromise = hydrateMessageOnOpenIfNeeded(activeMessage);
+        if (hydrationPromise) {
+          const hydrated = await hydrationPromise;
+          hydrationResult = Boolean(hydrated);
+        }
       } else {
         clearThreadContentError(threadId);
       }
@@ -4773,6 +4867,12 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     });
   }, [activeMessage, threadMessages]);
 
+  const collapsedMessagesRef = useRef(collapsedMessages);
+  const threadMessagesRef = useRef(threadMessages);
+  const threadLoadScrollRef = useRef<{
+    threadId: string;
+    messageId: string;
+  } | null>(null);
   const scrollActiveMessageIntoView = useCallback((behavior: ScrollBehavior) => {
     if (!activeMessageId) return false;
     const target = messageRefs.current.get(activeMessageId);
@@ -4780,8 +4880,31 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     target.scrollIntoView({ behavior, block: "start" });
     return true;
   }, [activeMessageId]);
-  const collapsedMessagesRef = useRef(collapsedMessages);
-  const threadMessagesRef = useRef(threadMessages);
+  const scheduleActiveMessageScroll = useCallback(
+    (behavior: ScrollBehavior) => {
+      if (!activeMessageId) return () => {};
+      const hasExpandedSibling = threadMessagesRef.current.some(
+        (message) => message.id !== activeMessageId && !collapsedMessagesRef.current[message.id]
+      );
+      let frame = 0;
+      let settleTimer = 0;
+      const doScroll = () => {
+        frame = window.requestAnimationFrame(() => {
+          scrollActiveMessageIntoView(behavior);
+        });
+      };
+      if (hasExpandedSibling) {
+        settleTimer = window.setTimeout(doScroll, THREAD_COLLAPSE_SETTLE_MS);
+      } else {
+        doScroll();
+      }
+      return () => {
+        if (frame) window.cancelAnimationFrame(frame);
+        if (settleTimer) window.clearTimeout(settleTimer);
+      };
+    },
+    [activeMessageId, scrollActiveMessageIntoView]
+  );
   useEffect(() => {
     collapsedMessagesRef.current = collapsedMessages;
     threadMessagesRef.current = threadMessages;
@@ -4789,26 +4912,39 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
 
   useEffect(() => {
     if (!activeMessageId) return;
-    const hasExpandedSibling = threadMessagesRef.current.some(
-      (message) => message.id !== activeMessageId && !collapsedMessagesRef.current[message.id]
-    );
-    let frame = 0;
-    let settleTimer = 0;
-    const doScroll = () => {
-      frame = window.requestAnimationFrame(() => {
-        scrollActiveMessageIntoView("smooth");
-      });
-    };
-    if (hasExpandedSibling) {
-      settleTimer = window.setTimeout(doScroll, THREAD_COLLAPSE_SETTLE_MS);
-    } else {
-      doScroll();
+    return scheduleActiveMessageScroll("smooth");
+  }, [activeMessageId, scheduleActiveMessageScroll]);
+
+  useEffect(() => {
+    if (!activeMessageId) {
+      threadLoadScrollRef.current = null;
+      return;
     }
-    return () => {
-      if (frame) window.cancelAnimationFrame(frame);
-      if (settleTimer) window.clearTimeout(settleTimer);
-    };
-  }, [activeMessageId, scrollActiveMessageIntoView]);
+    const activeThreadId =
+      activeMessage?.threadId ?? activeMessage?.messageId ?? activeMessage?.id ?? "";
+    if (!activeThreadId) return;
+    if (threadContentLoading === activeThreadId) {
+      threadLoadScrollRef.current = {
+        threadId: activeThreadId,
+        messageId: activeMessageId
+      };
+      return;
+    }
+    if (threadContentLoading !== null) return;
+    const pending = threadLoadScrollRef.current;
+    if (!pending) return;
+    if (pending.threadId !== activeThreadId || pending.messageId !== activeMessageId) return;
+    if (threadMessages.length === 0) return;
+    if (!messageRefs.current.get(activeMessageId)) return;
+    threadLoadScrollRef.current = null;
+    return scheduleActiveMessageScroll("smooth");
+  }, [
+    activeMessage,
+    activeMessageId,
+    scheduleActiveMessageScroll,
+    threadContentLoading,
+    threadMessages.length
+  ]);
 
   useEffect(() => {
     const pane = listPaneRef.current;
@@ -7108,6 +7244,8 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
                       messageTabs,
                       setMessageTabs,
                       fetchSource,
+                      ensureMessageContent,
+                      messageContentLoading,
                       setMessageFontScale,
                       messageFontScale,
                       adjustMessageZoom,

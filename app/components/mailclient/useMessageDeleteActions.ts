@@ -4,8 +4,11 @@ import type React from "react";
 import { useCallback } from "react";
 import type { Folder, Message } from "@/lib/data";
 import type { SelectionStore } from "./messagelist/selectionStore";
+import { resolveCollapsedThreadSelectionTarget } from "./messagelist/listSelection";
 import type { MoveMessagesToFolder, UndoMoveTarget } from "./useMessageMoveActions";
 import { getMessageSubjectForNotice } from "./utils/messageMutation";
+
+const getThreadKey = (item: Message) => item.threadId ?? item.messageId ?? item.id;
 
 type DeleteResponse = {
   action: "deleted" | "moved";
@@ -40,12 +43,14 @@ type UseMessageDeleteActionsOptions = {
   activeMessageId: string;
   supportsThreads: boolean;
   collapsedThreads: Record<string, boolean>;
+  includeFlaggedGroup: boolean;
   searchScope: "folder" | "all";
   folders: Folder[];
   messages: Message[];
   threadScopeMessages: Message[];
   visibleMessages: Array<{ message: Message; threadId: string }>;
   sortedMessages: Message[];
+  isFlaggedMessage: (message: Message) => boolean;
   isTrashFolder: (folderId?: string | null) => boolean;
   moveMessagesToFolder: MoveMessagesToFolder;
   selectionStore: SelectionStore;
@@ -76,12 +81,14 @@ export function useMessageDeleteActions({
   activeMessageId,
   supportsThreads,
   collapsedThreads,
+  includeFlaggedGroup,
   searchScope,
   folders,
   messages,
   threadScopeMessages,
   visibleMessages,
   sortedMessages,
+  isFlaggedMessage,
   isTrashFolder,
   moveMessagesToFolder,
   selectionStore,
@@ -109,7 +116,6 @@ export function useMessageDeleteActions({
     },
     [isTrashFolder]
   );
-
 
   const clearSelectionState = useCallback(() => {
     selectionStore.clearSelection();
@@ -289,9 +295,42 @@ export function useMessageDeleteActions({
         const fallback = sortedMessages.find((msg) => !targetIds.has(msg.id));
         if (fallback) nextActiveId = fallback.id;
       }
+      if (nextActiveId && supportsThreads) {
+        const visibleEntry = visibleMessages.find((item) => item.message.id === nextActiveId);
+        const threadId = visibleEntry?.threadId;
+        if (threadId && (collapsedThreads[threadId] ?? true)) {
+          const threadMessages = threadScopeMessages.filter(
+            (item) => getThreadKey(item) === threadId && !targetIds.has(item.id)
+          );
+          if (threadMessages.length > 1) {
+            const flat = threadMessages.map((message) => ({ message, depth: 0 }));
+            const target =
+              threadMessages.find((message) => message.id === nextActiveId) ??
+              threadMessages[0];
+            const isFlaggedGroupForThread =
+              includeFlaggedGroup && threadMessages.some((message) => isFlaggedMessage(message));
+            const effective = resolveCollapsedThreadSelectionTarget({
+              flat,
+              target,
+              isFlaggedMessage,
+              options: { isFlaggedGroup: isFlaggedGroupForThread }
+            });
+            nextActiveId = effective.id;
+          }
+        }
+      }
       return { activeWasDeleted: true, nextActiveId };
     },
-    [activeMessageId, sortedMessages, visibleMessages]
+    [
+      activeMessageId,
+      collapsedThreads,
+      includeFlaggedGroup,
+      isFlaggedMessage,
+      sortedMessages,
+      supportsThreads,
+      threadScopeMessages,
+      visibleMessages
+    ]
   );
 
   const runDeleteTransaction = useCallback(
@@ -401,7 +440,6 @@ export function useMessageDeleteActions({
   const handleDeleteMessage = useCallback(
     async (message: Message, options?: { allowThreadDeletion?: boolean }) => {
       const allowThreadDeletion = options?.allowThreadDeletion ?? true;
-      const getThreadKey = (item: Message) => item.threadId ?? item.messageId ?? item.id;
       const threadId = getThreadKey(message);
       const threadItems = supportsThreads
         ? threadScopeMessages.filter(

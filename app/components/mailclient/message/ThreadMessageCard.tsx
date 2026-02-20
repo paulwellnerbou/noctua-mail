@@ -1,10 +1,11 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type React from "react";
 import {
   CalendarDays,
   Edit3,
   Image as ImageIcon,
   Paperclip,
+  RefreshCw,
   ZoomIn,
   ZoomOut
 } from "lucide-react";
@@ -64,6 +65,8 @@ type ThreadMessageCardProps = {
   messageTabs: Record<string, MessageTab>;
   setMessageTabs: React.Dispatch<React.SetStateAction<Record<string, MessageTab>>>;
   fetchSource: (id: string) => void;
+  ensureMessageContent: (message: Message, options?: { manual?: boolean }) => Promise<boolean>;
+  messageContentLoading: Record<string, boolean>;
   setMessageFontScale: React.Dispatch<React.SetStateAction<Record<string, number>>>;
   messageFontScale: Record<string, number>;
   adjustMessageZoom: (messageId: string, delta: number) => void;
@@ -106,6 +109,8 @@ export default function ThreadMessageCard({
   messageTabs,
   setMessageTabs,
   fetchSource,
+  ensureMessageContent,
+  messageContentLoading,
   setMessageFontScale,
   messageFontScale,
   adjustMessageZoom,
@@ -137,6 +142,8 @@ export default function ThreadMessageCard({
   const hasHtml = hasHtmlContent(message.htmlBody);
   const hasText = Boolean(message.body?.trim());
   const hasSource = Boolean(message.hasSource);
+  const isContentMissing = !hasHtml && !hasText;
+  const contentLoading = bodyLoading || Boolean(messageContentLoading[message.id]);
   const fontScale = messageFontScale[message.id] ?? 1;
   const zoomValue = messageZoom[message.id] ?? 1;
   const folderBadgeIds = message.folderId ? [message.folderId] : [];
@@ -163,6 +170,21 @@ export default function ThreadMessageCard({
       fetchSource(message.id);
     }
   };
+
+  useEffect(() => {
+    if (isCollapsed) return;
+    if (!isContentMissing) return;
+    if (contentLoading) return;
+    if (bodyLoadError) return;
+    void ensureMessageContent(message);
+  }, [
+    bodyLoadError,
+    contentLoading,
+    ensureMessageContent,
+    isCollapsed,
+    isContentMissing,
+    message
+  ]);
 
   const updateFontScale = (delta: number) => {
     setMessageFontScale((prev) => {
@@ -276,6 +298,25 @@ export default function ThreadMessageCard({
     </div>
   );
 
+  const renderLoadContentPanel = () => (
+    <div className={styles.bodyEmpty} role="status" aria-live="polite">
+      <IconButton
+        size="2"
+        variant="soft"
+        color="gray"
+        title="Load message content"
+        aria-label="Load message content"
+        onClick={() => ensureMessageContent(message, { manual: true })}
+      >
+        <RefreshCw size={18} />
+      </IconButton>
+    </div>
+  );
+
+  const renderTextOrEmpty = () => (isContentMissing ? renderLoadContentPanel() : renderTextPanel(message.body));
+  const renderMarkdownOrEmpty = () =>
+    isContentMissing ? renderLoadContentPanel() : renderMarkdownPanel(message.body, message.id);
+
   const wrapPanel = (key: string, node: React.ReactNode) => (
     <div key={key} className={styles.panel}>
       {node}
@@ -283,14 +324,14 @@ export default function ThreadMessageCard({
   );
 
   let content: React.ReactNode = null;
-  if (bodyLoadError && !hasHtml && !hasText) {
+  if (bodyLoadError && isContentMissing) {
     content = wrapPanel(
       "load-error",
       <div className={styles.bodyLoadError} role="alert" aria-live="polite">
         <span className={styles.bodyLoadErrorLabel}>{bodyLoadError}</span>
       </div>
     );
-  } else if (bodyLoading && !hasHtml && !hasText) {
+  } else if (contentLoading && isContentMissing) {
     content = wrapPanel(
       "loading",
       <div className={styles.bodyLoading} role="status" aria-live="polite">
@@ -317,9 +358,9 @@ export default function ThreadMessageCard({
       currentTab === "html"
         ? renderHtmlPanel()
         : currentTab === "text"
-          ? renderTextPanel(message.body)
+          ? renderTextOrEmpty()
           : currentTab === "markdown"
-            ? renderMarkdownPanel(message.body, message.id)
+            ? renderMarkdownOrEmpty()
             : renderSourcePanel(message.id);
     content = (
       <>
@@ -359,9 +400,9 @@ export default function ThreadMessageCard({
     );
     const panel =
       currentTab === "text"
-        ? renderTextPanel(message.body)
+        ? renderTextOrEmpty()
         : currentTab === "markdown"
-          ? renderMarkdownPanel(message.body, message.id)
+          ? renderMarkdownOrEmpty()
           : renderSourcePanel(message.id);
     content = (
       <>
@@ -380,8 +421,8 @@ export default function ThreadMessageCard({
     );
     const panel =
       currentTab === "markdown"
-        ? renderMarkdownPanel(message.body, message.id)
-        : renderTextPanel(message.body);
+        ? renderMarkdownOrEmpty()
+        : renderTextOrEmpty();
     content = (
       <>
         {renderTabsBar(tabs, currentTab)}
