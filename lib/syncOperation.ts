@@ -46,7 +46,8 @@ export type SyncOperationProgressPhase =
   | "fetching"
   | "finalizing"
   | "done"
-  | "failed";
+  | "failed"
+  | "retrying";
 
 export type SyncOperationProgress = {
   accountId: string;
@@ -60,6 +61,8 @@ export type SyncOperationProgress = {
   estimatedTotal?: number;
   percent?: number;
   message?: string;
+  retryAttempt?: number;
+  maxRetries?: number;
   updatedAt: number;
 };
 
@@ -217,8 +220,6 @@ export async function runSyncOperationBatched(
   const allReferenceIds = new Set<string>();
   const newNotificationMessages: SyncNotificationMessage[] = [];
   const calendarMutations: CalendarReminderMutation[] = [];
-  const deferredThreadIds = new Set<string>();
-  let deferredNeedsFullThreadRecompute = false;
   let latestEstimatedTotal: number | undefined;
 
   emitProgress({
@@ -302,23 +303,17 @@ export async function runSyncOperationBatched(
 
     // Write this batch to database
     // Only replace existing messages on the FIRST batch during full sync
-    // to avoid deleting previous batches
-    const upsertResult = await upsertMessages(
+    // to avoid deleting previous batches.
+    // Always recompute threads after each batch so messages become visible
+    // progressively — without this, messages are invisible until the very
+    // end of a full sync because the UI queries the `threads` table.
+    await upsertMessages(
       account.id,
       payload.folderId ?? null,
       strippedMessages,
       Boolean(payload.fullSync && batch.batchNumber === 1),
-      { recomputeThreads: !payload.fullSync }
+      { recomputeThreads: true }
     );
-    if (payload.fullSync) {
-      if (upsertResult.requiresFullRecompute) {
-        deferredNeedsFullThreadRecompute = true;
-      }
-      upsertResult.affectedThreadIds.forEach((threadId) => {
-        if (threadId) deferredThreadIds.add(threadId);
-      });
-    }
-
     // Track processed IDs
     strippedMessages.forEach((msg) => allProcessedIds.add(msg.id));
 
@@ -388,12 +383,11 @@ export async function runSyncOperationBatched(
     }
   }
 
-  if (payload.fullSync) {
-    if (deferredNeedsFullThreadRecompute) {
-      await recomputeThreadsForAccount(account.id);
-    } else if (deferredThreadIds.size > 0) {
-      await recomputeThreadsForAccount(account.id, Array.from(deferredThreadIds));
-    }
+  if (payload.fullSync && totalCount > 0) {
+    // Final full recompute fixes cross-batch thread assignments (e.g. a reply
+    // arriving in an earlier batch than its parent). Per-batch recomputes above
+    // already made messages visible; this pass ensures thread roots are correct.
+    await recomputeThreadsForAccount(account.id);
   }
 
   // Clean up deleted messages if full sync

@@ -83,6 +83,7 @@ type UseSearchStateOptions = {
   relatedQueryId: string | null;
   virtualDefaultExcludedFolderIdsKey: string;
   apiFetch: (url: string, options?: RequestInit) => Promise<Response>;
+  syncCompletionVersion?: number;
 };
 
 export type SearchState = {
@@ -119,7 +120,8 @@ export function useSearchState(options: UseSearchStateOptions) {
     relatedRestoreRef,
     relatedQueryId,
     virtualDefaultExcludedFolderIdsKey,
-    apiFetch
+    apiFetch,
+    syncCompletionVersion
   } = options;
 
   const trimmedQuery = query.trim();
@@ -242,7 +244,7 @@ export function useSearchState(options: UseSearchStateOptions) {
       window.clearTimeout(timer);
       controller.abort();
     };
-  }, [activeAccountId, apiFetch, virtualDefaultExcludedFolderIdsKey]);
+  }, [activeAccountId, apiFetch, virtualDefaultExcludedFolderIdsKey, syncCompletionVersion]);
 
   // Auto-clear virtual folder when conditions change
   useEffect(() => {

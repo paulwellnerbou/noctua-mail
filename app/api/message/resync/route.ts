@@ -30,7 +30,7 @@ export async function POST(request: Request) {
   const existing = await getMessageById(payload.accountId, payload.messageId);
   if (!existing) {
     return NextResponse.json(
-      { ok: false, message: "Message not found in local cache." },
+      { ok: false, message: "Message not found in local cache. If a sync is in progress, retry later." },
       { status: 404 }
     );
   }

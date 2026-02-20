@@ -26,7 +26,8 @@ const SYNC_PHASE_LABELS: Record<SyncJobProgress["phase"], string> = {
   fetching: "Fetching",
   finalizing: "Finalizing",
   done: "Done",
-  failed: "Failed"
+  failed: "Failed",
+  retrying: "Retrying"
 };
 
 function formatSyncPercent(percent?: number) {
@@ -51,7 +52,18 @@ function formatSyncCount(progress: SyncJobProgress) {
   return `${processed}`;
 }
 
+function formatRetryLabel(progress: SyncJobProgress) {
+  const { retryAttempt, maxRetries } = progress;
+  if (typeof retryAttempt === "number" && typeof maxRetries === "number") {
+    return `Retrying (${retryAttempt}/${maxRetries})…`;
+  }
+  return "Retrying…";
+}
+
 function formatSyncProgressSummary(progress: SyncJobProgress) {
+  if (progress.phase === "retrying") {
+    return formatRetryLabel(progress);
+  }
   const countLabel = formatSyncCount(progress);
   const percentLabel = formatSyncPercent(progress.percent);
   const metrics = [percentLabel, countLabel].filter(Boolean).join(" · ");
@@ -122,6 +134,9 @@ export default function ProcessStatusPopover({
   const latestSyncStatusValue = (() => {
     if (latestSyncProgress) {
       const scopeLabel = resolveSyncScopeLabel(latestSyncProgress, folderById);
+      if (latestSyncProgress.phase === "retrying") {
+        return `${formatRetryLabel(latestSyncProgress)} ${scopeLabel}`;
+      }
       const percentLabel = formatSyncPercent(latestSyncProgress.percent);
       return percentLabel ? `Syncing ${scopeLabel} (${percentLabel})` : `Syncing ${scopeLabel}...`;
     }

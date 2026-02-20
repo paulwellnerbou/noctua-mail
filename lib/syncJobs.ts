@@ -371,13 +371,18 @@ function spawnSyncWorker(job: SyncJob, clientId?: string) {
             phase: parsed.progress.phase,
             processed: parsed.progress.processed,
             estimatedTotal: parsed.progress.estimatedTotal,
-            percent
+            percent,
+            retryAttempt: parsed.progress.retryAttempt,
+            maxRetries: parsed.progress.maxRetries,
+            message: parsed.progress.message
           })}`);
           return;
         }
         streamedResult = parsed.result;
       });
-      const stderrTextPromise = readPipedOutput(child.stderr);
+      const stderrTextPromise = readPipedOutput(child.stderr, (line) => {
+        if (line.trim()) console.error(`[sync-worker] ${line}`);
+      });
       try {
         const [exitCode, stdoutText, stderrRaw] = await Promise.all([
           child.exited,

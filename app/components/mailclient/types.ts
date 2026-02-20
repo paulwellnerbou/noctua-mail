@@ -38,7 +38,8 @@ export type SyncJobProgressPhase =
   | "fetching"
   | "finalizing"
   | "done"
-  | "failed";
+  | "failed"
+  | "retrying";
 
 export type SyncJobProgress = {
   jobId: string;
@@ -53,5 +54,7 @@ export type SyncJobProgress = {
   estimatedTotal?: number;
   percent?: number;
   message?: string;
+  retryAttempt?: number;
+  maxRetries?: number;
   updatedAt: number;
 };

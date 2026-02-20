@@ -59,6 +59,7 @@ type UseMessageDeleteActionsOptions = {
   shouldKeepMessageInResults?: (message: Message) => boolean;
   setPendingMessageActions: React.Dispatch<React.SetStateAction<Set<string>>>;
   setActiveMessageId: React.Dispatch<React.SetStateAction<string>>;
+  setViewMessage: (message: Message | null) => void;
   refreshFolders: () => Promise<unknown>;
   apiFetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
   readErrorMessage: (res: Response) => Promise<string>;
@@ -97,6 +98,7 @@ export function useMessageDeleteActions({
   shouldKeepMessageInResults,
   setPendingMessageActions,
   setActiveMessageId,
+  setViewMessage,
   refreshFolders,
   apiFetch,
   readErrorMessage,
@@ -388,11 +390,14 @@ export function useMessageDeleteActions({
         }
         if (activeWasDeleted) {
           if (nextActiveId) {
+            const nextActiveMessage = messages.find((m) => m.id === nextActiveId) ?? null;
             setActiveMessageId(nextActiveId);
+            setViewMessage(nextActiveMessage);
             selectionStore.setSelection(new Set([nextActiveId]), nextActiveId);
             lastSelectedIdRef.current = nextActiveId;
           } else {
             setActiveMessageId("");
+            setViewMessage(null);
             selectionStore.clearSelection();
           }
         } else if (options.clearSelectionWhenActiveRemains) {
@@ -431,6 +436,7 @@ export function useMessageDeleteActions({
       resolveDeleteNextActiveId,
       selectionStore,
       setActiveMessageId,
+      setViewMessage,
       setPendingMessageActions,
       onMessagesRemoved,
       markDeleteReconcileSuppression

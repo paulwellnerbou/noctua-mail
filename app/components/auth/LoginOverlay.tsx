@@ -35,16 +35,6 @@ export default function LoginOverlay({ onAuthenticated }: Props) {
   const [inviteOpen, setInviteOpen] = useState(false);
   const [signupOpen, setSignupOpen] = useState(false);
   const [editingAccount, setEditingAccount] = useState<Account | null>(null);
-  const [imapDetecting, setImapDetecting] = useState(false);
-  const [smtpDetecting, setSmtpDetecting] = useState(false);
-  const [imapProbe, setImapProbe] = useState<{ tls?: boolean; starttls?: boolean } | null>(
-    null
-  );
-  const [smtpProbe, setSmtpProbe] = useState<{ tls?: boolean; starttls?: boolean } | null>(
-    null
-  );
-  const [imapSecurity, setImapSecurity] = useState<"tls" | "starttls" | "none">("tls");
-  const [smtpSecurity, setSmtpSecurity] = useState<"tls" | "starttls" | "none">("tls");
   const [error, setError] = useState<string | null>(null);
   const [inviteError, setInviteError] = useState<string | null>(null);
   const [signupError, setSignupError] = useState<string | null>(null);
@@ -74,12 +64,10 @@ export default function LoginOverlay({ onAuthenticated }: Props) {
     }
   };
 
-  const submitSignup = async () => {
-    if (!editingAccount) return;
+  const submitSignup = async (account: Account) => {
     setSubmitting(true);
     setSignupError(null);
     try {
-      const account = editingAccount;
       const authPassword = account.imap.password || account.smtp.password || password;
       const res = await fetch("/api/auth/signup", {
         method: "POST",
@@ -131,71 +119,6 @@ export default function LoginOverlay({ onAuthenticated }: Props) {
     setSignupOpen(true);
   };
 
-  const runProbe = async (protocol: "imap" | "smtp") => {
-    if (!editingAccount) return;
-    if (protocol === "imap") setImapDetecting(true);
-    if (protocol === "smtp") setSmtpDetecting(true);
-    const config = protocol === "imap" ? editingAccount.imap : editingAccount.smtp;
-    const controller = new AbortController();
-    const timer = window.setTimeout(() => controller.abort(), 6000);
-    try {
-      const response = await fetch("/api/probe", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ protocol, host: config.host, port: config.port }),
-        signal: controller.signal
-      });
-      if (!response.ok) return;
-      const data = (await response.json()) as { supportsTLS: boolean; supportsStartTLS: boolean };
-      if (protocol === "imap") {
-        setImapProbe({ tls: data.supportsTLS, starttls: data.supportsStartTLS });
-        if (data.supportsTLS) {
-          setImapSecurity("tls");
-          setEditingAccount({
-            ...editingAccount,
-            imap: { ...editingAccount.imap, secure: true, port: 993 }
-          });
-        } else if (data.supportsStartTLS) {
-          setImapSecurity("starttls");
-          setEditingAccount({
-            ...editingAccount,
-            imap: { ...editingAccount.imap, secure: false, port: 143 }
-          });
-        } else {
-          setImapSecurity("none");
-          setEditingAccount({
-            ...editingAccount,
-            imap: { ...editingAccount.imap, secure: false, port: 143 }
-          });
-        }
-      } else {
-        setSmtpProbe({ tls: data.supportsTLS, starttls: data.supportsStartTLS });
-        if (data.supportsTLS) {
-          setSmtpSecurity("tls");
-          setEditingAccount({
-            ...editingAccount,
-            smtp: { ...editingAccount.smtp, secure: true, port: 465 }
-          });
-        } else if (data.supportsStartTLS) {
-          setSmtpSecurity("starttls");
-          setEditingAccount({
-            ...editingAccount,
-            smtp: { ...editingAccount.smtp, secure: false, port: 587 }
-          });
-        } else {
-          setSmtpSecurity("none");
-          setEditingAccount({
-            ...editingAccount,
-            smtp: { ...editingAccount.smtp, secure: false, port: 25 }
-          });
-        }
-      }
-    } finally {
-      window.clearTimeout(timer);
-      setImapDetecting(false);
-      setSmtpDetecting(false);
-    }
-  };
 
   return (
     <>
@@ -331,14 +254,6 @@ export default function LoginOverlay({ onAuthenticated }: Props) {
             isOpen={signupOpen}
             manageTab="account"
             isExistingAccount={false}
-            imapDetecting={imapDetecting}
-            smtpDetecting={smtpDetecting}
-            imapProbe={imapProbe}
-            smtpProbe={smtpProbe}
-            imapSecurity={imapSecurity}
-            smtpSecurity={smtpSecurity}
-            onImapSecurityChange={setImapSecurity}
-            onSmtpSecurityChange={setSmtpSecurity}
             onClose={() => {
               setSignupOpen(false);
               setInviteOpen(false);
@@ -346,9 +261,6 @@ export default function LoginOverlay({ onAuthenticated }: Props) {
             onTabChange={() => {}}
             onSave={submitSignup}
             onDelete={() => {}}
-            onUpdateAccount={setEditingAccount}
-            onUpdateSettings={() => {}}
-            onRunProbe={runProbe}
           />
         </>
       )}

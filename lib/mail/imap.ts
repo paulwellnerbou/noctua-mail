@@ -1240,6 +1240,10 @@ async function* fetchNewModeMessages(
   startUid: number,
   uidNext: number | null
 ): AsyncGenerator<NewModeFetchedMessage> {
+  const mailboxExists = client.mailbox && client.mailbox.exists;
+  if (typeof mailboxExists === "number" && mailboxExists <= 0) {
+    return;
+  }
   if (typeof uidNext === "number" && Number.isFinite(uidNext)) {
     const endUid = Math.max(startUid - 1, uidNext - 1);
     for (let uid = startUid; uid <= endUid; uid += 1) {
@@ -1533,6 +1537,17 @@ export async function* syncImapAccountBatched(
       }
     }
 
+    try {
+      await logImapOp("logout", { ...logContext }, () => client.logout());
+    } catch {
+      // ignore logout errors — connection may have already been closed
+    }
+    return;
+  }
+
+  if (typeof mailboxExists === "number" && mailboxExists <= 0) {
+    const finalBatch = flushBatch(true);
+    if (finalBatch) yield finalBatch;
     await logImapOp("logout", { ...logContext }, () => client.logout());
     return;
   }
@@ -1587,197 +1602,11 @@ export async function* syncImapAccountBatched(
   const finalBatch = flushBatch(true);
   if (finalBatch) yield finalBatch;
 
-  await logImapOp("logout", { ...logContext }, () => client.logout());
-}
-
-export async function syncImapAccount(
-  account: Account,
-  mailboxPath?: string,
-  mode: "full" | "recent" | "new" = "recent",
-  clientId?: string
-): Promise<ImapSyncResult> {
-  const logContext = buildLogContext(account, clientId);
-  const client = buildImapClient(account, logContext);
-
-  await logImapOp("connect", { host: account.imap.host, ...logContext }, () =>
-    client.connect()
-  );
-
-  const folderList = await logImapOp("list", { ...logContext }, () => client.list());
-  const folders: Folder[] = mapImapFolders(account, folderList);
-  const folderSpecialUseByPath = buildFolderSpecialUseByPath(folderList as Array<{
-    path?: string | null;
-    specialUse?: string | null;
-  }>);
-
-  const mailboxToOpen = mailboxPath ?? "INBOX";
-  const mailboxSpecialUse = resolveFolderSpecialUse(folderSpecialUseByPath, mailboxToOpen);
-  const linearModel = await getCategoryLinearModel(account.id);
-  const mailbox = await logImapOp("mailboxOpen", { mailbox: mailboxToOpen, ...logContext }, () =>
-    client.mailboxOpen(mailboxToOpen)
-  );
-  const mailboxUidNext = toFiniteNumber((mailbox as { uidNext?: unknown })?.uidNext);
-  const mailboxUidValidity = (mailbox as { uidValidity?: unknown })?.uidValidity;
-
-  // Validate and fix any existing UID mismatches before syncing
-  const folderId = buildFolderId(account.id, mailboxToOpen);
-  await validateAndFixMailboxHighestUid(account, folderId, mailboxToOpen);
-
-  const messages: Message[] = [];
-  const now = new Date();
-  const since = new Date(now.getTime() - 1000 * 60 * 60 * 24 * 30);
-  const fetchQuery = {
-    source: true,
-    flags: true,
-    envelope: true,
-    internalDate: true,
-    bodyStructure: true,
-    headers: true
-  } as const;
-
-  if (mode === "new") {
-    const newRange = await resolveNewModeRange({
-      account,
-      mailboxPath: mailboxToOpen,
-      mailboxUidNext,
-      mailboxUidValidity
-    });
-    logNewSyncDecision({
-      accountId: account.id,
-      folder: mailboxToOpen,
-      uidNext: newRange.uidNext,
-      skip: newRange.skip,
-      reason: newRange.reason
-    });
-    if (newRange.skip) {
-      await logImapOp("logout", { ...logContext }, () => client.logout());
-      return { messages, folders };
-    }
-    const rangeLabel = describeNewModeFetchRange(newRange.startUid, newRange.uidNext);
-    const fetchStrategy =
-      typeof newRange.uidNext === "number" && Number.isFinite(newRange.uidNext)
-        ? "fetch-one"
-        : "fetch-range";
-    const start = Date.now();
-    let count = 0;
-    for await (const message of fetchNewModeMessages(client, newRange.startUid, newRange.uidNext)) {
-      const attachmentsWithContent = await resolveAttachmentsForNewMode(
-        client,
-        message.uid,
-        message.bodyStructure,
-        account
-      );
-      const source = message.source;
-      const nextMessage = source
-        ? await parseImapMessage(
-            account,
-            mailboxToOpen,
-            {
-              uid: message.uid,
-              source,
-              flags: message.flags,
-              envelope: message.envelope,
-              internalDate: message.internalDate,
-              bodyStructure: message.bodyStructure,
-              headers: message.headers
-            },
-            client,
-            linearModel,
-            mailboxSpecialUse
-          )
-        : buildLightweightImapMessage({
-            account,
-            mailboxToOpen,
-            folderSpecialUse: mailboxSpecialUse,
-            uid: message.uid,
-            flags: message.flags,
-            envelope: message.envelope,
-            internalDate: message.internalDate,
-            attachments: attachmentsWithContent,
-            headers: message.headers,
-            linearModel
-          });
-      messages.push(
-        source
-          ? {
-              ...nextMessage,
-              attachments: mergeAttachmentContentForNewMode(
-                nextMessage.attachments,
-                attachmentsWithContent
-              )
-            }
-          : nextMessage
-      );
-      count += 1;
-    }
-    const logger = getImapLogger();
-    if (logger !== false) {
-      logger.info?.({
-        op: "fetch",
-        mailbox: mailboxToOpen,
-        range: rangeLabel,
-        strategy: fetchStrategy,
-        count,
-        ms: Date.now() - start
-      });
-    }
-    // Only update highestUid if we actually processed messages
-    // Use the actual latest UID from the database, not server's uidNext
-    if (count > 0) {
-      const actualLatestUid = await getLatestMessageUid(account.id, mailboxToOpen);
-      if (actualLatestUid !== null) {
-        await persistMailboxHighestUid({
-          account,
-          folderId: buildFolderId(account.id, mailboxToOpen),
-          mailboxPath: mailboxToOpen,
-          highestUid: actualLatestUid,
-          uidValidity: mailboxUidValidity
-        });
-      }
-    }
+  try {
     await logImapOp("logout", { ...logContext }, () => client.logout());
-    return { messages, folders };
+  } catch {
+    // ignore logout errors — connection may have already been closed
   }
-
-  const searchCriteria = mode === "full" ? { all: true } : { since };
-
-  const start = Date.now();
-  let count = 0;
-  for await (const message of client.fetch(searchCriteria, fetchQuery)) {
-    if (!message.source) continue;
-    const parsedMessage = await parseImapMessage(
-      account,
-      mailboxToOpen,
-      {
-        uid: message.uid,
-        source: message.source as Buffer,
-        flags: message.flags,
-        envelope: message.envelope as ImapEnvelope | undefined,
-        internalDate: (message as any).internalDate,
-        bodyStructure: (message as any).bodyStructure as ImapBodyStructure | undefined,
-        headers: (message as any).headers as Buffer | undefined
-      },
-      client,
-      linearModel,
-      mailboxSpecialUse
-    );
-    messages.push(parsedMessage);
-    count += 1;
-  }
-
-  const logger = getImapLogger();
-  if (logger !== false) {
-    logger.info?.({
-      op: "fetch",
-      mailbox: mailboxToOpen,
-      criteria: mode === "full" ? "all" : "since",
-      count,
-      ms: Date.now() - start
-    });
-  }
-
-  await logImapOp("logout", { ...logContext }, () => client.logout());
-  return { messages, folders };
 }
 
 export async function syncImapMessage(

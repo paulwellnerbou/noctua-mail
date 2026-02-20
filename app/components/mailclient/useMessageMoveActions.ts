@@ -63,6 +63,7 @@ type UseMessageMoveActionsOptions = {
   shouldKeepMessageInResults?: (message: Message) => boolean;
   setPendingMessageActions: React.Dispatch<React.SetStateAction<Set<string>>>;
   setActiveMessageId: React.Dispatch<React.SetStateAction<string>>;
+  setViewMessage: (message: Message | null) => void;
   apiFetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
   readErrorMessage: (res: Response) => Promise<string>;
   reportError: (message: string) => void;
@@ -90,6 +91,7 @@ export function useMessageMoveActions({
   shouldKeepMessageInResults,
   setPendingMessageActions,
   setActiveMessageId,
+  setViewMessage,
   apiFetch,
   readErrorMessage,
   reportError,
@@ -239,8 +241,10 @@ export function useMessageMoveActions({
             : false;
           if (!activeStillVisible) {
             setActiveMessageId("");
+            setViewMessage(null);
           } else if (resolvedActiveId !== activeMessageId) {
             setActiveMessageId(resolvedActiveId);
+            setViewMessage(activeUpdated);
           }
         }
         if (clearSelectionOnSuccess) {
@@ -323,6 +327,7 @@ export function useMessageMoveActions({
       selectionStore,
       shouldKeepMessageInResults,
       setActiveMessageId,
+      setViewMessage,
       setMessages,
       setPendingMessageActions,
       undoMoveOperation,

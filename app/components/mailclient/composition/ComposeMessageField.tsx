@@ -127,6 +127,8 @@ export default function ComposeMessageField({
   handleComposeAttachmentPick,
   removeComposeAttachment
 }: ComposeMessageFieldProps) {
+  const hasQuotedHtml = composeQuotedHtml.trim().length > 0;
+  const hasQuotedParts = Boolean(composeQuotedParts);
   const switchComposeTab = (nextTab: ComposeTab) => {
     if (nextTab === composeTab) return;
     const lastEdited = composeLastEditedRef.current;
@@ -181,12 +183,12 @@ export default function ComposeMessageField({
   const toggleIncludeOriginal = () => {
     setComposeIncludeOriginal((prev) => {
       const next = !prev;
-      if (!next) {
-        setComposeQuotedHtml("");
-      } else if (composeQuotedParts) {
+      if (next && composeQuotedParts) {
         const nextHtml = assembleQuotedHtml(composeQuotedParts, composeQuoteHtml);
         setComposeQuotedHtml(nextHtml);
         setComposeHtmlText(stripHtml(nextHtml));
+      } else if (!next && composeQuotedParts) {
+        setComposeQuotedHtml("");
       }
       return next;
     });
@@ -431,7 +433,7 @@ export default function ComposeMessageField({
           />
         </div>
       )}
-      {(composeTab === "html" || composeTab === "markdown") && composeQuotedParts && (
+      {(composeTab === "html" || composeTab === "markdown") && (hasQuotedHtml || hasQuotedParts) && (
         <Collapsible.Root
           className={composeStyles.composeQuotedBlock}
           open={composeIncludeOriginal}
@@ -473,7 +475,7 @@ export default function ComposeMessageField({
                   color="gray"
                   title="Edit quoted HTML"
                   onClick={handleEditQuotedHtml}
-                  disabled={!composeQuotedHtml.trim()}
+                  disabled={!hasQuotedHtml}
                 >
                   Edit quoted HTML
                 </Button>
@@ -485,7 +487,7 @@ export default function ComposeMessageField({
                   title={
                     composeStripImages ? "Images already stripped" : "Strip images from quoted HTML"
                   }
-                  disabled={composeStripImages}
+                  disabled={!hasQuotedParts || composeStripImages}
                   onClick={handleStripImages}
                 >
                   Strip images
@@ -497,6 +499,7 @@ export default function ComposeMessageField({
                   variant={composeQuoteHtml ? "solid" : "soft"}
                   title="Toggle HTML quoting"
                   onClick={toggleQuoteHtml}
+                  disabled={!hasQuotedParts}
                 >
                   Quote HTML
                 </Button>

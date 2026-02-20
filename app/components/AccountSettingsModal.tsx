@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { X } from "lucide-react";
 import { Dialog, Flex, IconButton, Tabs } from "@radix-ui/themes";
 import type { Account, AccountSettings } from "@/lib/data";
@@ -9,26 +10,26 @@ import AdminTabContent from "@/app/components/account-settings/tabs/AdminTabCont
 
 export type ManageTab = "account" | "signatures" | "preferences" | "categorization" | "admin";
 
+function deriveImapSecurity(imap: Account["imap"]): "tls" | "starttls" | "none" {
+  if (imap.secure) return "tls";
+  return imap.port === 143 ? "starttls" : "none";
+}
+
+function deriveSmtpSecurity(smtp: Account["smtp"]): "tls" | "starttls" | "none" {
+  if (smtp.secure) return "tls";
+  if (smtp.port === 587) return "starttls";
+  return "none";
+}
+
 type Props = {
   editingAccount: Account;
   isOpen: boolean;
   manageTab: ManageTab;
   isExistingAccount: boolean;
-  imapDetecting: boolean;
-  smtpDetecting: boolean;
-  imapProbe: { tls?: boolean; starttls?: boolean } | null;
-  smtpProbe: { tls?: boolean; starttls?: boolean } | null;
-  imapSecurity: "tls" | "starttls" | "none";
-  smtpSecurity: "tls" | "starttls" | "none";
-  onImapSecurityChange: (value: "tls" | "starttls" | "none") => void;
-  onSmtpSecurityChange: (value: "tls" | "starttls" | "none") => void;
   onClose: () => void;
   onTabChange: (tab: ManageTab) => void;
-  onSave: () => void;
+  onSave: (account: Account) => void;
   onDelete: () => void;
-  onUpdateAccount: (next: Account) => void;
-  onUpdateSettings: (next: AccountSettings) => void;
-  onRunProbe: (protocol: "imap" | "smtp") => void;
   isAdminUser?: boolean;
   onNotifySuccess?: (title: string, description: string) => void;
   apiFetch?: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
@@ -36,31 +37,90 @@ type Props = {
 };
 
 export default function AccountSettingsModal({
-  editingAccount,
+  editingAccount: initialAccount,
   isOpen,
   manageTab,
   isExistingAccount,
-  imapDetecting,
-  smtpDetecting,
-  imapProbe,
-  smtpProbe,
-  imapSecurity,
-  smtpSecurity,
-  onImapSecurityChange,
-  onSmtpSecurityChange,
   onClose,
   onTabChange,
   onSave,
   onDelete,
-  onUpdateAccount,
-  onUpdateSettings,
-  onRunProbe,
   isAdminUser = false,
   onNotifySuccess,
   apiFetch,
   readErrorMessage
 }: Props) {
+  const [localAccount, setLocalAccount] = useState<Account>(initialAccount);
+  const [imapSecurity, setImapSecurity] = useState<"tls" | "starttls" | "none">(() =>
+    deriveImapSecurity(initialAccount.imap)
+  );
+  const [smtpSecurity, setSmtpSecurity] = useState<"tls" | "starttls" | "none">(() =>
+    deriveSmtpSecurity(initialAccount.smtp)
+  );
+  const [imapDetecting, setImapDetecting] = useState(false);
+  const [smtpDetecting, setSmtpDetecting] = useState(false);
+  const [imapProbe, setImapProbe] = useState<{ tls?: boolean; starttls?: boolean } | null>(null);
+  const [smtpProbe, setSmtpProbe] = useState<{ tls?: boolean; starttls?: boolean } | null>(null);
+
   if (!isOpen) return null;
+
+  const fetchFn = apiFetch ?? fetch;
+
+  const handleSave = () => onSave(localAccount);
+
+  const handleUpdateSettings = (next: AccountSettings) => {
+    setLocalAccount((prev) => ({
+      ...prev,
+      settings: { ...(prev.settings ?? {}), ...next }
+    }));
+  };
+
+  const runProbe = async (protocol: "imap" | "smtp") => {
+    if (protocol === "imap") setImapDetecting(true);
+    if (protocol === "smtp") setSmtpDetecting(true);
+    const config = protocol === "imap" ? localAccount.imap : localAccount.smtp;
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => controller.abort(), 6000);
+    try {
+      const response = await fetchFn("/api/probe", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ protocol, host: config.host, port: config.port }),
+        signal: controller.signal
+      });
+      if (!response.ok) return;
+      const data = (await response.json()) as { supportsTLS: boolean; supportsStartTLS: boolean };
+      if (protocol === "imap") {
+        setImapProbe({ tls: data.supportsTLS, starttls: data.supportsStartTLS });
+        if (data.supportsTLS) {
+          setImapSecurity("tls");
+          setLocalAccount((prev) => ({ ...prev, imap: { ...prev.imap, secure: true, port: 993 } }));
+        } else if (data.supportsStartTLS) {
+          setImapSecurity("starttls");
+          setLocalAccount((prev) => ({ ...prev, imap: { ...prev.imap, secure: false, port: 143 } }));
+        } else {
+          setImapSecurity("none");
+          setLocalAccount((prev) => ({ ...prev, imap: { ...prev.imap, secure: false, port: 143 } }));
+        }
+      } else {
+        setSmtpProbe({ tls: data.supportsTLS, starttls: data.supportsStartTLS });
+        if (data.supportsTLS) {
+          setSmtpSecurity("tls");
+          setLocalAccount((prev) => ({ ...prev, smtp: { ...prev.smtp, secure: true, port: 465 } }));
+        } else if (data.supportsStartTLS) {
+          setSmtpSecurity("starttls");
+          setLocalAccount((prev) => ({ ...prev, smtp: { ...prev.smtp, secure: false, port: 587 } }));
+        } else {
+          setSmtpSecurity("none");
+          setLocalAccount((prev) => ({ ...prev, smtp: { ...prev.smtp, secure: false, port: 25 } }));
+        }
+      }
+    } finally {
+      window.clearTimeout(timer);
+      setImapDetecting(false);
+      setSmtpDetecting(false);
+    }
+  };
 
   return (
     <Dialog.Root
@@ -116,7 +176,7 @@ export default function AccountSettingsModal({
 
             <Tabs.Content value="account" style={{ flex: "1 1 auto", minHeight: 0, overflow: "hidden" }}>
               <AccountTabContent
-                editingAccount={editingAccount}
+                editingAccount={localAccount}
                 isExistingAccount={isExistingAccount}
                 imapDetecting={imapDetecting}
                 smtpDetecting={smtpDetecting}
@@ -124,43 +184,43 @@ export default function AccountSettingsModal({
                 smtpProbe={smtpProbe}
                 imapSecurity={imapSecurity}
                 smtpSecurity={smtpSecurity}
-                onImapSecurityChange={onImapSecurityChange}
-                onSmtpSecurityChange={onSmtpSecurityChange}
+                onImapSecurityChange={setImapSecurity}
+                onSmtpSecurityChange={setSmtpSecurity}
                 onClose={onClose}
-                onSave={onSave}
+                onSave={handleSave}
                 onDelete={onDelete}
-                onUpdateAccount={onUpdateAccount}
-                onRunProbe={onRunProbe}
+                onUpdateAccount={setLocalAccount}
+                onRunProbe={runProbe}
               />
             </Tabs.Content>
 
             <Tabs.Content value="signatures" style={{ flex: "1 1 auto", minHeight: 0, overflow: "hidden" }}>
               <SignaturesTabContent
-                editingAccount={editingAccount}
+                editingAccount={localAccount}
                 isExistingAccount={isExistingAccount}
-                onUpdateSettings={onUpdateSettings}
+                onUpdateSettings={handleUpdateSettings}
                 onClose={onClose}
-                onSave={onSave}
+                onSave={handleSave}
               />
             </Tabs.Content>
 
             <Tabs.Content value="preferences" style={{ flex: "1 1 auto", minHeight: 0, overflow: "hidden" }}>
               <PreferencesTabContent
-                editingAccount={editingAccount}
+                editingAccount={localAccount}
                 isExistingAccount={isExistingAccount}
-                onUpdateSettings={onUpdateSettings}
+                onUpdateSettings={handleUpdateSettings}
                 onClose={onClose}
-                onSave={onSave}
+                onSave={handleSave}
               />
             </Tabs.Content>
 
             <Tabs.Content value="categorization" style={{ flex: "1 1 auto", minHeight: 0, overflow: "hidden" }}>
               <CategorizationTabContent
-                accountId={editingAccount.id}
+                accountId={localAccount.id}
                 isActive={manageTab === "categorization"}
                 isExistingAccount={isExistingAccount}
                 onClose={onClose}
-                onSave={onSave}
+                onSave={handleSave}
                 onModelResetSuccess={() =>
                   onNotifySuccess?.(
                     "Categorization model reset",
