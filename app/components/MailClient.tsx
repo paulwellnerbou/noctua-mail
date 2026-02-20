@@ -1830,6 +1830,17 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     },
     [applyDeleteReconcileSuppression, draftsFolder?.id]
   );
+  const applyMoveReconcileSuppression = useCallback(
+    (targets: Message[]) => {
+      const ids = targets.map((target) => target.id);
+      applyDeleteReconcileSuppression({
+        targets,
+        messageIds: ids,
+        fallbackFolderId: activeFolderId
+      });
+    },
+    [activeFolderId, applyDeleteReconcileSuppression]
+  );
   const removeDraftFromUi = useCallback(
     (draftId: string | null) => {
       if (!draftId) return;
@@ -2695,7 +2706,8 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     undoMoveOperation,
     noticeSuccessTimeout: NOTICE_TIMEOUTS.success,
     onMoveComplete: evictMessageCaches,
-    markMessagesMutated
+    markMessagesMutated,
+    applyDeleteReconcileSuppression: applyMoveReconcileSuppression
   });
 
   const { handleDeleteMessage, handleDeleteMessagesByIds } = useMessageDeleteActions({
@@ -2736,6 +2748,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
 
   const handleArchiveMessage = async (message: Message) => {
     try {
+      applyMoveReconcileSuppression([message]);
       const res = await apiFetch("/api/message/archive", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -2882,6 +2895,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
   const handleMarkSpam = async (message: Message) => {
     setPendingMessageActions((prev) => new Set(prev).add(message.id));
     try {
+      applyMoveReconcileSuppression([message]);
       const res = await apiFetch("/api/message/spam", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -2976,6 +2990,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
   const handleMarkNotSpam = async (message: Message) => {
     setPendingMessageActions((prev) => new Set(prev).add(message.id));
     try {
+      applyMoveReconcileSuppression([message]);
       const res = await apiFetch("/api/message/not-spam", {
         method: "POST",
         headers: { "Content-Type": "application/json" },

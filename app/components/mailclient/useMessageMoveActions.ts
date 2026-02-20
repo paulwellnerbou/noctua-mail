@@ -76,6 +76,11 @@ type UseMessageMoveActionsOptions = {
   noticeSuccessTimeout: number;
   onMoveComplete?: (messageIds: string[]) => void;
   markMessagesMutated?: () => void;
+  applyDeleteReconcileSuppression?: (input: {
+    targets?: Message[];
+    messageIds?: Array<string | null | undefined>;
+    fallbackFolderId?: string | null;
+  }) => void;
 };
 
 export function useMessageMoveActions({
@@ -99,7 +104,8 @@ export function useMessageMoveActions({
   undoMoveOperation,
   noticeSuccessTimeout,
   onMoveComplete,
-  markMessagesMutated
+  markMessagesMutated,
+  applyDeleteReconcileSuppression
 }: UseMessageMoveActionsOptions) {
 
   const clearSelectionState = useCallback(() => {
@@ -121,17 +127,15 @@ export function useMessageMoveActions({
       if (!ids.length) return null;
       const uniqueIds = Array.from(new Set(ids));
       const idSet = new Set(uniqueIds);
-      const undoTargets: UndoMoveTarget[] = messages
+      const sourceTargets = messages
         .filter((item) => item.accountId === activeAccountId && idSet.has(item.id))
-        .map((item) => ({
-          messageId: item.id,
-          restoreFolderId: item.folderId
-        }));
+      const undoTargets: UndoMoveTarget[] = sourceTargets.map((item) => ({
+        messageId: item.id,
+        restoreFolderId: item.folderId
+      }));
       const singleTarget =
         uniqueIds.length === 1
-          ? messages.find(
-              (item) => item.accountId === activeAccountId && item.id === uniqueIds[0]
-            ) ?? null
+          ? sourceTargets[0] ?? null
           : null;
       const singleSubject =
         uniqueIds.length === 1 ? getMessageSubjectForNotice(singleTarget) : undefined;
@@ -141,6 +145,11 @@ export function useMessageMoveActions({
       const showNotice = options?.showNotice ?? true;
       const reportErrorOnFailure = options?.reportErrorOnFailure ?? true;
       try {
+        applyDeleteReconcileSuppression?.({
+          targets: sourceTargets,
+          messageIds: uniqueIds,
+          fallbackFolderId: activeFolderId
+        });
         if (managePendingState) {
           setPendingMessageActions((prev) => new Set([...prev, ...uniqueIds]));
         }
@@ -332,7 +341,8 @@ export function useMessageMoveActions({
       setPendingMessageActions,
       undoMoveOperation,
       onMoveComplete,
-      markMessagesMutated
+      markMessagesMutated,
+      applyDeleteReconcileSuppression
     ]
   );
 
