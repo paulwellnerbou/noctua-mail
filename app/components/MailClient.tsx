@@ -2707,7 +2707,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     noticeSuccessTimeout: NOTICE_TIMEOUTS.success,
     onMoveComplete: evictMessageCaches,
     markMessagesMutated,
-    applyDeleteReconcileSuppression: applyMoveReconcileSuppression
+    applyDeleteReconcileSuppression
   });
 
   const { handleDeleteMessage, handleDeleteMessagesByIds } = useMessageDeleteActions({
