@@ -419,6 +419,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
   const categoryRecomputePollTimerRef = useRef<number | null>(null);
   const categoryRecomputePollInFlightRef = useRef(false);
   const categoryRecomputeJobIdRef = useRef<string | null>(null);
+  const autoRepairAttemptedFolderIdsRef = useRef<Set<string>>(new Set());
   const [mailCheckMode, setMailCheckMode] = useState<"idle" | "polling">("polling");
   const [streamMode, setStreamMode] = useState<"stream" | "polling" | "idle">("polling");
   const pendingJumpMessageIdRef = useRef<string | null>(null);
@@ -458,6 +459,8 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     undefined
   );
   const initialSyncStatusRef = useRef<Record<string, "running" | "done">>({});
+  const recomputeThreadsRef = useRef<() => Promise<void>>(async () => {});
+  const syncFolderWithBackgroundRef = useRef<(folderId: string, awaitDeep?: boolean, allowRefresh?: boolean, mode?: "recent" | "new" | "full") => Promise<unknown>>(async () => null);
   const inboxFolderRef = useRef<Folder | null>(null);
   const relatedRestoreRef = useRef<{
     queryId: string;
@@ -1595,6 +1598,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     !checkIsThreadExcludedFolder(activeFolderId);
   const [threadRelatedMessages, setThreadRelatedMessages] = useState<Message[]>([]);
   const [threadContentById, setThreadContentById] = useState<Record<string, Message[]>>({});
+  const [threadEvictVersion, setThreadEvictVersion] = useState(0);
   const [threadContentLoading, setThreadContentLoading] = useState<string | null>(null);
   const [threadContentErrorById, setThreadContentErrorById] = useState<Record<string, string>>({});
   const threadContentByIdRef = useRef(threadContentById);
@@ -4701,7 +4705,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
       if (supportsThreads && cachedThread && cachedThread.length > 0 && activeHasContent) {
         return;
       }
-      if (!supportsThreads && activeHasContent) {
+      if (!supportsThreads && activeHasContent && cachedThread && cachedThread.length > 0) {
         return;
       }
 
@@ -4770,6 +4774,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     activeMessage,
     groupBy,
     supportsThreads,
+    threadEvictVersion,
     clearThreadContentError,
     hydrateMessageOnOpenIfNeeded,
     setThreadContentError,
@@ -4995,7 +5000,10 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
   useEffect(() => {
     if (!activeMessageId) return;
     return scheduleActiveMessageScroll("smooth");
-  }, [activeMessageId, scheduleActiveMessageScroll]);
+    // threadRelatedMessages.length is included so that when cross-folder messages load
+    // asynchronously and are inserted before the active message in the thread (displacing
+    // the scroll position), we re-scroll to keep the active message in view.
+  }, [activeMessageId, scheduleActiveMessageScroll, threadRelatedMessages.length]);
 
   useEffect(() => {
     if (!activeMessageId) {
@@ -5520,6 +5528,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
       threadCacheOrderRef.current = threadCacheOrderRef.current.filter((id) => id !== threadId);
       return next;
     });
+    setThreadEvictVersion((v) => v + 1);
     clearThreadContentError(threadId);
   }, [clearThreadContentError]);
 
@@ -5786,6 +5795,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     }
     return syncResult;
   };
+  syncFolderWithBackgroundRef.current = syncFolderWithBackground;
 
   const syncNewlyDetectedFolders = async (
     knownFolderIds: Set<string>,
@@ -6014,6 +6024,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
       setIsRecomputingThreads(false);
     }
   };
+  recomputeThreadsRef.current = recomputeThreads;
 
   const recomputeCategories = async () => {
     if (!activeAccountId) return;
@@ -6102,6 +6113,43 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     }
     return null;
   };
+
+  // Auto-repair empty folders: if a folder shows no messages after loading,
+  // check if raw messages exist in DB (threading issue → recompute) or not (missing → sync).
+  useEffect(() => {
+    if (searchScope !== "folder" || !activeFolderId || !activeAccountId) return;
+    if (listLoading || emptyListSyncing || isRecomputingThreads) return;
+    if (filteredMessages.length > 0) return;
+    if (autoRepairAttemptedFolderIdsRef.current.has(activeFolderId)) return;
+    autoRepairAttemptedFolderIdsRef.current.add(activeFolderId);
+    const folderId = activeFolderId;
+    const accountId = activeAccountId;
+    void (async () => {
+      try {
+        const res = await apiFetch(
+          `/api/messages?accountId=${encodeURIComponent(accountId)}&folderId=${encodeURIComponent(folderId)}&pageSize=1`
+        );
+        if (!res.ok) return;
+        const data = (await res.json()) as { total?: number };
+        if (typeof data?.total === "number" && data.total > 0) {
+          await recomputeThreadsRef.current();
+        } else {
+          await syncFolderWithBackgroundRef.current(folderId, false, true, "full");
+        }
+      } catch {
+        // silently ignore auto-repair errors
+      }
+    })();
+  }, [
+    searchScope,
+    activeFolderId,
+    activeAccountId,
+    apiFetch,
+    listLoading,
+    emptyListSyncing,
+    isRecomputingThreads,
+    filteredMessages.length
+  ]);
 
   useEffect(() => {
     if (authState !== "ok") return;

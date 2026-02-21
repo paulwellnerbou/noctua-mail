@@ -137,10 +137,18 @@ export default function ComposeMessageField({
       composeEditorInitRef.current = false;
       if (lastEdited === "text") {
         const currentBody = composeTextRef.current?.value || composeBody;
-        const nextHtml = currentBody ? `<p>${escapeHtml(currentBody).replace(/\n/g, "<br>")}</p>` : "";
+        // Strip the quoted text suffix so it isn't duplicated in the HTML editor and the quoted block below
+        let userText = currentBody;
+        if (composeQuotedText) {
+          const suffix = `\n\n${composeQuotedText}`;
+          if (userText.endsWith(suffix)) {
+            userText = userText.slice(0, -suffix.length);
+          }
+        }
+        const nextHtml = userText ? `<p>${escapeHtml(userText).replace(/\n/g, "<br>")}</p>` : "";
         setComposeHtml(nextHtml);
         setComposeHtmlText(stripHtml(nextHtml));
-        setComposeBody(currentBody);
+        setComposeBody(userText);
       } else if (lastEdited === "markdown") {
         const currentMd = composeMarkdown;
         const nextHtml = markdownToHtml(currentMd);

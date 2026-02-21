@@ -155,6 +155,7 @@ export function useComposeController({
         const glue = base ? "\n\n" : "";
         return `${base}${glue}${next.text}`;
       });
+      compose.setComposeEditorReset((prev) => prev + 1);
     } else if (compose.composeTab === "markdown") {
       compose.setComposeMarkdown((prev) => {
         let base = prev;
@@ -167,6 +168,7 @@ export function useComposeController({
         const glue = base ? "\n\n" : "";
         return `${base}${glue}${next.text}`;
       });
+      compose.setComposeEditorReset((prev) => prev + 1);
     } else {
       compose.setComposeHtml((prev) => {
         let base = prev;
@@ -421,11 +423,11 @@ export function useComposeController({
       } else {
         const replyParts = buildQuotedHtmlPartsFromText(message.body ?? "", replyHeader);
         const replySource = assembleQuotedHtml(replyParts, true);
-        compose.setComposeBody(formatQuotedBody(message.body ?? "", replyHeader).trimStart());
+        compose.setComposeBody("");
         compose.setComposeHtml("");
         compose.setComposeHtmlText("");
         compose.setComposeQuotedHtml(replySource);
-        compose.setComposeQuotedText("");
+        compose.setComposeQuotedText(formatQuotedBody(message.body ?? "", replyHeader).trimStart());
         compose.setComposeQuotedParts(replyParts);
         compose.setComposeTab("text");
         composeLastEditedRef.current = "text";
@@ -485,11 +487,11 @@ export function useComposeController({
       } else {
         const replyParts = buildQuotedHtmlPartsFromText(message.body ?? "", replyHeader);
         const replySource = assembleQuotedHtml(replyParts, true);
-        compose.setComposeBody(formatQuotedBody(message.body ?? "", replyHeader).trimStart());
+        compose.setComposeBody("");
         compose.setComposeHtml("");
         compose.setComposeHtmlText("");
         compose.setComposeQuotedHtml(replySource);
-        compose.setComposeQuotedText("");
+        compose.setComposeQuotedText(formatQuotedBody(message.body ?? "", replyHeader).trimStart());
         compose.setComposeQuotedParts(replyParts);
         compose.setComposeTab("text");
         composeLastEditedRef.current = "text";
@@ -525,11 +527,11 @@ export function useComposeController({
       } else {
         const forwardParts = buildQuotedHtmlPartsFromText(message.body ?? "", forwardHeader);
         const forwardSource = assembleQuotedHtml(forwardParts, true);
-        compose.setComposeBody(formatQuotedBody(message.body ?? "", forwardHeader).trimStart());
+        compose.setComposeBody("");
         compose.setComposeHtml("");
         compose.setComposeHtmlText("");
         compose.setComposeQuotedHtml(forwardSource);
-        compose.setComposeQuotedText("");
+        compose.setComposeQuotedText(formatQuotedBody(message.body ?? "", forwardHeader).trimStart());
         compose.setComposeQuotedParts(forwardParts);
         compose.setComposeTab("text");
         composeLastEditedRef.current = "text";
