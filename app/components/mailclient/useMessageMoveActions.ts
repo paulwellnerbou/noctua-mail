@@ -207,13 +207,18 @@ export function useMessageMoveActions({
               imapUid: queued ? undefined : item.imapUid
             };
             const updated = remapMessageReferenceIds(updatedBase, item.id, resolvedId);
-            const keep = shouldKeepMessageInResults
-              ? shouldKeepMessageInResults(updated)
-              : !(
-                  searchScope === "folder" &&
-                  activeFolderId &&
-                  updated.folderId !== activeFolderId
-                );
+            // For explicitly moved messages in folder scope, always remove from the
+            // current folder view — don't let the cross-folder thread exception keep
+            // them visible after they've been intentionally moved elsewhere.
+            const movedToOtherFolder =
+              searchScope === "folder" &&
+              activeFolderId &&
+              updated.folderId !== activeFolderId;
+            const keep = movedToOtherFolder
+              ? false
+              : shouldKeepMessageInResults
+                ? shouldKeepMessageInResults(updated)
+                : true;
             changed = true;
             if (!keep) return;
             nextById.set(updated.id, updated);
