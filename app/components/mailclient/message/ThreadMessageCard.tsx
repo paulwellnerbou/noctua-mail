@@ -140,7 +140,7 @@ export default function ThreadMessageCard({
   const priorityColor = getPriorityBadgeColor(message.priority);
   const isCollapsed = Boolean(collapsedMessages[message.id]);
   const hasHtml = hasHtmlContent(message.htmlBody);
-  const hasText = Boolean(message.body?.trim());
+  const hasText = Boolean(message.body && message.body !== "");
   const hasSource = Boolean(message.hasSource);
   const isContentMissing = !hasHtml && !hasText;
   const contentLoading = bodyLoading || Boolean(messageContentLoading[message.id]);

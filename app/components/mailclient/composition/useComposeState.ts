@@ -69,6 +69,7 @@ export function useComposeState() {
   const pendingDraftSaveRef = useRef<{ payload: DraftSavePayload; hash: string } | null>(null);
   const composeDraftIdRef = useRef<string | null>(null);
   const lastDraftHashRef = useRef<string>("");
+  const currentDraftHashRef = useRef<string>("");
   const composeBaselineHashRef = useRef<string | null>(null);
   const composeDirtyRef = useRef(false);
   const composeEditorInitRef = useRef(false);
@@ -163,6 +164,7 @@ export function useComposeState() {
     pendingDraftSaveRef,
     composeDraftIdRef,
     lastDraftHashRef,
+    currentDraftHashRef,
     composeBaselineHashRef,
     composeDirtyRef,
     composeEditorInitRef,

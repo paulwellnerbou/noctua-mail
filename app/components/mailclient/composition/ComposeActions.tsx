@@ -33,14 +33,10 @@ export default function ComposeActions({
   return (
     <div className={styles.composeFooter}>
       <div className={styles.composeDraftMeta}>
-        {composeDraftId && (
-          <Text size="1" color="gray" className={styles.composeDraft}>
-            Draft: {composeDraftId}
-          </Text>
-        )}
         {composeOpen && (
           <Text
             size="1"
+            title={composeDraftId ? `Draft: ${composeDraftId}` : undefined}
             className={`${styles.composeDraftStatus} ${
               draftSaveError
                 ? styles.composeDraftStatusError

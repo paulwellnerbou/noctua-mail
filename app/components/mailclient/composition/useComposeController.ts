@@ -126,6 +126,7 @@ export function useComposeController({
     composeDirtyRef,
     composeSignatureRef,
     lastDraftHashRef,
+    currentDraftHashRef,
     composeBaselineHashRef,
     composeEditorInitRef,
     composeLastEditedRef
@@ -286,6 +287,7 @@ export function useComposeController({
 
   const openCompose = (mode: ComposeMode, message?: Message, asNew = false) => {
     lastDraftHashRef.current = "";
+    currentDraftHashRef.current = "";
     composeBaselineHashRef.current = null;
     composeDirtyRef.current = false;
     composeEditorInitRef.current = false;

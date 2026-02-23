@@ -345,11 +345,6 @@
   color: var(--red-11);
 }
 
-.composeDraft {
-  font-size: 11px;
-  color: var(--muted);
-}
-
 .composeActions {
   display: flex;
   align-items: center;
