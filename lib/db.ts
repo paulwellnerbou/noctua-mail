@@ -36,7 +36,7 @@ import {
 } from "./messageFlags";
 import { normalizeAccountDateFormat } from "./dateFormatting";
 import { withDbWriteRetry } from "./dbWriteRetry";
-import { randomUUID } from "crypto";
+import { createHash, randomUUID } from "crypto";
 import { normalizeReminderDateList, resolveNextReminderOccurrence } from "./reminderRecurrence";
 import { resolveCalendarTimeZoneId } from "./calendarTimezones";
 import { collectCalendarReminderMutationsFromCalendarInvite } from "./calendarReminderMutations";
@@ -2436,6 +2436,47 @@ function normalizeCategoryManualState(value?: string | null): CategoryManualStat
   return null;
 }
 
+function buildMessageCollisionVariantId(
+  baseId: string,
+  mailboxPath?: string | null,
+  imapUid?: number | null
+) {
+  const normalizedMailboxPath = (mailboxPath ?? "").trim().toLowerCase();
+  const normalizedUid =
+    typeof imapUid === "number" && Number.isFinite(imapUid) ? String(imapUid) : "";
+  const suffix = createHash("sha1")
+    .update(`${baseId}|${normalizedMailboxPath}|${normalizedUid}`)
+    .digest("hex")
+    .slice(0, 12);
+  return `${baseId}-${suffix}`;
+}
+
+function isSameMailboxMessageCopy(
+  existing: { folderId?: string | null; mailboxPath?: string | null; imapUid?: number | null },
+  incoming: Pick<Message, "folderId" | "mailboxPath" | "imapUid">
+) {
+  if (existing.folderId && incoming.folderId && existing.folderId !== incoming.folderId) {
+    return false;
+  }
+  const existingUid =
+    typeof existing.imapUid === "number" && Number.isFinite(existing.imapUid)
+      ? existing.imapUid
+      : null;
+  const incomingUid =
+    typeof incoming.imapUid === "number" && Number.isFinite(incoming.imapUid)
+      ? incoming.imapUid
+      : null;
+  if (existingUid !== null && incomingUid !== null) {
+    return existingUid === incomingUid;
+  }
+  const existingMailbox = (existing.mailboxPath ?? "").trim().toLowerCase();
+  const incomingMailbox = (incoming.mailboxPath ?? "").trim().toLowerCase();
+  if (existingMailbox && incomingMailbox) {
+    return existingMailbox === incomingMailbox;
+  }
+  return true;
+}
+
 function normalizeSubjectLine(subject?: string | null) {
   let value = (subject ?? "").trim().toLowerCase();
   if (!value) return "";
@@ -2466,6 +2507,12 @@ type MessageSystemFlagState = {
 };
 
 type CategoryManualState = "cleared";
+
+type UpsertFileMove = {
+  previousMessageId: string;
+  nextMessageId: string;
+  attachmentIds: string[];
+};
 
 function deriveSystemFlagState(flags: string[]): MessageSystemFlagState {
   const hasFlag = (flag: string) =>
@@ -4139,6 +4186,7 @@ export async function upsertMessages(
   options: { recomputeThreads?: boolean } = {}
 ) {
   return withDbWriteRetry("upsertMessages", async () => {
+    const { moveMessageFiles } = await import("./storage");
     const shouldRecomputeThreads = options.recomputeThreads ?? true;
     const UPSERT_BATCH_SIZE = 200;
     const yieldToEventLoop = () =>
@@ -4171,6 +4219,11 @@ export async function upsertMessages(
       `DELETE FROM message_calendar_events WHERE accountId = ? AND messageId = ?`
     );
     const deleteMessageById = db.prepare(`DELETE FROM messages WHERE accountId = ? AND id = ?`);
+    const findMessageById = db.prepare(
+      `SELECT id, folderId, mailboxPath, imapUid
+       FROM messages
+       WHERE accountId = ? AND id = ?`
+    );
     const findFolderMessageDuplicates = db.prepare(
       `SELECT id, threadId
        FROM messages
@@ -4273,14 +4326,35 @@ export async function upsertMessages(
       loadManualCategoryStatesForMessageIds(nextMessages.map((message) => message.id));
     }
     const dedupedThreadIds = new Set<string>();
-    const upsertBatch = db.transaction((batch: Message[], shouldDeleteAttachments: boolean) => {
+    const upsertBatch = db.transaction(
+      (batch: Message[], shouldDeleteAttachments: boolean): UpsertFileMove[] => {
+      const fileMoves: UpsertFileMove[] = [];
       batch.forEach((message) => {
+        let rowId = message.id;
+        const existingById = findMessageById.get(accountId, rowId) as
+          | { id: string; folderId?: string | null; mailboxPath?: string | null; imapUid?: number | null }
+          | undefined;
+        if (existingById && !isSameMailboxMessageCopy(existingById, message)) {
+          rowId = buildMessageCollisionVariantId(
+            message.id,
+            message.mailboxPath ?? message.folderId,
+            message.imapUid ?? null
+          );
+          const attachmentIds = Array.from(
+            new Set((message.attachments ?? []).map((attachment) => attachment.id).filter(Boolean))
+          );
+          fileMoves.push({
+            previousMessageId: message.id,
+            nextMessageId: rowId,
+            attachmentIds
+          });
+        }
         if (message.messageId) {
           const duplicates = findFolderMessageDuplicates.all(
             accountId,
             message.folderId,
             message.messageId,
-            message.id
+            rowId
           ) as Array<{ id: string; threadId: string | null }>;
           duplicates.forEach((row) => {
             deleteAttachmentsForMessage.run(row.id);
@@ -4293,9 +4367,9 @@ export async function upsertMessages(
           });
         }
         if (shouldDeleteAttachments) {
-          deleteAttachmentsForMessage.run(message.id);
+          deleteAttachmentsForMessage.run(rowId);
         }
-        deleteCalendarEventsForMessage.run(accountId, message.id);
+        deleteCalendarEventsForMessage.run(accountId, rowId);
         const normalizedFlags = normalizeImapFlags(message.flags);
         const hasRawFlags = Array.isArray(message.flags);
         const normalizedSystemFlags = deriveSystemFlagState(normalizedFlags);
@@ -4314,7 +4388,10 @@ export async function upsertMessages(
           : typeof message.unread === "boolean"
             ? message.unread
             : !seen;
-        const manualCategoryState = manualCategoryStateByMessageId.get(message.id) ?? null;
+        const manualCategoryState =
+          manualCategoryStateByMessageId.get(rowId) ??
+          manualCategoryStateByMessageId.get(message.id) ??
+          null;
         const category =
           manualCategoryState === "cleared" ? null : normalizeCategory(message.category) ?? null;
         const categoryScore =
@@ -4329,8 +4406,24 @@ export async function upsertMessages(
             : message.categorySignals;
         const emailMatch = message.from.match(/<([^>]+)>/);
         const fromEmail = emailMatch ? emailMatch[1] : null;
+        const encodedMessageId = encodeURIComponent(message.id);
+        const encodedRowId = encodeURIComponent(rowId);
+        const rewriteAttachmentUrl = (url?: string) => {
+          if (!url || rowId === message.id) return url ?? null;
+          return url.replaceAll(
+            `messageId=${encodedMessageId}`,
+            `messageId=${encodedRowId}`
+          );
+        };
+        const rewrittenHtmlBody =
+          rowId !== message.id && message.htmlBody
+            ? message.htmlBody.replaceAll(
+                `messageId=${encodedMessageId}`,
+                `messageId=${encodedRowId}`
+              )
+            : message.htmlBody;
         insertMessage.run(
-          message.id,
+          rowId,
           message.accountId,
           message.folderId,
           message.threadId,
@@ -4353,7 +4446,7 @@ export async function upsertMessages(
           message.date,
           message.dateValue,
           message.body,
-          message.htmlBody ?? null,
+          rewrittenHtmlBody ?? null,
           message.priority ?? null,
           message.hasSource ? 1 : 0,
           unread ? 1 : 0,
@@ -4370,9 +4463,9 @@ export async function upsertMessages(
           manualCategoryState,
           message.listUnsubscribe ?? null
         );
-        deleteFts.run(message.id);
+        deleteFts.run(rowId);
         insertFts.run(
-          message.id,
+          rowId,
           message.subject,
           message.from,
           message.to,
@@ -4382,21 +4475,22 @@ export async function upsertMessages(
           message.preview
         );
         normalizeCalendarEventUids(message.calendarEventUids).forEach((eventUid) => {
-          insertCalendarEvent.run(accountId, message.id, eventUid);
+          insertCalendarEvent.run(accountId, rowId, eventUid);
         });
         (message.attachments ?? []).forEach((att) => {
           insertAttachment.run(
             att.id,
-            message.id,
+            rowId,
             att.filename,
             att.contentType,
             att.size,
             att.inline ? 1 : 0,
             att.cid ?? null,
-            att.url ?? null
+            rewriteAttachmentUrl(att.url) ?? null
           );
         });
       });
+      return fileMoves;
     });
 
     if (replaceExisting) {
@@ -4416,7 +4510,34 @@ export async function upsertMessages(
     for (let start = 0; start < nextMessages.length; start += UPSERT_BATCH_SIZE) {
       const batch = nextMessages.slice(start, start + UPSERT_BATCH_SIZE);
       if (batch.length === 0) continue;
-      upsertBatch(batch, shouldDeleteAttachments);
+      const fileMoves = upsertBatch(batch, shouldDeleteAttachments);
+      if (fileMoves.length > 0) {
+        const dedupedMoves = new Map<
+          string,
+          { previousMessageId: string; nextMessageId: string; attachmentIds: Set<string> }
+        >();
+        fileMoves.forEach((move: UpsertFileMove) => {
+          const key = `${move.previousMessageId}->${move.nextMessageId}`;
+          const existing = dedupedMoves.get(key);
+          if (existing) {
+            move.attachmentIds.forEach((attachmentId) => existing.attachmentIds.add(attachmentId));
+            return;
+          }
+          dedupedMoves.set(key, {
+            previousMessageId: move.previousMessageId,
+            nextMessageId: move.nextMessageId,
+            attachmentIds: new Set(move.attachmentIds)
+          });
+        });
+        for (const move of dedupedMoves.values()) {
+          await moveMessageFiles(
+            accountId,
+            move.previousMessageId,
+            move.nextMessageId,
+            Array.from(move.attachmentIds)
+          );
+        }
+      }
       if (start + UPSERT_BATCH_SIZE < nextMessages.length) {
         await yieldToEventLoop();
       }

@@ -53,6 +53,23 @@ function sourceFilePath(accountId: string, messageId: string) {
   return path.join(getSourcesAccountDir(accountId), sourceObjectFileName(messageId));
 }
 
+function toBaseMessageIdFromCollisionVariant(messageId: string) {
+  const trimmed = messageId.trim();
+  const match = trimmed.match(/^(.*)-([a-f0-9]{12})$/i);
+  if (!match) return null;
+  return match[1] || null;
+}
+
+function buildMessageIdLookupCandidates(messageId: string) {
+  const normalized = messageId.trim();
+  const candidates = [normalized];
+  const baseId = toBaseMessageIdFromCollisionVariant(normalized);
+  if (baseId && baseId !== normalized) {
+    candidates.push(baseId);
+  }
+  return candidates;
+}
+
 function sourceLegacyFilePath(accountId: string, messageId: string) {
   return path.join(sourcesDir, sourceFileName(accountId, messageId));
 }
@@ -189,11 +206,15 @@ export async function saveMessageSource(
 
 export async function getMessageSource(accountId: string, messageId: string) {
   await ensureSourcesDir();
-  try {
-    return await fs.readFile(sourceFilePath(accountId, messageId), "utf-8");
-  } catch {
-    return null;
+  const candidates = buildMessageIdLookupCandidates(messageId);
+  for (const candidateId of candidates) {
+    try {
+      return await fs.readFile(sourceFilePath(accountId, candidateId), "utf-8");
+    } catch {
+      // try next candidate
+    }
   }
+  return null;
 }
 
 export async function saveAttachmentData(
@@ -214,11 +235,15 @@ export async function getAttachmentData(
   attachmentId: string
 ) {
   await ensureAttachmentsDir();
-  try {
-    return await fs.readFile(attachmentFilePath(accountId, messageId, attachmentId));
-  } catch {
-    return null;
+  const candidates = buildMessageIdLookupCandidates(messageId);
+  for (const candidateId of candidates) {
+    try {
+      return await fs.readFile(attachmentFilePath(accountId, candidateId, attachmentId));
+    } catch {
+      // try next candidate
+    }
   }
+  return null;
 }
 
 export async function deleteMessageSource(accountId: string, messageId: string) {

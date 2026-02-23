@@ -287,19 +287,10 @@ export async function runSyncOperationBatched(
       }
     }
 
-    // Filter out duplicates (messages that exist in other folders)
-    let strippedMessages = sanitizedMessages;
-    if (payload.folderId && strippedMessages.length > 0) {
-      const existingFolderIds = await getFolderIdsByMessageIds(
-        account.id,
-        strippedMessages.map((message) => message.id)
-      );
-      strippedMessages = strippedMessages.filter((message) => {
-        const existingFolderId = existingFolderIds.get(message.id);
-        if (!existingFolderId) return true;
-        return !(message.folderId === payload.folderId && existingFolderId !== payload.folderId);
-      });
-    }
+    // Keep all synced messages here and let DB upsert decide how to resolve
+    // conflicting internal IDs. Pre-filtering by existing ID in another folder
+    // drops legitimate cross-folder copies (e.g. self-sent mail in Sent+INBOX).
+    const strippedMessages = sanitizedMessages;
 
     // Write this batch to database
     // Only replace existing messages on the FIRST batch during full sync

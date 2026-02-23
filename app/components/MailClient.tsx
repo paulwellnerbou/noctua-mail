@@ -419,25 +419,6 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
   const recomputeJobIdRef = useRef<string | null>(null);
   const categoryRecomputePollTimerRef = useRef<number | null>(null);
   const categoryRecomputePollInFlightRef = useRef(false);
-  const draftFingerprint = useCallback((value: string) => {
-    let hash = 0;
-    for (let i = 0; i < value.length; i += 1) {
-      hash = (hash * 31 + value.charCodeAt(i)) | 0;
-    }
-    return `${value.length}:${hash}`;
-  }, []);
-
-  const logDraftDebug = useCallback(
-    (event: string, payload: Record<string, unknown>) => {
-      try {
-        const serialized = JSON.stringify(payload);
-        console.info(`[noctua][draft-debug] ${event} ${serialized}`);
-      } catch {
-        // ignore logging failures
-      }
-    },
-    []
-  );
   const categoryRecomputeJobIdRef = useRef<string | null>(null);
   const autoRepairAttemptedFolderIdsRef = useRef<Set<string>>(new Set());
   const [mailCheckMode, setMailCheckMode] = useState<"idle" | "polling">("polling");
@@ -1583,7 +1564,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
   const {
     applySignatureToCompose,
     buildComposePayload,
-    openCompose,
+    openCompose: openComposeInternal,
     popOutCompose,
     popInCompose,
     minimizeCompose
@@ -1601,6 +1582,31 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
       return activeThread.find((msg) => msg.messageId === messageId);
     }
   });
+
+  const openCompose = (
+    mode: Parameters<typeof openComposeInternal>[0],
+    message?: Message,
+    asNew = false
+  ) => {
+    if (!message) {
+      openComposeInternal(mode, undefined, asNew);
+      return;
+    }
+
+    const resolved = messageById.get(message.id) ?? message;
+    const hasText = Boolean((resolved.body ?? "").trim());
+    const hasHtml = hasHtmlContent(resolved.htmlBody);
+    if (hasText || hasHtml) {
+      openComposeInternal(mode, resolved, asNew);
+      return;
+    }
+
+    void (async () => {
+      await ensureMessageContent(resolved, { manual: true });
+      openComposeInternal(mode, messageById.get(resolved.id) ?? resolved, asNew);
+    })();
+  };
+
   useEffect(() => {
     const preferred = currentAccount?.settings?.layout?.defaultView;
     if (
@@ -2162,10 +2168,6 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
         fallbackFolderId: draftsFolder?.id
       });
     }
-    logDraftDebug("save-start", {
-      draftId: composeDraftIdRef.current,
-      fingerprint: draftFingerprint(hash)
-    });
     if (composeTab === "text" && composeTextRef.current) {
       const element = composeTextRef.current;
       composeSelectionRef.current = {
@@ -2189,10 +2191,6 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
         const message = await readErrorMessage(res);
         reportError(message);
         setDraftSaveError(message || "Draft save failed.");
-        logDraftDebug("save-failed", {
-          draftId: composeDraftIdRef.current,
-          status: res.status
-        });
         return;
       }
       const data = (await res.json()) as { draftId?: string | null };
@@ -2215,11 +2213,6 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
       }
       setDraftSavedAt(Date.now());
       setDraftSaveError(null);
-      logDraftDebug("save-ok", {
-        draftId: data?.draftId ?? null,
-        fingerprint: draftFingerprint(hash),
-        dirty: composeDirtyRef.current
-      });
       await refreshFolders();
       if (searchScope === "folder" && isDraftsFolder(activeFolderId)) {
         await refreshMailboxData();
@@ -2227,10 +2220,6 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     } catch {
       reportError("Failed to save draft.");
       setDraftSaveError("Draft save failed.");
-      logDraftDebug("save-exception", {
-        draftId: composeDraftIdRef.current,
-        fingerprint: draftFingerprint(hash)
-      });
     } finally {
       setDraftSaving(false);
       if (composeTab === "text" && composeTextRef.current && composeSelectionRef.current) {
@@ -4832,13 +4821,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
   ]);
 
   useEffect(() => {
-    if (!composeOpen) return;
-    if (sendingMail) {
-      logDraftDebug("skip", {
-        reason: "sending"
-      });
-      return;
-    }
+    if (!composeOpen || sendingMail) return;
     const preferText = composeTab === "html" && composeLastEditedRef.current === "text";
     const { text, html, attachments, composeFormat } = buildComposePayload({ preferText });
     const hasContent = [
@@ -4849,13 +4832,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
       text,
       html ?? ""
     ].some((value) => (value ?? "").toString().trim().length > 0);
-    if (!hasContent) {
-      logDraftDebug("skip", {
-        reason: "no-content",
-        dirty: composeDirtyRef.current
-      });
-      return;
-    }
+    if (!hasContent) return;
     const normalizedHtml = html ?? "";
     const attachmentsHash = attachments
       .map((att) => `${att.filename}:${att.size}:${att.inline ? "1" : "0"}:${att.cid ?? ""}`)
@@ -4870,51 +4847,25 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
       attachments: attachmentsHash
     });
     currentDraftHashRef.current = hash;
-    logDraftDebug("state", {
-      baseline: composeBaselineHashRef.current ? "set" : "null",
-      dirty: composeDirtyRef.current,
-      draftId: composeDraftId,
-      tab: composeTab,
-      lastEdited: composeLastEditedRef.current,
-      fingerprint: draftFingerprint(hash),
-      lastFingerprint: lastDraftHashRef.current
-        ? draftFingerprint(lastDraftHashRef.current)
-        : null
-    });
     if (composeBaselineHashRef.current === null) {
       composeBaselineHashRef.current = hash;
       if (composeDraftId && !composeDirtyRef.current) {
         lastDraftHashRef.current = hash;
       }
-      logDraftDebug("baseline-set", {
-        fingerprint: draftFingerprint(hash)
-      });
       return;
     }
     if (hash === lastDraftHashRef.current) {
       composeDirtyRef.current = false;
-      logDraftDebug("skip", {
-        reason: "hash-unchanged"
-      });
       return;
     }
     if (!composeDirtyRef.current) {
-      logDraftDebug("skip", {
-        reason: "not-dirty"
-      });
       return;
     }
     if (draftSaveTimerRef.current) {
       window.clearTimeout(draftSaveTimerRef.current);
     }
-    logDraftDebug("schedule", {
-      fingerprint: draftFingerprint(hash)
-    });
     draftSaveTimerRef.current = window.setTimeout(() => {
       const replyHeaders = composeReplyHeaders;
-      logDraftDebug("fire", {
-        fingerprint: draftFingerprint(hash)
-      });
       saveDraftRef.current(
         {
           to: composeTo,
@@ -4963,8 +4914,6 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     composeLastEditedRef,
     draftSaveTimerRef,
     lastDraftHashRef,
-    logDraftDebug,
-    draftFingerprint
   ]);
 
 
