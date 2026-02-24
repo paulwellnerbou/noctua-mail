@@ -139,6 +139,12 @@
   white-space: pre-wrap;
 }
 
+.descriptionLink {
+  color: var(--accent-11);
+  text-decoration: underline;
+  word-break: break-all;
+}
+
 .locationLink {
   color: var(--accent-11);
   text-decoration: underline;

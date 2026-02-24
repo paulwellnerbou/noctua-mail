@@ -10,6 +10,7 @@ import {
 } from "@/lib/calendar";
 import { isCalendarAttachment } from "@/lib/messageFlags";
 import { resolveNextReminderOccurrence } from "@/lib/reminderRecurrence";
+import { linkifyText } from "@/app/components/LinkifiedText";
 import {
   CALENDAR_REMINDERS_UPDATED_EVENT,
   CALENDAR_REMINDER_LEAD_OPTIONS,
@@ -525,7 +526,9 @@ export default function CalendarEventPreview({
                       {event.description ? (
                         <div className={styles.description}>
                           <span className={styles.descriptionLabel}>Description</span>
-                          <span className={styles.descriptionText}>{event.description}</span>
+                          <span className={styles.descriptionText}>
+                            {linkifyText(event.description, styles.descriptionLink)}
+                          </span>
                         </div>
                       ) : null}
                       {event.organizer ? <p className={styles.meta}>Organizer: {event.organizer}</p> : null}
