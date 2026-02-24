@@ -119,6 +119,26 @@
   color: var(--gray-11);
 }
 
+.description {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 12px;
+  color: var(--gray-11);
+}
+
+.descriptionLabel {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--gray-10);
+}
+
+.descriptionText {
+  white-space: pre-wrap;
+}
+
 .locationLink {
   color: var(--accent-11);
   text-decoration: underline;

@@ -20,17 +20,13 @@ import {
   Send,
   Search,
   ShieldOff,
-  Square,
   Trash2,
   X
 } from "lucide-react";
 import LoginOverlay from "./auth/LoginOverlay";
 import FolderPane from "./mailclient/folder/FolderPane";
 import FolderTree from "./mailclient/folder/FolderTree";
-import InAppNoticeStack, {
-  type InAppNotice,
-  type InAppNoticeType
-} from "./mailclient/InAppNoticeStack";
+import InAppNoticeStack, { type InAppNotice } from "./mailclient/InAppNoticeStack";
 import ComposeInlineCard from "./mailclient/composition/ComposeInlineCard";
 import ComposeMinimized from "./mailclient/composition/ComposeMinimized";
 import ComposeMessageField from "./mailclient/composition/ComposeMessageField";
@@ -64,14 +60,13 @@ import {
   getThreadLatestDate,
   type ThreadNode
 } from "./mailclient/messagelist/threadTree";
-import threadStyles from "./mailclient/message/ThreadMessageCard.module.css";
 import { AlertDialog, Badge, Button, Card, Flex, IconButton, Text } from "@radix-ui/themes";
 import MessageMenu from "./mailclient/message/MessageMenu";
 import MessageQuickActions from "./mailclient/message/MessageQuickActions";
 import MessageViewPane from "./mailclient/message/MessageViewPane";
 import MarkdownPanel from "./mailclient/message/MarkdownPanel";
 import MessageSourcePanel from "./mailclient/message/MessageSourcePanel";
-import { CALENDAR_INVITE_FLAG, TODO_FLAG, DONE_FLAG, hasMessageFlag, withCalendarInviteFlag } from "@/lib/messageFlags";
+import { TODO_FLAG, DONE_FLAG, withCalendarInviteFlag } from "@/lib/messageFlags";
 import { openDetachedWindow } from "@/lib/ui/openDetachedWindow";
 import { getImapFlagBadges, hasHtmlContent } from "@/lib/ui/messageView";
 import {
@@ -82,25 +77,18 @@ import {
 } from "@/lib/ui/searchFilters";
 import {
   useSearchState,
-  type SearchFieldsState,
-  type SearchBadgesState,
-  VIRTUAL_FOLDERS,
-  type VirtualFolderDefinition,
-  DEFAULT_SEARCH_FIELDS,
-  DEFAULT_SEARCH_BADGES
-} from "./mailclient/useSearchState";
+  VIRTUAL_FOLDERS} from "./mailclient/useSearchState";
 import ThreadJsonModal from "./mailclient/message/ThreadJsonModal";
 import ThreadView from "./mailclient/message/ThreadView";
 import TopBar from "./mailclient/TopBar";
 import BottomStatusBar from "./mailclient/status/BottomStatusBar";
 import { useMessageDeleteActions } from "./mailclient/useMessageDeleteActions";
 import { useMessageMoveActions, type UndoMoveTarget } from "./mailclient/useMessageMoveActions";
-import type { Account, AccountSettings, Attachment, Folder, Message, User } from "@/lib/data";
+import type { Account, Attachment, Folder, Message, User } from "@/lib/data";
 import AccountSettingsModal, { type ManageTab } from "./AccountSettingsModal";
 import {
   computeGroupMeta,
   isFlaggedMessage,
-  isThreadExcludedFolder,
   getThreadMessages,
   applyFlagsToMessage,
   isMessageFlagged,

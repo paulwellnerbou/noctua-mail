@@ -522,6 +522,12 @@ export default function CalendarEventPreview({
                           )}
                         </div>
                       ) : null}
+                      {event.description ? (
+                        <div className={styles.description}>
+                          <span className={styles.descriptionLabel}>Description</span>
+                          <span className={styles.descriptionText}>{event.description}</span>
+                        </div>
+                      ) : null}
                       {event.organizer ? <p className={styles.meta}>Organizer: {event.organizer}</p> : null}
                       {recurrenceSummary ? <p className={styles.meta}>Repeats: {recurrenceSummary}</p> : null}
                       {eventReminder ? (
