@@ -4465,17 +4465,11 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     return () => window.clearInterval(timer);
   }, [authState, sessionTtlSeconds]);
 
-  // Initial sync on cold start (once per account)
+  // Initial sync on login (once per session per account)
   useEffect(() => {
     if (!initialDataReady || !activeAccountId) return;
 
-    const inboxId = inboxFolder?.id;
     const hasAccountFolders = accountFolders.length > 0;
-
-    if (messages.some((message) => message.accountId === activeAccountId)) {
-      initialSyncStatusRef.current[activeAccountId] = "done";
-      return;
-    }
 
     const syncStatus = initialSyncStatusRef.current[activeAccountId];
     if (syncStatus === "running" || syncStatus === "done") return;
@@ -4484,9 +4478,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     const accountId = activeAccountId;
     const syncPromise = !hasAccountFolders
       ? syncAccountRef.current?.(undefined, "full")
-      : inboxId
-        ? syncAccountRef.current?.(inboxId, "new")
-        : syncAccountRef.current?.(undefined, "new");
+      : syncAccountRef.current?.(undefined, "new");
     if (!syncPromise) {
       delete initialSyncStatusRef.current[accountId];
       return;
@@ -4499,7 +4491,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
       .catch(() => {
         delete initialSyncStatusRef.current[accountId];
       });
-  }, [activeAccountId, accountFolders.length, inboxFolder?.id, initialDataReady, messages]);
+  }, [activeAccountId, accountFolders.length, initialDataReady]);
 
   useEffect(() => {
     setMessages([]);
@@ -5910,6 +5902,14 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
 
     setIsSyncing(true);
     void (async () => {
+      const priorityFolderId = activeFolderId || inboxFolder?.id;
+      const sortedFolders = priorityFolderId
+        ? [
+            ...accountFolders.filter((f) => f.id === priorityFolderId),
+            ...accountFolders.filter((f) => f.id !== priorityFolderId)
+          ]
+        : accountFolders;
+
       if (mode === "new") {
         const plannedFolders = accountFolders.map((folder) => folder.id);
         let foldersToSync = plannedFolders;
@@ -5930,7 +5930,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
         }
 
         const foldersToSyncSet = new Set(foldersToSync);
-        for (const folder of accountFolders) {
+        for (const folder of sortedFolders) {
           if (!foldersToSyncSet.has(folder.id)) {
             continue;
           }
@@ -5955,7 +5955,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
         setIsSyncing(false);
         return;
       }
-      for (const folder of accountFolders) {
+      for (const folder of sortedFolders) {
         await syncFolderWithBackground(folder.id, true, false, mode === "full" ? "full" : "recent");
       }
       await syncNewlyDetectedFolders(knownFolderIds, mode);
