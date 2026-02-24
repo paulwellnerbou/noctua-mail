@@ -67,6 +67,7 @@ import MessageViewPane from "./mailclient/message/MessageViewPane";
 import MarkdownPanel from "./mailclient/message/MarkdownPanel";
 import MessageSourcePanel from "./mailclient/message/MessageSourcePanel";
 import { TODO_FLAG, DONE_FLAG, withCalendarInviteFlag } from "@/lib/messageFlags";
+import { createComposeAttachment } from "@/lib/mail/composeAttachment";
 import { openDetachedWindow } from "@/lib/ui/openDetachedWindow";
 import { getImapFlagBadges, hasHtmlContent } from "@/lib/ui/messageView";
 import {
@@ -1407,33 +1408,6 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     },
     [activeAccountId, apiFetch, recipientCacheRef]
   );
-
-  const readFileAsDataUrl = (file: File) =>
-    new Promise<string>((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(String(reader.result || ""));
-      reader.onerror = () => reject(reader.error);
-      reader.readAsDataURL(file);
-    });
-
-  const createComposeAttachment = async (
-    file: File,
-    inline: boolean,
-    dataUrlOverride?: string
-  ): Promise<Attachment> => {
-    const dataUrl = dataUrlOverride ?? (await readFileAsDataUrl(file));
-    const contentType = file.type || "application/octet-stream";
-    const id = crypto.randomUUID();
-    return {
-      id,
-      filename: file.name || `attachment-${id}`,
-      contentType,
-      size: file.size,
-      inline,
-      cid: inline ? `inline-${id}@noctua` : undefined,
-      dataUrl
-    };
-  };
 
   const addComposeFiles = async (files: File[], inline = false, dataUrlOverride?: string) => {
     if (files.length === 0) return;
