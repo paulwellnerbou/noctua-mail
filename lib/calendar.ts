@@ -79,11 +79,34 @@ function parseContentLine(line: string): ParsedLine | null {
 }
 
 function decodeIcsText(value: string) {
-  return value
-    .replace(/\\n/gi, "\n")
-    .replace(/\\,/g, ",")
-    .replace(/\\;/g, ";")
-    .replace(/\\\\/g, "\\");
+  if (!value.includes("\\")) return value;
+  let out = "";
+  for (let i = 0; i < value.length; i += 1) {
+    const char = value[i];
+    if (char !== "\\") {
+      out += char;
+      continue;
+    }
+    const next = value[i + 1];
+    if (!next) {
+      out += "\\";
+      continue;
+    }
+    const lower = next.toLowerCase();
+    if (lower === "n" || lower === "r") {
+      out += "\n";
+      i += 1;
+      continue;
+    }
+    if (next === "," || next === ";" || next === "\\") {
+      out += next;
+      i += 1;
+      continue;
+    }
+    out += next;
+    i += 1;
+  }
+  return out;
 }
 
 export function formatCalendarEventDate(
