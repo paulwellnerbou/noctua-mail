@@ -87,15 +87,26 @@ function looksLikeHtml(value: string) {
 
 function enforceSafeLinks(html: string) {
   return html.replace(/<a\b([^>]*)>/gi, (_, attrs: string) => {
-    const trimmed = attrs.trim();
-    const hasTarget = /\btarget\s*=/.test(trimmed);
-    const hasRel = /\brel\s*=/.test(trimmed);
-    const parts: string[] = [];
-    if (trimmed) parts.push(trimmed);
-    if (!hasTarget) parts.push('target="_blank"');
-    if (!hasRel) parts.push('rel="noreferrer noopener"');
-    const merged = parts.join(" ");
-    return merged ? `<a ${merged}>` : "<a>";
+    let result = attrs.trim();
+    if (!/\btarget\s*=/.test(result)) {
+      result = result ? `${result} target="_blank"` : 'target="_blank"';
+    }
+    if (/\brel\s*=/.test(result)) {
+      // Merge noopener/noreferrer into the existing rel value to prevent reverse-tabnabbing
+      result = result.replace(
+        /\brel\s*=\s*("([^"]*)"|'([^']*)'|(\S+))/i,
+        (_m, _full, dq, sq, uq) => {
+          const value = dq ?? sq ?? uq ?? "";
+          const tokens = value.split(/\s+/).filter(Boolean);
+          if (!tokens.includes("noopener")) tokens.push("noopener");
+          if (!tokens.includes("noreferrer")) tokens.push("noreferrer");
+          return `rel="${tokens.join(" ")}"`;
+        }
+      );
+    } else {
+      result = result ? `${result} rel="noreferrer noopener"` : 'rel="noreferrer noopener"';
+    }
+    return result ? `<a ${result}>` : "<a>";
   });
 }
 

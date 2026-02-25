@@ -81,8 +81,22 @@ export function useMessageData({
   const messageMutationVersionRef = useRef(0);
   const listReplacementLogFingerprintRef = useRef("");
 
+  // Cleanup filteredSearchRefreshTimer on unmount
+  useEffect(() => {
+    return () => {
+      if (filteredSearchRefreshTimerRef.current !== null) {
+        window.clearTimeout(filteredSearchRefreshTimerRef.current);
+        filteredSearchRefreshTimerRef.current = null;
+      }
+    };
+  }, []);
+
   // Reset list state when the query key changes
   useEffect(() => {
+    if (filteredSearchRefreshTimerRef.current !== null) {
+      window.clearTimeout(filteredSearchRefreshTimerRef.current);
+      filteredSearchRefreshTimerRef.current = null;
+    }
     setMessages([]);
     setMessagesPage(1);
     setHasMoreMessages(true);
@@ -174,9 +188,7 @@ export function useMessageData({
     return { endpoint, params };
   };
 
-  // Paginated message load effect. Dep array intentionally omits query/searchScope/etc.
-  // because messagesKey encodes all those values — the reset effect above handles key changes.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+  // Paginated message load effect.
   useEffect(() => {
     const loadMessages = async () => {
       if (!activeAccountId) return;
@@ -279,6 +291,9 @@ export function useMessageData({
     };
 
     loadMessages();
+    // Dep array intentionally omits query/searchScope/etc. — messagesKey encodes all those values;
+    // the reset effect above handles key changes and triggers a fresh page-1 load.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeAccountId, hasMoreMessages, loadingMessages, messagesKey, messagesPage, authState]);
 
   const refreshMailboxData = async (): Promise<boolean> => {

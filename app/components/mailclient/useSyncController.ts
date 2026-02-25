@@ -1100,6 +1100,9 @@ export function useSyncController({
       stopStream();
       stopPoll();
     };
+    // Other values used inside (apiFetch, reportError, callbacks, etc.) are accessed via stable
+    // refs or useCallback wrappers and should not re-trigger a full stream/poll reconnect.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeAccountId, activeFolderId, authState, inboxMailboxPath]);
 
   return {

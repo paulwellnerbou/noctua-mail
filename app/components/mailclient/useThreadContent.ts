@@ -317,12 +317,18 @@ export function useThreadContent({
           return null;
         } finally {
           sourceFetchRef.current.delete(messageId);
-          setLoadingSource((prev) => ({ ...prev, [messageId]: false }));
+          setLoadingSource((prev) => {
+            const next = { ...prev };
+            delete next[messageId];
+            return next;
+          });
         }
       })();
       sourceFetchRef.current.set(messageId, promise);
       return promise;
     },
+    // apiFetch/readErrorMessage/reportError are stable props (wrapped in useCallback by the caller)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [activeAccountId, hydrateMessageFromServer, messageById, threadMessagesRef]
   );
 

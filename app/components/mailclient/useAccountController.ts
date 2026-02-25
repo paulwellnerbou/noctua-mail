@@ -231,8 +231,7 @@ export function useAccountController({
     }
     const exists = accounts.find((a) => a.id === account.id);
     const isNew = !exists;
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const accountToSave = isNew ? ({ ...account, id: undefined } as any) : account;
+    const accountToSave = isNew ? ({ ...account, id: undefined } as Record<string, unknown>) : account;
     const endpoint = exists ? `/api/accounts/${account.id}` : "/api/accounts";
     const method = exists ? "PUT" : "POST";
     const saveResult = await apiFetch(endpoint, {
