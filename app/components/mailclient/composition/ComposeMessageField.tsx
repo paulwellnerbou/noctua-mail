@@ -137,18 +137,10 @@ export default function ComposeMessageField({
       composeEditorInitRef.current = false;
       if (lastEdited === "text") {
         const currentBody = composeTextRef.current?.value || composeBody;
-        // Strip the quoted text suffix so it isn't duplicated in the HTML editor and the quoted block below
-        let userText = currentBody;
-        if (composeQuotedText) {
-          const suffix = `\n\n${composeQuotedText}`;
-          if (userText.endsWith(suffix)) {
-            userText = userText.slice(0, -suffix.length);
-          }
-        }
-        const nextHtml = userText ? `<p>${escapeHtml(userText).replace(/\n/g, "<br>")}</p>` : "";
+        const nextHtml = currentBody ? `<p>${escapeHtml(currentBody).replace(/\n/g, "<br>")}</p>` : "";
         setComposeHtml(nextHtml);
         setComposeHtmlText(stripHtml(nextHtml));
-        setComposeBody(userText);
+        setComposeBody(currentBody);
       } else if (lastEdited === "markdown") {
         const currentMd = composeMarkdown;
         const nextHtml = markdownToHtml(currentMd);
@@ -338,9 +330,7 @@ export default function ComposeMessageField({
               id="compose-text-body"
               name="compose_body"
               textareaRef={composeTextRef}
-              defaultValue={`${composeBody}${
-                composeIncludeOriginal && composeQuotedText ? `\n\n${composeQuotedText}` : ""
-              }`}
+              defaultValue={composeBody}
               onChange={(event) => {
                 composeDirtyRef.current = true;
                 composeLastEditedRef.current = "text";
@@ -350,16 +340,7 @@ export default function ComposeMessageField({
                 const nextValue = event.target.value;
 
                 const updateState = () => {
-                  if (composeIncludeOriginal && composeQuotedText) {
-                    const suffix = `\n\n${composeQuotedText}`;
-                    if (nextValue.endsWith(suffix)) {
-                      setComposeBody(nextValue.slice(0, -suffix.length));
-                    } else {
-                      setComposeBody(nextValue);
-                    }
-                  } else {
-                    setComposeBody(nextValue);
-                  }
+                  setComposeBody(nextValue);
                   composeBodyLastUpdateRef.current = now;
                 };
 

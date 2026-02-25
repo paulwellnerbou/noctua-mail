@@ -10,6 +10,7 @@ import {
   ArrowRight,
   ArrowUp,
   Bold as BoldIcon,
+  Code2,
   Columns3,
   Italic as ItalicIcon,
   Link2 as LinkIcon,
@@ -150,7 +151,17 @@ function ComposeToolbarIcon({
   );
 }
 
-function ComposeToolbar({ toolbarRef }: { toolbarRef: React.Ref<HTMLDivElement> }) {
+function ComposeToolbar({
+  toolbarRef,
+  showSource,
+  onEnterSource,
+  onExitSource
+}: {
+  toolbarRef: React.Ref<HTMLDivElement>;
+  showSource: boolean;
+  onEnterSource: (html: string) => void;
+  onExitSource: () => void;
+}) {
   const [editor] = useLexicalComposerContext();
   const [isTableFocused, setIsTableFocused] = useState(false);
   const isTableFocusedRef = useRef(false);
@@ -232,6 +243,17 @@ function ComposeToolbar({ toolbarRef }: { toolbarRef: React.Ref<HTMLDivElement> 
       columns: "2",
       includeHeaders: false
     });
+  };
+
+  const toggleSource = () => {
+    if (showSource) {
+      onExitSource();
+    } else {
+      editor.getEditorState().read(() => {
+        const html = $generateHtmlFromNodes(editor, null);
+        onEnterSource(html);
+      });
+    }
   };
 
   const toolbarButtons: Array<{
@@ -415,11 +437,23 @@ function ComposeToolbar({ toolbarRef }: { toolbarRef: React.Ref<HTMLDivElement> 
           title={item.title}
           aria-label={item.title}
           onClick={item.onClick}
-          disabled={Boolean(item.requiresTableFocus && !isTableFocused)}
+          disabled={Boolean(showSource || (item.requiresTableFocus && !isTableFocused))}
         >
           {item.icon}
         </Button>
       ))}
+      <Button
+        type="button"
+        size="1"
+        variant={showSource ? "solid" : "soft"}
+        color="gray"
+        className={styles.composeToolbarButton}
+        title={showSource ? "Visual editor" : "Source HTML"}
+        aria-label={showSource ? "Visual editor" : "Source HTML"}
+        onClick={toggleSource}
+      >
+        <ComposeToolbarIcon base={<Code2 size={14} />} />
+      </Button>
     </div>
   );
 }
@@ -483,6 +517,50 @@ function ComposeEditable({
   );
 }
 
+function SourceSyncPlugin({
+  html,
+  showSource
+}: {
+  html: string;
+  showSource: boolean;
+}) {
+  const [editor] = useLexicalComposerContext();
+  const prevShowSourceRef = useRef(showSource);
+
+  useEffect(() => {
+    const prev = prevShowSourceRef.current;
+    prevShowSourceRef.current = showSource;
+    if (prev === showSource || showSource) return;
+    // Exiting source mode — reimport the edited HTML into the editor.
+    editor.update(() => {
+      const root = $getRoot();
+      root.clear();
+      if (!html.trim()) {
+        root.append($createParagraphNode());
+        return;
+      }
+      const parser = new DOMParser();
+      const dom = parser.parseFromString(html, "text/html");
+      const nodes = $generateNodesFromDOM(editor, dom);
+      if (nodes.length === 0) {
+        root.append($createParagraphNode());
+        return;
+      }
+      nodes.forEach((node) => {
+        if ($isElementNode(node) || $isDecoratorNode(node)) {
+          root.append(node);
+        } else if ($isTextNode(node)) {
+          const paragraph = $createParagraphNode();
+          paragraph.append(node);
+          root.append(paragraph);
+        }
+      });
+    });
+  }, [editor, html, showSource]);
+
+  return null;
+}
+
 function ComposerInitializer({
   initialHtml,
   resetKey
@@ -539,6 +617,22 @@ export default function ComposeEditor({
   const [toolbarHeight, setToolbarHeight] = useState(0);
   const changeFrameRef = useRef<number | null>(null);
   const pendingChangeRef = useRef<{ html: string; text: string } | null>(null);
+
+  const [showSource, setShowSource] = useState(false);
+  const [sourceHtml, setSourceHtml] = useState("");
+  const sourceTextareaRef = useRef<HTMLTextAreaElement | null>(null);
+
+  const handleEnterSource = useCallback((html: string) => {
+    setSourceHtml(html);
+    setShowSource(true);
+  }, []);
+
+  const handleExitSource = useCallback(() => {
+    const newHtml = sourceTextareaRef.current?.value ?? sourceHtml;
+    setSourceHtml(newHtml);
+    setShowSource(false);
+  }, [sourceHtml]);
+
   const initialConfig = useMemo(
     () => ({
       namespace: "noctua-compose",
@@ -590,12 +684,20 @@ export default function ComposeEditor({
 
   return (
     <div
-      className={[styles.composeEditor, className].filter(Boolean).join(" ")}
+      className={[styles.composeEditor, showSource && styles.composeEditorSourceMode, className]
+        .filter(Boolean)
+        .join(" ")}
       style={{ ["--compose-toolbar-height" as any]: `${toolbarHeight}px` }}
     >
       <LexicalComposer initialConfig={initialConfig}>
-        <ComposeToolbar toolbarRef={toolbarRef} />
+        <ComposeToolbar
+          toolbarRef={toolbarRef}
+          showSource={showSource}
+          onEnterSource={handleEnterSource}
+          onExitSource={handleExitSource}
+        />
         <ComposerInitializer initialHtml={initialHtml} resetKey={resetKey} />
+        <SourceSyncPlugin html={sourceHtml} showSource={showSource} />
         <RichTextPlugin
           contentEditable={<ComposeEditable onInlineImage={onInlineImage} />}
           placeholder={<div className={styles.composeEditorPlaceholder}>Write your message…</div>}
@@ -623,6 +725,16 @@ export default function ComposeEditor({
           }}
         />
       </LexicalComposer>
+      {showSource && (
+        <textarea
+          ref={sourceTextareaRef}
+          className={styles.composeSourceTextarea}
+          defaultValue={sourceHtml}
+          spellCheck={false}
+          autoComplete="off"
+          autoCorrect="off"
+        />
+      )}
     </div>
   );
 }

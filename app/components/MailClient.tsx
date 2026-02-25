@@ -34,7 +34,9 @@ import ComposeModal from "./mailclient/composition/ComposeModal";
 import { useComposeController } from "./mailclient/composition/useComposeController";
 import { useComposeState } from "./mailclient/composition/useComposeState";
 import { useComposeViewEffects } from "./mailclient/composition/useComposeViewEffects";
-import { shouldThreadComposeForMode } from "./mailclient/composition/composeThreading";
+import { buildSendPayload } from "./mailclient/composition/buildSendPayload";
+import { useComposeDraftAutoSave } from "./mailclient/composition/useComposeDraftAutoSave";
+import { useDraftManager } from "./mailclient/composition/useDraftManager";
 import MessageListHeader from "./mailclient/messagelist/MessageListHeader";
 import MessageListPane from "./mailclient/messagelist/MessageListPane";
 import MessageListView from "./mailclient/messagelist/MessageListView";
@@ -150,8 +152,6 @@ import type {
   SyncJobResult
 } from "./mailclient/types";
 import { normalizeAccountDateFormat } from "@/lib/dateFormatting";
-import type { DraftSavePayload } from "./mailclient/composition/composeTypes";
-
 type AuthMeResponse = {
   ok?: boolean;
   user?: User | null;
@@ -2122,184 +2122,6 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
   }, [activeAccountId, activeMessage, threadContentById, threadScopeMessages, threadForest]);
 
   const threadMessages = useMemo(() => activeThread, [activeThread]);
-  const saveDraftNow = async (payload: DraftSavePayload, hash: string) => {
-    if (!activeAccountId) return;
-    if (composeDraftIdRef.current) {
-      applyDeleteReconcileSuppression({
-        messageIds: [composeDraftIdRef.current],
-        fallbackFolderId: draftsFolder?.id
-      });
-    }
-    if (composeTab === "text" && composeTextRef.current) {
-      const element = composeTextRef.current;
-      composeSelectionRef.current = {
-        start: element.selectionStart ?? 0,
-        end: element.selectionEnd ?? 0,
-        value: element.value
-      };
-    }
-    setDraftSaving(true);
-    try {
-      const res = await apiFetch("/api/drafts/save", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          accountId: activeAccountId,
-          draftId: composeDraftIdRef.current,
-          ...payload
-        })
-      });
-      if (!res.ok) {
-        const message = await readErrorMessage(res);
-        reportError(message);
-        setDraftSaveError(message || "Draft save failed.");
-        return;
-      }
-      const data = (await res.json()) as { draftId?: string | null };
-      if (data?.draftId) {
-        const previousDraftId = composeDraftIdRef.current;
-        if (previousDraftId && previousDraftId !== data.draftId) {
-          setMessages((prev) => prev.filter((msg) => msg.id !== previousDraftId));
-          if (viewMessage?.id === previousDraftId) {
-            setViewMessage({ ...viewMessage, id: data.draftId });
-            setActiveMessageId(data.draftId);
-          }
-        }
-        composeDraftIdRef.current = data.draftId;
-        setComposeDraftId(data.draftId);
-      }
-      lastDraftHashRef.current = hash;
-      const latestHash = currentDraftHashRef.current;
-      if (!latestHash || latestHash === hash) {
-        composeDirtyRef.current = false;
-      }
-      setDraftSavedAt(Date.now());
-      setDraftSaveError(null);
-      await refreshFolders();
-      if (searchScope === "folder" && isDraftsFolder(activeFolderId)) {
-        await refreshMailboxData();
-      }
-    } catch {
-      reportError("Failed to save draft.");
-      setDraftSaveError("Draft save failed.");
-    } finally {
-      setDraftSaving(false);
-      if (composeTab === "text" && composeTextRef.current && composeSelectionRef.current) {
-        const element = composeTextRef.current;
-        const { start, end, value } = composeSelectionRef.current;
-        composeSelectionRef.current = null;
-        requestAnimationFrame(() => {
-          if (document.activeElement !== element || element.value !== value) return;
-          try {
-            element.setSelectionRange(start, end);
-          } catch {
-            // ignore selection errors
-          }
-        });
-      }
-    }
-  };
-
-  const runQueuedDraftSaves = () => {
-    if (draftSaveInFlightRef.current) return;
-    draftSaveInFlightRef.current = true;
-    void (async () => {
-      try {
-        while (pendingDraftSaveRef.current) {
-          const next = pendingDraftSaveRef.current;
-          pendingDraftSaveRef.current = null;
-          await saveDraftNow(next.payload, next.hash);
-        }
-      } finally {
-        draftSaveInFlightRef.current = false;
-        if (pendingDraftSaveRef.current) {
-          runQueuedDraftSaves();
-        }
-      }
-    })();
-  };
-
-  const saveDraft = (payload: DraftSavePayload, hash: string) => {
-    pendingDraftSaveRef.current = { payload, hash };
-    runQueuedDraftSaves();
-  };
-
-  const saveDraftRef = useRef(saveDraft);
-  useEffect(() => {
-    saveDraftRef.current = saveDraft;
-  }, [saveDraft]);
-
-  const handleDiscardDraft = async () => {
-    if (composeDraftId && activeAccountId) {
-      try {
-        setDiscardingDraft(true);
-        suppressDraftDeleteReconcile(composeDraftId);
-        const res = await apiFetch("/api/drafts/discard", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            accountId: activeAccountId,
-            draftId: composeDraftId
-          })
-        });
-        if (!res.ok) {
-          reportError(await readErrorMessage(res));
-        } else {
-          removeDraftFromUi(composeDraftId);
-          if (searchScope === "folder" && activeFolderId) {
-            void refreshMailboxData();
-          }
-        }
-        await refreshFolders();
-      } catch {
-        reportError("Failed to discard draft.");
-      } finally {
-        setDiscardingDraft(false);
-      }
-    }
-    lastDraftHashRef.current = "";
-    currentDraftHashRef.current = "";
-    composeBaselineHashRef.current = null;
-    setDraftSavedAt(null);
-    setDraftSaveError(null);
-    setComposeDraftId(null);
-    setComposeOpen(false);
-    setComposeView("inline");
-  };
-
-  const handleSaveDraft = () => {
-    if (!composeOpen || !activeAccountId) return;
-    const preferText = composeTab === "html" && composeLastEditedRef.current === "text";
-    const { text, html, attachments, composeFormat } = buildComposePayload({ preferText });
-    const normalizedHtml = html ?? "";
-    const attachmentsHash = attachments
-      .map((att) => `${att.filename}:${att.size}:${att.inline ? "1" : "0"}:${att.cid ?? ""}`)
-      .join("|");
-    const hash = JSON.stringify({
-      to: composeTo,
-      cc: composeCc,
-      bcc: composeBcc,
-      subject: composeSubject,
-      text,
-      html: normalizedHtml,
-      attachments: attachmentsHash
-    });
-    const payload: DraftSavePayload = {
-      to: composeTo,
-      cc: composeCc,
-      bcc: composeBcc,
-      subject: composeSubject,
-      text,
-      html: normalizedHtml,
-      composeFormat,
-      quotedHtmlEdited: composeQuotedHtmlEdited,
-      inReplyTo: composeReplyHeaders?.inReplyTo,
-      references: composeReplyHeaders?.references,
-      xForwardedMessageId: composeReplyHeaders?.xForwardedMessageId,
-      attachments
-    };
-    saveDraft(payload, hash);
-  };
 
   const visibleComposeAttachments = composeAttachments.filter((item) => !item.inline);
   const composeMessageField = (
@@ -2361,46 +2183,22 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     setSendingMail(true);
     try {
       const { text, html, attachments } = buildComposePayload();
-      const replyHeaders = composeReplyHeaders ?? {
-        inReplyTo: composeReplyMessage?.messageId ?? undefined,
-        references:
-          composeReplyMessage?.messageId
-            ? [
-                ...(composeReplyMessage.references ?? []),
-                ...(composeReplyMessage.inReplyTo ? [composeReplyMessage.inReplyTo] : []),
-                composeReplyMessage.messageId
-              ]
-            : undefined,
-        xForwardedMessageId: composeReplyMessage?.messageId ?? undefined
-      };
-      const shouldThreadCompose = shouldThreadComposeForMode(composeMode);
-      const replyFromValue = getAccountFromValue(currentAccount);
-      const replyToHeader =
-        composeMode === "reply" || composeMode === "replyAll" ? replyFromValue : "";
-      const normalizedReplyTo =
-        replyToHeader &&
-        replyFromValue &&
-        replyToHeader.trim().toLowerCase() === replyFromValue.trim().toLowerCase()
-          ? ""
-          : replyToHeader;
+      const smtpPayload = buildSendPayload(composeMode, {
+        composeTo,
+        composeCc,
+        composeBcc,
+        composeSubject,
+        text,
+        html,
+        attachments,
+        composeReplyHeaders,
+        composeReplyMessage,
+        accountFromValue: getAccountFromValue(currentAccount)
+      });
       const res = await apiFetch("/api/smtp", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          accountId: activeAccountId,
-          to: composeTo,
-          cc: composeCc,
-          bcc: composeBcc,
-          subject: composeSubject,
-          text,
-          html,
-          attachments,
-          inReplyTo: shouldThreadCompose ? replyHeaders.inReplyTo : undefined,
-          references: shouldThreadCompose ? replyHeaders.references : undefined,
-          replyTo: normalizedReplyTo,
-          xForwardedMessageId:
-            composeMode === "forward" ? replyHeaders.xForwardedMessageId : undefined
-        })
+        body: JSON.stringify({ accountId: activeAccountId, ...smtpPayload })
       });
       if (res.ok) {
         if (composeReplyMessage) {
@@ -4775,103 +4573,6 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
   ]);
 
   useEffect(() => {
-    if (!composeOpen || sendingMail) return;
-    const preferText = composeTab === "html" && composeLastEditedRef.current === "text";
-    const { text, html, attachments, composeFormat } = buildComposePayload({ preferText });
-    const hasContent = [
-      composeTo,
-      composeCc,
-      composeBcc,
-      composeSubject,
-      text,
-      html ?? ""
-    ].some((value) => (value ?? "").toString().trim().length > 0);
-    if (!hasContent) return;
-    const normalizedHtml = html ?? "";
-    const attachmentsHash = attachments
-      .map((att) => `${att.filename}:${att.size}:${att.inline ? "1" : "0"}:${att.cid ?? ""}`)
-      .join("|");
-    const hash = JSON.stringify({
-      to: composeTo,
-      cc: composeCc,
-      bcc: composeBcc,
-      subject: composeSubject,
-      text,
-      html: normalizedHtml,
-      attachments: attachmentsHash
-    });
-    currentDraftHashRef.current = hash;
-    if (composeBaselineHashRef.current === null) {
-      composeBaselineHashRef.current = hash;
-      if (composeDraftId && !composeDirtyRef.current) {
-        lastDraftHashRef.current = hash;
-      }
-      return;
-    }
-    if (hash === lastDraftHashRef.current) {
-      composeDirtyRef.current = false;
-      return;
-    }
-    if (!composeDirtyRef.current) {
-      return;
-    }
-    if (draftSaveTimerRef.current) {
-      window.clearTimeout(draftSaveTimerRef.current);
-    }
-    draftSaveTimerRef.current = window.setTimeout(() => {
-      const replyHeaders = composeReplyHeaders;
-      saveDraftRef.current(
-        {
-          to: composeTo,
-          cc: composeCc,
-          bcc: composeBcc,
-          subject: composeSubject,
-          text,
-          html,
-          composeFormat,
-          quotedHtmlEdited: composeQuotedHtmlEdited,
-          inReplyTo: replyHeaders?.inReplyTo,
-          references: replyHeaders?.references,
-          xForwardedMessageId: replyHeaders?.xForwardedMessageId,
-          attachments
-        },
-        hash
-      );
-    }, 2000);
-    return () => {
-      if (draftSaveTimerRef.current) {
-        window.clearTimeout(draftSaveTimerRef.current);
-      }
-    };
-  }, [
-    composeOpen,
-    sendingMail,
-    composeTo,
-    composeCc,
-    composeBcc,
-    composeSubject,
-    composeBody,
-    composeHtml,
-    composeHtmlText,
-    composeMarkdown,
-    composeQuotedHtml,
-    composeQuotedText,
-    composeIncludeOriginal,
-    composeStripImages,
-    composeQuotedHtmlEdited,
-    composeTab,
-    composeDraftId,
-    composeReplyHeaders,
-    composeAttachments,
-    composeBaselineHashRef,
-    composeDirtyRef,
-    composeLastEditedRef,
-    draftSaveTimerRef,
-    lastDraftHashRef,
-  ]);
-
-
-  useEffect(() => {
     const pending = pendingJumpLocalMessageIdRef.current;
     if (!pending) return;
     const target = messageById.get(pending);
@@ -6111,6 +5812,80 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     }
     return null;
   };
+
+  const { saveDraft, handleDiscardDraft, handleSaveDraft } = useDraftManager({
+    activeAccountId,
+    composeOpen,
+    composeTab,
+    composeTo,
+    composeCc,
+    composeBcc,
+    composeSubject,
+    composeQuotedHtmlEdited,
+    composeReplyHeaders,
+    composeDraftId,
+    setComposeDraftId,
+    setDraftSaving,
+    setDraftSavedAt,
+    setDraftSaveError,
+    setDiscardingDraft,
+    setComposeOpen,
+    setComposeView,
+    composeDraftIdRef,
+    lastDraftHashRef,
+    currentDraftHashRef,
+    composeBaselineHashRef,
+    composeDirtyRef,
+    composeLastEditedRef,
+    composeTextRef,
+    composeSelectionRef,
+    pendingDraftSaveRef,
+    draftSaveInFlightRef,
+    viewMessage,
+    setMessages,
+    setViewMessage,
+    setActiveMessageId,
+    searchScope,
+    activeFolderId,
+    isDraftsFolder,
+    suppressDraftDeleteReconcile,
+    removeDraftFromUi,
+    refreshFolders,
+    refreshMailboxData,
+    apiFetch,
+    reportError,
+    readErrorMessage,
+    buildComposePayload
+  });
+
+  useComposeDraftAutoSave({
+    composeOpen,
+    sendingMail,
+    composeTo,
+    composeCc,
+    composeBcc,
+    composeSubject,
+    composeBody,
+    composeHtml,
+    composeHtmlText,
+    composeMarkdown,
+    composeQuotedHtml,
+    composeIncludeOriginal,
+    composeStripImages,
+    composeQuotedHtmlEdited,
+    composeTab,
+    composeDraftId,
+    composeReplyHeaders,
+    composeAttachments,
+    lastDraftHashRef,
+    currentDraftHashRef,
+    composeBaselineHashRef,
+    composeDirtyRef,
+    composeLastEditedRef,
+    draftSaveTimerRef,
+    buildComposePayload,
+    saveDraft
+  });
 
   // Auto-repair empty folders: if a folder shows no messages after loading,
   // check if raw messages exist in DB (threading issue → recompute) or not (missing → sync).

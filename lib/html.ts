@@ -137,26 +137,22 @@ export function assembleQuotedHtml(parts: QuotedHtmlParts, quoteHtml: boolean) {
 /**
  * Extracts quoted HTML from a draft's combined HTML body.
  * Returns the user's HTML and the quoted HTML separately.
+ *
+ * The quoted section is always appended last (`${userHtml}${quotedHtml}`), so we
+ * only need to locate the opening tag — no need to find the matching closing tag,
+ * which would require a full DOM parser to handle nested elements correctly.
  */
 export function extractQuotedHtmlFromDraft(combinedHtml: string): {
   userHtml: string;
   quotedHtml: string;
 } {
-  // Look for the marked quoted HTML container div
-  const quotedDivRegex = /<div[^>]*id="noctua-quoted-html"[^>]*>[\s\S]*?<\/div>/i;
-  const match = combinedHtml.match(quotedDivRegex);
-
-  if (!match) {
-    // No marked quoted HTML found, return all as user HTML
+  // Match only the opening tag of the marker div, not the full element.
+  const markerMatch = combinedHtml.search(/<div[^>]*\bid="noctua-quoted-html"[^>]*>/i);
+  if (markerMatch === -1) {
     return { userHtml: combinedHtml, quotedHtml: "" };
   }
-
-  const quotedSection = match[0];
-  // Find where the quoted section starts
-  const quotedIndex = combinedHtml.indexOf(quotedSection);
-
-  // Everything before the quoted section is user HTML
-  const userHtml = combinedHtml.slice(0, quotedIndex).trim();
-
-  return { userHtml, quotedHtml: quotedSection };
+  return {
+    userHtml: combinedHtml.slice(0, markerMatch).trim(),
+    quotedHtml: combinedHtml.slice(markerMatch)
+  };
 }

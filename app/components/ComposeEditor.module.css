@@ -130,6 +130,26 @@
   pointer-events: none;
 }
 
+.composeEditorSourceMode .composeEditorInput,
+.composeEditorSourceMode .composeEditorPlaceholder {
+  display: none;
+}
+
+.composeSourceTextarea {
+  flex: 1;
+  min-height: 0;
+  resize: none;
+  border: none;
+  outline: none;
+  background: transparent;
+  font-family: ui-monospace, "Cascadia Code", "Source Code Pro", Menlo, Consolas, "DejaVu Sans Mono", monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--input-fg);
+  width: 100%;
+  padding: 0;
+}
+
 .composeParagraph {
   margin: 0 0 10px 0;
 }
