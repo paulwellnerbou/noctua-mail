@@ -42,13 +42,8 @@ import MessageListPane from "./mailclient/messagelist/MessageListPane";
 import MessageListView from "./mailclient/messagelist/MessageListView";
 import listMetaStyles from "./mailclient/messagelist/MessageListMeta.module.css";
 import listPaneStyles from "./mailclient/messagelist/MessageListPane.module.css";
-import type { MessageGroupMeta } from "./mailclient/messagelist/listModel";
 import { createSelectionStore } from "./mailclient/messagelist/selectionStore";
-import {
-  mergeCollapsedGroupsWithMeta,
-  mergeCollapsedThreadsWithMessages,
-  useMessageListDerivedState
-} from "./mailclient/messagelist/listState";
+import { useMessageListDerivedState } from "./mailclient/messagelist/listState";
 import {
   logListDebug,
   summarizeMessageForListDebug
@@ -68,7 +63,7 @@ import MessageQuickActions from "./mailclient/message/MessageQuickActions";
 import MessageViewPane from "./mailclient/message/MessageViewPane";
 import MarkdownPanel from "./mailclient/message/MarkdownPanel";
 import MessageSourcePanel from "./mailclient/message/MessageSourcePanel";
-import { TODO_FLAG, DONE_FLAG, withCalendarInviteFlag } from "@/lib/messageFlags";
+import { TODO_FLAG, DONE_FLAG } from "@/lib/messageFlags";
 import { createComposeAttachment } from "@/lib/mail/composeAttachment";
 import { openDetachedWindow } from "@/lib/ui/openDetachedWindow";
 import { getImapFlagBadges, hasHtmlContent } from "@/lib/ui/messageView";
@@ -81,13 +76,18 @@ import {
 import {
   useSearchState,
   VIRTUAL_FOLDERS} from "./mailclient/useSearchState";
+import { useReminderNotifications } from "./mailclient/useReminderNotifications";
+import { useMessageData } from "./mailclient/useMessageData";
+import { useThreadContent } from "./mailclient/useThreadContent";
+import { useSyncController } from "./mailclient/useSyncController";
+import { useAccountController } from "./mailclient/useAccountController";
 import ThreadJsonModal from "./mailclient/message/ThreadJsonModal";
 import ThreadView from "./mailclient/message/ThreadView";
 import TopBar from "./mailclient/TopBar";
 import BottomStatusBar from "./mailclient/status/BottomStatusBar";
 import { useMessageDeleteActions } from "./mailclient/useMessageDeleteActions";
 import { useMessageMoveActions, type UndoMoveTarget } from "./mailclient/useMessageMoveActions";
-import type { Account, Attachment, Folder, Message, User } from "@/lib/data";
+import type { Account, Folder, Message, User } from "@/lib/data";
 import AccountSettingsModal, { type ManageTab } from "./AccountSettingsModal";
 import {
   computeGroupMeta,
@@ -109,48 +109,22 @@ import {
   isSentFolder as checkIsSentFolder,
   isNotificationSuppressedFolder as checkIsNotificationSuppressedFolder
 } from "./mailclient/utils/folderHelpers";
-import {
-  makeClientId,
-  buildNotificationUrl,
-  extractEmails
-} from "./mailclient/utils/clientHelpers";
+import { extractEmails } from "./mailclient/utils/clientHelpers";
 import {
   getMessageSubjectForNotice,
   remapMessageReferenceIds
 } from "./mailclient/utils/messageMutation";
 import {
-  mergeLoadedMessageCount,
-  resolveLoadedMessageCount
-} from "./mailclient/utils/listCount";
-import {
   CALENDAR_REMINDERS_UPDATED_EVENT,
-  type CalendarReminder,
-  fetchCalendarReminders,
-  getCalendarReminderEndAtMs,
-  hasReminderBeenDeliveredOnClient,
-  markReminderDeliveredOnClient,
-  markReminderDeliveredOnClientById,
-  readDeliveredReminderMap,
-  pruneDeliveredReminderMap
+  markReminderDeliveredOnClientById
 } from "./mailclient/utils/calendarReminders";
 import {
   BUILD_VERSION_POLL_INTERVAL_MS,
   CALENDAR_REMINDER_REFRESH_INTERVAL_MS,
   NOTICE_TIMEOUTS,
-  NOTICE_TIMEOUTS_NO_UNDO,
-  THREAD_COLLAPSE_SETTLE_MS,
-  SYNC_STATUS_POLL_INTERVAL_MS,
-  SYNC_STATUS_RUNNING_POLL_INTERVAL_MS,
-  THREAD_CACHE_LIMIT
+  THREAD_COLLAPSE_SETTLE_MS
 } from "./mailclient/constants";
-import type {
-  ExceptionEntry,
-  ThreadDeleteConfirmState,
-  NoticeInput,
-  SyncNotificationMessage,
-  SyncJobProgress,
-  SyncJobResult
-} from "./mailclient/types";
+import type { ThreadDeleteConfirmState } from "./mailclient/types";
 import { normalizeAccountDateFormat } from "@/lib/dateFormatting";
 type AuthMeResponse = {
   ok?: boolean;
@@ -166,10 +140,6 @@ const RELATED_NOTICE_SUBJECT_MAX_CHARS = 96;
 
 type CurrentResultDecision = { keep: true } | { keep: false; reason: string };
 
-function filterUpcomingCalendarReminders(reminders: CalendarReminder[], nowMs = Date.now()) {
-  return reminders.filter((reminder) => getCalendarReminderEndAtMs(reminder) > nowMs);
-}
-
 function shortenRelatedNoticeSubject(subject: string, maxChars: number) {
   if (subject.length <= maxChars) return subject;
   if (maxChars <= 3) return ".".repeat(Math.max(0, maxChars));
@@ -183,7 +153,6 @@ type MailClientProps = {
 export default function MailClient({ buildVersionLabel = "" }: MailClientProps) {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [folders, setFolders] = useState<Folder[]>([]);
-  const [messages, setMessages] = useState<Message[]>([]);
   const [activeAccountId, setActiveAccountId] = useState("");
   const [activeFolderId, setActiveFolderId] = useState("");
   const [activeMessageId, setActiveMessageId] = useState("");
@@ -193,9 +162,6 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
   const [manageOpen, setManageOpen] = useState(false);
   const [manageTab, setManageTab] = useState<ManageTab>("account");
   const [editingAccount, setEditingAccount] = useState<Account | null>(null);
-  const [isSyncing, setIsSyncing] = useState(false);
-  const [isRecomputingThreads, setIsRecomputingThreads] = useState(false);
-  const [isRecomputingCategories, setIsRecomputingCategories] = useState(false);
   const [leftWidth, setLeftWidth] = useState(270);
   const [listWidth, setListWidth] = useState(840);
   const [dragging, setDragging] = useState<"left" | "list" | null>(null);
@@ -204,14 +170,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
   const [sortKey, setSortKey] = useState<"date" | "from" | "subject">("date");
   const [sortDir, setSortDir] = useState<"desc" | "asc">("desc");
   const [collapsedFolders, setCollapsedFolders] = useState<Record<string, boolean>>({});
-  const [syncingFolders, setSyncingFolders] = useState<Set<string>>(new Set());
-  const [syncCompletionVersion, setSyncCompletionVersion] = useState(0);
-  const [syncProgressByJobId, setSyncProgressByJobId] = useState<Record<string, SyncJobProgress>>(
-    {}
-  );
   const [folderQuery, setFolderQuery] = useState("");
-  const [exceptionEntries, setExceptionEntries] = useState<ExceptionEntry[]>([]);
-  const [pendingCalendarReminders, setPendingCalendarReminders] = useState<CalendarReminder[]>([]);
   const [messageView, setMessageView] = useState<"card" | "table" | "compact" | "threads">("threads");
   const clientId = useMemo(() => {
     if (typeof window === "undefined") return "";
@@ -236,10 +195,99 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     },
     [clientId]
   );
+
+  const readErrorMessage = useCallback(async (res: Response) => {
+    if (res.status === 401) {
+      setAuthState("unauth");
+    }
+    const responsePath = (() => {
+      if (!res.url) return null;
+      try {
+        const url = new URL(res.url);
+        return `${url.pathname}${url.search}`;
+      } catch {
+        return null;
+      }
+    })();
+    const withRequestPath = (message: string) => {
+      if (!responsePath) return message;
+      const normalized = message.trim();
+      if (!normalized) return message;
+      const statusOnly = normalized === String(res.status);
+      const statusPrefix = normalized.startsWith(`${res.status}`);
+      const statusTextOnly =
+        res.statusText && normalized.toLowerCase() === res.statusText.toLowerCase();
+      const requestFailedOnly = normalized === `Request failed (${res.status})`;
+      if (statusOnly || statusPrefix || statusTextOnly || requestFailedOnly) {
+        return `${normalized} ${responsePath}`.trim();
+      }
+      return message;
+    };
+    try {
+      const data = (await res.json()) as {
+        message?: string;
+        error?: string;
+        stack?: string;
+        details?: string;
+      };
+      const parts = [data?.message, data?.error, data?.details, data?.stack].filter(
+        (value) => value && typeof value === "string"
+      ) as string[];
+      if (parts.length) return withRequestPath(parts.join("\n"));
+    } catch {
+      // ignore
+    }
+    try {
+      const text = await res.text();
+      if (text) return withRequestPath(text.slice(0, 2000));
+    } catch {
+      // ignore
+    }
+    return withRequestPath(`Request failed (${res.status})`);
+  }, []);
+
+  const {
+    exceptionEntries,
+    setExceptionEntries,
+    pendingCalendarReminders,
+    inAppNotices,
+    swRegistrationRef,
+    currentBuildVersionRef,
+    pushNotice,
+    dismissNotice,
+    reportError,
+    checkForBuildUpdate,
+    showNotification,
+    syncReminderStateToServiceWorker,
+    processDueCalendarReminders,
+    refreshPendingCalendarReminders
+  } = useReminderNotifications({
+    activeAccountId,
+    accounts,
+    clientId,
+    buildVersionLabel,
+    apiFetch
+  });
+
+  const refreshFolders = useCallback(async (): Promise<Folder[] | null> => {
+    try {
+      const foldersRes = await apiFetch("/api/folders");
+      if (foldersRes.ok) {
+        const nextFolders = (await foldersRes.json()) as Folder[];
+        setFolders(nextFolders);
+        return nextFolders;
+      } else {
+        reportError(await readErrorMessage(foldersRes));
+      }
+    } catch {
+      reportError("Failed to refresh folders.");
+    }
+    return null;
+  }, [apiFetch, reportError, readErrorMessage, setFolders]);
+
   const [groupBy, setGroupBy] = useState<
     "none" | "date" | "week" | "sender" | "domain" | "year" | "folder"
   >("date");
-  const [groupMeta, setGroupMeta] = useState<MessageGroupMeta[]>([]);
   const [collapsedThreads, setCollapsedThreads] = useState<Record<string, boolean>>({});
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
   const selectionStoreRef = useRef<ReturnType<typeof createSelectionStore> | null>(null);
@@ -269,7 +317,6 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     listId?: string;
   } | null>(null);
   const unsubscribeConfirmResolveRef = useRef<((confirmed: boolean) => void) | null>(null);
-  const [inAppNotices, setInAppNotices] = useState<InAppNotice[]>([]);
   // searchScope moved to useSearchState hook
   const [includeSentInEverywhere, setIncludeSentInEverywhere] = useState(false);
   const [lastFolderId, setLastFolderId] = useState("");
@@ -282,7 +329,6 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     composeDraftId,
     setComposeDraftId,
     composeMode,
-    setComposeMode,
     composeTo,
     setComposeTo,
     composeCc,
@@ -302,14 +348,11 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     composeMarkdown,
     setComposeMarkdown,
     composeOpenedAt,
-    setComposeOpenedAt,
     composeSignatureId,
     setComposeSignatureId,
     signatureMenuOpen,
     setSignatureMenuOpen,
-    composeSignatureRef,
     composeReplyMessage,
-    setComposeReplyMessage,
     composeTab,
     setComposeTab,
     composeShowBcc,
@@ -325,7 +368,6 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     composeQuotedText,
     setComposeQuotedText,
     composeReplyHeaders,
-    setComposeReplyHeaders,
     composeAttachments,
     setComposeAttachments,
     composeDragActive,
@@ -335,7 +377,6 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     composeQuotedParts,
     setComposeQuotedParts,
     composeQuotedHtmlEdited,
-    setComposeQuotedHtmlEdited,
     recipientCacheRef,
     composeSize,
     setComposeSize,
@@ -372,21 +413,13 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
   const messageRefs = useRef<Map<string, HTMLElement>>(new Map());
   const listPaneRef = useRef<HTMLDivElement | null>(null);
   const [noticePaneRightOffset, setNoticePaneRightOffset] = useState(16);
-  const [messagesPage, setMessagesPage] = useState(1);
-  const [hasMoreMessages, setHasMoreMessages] = useState(true);
-  const [loadedMessageCount, setLoadedMessageCount] = useState(0);
-  const [totalMessages, setTotalMessages] = useState<number | null>(null);
-  const [loadingMessages, setLoadingMessages] = useState(false);
-  const [refreshingMessages, setRefreshingMessages] = useState(false);
-  const [messageListError, setMessageListError] = useState<string | null>(null);
-  const filteredSearchRefreshTimerRef = useRef<number | null>(null);
-  const lastRequestRef = useRef<{ key: string; page: number } | null>(null);
+  const refreshMailboxDataRef = useRef<() => Promise<boolean>>(async () => false);
+  const setMessagesRef = useRef<React.Dispatch<React.SetStateAction<Message[]>>>(() => {});
+  const updateMessagesRef = useRef<(updater: (message: Message) => Message | null, options?: { source?: string }) => void>(() => {});
+  const searchScopeRef = useRef<"folder" | "all">("folder");
+  const activeVirtualFolderIdRef = useRef("");
+  const threadMessagesRef = useRef<Message[]>([]);
   const currentKeyRef = useRef("");
-  const [loadingSource, setLoadingSource] = useState<Record<string, boolean>>({});
-  const loadingSourceRef = useRef<Record<string, boolean>>({});
-  const [messageContentLoading, setMessageContentLoading] = useState<Record<string, boolean>>({});
-  const messageContentLoadingRef = useRef<Record<string, boolean>>({});
-  const sourceFetchRef = useRef<Map<string, Promise<string | null>>>(new Map());
   const [messageTabs, setMessageTabs] = useState<
     Record<string, "html" | "text" | "markdown" | "source">
   >({});
@@ -400,18 +433,6 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
   } | null>(null);
   const [dragOverFolderId, setDragOverFolderId] = useState<string | null>(null);
   const [deletingFolderIds, setDeletingFolderIds] = useState<Set<string>>(new Set());
-  const streamSourceRef = useRef<EventSource | null>(null);
-  const pollTimerRef = useRef<number | null>(null);
-  const pollInFlightRef = useRef(false);
-  const recomputePollTimerRef = useRef<number | null>(null);
-  const recomputePollInFlightRef = useRef(false);
-  const recomputeJobIdRef = useRef<string | null>(null);
-  const categoryRecomputePollTimerRef = useRef<number | null>(null);
-  const categoryRecomputePollInFlightRef = useRef(false);
-  const categoryRecomputeJobIdRef = useRef<string | null>(null);
-  const autoRepairAttemptedFolderIdsRef = useRef<Set<string>>(new Set());
-  const [mailCheckMode, setMailCheckMode] = useState<"idle" | "polling">("polling");
-  const [streamMode, setStreamMode] = useState<"stream" | "polling" | "idle">("polling");
   const pendingJumpMessageIdRef = useRef<string | null>(null);
   const pendingJumpLocalMessageIdRef = useRef<string | null>(null);
   const pendingJumpAccountIdRef = useRef<string | null>(null);
@@ -419,44 +440,17 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
   const resolveMessageByExternalMessageIdRef = useRef<
     ((messageId: string, accountId: string) => Promise<Message | null>) | null
   >(null);
-  const lastUidNextByFolderRef = useRef<Record<string, number>>({});
-  const lastNotifiedUidRef = useRef<Record<string, number>>({});
-  const notifiedKeysRef = useRef<Set<string>>(new Set());
-  const autoHydrationInFlightRef = useRef<Map<string, Promise<Message | null>>>(new Map());
-  const autoHydrationAttemptAtRef = useRef<Record<string, number>>({});
-  const lastDeleteReconcileAtRef = useRef<Record<string, number>>({});
-  const localDeleteReconcileByFolderRef = useRef<Record<string, number>>({});
-  const localDeleteReconcileByUidRef = useRef<Record<string, number>>({});
-  const messageMutationVersionRef = useRef(0);
-  const listReplacementLogFingerprintRef = useRef("");
   const duplicateMessageIdLogFingerprintRef = useRef("");
   const activeVisibilityLogFingerprintRef = useRef("");
-  const swRegistrationRef = useRef<ServiceWorkerRegistration | null>(null);
-  const currentBuildVersionRef = useRef(buildVersionLabel.trim());
-  const promptedBuildVersionRef = useRef("");
   const threadPreferenceByFolderRef = useRef<Record<string, boolean>>({});
-  const syncStateRef = useRef<{ isSyncing: boolean; syncingFolders: Set<string> }>({
-    isSyncing: false,
-    syncingFolders: new Set()
-  });
-  const syncAccountRef = useRef<
-    (
-      folderId?: string,
-      mode?: "new" | "full",
-      options?: { recategorizeFolder?: boolean }
-    ) => Promise<void> | undefined
-  >(
-    undefined
-  );
-  const initialSyncStatusRef = useRef<Record<string, "running" | "done">>({});
-  const recomputeThreadsRef = useRef<() => Promise<void>>(async () => {});
-  const syncFolderWithBackgroundRef = useRef<(folderId: string, awaitDeep?: boolean, allowRefresh?: boolean, mode?: "recent" | "new" | "full") => Promise<unknown>>(async () => null);
   const inboxFolderRef = useRef<Folder | null>(null);
   const relatedRestoreRef = useRef<{
     queryId: string;
     scope: "folder" | "all";
     folderId: string;
   } | null>(null);
+  const initialSyncStatusRef = useRef<Record<string, "running" | "done">>({});
+  const lastNotifiedUidRef = useRef<Record<string, number>>({});
   const trimmedQuery = query.trim();
   const relatedQueryId = useMemo(() => {
     const match = trimmedQuery.match(/^related:(.+)$/i);
@@ -519,15 +513,74 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     () => [...virtualDefaultExcludedFolderIds].sort().join(","),
     [virtualDefaultExcludedFolderIds]
   );
-  const focusedExcludedFolderIdsKey = useMemo(
-    () => [...focusedExcludedFolderIds].sort().join(","),
-    [focusedExcludedFolderIds]
-  );
   const folderTree = useMemo(() => buildFolderTree(accountFolders), [accountFolders]);
   const folderById = useMemo(
     () => new Map(accountFolders.map((folder) => [folder.id, folder])),
     [accountFolders]
   );
+
+  const inboxFolder = useMemo(() => {
+    const bySpecial = accountFolders.find(
+      (folder) => (folder.specialUse ?? "").toLowerCase() === "\\inbox"
+    );
+    if (bySpecial) return bySpecial;
+    const byName = accountFolders.find((folder) => folder.name.toLowerCase() === "inbox");
+    return byName ?? accountFolders[0];
+  }, [accountFolders]);
+
+  const inboxMailboxPath = useMemo(() => {
+    if (!inboxFolder) return "INBOX";
+    return inboxFolder.id.replace(`${activeAccountId}:`, "");
+  }, [activeAccountId, inboxFolder]);
+
+  const {
+    isSyncing,
+    isRecomputingThreads,
+    isRecomputingCategories,
+    syncingFolders,
+    syncCompletionVersion,
+    syncProgressByJobId,
+    mailCheckMode,
+    syncStateRef,
+    syncAccountRef,
+    recomputeThreadsRef,
+    syncFolderWithBackgroundRef,
+    autoRepairAttemptedFolderIdsRef,
+    lastUidNextByFolderRef,
+    localDeleteReconcileByFolderRef,
+    localDeleteReconcileByUidRef,
+    syncAccount,
+    runSyncJob,
+    recomputeThreads,
+    recomputeCategories
+  } = useSyncController({
+    activeAccountId,
+    activeFolderId,
+    activeVirtualFolderId: activeVirtualFolderIdRef.current,
+    searchScope: searchScopeRef.current,
+    authState,
+    inboxMailboxPath,
+    accountFolders,
+    currentAccountEmail: accounts.find((a) => a.id === activeAccountId)?.email,
+    currentAccountSyncSettings: accounts.find((a) => a.id === activeAccountId)?.settings?.sync,
+    apiFetch,
+    readErrorMessage,
+    reportError,
+    pushNotice,
+    showNotification,
+    refreshMailboxData: () => refreshMailboxDataRef.current(),
+    refreshFolders,
+    refreshPendingCalendarReminders,
+    setFolders,
+    setMessages: (updater) => setMessagesRef.current(updater),
+    setActiveFolderId,
+    isNotificationSuppressedFolder: (folderId: string) =>
+      checkIsNotificationSuppressedFolder(folderId, accountFolders),
+    updateMessagesWithCurrentResultPrune: (updater, options) =>
+      updateMessagesRef.current(updater, options),
+    inboxFolder: inboxFolder ?? null,
+    currentKeyRef
+  });
 
   // Search state hook (needs folderById to be defined first)
   const { state: searchState, actions: searchActions } = useSearchState({
@@ -562,10 +615,12 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     setSearchScope,
     setSearchFields,
     setSearchBadges,
-    setActiveVirtualFolderId,
     clearSearch,
     activateVirtualFolder
   } = searchActions;
+
+  searchScopeRef.current = searchScope;
+  activeVirtualFolderIdRef.current = activeVirtualFolderId ?? "";
 
   // Computed values that depend on search state
   const searchFieldKey = useMemo(() => {
@@ -611,14 +666,6 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     ]
   );
   currentKeyRef.current = messagesKey;
-  const inboxFolder = useMemo(() => {
-    const bySpecial = accountFolders.find(
-      (folder) => (folder.specialUse ?? "").toLowerCase() === "\\inbox"
-    );
-    if (bySpecial) return bySpecial;
-    const byName = accountFolders.find((folder) => folder.name.toLowerCase() === "inbox");
-    return byName ?? accountFolders[0];
-  }, [accountFolders]);
 
   const findSentFolder = () => {
     const lowered = accountFolders.map((folder) => ({
@@ -646,39 +693,6 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     const byPartial = lowered.find((item) => item.name.includes("sent"));
     return byPartial?.folder ?? null;
   };
-  const inboxMailboxPath = useMemo(() => {
-    if (!inboxFolder) return "INBOX";
-    return inboxFolder.id.replace(`${activeAccountId}:`, "");
-  }, [activeAccountId, inboxFolder]);
-  const messageCountByFolder = useMemo(() => {
-    const map = new Map<string, number>();
-    messages
-      .filter((m) => m.accountId === activeAccountId)
-      .forEach((msg) => {
-        const current = map.get(msg.folderId) ?? 0;
-        map.set(msg.folderId, current + 1);
-      });
-    return map;
-  }, [messages, activeAccountId]);
-  const messageByMessageId = useMemo(() => {
-    const map = new Map<string, Message>();
-    messages.forEach((message) => {
-      if (message.accountId !== activeAccountId) return;
-      if (message.messageId) {
-        map.set(message.messageId, message);
-      }
-    });
-    return map;
-  }, [messages, activeAccountId]);
-  const messageById = useMemo(() => {
-    const map = new Map<string, Message>();
-    messages.forEach((message) => {
-      if (message.accountId !== activeAccountId) return;
-      map.set(message.id, message);
-    });
-    return map;
-  }, [messages, activeAccountId]);
-
   const jumpToMessageId = (messageId: string, source = "unknown") => {
     const normalized = messageId.trim();
     const lower = normalized.toLowerCase();
@@ -728,7 +742,6 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
   const clearNotificationDeepLink = (messageId?: string | null) => {
     clearUrlParam("messageId", messageId);
   };
-  const listLoading = loadingMessages || refreshingMessages;
   const emptyListSyncing = isSyncing || syncingFolders.size > 0;
   const selectedSearchBadges = useMemo(
     () =>
@@ -750,56 +763,12 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
   );
   const hasFilteredSearchCriteria =
     isRelatedSearch || trimmedQuery.length > 0 || effectiveSearchBadges.length > 0;
-  const logListReplacement = (
-    source: string,
-    prevMessages: Message[],
-    nextMessages: Message[]
-  ) => {
-    const prevScoped = prevMessages.filter((message) => message.accountId === activeAccountId);
-    const nextScoped = nextMessages.filter((message) => message.accountId === activeAccountId);
-    const nextIds = new Set(nextScoped.map((message) => message.id));
-    const removed = prevScoped.filter((message) => !nextIds.has(message.id));
-    const foreign = nextMessages.filter((message) => message.accountId !== activeAccountId);
-    if (removed.length === 0 && foreign.length === 0) return;
-    const removedSample = removed
-      .slice(0, LIST_DEBUG_SAMPLE_LIMIT)
-      .map((message) => summarizeMessageForListDebug(message));
-    const foreignSample = foreign
-      .slice(0, LIST_DEBUG_SAMPLE_LIMIT)
-      .map((message) => summarizeMessageForListDebug(message));
-    const fingerprint = [
-      source,
-      activeAccountId,
-      activeFolderId,
-      searchScope,
-      removed.length,
-      foreign.length,
-      removedSample.map((message) => message?.id ?? "").join(",")
-    ].join("|");
-    if (listReplacementLogFingerprintRef.current === fingerprint) return;
-    listReplacementLogFingerprintRef.current = fingerprint;
-    logListDebug("warn", "list replacement changed membership", {
-      source,
-      activeAccountId,
-      activeFolderId,
-      searchScope,
-      previousCount: prevScoped.length,
-      nextCount: nextScoped.length,
-      removedCount: removed.length,
-      foreignCount: foreign.length,
-      removedSample,
-      foreignSample
-    });
-  };
 
   // Cleanup debounce timer on unmount
   useEffect(() => {
     return () => {
       if (composeBodyDebounceRef.current) {
         clearTimeout(composeBodyDebounceRef.current);
-      }
-      if (filteredSearchRefreshTimerRef.current !== null) {
-        window.clearTimeout(filteredSearchRefreshTimerRef.current);
       }
     };
   }, [composeBodyDebounceRef]);
@@ -909,114 +878,6 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     return `Showing related mails for ${label} (based on calendar invite UID matches, subject similarity, sender/recipient overlap, and conversation references).`;
   }, [isRelatedSearch, relatedContext, relatedQueryId]);
   // clearSearch, activateVirtualFolder, and virtual folder count effects moved to useSearchState hook
-  const pushNotice = useCallback((input: NoticeInput) => {
-    const { durationMs, ...notice } = input;
-    const baseTimeoutMs =
-      durationMs === null
-        ? null
-        : typeof durationMs === "number"
-          ? durationMs
-          : NOTICE_TIMEOUTS[notice.type];
-    const hasUndoAction =
-      notice.actionLabel?.trim().toLowerCase() === "undo" &&
-      typeof notice.onAction === "function";
-    const timeoutMs =
-      baseTimeoutMs == null
-        ? null
-        : hasUndoAction
-          ? baseTimeoutMs
-          : Math.min(baseTimeoutMs, NOTICE_TIMEOUTS_NO_UNDO[notice.type]);
-    const nextNotice: InAppNotice = {
-      ...notice,
-      id: makeClientId(),
-      expiresAt: timeoutMs == null ? null : Date.now() + timeoutMs
-    };
-    setInAppNotices((prev) => [...prev, nextNotice].slice(-8));
-  }, []);
-  const promptBuildRefreshNotice = useCallback((nextBuildVersion: string) => {
-    const normalizedVersion = nextBuildVersion.trim();
-    if (!normalizedVersion) return;
-    if (promptedBuildVersionRef.current === normalizedVersion) return;
-    promptedBuildVersionRef.current = normalizedVersion;
-    pushNotice({
-      type: "info",
-      title: "Update available",
-      description: `A newer build (${normalizedVersion}) is available.`,
-      actionLabel: "Refresh",
-      onAction: () => {
-        if (typeof window === "undefined") return;
-        window.location.reload();
-      },
-      durationMs: null
-    });
-  }, [pushNotice]);
-  const dismissNotice = useCallback((noticeId: string) => {
-    setInAppNotices((prev) => prev.filter((item) => item.id !== noticeId));
-  }, []);
-  const reportError = useCallback((message: string) => {
-    const normalized = message?.trim() || "Unexpected error.";
-    const entry: ExceptionEntry = {
-      id: makeClientId(),
-      message: normalized,
-      timestamp: Date.now()
-    };
-    setExceptionEntries((prev) => [entry, ...prev].slice(0, 30));
-    pushNotice({
-      type: "error",
-      title: "Operation failed",
-      description: normalized.split("\n")[0]?.slice(0, 220),
-      durationMs: NOTICE_TIMEOUTS.error
-    });
-  }, [pushNotice]);
-  const readErrorMessage = useCallback(async (res: Response) => {
-    if (res.status === 401) {
-      setAuthState("unauth");
-    }
-    const responsePath = (() => {
-      if (!res.url) return null;
-      try {
-        const url = new URL(res.url);
-        return `${url.pathname}${url.search}`;
-      } catch {
-        return null;
-      }
-    })();
-    const withRequestPath = (message: string) => {
-      if (!responsePath) return message;
-      const normalized = message.trim();
-      if (!normalized) return message;
-      const statusOnly = normalized === String(res.status);
-      const statusPrefix = normalized.startsWith(`${res.status}`);
-      const statusTextOnly =
-        res.statusText && normalized.toLowerCase() === res.statusText.toLowerCase();
-      const requestFailedOnly = normalized === `Request failed (${res.status})`;
-      if (statusOnly || statusPrefix || statusTextOnly || requestFailedOnly) {
-        return `${normalized} ${responsePath}`.trim();
-      }
-      return message;
-    };
-    try {
-      const data = (await res.json()) as {
-        message?: string;
-        error?: string;
-        stack?: string;
-        details?: string;
-      };
-      const parts = [data?.message, data?.error, data?.details, data?.stack].filter(
-        (value) => value && typeof value === "string"
-      ) as string[];
-      if (parts.length) return withRequestPath(parts.join("\n"));
-    } catch {
-      // ignore
-    }
-    try {
-      const text = await res.text();
-      if (text) return withRequestPath(text.slice(0, 2000));
-    } catch {
-      // ignore
-    }
-    return withRequestPath(`Request failed (${res.status})`);
-  }, []);
   const formatRelativeTime = (timestamp?: number | null) => {
     if (!timestamp) return "";
     const seconds = Math.max(1, Math.floor((Date.now() - timestamp) / 1000));
@@ -1028,194 +889,6 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     const days = Math.floor(hours / 24);
     return `${days}d ago`;
   };
-
-  const checkForBuildUpdate = useCallback(async () => {
-    try {
-      const response = await apiFetch("/api/version", {
-        credentials: "include",
-        cache: "no-store"
-      });
-      if (!response.ok) return;
-      const payload = (await response.json().catch(() => null)) as
-        | {
-            buildVersionLabel?: string;
-          }
-        | null;
-      const latestBuildVersion =
-        typeof payload?.buildVersionLabel === "string" ? payload.buildVersionLabel.trim() : "";
-      if (!latestBuildVersion) return;
-      const currentBuildVersion = currentBuildVersionRef.current;
-      if (!currentBuildVersion) {
-        currentBuildVersionRef.current = latestBuildVersion;
-        return;
-      }
-      if (latestBuildVersion === currentBuildVersion) return;
-      promptBuildRefreshNotice(latestBuildVersion);
-    } catch {
-      // ignore build version check failures
-    }
-  }, [apiFetch, promptBuildRefreshNotice]);
-
-  const ensureNotificationPermission = useCallback(async () => {
-    if (typeof window === "undefined" || !("Notification" in window)) return "denied";
-    if (Notification.permission === "default") {
-      try {
-        return await Notification.requestPermission();
-      } catch {
-        return Notification.permission;
-      }
-    }
-    return Notification.permission;
-  }, []);
-
-  const showNotification = useCallback(
-    async (
-      title: string,
-      body: string,
-      tag: string,
-      opts?: { messageId?: string | null; accountId?: string | null; url?: string }
-    ): Promise<boolean> => {
-      if (typeof window === "undefined" || !("Notification" in window)) return false;
-      const permission = await ensureNotificationPermission();
-      console.info("[noctua] notification permission", permission);
-      if (permission !== "granted") return false;
-      const targetUrl = opts?.url ?? buildNotificationUrl(opts?.messageId, opts?.accountId);
-      const notificationOptions = {
-        body,
-        tag,
-        icon: "/icon.png",
-        badge: "/favicon.png",
-        data: {
-          url: targetUrl,
-          messageId: opts?.messageId ?? null,
-          accountId: opts?.accountId ?? null
-        }
-      };
-      try {
-        if ("serviceWorker" in navigator) {
-          const registration =
-            swRegistrationRef.current ??
-            (await navigator.serviceWorker.getRegistration()) ??
-            (await navigator.serviceWorker.ready);
-          if (registration?.active) {
-            console.info("[noctua] showNotification via service worker", title, body);
-            await registration.showNotification(title, notificationOptions);
-            return true;
-          }
-        }
-        console.info("[noctua] showNotification via Notification()", title, body);
-        const notification = new Notification(title, notificationOptions);
-        notification.onclick = () => {
-          window.focus();
-          window.location.assign(targetUrl);
-        };
-        return true;
-      } catch (error) {
-        console.warn("[noctua] notification failed", error);
-        try {
-          console.info("[noctua] fallback Notification()", title, body);
-          const fallback = new Notification(title, notificationOptions);
-          fallback.onclick = () => {
-            window.focus();
-            window.location.assign(targetUrl);
-          };
-          return true;
-        } catch (fallbackError) {
-          console.warn("[noctua] notification fallback failed", fallbackError);
-        }
-      }
-      return false;
-    },
-    [ensureNotificationPermission]
-  );
-
-  const syncReminderStateToServiceWorker = useCallback(
-    async (reminders: CalendarReminder[]) => {
-      if (typeof window === "undefined" || !("serviceWorker" in navigator)) return;
-      const accountIds = accounts.map((account) => account.id).filter(Boolean);
-      if (accountIds.length === 0 || !clientId) return;
-      const deliveredByAccount: Record<string, Record<string, number>> = {};
-      accountIds.forEach((accountId) => {
-        const map = readDeliveredReminderMap(accountId, clientId);
-        if (Object.keys(map).length > 0) {
-          deliveredByAccount[accountId] = map;
-        }
-      });
-      const payload = {
-        type: "noctua:reminder-state",
-        accountIds,
-        deliveredByAccount,
-        activeAccountId: activeAccountId || null,
-        activeReminderIds: reminders.map((item) => item.id)
-      };
-      try {
-        const registration =
-          swRegistrationRef.current ??
-          (await navigator.serviceWorker.getRegistration()) ??
-          null;
-        swRegistrationRef.current = registration;
-        const target = registration?.active ?? navigator.serviceWorker.controller ?? null;
-        target?.postMessage(payload);
-      } catch {
-        // ignore service worker sync errors
-      }
-    },
-    [accounts, activeAccountId, clientId]
-  );
-
-  const processDueCalendarReminders = useCallback(async (reminders: CalendarReminder[]) => {
-    if (!activeAccountId.trim()) return;
-    const now = Date.now();
-    if (reminders.length === 0 || !clientId) return;
-    pruneDeliveredReminderMap(activeAccountId, clientId, reminders);
-    let deliveredChanged = false;
-    for (let index = 0; index < reminders.length; index += 1) {
-      const reminder = reminders[index];
-      if (reminder.triggerAtMs > now) continue;
-      if (getCalendarReminderEndAtMs(reminder) <= now) continue;
-      if (hasReminderBeenDeliveredOnClient(activeAccountId, clientId, reminder)) continue;
-      const eventDateLabel = new Intl.DateTimeFormat(undefined, {
-        dateStyle: "medium",
-        timeStyle: "short"
-      }).format(new Date(reminder.nextEventStartAtMs));
-      const bodyParts = [`${reminder.leadLabel} reminder`, `Starts ${eventDateLabel}`];
-      if (reminder.eventLocation) {
-        bodyParts.push(reminder.eventLocation);
-      }
-      const sent = await showNotification(
-        `Reminder: ${reminder.eventTitle || "Calendar event"}`,
-        bodyParts.join(" · "),
-        `calendar-reminder-${reminder.id}`,
-        { messageId: reminder.messageId ?? null, accountId: reminder.accountId ?? activeAccountId }
-      );
-      if (sent) {
-        markReminderDeliveredOnClient(activeAccountId, clientId, reminder);
-        deliveredChanged = true;
-      }
-    }
-    if (deliveredChanged) {
-      await syncReminderStateToServiceWorker(reminders);
-    }
-  }, [activeAccountId, clientId, showNotification, syncReminderStateToServiceWorker]);
-
-  const refreshPendingCalendarReminders = useCallback(async () => {
-    if (!activeAccountId.trim()) {
-      setPendingCalendarReminders([]);
-      return;
-    }
-    try {
-      const reminders = await fetchCalendarReminders(activeAccountId);
-      const upcomingReminders = filterUpcomingCalendarReminders(reminders);
-      setPendingCalendarReminders(upcomingReminders);
-      if (clientId) {
-        pruneDeliveredReminderMap(activeAccountId, clientId, upcomingReminders);
-      }
-      await syncReminderStateToServiceWorker(upcomingReminders);
-      await processDueCalendarReminders(upcomingReminders);
-    } catch {
-      // ignore reminder sync failures in status UI
-    }
-  }, [activeAccountId, clientId, processDueCalendarReminders, syncReminderStateToServiceWorker]);
 
   const undoMoveOperation = async (
     targets: UndoMoveTarget[],
@@ -1263,6 +936,84 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     }
   };
 
+  // Folder helper wrappers - these don't need memoization (not passed to hooks)
+  const isDraftsFolder = (folderId?: string | null) => checkIsDraftsFolder(folderId, folders);
+  const isTrashFolder = (folderId?: string | null) => checkIsTrashFolder(folderId, folders);
+  const isSpamFolder = (folderId?: string | null) => checkIsSpamFolder(folderId, folders);
+  const isSentFolder = (folderId?: string | null) => checkIsSentFolder(folderId, folders);
+
+  // Memoize Set of excluded folder IDs - only changes when folder structure changes
+  const excludedFolderIdsForThreads = useMemo(() => {
+    const ids = new Set<string>();
+    folders.forEach(folder => {
+      const special = (folder.specialUse ?? "").toLowerCase();
+      if (special === "\\trash" || special === "\\junk" || special === "\\spam") {
+        ids.add(folder.id);
+      }
+    });
+    return ids;
+  }, [folders.map(f => `${f.id}:${f.specialUse}`).join('|')]);
+
+  // CRITICAL: This IS passed to useMessageListDerivedState and MUST be stable
+  const checkIsThreadExcludedFolder = useMemo(
+    () => (folderId?: string | null) => {
+      if (!folderId) return false;
+      return excludedFolderIdsForThreads.has(folderId);
+    },
+    [excludedFolderIdsForThreads]
+  );
+
+  const threadsAllowed =
+    ["date", "week", "year"].includes(groupBy) &&
+    !isDraftsFolder(activeFolderId) &&
+    !checkIsThreadExcludedFolder(activeFolderId);
+  const supportsThreads = threadsEnabled && threadsAllowed;
+
+  // useMessageData: manages message list state, loading, and refresh
+  const {
+    messages,
+    setMessages,
+    groupMeta,
+    setMessagesPage,
+    hasMoreMessages,
+    setHasMoreMessages,
+    loadedMessageCount,
+    totalMessages,
+    setTotalMessages,
+    loadingMessages,
+    refreshingMessages,
+    messageListError,
+    setMessageListError,
+    refreshMailboxData,
+    queueFilteredSearchRefresh,
+    markMessagesMutated
+  } = useMessageData({
+    messagesKey,
+    activeAccountId,
+    searchScope,
+    activeFolderId,
+    isRelatedSearch,
+    relatedQueryId,
+    selectedSearchFields,
+    searchBadges,
+    effectiveSearchBadges,
+    currentSearchExcludedFolderIds,
+    supportsThreads,
+    groupBy,
+    query,
+    authState,
+    apiFetch,
+    readErrorMessage,
+    reportError,
+    setRelatedContext,
+    relatedContext,
+    setCollapsedGroups,
+    setCollapsedThreads,
+    currentKeyRef
+  });
+  refreshMailboxDataRef.current = refreshMailboxData;
+  setMessagesRef.current = setMessages;
+
   const accountMessages = useMemo(() => {
     const filtered = messages.filter((message) => message.accountId === activeAccountId);
     const seen = new Set<string>();
@@ -1297,7 +1048,6 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
   }, [activeAccountId, messages]);
 
   const filteredMessages = accountMessages;
-  const hasLoadedMessages = filteredMessages.length > 0;
 
   const sortedMessages = useMemo(() => {
     const items = [...filteredMessages];
@@ -1315,39 +1065,119 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     return items;
   }, [filteredMessages, sortDir, sortKey]);
 
-  // Folder helper wrappers - these don't need memoization (not passed to hooks)
-  const isDraftsFolder = (folderId?: string | null) => checkIsDraftsFolder(folderId, folders);
-  const isTrashFolder = (folderId?: string | null) => checkIsTrashFolder(folderId, folders);
-  const isSpamFolder = (folderId?: string | null) => checkIsSpamFolder(folderId, folders);
-  const isSentFolder = (folderId?: string | null) => checkIsSentFolder(folderId, folders);
-  const isNotificationSuppressedFolder = (folderId?: string | null) => checkIsNotificationSuppressedFolder(folderId, folders);
-
-  // Memoize Set of excluded folder IDs - only changes when folder structure changes
-  const excludedFolderIdsForThreads = useMemo(() => {
-    const ids = new Set<string>();
-    folders.forEach(folder => {
-      const special = (folder.specialUse ?? "").toLowerCase();
-      if (special === "\\trash" || special === "\\junk" || special === "\\spam") {
-        ids.add(folder.id);
+  // Memos that depend on messages (from useMessageData)
+  const messageCountByFolder = useMemo(() => {
+    const map = new Map<string, number>();
+    messages
+      .filter((m) => m.accountId === activeAccountId)
+      .forEach((msg) => {
+        const current = map.get(msg.folderId) ?? 0;
+        map.set(msg.folderId, current + 1);
+      });
+    return map;
+  }, [messages, activeAccountId]);
+  const messageByMessageId = useMemo(() => {
+    const map = new Map<string, Message>();
+    messages.forEach((message) => {
+      if (message.accountId !== activeAccountId) return;
+      if (message.messageId) {
+        map.set(message.messageId, message);
       }
     });
-    return ids;
-  }, [folders.map(f => `${f.id}:${f.specialUse}`).join('|')]);
+    return map;
+  }, [messages, activeAccountId]);
+  const messageById = useMemo(() => {
+    const map = new Map<string, Message>();
+    messages.forEach((message) => {
+      if (message.accountId !== activeAccountId) return;
+      map.set(message.id, message);
+    });
+    return map;
+  }, [messages, activeAccountId]);
 
-  // CRITICAL: This IS passed to useMessageListDerivedState and MUST be stable
-  const checkIsThreadExcludedFolder = useMemo(
-    () => (folderId?: string | null) => {
-      if (!folderId) return false;
-      return excludedFolderIdsForThreads.has(folderId);
-    },
-    [excludedFolderIdsForThreads]
-  );
+  // useThreadContent: manages thread content cache, source loading, and hydration
+  const {
+    threadRelatedMessages,
+    setThreadRelatedMessages,
+    threadContentById,
+    threadEvictVersion,
+    threadContentLoading,
+    setThreadContentLoading,
+    threadContentErrorById,
+    setLoadingSource,
+    messageContentLoading,
+    setMessageContentLoading,
+    threadContentByIdRef,
+    sourceFetchRef,
+    autoHydrationAttemptAtRef,
+    upsertThreadCache,
+    clearThreadContentError,
+    setThreadContentError,
+    evictMessagesFromThreadCache,
+    evictThreadCache,
+    resetThreadCache,
+    updateThreadCacheWithFlags,
+    updateThreadCacheWithCategory,
+    hydrateMessageFromServer,
+    fetchSource,
+    hydrateMessageOnOpenIfNeeded,
+    ensureMessageContent
+  } = useThreadContent({
+    activeAccountId,
+    apiFetch,
+    readErrorMessage,
+    reportError,
+    updateMessagesWithCurrentResultPrune: (updater, options) =>
+      updateMessagesRef.current(updater, options),
+    messageById,
+    threadMessagesRef
+  });
 
-  const threadsAllowed =
-    ["date", "week", "year"].includes(groupBy) &&
-    !isDraftsFolder(activeFolderId) &&
-    !checkIsThreadExcludedFolder(activeFolderId);
-  const supportsThreads = threadsEnabled && threadsAllowed;
+  // useAccountController: manages account/folder CRUD and initial data load
+  const {
+    loadInitialData,
+    switchAccount,
+    saveAccount,
+    saveAccountSettings,
+    deleteAccount,
+    startEditAccount,
+    handleCreateSubfolder,
+    handleRenameFolderItem,
+    handleDeleteFolderItem
+  } = useAccountController({
+    activeAccountId,
+    accounts,
+    accountFolders,
+    activeFolderId,
+    deletingFolderIds,
+    apiFetch,
+    readErrorMessage,
+    reportError,
+    refreshFolders,
+    runSyncJob,
+    setAccounts,
+    setActiveAccountId,
+    setFolders,
+    setAuthState,
+    setCurrentUser,
+    setInitialDataReady,
+    setSessionTtlSeconds,
+    setMessages,
+    setMessagesPage,
+    setHasMoreMessages,
+    setTotalMessages,
+    setActiveMessageId,
+    setViewMessage,
+    setActiveFolderId,
+    setLastFolderId,
+    setMessageListError,
+    setExceptionEntries,
+    setManageOpen,
+    setManageTab,
+    setEditingAccount,
+    setDeletingFolderIds
+  });
+
   const preferToDisplay = isDraftsFolder(activeFolderId) || isSentFolder(activeFolderId);
   const draftsFolder = useMemo(
     () =>
@@ -1359,6 +1189,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
   const draftsCount = draftsFolder
     ? draftsFolder.count ?? messageCountByFolder.get(draftsFolder.id) ?? 0
     : 0;
+  const listLoading = loadingMessages || refreshingMessages;
 
   const getPrimaryEmail = (value?: string) => extractEmails(value)[0] ?? null;
   const getAccountFromValue = (account?: Account | null) => {
@@ -1584,96 +1415,6 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     includeThreadAcrossFolders &&
     !isDraftsFolder(activeFolderId) &&
     !checkIsThreadExcludedFolder(activeFolderId);
-  const [threadRelatedMessages, setThreadRelatedMessages] = useState<Message[]>([]);
-  const [threadContentById, setThreadContentById] = useState<Record<string, Message[]>>({});
-  const [threadEvictVersion, setThreadEvictVersion] = useState(0);
-  const [threadContentLoading, setThreadContentLoading] = useState<string | null>(null);
-  const [threadContentErrorById, setThreadContentErrorById] = useState<Record<string, string>>({});
-  const threadContentByIdRef = useRef(threadContentById);
-  const threadCacheOrderRef = useRef<string[]>([]);
-  useEffect(() => {
-    threadContentByIdRef.current = threadContentById;
-  }, [threadContentById]);
-  const upsertThreadCache = useCallback((threadId: string, items: Message[]) => {
-    setThreadContentById((prev) => {
-      const next = { ...prev, [threadId]: items };
-      const order = threadCacheOrderRef.current.filter((id) => id !== threadId);
-      order.push(threadId);
-      while (order.length > THREAD_CACHE_LIMIT) {
-        const evict = order.shift();
-        if (evict) delete next[evict];
-      }
-      threadCacheOrderRef.current = order;
-      return next;
-    });
-  }, []);
-  const clearThreadContentError = useCallback((threadId: string) => {
-    setThreadContentErrorById((prev) => {
-      if (!(threadId in prev)) return prev;
-      const next = { ...prev };
-      delete next[threadId];
-      return next;
-    });
-  }, []);
-  const setThreadContentError = useCallback(
-    (threadId: string, message = "Failed to load message content.") => {
-      setThreadContentErrorById((prev) =>
-        prev[threadId] === message ? prev : { ...prev, [threadId]: message }
-      );
-    },
-    []
-  );
-  const setMessageContentLoadingState = useCallback((messageId: string, loading: boolean) => {
-    setMessageContentLoading((prev) => {
-      const isLoading = Boolean(prev[messageId]);
-      if (loading && isLoading) return prev;
-      if (!loading && !isLoading) return prev;
-      const next = { ...prev };
-      if (loading) {
-        next[messageId] = true;
-      } else {
-        delete next[messageId];
-      }
-      return next;
-    });
-  }, []);
-  const updateThreadCacheWithMessage = useCallback((message: Message) => {
-    const threadId = message.threadId ?? message.messageId ?? message.id;
-    if (!threadId) return;
-    setThreadContentById((prev) => {
-      const cached = prev[threadId];
-      if (!cached || cached.length === 0) return prev;
-      let updated = false;
-      const nextThread = cached.map((item) => {
-        if (item.id !== message.id) return item;
-        updated = true;
-        return { ...item, ...message, groupKey: item.groupKey ?? message.groupKey };
-      });
-      if (!updated) return prev;
-      return { ...prev, [threadId]: nextThread };
-    });
-  }, []);
-  const evictMessagesFromThreadCache = useCallback((messageIds: string[]) => {
-    if (messageIds.length === 0) return;
-    const idSet = new Set(messageIds);
-    setThreadContentById((prev) => {
-      let changed = false;
-      const next: Record<string, Message[]> = { ...prev };
-      Object.entries(prev).forEach(([threadId, items]) => {
-        const filtered = items.filter((item) => !idSet.has(item.id));
-        if (filtered.length === items.length) return;
-        changed = true;
-        if (filtered.length === 0) {
-          delete next[threadId];
-        } else {
-          next[threadId] = filtered;
-        }
-      });
-      if (!changed) return prev;
-      threadCacheOrderRef.current = threadCacheOrderRef.current.filter((id) => id in next);
-      return next;
-    });
-  }, []);
   const evictMessageCaches = useCallback(
     (messageIds: string[]) => {
       if (messageIds.length === 0) return;
@@ -1756,9 +1497,6 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     },
     [evictMessagesFromThreadCache]
   );
-  const markMessagesMutated = useCallback(() => {
-    messageMutationVersionRef.current += 1;
-  }, []);
   const applyDeleteReconcileSuppression = useCallback(
     ({
       targets = [],
@@ -2242,7 +1980,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
         }
         const sentFolder = findSentFolder();
         if (sentFolder) {
-          await syncFolderWithBackground(sentFolder.id, false, false, "recent", false);
+          await syncFolderWithBackgroundRef.current?.(sentFolder.id, false, false, "recent");
         }
         await refreshFolders();
         if (sentFolder && activeFolderId === sentFolder.id && searchScope === "folder") {
@@ -3006,7 +2744,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
         setViewMessage(null);
         setActiveMessageId("");
       }
-      queueFilteredSearchRefresh();
+      queueFilteredSearchRefresh(hasFilteredSearchCriteria);
     } catch {
       reportError("Failed to update message flag.");
     }
@@ -3044,7 +2782,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
         setViewMessage(null);
         setActiveMessageId("");
       }
-      queueFilteredSearchRefresh();
+      queueFilteredSearchRefresh(hasFilteredSearchCriteria);
     } catch {
       reportError("Failed to update message keyword.");
     }
@@ -3052,46 +2790,6 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
 
   const updateFlagStateRef = useRef(updateFlagState);
   updateFlagStateRef.current = updateFlagState;
-
-  const updateThreadCacheWithFlags = (messageId: string, flags: string[]) => {
-    setThreadContentById((prev) => {
-      let changed = false;
-      const next: Record<string, Message[]> = { ...prev };
-      Object.entries(prev).forEach(([threadId, list]) => {
-        const idx = list.findIndex((item) => item.id === messageId);
-        if (idx < 0) return;
-        const updated = applyFlagsToMessage(list[idx], flags);
-        const nextList = [...list];
-        nextList[idx] = updated;
-        next[threadId] = nextList;
-        changed = true;
-      });
-      return changed ? next : prev;
-    });
-  };
-
-  const updateThreadCacheWithCategory = (
-    messageId: string,
-    category: Message["category"],
-    categoryScore: Message["categoryScore"],
-    categorySignals: Message["categorySignals"]
-  ) => {
-    setThreadContentById((prev) => {
-      let changed = false;
-      const next: Record<string, Message[]> = { ...prev };
-      Object.entries(prev).forEach(([threadId, list]) => {
-        const idx = list.findIndex((item) => item.id === messageId);
-        if (idx < 0) return;
-        const current = list[idx];
-        const updated = { ...current, category, categoryScore, categorySignals };
-        const nextList = [...list];
-        nextList[idx] = updated;
-        next[threadId] = nextList;
-        changed = true;
-      });
-      return changed ? next : prev;
-    });
-  };
 
   const handleSetCategory = async (
     message: Message,
@@ -3146,7 +2844,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
         setViewMessage(null);
         setActiveMessageId("");
       }
-      queueFilteredSearchRefresh();
+      queueFilteredSearchRefresh(hasFilteredSearchCriteria);
       pushNotice({
         type: "success",
         title: category ? "Category updated." : "Category removed.",
@@ -3184,8 +2882,8 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
       reportError(await readErrorMessage(removeRes));
       return;
     }
-    const removeData = (await removeRes.json()) as { flags: string[] };
-    
+    await removeRes.json();
+
     // Add the new flag
     const addRes = await apiFetch("/api/message/flags", {
       method: "POST",
@@ -3232,7 +2930,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
             await Promise.all(
               todoMessages.map((m) => transitionTodoState(m, TODO_FLAG, DONE_FLAG))
             );
-            queueFilteredSearchRefresh();
+            queueFilteredSearchRefresh(hasFilteredSearchCriteria);
           }
         } else if (clickedBadge === "done") {
           // Mark all Done messages as To-Do
@@ -3241,7 +2939,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
             await Promise.all(
               doneMessages.map((m) => transitionTodoState(m, DONE_FLAG, TODO_FLAG))
             );
-            queueFilteredSearchRefresh();
+            queueFilteredSearchRefresh(hasFilteredSearchCriteria);
           }
         }
         return;
@@ -3363,7 +3061,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
         setViewMessage(null);
         setActiveMessageId("");
       }
-      queueFilteredSearchRefresh();
+      queueFilteredSearchRefresh(hasFilteredSearchCriteria);
     } catch {
       reportError("Failed to update To-Do flag.");
     }
@@ -3601,134 +3299,6 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     return source.replace(/([A-Za-z0-9+/=]{200,})/g, "[base64 omitted]");
   };
 
-  const hydrateMessageFromServer = useCallback(
-    async (message: Message, options?: { silent?: boolean }) => {
-      const canResync = message.mailboxPath && typeof message.imapUid === "number" && !Number.isNaN(message.imapUid);
-
-      if (canResync) {
-        try {
-          const res = await apiFetch("/api/message/resync", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ accountId: message.accountId, messageId: message.id })
-          });
-          if (!res.ok) {
-            if (!options?.silent) {
-              reportError(await readErrorMessage(res));
-            }
-            return null;
-          }
-        } catch {
-          if (!options?.silent) {
-            reportError("Re-sync failed due to a network error.");
-          }
-          return null;
-        }
-      }
-
-      try {
-        const detailRes = await apiFetch(
-          `/api/message?accountId=${encodeURIComponent(message.accountId)}&messageId=${encodeURIComponent(
-            message.id
-          )}`,
-          { cache: "no-store" }
-        );
-        if (!detailRes.ok) return null;
-        const detail = (await detailRes.json()) as { ok?: boolean; message?: Message };
-        const hydrated = detail?.ok ? detail.message : null;
-        if (!hydrated?.id) return null;
-        
-        // If the message is loaded but still empty, set a space so it's considered loaded
-        if (!hasHtmlContent(hydrated.htmlBody) && (!hydrated.body || hydrated.body === "")) {
-          hydrated.body = " ";
-        }
-
-        updateMessagesWithCurrentResultPrune((item) => {
-          if (item.id !== hydrated.id) return item;
-          return {
-            ...hydrated,
-            // /api/message does not include list grouping metadata; preserve existing group key
-            // so the row remains in the same visible group after hydration.
-            groupKey: item.groupKey ?? hydrated.groupKey
-          };
-        }, { source: "hydrate-message-from-server" });
-        return hydrated;
-      } catch {
-        return null;
-      }
-    },
-    [apiFetch, readErrorMessage, reportError, updateMessagesWithCurrentResultPrune]
-  );
-
-  const fetchSource = useCallback(async (messageId: string) => {
-    const existing = sourceFetchRef.current.get(messageId);
-    if (existing) {
-      console.info("[noctua] fetch source reuse", { messageId });
-      return existing;
-    }
-    console.info("[noctua] fetch source start", { messageId });
-    setLoadingSource((prev) => ({ ...prev, [messageId]: true }));
-    const promise = (async () => {
-      const loadSource = async () => {
-        const res = await apiFetch(
-          `/api/source?accountId=${encodeURIComponent(activeAccountId)}&messageId=${encodeURIComponent(
-            messageId
-          )}`
-        );
-        if (!res.ok) {
-          const errorMessage = await readErrorMessage(res);
-          return {
-            source: null as string | null,
-            status: res.status,
-            errorMessage
-          };
-        }
-        const data = (await res.json()) as { source?: string };
-        return {
-          source: data.source ?? "",
-          status: res.status,
-          errorMessage: ""
-        };
-      };
-
-      try {
-        let result = await loadSource();
-        if (!result.source && result.status === 404) {
-          const message =
-            messageById.get(messageId) ??
-            threadMessages.find((item) => item.id === messageId);
-          if (message && !message.hasSource) {
-            await hydrateMessageFromServer(message, { silent: true });
-            result = await loadSource();
-          }
-        }
-        if (result.source !== null) {
-          console.info("[noctua] fetch source ok", {
-            messageId,
-            size: result.source.length
-          });
-          return result.source;
-        }
-        console.warn("[noctua] fetch source failed", {
-          messageId,
-          status: result.status,
-          errorMessage: result.errorMessage
-        });
-        reportError(result.errorMessage || "Failed to load source.");
-        return null;
-      } catch (error) {
-        console.warn("[noctua] fetch source exception", { messageId, error });
-        reportError("Failed to load source.");
-        return null;
-      } finally {
-        sourceFetchRef.current.delete(messageId);
-        setLoadingSource((prev) => ({ ...prev, [messageId]: false }));
-      }
-    })();
-    sourceFetchRef.current.set(messageId, promise);
-    return promise;
-  }, [activeAccountId, hydrateMessageFromServer, messageById, threadMessages]);
-
   const renderSourcePanel = (messageId: string) => (
     <MessageSourcePanel
       messageId={messageId}
@@ -3738,76 +3308,6 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
   );
   const renderMarkdownPanel = (body: string | undefined, messageId: string) => (
     <MarkdownPanel body={body} fontScale={messageFontScale[messageId] ?? 1} />
-  );
-
-  const hydrateMessageOnOpenIfNeeded = useCallback(
-    (message: Message) => {
-      const hasText = Boolean(message.body && message.body !== "");
-      const hasHtml = hasHtmlContent(message.htmlBody);
-      if (hasText || hasHtml) return null;
-
-      const key = `${message.accountId}:${message.id}`;
-      const now = Date.now();
-      const lastAttempt = autoHydrationAttemptAtRef.current[key] ?? 0;
-      if (now - lastAttempt < 30_000) {
-        return null;
-      }
-      const inFlight = autoHydrationInFlightRef.current.get(key);
-      if (inFlight) {
-        return inFlight;
-      }
-      autoHydrationAttemptAtRef.current[key] = now;
-      const promise = hydrateMessageFromServer(message, { silent: true }).finally(() => {
-        autoHydrationInFlightRef.current.delete(key);
-      });
-      autoHydrationInFlightRef.current.set(key, promise);
-      return promise;
-    },
-    [hydrateMessageFromServer]
-  );
-
-  const ensureMessageContent = useCallback(
-    async (message: Message, options?: { manual?: boolean }) => {
-      const resolved = messageById.get(message.id) ?? message;
-      const hasText = Boolean(resolved.body && resolved.body !== "");
-      const hasHtml = hasHtmlContent(resolved.htmlBody);
-      if (hasText || hasHtml) return true;
-      if (messageContentLoadingRef.current[message.id]) return false;
-
-      if (!options?.manual) {
-        const hydrationPromise = hydrateMessageOnOpenIfNeeded(resolved);
-        if (!hydrationPromise) return false;
-        setMessageContentLoadingState(message.id, true);
-        try {
-          const hydrated = await hydrationPromise;
-          if (hydrated) {
-            updateThreadCacheWithMessage(hydrated);
-          }
-          return Boolean(hydrated);
-        } finally {
-          setMessageContentLoadingState(message.id, false);
-        }
-      }
-
-      setMessageContentLoadingState(message.id, true);
-      try {
-        const hydrated = await hydrateMessageFromServer(resolved);
-        if (hydrated) {
-          updateThreadCacheWithMessage(hydrated);
-        }
-        return Boolean(hydrated);
-      } finally {
-        setMessageContentLoadingState(message.id, false);
-      }
-    },
-    [
-      hasHtmlContent,
-      hydrateMessageFromServer,
-      hydrateMessageOnOpenIfNeeded,
-      messageById,
-      setMessageContentLoadingState,
-      updateThreadCacheWithMessage
-    ]
   );
 
   const jsonPayload = useMemo(() => {
@@ -3821,14 +3321,6 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
   }, [omitBody, threadMessages]);
 
   const activeFolderName = accountFolders.find((folder) => folder.id === activeFolderId)?.name;
-
-  useEffect(() => {
-    loadingSourceRef.current = loadingSource;
-  }, [loadingSource]);
-
-  useEffect(() => {
-    messageContentLoadingRef.current = messageContentLoading;
-  }, [messageContentLoading]);
 
   useEffect(() => {
     const stored = localStorage.getItem("noctua:theme");
@@ -3849,7 +3341,6 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
       }
     }
     autoHydrationAttemptAtRef.current = {};
-    autoHydrationInFlightRef.current.clear();
   }, [activeAccountId]);
 
   useEffect(() => {
@@ -3881,116 +3372,6 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
   useEffect(() => {
     inboxFolderRef.current = inboxFolder ?? null;
   }, [inboxFolder]);
-
-  const loadInitialData = useCallback(
-    async (options?: { skipAuthCheck?: boolean; preferredAccountId?: string | null }) => {
-      const skipAuthCheck = options?.skipAuthCheck === true;
-      let preferredAccountId = options?.preferredAccountId?.trim() ?? "";
-      setInitialDataReady(false);
-      try {
-        if (!skipAuthCheck) {
-          const me = await apiFetch("/api/auth/me", {
-            credentials: "include",
-            cache: "no-store"
-          });
-          if (!me.ok) {
-            setAuthState("unauth");
-            setCurrentUser(null);
-            return;
-          }
-          const meData = (await me.json()) as AuthMeResponse | null;
-          setAuthState("ok");
-          setCurrentUser(meData?.user ?? null);
-          if (typeof meData?.ttlSeconds === "number") {
-            setSessionTtlSeconds(meData.ttlSeconds);
-          }
-          if (typeof meData?.accountId === "string" && meData.accountId.trim()) {
-            preferredAccountId = meData.accountId.trim();
-          }
-        }
-        const [accountsRes, foldersRes] = await Promise.all([
-          apiFetch("/api/accounts"),
-          apiFetch("/api/folders")
-        ]);
-        let loadedAccounts = false;
-        let loadedFolders = false;
-        if (accountsRes.ok) {
-          const nextAccounts = (await accountsRes.json()) as Account[];
-          setAccounts(nextAccounts);
-          setActiveAccountId((prev) => {
-            if (
-              preferredAccountId &&
-              nextAccounts.some((account) => account.id === preferredAccountId)
-            ) {
-              return preferredAccountId;
-            }
-            if (nextAccounts.find((account) => account.id === prev)) return prev;
-            return nextAccounts[0]?.id ?? prev;
-          });
-          loadedAccounts = true;
-        } else {
-          reportError(await readErrorMessage(accountsRes));
-        }
-        if (foldersRes.ok) {
-          const nextFolders = (await foldersRes.json()) as Folder[];
-          setFolders(nextFolders);
-          loadedFolders = true;
-        } else {
-          reportError(await readErrorMessage(foldersRes));
-        }
-        if (loadedAccounts && loadedFolders) {
-          setInitialDataReady(true);
-        }
-      } catch {
-        setAuthState("unauth");
-        setCurrentUser(null);
-        reportError("Failed to load mailbox data.");
-      }
-    },
-    [readErrorMessage, reportError]
-  );
-
-  useEffect(() => {
-    loadInitialData();
-  }, [loadInitialData]);
-
-  const switchAccount = useCallback(
-    async (nextAccountId: string) => {
-      const normalizedAccountId = nextAccountId.trim();
-      if (!normalizedAccountId || normalizedAccountId === activeAccountId) return;
-      try {
-        const response = await apiFetch("/api/auth/switch-account", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ accountId: normalizedAccountId })
-        });
-        if (!response.ok) {
-          reportError(await readErrorMessage(response));
-          return;
-        }
-        const payload = (await response.json().catch(() => null)) as { accountId?: string } | null;
-        const switchedAccountId =
-          typeof payload?.accountId === "string" && payload.accountId.trim()
-            ? payload.accountId.trim()
-            : normalizedAccountId;
-        setExceptionEntries([]);
-        setMessageListError(null);
-        setMessages([]);
-        setMessagesPage(1);
-        setHasMoreMessages(true);
-        setTotalMessages(null);
-        setActiveMessageId("");
-        setViewMessage(null);
-        setActiveFolderId("");
-        setLastFolderId("");
-        setActiveAccountId(switchedAccountId);
-        await loadInitialData({ skipAuthCheck: true, preferredAccountId: switchedAccountId });
-      } catch {
-        reportError("Failed to switch account.");
-      }
-    },
-    [activeAccountId, apiFetch, loadInitialData, readErrorMessage, reportError]
-  );
 
   useEffect(() => {
     if (!("serviceWorker" in navigator)) return;
@@ -4254,157 +3635,6 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
   }, [activeAccountId, accountFolders.length, initialDataReady]);
 
   useEffect(() => {
-    setMessages([]);
-    setMessagesPage(1);
-    setHasMoreMessages(true);
-    setLoadedMessageCount(0);
-    setTotalMessages(null);
-    lastRequestRef.current = null;
-    currentKeyRef.current = messagesKey;
-    setGroupMeta([]);
-    setMessageListError(null);
-  }, [messagesKey]);
-
-  useEffect(() => {
-    const loadMessages = async () => {
-      if (!activeAccountId) return;
-      if (searchScope === "folder" && !isRelatedSearch && !activeFolderId) return;
-      if (loadingMessages || !hasMoreMessages) return;
-      if (
-        lastRequestRef.current?.key === messagesKey &&
-        lastRequestRef.current?.page === messagesPage
-      ) {
-        return;
-      }
-      const requestKey = messagesKey;
-      const requestMutationVersion = messageMutationVersionRef.current;
-      lastRequestRef.current = { key: requestKey, page: messagesPage };
-      try {
-        setLoadingMessages(true);
-        const pageSize = searchScope === "all" ? 600 : 300;
-        const params = new URLSearchParams({
-          accountId: activeAccountId,
-          page: String(messagesPage),
-          pageSize: String(pageSize),
-          groupBy
-        });
-        const trimmedQuery = query.trim();
-        if (!isRelatedSearch && trimmedQuery) {
-          params.set("fields", selectedSearchFields.join(","));
-        }
-        if (searchBadges.attachments) {
-          params.set("attachments", "1");
-        }
-        if (effectiveSearchBadges.length > 0) {
-          params.set("badges", effectiveSearchBadges.join(","));
-        }
-        if (!isRelatedSearch && searchScope === "folder" && activeFolderId) {
-          params.set("folderId", activeFolderId);
-        }
-        if (searchScope === "all" && currentSearchExcludedFolderIds.length > 0) {
-          params.set("excludeFolderIds", currentSearchExcludedFolderIds.join(","));
-        }
-        let endpoint = trimmedQuery ? "/api/search" : "/api/messages";
-        if (isRelatedSearch) {
-          endpoint = "/api/related";
-          params.set("relatedId", relatedQueryId);
-        } else if (supportsThreads) {
-          endpoint = "/api/threads";
-        } else if (trimmedQuery) {
-          params.set("q", trimmedQuery);
-        }
-        if (trimmedQuery && endpoint === "/api/threads") {
-          params.set("q", trimmedQuery);
-        }
-        const messagesRes = await apiFetch(`${endpoint}?${params.toString()}`);
-        if (messagesRes.ok) {
-          const data = (await messagesRes.json()) as {
-            items: Message[];
-            hasMore: boolean;
-            groups?: { key: string; label: string; count: number }[];
-            total?: number;
-            baseCount?: number;
-            relatedSubject?: string;
-          };
-          const items = Array.isArray(data?.items) ? data.items.filter(Boolean) : [];
-          const foreignItems = items.filter((item) => item.accountId !== activeAccountId);
-          if (foreignItems.length > 0) {
-            logListDebug("error", "list API returned foreign-account rows", {
-              source: "loadMessages",
-              activeAccountId,
-              foreignCount: foreignItems.length,
-              sample: foreignItems
-                .slice(0, LIST_DEBUG_SAMPLE_LIMIT)
-                .map((item) => summarizeMessageForListDebug(item))
-            });
-          }
-          if (currentKeyRef.current !== requestKey) return;
-          if (messageMutationVersionRef.current !== requestMutationVersion) {
-            lastRequestRef.current = null;
-            return;
-          }
-          if (isRelatedSearch) {
-            setRelatedContext({ id: relatedQueryId, subject: data.relatedSubject });
-          } else if (relatedContext) {
-            setRelatedContext(null);
-          }
-          setMessages((prev) => {
-            if (messagesPage === 1) {
-              logListReplacement("loadMessages-page1", prev, items);
-              return items;
-            }
-            const prevIds = new Set(prev.map((message) => message.id));
-            const duplicateIncoming = items.filter((message) => prevIds.has(message.id));
-            if (duplicateIncoming.length > 0) {
-              logListDebug("warn", "paged list append contains duplicate ids", {
-                source: "loadMessages-append",
-                activeAccountId,
-                duplicateCount: duplicateIncoming.length,
-                sample: duplicateIncoming
-                  .slice(0, LIST_DEBUG_SAMPLE_LIMIT)
-                  .map((item) => summarizeMessageForListDebug(item))
-              });
-            }
-            return [...prev, ...items];
-          });
-          setLoadedMessageCount((prev) =>
-            mergeLoadedMessageCount({
-              page: messagesPage,
-              previousCount: prev,
-              itemCount: items.length,
-              baseCount: data?.baseCount
-            })
-          );
-          setHasMoreMessages(Boolean(data?.hasMore));
-          setTotalMessages(typeof data?.total === "number" ? data.total : null);
-          if (messagesPage === 1) {
-            const nextMeta = Array.isArray(data?.groups)
-              ? data.groups
-              : computeGroupMeta(items);
-            setGroupMeta(nextMeta);
-            setCollapsedGroups((prev) => mergeCollapsedGroupsWithMeta(prev, nextMeta));
-            setCollapsedThreads((prev) => mergeCollapsedThreadsWithMessages(prev, items));
-          }
-          setMessageListError(null);
-        } else {
-          const errorMessage = await readErrorMessage(messagesRes);
-          reportError(errorMessage);
-          setMessageListError(errorMessage || "Failed to load messages.");
-        }
-      } catch {
-        lastRequestRef.current = null;
-        // keep previous data
-        reportError("Failed to load messages.");
-        setMessageListError("Failed to load messages.");
-      } finally {
-        setLoadingMessages(false);
-      }
-    };
-
-    loadMessages();
-  }, [activeAccountId, hasMoreMessages, loadingMessages, messagesKey, messagesPage, authState]);
-
-  useEffect(() => {
     const loadThreadRelated = async () => {
       if (supportsThreads) {
         setThreadRelatedMessages([]);
@@ -4646,7 +3876,6 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
   }, [activeMessage, threadMessages]);
 
   const collapsedMessagesRef = useRef(collapsedMessages);
-  const threadMessagesRef = useRef(threadMessages);
   const threadLoadScrollRef = useRef<{
     threadId: string;
     messageId: string;
@@ -4877,224 +4106,6 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     };
   }, [dragging, leftWidth]);
 
-  const startEditAccount = (account?: Account) => {
-    const targetAccount: Account =
-      account ?? {
-        id: `acc-${crypto.randomUUID().slice(0, 6)}`,
-        name: "",
-        email: "",
-        avatar: "NW",
-        imap: { host: "", port: 993, secure: true, user: "", password: "" },
-        smtp: { host: "", port: 587, secure: false, user: "", password: "" }
-      };
-    setEditingAccount(targetAccount);
-    setManageOpen(true);
-    setManageTab("account");
-  };
-
-  const saveAccount = async (account: Account) => {
-    // Validate email is not empty for new accounts
-    if (!account.email?.trim()) {
-      reportError("Email address is required");
-      return;
-    }
-
-    const exists = accounts.find((a) => a.id === account.id);
-    const isNew = !exists;
-
-    // For new accounts, don't send ID - let server generate it
-    // For existing accounts, send the full account
-    const accountToSave = isNew
-      ? { ...account, id: undefined } as any
-      : account;
-
-    const endpoint = exists ? `/api/accounts/${account.id}` : "/api/accounts";
-    const method = exists ? "PUT" : "POST";
-    const saveResult = await apiFetch(endpoint, {
-      method,
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(accountToSave)
-    });
-    if (!saveResult.ok) {
-      reportError(await readErrorMessage(saveResult));
-      return;
-    }
-
-    // Get the server-generated account ID for new accounts
-    const newAccountId = isNew
-      ? ((await saveResult.json()) as { id: string }).id
-      : account.id;
-
-    const refreshed = await apiFetch("/api/accounts");
-    if (refreshed.ok) {
-      const nextAccounts = (await refreshed.json()) as Account[];
-      setAccounts(nextAccounts);
-      setManageOpen(false);
-      setEditingAccount(null);
-      if (isNew) {
-        await switchAccount(newAccountId);
-        await refreshFolders();
-        await runSyncJob({ accountId: newAccountId, fullSync: true, mode: "full" });
-      }
-    } else {
-      reportError(await readErrorMessage(refreshed));
-      return;
-    }
-  };
-
-  const saveAccountSettings = async (account: Account) => {
-    const exists = accounts.find((a) => a.id === account.id);
-    if (!exists) return;
-    const res = await apiFetch(`/api/accounts/${account.id}`, {
-      method: "PUT",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ settings: account.settings ?? {} })
-    });
-    if (!res.ok) {
-      reportError(await readErrorMessage(res));
-      return;
-    }
-    const refreshed = await apiFetch("/api/accounts");
-    if (refreshed.ok) {
-      const nextAccounts = (await refreshed.json()) as Account[];
-      setAccounts(nextAccounts);
-    } else {
-      reportError(await readErrorMessage(refreshed));
-    }
-  };
-
-  const deleteAccount = async (accountId: string) => {
-    const res = await apiFetch(`/api/accounts/${accountId}`, { method: "DELETE" });
-    if (!res.ok) {
-      reportError(await readErrorMessage(res));
-      return;
-    }
-    const refreshed = await apiFetch("/api/accounts");
-    if (refreshed.ok) {
-      const nextAccounts = (await refreshed.json()) as Account[];
-      setAccounts(nextAccounts);
-      const nextAccountId = nextAccounts[0]?.id ?? "";
-      if (nextAccountId) {
-        await switchAccount(nextAccountId);
-      } else {
-        setActiveAccountId("");
-      }
-    } else {
-      reportError(await readErrorMessage(refreshed));
-    }
-    setManageOpen(false);
-    setEditingAccount(null);
-  };
-
-  const refreshMailboxData = async () => {
-    if (searchScope === "folder" && !isRelatedSearch && !activeFolderId) {
-      return false;
-    }
-    setRefreshingMessages(true);
-    const requestMutationVersion = messageMutationVersionRef.current;
-    const trimmedQuery = query.trim();
-    const pageSize = searchScope === "all" ? 600 : 300;
-    const params = new URLSearchParams({
-      accountId: activeAccountId,
-      page: "1",
-      pageSize: String(pageSize),
-      groupBy
-    });
-    if (!isRelatedSearch && trimmedQuery) {
-      params.set("fields", selectedSearchFields.join(","));
-    }
-    if (searchBadges.attachments) {
-      params.set("attachments", "1");
-    }
-    if (effectiveSearchBadges.length > 0) {
-      params.set("badges", effectiveSearchBadges.join(","));
-    }
-    if (!isRelatedSearch && searchScope === "folder" && activeFolderId) {
-      params.set("folderId", activeFolderId);
-    }
-    if (searchScope === "all" && currentSearchExcludedFolderIds.length > 0) {
-      params.set("excludeFolderIds", currentSearchExcludedFolderIds.join(","));
-    }
-    let endpoint = trimmedQuery ? "/api/search" : "/api/messages";
-    if (isRelatedSearch) {
-      endpoint = "/api/related";
-      params.set("relatedId", relatedQueryId);
-    } else if (supportsThreads) {
-      endpoint = "/api/threads";
-    } else if (trimmedQuery) {
-      params.set("q", trimmedQuery);
-    }
-    if (trimmedQuery && endpoint === "/api/threads") {
-      params.set("q", trimmedQuery);
-    }
-    try {
-      const messageRes = await apiFetch(`${endpoint}?${params.toString()}`);
-      if (!messageRes.ok) {
-        const message = await readErrorMessage(messageRes);
-        reportError(message || "Failed to refresh mailbox data.");
-        setMessageListError(message || "Failed to load messages.");
-        return false;
-      }
-      const messageData = (await messageRes.json()) as {
-        items: Message[];
-        hasMore: boolean;
-        groups?: { key: string; label: string; count: number }[];
-        total?: number;
-        baseCount?: number;
-        relatedSubject?: string;
-      };
-      const nextMessages = Array.isArray(messageData?.items)
-        ? messageData.items.filter(Boolean)
-        : [];
-      const foreignItems = nextMessages.filter((item) => item.accountId !== activeAccountId);
-      if (foreignItems.length > 0) {
-        logListDebug("error", "refresh returned foreign-account rows", {
-          source: "refreshMailboxData",
-          activeAccountId,
-          foreignCount: foreignItems.length,
-          sample: foreignItems
-            .slice(0, LIST_DEBUG_SAMPLE_LIMIT)
-            .map((item) => summarizeMessageForListDebug(item))
-        });
-      }
-      if (messageMutationVersionRef.current !== requestMutationVersion) {
-        return false;
-      }
-      setMessages((prev) => {
-        logListReplacement("refreshMailboxData", prev, nextMessages);
-        return nextMessages;
-      });
-      setLoadedMessageCount(resolveLoadedMessageCount(nextMessages.length, messageData?.baseCount));
-      setMessagesPage(1);
-      setHasMoreMessages(Boolean(messageData?.hasMore));
-      setTotalMessages(typeof messageData?.total === "number" ? messageData.total : null);
-      const nextMeta = Array.isArray(messageData?.groups)
-        ? messageData.groups
-        : computeGroupMeta(nextMessages);
-      if (isRelatedSearch) {
-        setRelatedContext({ id: relatedQueryId, subject: messageData.relatedSubject });
-      } else if (relatedContext) {
-        setRelatedContext(null);
-      }
-      setGroupMeta(nextMeta);
-      setCollapsedGroups((prev) => mergeCollapsedGroupsWithMeta(prev, nextMeta));
-      setCollapsedThreads((prev) => mergeCollapsedThreadsWithMessages(prev, nextMessages));
-      setMessageListError(null);
-      return true;
-    } finally {
-      setRefreshingMessages(false);
-    }
-  };
-
-  const queueFilteredSearchRefresh = () => {
-    if (!hasFilteredSearchCriteria) return;
-    if (filteredSearchRefreshTimerRef.current !== null) return;
-    filteredSearchRefreshTimerRef.current = window.setTimeout(() => {
-      filteredSearchRefreshTimerRef.current = null;
-      void refreshMailboxData();
-    }, 120);
-  };
-
   const resolveMessageByExternalMessageId = useCallback(
     async (messageId: string, accountId: string) => {
       if (!accountId) return null;
@@ -5210,19 +4221,6 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
   };
   const handleDismissNotice = dismissNotice;
 
-  const evictThreadCache = useCallback((threadId?: string | null) => {
-    if (!threadId) return;
-    setThreadContentById((prev) => {
-      if (!(threadId in prev)) return prev;
-      const next = { ...prev };
-      delete next[threadId];
-      threadCacheOrderRef.current = threadCacheOrderRef.current.filter((id) => id !== threadId);
-      return next;
-    });
-    setThreadEvictVersion((v) => v + 1);
-    clearThreadContentError(threadId);
-  }, [clearThreadContentError]);
-
   const handleResyncMessage = async (message: Message) => {
     try {
       const hydrated = await hydrateMessageFromServer(message);
@@ -5293,526 +4291,6 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
       });
     }
   };
-
-  const waitForSyncJob = async (jobId: string): Promise<SyncJobResult> => {
-    const startedAt = Date.now();
-    const timeoutMs = 1000 * 60 * 60;
-    const clearProgress = () => {
-      setSyncProgressByJobId((prev) => {
-        if (!prev[jobId]) return prev;
-        const next = { ...prev };
-        delete next[jobId];
-        return next;
-      });
-    };
-    try {
-      while (Date.now() - startedAt < timeoutMs) {
-        const statusRes = await apiFetch(`/api/sync/status?jobId=${encodeURIComponent(jobId)}`, {
-          cache: "no-store"
-        });
-        if (!statusRes.ok) {
-          throw new Error(await readErrorMessage(statusRes));
-        }
-        const data = (await statusRes.json()) as {
-          ok: boolean;
-          job?: {
-            status?: "queued" | "running" | "done" | "failed";
-            error?: string;
-            result?: SyncJobResult;
-            progress?: Omit<SyncJobProgress, "jobId">;
-          };
-        };
-        const progress = data.job?.progress;
-        if (progress) {
-          const nextProgress: SyncJobProgress = {
-            ...progress,
-            jobId,
-            updatedAt: typeof progress.updatedAt === "number" ? progress.updatedAt : Date.now()
-          };
-          setSyncProgressByJobId((prev) => ({ ...prev, [jobId]: nextProgress }));
-        }
-        const status = data.job?.status;
-        if (status === "done") {
-          return data.job?.result ?? { count: 0 };
-        }
-        if (status === "failed") {
-          throw new Error(data.job?.error || "Sync job failed.");
-        }
-        await new Promise<void>((resolve) => {
-          const delayMs =
-            status === "running"
-              ? SYNC_STATUS_RUNNING_POLL_INTERVAL_MS
-              : SYNC_STATUS_POLL_INTERVAL_MS;
-          window.setTimeout(resolve, delayMs);
-        });
-      }
-      throw new Error("Sync timed out.");
-    } finally {
-      clearProgress();
-    }
-  };
-
-  const runSyncJob = async (payload: {
-    accountId: string;
-    folderId?: string;
-    fullSync?: boolean;
-    mode?: "full" | "recent" | "new";
-    recategorizeFolder?: boolean;
-  }): Promise<SyncJobResult> => {
-    const syncRes = await apiFetch("/api/sync", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload)
-    });
-    if (!syncRes.ok) {
-      throw new Error(await readErrorMessage(syncRes));
-    }
-    const data = (await syncRes.json()) as { ok: boolean; jobId?: string };
-    if (!data.jobId) {
-      throw new Error("Sync job did not return a job id.");
-    }
-    return waitForSyncJob(data.jobId);
-  };
-
-  type NewSyncFolderDecision = {
-    folderId: string;
-    mailboxPath: string;
-    uidNext: number | null;
-    skip: boolean;
-    reason:
-      | "baseline-unsynced-folder"
-      | "no-new-uids"
-      | "has-new-uids"
-      | "missing-uid-next"
-      | "status-error";
-  };
-
-  const planNewSyncCandidates = async (folderIds: string[]): Promise<NewSyncFolderDecision[]> => {
-    const response = await apiFetch("/api/sync/new-candidates", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ accountId: activeAccountId, folderIds })
-    });
-    if (!response.ok) {
-      throw new Error(await readErrorMessage(response));
-    }
-    const data = (await response.json()) as {
-      ok?: boolean;
-      decisions?: NewSyncFolderDecision[];
-      message?: string;
-    };
-    if (data.ok === false) {
-      throw new Error(data.message || "Failed to plan new-message sync.");
-    }
-    return Array.isArray(data.decisions) ? data.decisions : [];
-  };
-
-  const syncFolderWithBackground = async (
-    folderId: string,
-    awaitDeep = false,
-    allowRefresh = true,
-    mode: "recent" | "new" | "full" = "recent",
-    allowDeep = true,
-    options?: { recategorizeFolder?: boolean }
-  ): Promise<SyncJobResult | null> => {
-    const selectionKey = currentKeyRef.current;
-    setSyncingFolders((prev) => new Set(prev).add(folderId));
-    let syncResult: SyncJobResult;
-    try {
-      syncResult = await runSyncJob({
-        accountId: activeAccountId,
-        folderId,
-        mode,
-        recategorizeFolder: Boolean(options?.recategorizeFolder)
-      });
-      if (allowRefresh && currentKeyRef.current === selectionKey) {
-        setSyncCompletionVersion((v) => v + 1);
-        if (searchScope === "folder" && activeFolderId === folderId) {
-          await refreshMailboxData();
-        } else if (activeVirtualFolderId) {
-          await refreshMailboxData();
-        }
-      }
-    } catch (error) {
-      reportError(error instanceof Error ? error.message : "Sync failed due to a network error.");
-      setSyncingFolders((prev) => {
-        const next = new Set(prev);
-        next.delete(folderId);
-        return next;
-      });
-      return null;
-    }
-
-    const shouldRunDeepSync = allowDeep && mode !== "full";
-    if (!shouldRunDeepSync) {
-      setSyncingFolders((prev) => {
-        const next = new Set(prev);
-        next.delete(folderId);
-        return next;
-      });
-      return syncResult;
-    }
-
-    const deepSync = (async () => {
-      try {
-        await runSyncJob({
-          accountId: activeAccountId,
-          folderId,
-          fullSync: true,
-          recategorizeFolder: Boolean(options?.recategorizeFolder)
-        });
-        if (allowRefresh && currentKeyRef.current === selectionKey) {
-          setSyncCompletionVersion((v) => v + 1);
-          if (searchScope === "folder" && activeFolderId === folderId) {
-            await refreshMailboxData();
-          } else if (activeVirtualFolderId) {
-            await refreshMailboxData();
-          }
-        }
-      } catch (error) {
-        reportError(
-          error instanceof Error ? error.message : "Background sync failed due to a network error."
-        );
-      } finally {
-        setSyncingFolders((prev) => {
-          const next = new Set(prev);
-          next.delete(folderId);
-          return next;
-        });
-      }
-    })();
-    if (awaitDeep) {
-      await deepSync;
-    }
-    return syncResult;
-  };
-  syncFolderWithBackgroundRef.current = syncFolderWithBackground;
-
-  const syncNewlyDetectedFolders = async (
-    knownFolderIds: Set<string>,
-    mode: "new" | "full"
-  ) => {
-    const nextFolders = await refreshFolders();
-    const accountList = (nextFolders ?? folders).filter(
-      (folder) => folder.accountId === activeAccountId
-    );
-    const newlyDetected = accountList.filter((folder) => !knownFolderIds.has(folder.id));
-    if (newlyDetected.length === 0) {
-      return accountList;
-    }
-    for (const folder of newlyDetected) {
-      await syncFolderWithBackground(
-        folder.id,
-        true,
-        false,
-        mode === "new" ? "new" : "recent",
-        mode !== "new"
-      );
-    }
-    const refreshed = await refreshFolders();
-    return (refreshed ?? accountList).filter((folder) => folder.accountId === activeAccountId);
-  };
-
-  const syncAccount = async (
-    folderId?: string,
-    mode: "new" | "full" = "full",
-    options?: { recategorizeFolder?: boolean }
-  ) => {
-    const selectionKey = currentKeyRef.current;
-    const knownFolderIds = new Set(accountFolders.map((folder) => folder.id));
-    if (folderId) {
-      await syncFolderWithBackground(
-        folderId,
-        false,
-        true,
-        mode === "new" ? "new" : mode === "full" ? "full" : "recent",
-        mode !== "new",
-        { recategorizeFolder: Boolean(options?.recategorizeFolder) }
-      );
-      if (mode !== "new") {
-        await syncNewlyDetectedFolders(knownFolderIds, mode);
-      }
-      return;
-    }
-
-    if (accountFolders.length === 0) {
-      setIsSyncing(true);
-      try {
-        await runSyncJob({ accountId: activeAccountId, fullSync: true, mode: "full" });
-        const accountList = await syncNewlyDetectedFolders(knownFolderIds, "full");
-        const findInboxInList = (list: Folder[]) => {
-          const bySpecial = list.find(
-            (folder) => (folder.specialUse ?? "").toLowerCase() === "\\inbox"
-          );
-          if (bySpecial) return bySpecial;
-          const byName = list.find((folder) => folder.name.toLowerCase() === "inbox");
-          return byName ?? list[0];
-        };
-        const nextInbox = findInboxInList(accountList);
-        if (nextInbox) {
-          setActiveFolderId((prev) => prev || nextInbox.id);
-        }
-        if (currentKeyRef.current === selectionKey) {
-          await refreshMailboxData();
-        }
-      } catch (error) {
-        reportError(error instanceof Error ? error.message : "Sync failed due to a network error.");
-      } finally {
-        setIsSyncing(false);
-      }
-      return;
-    }
-
-    setIsSyncing(true);
-    void (async () => {
-      const priorityFolderId = activeFolderId || inboxFolder?.id;
-      const sortedFolders = priorityFolderId
-        ? [
-            ...accountFolders.filter((f) => f.id === priorityFolderId),
-            ...accountFolders.filter((f) => f.id !== priorityFolderId)
-          ]
-        : accountFolders;
-
-      if (mode === "new") {
-        const plannedFolders = accountFolders.map((folder) => folder.id);
-        let foldersToSync = plannedFolders;
-        try {
-          const decisions = await planNewSyncCandidates(plannedFolders);
-          const decisionMap = new Map(decisions.map((item) => [item.folderId, item]));
-          foldersToSync = plannedFolders.filter((folderId) => {
-            const decision = decisionMap.get(folderId);
-            if (!decision) return true;
-            return !decision.skip;
-          });
-        } catch (error) {
-          reportError(
-            error instanceof Error
-              ? error.message
-              : "Could not determine new-message sync candidates."
-          );
-        }
-
-        const foldersToSyncSet = new Set(foldersToSync);
-        for (const folder of sortedFolders) {
-          if (!foldersToSyncSet.has(folder.id)) {
-            continue;
-          }
-          const refreshThis =
-            searchScope === "folder" && activeFolderId === folder.id ? true : false;
-          await syncFolderWithBackground(
-            folder.id,
-            true,
-            refreshThis,
-            "new",
-            false
-          );
-        }
-        await syncNewlyDetectedFolders(knownFolderIds, "new");
-        if (
-          currentKeyRef.current === selectionKey &&
-          searchScope === "folder" &&
-          activeFolderId
-        ) {
-          await refreshMailboxData();
-        }
-        setIsSyncing(false);
-        return;
-      }
-      for (const folder of sortedFolders) {
-        await syncFolderWithBackground(folder.id, true, false, mode === "full" ? "full" : "recent");
-      }
-      await syncNewlyDetectedFolders(knownFolderIds, mode);
-      setIsSyncing(false);
-    })();
-  };
-  syncAccountRef.current = syncAccount;
-
-  const stopRecomputePoll = useCallback(() => {
-    if (recomputePollTimerRef.current) {
-      window.clearTimeout(recomputePollTimerRef.current);
-      recomputePollTimerRef.current = null;
-    }
-    recomputePollInFlightRef.current = false;
-    recomputeJobIdRef.current = null;
-  }, []);
-
-  const stopCategoryRecomputePoll = useCallback(() => {
-    if (categoryRecomputePollTimerRef.current) {
-      window.clearTimeout(categoryRecomputePollTimerRef.current);
-      categoryRecomputePollTimerRef.current = null;
-    }
-    categoryRecomputePollInFlightRef.current = false;
-    categoryRecomputeJobIdRef.current = null;
-  }, []);
-
-  useEffect(() => {
-    return () => {
-      stopRecomputePoll();
-      stopCategoryRecomputePoll();
-    };
-  }, [stopRecomputePoll, stopCategoryRecomputePoll]);
-
-  const recomputeThreads = async () => {
-    if (!activeAccountId) return;
-    stopRecomputePoll();
-    setIsRecomputingThreads(true);
-    try {
-      const res = await apiFetch("/api/threads/recompute", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ accountId: activeAccountId })
-      });
-      if (!res.ok) {
-        reportError(await readErrorMessage(res));
-        setIsRecomputingThreads(false);
-        return;
-      }
-      const data = (await res.json()) as { jobId?: string };
-      if (!data?.jobId) {
-        reportError("Thread recompute did not return a job id.");
-        setIsRecomputingThreads(false);
-        return;
-      }
-      const jobId = data.jobId;
-      recomputeJobIdRef.current = jobId;
-
-      const pollOnce = async () => {
-        if (recomputePollInFlightRef.current) return;
-        if (recomputeJobIdRef.current !== jobId) return;
-        recomputePollInFlightRef.current = true;
-        try {
-          const statusRes = await apiFetch(
-            `/api/threads/recompute/status?jobId=${encodeURIComponent(jobId)}`
-          );
-          if (!statusRes.ok) {
-            reportError(await readErrorMessage(statusRes));
-            stopRecomputePoll();
-            setIsRecomputingThreads(false);
-            return;
-          }
-          const statusData = (await statusRes.json()) as {
-            job?: { status?: string; error?: string };
-          };
-          const status = statusData?.job?.status;
-          if (status === "done") {
-            stopRecomputePoll();
-            setIsRecomputingThreads(false);
-            await refreshMailboxData();
-            return;
-          }
-          if (status === "failed") {
-            reportError(statusData?.job?.error || "Thread recompute failed.");
-            stopRecomputePoll();
-            setIsRecomputingThreads(false);
-            return;
-          }
-        } catch {
-          reportError("Failed to check thread recompute status.");
-          stopRecomputePoll();
-          setIsRecomputingThreads(false);
-          return;
-        } finally {
-          recomputePollInFlightRef.current = false;
-        }
-        recomputePollTimerRef.current = window.setTimeout(pollOnce, 1000);
-      };
-
-      void pollOnce();
-    } catch {
-      reportError("Thread recompute failed due to a network error.");
-      setIsRecomputingThreads(false);
-    }
-  };
-  recomputeThreadsRef.current = recomputeThreads;
-
-  const recomputeCategories = async () => {
-    if (!activeAccountId) return;
-    stopCategoryRecomputePoll();
-    setIsRecomputingCategories(true);
-    try {
-      const res = await apiFetch("/api/categories/recompute", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ accountId: activeAccountId })
-      });
-      if (!res.ok) {
-        reportError(await readErrorMessage(res));
-        setIsRecomputingCategories(false);
-        return;
-      }
-      const data = (await res.json()) as { jobId?: string };
-      if (!data?.jobId) {
-        reportError("Category recompute did not return a job id.");
-        setIsRecomputingCategories(false);
-        return;
-      }
-      const jobId = data.jobId;
-      categoryRecomputeJobIdRef.current = jobId;
-
-      const pollOnce = async () => {
-        if (categoryRecomputePollInFlightRef.current) return;
-        if (categoryRecomputeJobIdRef.current !== jobId) return;
-        categoryRecomputePollInFlightRef.current = true;
-        try {
-          const statusRes = await apiFetch(
-            `/api/categories/recompute/status?jobId=${encodeURIComponent(jobId)}`
-          );
-          if (!statusRes.ok) {
-            reportError(await readErrorMessage(statusRes));
-            stopCategoryRecomputePoll();
-            setIsRecomputingCategories(false);
-            return;
-          }
-          const statusData = (await statusRes.json()) as {
-            job?: { status?: string; error?: string };
-          };
-          const status = statusData?.job?.status;
-          if (status === "done") {
-            stopCategoryRecomputePoll();
-            setIsRecomputingCategories(false);
-            await refreshMailboxData();
-            return;
-          }
-          if (status === "failed") {
-            reportError(statusData?.job?.error || "Category recompute failed.");
-            stopCategoryRecomputePoll();
-            setIsRecomputingCategories(false);
-            return;
-          }
-        } catch {
-          reportError("Failed to check category recompute status.");
-          stopCategoryRecomputePoll();
-          setIsRecomputingCategories(false);
-          return;
-        } finally {
-          categoryRecomputePollInFlightRef.current = false;
-        }
-        categoryRecomputePollTimerRef.current = window.setTimeout(pollOnce, 1000);
-      };
-
-      void pollOnce();
-    } catch {
-      reportError("Category recompute failed due to a network error.");
-      setIsRecomputingCategories(false);
-    }
-  };
-
-  const refreshFolders = async (): Promise<Folder[] | null> => {
-    try {
-      const foldersRes = await apiFetch("/api/folders");
-      if (foldersRes.ok) {
-        const nextFolders = (await foldersRes.json()) as Folder[];
-        setFolders(nextFolders);
-        return nextFolders;
-      } else {
-        reportError(await readErrorMessage(foldersRes));
-      }
-    } catch {
-      reportError("Failed to refresh folders.");
-    }
-    return null;
-  };
-
   const { saveDraft, handleDiscardDraft, handleSaveDraft } = useDraftManager({
     activeAccountId,
     composeOpen,
@@ -5924,509 +4402,6 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     filteredMessages.length
   ]);
 
-  useEffect(() => {
-    if (authState !== "ok") return;
-    if (!activeAccountId || !inboxMailboxPath) return;
-    let disposed = false;
-    let streamReconnectTimer: number | null = null;
-
-    const stopPoll = () => {
-      if (pollTimerRef.current) {
-        window.clearInterval(pollTimerRef.current);
-        pollTimerRef.current = null;
-      }
-    };
-
-    const notifyNewMessages = async (
-      items: Array<{
-        uid: number;
-        subject?: string;
-        from?: string;
-        messageId?: string | null;
-        folderId?: string;
-        category?: string | null;
-      }> | null | undefined
-    ) => {
-      if (!items || items.length === 0) return;
-      const normalized = items.filter(
-        (item): item is {
-          uid: number;
-          subject?: string;
-          from?: string;
-          messageId?: string | null;
-          folderId?: string;
-          category?: string | null;
-        } => Boolean(item) && typeof item.uid === "number"
-      );
-      if (normalized.length === 0) return;
-      const eligible = normalized.filter(
-        (item) => !item.folderId || !isNotificationSuppressedFolder(item.folderId)
-      );
-      if (eligible.length === 0) return;
-      const lastNotified = lastNotifiedUidRef.current[activeAccountId] ?? null;
-      const maxUid = Math.max(...normalized.map((item) => item.uid));
-      if (lastNotified == null) {
-        lastNotifiedUidRef.current[activeAccountId] = maxUid;
-        localStorage.setItem(`noctua:lastNotifiedUid:${activeAccountId}`, String(maxUid));
-        return;
-      }
-      const eligibleByUid = eligible.filter((item) => item.uid > lastNotified);
-      if (eligibleByUid.length === 0) {
-        if (maxUid > lastNotified) {
-          lastNotifiedUidRef.current[activeAccountId] = maxUid;
-          localStorage.setItem(`noctua:lastNotifiedUid:${activeAccountId}`, String(maxUid));
-        }
-        return;
-      }
-      // Filter out messages sent by me
-      const accountEmail = currentAccount?.email?.toLowerCase() ?? "";
-      const notFromMe = eligibleByUid.filter((item) => {
-        if (!accountEmail) return true;
-        const fromEmails = extractEmails(item.from);
-        return !fromEmails.some((email) => email.toLowerCase() === accountEmail);
-      });
-      const notNewsletter = notFromMe.filter((item) => item.category !== "newsletter");
-      const unique = notNewsletter.filter((item) => {
-        const key = item.messageId || `uid:${item.uid}`;
-        if (notifiedKeysRef.current.has(key)) return false;
-        notifiedKeysRef.current.add(key);
-        return true;
-      });
-      if (notifiedKeysRef.current.size > 200) {
-        const iterator = notifiedKeysRef.current.values();
-        for (let i = 0; i < 50; i += 1) {
-          const next = iterator.next();
-          if (next.done) break;
-          notifiedKeysRef.current.delete(next.value);
-        }
-      }
-      if (maxUid > lastNotified) {
-        lastNotifiedUidRef.current[activeAccountId] = maxUid;
-        localStorage.setItem(`noctua:lastNotifiedUid:${activeAccountId}`, String(maxUid));
-      }
-
-      if (unique.length === 1) {
-        const message = unique[0];
-        const title = message.subject || "(no subject)";
-        const body = message.from ? `From: ${message.from}` : "New message received";
-        console.info("[noctua] new mail", message);
-        await showNotification(title, body, `mail-${message.messageId ?? message.uid}`, {
-          messageId: message.messageId ?? null,
-          accountId: activeAccountId
-        });
-        pushNotice({
-          type: "info",
-          icon: "mail",
-          title,
-          description: body,
-          messageId: message.messageId ?? undefined,
-          durationMs: 12000
-        });
-      } else if (unique.length > 1) {
-        const title = `${unique.length} new messages`;
-        const preview = unique
-          .slice(0, 3)
-          .map((item) => item.subject || "(no subject)")
-          .join(" • ");
-        console.info("[noctua] new mail batch", unique);
-        await showNotification(title, preview, "mail-batch", { url: "/" });
-        pushNotice({
-          type: "info",
-          icon: "mail",
-          title,
-          description: preview,
-          ids: unique.map((item) => item.messageId ?? undefined).filter(Boolean) as string[],
-          durationMs: 12000
-        });
-      }
-    };
-
-    const syncAndNotifyNewMessages = async (
-      items: Array<{
-        uid: number;
-        subject?: string;
-        from?: string;
-        messageId?: string | null;
-        folderId?: string;
-      }> | null | undefined
-    ) => {
-      if (!items || items.length === 0) return;
-      const normalized = items.filter(
-        (item): item is {
-          uid: number;
-          subject?: string;
-          from?: string;
-          messageId?: string | null;
-          folderId?: string;
-        } => Boolean(item) && typeof item.uid === "number"
-      );
-      if (normalized.length === 0) return;
-      const fallbackFolderId = inboxFolderRef.current?.id;
-      const foldersToSync = Array.from(
-        new Set(
-          normalized
-            .map((item) => item.folderId ?? fallbackFolderId)
-            .filter((folderId): folderId is string => Boolean(folderId))
-        )
-      );
-      if (foldersToSync.length === 0) return;
-
-      const syncedMessages: SyncNotificationMessage[] = [];
-      for (const folderId of foldersToSync) {
-        const result = await syncFolderWithBackground(folderId, false, true, "new", false);
-        if (!result?.newMessages?.length) continue;
-        syncedMessages.push(...result.newMessages);
-      }
-      if (syncedMessages.length === 0) return;
-      await refreshPendingCalendarReminders();
-      await notifyNewMessages(syncedMessages);
-    };
-
-    const pollOnce = async () => {
-      if (pollInFlightRef.current) return;
-      pollInFlightRef.current = true;
-      try {
-        const inboxFolderId = inboxFolderRef.current?.id;
-        const params = new URLSearchParams({
-          accountId: activeAccountId,
-          mailbox: inboxMailboxPath
-        });
-        const since = inboxFolderId ? lastUidNextByFolderRef.current[inboxFolderId] : undefined;
-        if (typeof since === "number" && Number.isFinite(since)) {
-          params.set("sinceUidNext", String(since));
-        }
-        const res = await apiFetch(`/api/imap/poll?${params.toString()}`);
-        if (!res.ok) {
-          reportError(await readErrorMessage(res));
-          return;
-        }
-        const data = (await res.json()) as {
-          ok?: boolean;
-          uidNext?: number;
-          messages?: Array<{ uid: number; subject?: string; from?: string; messageId?: string }>;
-          message?: string;
-        };
-        if (data?.ok === false) {
-          reportError(data.message || "Failed to check for new mail.");
-          return;
-        }
-        if (typeof data?.uidNext === "number" && inboxFolderId) {
-          lastUidNextByFolderRef.current[inboxFolderId] = data.uidNext;
-        }
-        if (Array.isArray(data?.messages) && data.messages.length > 0) {
-          await syncAndNotifyNewMessages(data.messages);
-        }
-      } catch {
-        reportError("Failed to check for new mail.");
-      } finally {
-        pollInFlightRef.current = false;
-      }
-    };
-
-    const startPoll = (intervalMs: number) => {
-      stopPoll();
-      setMailCheckMode("polling");
-      setStreamMode("polling");
-      void pollOnce();
-      pollTimerRef.current = window.setInterval(pollOnce, intervalMs);
-    };
-
-    const syncSettings = currentAccount?.settings?.sync ?? {};
-    const streamMaxIdle = syncSettings.maxIdleSessions ?? 3;
-    const streamPollInterval = syncSettings.pollIntervalMs ?? 300000;
-
-    const stopStream = () => {
-      if (streamSourceRef.current) {
-        streamSourceRef.current.close();
-        streamSourceRef.current = null;
-      }
-    };
-
-    const startStream = () => {
-      stopStream();
-      stopPoll();
-      if (typeof window === "undefined" || !("EventSource" in window)) {
-        startPoll(streamPollInterval);
-        return;
-      }
-      const params = new URLSearchParams({ accountId: activeAccountId });
-      if (activeFolderId) {
-        params.set("activeFolderId", activeFolderId);
-      }
-      const source = new EventSource(`/api/imap/stream?${params.toString()}`);
-      streamSourceRef.current = source;
-      const shouldSkipDeleteReconcile = (folderId?: string, uid?: number) => {
-        if (!folderId) return false;
-        const now = Date.now();
-        const folderExpiry = localDeleteReconcileByFolderRef.current[folderId] ?? 0;
-        if (folderExpiry <= now) {
-          if (folderExpiry > 0) {
-            delete localDeleteReconcileByFolderRef.current[folderId];
-          }
-        } else {
-          return true;
-        }
-        if (typeof uid !== "number" || !Number.isFinite(uid)) return false;
-        const uidKey = `${folderId}:${uid}`;
-        const uidExpiry = localDeleteReconcileByUidRef.current[uidKey] ?? 0;
-        if (uidExpiry <= now) {
-          if (uidExpiry > 0) {
-            delete localDeleteReconcileByUidRef.current[uidKey];
-          }
-          return false;
-        }
-        return true;
-      };
-      const requestFolderReconcileSync = (folderId?: string) => {
-        if (!folderId) return;
-        const now = Date.now();
-        const lastRun = lastDeleteReconcileAtRef.current[folderId] ?? 0;
-        if (now - lastRun < 5000) return;
-        const { isSyncing, syncingFolders } = syncStateRef.current;
-        if (isSyncing || syncingFolders.has(folderId)) return;
-        lastDeleteReconcileAtRef.current[folderId] = now;
-        void syncAccountRef.current?.(folderId, "full");
-      };
-      source.addEventListener("open", () => {
-        setMailCheckMode("idle");
-        setStreamMode("stream");
-      });
-      source.addEventListener("folder:update", (event) => {
-        try {
-          const data = JSON.parse((event as MessageEvent).data) as Array<{
-            id: string;
-            uidNext?: number;
-            unseen?: number;
-            exists?: number;
-          }>;
-          if (Array.isArray(data)) {
-            setFolders((prev) =>
-              prev.map((folder) => {
-                const update = data.find((item) => item.id === folder.id);
-                if (!update) return folder;
-                const nextCount =
-                  typeof update.exists === "number" ? update.exists : folder.count;
-                const nextUnread =
-                  typeof update.unseen === "number"
-                    ? update.unseen
-                    : folder.unreadCount ?? folder.count;
-                return { ...folder, count: nextCount, unreadCount: nextUnread };
-              })
-            );
-            data.forEach((item) => {
-              if (typeof item.uidNext === "number") {
-                lastUidNextByFolderRef.current[item.id] = item.uidNext;
-              }
-            });
-          }
-        } catch {
-          // ignore
-        }
-      });
-      source.addEventListener("new", (event) => {
-        try {
-          const data = JSON.parse((event as MessageEvent).data) as {
-            uidNext?: number;
-            messages?: Array<{
-              uid: number;
-              subject?: string;
-              from?: string;
-              messageId?: string | null;
-              folderId?: string;
-            }>;
-          };
-          if (Array.isArray(data?.messages) && data.messages.length > 0) {
-            const nextUid = data?.uidNext;
-            if (typeof nextUid === "number") {
-              data.messages.forEach((msg) => {
-                if (msg.folderId) {
-                  lastUidNextByFolderRef.current[msg.folderId] = nextUid;
-                }
-              });
-            }
-            void syncAndNotifyNewMessages(data.messages);
-          }
-        } catch {
-          // ignore parse errors
-        }
-      });
-      source.addEventListener("flags:update", (event) => {
-        try {
-          const data = JSON.parse((event as MessageEvent).data) as {
-            folderId?: string;
-            uid?: number;
-            flags?: string[];
-          };
-          if (!data || typeof data.uid !== "number") return;
-          updateMessagesWithCurrentResultPrune((msg) => {
-            if (
-              msg.accountId !== activeAccountId ||
-              msg.imapUid !== data.uid ||
-              (data.folderId && msg.folderId !== data.folderId)
-            ) {
-              return msg;
-            }
-            const flags = withCalendarInviteFlag(data.flags ?? msg.flags ?? [], {
-              attachments: msg.attachments,
-              textBody: msg.body,
-              htmlBody: msg.htmlBody
-            });
-            return applyFlagsToMessage(msg, flags);
-          }, { source: "stream-flags-update" });
-          const hasDeletedFlag = (data.flags ?? []).some(
-            (flag) => flag.toLowerCase() === "\\deleted"
-          );
-          if (hasDeletedFlag) {
-            const folderId = data.folderId ?? activeFolderId;
-            if (shouldSkipDeleteReconcile(folderId, data.uid)) return;
-            requestFolderReconcileSync(folderId);
-          }
-        } catch {
-          // ignore
-        }
-      });
-      source.addEventListener("message:removed", (event) => {
-        try {
-          const data = JSON.parse((event as MessageEvent).data) as { folderId?: string; uid?: number };
-          const folderId = data.folderId ?? activeFolderId;
-          if (data.uid && folderId) {
-            setMessages((prev) => prev.filter((msg) => !(msg.folderId === folderId && msg.imapUid === data.uid)));
-          }
-          if (shouldSkipDeleteReconcile(folderId, data.uid)) return;
-          requestFolderReconcileSync(folderId);
-        } catch {
-          // ignore
-        }
-      });
-      source.addEventListener("error", () => {
-        stopStream();
-        setMailCheckMode("polling");
-        setStreamMode("polling");
-        startPoll(streamPollInterval);
-        if (!disposed) {
-          if (streamReconnectTimer) window.clearTimeout(streamReconnectTimer);
-          streamReconnectTimer = window.setTimeout(() => {
-            if (!disposed && document.visibilityState === "visible") {
-              startStream();
-            }
-          }, 15000);
-        }
-      });
-    };
-
-    const handleVisibility = () => {
-      if (document.visibilityState === "visible") {
-        startStream();
-      } else {
-        stopStream();
-        startPoll(Math.max(120000, streamPollInterval));
-      }
-    };
-
-    handleVisibility();
-    document.addEventListener("visibilitychange", handleVisibility);
-    window.addEventListener("pagehide", stopStream);
-    window.addEventListener("beforeunload", stopStream);
-
-    return () => {
-      disposed = true;
-      if (streamReconnectTimer) {
-        window.clearTimeout(streamReconnectTimer);
-        streamReconnectTimer = null;
-      }
-      document.removeEventListener("visibilitychange", handleVisibility);
-      window.removeEventListener("pagehide", stopStream);
-      window.removeEventListener("beforeunload", stopStream);
-      stopStream();
-      stopPoll();
-    };
-  }, [activeAccountId, activeFolderId, authState, inboxMailboxPath]);
-
-  const handleCreateSubfolder = async (folder: Folder) => {
-    if (!activeAccountId) return;
-    const name = window.prompt("New subfolder name");
-    if (!name?.trim()) return;
-    try {
-      const res = await apiFetch("/api/folders/create", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          accountId: activeAccountId,
-          name: name.trim(),
-          parentId: folder.id
-        })
-      });
-      if (!res.ok) {
-        reportError(await readErrorMessage(res));
-        return;
-      }
-      await refreshFolders();
-    } catch {
-      reportError("Failed to create folder.");
-    }
-  };
-
-  const handleRenameFolderItem = async (folder: Folder) => {
-    if (!activeAccountId) return;
-    const name = window.prompt("Rename folder", folder.name);
-    if (!name?.trim() || name.trim() === folder.name) return;
-    try {
-      const res = await apiFetch("/api/folders/rename", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          accountId: activeAccountId,
-          folderId: folder.id,
-          name: name.trim()
-        })
-      });
-      if (!res.ok) {
-        reportError(await readErrorMessage(res));
-        return;
-      }
-      await refreshFolders();
-    } catch {
-      reportError("Failed to rename folder.");
-    }
-  };
-
-  const handleDeleteFolderItem = async (folder: Folder) => {
-    if (!activeAccountId) return;
-    if (deletingFolderIds.has(folder.id)) return;
-    const confirmed = window.confirm(`Delete folder "${folder.name}" and its messages?`);
-    if (!confirmed) return;
-    setDeletingFolderIds((prev) => {
-      const next = new Set(prev);
-      next.add(folder.id);
-      return next;
-    });
-    try {
-      const res = await apiFetch("/api/folders/delete", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          accountId: activeAccountId,
-          folderId: folder.id
-        })
-      });
-      if (!res.ok) {
-        reportError(await readErrorMessage(res));
-        return;
-      }
-      await refreshFolders();
-      if (activeFolderId === folder.id) {
-        setActiveFolderId(accountFolders[0]?.id ?? "");
-      }
-    } catch {
-      reportError("Failed to delete folder.");
-    } finally {
-      setDeletingFolderIds((prev) => {
-        const next = new Set(prev);
-        next.delete(folder.id);
-        return next;
-      });
-    }
-  };
 
   const deferredMessageView = useDeferredValue(messageView);
   const isCompactView = deferredMessageView === "compact";
@@ -6518,7 +4493,6 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
           setTotalMessages(null);
           initialSyncStatusRef.current = {};
           lastUidNextByFolderRef.current = {};
-          pollInFlightRef.current = false;
           try {
             const res = await apiFetch("/api/auth/me", {
               credentials: "include",
@@ -6922,10 +4896,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
           onShowJson={() => setShowJson(true)}
           onEvictThreadCache={() => {
             console.info("[noctua] evict thread cache");
-            setThreadContentById({});
-            setThreadContentErrorById({});
-            threadCacheOrderRef.current = [];
-            setThreadContentLoading(null);
+            resetThreadCache();
           }}
         >
             {(() => {

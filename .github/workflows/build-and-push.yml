@@ -2,9 +2,9 @@ name: Build and Push Docker Image
 
 on:
   push:
-    branches: [main, master, develop]
+    branches: [main]
   pull_request:
-    branches: [main, master]
+    branches: [main]
   workflow_dispatch:  # Allow manual trigger
 
 env:
@@ -22,11 +22,34 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Compute tag variables
+        env:
+          BRANCH_REF: ${{ github.head_ref || github.ref_name }}
+        run: |
+          SHORT_SHA="${GITHUB_SHA::7}"
+          # Sanitize branch name to valid docker tag component
+          BRANCH_TAG="$(echo "$BRANCH_REF" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9._-]+/-/g; s/^[^a-z0-9_]+//; s/[^a-z0-9_]+$//')"
+          if [ -z "$BRANCH_TAG" ]; then
+            BRANCH_TAG="unknown"
+          fi
+          echo "SHORT_SHA=$SHORT_SHA" >> "$GITHUB_ENV"
+          echo "BRANCH_TAG=$BRANCH_TAG" >> "$GITHUB_ENV"
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v1
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Run tests
+        run: bun test
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
+        if: ${{ github.event_name != 'pull_request' }}
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -40,7 +63,7 @@ jobs:
           tags: |
             type=ref,event=branch
             type=ref,event=pr
-            type=sha,prefix={{branch}}-
+            type=raw,value=${{ env.BRANCH_TAG }}-${{ env.SHORT_SHA }}
             type=raw,value=latest,enable={{is_default_branch}}
 
       - name: Prepare build version metadata
@@ -52,7 +75,7 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: .
-          push: true
+          push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: |

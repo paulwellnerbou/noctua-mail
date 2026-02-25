@@ -8,6 +8,7 @@ import {
   parseIcsEvents,
   type CalendarEventPreview
 } from "@/lib/calendar";
+import { sanitizeHtmlForDisplay, stripStyleTags } from "@/lib/html";
 import { isCalendarAttachment } from "@/lib/messageFlags";
 import { resolveNextReminderOccurrence } from "@/lib/reminderRecurrence";
 import { linkifyText } from "@/app/components/LinkifiedText";
@@ -78,6 +79,41 @@ function parseHttpUrl(value?: string) {
 
 function normalizeLineEndings(value: string) {
   return value.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+}
+
+function looksLikeHtml(value: string) {
+  return /<\s*\/?\s*[a-z][\w:-]*(\s[^>]*?)?>/i.test(value);
+}
+
+function enforceSafeLinks(html: string) {
+  return html.replace(/<a\b([^>]*)>/gi, (_, attrs: string) => {
+    let result = attrs.trim();
+    if (!/\btarget\s*=/.test(result)) {
+      result = result ? `${result} target="_blank"` : 'target="_blank"';
+    }
+    if (/\brel\s*=/.test(result)) {
+      // Merge noopener/noreferrer into the existing rel value to prevent reverse-tabnabbing
+      result = result.replace(
+        /\brel\s*=\s*("([^"]*)"|'([^']*)'|(\S+))/i,
+        (_m, _full, dq, sq, uq) => {
+          const value = dq ?? sq ?? uq ?? "";
+          const tokens = value.split(/\s+/).filter(Boolean);
+          if (!tokens.includes("noopener")) tokens.push("noopener");
+          if (!tokens.includes("noreferrer")) tokens.push("noreferrer");
+          return `rel="${tokens.join(" ")}"`;
+        }
+      );
+    } else {
+      result = result ? `${result} rel="noreferrer noopener"` : 'rel="noreferrer noopener"';
+    }
+    return result ? `<a ${result}>` : "<a>";
+  });
+}
+
+function sanitizeDescriptionHtml(value: string) {
+  const stripped = stripStyleTags(value);
+  const safe = sanitizeHtmlForDisplay(stripped);
+  return enforceSafeLinks(safe);
 }
 
 function extractIcsUid(rawSource: string) {
@@ -494,6 +530,11 @@ export default function CalendarEventPreview({
                   const reminderKey = event.uid ?? `${attachment.id}-${index}`;
                   const hasStartTime = Boolean(event.start);
                   const canScheduleReminder = canScheduleReminderForEvent(event);
+                  const description = (event.description ?? "").trim();
+                  const descriptionHtml = description && looksLikeHtml(description)
+                    ? sanitizeDescriptionHtml(description)
+                    : "";
+                  const useHtmlDescription = Boolean(descriptionHtml);
                   const eventReminder =
                     event.start
                       ? findActiveCalendarReminderForEvent(pendingReminders, {
@@ -523,12 +564,19 @@ export default function CalendarEventPreview({
                           )}
                         </div>
                       ) : null}
-                      {event.description ? (
+                      {description ? (
                         <div className={styles.description}>
                           <span className={styles.descriptionLabel}>Description</span>
-                          <span className={styles.descriptionText}>
-                            {linkifyText(event.description, styles.descriptionLink)}
-                          </span>
+                          {useHtmlDescription ? (
+                            <div
+                              className={styles.descriptionText}
+                              dangerouslySetInnerHTML={{ __html: descriptionHtml }}
+                            />
+                          ) : (
+                            <span className={styles.descriptionText}>
+                              {linkifyText(description, styles.descriptionLink)}
+                            </span>
+                          )}
                         </div>
                       ) : null}
                       {event.organizer ? <p className={styles.meta}>Organizer: {event.organizer}</p> : null}
