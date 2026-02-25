@@ -4,7 +4,7 @@ on:
   workflow_run:
     workflows: ["Build and Push Docker Image"]
     types: [completed]
-    branches: [main, master, develop]
+    branches: [main]
   workflow_dispatch:  # Allow manual trigger
 
 env:
