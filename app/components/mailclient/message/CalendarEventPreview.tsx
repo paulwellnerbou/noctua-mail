@@ -8,6 +8,7 @@ import {
   parseIcsEvents,
   type CalendarEventPreview
 } from "@/lib/calendar";
+import { sanitizeHtmlForDisplay, stripStyleTags } from "@/lib/html";
 import { isCalendarAttachment } from "@/lib/messageFlags";
 import { resolveNextReminderOccurrence } from "@/lib/reminderRecurrence";
 import { linkifyText } from "@/app/components/LinkifiedText";
@@ -78,6 +79,30 @@ function parseHttpUrl(value?: string) {
 
 function normalizeLineEndings(value: string) {
   return value.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+}
+
+function looksLikeHtml(value: string) {
+  return /<\s*\/?\s*[a-z][\w:-]*(\s[^>]*?)?>/i.test(value);
+}
+
+function enforceSafeLinks(html: string) {
+  return html.replace(/<a\b([^>]*)>/gi, (_, attrs: string) => {
+    const trimmed = attrs.trim();
+    const hasTarget = /\btarget\s*=/.test(trimmed);
+    const hasRel = /\brel\s*=/.test(trimmed);
+    const parts: string[] = [];
+    if (trimmed) parts.push(trimmed);
+    if (!hasTarget) parts.push('target="_blank"');
+    if (!hasRel) parts.push('rel="noreferrer noopener"');
+    const merged = parts.join(" ");
+    return merged ? `<a ${merged}>` : "<a>";
+  });
+}
+
+function sanitizeDescriptionHtml(value: string) {
+  const stripped = stripStyleTags(value);
+  const safe = sanitizeHtmlForDisplay(stripped);
+  return enforceSafeLinks(safe);
 }
 
 function extractIcsUid(rawSource: string) {
@@ -494,6 +519,11 @@ export default function CalendarEventPreview({
                   const reminderKey = event.uid ?? `${attachment.id}-${index}`;
                   const hasStartTime = Boolean(event.start);
                   const canScheduleReminder = canScheduleReminderForEvent(event);
+                  const description = (event.description ?? "").trim();
+                  const descriptionHtml = description && looksLikeHtml(description)
+                    ? sanitizeDescriptionHtml(description)
+                    : "";
+                  const useHtmlDescription = Boolean(descriptionHtml);
                   const eventReminder =
                     event.start
                       ? findActiveCalendarReminderForEvent(pendingReminders, {
@@ -523,12 +553,19 @@ export default function CalendarEventPreview({
                           )}
                         </div>
                       ) : null}
-                      {event.description ? (
+                      {description ? (
                         <div className={styles.description}>
                           <span className={styles.descriptionLabel}>Description</span>
-                          <span className={styles.descriptionText}>
-                            {linkifyText(event.description, styles.descriptionLink)}
-                          </span>
+                          {useHtmlDescription ? (
+                            <div
+                              className={styles.descriptionText}
+                              dangerouslySetInnerHTML={{ __html: descriptionHtml }}
+                            />
+                          ) : (
+                            <span className={styles.descriptionText}>
+                              {linkifyText(description, styles.descriptionLink)}
+                            </span>
+                          )}
                         </div>
                       ) : null}
                       {event.organizer ? <p className={styles.meta}>Organizer: {event.organizer}</p> : null}

@@ -1,0 +1,428 @@
+"use client";
+
+import type React from "react";
+import { useCallback, useEffect } from "react";
+import type { Account, Folder, Message, User } from "@/lib/data";
+import type { ManageTab } from "../AccountSettingsModal";
+import type { SyncJobResult } from "./types";
+
+type ApiFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+
+type AuthMeResponse = {
+  ok?: boolean;
+  user?: User | null;
+  accountId?: string;
+  ttlSeconds?: number;
+};
+
+export type UseAccountControllerParams = {
+  activeAccountId: string;
+  accounts: Account[];
+  accountFolders: Folder[];
+  activeFolderId: string;
+  deletingFolderIds: Set<string>;
+  apiFetch: ApiFetch;
+  readErrorMessage: (res: Response) => Promise<string>;
+  reportError: (message: string) => void;
+  refreshFolders: () => Promise<Folder[] | null>;
+  runSyncJob: (payload: {
+    accountId: string;
+    folderId?: string;
+    fullSync?: boolean;
+    mode?: "full" | "recent" | "new";
+  }) => Promise<SyncJobResult>;
+  // State setters owned by MailClient
+  setAccounts: React.Dispatch<React.SetStateAction<Account[]>>;
+  setActiveAccountId: React.Dispatch<React.SetStateAction<string>>;
+  setFolders: React.Dispatch<React.SetStateAction<Folder[]>>;
+  setAuthState: React.Dispatch<React.SetStateAction<"loading" | "ok" | "unauth">>;
+  setCurrentUser: React.Dispatch<React.SetStateAction<User | null>>;
+  setInitialDataReady: React.Dispatch<React.SetStateAction<boolean>>;
+  setSessionTtlSeconds: React.Dispatch<React.SetStateAction<number | null>>;
+  setMessages: React.Dispatch<React.SetStateAction<Message[]>>;
+  setMessagesPage: React.Dispatch<React.SetStateAction<number>>;
+  setHasMoreMessages: React.Dispatch<React.SetStateAction<boolean>>;
+  setTotalMessages: React.Dispatch<React.SetStateAction<number | null>>;
+  setActiveMessageId: React.Dispatch<React.SetStateAction<string>>;
+  setViewMessage: React.Dispatch<React.SetStateAction<Message | null>>;
+  setActiveFolderId: React.Dispatch<React.SetStateAction<string>>;
+  setLastFolderId: React.Dispatch<React.SetStateAction<string>>;
+  setMessageListError: React.Dispatch<React.SetStateAction<string | null>>;
+  setExceptionEntries: React.Dispatch<React.SetStateAction<Array<{ id: string; message: string; timestamp: number }>>>;
+  setManageOpen: React.Dispatch<React.SetStateAction<boolean>>;
+  setManageTab: React.Dispatch<React.SetStateAction<ManageTab>>;
+  setEditingAccount: React.Dispatch<React.SetStateAction<Account | null>>;
+  setDeletingFolderIds: React.Dispatch<React.SetStateAction<Set<string>>>;
+};
+
+export function useAccountController({
+  activeAccountId,
+  accounts,
+  accountFolders,
+  activeFolderId,
+  deletingFolderIds,
+  apiFetch,
+  readErrorMessage,
+  reportError,
+  refreshFolders,
+  runSyncJob,
+  setAccounts,
+  setActiveAccountId,
+  setFolders,
+  setAuthState,
+  setCurrentUser,
+  setInitialDataReady,
+  setSessionTtlSeconds,
+  setMessages,
+  setMessagesPage,
+  setHasMoreMessages,
+  setTotalMessages,
+  setActiveMessageId,
+  setViewMessage,
+  setActiveFolderId,
+  setLastFolderId,
+  setMessageListError,
+  setExceptionEntries,
+  setManageOpen,
+  setManageTab,
+  setEditingAccount,
+  setDeletingFolderIds
+}: UseAccountControllerParams) {
+  const loadInitialData = useCallback(
+    async (options?: { skipAuthCheck?: boolean; preferredAccountId?: string | null }) => {
+      const skipAuthCheck = options?.skipAuthCheck === true;
+      let preferredAccountId = options?.preferredAccountId?.trim() ?? "";
+      setInitialDataReady(false);
+      try {
+        if (!skipAuthCheck) {
+          const me = await apiFetch("/api/auth/me", {
+            credentials: "include",
+            cache: "no-store"
+          });
+          if (!me.ok) {
+            setAuthState("unauth");
+            setCurrentUser(null);
+            return;
+          }
+          const meData = (await me.json()) as AuthMeResponse | null;
+          setAuthState("ok");
+          setCurrentUser(meData?.user ?? null);
+          if (typeof meData?.ttlSeconds === "number") {
+            setSessionTtlSeconds(meData.ttlSeconds);
+          }
+          if (typeof meData?.accountId === "string" && meData.accountId.trim()) {
+            preferredAccountId = meData.accountId.trim();
+          }
+        }
+        const [accountsRes, foldersRes] = await Promise.all([
+          apiFetch("/api/accounts"),
+          apiFetch("/api/folders")
+        ]);
+        let loadedAccounts = false;
+        let loadedFolders = false;
+        if (accountsRes.ok) {
+          const nextAccounts = (await accountsRes.json()) as Account[];
+          setAccounts(nextAccounts);
+          setActiveAccountId((prev) => {
+            if (
+              preferredAccountId &&
+              nextAccounts.some((account) => account.id === preferredAccountId)
+            ) {
+              return preferredAccountId;
+            }
+            if (nextAccounts.find((account) => account.id === prev)) return prev;
+            return nextAccounts[0]?.id ?? prev;
+          });
+          loadedAccounts = true;
+        } else {
+          reportError(await readErrorMessage(accountsRes));
+        }
+        if (foldersRes.ok) {
+          const nextFolders = (await foldersRes.json()) as Folder[];
+          setFolders(nextFolders);
+          loadedFolders = true;
+        } else {
+          reportError(await readErrorMessage(foldersRes));
+        }
+        if (loadedAccounts && loadedFolders) {
+          setInitialDataReady(true);
+        }
+      } catch {
+        setAuthState("unauth");
+        setCurrentUser(null);
+        reportError("Failed to load mailbox data.");
+      }
+    },
+    [
+      apiFetch,
+      readErrorMessage,
+      reportError,
+      setAccounts,
+      setActiveAccountId,
+      setAuthState,
+      setCurrentUser,
+      setFolders,
+      setInitialDataReady,
+      setSessionTtlSeconds
+    ]
+  );
+
+  const switchAccount = useCallback(
+    async (nextAccountId: string) => {
+      const normalizedAccountId = nextAccountId.trim();
+      if (!normalizedAccountId || normalizedAccountId === activeAccountId) return;
+      try {
+        const response = await apiFetch("/api/auth/switch-account", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ accountId: normalizedAccountId })
+        });
+        if (!response.ok) {
+          reportError(await readErrorMessage(response));
+          return;
+        }
+        const payload = (await response.json().catch(() => null)) as {
+          accountId?: string;
+        } | null;
+        const switchedAccountId =
+          typeof payload?.accountId === "string" && payload.accountId.trim()
+            ? payload.accountId.trim()
+            : normalizedAccountId;
+        setExceptionEntries([]);
+        setMessageListError(null);
+        setMessages([]);
+        setMessagesPage(1);
+        setHasMoreMessages(true);
+        setTotalMessages(null);
+        setActiveMessageId("");
+        setViewMessage(null);
+        setActiveFolderId("");
+        setLastFolderId("");
+        setActiveAccountId(switchedAccountId);
+        await loadInitialData({ skipAuthCheck: true, preferredAccountId: switchedAccountId });
+      } catch {
+        reportError("Failed to switch account.");
+      }
+    },
+    [
+      activeAccountId,
+      apiFetch,
+      loadInitialData,
+      readErrorMessage,
+      reportError,
+      setActiveAccountId,
+      setActiveMessageId,
+      setActiveFolderId,
+      setExceptionEntries,
+      setHasMoreMessages,
+      setLastFolderId,
+      setMessageListError,
+      setMessages,
+      setMessagesPage,
+      setTotalMessages,
+      setViewMessage
+    ]
+  );
+
+  const saveAccount = async (account: Account) => {
+    if (!account.email?.trim()) {
+      reportError("Email address is required");
+      return;
+    }
+    const exists = accounts.find((a) => a.id === account.id);
+    const isNew = !exists;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const accountToSave = isNew ? ({ ...account, id: undefined } as any) : account;
+    const endpoint = exists ? `/api/accounts/${account.id}` : "/api/accounts";
+    const method = exists ? "PUT" : "POST";
+    const saveResult = await apiFetch(endpoint, {
+      method,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(accountToSave)
+    });
+    if (!saveResult.ok) {
+      reportError(await readErrorMessage(saveResult));
+      return;
+    }
+    const newAccountId = isNew
+      ? ((await saveResult.json()) as { id: string }).id
+      : account.id;
+    const refreshed = await apiFetch("/api/accounts");
+    if (refreshed.ok) {
+      const nextAccounts = (await refreshed.json()) as Account[];
+      setAccounts(nextAccounts);
+      setManageOpen(false);
+      setEditingAccount(null);
+      if (isNew) {
+        await switchAccount(newAccountId);
+        await refreshFolders();
+        await runSyncJob({ accountId: newAccountId, fullSync: true, mode: "full" });
+      }
+    } else {
+      reportError(await readErrorMessage(refreshed));
+    }
+  };
+
+  const saveAccountSettings = async (account: Account) => {
+    const exists = accounts.find((a) => a.id === account.id);
+    if (!exists) return;
+    const res = await apiFetch(`/api/accounts/${account.id}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ settings: account.settings ?? {} })
+    });
+    if (!res.ok) {
+      reportError(await readErrorMessage(res));
+      return;
+    }
+    const refreshed = await apiFetch("/api/accounts");
+    if (refreshed.ok) {
+      const nextAccounts = (await refreshed.json()) as Account[];
+      setAccounts(nextAccounts);
+    } else {
+      reportError(await readErrorMessage(refreshed));
+    }
+  };
+
+  const deleteAccount = async (accountId: string) => {
+    const res = await apiFetch(`/api/accounts/${accountId}`, { method: "DELETE" });
+    if (!res.ok) {
+      reportError(await readErrorMessage(res));
+      return;
+    }
+    const refreshed = await apiFetch("/api/accounts");
+    if (refreshed.ok) {
+      const nextAccounts = (await refreshed.json()) as Account[];
+      setAccounts(nextAccounts);
+      const nextAccountId = nextAccounts[0]?.id ?? "";
+      if (nextAccountId) {
+        await switchAccount(nextAccountId);
+      } else {
+        setActiveAccountId("");
+      }
+    } else {
+      reportError(await readErrorMessage(refreshed));
+    }
+    setManageOpen(false);
+    setEditingAccount(null);
+  };
+
+  const startEditAccount = (account?: Account) => {
+    const targetAccount: Account =
+      account ?? {
+        id: `acc-${crypto.randomUUID().slice(0, 6)}`,
+        name: "",
+        email: "",
+        avatar: "NW",
+        imap: { host: "", port: 993, secure: true, user: "", password: "" },
+        smtp: { host: "", port: 587, secure: false, user: "", password: "" }
+      };
+    setEditingAccount(targetAccount);
+    setManageOpen(true);
+    setManageTab("account");
+  };
+
+  const handleCreateSubfolder = async (folder: Folder) => {
+    if (!activeAccountId) return;
+    const name = window.prompt("New subfolder name");
+    if (!name?.trim()) return;
+    try {
+      const res = await apiFetch("/api/folders/create", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          accountId: activeAccountId,
+          name: name.trim(),
+          parentId: folder.id
+        })
+      });
+      if (!res.ok) {
+        reportError(await readErrorMessage(res));
+        return;
+      }
+      await refreshFolders();
+    } catch {
+      reportError("Failed to create folder.");
+    }
+  };
+
+  const handleRenameFolderItem = async (folder: Folder) => {
+    if (!activeAccountId) return;
+    const name = window.prompt("Rename folder", folder.name);
+    if (!name?.trim() || name.trim() === folder.name) return;
+    try {
+      const res = await apiFetch("/api/folders/rename", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          accountId: activeAccountId,
+          folderId: folder.id,
+          name: name.trim()
+        })
+      });
+      if (!res.ok) {
+        reportError(await readErrorMessage(res));
+        return;
+      }
+      await refreshFolders();
+    } catch {
+      reportError("Failed to rename folder.");
+    }
+  };
+
+  const handleDeleteFolderItem = async (folder: Folder) => {
+    if (!activeAccountId) return;
+    if (deletingFolderIds.has(folder.id)) return;
+    const confirmed = window.confirm(`Delete folder "${folder.name}" and its messages?`);
+    if (!confirmed) return;
+    setDeletingFolderIds((prev) => {
+      const next = new Set(prev);
+      next.add(folder.id);
+      return next;
+    });
+    try {
+      const res = await apiFetch("/api/folders/delete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          accountId: activeAccountId,
+          folderId: folder.id
+        })
+      });
+      if (!res.ok) {
+        reportError(await readErrorMessage(res));
+        return;
+      }
+      await refreshFolders();
+      if (activeFolderId === folder.id) {
+        setActiveFolderId(accountFolders[0]?.id ?? "");
+      }
+    } catch {
+      reportError("Failed to delete folder.");
+    } finally {
+      setDeletingFolderIds((prev) => {
+        const next = new Set(prev);
+        next.delete(folder.id);
+        return next;
+      });
+    }
+  };
+
+  // Load initial data on mount
+  useEffect(() => {
+    loadInitialData();
+  }, [loadInitialData]);
+
+  return {
+    loadInitialData,
+    switchAccount,
+    refreshFolders,
+    saveAccount,
+    saveAccountSettings,
+    deleteAccount,
+    startEditAccount,
+    handleCreateSubfolder,
+    handleRenameFolderItem,
+    handleDeleteFolderItem
+  };
+}

@@ -139,6 +139,12 @@
   white-space: pre-wrap;
 }
 
+.description :where(a) {
+  color: var(--accent-11);
+  text-decoration: underline;
+  word-break: break-all;
+}
+
 .descriptionLink {
   color: var(--accent-11);
   text-decoration: underline;
