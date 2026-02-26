@@ -57,13 +57,13 @@ import {
   getThreadLatestDate,
   type ThreadNode
 } from "./mailclient/messagelist/threadTree";
-import { AlertDialog, Badge, Button, Card, Flex, IconButton, Text } from "@radix-ui/themes";
+import { AlertDialog, Badge, Button, Card, Flex, IconButton, SegmentedControl, Text } from "@radix-ui/themes";
 import MessageMenu from "./mailclient/message/MessageMenu";
 import MessageQuickActions from "./mailclient/message/MessageQuickActions";
 import MessageViewPane from "./mailclient/message/MessageViewPane";
 import MarkdownPanel from "./mailclient/message/MarkdownPanel";
 import MessageSourcePanel from "./mailclient/message/MessageSourcePanel";
-import { TODO_FLAG, DONE_FLAG } from "@/lib/messageFlags";
+import { TODO_FLAG, DONE_FLAG, isMeaningfulNonInlineAttachment } from "@/lib/messageFlags";
 import { createComposeAttachment } from "@/lib/mail/composeAttachment";
 import { openDetachedWindow } from "@/lib/ui/openDetachedWindow";
 import { getImapFlagBadges, hasHtmlContent } from "@/lib/ui/messageView";
@@ -175,6 +175,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
   const [collapsedFolders, setCollapsedFolders] = useState<Record<string, boolean>>({});
   const [folderQuery, setFolderQuery] = useState("");
   const [messageView, setMessageView] = useState<"card" | "table" | "compact" | "threads">("threads");
+  const [threadViewMode, setThreadViewMode] = useState<"full" | "compact">("compact");
   const clientId = useMemo(() => {
     if (typeof window === "undefined") return "";
     const key = "noctuaClientId";
@@ -1398,18 +1399,56 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
       return;
     }
 
+    const afterOpen = (msg: Message) => {
+      openComposeInternal(mode, msg, asNew);
+      if (mode === "forward") {
+        void loadForwardAttachments(msg);
+      }
+    };
+
     const resolved = messageById.get(message.id) ?? message;
     const hasText = Boolean((resolved.body ?? "").trim());
     const hasHtml = hasHtmlContent(resolved.htmlBody);
     if (hasText || hasHtml) {
-      openComposeInternal(mode, resolved, asNew);
+      afterOpen(resolved);
       return;
     }
 
     void (async () => {
       const hydrated = await ensureMessageContent(resolved, { manual: true });
-      openComposeInternal(mode, hydrated ?? resolved, asNew);
+      afterOpen(hydrated ?? resolved);
     })();
+  };
+
+  const loadForwardAttachments = async (message: Message) => {
+    const toFetch = (message.attachments ?? []).filter(isMeaningfulNonInlineAttachment);
+    if (!toFetch.length) return;
+
+    const results = await Promise.all(
+      toFetch.map(async (att) => {
+        try {
+          const res = await apiFetch(
+            `/api/attachment?accountId=${encodeURIComponent(message.accountId)}&messageId=${encodeURIComponent(message.id)}&attachmentId=${encodeURIComponent(att.id)}`
+          );
+          if (!res.ok) return null;
+          const blob = await res.blob();
+          const dataUrl = await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(String(reader.result));
+            reader.onerror = () => reject(reader.error);
+            reader.readAsDataURL(blob);
+          });
+          return { ...att, dataUrl };
+        } catch {
+          return null;
+        }
+      })
+    );
+
+    const valid = results.filter((att): att is NonNullable<typeof att> => att !== null);
+    if (valid.length > 0) {
+      setComposeAttachments(valid);
+    }
   };
 
   useEffect(() => {
@@ -1969,6 +2008,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
         if (composeDraftId && activeAccountId) {
           suppressDraftDeleteReconcile(composeDraftId);
           removeDraftFromUi(composeDraftId);
+          evictMessagesFromThreadCache([composeDraftId]);
           try {
             await apiFetch("/api/drafts/discard", {
               method: "POST",
@@ -2656,6 +2696,22 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     setActiveFolderId("");
     setQuery(`related:${message.id}`);
   };
+  const handleShowThread = (message: Message) => {
+    const threadId = message.threadId ?? message.messageId ?? message.id;
+    if (!threadId) return;
+    relatedRestoreRef.current = {
+      queryId: threadId,
+      scope: searchScope,
+      folderId: activeFolderId
+    };
+    if (searchScope === "folder" && activeFolderId) {
+      setLastFolderId(activeFolderId);
+    }
+    setSearchScope("all");
+    setActiveFolderId("");
+    setQuery(`thread:${threadId}`);
+  };
+
   const handleFindRelatedByCalendarInviteUid = (eventUid: string) => {
     const normalizedUid = eventUid.trim().replace(/"/g, "");
     if (!normalizedUid) return;
@@ -2710,6 +2766,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
       handleOpenInNewWindow={handleOpenInNewWindow}
       handleOpenHtmlInNewWindow={handleOpenHtmlInNewWindow}
       onShowRelated={handleShowRelated}
+      onShowThread={handleShowThread}
       isTrashFolder={isTrashFolder}
       isSpamFolder={isSpamFolder}
       onOpenChange={onOpenChange}
@@ -4937,6 +4994,27 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
             console.info("[noctua] evict thread cache");
             resetThreadCache();
           }}
+          header={activeMessage ? (() => {
+                  const rootSubject =
+                    activeThread[0]?.subject ?? activeMessage?.subject ?? "";
+                  return (
+                    <>
+                      <span style={{ flex: 1, minWidth: 0, fontWeight: 600, fontSize: 16, lineHeight: 1.4, wordBreak: "break-word", overflowWrap: "anywhere", color: "var(--gray-12)" }}>
+                        {rootSubject || "(no subject)"}
+                      </span>
+                      <SegmentedControl.Root
+                        size="1"
+                        value={threadViewMode}
+                        onValueChange={(v) => setThreadViewMode(v as "full" | "compact")}
+                        style={{ flexShrink: 0 }}
+                      >
+                        <SegmentedControl.Item value="compact">Compact</SegmentedControl.Item>
+                        <SegmentedControl.Item value="full">Full</SegmentedControl.Item>
+                      </SegmentedControl.Root>
+                    </>
+                  );
+                })() : undefined
+          }
         >
             {(() => {
               // Render function for ComposeInlineCard with ref
@@ -5077,7 +5155,9 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
                       getPrimaryEmail,
                       extractEmails,
                       onFindRelatedByCalendarInviteUid: handleFindRelatedByCalendarInviteUid,
-                      dateFormat: accountDateFormat
+                      dateFormat: accountDateFormat,
+                      threadViewMode,
+                      userEmail: currentAccount?.email
                     }}
                   />
                 </>

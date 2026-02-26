@@ -4,6 +4,7 @@ import {
   CalendarDays,
   Edit3,
   Image as ImageIcon,
+  MoveRight,
   Paperclip,
   RefreshCw,
   ZoomIn,
@@ -25,7 +26,8 @@ import CalendarEventPreview from "./CalendarEventPreview";
 import MessageRecipientMetaField from "./MessageRecipientMetaField";
 import CategoryBadge from "../CategoryBadge";
 import FlagBadge from "./FlagBadge";
-import { hasNonInlineAttachments, getUnsubscribeCapability } from "../utils/messageHelpers";
+import { hasNonInlineAttachments, getUnsubscribeCapability, resolveInReplyToRef } from "../utils/messageHelpers";
+import { getMessageFromDisplay } from "../messagelist/threadGroupUtils";
 
 type MessageTab = "html" | "text" | "markdown" | "source";
 
@@ -83,6 +85,8 @@ type ThreadMessageCardProps = {
   onFindRelatedByCalendarInviteUid?: (uid: string) => void;
   handleUnsubscribe: (message: Message) => void;
   dateFormat?: AccountDateFormat;
+  threadViewMode?: "full" | "compact";
+  userEmail?: string;
 };
 
 export default function ThreadMessageCard({
@@ -126,7 +130,9 @@ export default function ThreadMessageCard({
   extractEmails,
   onFindRelatedByCalendarInviteUid,
   handleUnsubscribe,
-  dateFormat
+  dateFormat,
+  threadViewMode,
+  userEmail
 }: ThreadMessageCardProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const toValue = (message.to ?? "").trim() || "(no recipients)";
@@ -431,6 +437,128 @@ export default function ThreadMessageCard({
     );
   }
 
+  // Compact collapsed row (two-line summary, no card border)
+  if (threadViewMode === "compact" && isCollapsed) {
+    const imapBadges = getImapFlagBadges(message);
+    const showAttachmentIcon = hasNonInlineAttachments(message);
+    const showInlineImageIcon =
+      message.hasInlineAttachments ?? message.attachments?.some((a) => a.inline);
+    const fromDisplay = getMessageFromDisplay(
+      message.from ?? "",
+      { to: message.to, cc: message.cc, bcc: message.bcc },
+      userEmail,
+      true,
+      false
+    );
+    const senderText = fromDisplay.text || message.from || "(unknown)";
+    const senderEmail = getPrimaryEmail(message.from);
+    // Show email address after display name only when they differ (i.e. there is a separate display name)
+    const showSenderEmail =
+      !fromDisplay.showRecipientIcon &&
+      senderEmail !== null &&
+      senderEmail.toLowerCase() !== senderText.toLowerCase();
+    return (
+      <div
+        ref={(el) => {
+          if (el) messageRefs.current.set(message.id, el);
+        }}
+        className={`${styles.compactRow} ${
+          pendingMessageActions.has(message.id) ? styles.cardDisabled : ""
+        } ${menuOpen ? styles.cardMenuOpen : ""}`}
+        onClick={() =>
+          setCollapsedMessages((prev) => ({ ...prev, [message.id]: false }))
+        }
+        role="button"
+        tabIndex={0}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            setCollapsedMessages((prev) => ({ ...prev, [message.id]: false }));
+          }
+        }}
+      >
+        <span className={styles.compactCaret}>
+          <CaretRightIcon />
+        </span>
+        <div className={styles.compactMain}>
+          <div className={styles.compactFirstLine}>
+            <span
+              className={`${styles.compactSender} ${!message.seen ? styles.compactSenderUnread : ""}`}
+              title={fromDisplay.tooltip || message.from}
+            >
+              {fromDisplay.showRecipientIcon && (
+                <span className={styles.compactRecipientIcon} aria-label="Recipients">
+                  <MoveRight size={12} />
+                </span>
+              )}
+              {senderText}
+              {showSenderEmail && (
+                <span className={styles.compactSenderEmail}>{senderEmail}</span>
+              )}
+            </span>
+            <div
+              className={styles.compactBadges}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <FolderBadges
+                folderIds={folderBadgeIds}
+                folderNameById={folderNameById}
+                threadPathById={threadPathById}
+                onSelectFolder={handleFolderBadgeSelect}
+              />
+              {imapBadges.map((badge) => {
+                if (badge.kind === "flagged")
+                  return (
+                    <FlagBadge
+                      key="flagged"
+                      kind="flagged"
+                      showLabel={false}
+                      onClick={() => toggleFlaggedFlag(message)}
+                    />
+                  );
+                if (badge.kind === "todo")
+                  return (
+                    <FlagBadge
+                      key="todo"
+                      kind="todo"
+                      showLabel={false}
+                      onClick={() => toggleTodoFlag(message)}
+                    />
+                  );
+                if (badge.kind === "done")
+                  return (
+                    <FlagBadge
+                      key="done"
+                      kind="done"
+                      showLabel={false}
+                      onClick={() => toggleTodoFlag(message)}
+                    />
+                  );
+                return null;
+              })}
+              {showAttachmentIcon && <Paperclip size={11} />}
+              {showInlineImageIcon && <ImageIcon size={11} />}
+            </div>
+            <span className={styles.compactDate} title={dateDisplay.tooltip}>
+              {dateDisplay.text}
+            </span>
+            <div
+              className={styles.compactActions}
+              onClick={(e) => e.stopPropagation()}
+            >
+              {renderMessageMenu(message, "thread", setMenuOpen)}
+            </div>
+          </div>
+          <div className={styles.compactSecondLine}>
+            <span className={styles.compactPreview}>
+              {message.preview || ""}
+            </span>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <Card
       asChild
@@ -569,9 +697,11 @@ export default function ThreadMessageCard({
               </div>
             </div>
             <div className={styles.info}>
-              <div className={styles.subjectLine}>
-                <span className={styles.subjectText}>{message.subject}</span>
-              </div>
+              {!threadViewMode && (
+                <div className={styles.subjectLine}>
+                  <span className={styles.subjectText}>{message.subject}</span>
+                </div>
+              )}
               <div className={`${styles.metaLine} ${styles.metaSplit}`}>
                 <MessageRecipientMetaField
                   label="From"
@@ -598,28 +728,17 @@ export default function ThreadMessageCard({
                 />
               ))}
               {(() => {
-                const refId =
-                  message.xForwardedMessageId ??
-                  message.inReplyTo ??
-                  (message.references && message.references.length > 0
-                    ? message.references[message.references.length - 1]
-                    : undefined);
-                const target =
-                  refId && messageByMessageId.has(refId) ? messageByMessageId.get(refId) : null;
-                return refId && target ? (
+                const ref = resolveInReplyToRef(message, messageByMessageId);
+                return ref ? (
                   <div className={`${styles.metaLine} ${styles.metaLineLink}`}>
                     <span className={styles.metaLabel}>
-                      {message.xForwardedMessageId ? "Forwarded mail:" : "In Reply To:"}
+                      {ref.isForward ? "Forwarded mail:" : "In Reply To:"}
                     </span>
                     <button
                       className={styles.threadLink}
-                      onClick={() => {
-                        if (target) {
-                          handleSelectMessage(target);
-                        }
-                      }}
+                      onClick={() => handleSelectMessage(ref.target)}
                     >
-                      {target?.subject ?? refId}
+                      {ref.target.subject ?? ref.refId}
                     </button>
                   </div>
                 ) : null;

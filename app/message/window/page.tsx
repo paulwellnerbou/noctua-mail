@@ -361,6 +361,7 @@ export default function MessageWindowPage() {
                       category: false,
                       delete: false,
                       showRelated: false,
+                      showThread: false,
                       openWindow: false,
                       resync: false
                     }}
@@ -379,6 +380,7 @@ export default function MessageWindowPage() {
                     handleOpenInNewWindow={noop}
                     handleOpenHtmlInNewWindow={handleOpenHtmlInNewWindow}
                     onShowRelated={noop}
+                    onShowThread={noop}
                     isTrashFolder={() => false}
                     isSpamFolder={() => false}
                     onOpenChange={onOpenChange}

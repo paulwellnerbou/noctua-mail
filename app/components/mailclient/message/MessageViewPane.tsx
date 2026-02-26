@@ -6,6 +6,7 @@ type MessageViewPaneProps = {
   onShowJson: () => void;
   onEvictThreadCache: () => void;
   children: React.ReactNode;
+  header?: React.ReactNode;
   hideToolbar?: boolean;
 };
 
@@ -13,6 +14,7 @@ export default function MessageViewPane({
   onShowJson,
   onEvictThreadCache,
   children,
+  header,
   hideToolbar = false
 }: MessageViewPaneProps) {
   return (
@@ -42,6 +44,7 @@ export default function MessageViewPane({
           </div>
         </div>
       )}
+      {header && <div className={styles.threadHeader}>{header}</div>}
       <div className={styles.threadView}>{children}</div>
     </section>
   );

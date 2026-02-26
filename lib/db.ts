@@ -2373,8 +2373,19 @@ function parseSearchInput(
     }
   );
 
-  const rawQuery = withoutInviteUid.trim();
-  const queryTokens = buildSearchTokens(withoutInviteUid);
+  // Extract "thread:" terms (exact thread ID match)
+  const threadTerms: string[] = [];
+  const withoutThread = withoutInviteUid.replace(
+    /(^|\s)thread:("([^"]+)"|\S+)/gi,
+    (match, lead, term) => {
+      const cleaned = term.replace(/^"|"$/g, "").trim();
+      if (cleaned) threadTerms.push(cleaned);
+      return lead ? " " : "";
+    }
+  );
+
+  const rawQuery = withoutThread.trim();
+  const queryTokens = buildSearchTokens(withoutThread);
   const columns = normalizeSearchFields(fields);
   const includeAttachmentFilenames = shouldSearchAttachmentFilenames(fields);
   const ftsTokenQueries = buildScopedFtsTokenQueries(queryTokens, columns);
@@ -2387,6 +2398,7 @@ function parseSearchInput(
     toTerms,
     inTerms,
     inviteUidTerms,
+    threadTerms,
     rawQuery,
     attachmentFilenameTerms
   };
@@ -2779,7 +2791,7 @@ async function getGroupCounts(params: {
   const db = await getAccountDb(accountId);
   const accountEmail = await getAccountEmail(accountId);
 
-  const { ftsTokenQueries, fromTerms, toTerms, inTerms, inviteUidTerms, rawQuery, attachmentFilenameTerms } = parseSearchInput(
+  const { ftsTokenQueries, fromTerms, toTerms, inTerms, inviteUidTerms, threadTerms, rawQuery, attachmentFilenameTerms } = parseSearchInput(
     query,
     fields,
     accountEmail
@@ -2803,6 +2815,12 @@ async function getGroupCounts(params: {
     const pattern = `%${term.toLowerCase()}%`;
     args.push(pattern, pattern, pattern);
   });
+
+  // Apply "thread:" filter (exact thread ID match)
+  threadTerms.forEach(() => {
+    where += " AND m.threadId = ?";
+  });
+  threadTerms.forEach((term) => args.push(term));
 
   // Apply "in:" filter (searches in folder names)
   if (inTerms.length > 0) {
@@ -2987,7 +3005,7 @@ async function getTotalCount(params: {
     params;
   const accountEmail = await getAccountEmail(accountId);
 
-  const { ftsTokenQueries, fromTerms, toTerms, inTerms, inviteUidTerms, rawQuery, attachmentFilenameTerms } = parseSearchInput(
+  const { ftsTokenQueries, fromTerms, toTerms, inTerms, inviteUidTerms, threadTerms, rawQuery, attachmentFilenameTerms } = parseSearchInput(
     query,
     fields,
     accountEmail
@@ -3011,6 +3029,12 @@ async function getTotalCount(params: {
     const pattern = `%${term.toLowerCase()}%`;
     args.push(pattern, pattern, pattern);
   });
+
+  // Apply "thread:" filter (exact thread ID match)
+  threadTerms.forEach(() => {
+    where += " AND m.threadId = ?";
+  });
+  threadTerms.forEach((term) => args.push(term));
 
   // Apply "in:" filter (searches in folder names)
   if (inTerms.length > 0) {
@@ -3468,7 +3492,7 @@ export async function listMessages(params: {
   const offset = (page - 1) * pageSize;
   const accountEmail = await getAccountEmail(accountId);
 
-  const { ftsTokenQueries, fromTerms, toTerms, inTerms, inviteUidTerms, rawQuery, attachmentFilenameTerms } = parseSearchInput(
+  const { ftsTokenQueries, fromTerms, toTerms, inTerms, inviteUidTerms, threadTerms, rawQuery, attachmentFilenameTerms } = parseSearchInput(
     query,
     fields,
     accountEmail
@@ -3493,6 +3517,12 @@ export async function listMessages(params: {
     const pattern = `%${term.toLowerCase()}%`;
     args.push(pattern, pattern, pattern);
   });
+
+  // Apply "thread:" filter (exact thread ID match)
+  threadTerms.forEach(() => {
+    where += " AND m.threadId = ?";
+  });
+  threadTerms.forEach((term) => args.push(term));
 
   // Apply "in:" filter (searches in folder names)
   if (inTerms.length > 0) {
@@ -3549,6 +3579,7 @@ export async function listMessages(params: {
     fromTerms.length === 0 &&
     toTerms.length === 0 &&
     inTerms.length === 0 &&
+    threadTerms.length === 0 &&
     (badges?.length ?? 0) === 0 &&
     !attachmentsFilter;
   const orderBySql = shouldPrioritizeFlaggedMessages
@@ -3701,7 +3732,7 @@ export async function listThreads(params: {
   const offset = (page - 1) * pageSize;
   const accountEmail = await getAccountEmail(accountId);
 
-  const { ftsTokenQueries, fromTerms, toTerms, inTerms, inviteUidTerms, rawQuery, attachmentFilenameTerms } = parseSearchInput(
+  const { ftsTokenQueries, fromTerms, toTerms, inTerms, inviteUidTerms, threadTerms, rawQuery, attachmentFilenameTerms } = parseSearchInput(
     query,
     fields,
     accountEmail
@@ -3726,6 +3757,12 @@ export async function listThreads(params: {
     const pattern = `%${term.toLowerCase()}%`;
     args.push(pattern, pattern, pattern);
   });
+
+  // Apply "thread:" filter (exact thread ID match)
+  threadTerms.forEach(() => {
+    where += " AND m.threadId = ?";
+  });
+  threadTerms.forEach((term) => args.push(term));
 
   // Apply "in:" filter (searches in folder names)
   if (inTerms.length > 0) {
@@ -3786,6 +3823,7 @@ export async function listThreads(params: {
     fromTerms.length === 0 &&
     toTerms.length === 0 &&
     inTerms.length === 0 &&
+    threadTerms.length === 0 &&
     (badges?.length ?? 0) === 0 &&
     !attachmentsFilter;
   const isUnfilteredThreadList =
@@ -3797,6 +3835,7 @@ export async function listThreads(params: {
     fromTerms.length === 0 &&
     toTerms.length === 0 &&
     inTerms.length === 0 &&
+    threadTerms.length === 0 &&
     (badges?.length ?? 0) === 0 &&
     !attachmentsFilter &&
     normalizedExcludedFolderIds.length === 0;

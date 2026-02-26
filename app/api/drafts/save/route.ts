@@ -9,7 +9,7 @@ import {
 import { appendImapMessage, deleteImapMessage, syncImapMessage } from "@/lib/mail/imap";
 import { parseComposeAttachments, resolveComposeHtml } from "@/lib/mail/composePayload";
 import { buildRawMessage } from "@/lib/mail/smtp";
-import { saveMessageSource } from "@/lib/storage";
+import { sanitizeSyncedMessage } from "@/lib/mail/syncMessageSanitizer";
 import type { Folder } from "@/lib/data";
 import { requireSessionAccountOr403, requireSessionOr401 } from "@/lib/auth";
 
@@ -130,18 +130,16 @@ export async function POST(request: Request) {
   if (uid) {
     const message = await syncImapMessage(account, draftsMailbox, uid, clientId);
     if (message) {
+      const sanitized = await sanitizeSyncedMessage(message, account.id);
       // Add compose format and quoted HTML edited flag to the message (local DB only, not stored in IMAP)
       if (payload.composeFormat) {
-        message.xComposeFormat = payload.composeFormat;
+        sanitized.xComposeFormat = payload.composeFormat;
       }
       if (typeof payload.quotedHtmlEdited === "boolean") {
-        message.quotedHtmlEdited = payload.quotedHtmlEdited;
+        sanitized.quotedHtmlEdited = payload.quotedHtmlEdited;
       }
-      if (message.source) {
-        await saveMessageSource(account.id, message.id, message.source);
-      }
-      await upsertMessages(account.id, null, [message], false);
-      messageId = message.id;
+      await upsertMessages(account.id, null, [sanitized], false);
+      messageId = sanitized.id;
     }
   }
 
