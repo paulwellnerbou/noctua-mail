@@ -40,6 +40,7 @@ import {
 import { normalizeAccountDateFormat } from "./dateFormatting";
 import { withDbWriteRetry } from "./dbWriteRetry";
 import { createHash, randomUUID } from "crypto";
+import { resolveThreadingForItems } from "./threading";
 import { normalizeReminderDateList, resolveNextReminderOccurrence } from "./reminderRecurrence";
 import { resolveCalendarTimeZoneId } from "./calendarTimezones";
 import { collectCalendarReminderMutationsFromCalendarInvite } from "./calendarReminderMutations";
@@ -1255,65 +1256,23 @@ export async function recomputeThreadIdsForAccount(accountId: string) {
       dateValue: number;
     }>;
     if (rows.length === 0) return;
-    const byMessageId = new Map<string, (typeof rows)[number]>();
-    const byId = new Map<string, (typeof rows)[number]>();
-    rows.forEach((row) => {
-      byId.set(row.id, row);
-      if (row.messageId) {
-        const existing = byMessageId.get(row.messageId);
-        if (!existing || row.dateValue < existing.dateValue) {
-          byMessageId.set(row.messageId, row);
-        }
-      }
-    });
-    const parentCache = new Map<string, string | null>();
-    const resolveParentId = (msg: (typeof rows)[number]) => {
-      if (parentCache.has(msg.id)) return parentCache.get(msg.id)!;
-      let resolved: string | null = null;
-      if (msg.inReplyTo && byMessageId.has(msg.inReplyTo)) {
-        resolved = byMessageId.get(msg.inReplyTo)!.id;
-      } else {
-        const refs = parseReferences(msg.references) ?? [];
-        for (let i = refs.length - 1; i >= 0; i -= 1) {
-          const ref = refs[i];
-          if (byMessageId.has(ref)) {
-            resolved = byMessageId.get(ref)!.id;
-            break;
-          }
-        }
-      }
-      if (resolved === msg.id) resolved = null;
-      parentCache.set(msg.id, resolved);
-      return resolved;
-    };
-    const threadCache = new Map<string, string>();
-    const resolveThreadId = (msg: (typeof rows)[number], stack: Set<string>): string => {
-      if (threadCache.has(msg.id)) return threadCache.get(msg.id)!;
-      if (stack.has(msg.id)) {
-        const fallback = msg.messageId ?? msg.threadId ?? msg.id;
-        threadCache.set(msg.id, fallback);
-        return fallback;
-      }
-      stack.add(msg.id);
-      const parentId = resolveParentId(msg);
-      let resolved: string | undefined;
-      if (parentId && byId.has(parentId)) {
-        resolved = resolveThreadId(byId.get(parentId)!, stack);
-      } else if (msg.messageId) {
-        resolved = msg.messageId;
-      } else if (msg.threadId) {
-        resolved = msg.threadId;
-      } else {
-        resolved = msg.id;
-      }
-      stack.delete(msg.id);
-      threadCache.set(msg.id, resolved);
-      return resolved;
-    };
+    const normalized = resolveThreadingForItems(
+      rows.map((row) => ({
+        id: row.id,
+        dateValue: row.dateValue,
+        messageId: row.messageId,
+        inReplyTo: row.inReplyTo,
+        references: parseReferences(row.references),
+        threadId: row.threadId
+      }))
+    );
+    const normalizedById = new Map(normalized.map((row) => [row.id, row]));
     const updates: Array<{ id: string; threadId: string; parentId: string | null }> = [];
     rows.forEach((row) => {
-      const nextParentId = resolveParentId(row);
-      const nextThreadId = resolveThreadId(row, new Set());
+      const next = normalizedById.get(row.id);
+      if (!next?.threadId) return;
+      const nextParentId = next.parentId ?? null;
+      const nextThreadId = next.threadId;
       if (
         (nextThreadId && nextThreadId !== row.threadId) ||
         (nextParentId ?? null) !== (row.parentId ?? null)
