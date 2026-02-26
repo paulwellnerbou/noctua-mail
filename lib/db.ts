@@ -13,7 +13,10 @@ import type {
   Account,
   AccountSettings,
   Attachment,
+  CalendarEvent,
+  CalendarEventSourceType,
   CalendarReminder,
+  CaldavConfig,
   Folder,
   InviteCode,
   MailboxState,
@@ -370,6 +373,27 @@ function initMasterSchema(db: any) {
     db.prepare(`ALTER TABLE invite_codes ADD COLUMN usedByUserId TEXT`).run();
   }
 
+  const accountColumns = new Set(
+    (db.prepare(`PRAGMA table_info(accounts)`).all() as Array<{ name?: string }>).map((row) =>
+      String(row.name ?? "")
+    )
+  );
+  if (!accountColumns.has("caldavUrl")) {
+    db.prepare(`ALTER TABLE accounts ADD COLUMN caldavUrl TEXT`).run();
+  }
+  if (!accountColumns.has("caldavUser")) {
+    db.prepare(`ALTER TABLE accounts ADD COLUMN caldavUser TEXT`).run();
+  }
+  if (!accountColumns.has("caldavPassword")) {
+    db.prepare(`ALTER TABLE accounts ADD COLUMN caldavPassword TEXT`).run();
+  }
+  if (!accountColumns.has("caldavCalendarPath")) {
+    db.prepare(`ALTER TABLE accounts ADD COLUMN caldavCalendarPath TEXT`).run();
+  }
+  if (!accountColumns.has("caldavSyncIntervalMs")) {
+    db.prepare(`ALTER TABLE accounts ADD COLUMN caldavSyncIntervalMs INTEGER`).run();
+  }
+
   const userCount = db.prepare(`SELECT COUNT(*) as count FROM users`).get() as { count: number };
   if (userCount.count === 0) {
     const adminInvite = ensureAdminInvite(db);
@@ -543,6 +567,43 @@ function initAccountSchema(db: any) {
       ON calendar_reminders(accountId, userId, updatedAtMs DESC);
     CREATE INDEX IF NOT EXISTS idx_category_feedback_events_account_created
       ON category_feedback_events(accountId, createdAt DESC);
+
+    CREATE TABLE IF NOT EXISTS calendar_events (
+      id TEXT PRIMARY KEY,
+      accountId TEXT NOT NULL,
+      calendarId TEXT,
+      eventUid TEXT NOT NULL,
+      summary TEXT NOT NULL,
+      description TEXT,
+      location TEXT,
+      startAtMs INTEGER NOT NULL,
+      endAtMs INTEGER,
+      allDay INTEGER NOT NULL DEFAULT 0,
+      startTimezone TEXT,
+      endTimezone TEXT,
+      recurrenceRule TEXT,
+      recurrenceDates TEXT,
+      excludedDates TEXT,
+      status TEXT,
+      organizer TEXT,
+      attendees TEXT,
+      remoteEtag TEXT,
+      remoteHref TEXT,
+      rawIcs TEXT,
+      sourceType TEXT NOT NULL DEFAULT 'local',
+      messageId TEXT,
+      createdAtMs INTEGER NOT NULL,
+      updatedAtMs INTEGER NOT NULL,
+      deletedAtMs INTEGER
+    );
+    CREATE INDEX IF NOT EXISTS idx_calendar_events_account_start
+      ON calendar_events(accountId, startAtMs);
+    CREATE INDEX IF NOT EXISTS idx_calendar_events_account_uid
+      ON calendar_events(accountId, eventUid);
+    CREATE INDEX IF NOT EXISTS idx_calendar_events_account_source
+      ON calendar_events(accountId, sourceType);
+    CREATE INDEX IF NOT EXISTS idx_calendar_events_account_calendar
+      ON calendar_events(accountId, calendarId);
   `);
 
   // Lightweight schema migration for existing account DBs.
@@ -662,12 +723,26 @@ function resolveAccountDbPathForPersist(accountId: string, dbPath?: string | nul
 }
 
 function mapAccountRow(row: any): Account {
+  const caldav: CaldavConfig | undefined =
+    row.caldavUrl && String(row.caldavUrl).trim()
+      ? {
+          url: String(row.caldavUrl),
+          user: String(row.caldavUser ?? ""),
+          password: decodeSecret(String(row.caldavPassword ?? "")),
+          calendarPath: row.caldavCalendarPath ? String(row.caldavCalendarPath) : undefined,
+          syncIntervalMs:
+            row.caldavSyncIntervalMs != null && Number.isFinite(Number(row.caldavSyncIntervalMs))
+              ? Number(row.caldavSyncIntervalMs)
+              : undefined
+        }
+      : undefined;
   return {
     id: row.id,
     name: row.name,
     email: row.email,
     avatar: row.avatar,
     settings: normalizeAccountSettings(row.settings ? (JSON.parse(row.settings) as any) : undefined),
+    caldav,
     imap: {
       host: row.imapHost,
       port: row.imapPort,
@@ -687,9 +762,16 @@ function mapAccountRow(row: any): Account {
 }
 
 function mergeAccount(current: Account, payload: Partial<Account>): Account {
+  const mergedCaldav =
+    payload.caldav !== undefined
+      ? payload.caldav === null
+        ? undefined
+        : { ...(current.caldav ?? {}), ...payload.caldav }
+      : current.caldav;
   return {
     ...current,
     ...payload,
+    caldav: mergedCaldav,
     imap: { ...current.imap, ...(payload.imap ?? {}) },
     smtp: { ...current.smtp, ...(payload.smtp ?? {}) },
     settings: { ...(current.settings ?? {}), ...(payload.settings ?? {}) }
@@ -703,8 +785,9 @@ function persistAccountRow(db: any, account: Account, dbPath?: string | null) {
       id, name, email, avatar, ownerUserId, dbPath,
       settings,
       imapHost, imapPort, imapSecure, imapUser, imapPassword,
-      smtpHost, smtpPort, smtpSecure, smtpUser, smtpPassword
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      smtpHost, smtpPort, smtpSecure, smtpUser, smtpPassword,
+      caldavUrl, caldavUser, caldavPassword, caldavCalendarPath, caldavSyncIntervalMs
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   insert.run(
     account.id,
@@ -723,7 +806,12 @@ function persistAccountRow(db: any, account: Account, dbPath?: string | null) {
     account.smtp.port,
     account.smtp.secure ? 1 : 0,
     account.smtp.user,
-    shouldStorePasswordInDb() ? encodeSecret(account.smtp.password) : ""
+    shouldStorePasswordInDb() ? encodeSecret(account.smtp.password) : "",
+    account.caldav?.url ?? null,
+    account.caldav?.user ?? null,
+    account.caldav?.password ? encodeSecret(account.caldav.password) : null,
+    account.caldav?.calendarPath ?? null,
+    account.caldav?.syncIntervalMs ?? null
   );
 }
 
@@ -5703,4 +5791,156 @@ export async function recomputeCategoriesForAccount(
   }
 
   console.log(`Finished: ${processed}/${messages.length} processed, ${categorized} categorized`);
+}
+
+// ── Calendar Events ──────────────────────────────────────────────────────────
+
+function rowToCalendarEvent(row: any): CalendarEvent {
+  return {
+    id: row.id,
+    accountId: row.accountId,
+    calendarId: row.calendarId ?? undefined,
+    eventUid: row.eventUid,
+    summary: row.summary,
+    description: row.description ?? undefined,
+    location: row.location ?? undefined,
+    startAtMs: row.startAtMs,
+    endAtMs: row.endAtMs ?? undefined,
+    allDay: Boolean(row.allDay),
+    startTimezone: row.startTimezone ?? undefined,
+    endTimezone: row.endTimezone ?? undefined,
+    recurrenceRule: row.recurrenceRule ?? undefined,
+    recurrenceDates: row.recurrenceDates ? JSON.parse(row.recurrenceDates) : undefined,
+    excludedDates: row.excludedDates ? JSON.parse(row.excludedDates) : undefined,
+    status: row.status ?? undefined,
+    organizer: row.organizer ?? undefined,
+    attendees: row.attendees ?? undefined,
+    remoteEtag: row.remoteEtag ?? undefined,
+    remoteHref: row.remoteHref ?? undefined,
+    rawIcs: row.rawIcs ?? undefined,
+    sourceType: (row.sourceType as CalendarEventSourceType) ?? "local",
+    messageId: row.messageId ?? undefined,
+    createdAtMs: row.createdAtMs,
+    updatedAtMs: row.updatedAtMs,
+    deletedAtMs: row.deletedAtMs ?? undefined
+  };
+}
+
+export async function listCalendarEvents(
+  accountId: string,
+  rangeStartMs: number,
+  rangeEndMs: number
+): Promise<CalendarEvent[]> {
+  const db = await getAccountDb(accountId);
+  const rows = db
+    .prepare(
+      `SELECT * FROM calendar_events
+       WHERE accountId = ?
+         AND deletedAtMs IS NULL
+         AND startAtMs < ?
+         AND (endAtMs IS NULL OR endAtMs >= ? OR (recurrenceRule IS NOT NULL AND recurrenceRule != ''))
+       ORDER BY startAtMs ASC`
+    )
+    .all(accountId, rangeEndMs, rangeStartMs) as any[];
+  return rows.map(rowToCalendarEvent);
+}
+
+export async function getCalendarEventById(
+  accountId: string,
+  eventId: string
+): Promise<CalendarEvent | null> {
+  const db = await getAccountDb(accountId);
+  const row = db
+    .prepare(`SELECT * FROM calendar_events WHERE accountId = ? AND id = ?`)
+    .get(accountId, eventId) as any;
+  return row ? rowToCalendarEvent(row) : null;
+}
+
+export async function getCalendarEventByUid(
+  accountId: string,
+  eventUid: string
+): Promise<CalendarEvent | null> {
+  const db = await getAccountDb(accountId);
+  const row = db
+    .prepare(
+      `SELECT * FROM calendar_events WHERE accountId = ? AND eventUid = ? AND deletedAtMs IS NULL`
+    )
+    .get(accountId, eventUid) as any;
+  return row ? rowToCalendarEvent(row) : null;
+}
+
+export async function upsertCalendarEvent(
+  accountId: string,
+  event: CalendarEvent
+): Promise<void> {
+  const db = await getAccountDb(accountId);
+  db.prepare(
+    `INSERT OR REPLACE INTO calendar_events (
+      id, accountId, calendarId, eventUid, summary, description, location,
+      startAtMs, endAtMs, allDay, startTimezone, endTimezone,
+      recurrenceRule, recurrenceDates, excludedDates,
+      status, organizer, attendees, remoteEtag, remoteHref, rawIcs,
+      sourceType, messageId, createdAtMs, updatedAtMs, deletedAtMs
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  ).run(
+    event.id,
+    event.accountId,
+    event.calendarId ?? null,
+    event.eventUid,
+    event.summary,
+    event.description ?? null,
+    event.location ?? null,
+    event.startAtMs,
+    event.endAtMs ?? null,
+    event.allDay ? 1 : 0,
+    event.startTimezone ?? null,
+    event.endTimezone ?? null,
+    event.recurrenceRule ?? null,
+    event.recurrenceDates ? JSON.stringify(event.recurrenceDates) : null,
+    event.excludedDates ? JSON.stringify(event.excludedDates) : null,
+    event.status ?? null,
+    event.organizer ?? null,
+    event.attendees ?? null,
+    event.remoteEtag ?? null,
+    event.remoteHref ?? null,
+    event.rawIcs ?? null,
+    event.sourceType,
+    event.messageId ?? null,
+    event.createdAtMs,
+    event.updatedAtMs,
+    event.deletedAtMs ?? null
+  );
+}
+
+export async function deleteCalendarEvent(
+  accountId: string,
+  eventId: string
+): Promise<void> {
+  const db = await getAccountDb(accountId);
+  db.prepare(`DELETE FROM calendar_events WHERE accountId = ? AND id = ?`).run(accountId, eventId);
+}
+
+export async function softDeleteCalendarEvent(
+  accountId: string,
+  eventId: string
+): Promise<void> {
+  const db = await getAccountDb(accountId);
+  db.prepare(
+    `UPDATE calendar_events SET deletedAtMs = ? WHERE accountId = ? AND id = ?`
+  ).run(Date.now(), accountId, eventId);
+}
+
+export async function listCalendarEventsBySource(
+  accountId: string,
+  sourceType: CalendarEventSourceType
+): Promise<CalendarEvent[]> {
+  const db = await getAccountDb(accountId);
+  const rows = db
+    .prepare(
+      `SELECT * FROM calendar_events
+       WHERE accountId = ? AND sourceType = ? AND deletedAtMs IS NULL
+       ORDER BY startAtMs ASC`
+    )
+    .all(accountId, sourceType) as any[];
+  return rows.map(rowToCalendarEvent);
 }

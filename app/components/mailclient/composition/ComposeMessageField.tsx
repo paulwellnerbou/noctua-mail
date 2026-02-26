@@ -4,8 +4,12 @@ import { CaretRightIcon, ChevronDownIcon } from "@radix-ui/react-icons";
 import { Button, DropdownMenu, Tabs } from "@radix-ui/themes";
 import { Paperclip } from "lucide-react";
 import type { Attachment } from "@/lib/data";
-import { assembleQuotedHtml, escapeHtml } from "@/lib/html";
-import { markdownToHtml, htmlToMarkdown, textToMarkdown } from "@/lib/markdownConvert";
+import { assembleQuotedHtml } from "@/lib/html";
+import {
+  computeBodyOnSwitchToText,
+  computeHtmlOnSwitchToHtml,
+  computeMarkdownOnSwitchToMarkdown
+} from "./composeTabSwitch";
 import AttachmentsList from "../../AttachmentsList";
 import ComposeEditor from "../../ComposeEditor";
 import ComposeMarkdownEditor from "../../ComposeMarkdownEditor";
@@ -135,33 +139,35 @@ export default function ComposeMessageField({
 
     if (nextTab === "html") {
       composeEditorInitRef.current = false;
-      if (lastEdited === "text") {
-        const currentBody = composeTextRef.current?.value || composeBody;
-        const nextHtml = currentBody ? `<p>${escapeHtml(currentBody).replace(/\n/g, "<br>")}</p>` : "";
-        setComposeHtml(nextHtml);
-        setComposeHtmlText(stripHtml(nextHtml));
-        setComposeBody(currentBody);
-      } else if (lastEdited === "markdown") {
-        const currentMd = composeMarkdown;
-        const nextHtml = markdownToHtml(currentMd);
-        setComposeHtml(nextHtml);
-        setComposeHtmlText(stripHtml(nextHtml));
+      const currentBody = composeTextRef.current?.value || composeBody;
+      const result = computeHtmlOnSwitchToHtml(
+        { lastEdited, composeBody: currentBody, composeMarkdown },
+        { stripHtml }
+      );
+      if (result) {
+        setComposeHtml(result.html);
+        setComposeHtmlText(result.htmlText);
+        if (lastEdited === "text") setComposeBody(currentBody);
       }
       setComposeTab("html");
       return;
     }
 
     if (nextTab === "text") {
-      if (lastEdited === "html") {
-        const nextText = composeHtmlText || stripHtml(composeHtml);
-        const currentBody = composeTextRef.current?.value || composeBody;
-        if (nextText.trim().length > 0 || currentBody.trim().length === 0) {
-          setComposeBody(nextText);
-        }
-      } else if (lastEdited === "markdown") {
-        const currentMd = composeMarkdown;
-        // Keep markdown syntax, only strip embedded HTML tags
-        const nextText = currentMd.replace(/<[^>]+>/g, "").trim();
+      const currentBody = composeTextRef.current?.value || composeBody;
+      const nextText = computeBodyOnSwitchToText(
+        {
+          lastEdited,
+          composeHtml,
+          composeHtmlText,
+          composeMarkdown,
+          composeQuotedParts,
+          composeQuotedHtml,
+          composeIncludeOriginal
+        },
+        { stripHtml }
+      );
+      if (nextText.trim().length > 0 || currentBody.trim().length === 0) {
         setComposeBody(nextText);
       }
       setComposeTab("text");
@@ -169,13 +175,13 @@ export default function ComposeMessageField({
     }
 
     if (nextTab === "markdown") {
-      if (lastEdited === "html") {
-        const nextMd = htmlToMarkdown(composeHtml);
-        setComposeMarkdown(nextMd);
-      } else if (lastEdited === "text") {
-        const currentBody = composeTextRef.current?.value || composeBody;
-        setComposeMarkdown(textToMarkdown(currentBody));
-      }
+      const currentBody = composeTextRef.current?.value || composeBody;
+      const nextMd = computeMarkdownOnSwitchToMarkdown({
+        lastEdited,
+        composeBody: currentBody,
+        composeHtml
+      });
+      if (nextMd !== null) setComposeMarkdown(nextMd);
       setComposeTab("markdown");
     }
   };

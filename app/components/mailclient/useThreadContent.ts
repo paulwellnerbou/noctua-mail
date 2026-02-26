@@ -114,11 +114,17 @@ export function useThreadContent({
       const cached = prev[threadId];
       if (!cached || cached.length === 0) return prev;
       let updated = false;
+      let found = false;
       const nextThread = cached.map((item) => {
         if (item.id !== message.id) return item;
+        found = true;
         updated = true;
         return { ...item, ...message, groupKey: item.groupKey ?? message.groupKey };
       });
+      if (!found) {
+        updated = true;
+        nextThread.push({ ...message, groupKey: message.groupKey });
+      }
       if (!updated) return prev;
       return { ...prev, [threadId]: nextThread };
     });
@@ -359,23 +365,23 @@ export function useThreadContent({
   );
 
   const ensureMessageContent = useCallback(
-    async (message: Message, options?: { manual?: boolean }) => {
+    async (message: Message, options?: { manual?: boolean }): Promise<Message | null> => {
       const resolved = messageById.get(message.id) ?? message;
       const hasText = Boolean(resolved.body && resolved.body !== "");
       const hasHtml = hasHtmlContent(resolved.htmlBody);
-      if (hasText || hasHtml) return true;
-      if (messageContentLoadingRef.current[message.id]) return false;
+      if (hasText || hasHtml) return resolved;
+      if (messageContentLoadingRef.current[message.id]) return null;
 
       if (!options?.manual) {
         const hydrationPromise = hydrateMessageOnOpenIfNeeded(resolved);
-        if (!hydrationPromise) return false;
+        if (!hydrationPromise) return null;
         setMessageContentLoadingState(message.id, true);
         try {
           const hydrated = await hydrationPromise;
           if (hydrated) {
             updateThreadCacheWithMessage(hydrated);
           }
-          return Boolean(hydrated);
+          return hydrated ?? null;
         } finally {
           setMessageContentLoadingState(message.id, false);
         }
@@ -387,7 +393,7 @@ export function useThreadContent({
         if (hydrated) {
           updateThreadCacheWithMessage(hydrated);
         }
-        return Boolean(hydrated);
+        return hydrated ?? null;
       } finally {
         setMessageContentLoadingState(message.id, false);
       }

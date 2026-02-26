@@ -7,8 +7,9 @@ import SignaturesTabContent from "@/app/components/account-settings/tabs/Signatu
 import PreferencesTabContent from "@/app/components/account-settings/tabs/PreferencesTabContent";
 import CategorizationTabContent from "@/app/components/account-settings/tabs/CategorizationTabContent";
 import AdminTabContent from "@/app/components/account-settings/tabs/AdminTabContent";
+import CalendarTabContent from "@/app/components/account-settings/tabs/CalendarTabContent";
 
-export type ManageTab = "account" | "signatures" | "preferences" | "categorization" | "admin";
+export type ManageTab = "account" | "signatures" | "preferences" | "categorization" | "calendar" | "admin";
 
 function deriveImapSecurity(imap: Account["imap"]): "tls" | "starttls" | "none" {
   if (imap.secure) return "tls";
@@ -167,6 +168,9 @@ export default function AccountSettingsModal({
               <Tabs.Trigger value="categorization" disabled={!isExistingAccount}>
                 Categorization
               </Tabs.Trigger>
+              <Tabs.Trigger value="calendar" disabled={!isExistingAccount}>
+                Calendar
+              </Tabs.Trigger>
               {isAdminUser && (
                 <Tabs.Trigger value="admin" disabled={!isExistingAccount}>
                   Admin
@@ -229,6 +233,16 @@ export default function AccountSettingsModal({
                 }
                 apiFetch={apiFetch}
                 readErrorMessage={readErrorMessage}
+              />
+            </Tabs.Content>
+
+            <Tabs.Content value="calendar" style={{ flex: "1 1 auto", minHeight: 0, overflow: "hidden" }}>
+              <CalendarTabContent
+                editingAccount={localAccount}
+                isExistingAccount={isExistingAccount}
+                onUpdateAccount={setLocalAccount}
+                onClose={onClose}
+                onSave={handleSave}
               />
             </Tabs.Content>
 

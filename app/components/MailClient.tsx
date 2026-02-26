@@ -85,6 +85,7 @@ import ThreadJsonModal from "./mailclient/message/ThreadJsonModal";
 import ThreadView from "./mailclient/message/ThreadView";
 import TopBar from "./mailclient/TopBar";
 import BottomStatusBar from "./mailclient/status/BottomStatusBar";
+import CalendarSidebarPanel from "./calendar/CalendarSidebarPanel";
 import { useMessageDeleteActions } from "./mailclient/useMessageDeleteActions";
 import { useMessageMoveActions, type UndoMoveTarget } from "./mailclient/useMessageMoveActions";
 import type { Account, Folder, Message, User } from "@/lib/data";
@@ -165,6 +166,8 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
   const [leftWidth, setLeftWidth] = useState(270);
   const [listWidth, setListWidth] = useState(840);
   const [dragging, setDragging] = useState<"left" | "list" | null>(null);
+  const [calendarSidebarOpen, setCalendarSidebarOpen] = useState(false);
+  const [calendarSidebarWidth] = useState(400);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const dragImageRef = useRef<HTMLDivElement | null>(null);
   const [sortKey, setSortKey] = useState<"date" | "from" | "subject">("date");
@@ -1064,6 +1067,15 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     });
     return items;
   }, [filteredMessages, sortDir, sortKey]);
+  const threadRelatedCandidateIds = useMemo(() => {
+    if (sortedMessages.length === 0) return [];
+    const ids = Array.from(
+      new Set(sortedMessages.map((msg) => msg.threadId).filter(Boolean))
+    );
+    ids.sort();
+    return ids;
+  }, [sortedMessages]);
+  const threadRelatedCandidatesKey = threadRelatedCandidateIds.join("|");
 
   // Memos that depend on messages (from useMessageData)
   const messageCountByFolder = useMemo(() => {
@@ -1395,8 +1407,8 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     }
 
     void (async () => {
-      await ensureMessageContent(resolved, { manual: true });
-      openComposeInternal(mode, messageById.get(resolved.id) ?? resolved, asNew);
+      const hydrated = await ensureMessageContent(resolved, { manual: true });
+      openComposeInternal(mode, hydrated ?? resolved, asNew);
     })();
   };
 
@@ -1749,6 +1761,14 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     if (!viewMessage) return undefined;
     return filteredMessages.find((m) => m.id === viewMessage.id) ?? viewMessage;
   }, [viewMessage, filteredMessages, hideThreadView, composeOpen, composeMode]);
+  const activeMessageRef = useRef<Message | null>(null);
+  activeMessageRef.current = activeMessage ?? null;
+  const activeMessageThreadKey = (() => {
+    if (!activeMessage) return "";
+    const threadId = activeMessage.threadId ?? activeMessage.messageId ?? activeMessage.id;
+    if (!threadId) return "";
+    return `${activeMessage.accountId}|${activeMessage.id}|${threadId}`;
+  })();
 
   useComposeViewEffects({
     showComposeInline,
@@ -3634,6 +3654,24 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
       });
   }, [activeAccountId, accountFolders.length, initialDataReady]);
 
+  // CalDAV periodic sync
+  useEffect(() => {
+    if (!activeAccountId || !initialDataReady) return;
+    const caldav = currentAccount?.caldav;
+    if (!caldav?.url) return;
+    const intervalMs = caldav.syncIntervalMs ?? 15 * 60 * 1000;
+    const doSync = () => {
+      void apiFetch("/api/calendar/sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ accountId: activeAccountId })
+      });
+    };
+    doSync();
+    const timer = window.setInterval(doSync, intervalMs);
+    return () => window.clearInterval(timer);
+  }, [activeAccountId, currentAccount?.caldav?.url, currentAccount?.caldav?.syncIntervalMs, initialDataReady, apiFetch]);
+
   useEffect(() => {
     const loadThreadRelated = async () => {
       if (supportsThreads) {
@@ -3652,13 +3690,11 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
         setThreadRelatedMessages([]);
         return;
       }
-      if (!activeAccountId || sortedMessages.length === 0) {
+      if (!activeAccountId || threadRelatedCandidateIds.length === 0) {
         setThreadRelatedMessages([]);
         return;
       }
-      const threadIds = Array.from(
-        new Set(sortedMessages.map((msg) => msg.threadId).filter(Boolean))
-      );
+      const threadIds = threadRelatedCandidateIds;
       if (threadIds.length === 0) {
         setThreadRelatedMessages([]);
         return;
@@ -3684,20 +3720,24 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
       }
     };
     loadThreadRelated();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- threadRelatedCandidateIds churns with list refreshes; keying on threadRelatedCandidatesKey prevents refetch loops.
   }, [
     activeAccountId,
     activeFolderId,
     groupBy,
     includeThreadAcrossFoldersForList,
     searchScope,
-    sortedMessages
+    supportsThreads,
+    threadRelatedCandidatesKey
   ]);
 
   useEffect(() => {
     const loadThreadContent = async () => {
-      if (!activeMessage) return;
+      if (!activeMessageThreadKey) return;
+      const active = activeMessageRef.current;
+      if (!active) return;
       const threadId =
-        activeMessage.threadId ?? activeMessage.messageId ?? activeMessage.id;
+        active.threadId ?? active.messageId ?? active.id;
       if (!threadId) return;
       const loadFailureMessage = "Failed to load message content.";
 
@@ -3708,14 +3748,13 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
         const hasHtml = hasHtmlContent(message.htmlBody);
         return hasText || hasHtml;
       };
-      const cachedActive =
-        cachedThread?.find((item) => item.id === activeMessage.id) ?? null;
-      const activeHasContent = hasContent(cachedActive ?? activeMessage);
+      const cachedActive = cachedThread?.find((item) => item.id === active.id) ?? null;
+      const activeHasContent = hasContent(cachedActive ?? active);
       let hydrationResult: boolean | null = null;
       if (!activeHasContent) {
         clearThreadContentError(threadId);
         setThreadContentLoading(threadId);
-        const hydrationPromise = hydrateMessageOnOpenIfNeeded(activeMessage);
+        const hydrationPromise = hydrateMessageOnOpenIfNeeded(active);
         if (hydrationPromise) {
           const hydrated = await hydrationPromise;
           hydrationResult = Boolean(hydrated);
@@ -3736,7 +3775,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
       ): ThreadNode | null => {
         for (const node of nodes) {
           const nextRoot = currentRoot ?? node;
-          if (node.message.id === activeMessage.id) {
+          if (node.message.id === active.id) {
             return nextRoot;
           }
           const childRoot = findRoot(node.children, nextRoot);
@@ -3747,7 +3786,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
       const localRoot = supportsThreads ? findRoot(threadForest, null) : null;
       const localFlat = localRoot
         ? flattenThread(localRoot).map((item) => item.message)
-        : [activeMessage];
+        : [active];
       const messageIds = Array.from(new Set(localFlat.map((item) => item.id)));
       const threadIds = supportsThreads
         ? Array.from(new Set(localFlat.map((item) => item.threadId).filter(Boolean)))
@@ -3776,8 +3815,8 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
         const filtered = items.filter(
           (item) => item.folderId === activeFolderId || !checkIsThreadExcludedFolder(item.folderId)
         );
-        const loadedActive = filtered.find((item) => item.id === activeMessage.id) ?? null;
-        const loadedHasContent = hasContent(loadedActive ?? activeMessage);
+        const loadedActive = filtered.find((item) => item.id === active.id) ?? null;
+        const loadedHasContent = hasContent(loadedActive ?? active);
         if (hydrationResult === false && !loadedHasContent) {
           setThreadContentError(threadId, loadFailureMessage);
         }
@@ -3792,7 +3831,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
   }, [
     activeAccountId,
     activeFolderId,
-    activeMessage,
+    activeMessageThreadKey,
     groupBy,
     supportsThreads,
     threadEvictVersion,
@@ -5045,6 +5084,18 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
               );
             })()}
         </MessageViewPane>
+
+        {calendarSidebarOpen && activeAccountId && (
+          <>
+            <div className="resizer" style={{ cursor: "default", pointerEvents: "none" }} />
+            <div style={{ width: calendarSidebarWidth, flexShrink: 0, display: "flex", flexDirection: "column", minHeight: 0, overflow: "hidden" }}>
+              <CalendarSidebarPanel
+                accountId={activeAccountId}
+                onClose={() => setCalendarSidebarOpen(false)}
+              />
+            </div>
+          </>
+        )}
       </section>
 
       {manageOpen && editingAccount && (
@@ -5168,6 +5219,18 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
           setExceptionEntries([]);
         }}
         formatRelativeTime={formatRelativeTime}
+        onOpenCalendarSidebar={() => setCalendarSidebarOpen(true)}
+        onOpenCalendarMessage={(messageId) => {
+          const msg = messageById.get(messageId) ?? null;
+          if (msg) {
+            setViewMessage(msg);
+            setActiveMessageId(messageId);
+            return;
+          }
+          void resolveMessageByExternalMessageId(messageId, activeAccountId).then((resolved) => {
+            if (resolved) setViewMessage(resolved);
+          });
+        }}
       />
     </div>
   );

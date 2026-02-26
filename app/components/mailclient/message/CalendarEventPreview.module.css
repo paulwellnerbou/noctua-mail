@@ -35,7 +35,6 @@
 
 .infoButton {
   flex-shrink: 0;
-  width: var(--attachment-control-height);
   height: var(--attachment-control-height);
 }
 
@@ -75,106 +74,10 @@
   color: var(--gray-11);
 }
 
-.event {
-  border-radius: var(--radius-2);
-  border: 1px solid var(--gray-4);
-  background: var(--color-panel-solid);
-  padding: var(--space-2);
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.actions {
-  margin-top: var(--space-1);
-  display: inline-flex;
-  align-items: center;
-  gap: var(--space-2);
-}
-
-.reminderButton {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.eventTitle {
-  margin: 0;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--gray-12);
-}
-
-.metaRow {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  color: var(--gray-11);
-}
-
 .meta {
   margin: 0;
   font-size: 12px;
   color: var(--gray-11);
-}
-
-.description {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  font-size: 12px;
-  color: var(--gray-11);
-}
-
-.descriptionLabel {
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.03em;
-  text-transform: uppercase;
-  color: var(--gray-10);
-}
-
-.descriptionText {
-  white-space: pre-wrap;
-}
-
-.description :where(a) {
-  color: var(--accent-11);
-  text-decoration: underline;
-  word-break: break-all;
-}
-
-.descriptionLink {
-  color: var(--accent-11);
-  text-decoration: underline;
-  word-break: break-all;
-}
-
-.locationLink {
-  color: var(--accent-11);
-  text-decoration: underline;
-  word-break: break-all;
-}
-
-.notice {
-  margin: 0;
-  font-size: 12px;
-  color: var(--indigo-11);
-}
-
-.reminderMeta {
-  margin: 0;
-  font-size: 12px;
-  color: var(--indigo-11);
-}
-
-.deleteReminderButton {
-  flex-shrink: 0;
-}
-
-.reminderDialog {
-  width: min(420px, 92vw);
 }
 
 .rawIcsDialog.rawIcsDialog {
@@ -200,8 +103,7 @@
   font-size: 12px;
   line-height: 1.4;
   color: var(--gray-12);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New",
-    monospace;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
   word-break: break-all;
 }
 

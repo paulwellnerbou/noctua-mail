@@ -65,7 +65,7 @@ type ThreadMessageCardProps = {
   messageTabs: Record<string, MessageTab>;
   setMessageTabs: React.Dispatch<React.SetStateAction<Record<string, MessageTab>>>;
   fetchSource: (id: string) => void;
-  ensureMessageContent: (message: Message, options?: { manual?: boolean }) => Promise<boolean>;
+  ensureMessageContent: (message: Message, options?: { manual?: boolean }) => Promise<Message | null>;
   messageContentLoading: Record<string, boolean>;
   setMessageFontScale: React.Dispatch<React.SetStateAction<Record<string, number>>>;
   messageFontScale: Record<string, number>;

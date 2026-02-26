@@ -314,7 +314,7 @@ export default function MessageWindowPage() {
               messageCardProps={{
                 messageRefs,
                 pendingMessageActions,
-                ensureMessageContent: async () => false,
+                ensureMessageContent: async () => null,
                 messageContentLoading: {},
                 includeThreadAcrossFolders: false,
                 activeFolderId: safeMessage.folderId,

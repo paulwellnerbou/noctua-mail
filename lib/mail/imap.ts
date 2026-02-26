@@ -1,3 +1,5 @@
+import { convert as htmlToTextConvert } from "html-to-text";
+import { decodeHTMLStrict } from "entities";
 import type { Account, Folder, Message } from "@/lib/data";
 import {
   getCategoryLinearModel,
@@ -5,7 +7,6 @@ import {
   getMailboxState,
   saveMailboxState
 } from "@/lib/db";
-import { extractHtmlBody } from "@/lib/html";
 import { isCalendarAttachment, withCalendarInviteFlag } from "@/lib/messageFlags";
 import { parseIcsInvite } from "@/lib/calendar";
 import {
@@ -409,44 +410,8 @@ async function readImapTextPart(
   }
 }
 
-const htmlNamedEntities: Record<string, string> = {
-  amp: "&",
-  lt: "<",
-  gt: ">",
-  quot: "\"",
-  apos: "'",
-  nbsp: " ",
-  ensp: " ",
-  emsp: " ",
-  thinsp: " ",
-  zwnj: "\u200C",
-  zwj: "\u200D",
-  ndash: "-",
-  mdash: " - ",
-  hellip: "..."
-};
-
 const invisiblePreviewCharsPattern = /[\u034F\u061C\u115F\u1160\u17B4\u17B5\u180B-\u180E\u200B-\u200F\u202A-\u202E\u2060-\u206F\u3164\uFE00-\uFE0F\uFEFF\uFFA0]/g;
 const unicodeSpacePattern = /[\u00A0\u2000-\u200A\u202F\u205F\u3000]/g;
-
-const decodeHtmlEntities = (value: string) =>
-  value.replace(/&(#x?[0-9a-f]+|[a-z][a-z0-9]+);/gi, (entity, body: string) => {
-    if (body[0] === "#") {
-      const isHex = body[1]?.toLowerCase() === "x";
-      const raw = isHex ? body.slice(2) : body.slice(1);
-      const codePoint = Number.parseInt(raw, isHex ? 16 : 10);
-      if (Number.isNaN(codePoint) || codePoint < 0 || codePoint > 0x10ffff) {
-        return "";
-      }
-      try {
-        return String.fromCodePoint(codePoint);
-      } catch {
-        return "";
-      }
-    }
-    const normalizedName = body.toLowerCase();
-    return htmlNamedEntities[normalizedName] ?? entity;
-  });
 
 const normalizePreviewWhitespace = (value: string) =>
   value
@@ -827,22 +792,19 @@ async function parseImapMessage(
     new Date();
   const dateValue = resolvedDate.getTime();
   const date = new Date(dateValue).toLocaleString();
-  const htmlToText = (value: string) => {
-    const htmlBody = extractHtmlBody(value);
-    const withoutBlocks = htmlBody
-      .replace(/<!--[\s\S]*?-->/g, " ")
-      .replace(/<script[\s\S]*?>[\s\S]*?<\/script>/gi, " ")
-      .replace(/<style[\s\S]*?>[\s\S]*?<\/style>/gi, " ")
-      .replace(/<br\s*\/?>/gi, "\n")
-      .replace(/<\/(p|div|section|article|header|footer|blockquote|pre|table|tr|h[1-6])>/gi, "\n")
-      .replace(/<li[^>]*>/gi, "\n");
-    const stripped = withoutBlocks.replace(/<[^>]+>/g, " ");
-    const decoded = decodeHtmlEntities(stripped);
-    return normalizePreviewWhitespace(decoded);
-  };
+  const htmlToText = (value: string) =>
+    normalizePreviewWhitespace(
+      htmlToTextConvert(value, {
+        wordwrap: false,
+        selectors: [
+          { selector: "img", format: "skip" },
+          { selector: "a", options: { ignoreHref: true } }
+        ]
+      })
+    );
   const buildPreview = (value: string) => {
     const baseValue = /<[^>]+>/i.test(value) ? htmlToText(value) : value;
-    const normalized = normalizePreviewWhitespace(decodeHtmlEntities(baseValue));
+    const normalized = normalizePreviewWhitespace(decodeHTMLStrict(baseValue));
     if (!normalized) return "";
     let cleaned = normalized
       .replace(/\[https?:\/\/[^\]]+\]/gi, " ")
