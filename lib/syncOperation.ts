@@ -12,6 +12,7 @@ import {
   upsertMessages
 } from "@/lib/db";
 import { collectCalendarReminderMutationsFromCalendarInvite } from "@/lib/calendarReminderMutations";
+import { importEmailCalendarEvents } from "@/lib/caldav/emailEventImporter";
 import { getAttachmentContentBuffer, sanitizeSyncedMessage } from "@/lib/mail/syncMessageSanitizer";
 import { isCalendarAttachment } from "@/lib/messageFlags";
 import { deleteMessageFiles } from "@/lib/storage";
@@ -220,6 +221,7 @@ export async function runSyncOperationBatched(
   const allReferenceIds = new Set<string>();
   const newNotificationMessages: SyncNotificationMessage[] = [];
   const calendarMutations: CalendarReminderMutation[] = [];
+  const calendarEventImports: Array<{ messageId: string; icsSource: string }> = [];
   let latestEstimatedTotal: number | undefined;
 
   emitProgress({
@@ -308,8 +310,8 @@ export async function runSyncOperationBatched(
     // Track processed IDs
     strippedMessages.forEach((msg) => allProcessedIds.add(msg.id));
 
-    // Collect calendar mutations for "new" mode
-    if (syncMode === "new" && strippedMessages.length > 0) {
+    // Collect ICS sources for calendar event import (all sync modes — upsert is idempotent)
+    if (strippedMessages.length > 0) {
       const strippedIds = new Set(strippedMessages.map((item) => item.id));
       const syncedMessages = normalizedMessages.filter((message) => strippedIds.has(message.id));
 
@@ -318,28 +320,35 @@ export async function runSyncOperationBatched(
           if (!isCalendarAttachment(attachment)) return;
           const attachmentBuffer = getAttachmentContentBuffer(attachment);
           if (!attachmentBuffer) return;
-          const calendarSource = attachmentBuffer.toString("utf8");
-          calendarMutations.push(
-            ...collectCalendarReminderMutationsFromCalendarInvite(
-              calendarSource,
-              message.messageId ?? undefined
-            )
-          );
+          const icsSource = attachmentBuffer.toString("utf8");
+          calendarEventImports.push({ messageId: message.id, icsSource });
+
+          // Also collect reminder mutations for "new" mode
+          if (syncMode === "new") {
+            calendarMutations.push(
+              ...collectCalendarReminderMutationsFromCalendarInvite(
+                icsSource,
+                message.messageId ?? undefined
+              )
+            );
+          }
         });
       });
 
-      // Collect new message notifications
-      strippedMessages.forEach((message) => {
-        if (typeof message.imapUid !== "number") return;
-        newNotificationMessages.push({
-          folderId: message.folderId,
-          uid: message.imapUid,
-          subject: message.subject,
-          from: message.from,
-          messageId: message.messageId ?? null,
-          category: message.category ?? null
+      // Collect new message notifications (new mode only)
+      if (syncMode === "new") {
+        strippedMessages.forEach((message) => {
+          if (typeof message.imapUid !== "number") return;
+          newNotificationMessages.push({
+            folderId: message.folderId,
+            uid: message.imapUid,
+            subject: message.subject,
+            from: message.from,
+            messageId: message.messageId ?? null,
+            category: message.category ?? null
+          });
         });
-      });
+      }
     }
 
     // Clear batch from memory before next iteration
@@ -354,7 +363,12 @@ export async function runSyncOperationBatched(
     message: "Applying synchronized changes."
   });
 
-  // Process calendar reminders after all batches
+  // Import calendar events from ICS attachments (all sync modes)
+  for (const imp of calendarEventImports) {
+    await importEmailCalendarEvents(account.id, imp.messageId, imp.icsSource);
+  }
+
+  // Process calendar reminders after all batches (new mode only)
   for (const mutation of calendarMutations) {
     if (mutation.kind === "cancel") {
       await cancelCalendarRemindersByEventUid(account.id, mutation.eventUid);

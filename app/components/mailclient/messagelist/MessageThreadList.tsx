@@ -8,6 +8,7 @@ import { CALENDAR_INVITE_FLAG, hasMessageFlag } from "@/lib/messageFlags";
 import badgeStyles from "../message/MessageBadge.module.css";
 import CategoryBadge from "../CategoryBadge";
 import FlagBadge from "../message/FlagBadge";
+import MessageBadge from "../message/MessageBadge";
 import { shouldShowAttachmentIcon, hasTodoFlag, hasDoneFlag } from "../utils/messageHelpers";
 import {
   buildMessageListItems,
@@ -472,7 +473,6 @@ export default function MessageThreadList({
                       )}
                   {(threadBadgeUnion.threadHasFlagged || message.flagged) && (
                     <FlagBadge
-                      kind="flagged"
                       onClick={() =>
                         toggleFlaggedFlag(
                           message,
@@ -482,7 +482,7 @@ export default function MessageThreadList({
                     />
                   )}
                   {(threadBadgeUnion.threadHasTodo || hasTodoFlag(message)) && (
-                    <FlagBadge
+                    <MessageBadge
                       kind="todo"
                       onClick={() =>
                         toggleTodoFlag(
@@ -494,7 +494,7 @@ export default function MessageThreadList({
                     />
                   )}
                   {(threadBadgeUnion.threadHasDone || hasDoneFlag(message)) && (
-                    <FlagBadge
+                    <MessageBadge
                       kind="done"
                       onClick={() =>
                         toggleTodoFlag(

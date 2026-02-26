@@ -5908,6 +5908,35 @@ export async function getCalendarEventByUid(
   return row ? rowToCalendarEvent(row) : null;
 }
 
+export async function upsertCalendarEventByUid(
+  accountId: string,
+  fields: Omit<CalendarEvent, "id" | "accountId" | "createdAtMs" | "updatedAtMs" | "deletedAtMs">
+): Promise<CalendarEvent> {
+  const existing = await getCalendarEventByUid(accountId, fields.eventUid);
+  const now = Date.now();
+  const event: CalendarEvent = {
+    ...fields,
+    accountId,
+    id: existing?.id ?? `cal-${crypto.randomUUID()}`,
+    createdAtMs: existing?.createdAtMs ?? now,
+    updatedAtMs: now,
+    deletedAtMs: undefined
+  };
+  await upsertCalendarEvent(accountId, event);
+  return event;
+}
+
+export async function cancelCalendarEventByUid(
+  accountId: string,
+  eventUid: string
+): Promise<void> {
+  const db = await getAccountDb(accountId);
+  db.prepare(
+    `UPDATE calendar_events SET status = 'CANCELLED', updatedAtMs = ?
+     WHERE accountId = ? AND eventUid = ? AND deletedAtMs IS NULL`
+  ).run(Date.now(), accountId, eventUid);
+}
+
 export async function upsertCalendarEvent(
   accountId: string,
   event: CalendarEvent

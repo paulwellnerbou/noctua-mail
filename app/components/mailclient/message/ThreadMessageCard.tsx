@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import type React from "react";
 import {
-  CalendarDays,
   Edit3,
   Image as ImageIcon,
   MoveRight,
@@ -26,6 +25,7 @@ import CalendarEventPreview from "./CalendarEventPreview";
 import MessageRecipientMetaField from "./MessageRecipientMetaField";
 import CategoryBadge from "../CategoryBadge";
 import FlagBadge from "./FlagBadge";
+import MessageBadge from "./MessageBadge";
 import { hasNonInlineAttachments, getUnsubscribeCapability, resolveInReplyToRef } from "../utils/messageHelpers";
 import { getMessageFromDisplay } from "../messagelist/threadGroupUtils";
 
@@ -508,32 +508,13 @@ export default function ThreadMessageCard({
               />
               {imapBadges.map((badge) => {
                 if (badge.kind === "flagged")
-                  return (
-                    <FlagBadge
-                      key="flagged"
-                      kind="flagged"
-                      showLabel={false}
-                      onClick={() => toggleFlaggedFlag(message)}
-                    />
-                  );
+                  return <FlagBadge key="flagged" onClick={() => toggleFlaggedFlag(message)} />;
                 if (badge.kind === "todo")
-                  return (
-                    <FlagBadge
-                      key="todo"
-                      kind="todo"
-                      showLabel={false}
-                      onClick={() => toggleTodoFlag(message)}
-                    />
-                  );
+                  return <MessageBadge key="todo" kind="todo" onClick={() => toggleTodoFlag(message)} />;
                 if (badge.kind === "done")
-                  return (
-                    <FlagBadge
-                      key="done"
-                      kind="done"
-                      showLabel={false}
-                      onClick={() => toggleTodoFlag(message)}
-                    />
-                  );
+                  return <MessageBadge key="done" kind="done" onClick={() => toggleTodoFlag(message)} />;
+                if (badge.kind === "calendar")
+                  return <MessageBadge key="calendar" kind="calendar" />;
                 return null;
               })}
               {showAttachmentIcon && <Paperclip size={11} />}
@@ -597,23 +578,28 @@ export default function ThreadMessageCard({
                     badge.kind === "flagged" ? (
                       <FlagBadge
                         key={`${badge.kind}-${badge.label}`}
-                        kind="flagged"
                         showLabel
                         onClick={() => toggleFlaggedFlag(message)}
                       />
                     ) : badge.kind === "todo" ? (
-                      <FlagBadge
+                      <MessageBadge
                         key={`${badge.kind}-${badge.label}`}
                         kind="todo"
                         showLabel
                         onClick={() => toggleTodoFlag(message)}
                       />
                     ) : badge.kind === "done" ? (
-                      <FlagBadge
+                      <MessageBadge
                         key={`${badge.kind}-${badge.label}`}
                         kind="done"
                         showLabel
                         onClick={() => toggleTodoFlag(message)}
+                      />
+                    ) : badge.kind === "calendar" ? (
+                      <MessageBadge
+                        key={`${badge.kind}-${badge.label}`}
+                        kind="calendar"
+                        showLabel
                       />
                     ) : badge.kind.startsWith("category-") ? (
                       <CategoryBadge
@@ -627,10 +613,9 @@ export default function ThreadMessageCard({
                         size="1"
                         variant="soft"
                         color={getFlagBadgeColor(badge.kind)}
-                        className={badge.kind === "calendar" ? badgeStyles.badge : undefined}
+                        className={badgeStyles.badge}
                         title={badge.label}
                       >
-                        {badge.kind === "calendar" && <CalendarDays size={12} />}
                         {badge.label}
                       </Badge>
                     )
