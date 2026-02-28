@@ -26,6 +26,7 @@ import MessageRecipientMetaField from "./MessageRecipientMetaField";
 import CategoryBadge from "../CategoryBadge";
 import FlagBadge from "./FlagBadge";
 import MessageBadge from "./MessageBadge";
+import InReplyToReferenceRow from "../InReplyToReferenceRow";
 import { hasNonInlineAttachments, getUnsubscribeCapability, resolveInReplyToRef } from "../utils/messageHelpers";
 import { getMessageFromDisplay } from "../messagelist/threadGroupUtils";
 
@@ -715,17 +716,12 @@ export default function ThreadMessageCard({
               {(() => {
                 const ref = resolveInReplyToRef(message, messageByMessageId);
                 return ref ? (
-                  <div className={`${styles.metaLine} ${styles.metaLineLink}`}>
-                    <span className={styles.metaLabel}>
-                      {ref.isForward ? "Forwarded mail:" : "In Reply To:"}
-                    </span>
-                    <button
-                      className={styles.threadLink}
-                      onClick={() => handleSelectMessage(ref.target)}
-                    >
-                      {ref.target.subject ?? ref.refId}
-                    </button>
-                  </div>
+                  <InReplyToReferenceRow
+                    variant="message"
+                    label={ref.isForward ? "Forwarded mail:" : "In Reply To:"}
+                    value={ref.target.subject ?? ref.refId}
+                    onClick={() => handleSelectMessage(ref.target)}
+                  />
                 ) : null;
               })()}
             </div>

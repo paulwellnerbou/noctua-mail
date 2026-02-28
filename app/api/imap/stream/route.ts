@@ -1,11 +1,13 @@
 import { NextResponse } from "next/server";
 
-import { getAccounts, getFolders, getLatestMessageUid, getMailboxState, saveMailboxState } from "@/lib/db";
+import { getFolders, getLatestMessageUid, getMailboxState, saveMailboxState } from "@/lib/db";
 import { logImapOp } from "@/lib/mail/imapLogger";
 import { bindImapClientError, buildImapFlowOptions } from "@/lib/mail/imapClientOptions";
 import { registerStream } from "@/lib/mail/imapStreamRegistry";
 import { normalizeImapFlags } from "@/lib/messageFlags";
-import { requireSessionAccountOr403, requireSessionOr401 } from "@/lib/auth";
+import { mailboxPathFromFolderId } from "@/lib/mailboxPaths";
+import { findInboxFolder } from "@/lib/specialFolders";
+import { requireAccountContext } from "@/app/api/_helpers/accountContext";
 
 type EnvelopeAddress = { name?: string | null; mailbox?: string | null; host?: string | null };
 type Envelope = { subject?: string | null; from?: EnvelopeAddress[] | null; date?: Date | null; messageId?: string | null };
@@ -24,23 +26,14 @@ function formatAddress(addresses?: EnvelopeAddress[] | null) {
 }
 
 export async function GET(request: Request) {
-  const session = requireSessionOr401(request);
-  if (session instanceof NextResponse) return session;
-  const clientId = request.headers.get("x-noctua-client") ?? undefined;
   const { searchParams } = new URL(request.url);
-  const accountId = searchParams.get("accountId");
+  const accountIdParam = searchParams.get("accountId");
   const activeFolderId = searchParams.get("activeFolderId");
-  if (!accountId) {
-    return NextResponse.json({ ok: false, message: "Missing accountId" }, { status: 400 });
-  }
-  const access = await requireSessionAccountOr403(session, accountId);
-  if (access instanceof NextResponse) return access;
-
-  const accounts = await getAccounts();
-  const account = accounts.find((item) => item.id === accountId);
-  if (!account) {
-    return NextResponse.json({ ok: false, message: "Account not found" }, { status: 404 });
-  }
+  const accountContext = await requireAccountContext(request, accountIdParam ?? "", {
+    missingAccountMessage: "Missing accountId"
+  });
+  if (accountContext instanceof NextResponse) return accountContext;
+  const { accountId, account, clientId } = accountContext;
   const logContext = { accountId, clientId };
 
   const maxIdleSessions =
@@ -55,10 +48,7 @@ export async function GET(request: Request) {
     DEFAULT_BACKGROUND_POLL_INTERVAL;
 
   const folders = await getFolders(accountId);
-  const inboxFolder =
-    folders.find((f) => (f.specialUse ?? "").toLowerCase() === "\\inbox") ||
-    folders.find((f) => f.name.toLowerCase() === "inbox") ||
-    folders[0];
+  const inboxFolder = findInboxFolder(folders, accountId) ?? folders[0];
 
   const encoder = new TextEncoder();
 
@@ -158,9 +148,7 @@ export async function GET(request: Request) {
           if (markUsed) existing.lastUsed = Date.now();
           return;
         }
-        const mailbox = folder.id.startsWith(`${accountId}:`)
-          ? folder.id.slice(accountId.length + 1)
-          : folder.name;
+        const mailbox = mailboxPathFromFolderId(folder.id, accountId);
 
         const client = new ImapFlow(
           buildImapFlowOptions(account, {
@@ -355,9 +343,7 @@ export async function GET(request: Request) {
             const updates: Array<{ id: string; uidNext?: number; unseen?: number; exists?: number }>
               = [];
             for (const folder of toPoll) {
-              const mailbox = folder.id.startsWith(`${accountId}:`)
-                ? folder.id.slice(accountId.length + 1)
-                : folder.name;
+              const mailbox = mailboxPathFromFolderId(folder.id, accountId);
               try {
                 const status = await logImapOp(
                   "imap.status",

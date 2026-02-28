@@ -287,7 +287,7 @@ export function useMessageMoveActions({
                       mappedUndoTargets.length === 1 ? "Move undone." : "Moves undone."
                     )
                 : undefined,
-            durationMs: mappedUndoTargets.length > 0 ? 12000 : noticeSuccessTimeout
+            durationMs: noticeSuccessTimeout
           });
         }
         if (onMoveComplete) {

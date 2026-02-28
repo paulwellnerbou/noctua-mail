@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
-import { requireSessionAccountOr403, requireSessionOr401 } from "@/lib/auth";
-import { getAccounts, getFolders } from "@/lib/db";
+import { getFolders } from "@/lib/db";
 import { planImapNewSyncFolders } from "@/lib/mail/imap";
+import { requireAccountContext } from "@/app/api/_helpers/accountContext";
 
 type NewSyncCandidatesPayload = {
   accountId?: string;
@@ -9,23 +9,13 @@ type NewSyncCandidatesPayload = {
 };
 
 export async function POST(request: Request) {
-  const session = requireSessionOr401(request);
-  if (session instanceof NextResponse) return session;
-  const clientId = request.headers.get("x-noctua-client") ?? undefined;
   const payload = (await request.json()) as NewSyncCandidatesPayload;
 
-  const accountId = payload?.accountId;
-  if (!accountId) {
-    return NextResponse.json({ ok: false, message: "Missing accountId" }, { status: 400 });
-  }
-  const access = await requireSessionAccountOr403(session, accountId);
-  if (access instanceof NextResponse) return access;
-
-  const accounts = await getAccounts();
-  const account = accounts.find((item) => item.id === accountId);
-  if (!account) {
-    return NextResponse.json({ ok: false, message: "Account not found" }, { status: 404 });
-  }
+  const accountContext = await requireAccountContext(request, payload?.accountId ?? "", {
+    missingAccountMessage: "Missing accountId"
+  });
+  if (accountContext instanceof NextResponse) return accountContext;
+  const { accountId, account, clientId } = accountContext;
 
   const accountFolderIds = new Set(
     (await getFolders(accountId)).filter((folder) => folder.accountId === accountId).map((folder) => folder.id)

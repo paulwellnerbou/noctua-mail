@@ -1,4 +1,5 @@
 import type { Message } from "@/lib/data";
+import { INVITE_DECK_GROUP_BY, sortGroupsForGroupBy } from "@/lib/messageGrouping";
 import {
   buildFlatEntries,
   buildThreadGroupEntries,
@@ -89,6 +90,11 @@ type SharedListParams = {
   getThreadLatestDate: (node: ThreadNode) => number;
   userEmail?: string;
   preferToDisplay: boolean;
+};
+
+export type BuildMessageListItemsParams = SharedListParams & {
+  mode: "flat" | "nested";
+  collapsedNestedMessages?: Record<string, boolean>;
 };
 
 export function buildGroupedMessages(params: {
@@ -206,30 +212,14 @@ export function buildGroupedMessages(params: {
   }));
 }
 
-const DATE_GROUP_ORDER = ["Today", "Yesterday", "This Week", "Older"];
-
 function sortGroupMetaForGroupBy(groups: MessageGroupMeta[], groupBy: string) {
-  if (groupBy !== "date") {
+  if (groupBy !== "date" && groupBy !== INVITE_DECK_GROUP_BY) {
     return groups;
   }
-  const orderIndex = new Map<string, number>();
-  DATE_GROUP_ORDER.forEach((key, index) => orderIndex.set(key, index));
-  return groups
-    .map((group, index) => ({
-      group,
-      index,
-      order: orderIndex.get(group.key) ?? Number.POSITIVE_INFINITY
-    }))
-    .sort((a, b) => (a.order === b.order ? a.index - b.index : a.order - b.order))
-    .map((entry) => entry.group);
+  return sortGroupsForGroupBy(groups, groupBy);
 }
 
-export function buildMessageListItems(
-  params: SharedListParams & {
-    mode: "flat" | "nested";
-    collapsedNestedMessages?: Record<string, boolean>;
-  }
-): ListItem[] {
+export function buildMessageListItems(params: BuildMessageListItemsParams): ListItem[] {
   const {
     groupedMessages,
     collapsedGroups,

@@ -3,6 +3,8 @@ import type { Attachment } from "@/lib/data";
 export const CALENDAR_INVITE_FLAG = "calendar-invite";
 export const TODO_FLAG = "$Todo";
 export const DONE_FLAG = "$Done";
+export const NONJUNK_KEYWORD = "NONJUNK";
+export const RECENT_IMAP_FLAG = "\\recent";
 const LEGACY_CUSTOM_FLAGGED_KEYWORD = "pinned";
 
 export const CALENDAR_MIME_HINTS = [
@@ -41,6 +43,7 @@ type CalendarInviteDetectionInput = {
 };
 
 const normalize = (value?: string | null) => (value ?? "").trim().toLowerCase();
+const normalizeKeyword = (value: string) => value.replace(/[\s-]/g, "").toLowerCase();
 
 function includesHint(value: string, hints: readonly string[]) {
   if (!value) return false;
@@ -94,6 +97,32 @@ function bodyLooksLikeCalendarInvite(textBody?: string | null, htmlBody?: string
 export function hasMessageFlag(flags: string[] | null | undefined, flag: string) {
   const target = flag.toLowerCase();
   return (flags ?? []).some((item) => item.toLowerCase() === target);
+}
+
+export function isNonJunkKeyword(value: string) {
+  return normalizeKeyword(value) === "nonjunk";
+}
+
+export function withoutRecentFlag(flags: string[] | null | undefined) {
+  return (flags ?? []).filter((flag) => flag.toLowerCase() !== RECENT_IMAP_FLAG);
+}
+
+export function withoutNonJunkAndRecentFlags(flags: string[] | null | undefined) {
+  return (flags ?? []).filter(
+    (flag) => !isNonJunkKeyword(flag) && flag.toLowerCase() !== RECENT_IMAP_FLAG
+  );
+}
+
+export function appendNonJunkKeyword(flags: string[] | null | undefined) {
+  return [...withoutNonJunkAndRecentFlags(flags), NONJUNK_KEYWORD];
+}
+
+export function sameFlagOrderAndValues(left: string[], right: string[]) {
+  if (left.length !== right.length) return false;
+  for (let i = 0; i < left.length; i += 1) {
+    if (left[i] !== right[i]) return false;
+  }
+  return true;
 }
 
 /**

@@ -18,6 +18,29 @@ type SelectCollapsedThread = (
   options?: { isFlaggedGroup?: boolean }
 ) => void;
 
+export type ToggleAnimation = {
+  key: string;
+  open: boolean;
+  at: number;
+};
+
+export function applyToggleWithAnimation(params: {
+  key: string;
+  open: boolean;
+  setLastToggle: React.Dispatch<React.SetStateAction<ToggleAnimation | null>>;
+  setAnimationClock: React.Dispatch<React.SetStateAction<number>>;
+  setCollapsedState: React.Dispatch<React.SetStateAction<Record<string, boolean>>>;
+}) {
+  const { key, open, setLastToggle, setAnimationClock, setCollapsedState } = params;
+  const at = Date.now();
+  setLastToggle({ key, open, at });
+  setAnimationClock(at);
+  setCollapsedState((prev) => ({
+    ...prev,
+    [key]: !open
+  }));
+}
+
 export const hasSelectionModifier = (event: {
   shiftKey: boolean;
   metaKey: boolean;

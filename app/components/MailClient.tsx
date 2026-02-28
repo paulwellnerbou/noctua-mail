@@ -73,6 +73,7 @@ import MessageViewPane from "./mailclient/message/MessageViewPane";
 import MarkdownPanel from "./mailclient/message/MarkdownPanel";
 import MessageSourcePanel from "./mailclient/message/MessageSourcePanel";
 import { TODO_FLAG, DONE_FLAG, isMeaningfulNonInlineAttachment } from "@/lib/messageFlags";
+import { INVITE_DECK_GROUP_BY } from "@/lib/messageGrouping";
 import { createComposeAttachment } from "@/lib/mail/composeAttachment";
 import { openDetachedWindow } from "@/lib/ui/openDetachedWindow";
 import { getImapFlagBadges, hasHtmlContent } from "@/lib/ui/messageView";
@@ -82,9 +83,7 @@ import {
   getSearchBadgeLabel,
   getSearchFieldLabel
 } from "@/lib/ui/searchFilters";
-import {
-  useSearchState,
-  VIRTUAL_FOLDERS} from "./mailclient/useSearchState";
+import { useSearchState, VIRTUAL_FOLDERS } from "./mailclient/useSearchState";
 import { useReminderNotifications } from "./mailclient/useReminderNotifications";
 import { useMessageData } from "./mailclient/useMessageData";
 import { useThreadContent } from "./mailclient/useThreadContent";
@@ -770,6 +769,13 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     () => (activeVirtualFolder ? [...activeVirtualFolder.queryBadges] : selectedSearchBadges),
     [activeVirtualFolder, selectedSearchBadges]
   );
+  const effectiveGroupBy = useMemo(
+    () =>
+      activeVirtualFolder?.id === "virtual:invite-deck" && groupBy === "date"
+        ? INVITE_DECK_GROUP_BY
+        : groupBy,
+    [activeVirtualFolder?.id, groupBy]
+  );
   const selectedSearchBadgeLabels = useMemo(
     () =>
       activeVirtualFolder
@@ -1015,7 +1021,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     effectiveSearchBadges,
     currentSearchExcludedFolderIds,
     supportsThreads,
-    groupBy,
+    groupBy: effectiveGroupBy,
     query,
     authState,
     apiFetch,
@@ -1587,7 +1593,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     includeThreadAcrossFoldersForList,
     isThreadExcludedFolder: checkIsThreadExcludedFolder,
     supportsThreads,
-    groupBy,
+    groupBy: effectiveGroupBy,
     groupMeta,
     isFlaggedMessage,
     hasDoneFlag,

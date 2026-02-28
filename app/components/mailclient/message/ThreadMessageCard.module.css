@@ -133,11 +133,6 @@
   align-items: flex-start;
 }
 
-.metaLineLink {
-  flex-wrap: nowrap;
-  align-items: baseline;
-}
-
 .metaLabel {
   color: var(--gray-11);
   font-weight: 600;
@@ -237,24 +232,6 @@
 
 .moreButton:hover {
   text-decoration: underline;
-}
-
-.threadLink {
-  background: transparent;
-  border: none;
-  padding: 0;
-  display: inline-block;
-  color: var(--accent);
-  text-decoration: underline;
-  cursor: pointer;
-  font-size: 12px;
-  line-height: inherit;
-  text-align: left;
-  min-width: 0;
-  flex: 1 1 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .copyOk {

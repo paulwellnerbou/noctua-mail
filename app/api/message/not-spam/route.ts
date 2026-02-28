@@ -1,88 +1,37 @@
 import { NextResponse } from "next/server";
 import {
-  getAccounts,
-  getFolders,
-  getMessageById,
-  relocateMovedMessage,
   updateMessageFlags
 } from "@/lib/db";
-import { moveImapMessage, updateImapFlags } from "@/lib/mail/imap";
-import { moveMessageFiles } from "@/lib/storage";
-import type { Folder } from "@/lib/data";
-import { requireSessionAccountOr403, requireSessionOr401 } from "@/lib/auth";
-
-const NONJUNK_KEYWORD = "NONJUNK";
-
-const normalizeKeyword = (value: string) => value.replace(/[\s-]/g, "").toLowerCase();
-const isNonJunkKeyword = (value: string) => normalizeKeyword(value) === "nonjunk";
-
-function folderMailboxPath(folder: Folder, accountId: string) {
-  if (folder.id.startsWith(`${accountId}:`)) {
-    return folder.id.slice(accountId.length + 1);
-  }
-  return folder.name;
-}
-
-function findInboxFolder(folders: Folder[], accountId: string) {
-  const candidates = folders.filter((folder) => folder.accountId === accountId);
-  const bySpecial = candidates.find(
-    (folder) => (folder.specialUse ?? "").toLowerCase() === "\\inbox"
-  );
-  if (bySpecial) return bySpecial;
-  const byName = candidates.find((folder) => folder.name.trim().toLowerCase() === "inbox");
-  if (byName) return byName;
-  return null;
-}
-
-function mailboxPathFromFolderId(folderId: string, accountId: string) {
-  if (folderId.startsWith(`${accountId}:`)) {
-    return folderId.slice(accountId.length + 1);
-  }
-  return folderId;
-}
+import { updateImapFlags } from "@/lib/mail/imap";
+import {
+  NONJUNK_KEYWORD,
+  appendNonJunkKeyword,
+  sameFlagOrderAndValues
+} from "@/lib/messageFlags";
+import { findInboxFolder } from "@/lib/specialFolders";
+import {
+  moveAndRelocateMessageWithFiles,
+  requireImapMessageMutationContext,
+  resolveSpecialFolderAndMailbox,
+} from "../routeHelpers";
+import { clearImapNonJunkFlags } from "../flagMutationHelpers";
 
 export async function POST(request: Request) {
-  const session = requireSessionOr401(request);
-  if (session instanceof NextResponse) return session;
-  const clientId = request.headers.get("x-noctua-client") ?? undefined;
   const payload = (await request.json()) as { accountId: string; messageId: string };
-  if (!payload?.accountId || !payload?.messageId) {
-    return NextResponse.json({ ok: false, message: "Missing accountId or messageId" }, { status: 400 });
-  }
-  const access = await requireSessionAccountOr403(session, payload.accountId);
-  if (access instanceof NextResponse) return access;
-  const accounts = await getAccounts();
-  const account = accounts.find((item) => item.id === payload.accountId);
-  if (!account) {
-    return NextResponse.json({ ok: false, message: "Account not found" }, { status: 404 });
-  }
+  const context = await requireImapMessageMutationContext(request, payload);
+  if (context instanceof NextResponse) return context;
+  const { accountId, account, clientId, message } = context;
 
-  const message = await getMessageById(payload.accountId, payload.messageId);
-  if (!message) {
-    return NextResponse.json({ ok: false, message: "Message not found" }, { status: 404 });
-  }
-  if (!message.imapUid || !message.mailboxPath) {
-    return NextResponse.json(
-      { ok: false, message: "Message is missing IMAP metadata" },
-      { status: 400 }
-    );
-  }
-
-  const folders = await getFolders(payload.accountId);
-  const inboxFolder = findInboxFolder(folders, payload.accountId);
-  const inboxMailbox = inboxFolder
-    ? folderMailboxPath(inboxFolder, payload.accountId)
-    : "INBOX";
-  const currentMailbox =
-    message.mailboxPath || mailboxPathFromFolderId(message.folderId, payload.accountId);
+  const { folder: inboxFolder, mailbox: inboxMailbox } = await resolveSpecialFolderAndMailbox(
+    accountId,
+    findInboxFolder,
+    { fallbackMailbox: "INBOX" }
+  );
+  const inboxMailboxPath = inboxMailbox ?? "INBOX";
+  const currentMailbox = message.mailboxPath;
 
   const existingFlags = message.flags ?? [];
-  const nonJunkFlags = existingFlags.filter(isNonJunkKeyword);
-  if (nonJunkFlags.length > 0) {
-    for (const flag of nonJunkFlags) {
-      await updateImapFlags(account, currentMailbox, message.imapUid, flag, false, clientId);
-    }
-  }
+  await clearImapNonJunkFlags(account, currentMailbox, message.imapUid, existingFlags, clientId);
   await updateImapFlags(
     account,
     currentMailbox,
@@ -92,45 +41,28 @@ export async function POST(request: Request) {
     clientId
   );
 
-  const destinationUid = await moveImapMessage(
+  const { relocated } = await moveAndRelocateMessageWithFiles({
     account,
     currentMailbox,
-    message.imapUid,
-    inboxMailbox,
-    clientId
-  );
-  const relocated = await relocateMovedMessage({
-    accountId: payload.accountId,
+    imapUid: message.imapUid,
+    destinationMailbox: inboxMailboxPath,
+    clientId,
+    accountId,
     previousId: message.id,
-    destinationFolderId: inboxFolder?.id ?? message.folderId,
-    destinationMailboxPath: inboxMailbox,
-    destinationUid
+    destinationFolderId: inboxFolder?.id ?? message.folderId
   });
-  if (relocated?.changed) {
-    await moveMessageFiles(
-      payload.accountId,
-      relocated.previousId,
-      relocated.nextId,
-      relocated.attachmentIds
-    );
-  }
 
-  const cleanedFlags = existingFlags.filter(
-    (flag) => !isNonJunkKeyword(flag) && flag.toLowerCase() !== "\\recent"
-  );
-  const nextFlags = [...cleanedFlags, NONJUNK_KEYWORD];
-  const flagsChanged =
-    nextFlags.length !== existingFlags.length ||
-    nextFlags.some((flag, index) => flag !== existingFlags[index]);
+  const nextFlags = appendNonJunkKeyword(existingFlags);
+  const flagsChanged = !sameFlagOrderAndValues(nextFlags, existingFlags);
   if (flagsChanged) {
-    await updateMessageFlags(payload.accountId, relocated?.nextId ?? message.id, nextFlags);
+    await updateMessageFlags(accountId, relocated?.nextId ?? message.id, nextFlags);
   }
 
   return NextResponse.json({
     ok: true,
     action: "moved",
     inboxFolderId: inboxFolder?.id ?? null,
-    inboxMailbox,
+    inboxMailbox: inboxMailboxPath,
     flags: nextFlags,
     previousMessageId: relocated?.previousId ?? message.id,
     messageId: relocated?.nextId ?? message.id

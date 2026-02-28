@@ -5,37 +5,24 @@ import {
   softDeleteCalendarEvent,
   upsertCalendarEvent
 } from "@/lib/db";
-import { requireSessionAccountOr403, requireSessionOr401 } from "@/lib/auth";
+import { requireAccountContext } from "@/app/api/_helpers/accountContext";
 import type { CalendarEvent } from "@/lib/data";
-
-function toNumber(value: unknown): number {
-  const num = Number(value);
-  return Number.isFinite(num) ? num : NaN;
-}
-
-function toNumberArray(value: unknown): number[] | undefined {
-  if (!Array.isArray(value)) return undefined;
-  const normalized = value
-    .map((item) => Number(item))
-    .filter((item) => Number.isFinite(item) && item > 0)
-    .map((item) => Math.round(item));
-  return normalized.length > 0 ? Array.from(new Set(normalized)).sort((a, b) => a - b) : undefined;
-}
+import { toFiniteNumber, toPositiveNumberArray } from "@/app/api/_helpers/numberParsing";
 
 export async function GET(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = requireSessionOr401(request);
-  if (session instanceof NextResponse) return session;
   const { searchParams } = new URL(request.url);
   const accountId = searchParams.get("accountId")?.trim() ?? "";
   const { id: eventId } = await params;
   if (!accountId || !eventId) {
     return NextResponse.json({ ok: false, message: "Missing accountId or eventId" }, { status: 400 });
   }
-  const access = await requireSessionAccountOr403(session, accountId);
-  if (access instanceof NextResponse) return access;
+  const accountContext = await requireAccountContext(request, accountId, {
+    missingAccountMessage: "Missing accountId"
+  });
+  if (accountContext instanceof NextResponse) return accountContext;
   try {
     const event = await getCalendarEventById(accountId, eventId);
     if (!event) {
@@ -52,8 +39,6 @@ export async function PUT(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = requireSessionOr401(request);
-  if (session instanceof NextResponse) return session;
   const { id: eventId } = await params;
   const body = (await request.json().catch(() => null)) as Partial<CalendarEvent> & {
     accountId?: string;
@@ -62,8 +47,10 @@ export async function PUT(
   if (!accountId || !eventId) {
     return NextResponse.json({ ok: false, message: "Missing accountId or eventId" }, { status: 400 });
   }
-  const access = await requireSessionAccountOr403(session, accountId);
-  if (access instanceof NextResponse) return access;
+  const accountContext = await requireAccountContext(request, accountId, {
+    missingAccountMessage: "Missing accountId"
+  });
+  if (accountContext instanceof NextResponse) return accountContext;
 
   const existing = await getCalendarEventById(accountId, eventId);
   if (!existing) {
@@ -71,7 +58,7 @@ export async function PUT(
   }
 
   const summary = String(body?.summary ?? existing.summary).trim();
-  const startAtMs = toNumber(body?.startAtMs);
+  const startAtMs = toFiniteNumber(body?.startAtMs);
   if (!summary) {
     return NextResponse.json({ ok: false, message: "Missing summary" }, { status: 400 });
   }
@@ -85,13 +72,13 @@ export async function PUT(
     description: body?.description !== undefined ? body.description?.trim() || undefined : existing.description,
     location: body?.location !== undefined ? body.location?.trim() || undefined : existing.location,
     startAtMs,
-    endAtMs: body?.endAtMs !== undefined ? toNumber(body.endAtMs) || undefined : existing.endAtMs,
+    endAtMs: body?.endAtMs !== undefined ? toFiniteNumber(body.endAtMs) || undefined : existing.endAtMs,
     allDay: body?.allDay !== undefined ? Boolean(body.allDay) : existing.allDay,
     startTimezone: body?.startTimezone !== undefined ? body.startTimezone?.trim() || undefined : existing.startTimezone,
     endTimezone: body?.endTimezone !== undefined ? body.endTimezone?.trim() || undefined : existing.endTimezone,
     recurrenceRule: body?.recurrenceRule !== undefined ? body.recurrenceRule?.trim() || undefined : existing.recurrenceRule,
-    recurrenceDates: body?.recurrenceDates !== undefined ? toNumberArray(body.recurrenceDates) : existing.recurrenceDates,
-    excludedDates: body?.excludedDates !== undefined ? toNumberArray(body.excludedDates) : existing.excludedDates,
+    recurrenceDates: body?.recurrenceDates !== undefined ? toPositiveNumberArray(body.recurrenceDates) : existing.recurrenceDates,
+    excludedDates: body?.excludedDates !== undefined ? toPositiveNumberArray(body.excludedDates) : existing.excludedDates,
     status: body?.status !== undefined ? body.status?.trim() || undefined : existing.status,
     remoteEtag: body?.remoteEtag !== undefined ? body.remoteEtag?.trim() || undefined : existing.remoteEtag,
     remoteHref: body?.remoteHref !== undefined ? body.remoteHref?.trim() || undefined : existing.remoteHref,
@@ -113,8 +100,6 @@ export async function DELETE(
   request: Request,
   { params }: { params: Promise<{ id: string }> }
 ) {
-  const session = requireSessionOr401(request);
-  if (session instanceof NextResponse) return session;
   const { id: eventId } = await params;
   const { searchParams } = new URL(request.url);
   const accountId = searchParams.get("accountId")?.trim() ?? "";
@@ -122,8 +107,10 @@ export async function DELETE(
   if (!accountId || !eventId) {
     return NextResponse.json({ ok: false, message: "Missing accountId or eventId" }, { status: 400 });
   }
-  const access = await requireSessionAccountOr403(session, accountId);
-  if (access instanceof NextResponse) return access;
+  const accountContext = await requireAccountContext(request, accountId, {
+    missingAccountMessage: "Missing accountId"
+  });
+  if (accountContext instanceof NextResponse) return accountContext;
   try {
     if (soft) {
       await softDeleteCalendarEvent(accountId, eventId);

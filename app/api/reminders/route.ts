@@ -1,53 +1,26 @@
 import { NextResponse } from "next/server";
 import {
   clearCalendarReminders,
-  getAccountById,
   deleteCalendarReminderByEvent,
   deleteCalendarReminderById,
   listCalendarReminders,
   upsertCalendarReminder
 } from "@/lib/db";
-import { requireSessionAccountOr403, requireSessionOr401 } from "@/lib/auth";
-
-function toNumber(value: unknown) {
-  const num = Number(value);
-  return Number.isFinite(num) ? num : NaN;
-}
-
-function toNumberArray(value: unknown): number[] | undefined {
-  if (!Array.isArray(value)) return undefined;
-  const normalized = value
-    .map((item) => Number(item))
-    .filter((item) => Number.isFinite(item) && item > 0)
-    .map((item) => Math.round(item));
-  return normalized.length > 0 ? Array.from(new Set(normalized)).sort((a, b) => a - b) : undefined;
-}
-
-async function ensureAccountExists(accountId: string) {
-  const account = await getAccountById(accountId);
-  return Boolean(account);
-}
+import { requireAccountContext } from "@/app/api/_helpers/accountContext";
+import { toFiniteNumber, toPositiveNumberArray } from "@/app/api/_helpers/numberParsing";
 
 export async function GET(request: Request) {
-  const session = requireSessionOr401(request);
-  if (session instanceof NextResponse) return session;
   const { searchParams } = new URL(request.url);
   const accountId = searchParams.get("accountId")?.trim() ?? "";
-  if (!accountId) {
-    return NextResponse.json({ ok: false, message: "Missing accountId" }, { status: 400 });
-  }
-  const access = await requireSessionAccountOr403(session, accountId);
-  if (access instanceof NextResponse) return access;
-  if (!(await ensureAccountExists(accountId))) {
-    return NextResponse.json({ ok: false, message: "Account not found" }, { status: 404 });
-  }
-  const items = await listCalendarReminders(accountId, session.userId);
+  const accountContext = await requireAccountContext(request, accountId, {
+    missingAccountMessage: "Missing accountId"
+  });
+  if (accountContext instanceof NextResponse) return accountContext;
+  const items = await listCalendarReminders(accountContext.accountId, accountContext.session.userId);
   return NextResponse.json({ ok: true, items });
 }
 
 export async function POST(request: Request) {
-  const session = requireSessionOr401(request);
-  if (session instanceof NextResponse) return session;
   const payload = (await request.json()) as {
     accountId?: string;
     id?: string;
@@ -66,18 +39,14 @@ export async function POST(request: Request) {
     leadLabel?: string;
   };
   const accountId = payload.accountId?.trim() ?? "";
-  if (!accountId) {
-    return NextResponse.json({ ok: false, message: "Missing accountId" }, { status: 400 });
-  }
-  const access = await requireSessionAccountOr403(session, accountId);
-  if (access instanceof NextResponse) return access;
-  if (!(await ensureAccountExists(accountId))) {
-    return NextResponse.json({ ok: false, message: "Account not found" }, { status: 404 });
-  }
-  const eventStartAtMs = toNumber(payload.eventStartAtMs);
+  const accountContext = await requireAccountContext(request, accountId, {
+    missingAccountMessage: "Missing accountId"
+  });
+  if (accountContext instanceof NextResponse) return accountContext;
+  const eventStartAtMs = toFiniteNumber(payload.eventStartAtMs);
   const eventEndAtMs =
-    payload.eventEndAtMs == null ? undefined : toNumber(payload.eventEndAtMs);
-  const leadMinutes = toNumber(payload.leadMinutes);
+    payload.eventEndAtMs == null ? undefined : toFiniteNumber(payload.eventEndAtMs);
+  const leadMinutes = toFiniteNumber(payload.leadMinutes);
   const leadLabel = String(payload.leadLabel ?? "").trim();
   const startTimezone =
     typeof payload.startTimezone === "string" && payload.startTimezone.trim()
@@ -87,8 +56,8 @@ export async function POST(request: Request) {
     typeof payload.recurrenceRule === "string" && payload.recurrenceRule.trim()
       ? payload.recurrenceRule.trim()
       : undefined;
-  const recurrenceDates = toNumberArray(payload.recurrenceDates);
-  const excludedDates = toNumberArray(payload.excludedDates);
+  const recurrenceDates = toPositiveNumberArray(payload.recurrenceDates);
+  const excludedDates = toPositiveNumberArray(payload.excludedDates);
   if (!Number.isFinite(eventStartAtMs) || eventStartAtMs <= 0) {
     return NextResponse.json({ ok: false, message: "Invalid eventStartAtMs" }, { status: 400 });
   }
@@ -101,7 +70,7 @@ export async function POST(request: Request) {
   if (!leadLabel) {
     return NextResponse.json({ ok: false, message: "Invalid leadLabel" }, { status: 400 });
   }
-  const result = await upsertCalendarReminder(accountId, session.userId, {
+  const result = await upsertCalendarReminder(accountContext.accountId, accountContext.session.userId, {
     id: payload.id,
     messageId: typeof payload.messageId === "string" ? payload.messageId : undefined,
     eventUid: payload.eventUid,
@@ -122,8 +91,6 @@ export async function POST(request: Request) {
 }
 
 export async function DELETE(request: Request) {
-  const session = requireSessionOr401(request);
-  if (session instanceof NextResponse) return session;
   const payload = (await request.json()) as {
     accountId?: string;
     clearAll?: boolean;
@@ -133,33 +100,33 @@ export async function DELETE(request: Request) {
     eventStartAtMs?: number;
   };
   const accountId = payload.accountId?.trim() ?? "";
-  if (!accountId) {
-    return NextResponse.json({ ok: false, message: "Missing accountId" }, { status: 400 });
-  }
-  const access = await requireSessionAccountOr403(session, accountId);
-  if (access instanceof NextResponse) return access;
-  if (!(await ensureAccountExists(accountId))) {
-    return NextResponse.json({ ok: false, message: "Account not found" }, { status: 404 });
-  }
+  const accountContext = await requireAccountContext(request, accountId, {
+    missingAccountMessage: "Missing accountId"
+  });
+  if (accountContext instanceof NextResponse) return accountContext;
 
   if (payload.clearAll === true) {
-    const cleared = await clearCalendarReminders(accountId, session.userId);
+    const cleared = await clearCalendarReminders(accountContext.accountId, accountContext.session.userId);
     return NextResponse.json({ ok: true, cleared });
   }
 
   if (payload.reminderId?.trim()) {
-    const deleted = await deleteCalendarReminderById(accountId, session.userId, payload.reminderId.trim());
+    const deleted = await deleteCalendarReminderById(
+      accountContext.accountId,
+      accountContext.session.userId,
+      payload.reminderId.trim()
+    );
     return NextResponse.json({ ok: true, deleted });
   }
 
-  const eventStartAtMs = toNumber(payload.eventStartAtMs);
+  const eventStartAtMs = toFiniteNumber(payload.eventStartAtMs);
   if (!Number.isFinite(eventStartAtMs) || eventStartAtMs <= 0) {
     return NextResponse.json(
       { ok: false, message: "Missing reminderId or valid eventStartAtMs" },
       { status: 400 }
     );
   }
-  const deleted = await deleteCalendarReminderByEvent(accountId, session.userId, {
+  const deleted = await deleteCalendarReminderByEvent(accountContext.accountId, accountContext.session.userId, {
     eventUid: payload.eventUid,
     eventTitle: payload.eventTitle,
     eventStartAtMs

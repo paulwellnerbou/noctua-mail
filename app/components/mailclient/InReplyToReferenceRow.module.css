@@ -1,0 +1,51 @@
+.messageRow {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  flex-wrap: nowrap;
+  font-size: 12px;
+  color: var(--gray-11);
+  line-height: 1.6;
+}
+
+.composeRow {
+  display: grid;
+  grid-template-columns: 84px 1fr;
+  gap: var(--space-3);
+  align-items: center;
+}
+
+.label {
+  color: var(--gray-11);
+  font-weight: 600;
+  flex: 0 0 auto;
+  font-size: 12px;
+}
+
+.content {
+  min-width: 0;
+}
+
+.link {
+  background: transparent;
+  border: none;
+  padding: 0;
+  display: inline-block;
+  color: var(--accent);
+  text-decoration: underline;
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1.6;
+  text-align: left;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.value {
+  color: var(--gray-12);
+  font-size: 12px;
+  line-height: 1.6;
+}

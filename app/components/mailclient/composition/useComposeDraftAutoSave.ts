@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import type { Attachment } from "@/lib/data";
 import type { ComposePayload } from "./composeContentBuilder";
+import { buildDraftSavePayload, computeDraftHash, hasDraftContent } from "./draftSaveUtils";
 import type { ComposeReplyHeaders, ComposeTab, DraftSavePayload } from "./composeTypes";
 
 export type UseComposeDraftAutoSaveParams = {
@@ -75,23 +76,25 @@ export function useComposeDraftAutoSave({
   useEffect(() => {
     if (!composeOpen || sendingMail) return;
     const preferText = composeTab === "html" && composeLastEditedRef.current === "text";
-    const { text, html, attachments, composeFormat } = buildComposePayloadRef.current({ preferText });
-    const hasContent = [composeTo, composeCc, composeBcc, composeSubject, text, html ?? ""].some(
-      (value) => (value ?? "").toString().trim().length > 0
-    );
-    if (!hasContent) return;
-    const normalizedHtml = html ?? "";
-    const attachmentsHash = attachments
-      .map((att) => `${att.filename}:${att.size}:${att.inline ? "1" : "0"}:${att.cid ?? ""}`)
-      .join("|");
-    const hash = JSON.stringify({
+    const composePayload = buildComposePayloadRef.current({ preferText });
+    const { text, html, attachments } = composePayload;
+    const hasContent = hasDraftContent({
       to: composeTo,
       cc: composeCc,
       bcc: composeBcc,
       subject: composeSubject,
       text,
-      html: normalizedHtml,
-      attachments: attachmentsHash
+      html
+    });
+    if (!hasContent) return;
+    const hash = computeDraftHash({
+      to: composeTo,
+      cc: composeCc,
+      bcc: composeBcc,
+      subject: composeSubject,
+      text,
+      html,
+      attachments
     });
     currentDraftHashRef.current = hash;
     if (composeBaselineHashRef.current === null) {
@@ -112,22 +115,19 @@ export function useComposeDraftAutoSave({
       window.clearTimeout(draftSaveTimerRef.current);
     }
     draftSaveTimerRef.current = window.setTimeout(() => {
-      const replyHeaders = composeReplyHeaders;
       saveDraftRef.current(
-        {
-          to: composeTo,
-          cc: composeCc,
-          bcc: composeBcc,
-          subject: composeSubject,
-          text,
-          html,
-          composeFormat,
-          quotedHtmlEdited: composeQuotedHtmlEdited,
-          inReplyTo: replyHeaders?.inReplyTo,
-          references: replyHeaders?.references,
-          xForwardedMessageId: replyHeaders?.xForwardedMessageId,
-          attachments
-        },
+        buildDraftSavePayload(
+          {
+            to: composeTo,
+            cc: composeCc,
+            bcc: composeBcc,
+            subject: composeSubject,
+            composeQuotedHtmlEdited,
+            composeReplyHeaders
+          },
+          composePayload,
+          { preserveUndefinedHtml: true }
+        ),
         hash
       );
     }, 2000);

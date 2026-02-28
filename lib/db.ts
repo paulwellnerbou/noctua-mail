@@ -40,12 +40,19 @@ import {
 import { normalizeAccountDateFormat } from "./dateFormatting";
 import { withDbWriteRetry } from "./dbWriteRetry";
 import { createHash, randomUUID } from "crypto";
+import {
+  buildInviteDeckGroupKeyFromEvent,
+  buildTimeGroupKey,
+  INVITE_DECK_GROUP_BY,
+  sortGroupsForGroupBy
+} from "./messageGrouping";
 import { resolveThreadingForItems } from "./threading";
 import { normalizeReminderDateList, resolveNextReminderOccurrence } from "./reminderRecurrence";
 import { resolveCalendarTimeZoneId } from "./calendarTimezones";
 import { collectCalendarReminderMutationsFromCalendarInvite } from "./calendarReminderMutations";
 import type { CalendarReminderMutation } from "./calendarReminderMutations";
 import { getAttachmentContentBuffer } from "./mail/syncMessageSanitizer";
+import { getMessageSource } from "./storage";
 import {
   CATEGORY_KEYS,
   createSeededLinearModel,
@@ -2185,15 +2192,8 @@ export async function cancelCalendarRemindersByEventUid(accountId: string, event
 
 function buildGroupKey(message: Message, groupBy: string) {
   const date = new Date(message.dateValue);
-  if (groupBy === "date") {
-    const now = new Date();
-    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-    const yesterdayStart = todayStart - 24 * 60 * 60 * 1000;
-    const weekStart = todayStart - 7 * 24 * 60 * 60 * 1000;
-    if (message.dateValue >= todayStart) return "Today";
-    if (message.dateValue >= yesterdayStart) return "Yesterday";
-    if (message.dateValue >= weekStart) return "This Week";
-    return "Older";
+  if (groupBy === "date" || groupBy === INVITE_DECK_GROUP_BY) {
+    return buildTimeGroupKey(message.dateValue, groupBy);
   }
   if (groupBy === "week") {
     const year = date.getFullYear();
@@ -2217,6 +2217,130 @@ function buildGroupKey(message: Message, groupBy: string) {
 function buildGroupLabel(key: string, groupBy: string) {
   if (groupBy === "none") return "All";
   return key;
+}
+
+type InviteDeckEventRow = {
+  messageId?: string | null;
+  eventUid?: string | null;
+  startAtMs?: number | null;
+  endAtMs?: number | null;
+  startTimezone?: string | null;
+  recurrenceRule?: string | null;
+  recurrenceDates?: string | null;
+  excludedDates?: string | null;
+};
+
+function getInviteDeckGroupKeyForEventRow(row: InviteDeckEventRow, nowMs = Date.now()) {
+  return buildInviteDeckGroupKeyFromEvent(
+    {
+      eventStartAtMs: Number(row.startAtMs ?? 0),
+      eventEndAtMs: Number(row.endAtMs ?? 0) || undefined,
+      startTimezone: normalizeReminderTimezone(
+        typeof row.startTimezone === "string" ? row.startTimezone : undefined
+      ) ?? undefined,
+      recurrenceRule:
+        normalizeReminderRecurrenceRule(
+          typeof row.recurrenceRule === "string" ? row.recurrenceRule : undefined
+        ) ?? undefined,
+      recurrenceDates: parseReminderDateListJson(row.recurrenceDates),
+      excludedDates: parseReminderDateListJson(row.excludedDates)
+    },
+    nowMs
+  );
+}
+
+async function getInviteDeckGroupKeysByMessageId(
+  db: any,
+  accountId: string,
+  messageIds: string[],
+  nowMs = Date.now()
+) {
+  const uniqueMessageIds = Array.from(new Set(messageIds.map((value) => value.trim()).filter(Boolean)));
+  if (uniqueMessageIds.length === 0) {
+    return new Map<string, string>();
+  }
+  const rows = db
+    .prepare(
+      `
+      SELECT
+        mce.messageId AS messageId,
+        mce.eventUid AS eventUid,
+        ce.startAtMs AS startAtMs,
+        ce.endAtMs AS endAtMs,
+        ce.startTimezone AS startTimezone,
+        ce.recurrenceRule AS recurrenceRule,
+        ce.recurrenceDates AS recurrenceDates,
+        ce.excludedDates AS excludedDates
+      FROM message_calendar_events mce
+      LEFT JOIN calendar_events ce
+        ON ce.accountId = mce.accountId
+       AND lower(ce.eventUid) = lower(mce.eventUid)
+      WHERE mce.accountId = ?
+        AND mce.messageId IN (${uniqueMessageIds.map(() => "?").join(",")})
+        AND ce.deletedAtMs IS NULL
+        AND (ce.sourceType = 'email' OR ce.eventUid IS NULL)
+      `
+    )
+    .all(accountId, ...uniqueMessageIds) as InviteDeckEventRow[];
+
+  const groupsByMessageId = new Map<string, string>();
+  const missingEventUidsByMessageId = new Map<string, Set<string>>();
+  rows.forEach((row) => {
+    const messageId = String(row.messageId ?? "").trim();
+    if (!messageId) return;
+    const eventUidKey = normalizeReminderEventUidKey(row.eventUid ?? undefined);
+    if (!row.startAtMs) {
+      if (eventUidKey) {
+        const existing = missingEventUidsByMessageId.get(messageId) ?? new Set<string>();
+        existing.add(eventUidKey);
+        missingEventUidsByMessageId.set(messageId, existing);
+      }
+      return;
+    }
+    const nextGroup = getInviteDeckGroupKeyForEventRow(row, nowMs);
+    const existing = groupsByMessageId.get(messageId);
+    if (existing === "UPCOMING" || nextGroup === "UPCOMING") {
+      groupsByMessageId.set(messageId, "UPCOMING");
+      return;
+    }
+    groupsByMessageId.set(messageId, nextGroup);
+  });
+
+  for (const [messageId, missingEventUids] of missingEventUidsByMessageId.entries()) {
+    if (groupsByMessageId.get(messageId) === "UPCOMING") continue;
+    const source = await getMessageSource(accountId, messageId);
+    if (!source) continue;
+    const mutationsByUid = await collectCalendarReminderMutationsByEventUidFromSource(
+      source,
+      messageId
+    );
+    let fallbackGroup: string | null = null;
+    missingEventUids.forEach((eventUidKey) => {
+      const mutation = mutationsByUid.get(eventUidKey);
+      if (!mutation || mutation.kind !== "update") return;
+      const nextGroup = buildInviteDeckGroupKeyFromEvent(
+        {
+          eventStartAtMs: mutation.eventStartAtMs,
+          eventEndAtMs: mutation.eventEndAtMs,
+          startTimezone: mutation.startTimezone,
+          recurrenceRule: mutation.recurrenceRule,
+          recurrenceDates: mutation.recurrenceDates,
+          excludedDates: mutation.excludedDates
+        },
+        nowMs
+      );
+      if (nextGroup === "UPCOMING") {
+        fallbackGroup = "UPCOMING";
+        return;
+      }
+      fallbackGroup = fallbackGroup ?? nextGroup;
+    });
+    if (fallbackGroup) {
+      groupsByMessageId.set(messageId, fallbackGroup);
+    }
+  }
+
+  return groupsByMessageId;
 }
 
 function buildSearchTokens(raw?: string | null) {
@@ -2825,14 +2949,38 @@ async function getGroupCounts(params: {
     where += ` AND ${buildMeaningfulAttachmentExistsSql("m")}`;
   }
 
-  if (groupBy === "date") {
+  if (groupBy === "date" || groupBy === INVITE_DECK_GROUP_BY) {
+    if (groupBy === INVITE_DECK_GROUP_BY) {
+      const rows = db
+        .prepare(
+          `
+          SELECT m.id AS id, m.dateValue AS dateValue
+          FROM messages m
+          WHERE ${where}
+        `
+        )
+        .all(...args) as Array<{ id: string; dateValue: number }>;
+      const inviteDeckGroupsByMessageId = await getInviteDeckGroupKeysByMessageId(
+        db,
+        accountId,
+        rows.map((row) => row.id)
+      );
+      const groupRows = Array.from(
+        rows.reduce((counts, row) => {
+          const key =
+            inviteDeckGroupsByMessageId.get(row.id) ??
+            buildTimeGroupKey(Number(row.dateValue ?? 0), INVITE_DECK_GROUP_BY);
+          counts.set(key, (counts.get(key) ?? 0) + 1);
+          return counts;
+        }, new Map<string, number>())
+      ).map(([key, count]) => ({ key, count }));
+      return groupsFromRows(sortGroupsForGroupBy(groupRows, groupBy), groupBy);
+    }
+
     const now = new Date();
     const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-    const yesterdayStart = todayStart - 24 * 60 * 60 * 1000;
-    const weekStart = todayStart - 7 * 24 * 60 * 60 * 1000;
-    const rows = db
-      .prepare(
-        `
+    const sql =
+      `
         SELECT
           CASE
             WHEN m.dateValue >= ? THEN 'Today'
@@ -2844,12 +2992,11 @@ async function getGroupCounts(params: {
         FROM messages m
         WHERE ${where}
         GROUP BY key
-      `
-      )
-      .all(todayStart, yesterdayStart, weekStart, ...args) as Array<{ key: string; count: number }>;
-    const order = ["Today", "Yesterday", "This Week", "Older"];
-    rows.sort((a, b) => order.indexOf(a.key) - order.indexOf(b.key));
-    return groupsFromRows(rows, groupBy);
+      `;
+    const rows = db
+      .prepare(sql)
+      .all(todayStart, todayStart - 24 * 60 * 60 * 1000, todayStart - 7 * 24 * 60 * 60 * 1000, ...args) as Array<{ key: string; count: number }>;
+    return groupsFromRows(sortGroupsForGroupBy(rows, groupBy), groupBy);
   }
 
   if (groupBy === "week") {
@@ -3330,6 +3477,14 @@ export async function listRelatedMessages(params: {
   const total = filtered.length;
   const start = Math.max(0, (page - 1) * pageSize);
   const pageRows = filtered.slice(start, start + pageSize).map((item) => item.row);
+  const inviteDeckGroupsByMessageId =
+    groupBy === INVITE_DECK_GROUP_BY
+      ? await getInviteDeckGroupKeysByMessageId(
+          db,
+          accountId,
+          filtered.map((item) => String(item.row.id ?? ""))
+        )
+      : new Map<string, string>();
 
   const items: Message[] = pageRows.map((row) => {
     const message: Message = {
@@ -3374,7 +3529,8 @@ export async function listRelatedMessages(params: {
       categorySignals: parseStringArray(row.categorySignals),
       listUnsubscribe: row.listUnsubscribe ?? undefined
     };
-    (message as any).groupKey = buildGroupKey(message, groupBy);
+    (message as any).groupKey =
+      inviteDeckGroupsByMessageId.get(message.id) ?? buildGroupKey(message, groupBy);
     return message;
   });
 
@@ -3393,7 +3549,7 @@ export async function listRelatedMessages(params: {
       dateValue: row.dateValue,
       body: ""
     } as Message;
-    const key = buildGroupKey(message, groupBy);
+    const key = inviteDeckGroupsByMessageId.get(message.id) ?? buildGroupKey(message, groupBy);
     groupCounts.set(key, (groupCounts.get(key) ?? 0) + 1);
   });
 
@@ -3401,9 +3557,8 @@ export async function listRelatedMessages(params: {
     key,
     count
   }));
-  if (groupBy === "date") {
-    const order = ["Today", "Yesterday", "This Week", "Older"];
-    groupRows.sort((a, b) => order.indexOf(a.key) - order.indexOf(b.key));
+  if (groupBy === "date" || groupBy === INVITE_DECK_GROUP_BY) {
+    groupRows.splice(0, groupRows.length, ...sortGroupsForGroupBy(groupRows, groupBy));
   } else if (groupBy === "week" || groupBy === "year") {
     groupRows.sort((a, b) => String(b.key).localeCompare(String(a.key)));
   } else {
@@ -3592,6 +3747,14 @@ export async function listMessages(params: {
     `
     )
     .all(...args, pageSize, offset) as any[];
+  const inviteDeckGroupsByMessageId =
+    groupBy === INVITE_DECK_GROUP_BY
+      ? await getInviteDeckGroupKeysByMessageId(
+          db,
+          accountId,
+          rows.map((row) => String(row.id ?? ""))
+        )
+      : new Map<string, string>();
 
   const items: Message[] = rows.map((row) => {
     const message: Message = {
@@ -3636,7 +3799,8 @@ export async function listMessages(params: {
       categorySignals: parseStringArray(row.categorySignals),
       listUnsubscribe: row.listUnsubscribe ?? undefined
     };
-    (message as any).groupKey = buildGroupKey(message, groupBy);
+    (message as any).groupKey =
+      inviteDeckGroupsByMessageId.get(message.id) ?? buildGroupKey(message, groupBy);
     return message;
   });
 
@@ -4030,6 +4194,14 @@ export async function listThreads(params: {
           )
           .all(...threadMessageArgs, ...threadIds) as any[])
       : [];
+  const inviteDeckThreadGroupsByMessageId =
+    groupBy === INVITE_DECK_GROUP_BY
+      ? await getInviteDeckGroupKeysByMessageId(
+          db,
+          accountId,
+          messagesRows.map((row) => String(row.id ?? ""))
+        )
+      : new Map<string, string>();
 
   const items: Message[] = messagesRows.map((row) => {
     const message: Message = {
@@ -4074,7 +4246,8 @@ export async function listThreads(params: {
       categorySignals: parseStringArray(row.categorySignals),
       listUnsubscribe: row.listUnsubscribe ?? undefined
     };
-    (message as any).groupKey = buildGroupKey(message, groupBy);
+    (message as any).groupKey =
+      inviteDeckThreadGroupsByMessageId.get(message.id) ?? buildGroupKey(message, groupBy);
     return message;
   });
 
@@ -4135,6 +4308,10 @@ export async function listThreadMessages(params: {
           )
           .all(...ids) as any[])
       : [];
+  const inviteDeckThreadMessageGroupsByMessageId =
+    groupBy === INVITE_DECK_GROUP_BY
+      ? await getInviteDeckGroupKeysByMessageId(db, accountId, ids)
+      : new Map<string, string>();
 
   const attachmentsByMessage = new Map<string, Attachment[]>();
   attachmentRows.forEach((row) => {
@@ -4192,7 +4369,8 @@ export async function listThreadMessages(params: {
       categorySignals: parseStringArray(row.categorySignals),
       listUnsubscribe: row.listUnsubscribe ?? undefined
     };
-    (message as any).groupKey = buildGroupKey(message, groupBy);
+    (message as any).groupKey =
+      inviteDeckThreadMessageGroupsByMessageId.get(message.id) ?? buildGroupKey(message, groupBy);
     return message;
   });
 
@@ -4204,14 +4382,22 @@ export async function getThreadIdsByMessageIds(accountId: string, messageIds: st
   const db = await getAccountDb(accountId);
   const rows = db
     .prepare(
-      `SELECT messageId, threadId FROM messages WHERE accountId = ? AND messageId IN (${messageIds
-        .map(() => "?")
-        .join(",")})`
+      `SELECT messageId, threadId, dateValue, id
+       FROM messages
+       WHERE accountId = ? AND messageId IN (${messageIds.map(() => "?").join(",")})
+       ORDER BY dateValue ASC, id ASC`
     )
-    .all(accountId, ...messageIds) as Array<{ messageId: string; threadId: string }>;
+    .all(accountId, ...messageIds) as Array<{
+    messageId: string | null;
+    threadId: string | null;
+    dateValue: number;
+    id: string;
+  }>;
   const map = new Map<string, string>();
   rows.forEach((row) => {
-    if (row.messageId && row.threadId) {
+    // The same Message-ID may appear in multiple folders. Use the oldest copy
+    // as the canonical external thread mapping to keep sync-time threading stable.
+    if (row.messageId && row.threadId && !map.has(row.messageId)) {
       map.set(row.messageId, row.threadId);
     }
   });

@@ -1,7 +1,8 @@
 import { startTransition, useEffect, useState } from "react";
 import type React from "react";
-import { Button, Link, Text, TextField } from "@radix-ui/themes";
+import { Button, Text, TextField } from "@radix-ui/themes";
 import type { Message } from "@/lib/data";
+import InReplyToReferenceRow from "../InReplyToReferenceRow";
 import styles from "./Compose.module.css";
 
 type RecipientFocus = "to" | "cc" | "bcc" | null;
@@ -304,30 +305,13 @@ export default function ComposeFields({
       : "Clear Cc/Bcc to hide fields"
     : "Show Cc and Bcc";
   const showFrom = variant === "inline";
-  const inReplyToRow = inReplyToMessage && (
-    <div className={styles.composeGridRow}>
-      <Text size="2" weight="medium" className={styles.label}>
-        In reply to:
-      </Text>
-      <div className={styles.composeInReplyTo}>
-        <Text size="2" color="gray">
-          {onJumpToMessage ? (
-            <Link
-              size="2"
-              onClick={() => onJumpToMessage(inReplyToMessage.id)}
-              style={{ cursor: "pointer" }}
-            >
-              {inReplyToMessage.subject || "(no subject)"} — {inReplyToMessage.from}
-            </Link>
-          ) : (
-            <>
-              {inReplyToMessage.subject || "(no subject)"} — {inReplyToMessage.from}
-            </>
-          )}
-        </Text>
-      </div>
-    </div>
-  );
+  const inReplyToRow = inReplyToMessage ? (
+    <InReplyToReferenceRow
+      variant="compose"
+      value={`${inReplyToMessage.subject || "(no subject)"} — ${inReplyToMessage.from}`}
+      onClick={onJumpToMessage ? () => onJumpToMessage(inReplyToMessage.id) : undefined}
+    />
+  ) : null;
   const subjectRow = (
     <div className={styles.composeGridRow}>
       <Text size="2" weight="medium" className={styles.label}>
@@ -362,7 +346,6 @@ export default function ComposeFields({
 
   return (
     <div className={styles.composeGrid}>
-      {inReplyToRow}
       {showFrom && fromRow}
       <RecipientField
         variant={variant}
@@ -437,6 +420,7 @@ export default function ComposeFields({
         />
       )}
       {subjectRow}
+      {inReplyToRow}
     </div>
   );
 }

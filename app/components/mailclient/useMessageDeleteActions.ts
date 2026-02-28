@@ -245,7 +245,7 @@ export function useMessageDeleteActions({
                     undoTargets.length === 1 ? "Message restored." : "Messages restored."
                   )
               : undefined,
-          durationMs: undoTargets.length > 0 ? 12000 : noticeSuccessTimeout
+          durationMs: noticeSuccessTimeout
         });
         return;
       }

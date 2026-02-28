@@ -1,22 +1,16 @@
 import { NextResponse } from "next/server";
-import { requireSessionAccountOr403, requireSessionOr401 } from "@/lib/auth";
+import { requireAccountContext } from "@/app/api/_helpers/accountContext";
 import { syncCalendarEvents } from "@/lib/caldav/sync";
 
 const syncInProgress = new Map<string, boolean>();
 
 export async function POST(request: Request) {
-  const session = requireSessionOr401(request);
-  if (session instanceof NextResponse) return session;
-
   const body = (await request.json().catch(() => null)) as { accountId?: string } | null;
   const accountId = body?.accountId?.trim() ?? "";
-
-  if (!accountId) {
-    return NextResponse.json({ ok: false, message: "Missing accountId" }, { status: 400 });
-  }
-
-  const access = await requireSessionAccountOr403(session, accountId);
-  if (access instanceof NextResponse) return access;
+  const accountContext = await requireAccountContext(request, accountId, {
+    missingAccountMessage: "Missing accountId"
+  });
+  if (accountContext instanceof NextResponse) return accountContext;
 
   if (syncInProgress.get(accountId)) {
     return NextResponse.json({ ok: true, message: "Sync already in progress", skipped: true });
@@ -35,21 +29,15 @@ export async function POST(request: Request) {
 }
 
 export async function GET(request: Request) {
-  const session = requireSessionOr401(request);
-  if (session instanceof NextResponse) return session;
-
   const { searchParams } = new URL(request.url);
   const accountId = searchParams.get("accountId")?.trim() ?? "";
-
-  if (!accountId) {
-    return NextResponse.json({ ok: false, message: "Missing accountId" }, { status: 400 });
-  }
-
-  const access = await requireSessionAccountOr403(session, accountId);
-  if (access instanceof NextResponse) return access;
+  const accountContext = await requireAccountContext(request, accountId, {
+    missingAccountMessage: "Missing accountId"
+  });
+  if (accountContext instanceof NextResponse) return accountContext;
 
   return NextResponse.json({
     ok: true,
-    syncing: syncInProgress.get(accountId) ?? false
+    syncing: syncInProgress.get(accountContext.accountId) ?? false
   });
 }

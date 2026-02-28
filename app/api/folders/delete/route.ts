@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import {
   deleteMessagesByFolderPrefix,
-  getAccounts,
   getFolders,
   saveFoldersForAccount,
   updateMessagesFolderPrefix
@@ -13,32 +12,25 @@ import {
   unsubscribeImapFolder
 } from "@/lib/mail/imap";
 import { notifyFolderDeleted } from "@/lib/mail/imapStreamRegistry";
-import { requireSessionAccountOr403, requireSessionOr401 } from "@/lib/auth";
 import { findTrashFolder, mailboxPathFromFolderId } from "@/app/api/message/delete/trashUtils";
+import { requireAccountContext } from "@/app/api/_helpers/accountContext";
 
 export async function POST(request: Request) {
-  const auth = await requireSessionOr401(request);
-  if (auth instanceof NextResponse) return auth;
-  const clientId = request.headers.get("x-noctua-client") ?? undefined;
   const startedAt = Date.now();
   const payload = (await request.json()) as { accountId: string; folderId: string };
   if (!payload?.accountId || !payload?.folderId) {
     return NextResponse.json({ ok: false, message: "Missing accountId or folderId" }, { status: 400 });
   }
-  const access = await requireSessionAccountOr403(auth, payload.accountId);
-  if (access instanceof NextResponse) return access;
-  const accounts = await getAccounts();
-  const account = accounts.find((item) => item.id === payload.accountId);
-  if (!account) {
-    return NextResponse.json({ ok: false, message: "Account not found" }, { status: 404 });
-  }
-  const folders = await getFolders(payload.accountId);
+  const accountContext = await requireAccountContext(request, payload.accountId);
+  if (accountContext instanceof NextResponse) return accountContext;
+  const { account, accountId, clientId } = accountContext;
+  const folders = await getFolders(accountId);
   const folder = folders.find((item) => item.id === payload.folderId);
   if (!folder) {
     return NextResponse.json({ ok: false, message: "Folder not found" }, { status: 404 });
   }
-  const mailboxPath = mailboxPathFromFolderId(folder.id, payload.accountId);
-  const trashFolder = findTrashFolder(folders, payload.accountId);
+  const mailboxPath = mailboxPathFromFolderId(folder.id, accountId);
+  const trashFolder = findTrashFolder(folders, accountId);
   if (!trashFolder) {
     return NextResponse.json(
       { ok: false, message: "Trash folder not found" },
@@ -46,7 +38,7 @@ export async function POST(request: Request) {
     );
   }
   const delimiter = trashFolder.delimiter ?? folder.delimiter ?? "/";
-  const trashMailbox = mailboxPathFromFolderId(trashFolder.id, payload.accountId);
+  const trashMailbox = mailboxPathFromFolderId(trashFolder.id, accountId);
   const isInTrash =
     folder.id === trashFolder.id ||
     mailboxPath === trashMailbox ||
@@ -65,9 +57,9 @@ export async function POST(request: Request) {
         clientId ? ` client=${clientId}` : ""
       } ${Date.now() - t0}ms`
     );
-    await notifyFolderDeleted(payload.accountId, folder.id);
+    await notifyFolderDeleted(accountId, folder.id);
     const t1 = Date.now();
-    await deleteMessagesByFolderPrefix(payload.accountId, mailboxPath);
+    await deleteMessagesByFolderPrefix(accountId, mailboxPath);
     console.info(
       `[db] delete messages folderPrefix=${mailboxPath} ${Date.now() - t1}ms`
     );
@@ -98,9 +90,9 @@ export async function POST(request: Request) {
   } catch (error) {
     console.info(`[imap] unsubscribe failed mailbox=${newPath} ${String(error)}`);
   }
-  await notifyFolderDeleted(payload.accountId, folder.id);
+  await notifyFolderDeleted(accountId, folder.id);
   const t1 = Date.now();
-  await updateMessagesFolderPrefix(payload.accountId, mailboxPath, newPath);
+  await updateMessagesFolderPrefix(accountId, mailboxPath, newPath);
   console.info(
     `[db] update messages folderPrefix=${mailboxPath} -> ${newPath} ${Date.now() - t1}ms`
   );

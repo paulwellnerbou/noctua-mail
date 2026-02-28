@@ -38,6 +38,17 @@ type UseMessageMutationsProps = {
   queueFilteredSearchRefresh: (hasCriteria: boolean) => void;
 };
 
+type SystemFlag = "seen" | "answered" | "flagged" | "draft" | "deleted";
+type MoveReconcileParams = {
+  movedMessageId: string;
+  destinationFolderId?: string | null;
+  destinationMailbox?: string;
+  flags?: string[];
+  source: string;
+  successTitle: string;
+  undoSuccessMessage: string;
+};
+
 export function useMessageMutations({
   activeAccountId,
   searchScope,
@@ -61,6 +72,142 @@ export function useMessageMutations({
   updateThreadCacheWithCategory,
   queueFilteredSearchRefresh
 }: UseMessageMutationsProps) {
+  const reconcileMessageFlags = useCallback((
+    message: Message,
+    flags: string[],
+    source: string
+  ) => {
+    const updatedMessage = applyFlagsToMessage(message, flags);
+    const shouldKeepUpdatedMessage = shouldKeepMessageInCurrentResults(updatedMessage);
+    updateMessagesWithCurrentResultPrune(
+      (item) => (item.id === message.id ? applyFlagsToMessage(item, flags) : item),
+      { source }
+    );
+    updateThreadCacheWithFlags(message.id, flags);
+    if (viewMessage?.id === message.id && !shouldKeepUpdatedMessage) {
+      setViewMessage(null);
+      setActiveMessageId("");
+    }
+    return updatedMessage;
+  }, [
+    setActiveMessageId,
+    setViewMessage,
+    shouldKeepMessageInCurrentResults,
+    updateMessagesWithCurrentResultPrune,
+    updateThreadCacheWithFlags,
+    viewMessage?.id
+  ]);
+
+  const requestMessageFlagMutation = useCallback(async (
+    messageId: string,
+    payload: { value: boolean; flag?: SystemFlag; keyword?: string }
+  ) => {
+    const res = await apiFetch("/api/message/flags", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        accountId: activeAccountId,
+        messageId,
+        ...payload
+      })
+    });
+    if (!res.ok) {
+      reportError(await readErrorMessage(res));
+      return null;
+    }
+    const data = (await res.json()) as { flags?: string[] };
+    return data.flags ?? [];
+  }, [activeAccountId, apiFetch, readErrorMessage, reportError]);
+
+  const reconcileMoveMutation = useCallback((
+    message: Message,
+    params: MoveReconcileParams
+  ) => {
+    const {
+      movedMessageId,
+      destinationFolderId,
+      destinationMailbox,
+      flags,
+      source,
+      successTitle,
+      undoSuccessMessage
+    } = params;
+    evictMessageCaches(Array.from(new Set([message.id, movedMessageId])));
+
+    const movedMessage =
+      searchScope === "all" && destinationFolderId
+        ? remapMessageReferenceIds(
+            applyFlagsToMessage(
+              {
+                ...message,
+                id: movedMessageId,
+                folderId: destinationFolderId,
+                mailboxPath: destinationMailbox ?? message.mailboxPath
+              },
+              flags ?? message.flags ?? []
+            ),
+            message.id,
+            movedMessageId
+          )
+        : null;
+
+    updateMessagesWithCurrentResultPrune((item) => {
+      if (item.id !== message.id) return item;
+      if (searchScope === "all" && destinationFolderId) {
+        return remapMessageReferenceIds(
+          applyFlagsToMessage(
+            {
+              ...item,
+              id: movedMessageId,
+              folderId: destinationFolderId,
+              mailboxPath: destinationMailbox ?? item.mailboxPath
+            },
+            flags ?? item.flags ?? []
+          ),
+          item.id,
+          movedMessageId
+        );
+      }
+      return null;
+    }, { source });
+
+    if (viewMessage?.id === message.id) {
+      if (!movedMessage || !shouldKeepMessageInCurrentResults(movedMessage)) {
+        setViewMessage(null);
+        setActiveMessageId("");
+      } else if (movedMessageId !== message.id) {
+        setViewMessage(movedMessage);
+        setActiveMessageId(movedMessageId);
+      }
+    }
+
+    const undoTarget: UndoMoveTarget = {
+      messageId: movedMessageId,
+      restoreFolderId: message.folderId
+    };
+    pushNotice({
+      type: "success",
+      title: successTitle,
+      description: getMessageSubjectForNotice(message),
+      actionLabel: destinationFolderId ? "Undo" : undefined,
+      onAction:
+        destinationFolderId
+          ? () => undoMoveOperation([undoTarget], activeAccountId, undoSuccessMessage)
+          : undefined,
+      durationMs: NOTICE_TIMEOUTS.success
+    });
+  }, [
+    activeAccountId,
+    evictMessageCaches,
+    pushNotice,
+    searchScope,
+    setActiveMessageId,
+    setViewMessage,
+    shouldKeepMessageInCurrentResults,
+    undoMoveOperation,
+    updateMessagesWithCurrentResultPrune,
+    viewMessage?.id
+  ]);
 
   const handleArchiveMessage = useCallback(async (message: Message) => {
     try {
@@ -77,69 +224,30 @@ export function useMessageMutations({
       const data = (await res.json()) as {
         action: "moved";
         archiveFolderId?: string | null;
+        archiveMailbox?: string;
+        flags?: string[];
         previousMessageId?: string;
         messageId?: string;
       };
-      const movedMessageId = data.messageId ?? message.id;
-      evictMessageCaches(
-        Array.from(new Set([message.id, movedMessageId]))
-      );
-      const shouldKeepArchivedMessage =
-        searchScope === "all" &&
-        Boolean(data.archiveFolderId) &&
-        shouldKeepMessageInCurrentResults(
-          remapMessageReferenceIds(
-            {
-              ...message,
-              id: movedMessageId,
-              folderId: data.archiveFolderId!
-            },
-            message.id,
-            movedMessageId
-          )
-        );
-      updateMessagesWithCurrentResultPrune((item) => {
-        if (item.id !== message.id) return item;
-        if (searchScope === "all" && data.archiveFolderId) {
-          return remapMessageReferenceIds(
-            { ...item, id: movedMessageId, folderId: data.archiveFolderId! },
-            item.id,
-            movedMessageId
-          );
-        }
-        return null;
-      }, { source: "archive-message" });
-      if (viewMessage?.id === message.id) {
-        if (!shouldKeepArchivedMessage) {
-          setViewMessage(null);
-          setActiveMessageId("");
-        } else if (movedMessageId !== message.id) {
-          setViewMessage({ ...message, id: movedMessageId, folderId: data.archiveFolderId! });
-          setActiveMessageId(movedMessageId);
-        }
-      }
-      const undoTarget: UndoMoveTarget = {
-        messageId: movedMessageId,
-        restoreFolderId: message.folderId
-      };
-      pushNotice({
-        type: "success",
-        title: "Message archived.",
-        description: getMessageSubjectForNotice(message),
-        actionLabel: data.archiveFolderId ? "Undo" : undefined,
-        onAction:
-          data.archiveFolderId
-            ? () => undoMoveOperation([undoTarget], activeAccountId, "Archive undone.")
-            : undefined,
-        durationMs: data.archiveFolderId ? 12000 : NOTICE_TIMEOUTS.success
+      reconcileMoveMutation(message, {
+        movedMessageId: data.messageId ?? message.id,
+        destinationFolderId: data.archiveFolderId,
+        destinationMailbox: data.archiveMailbox,
+        flags: data.flags,
+        source: "archive-message",
+        successTitle: "Message archived.",
+        undoSuccessMessage: "Archive undone."
       });
     } catch {
       reportError("Failed to archive message.");
     }
   }, [
-    activeAccountId, apiFetch, applyMoveReconcileSuppression, evictMessageCaches, pushNotice, readErrorMessage,
-    reportError, searchScope, setActiveMessageId, setViewMessage, shouldKeepMessageInCurrentResults,
-    undoMoveOperation, updateMessagesWithCurrentResultPrune, viewMessage?.id
+    activeAccountId,
+    apiFetch,
+    applyMoveReconcileSuppression,
+    readErrorMessage,
+    reconcileMoveMutation,
+    reportError
   ]);
 
   const handleUnsubscribe = useCallback(
@@ -233,68 +341,14 @@ export function useMessageMutations({
         previousMessageId?: string;
         messageId?: string;
       };
-      const movedMessageId = data.messageId ?? message.id;
-      evictMessageCaches(
-        Array.from(new Set([message.id, movedMessageId]))
-      );
-      const movedSpamMessage =
-        searchScope === "all" && data.junkFolderId
-          ? remapMessageReferenceIds(
-              applyFlagsToMessage(
-                {
-                  ...message,
-                  id: movedMessageId,
-                  folderId: data.junkFolderId!,
-                  mailboxPath: data.junkMailbox ?? message.mailboxPath
-                },
-                data.flags ?? message.flags ?? []
-              ),
-              message.id,
-              movedMessageId
-            )
-          : null;
-      updateMessagesWithCurrentResultPrune((item) => {
-        if (item.id !== message.id) return item;
-        if (searchScope === "all" && data.junkFolderId) {
-          return remapMessageReferenceIds(
-            applyFlagsToMessage(
-              {
-                ...item,
-                id: movedMessageId,
-                folderId: data.junkFolderId!,
-                mailboxPath: data.junkMailbox ?? item.mailboxPath
-              },
-              data.flags ?? item.flags ?? []
-            ),
-            item.id,
-            movedMessageId
-          );
-        }
-        return null;
-      }, { source: "mark-spam" });
-      if (viewMessage?.id === message.id) {
-        if (!movedSpamMessage || !shouldKeepMessageInCurrentResults(movedSpamMessage)) {
-          setViewMessage(null);
-          setActiveMessageId("");
-        } else if (movedMessageId !== message.id) {
-          setViewMessage(movedSpamMessage);
-          setActiveMessageId(movedMessageId);
-        }
-      }
-      const undoTarget: UndoMoveTarget = {
-        messageId: movedMessageId,
-        restoreFolderId: message.folderId
-      };
-      pushNotice({
-        type: "success",
-        title: "Message marked as spam.",
-        description: getMessageSubjectForNotice(message),
-        actionLabel: data.junkFolderId ? "Undo" : undefined,
-        onAction:
-          data.junkFolderId
-            ? () => undoMoveOperation([undoTarget], activeAccountId, "Spam action undone.")
-            : undefined,
-        durationMs: data.junkFolderId ? 12000 : NOTICE_TIMEOUTS.success
+      reconcileMoveMutation(message, {
+        movedMessageId: data.messageId ?? message.id,
+        destinationFolderId: data.junkFolderId,
+        destinationMailbox: data.junkMailbox,
+        flags: data.flags,
+        source: "mark-spam",
+        successTitle: "Message marked as spam.",
+        undoSuccessMessage: "Spam action undone."
       });
     } catch {
       reportError("Failed to mark message as spam.");
@@ -306,9 +360,13 @@ export function useMessageMutations({
       });
     }
   }, [
-    activeAccountId, apiFetch, applyMoveReconcileSuppression, evictMessageCaches, pushNotice, readErrorMessage,
-    reportError, searchScope, setActiveMessageId, setPendingMessageActions, setViewMessage,
-    shouldKeepMessageInCurrentResults, undoMoveOperation, updateMessagesWithCurrentResultPrune, viewMessage?.id
+    activeAccountId,
+    apiFetch,
+    applyMoveReconcileSuppression,
+    readErrorMessage,
+    reconcileMoveMutation,
+    reportError,
+    setPendingMessageActions
   ]);
 
   const handleMarkNotSpam = useCallback(async (message: Message) => {
@@ -332,68 +390,14 @@ export function useMessageMutations({
         previousMessageId?: string;
         messageId?: string;
       };
-      const movedMessageId = data.messageId ?? message.id;
-      evictMessageCaches(
-        Array.from(new Set([message.id, movedMessageId]))
-      );
-      const movedInboxMessage =
-        searchScope === "all" && data.inboxFolderId
-          ? remapMessageReferenceIds(
-              applyFlagsToMessage(
-                {
-                  ...message,
-                  id: movedMessageId,
-                  folderId: data.inboxFolderId!,
-                  mailboxPath: data.inboxMailbox ?? message.mailboxPath
-                },
-                data.flags ?? message.flags ?? []
-              ),
-              message.id,
-              movedMessageId
-            )
-          : null;
-      updateMessagesWithCurrentResultPrune((item) => {
-        if (item.id !== message.id) return item;
-        if (searchScope === "all" && data.inboxFolderId) {
-          return remapMessageReferenceIds(
-            applyFlagsToMessage(
-              {
-                ...item,
-                id: movedMessageId,
-                folderId: data.inboxFolderId!,
-                mailboxPath: data.inboxMailbox ?? item.mailboxPath
-              },
-              data.flags ?? item.flags ?? []
-            ),
-            item.id,
-            movedMessageId
-          );
-        }
-        return null;
-      }, { source: "mark-not-spam" });
-      if (viewMessage?.id === message.id) {
-        if (!movedInboxMessage || !shouldKeepMessageInCurrentResults(movedInboxMessage)) {
-          setViewMessage(null);
-          setActiveMessageId("");
-        } else if (movedMessageId !== message.id) {
-          setViewMessage(movedInboxMessage);
-          setActiveMessageId(movedMessageId);
-        }
-      }
-      const undoTarget: UndoMoveTarget = {
-        messageId: movedMessageId,
-        restoreFolderId: message.folderId
-      };
-      pushNotice({
-        type: "success",
-        title: "Message marked as not spam.",
-        description: getMessageSubjectForNotice(message),
-        actionLabel: data.inboxFolderId ? "Undo" : undefined,
-        onAction:
-          data.inboxFolderId
-            ? () => undoMoveOperation([undoTarget], activeAccountId, "Not-spam action undone.")
-            : undefined,
-        durationMs: data.inboxFolderId ? 12000 : NOTICE_TIMEOUTS.success
+      reconcileMoveMutation(message, {
+        movedMessageId: data.messageId ?? message.id,
+        destinationFolderId: data.inboxFolderId,
+        destinationMailbox: data.inboxMailbox,
+        flags: data.flags,
+        source: "mark-not-spam",
+        successTitle: "Message marked as not spam.",
+        undoSuccessMessage: "Not-spam action undone."
       });
     } catch {
       reportError("Failed to mark message as not spam.");
@@ -405,67 +409,48 @@ export function useMessageMutations({
       });
     }
   }, [
-    activeAccountId, apiFetch, applyMoveReconcileSuppression, evictMessageCaches, pushNotice, readErrorMessage,
-    reportError, searchScope, setActiveMessageId, setPendingMessageActions, setViewMessage,
-    shouldKeepMessageInCurrentResults, undoMoveOperation, updateMessagesWithCurrentResultPrune, viewMessage?.id
+    activeAccountId,
+    apiFetch,
+    applyMoveReconcileSuppression,
+    readErrorMessage,
+    reconcileMoveMutation,
+    reportError,
+    setPendingMessageActions
   ]);
 
   const updateFlagState = useCallback(async (
     message: Message,
-    flag: "seen" | "answered" | "flagged" | "draft" | "deleted",
+    flag: SystemFlag,
     value: boolean
   ) => {
     try {
-      const res = await apiFetch("/api/message/flags", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          accountId: activeAccountId,
-          messageId: message.id,
-          flag,
-          value
-        })
-      });
-      if (!res.ok) {
-        reportError(await readErrorMessage(res));
-        return;
-      }
-      const data = (await res.json()) as { flags: string[] };
-      const updatedMessage = applyFlagsToMessage(message, data.flags);
-      const shouldKeepUpdatedMessage = shouldKeepMessageInCurrentResults(updatedMessage);
-      updateMessagesWithCurrentResultPrune(
-        (item) => (item.id === message.id ? applyFlagsToMessage(item, data.flags) : item),
-        { source: "update-flag-state" }
-      );
-      updateThreadCacheWithFlags(message.id, data.flags);
-      if (flag === "seen") {
-        const nextSeen = Boolean(updatedMessage.seen);
+      const flags = await requestMessageFlagMutation(message.id, { flag, value });
+      if (!flags) return;
+      const updatedMessage = reconcileMessageFlags(message, flags, "update-flag-state");
+      const previousSeen = Boolean(message.seen);
+      const nextSeen = Boolean(updatedMessage.seen);
+      if (previousSeen !== nextSeen) {
         setFolders((prev) =>
           prev.map((folder) => {
             if (folder.id !== message.folderId) return folder;
             const unreadCount = folder.unreadCount ?? 0;
-            if (message.seen && !nextSeen) {
+            if (previousSeen && !nextSeen) {
               return { ...folder, unreadCount: unreadCount + 1 };
             }
-            if (!message.seen && nextSeen) {
+            if (!previousSeen && nextSeen) {
               return { ...folder, unreadCount: Math.max(0, unreadCount - 1) };
             }
             return folder;
           })
         );
       }
-      if (viewMessage?.id === message.id && !shouldKeepUpdatedMessage) {
-        setViewMessage(null);
-        setActiveMessageId("");
-      }
       queueFilteredSearchRefresh(hasFilteredSearchCriteria);
     } catch {
       reportError("Failed to update message flag.");
     }
   }, [
-    activeAccountId, apiFetch, hasFilteredSearchCriteria, queueFilteredSearchRefresh, readErrorMessage, reportError,
-    setActiveMessageId, setFolders, setViewMessage, shouldKeepMessageInCurrentResults, updateMessagesWithCurrentResultPrune,
-    updateThreadCacheWithFlags, viewMessage?.id
+    hasFilteredSearchCriteria, queueFilteredSearchRefresh, reconcileMessageFlags, reportError,
+    requestMessageFlagMutation, setFolders
   ]);
 
   const updateKeywordFlag = useCallback(async (
@@ -474,40 +459,16 @@ export function useMessageMutations({
     value: boolean
   ) => {
     try {
-      const res = await apiFetch("/api/message/flags", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          accountId: activeAccountId,
-          messageId: message.id,
-          keyword,
-          value
-        })
-      });
-      if (!res.ok) {
-        reportError(await readErrorMessage(res));
-        return;
-      }
-      const data = (await res.json()) as { flags: string[] };
-      const updatedMessage = applyFlagsToMessage(message, data.flags);
-      const shouldKeepUpdatedMessage = shouldKeepMessageInCurrentResults(updatedMessage);
-      updateMessagesWithCurrentResultPrune(
-        (item) => (item.id === message.id ? applyFlagsToMessage(item, data.flags) : item),
-        { source: "update-keyword-flag" }
-      );
-      updateThreadCacheWithFlags(message.id, data.flags);
-      if (viewMessage?.id === message.id && !shouldKeepUpdatedMessage) {
-        setViewMessage(null);
-        setActiveMessageId("");
-      }
+      const flags = await requestMessageFlagMutation(message.id, { keyword, value });
+      if (!flags) return;
+      reconcileMessageFlags(message, flags, "update-keyword-flag");
       queueFilteredSearchRefresh(hasFilteredSearchCriteria);
     } catch {
       reportError("Failed to update message keyword.");
     }
   }, [
-    activeAccountId, apiFetch, hasFilteredSearchCriteria, queueFilteredSearchRefresh, readErrorMessage, reportError,
-    setActiveMessageId, setViewMessage, shouldKeepMessageInCurrentResults, updateMessagesWithCurrentResultPrune,
-    updateThreadCacheWithFlags, viewMessage?.id
+    hasFilteredSearchCriteria, queueFilteredSearchRefresh, reconcileMessageFlags, reportError,
+    requestMessageFlagMutation
   ]);
 
   const handleSetCategory = useCallback(async (
@@ -589,53 +550,22 @@ export function useMessageMutations({
     fromKeyword: string,
     toKeyword: string
   ): Promise<void> => {
-    const removeRes = await apiFetch("/api/message/flags", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        accountId: activeAccountId,
-        messageId: msg.id,
-        keyword: fromKeyword,
-        value: false
-      })
+    const removeFlags = await requestMessageFlagMutation(msg.id, {
+      keyword: fromKeyword,
+      value: false
     });
-    if (!removeRes.ok) {
-      reportError(await readErrorMessage(removeRes));
-      return;
-    }
-    await removeRes.json();
+    if (!removeFlags) return;
 
-    const addRes = await apiFetch("/api/message/flags", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        accountId: activeAccountId,
-        messageId: msg.id,
-        keyword: toKeyword,
-        value: true
-      })
+    const finalFlags = await requestMessageFlagMutation(msg.id, {
+      keyword: toKeyword,
+      value: true
     });
-    if (!addRes.ok) {
-      reportError(await readErrorMessage(addRes));
-      return;
-    }
-    const addData = (await addRes.json()) as { flags: string[] };
-    const finalFlags = addData.flags;
-    
-    const updatedMessage = applyFlagsToMessage(msg, finalFlags);
-    const shouldKeepUpdatedMessage = shouldKeepMessageInCurrentResults(updatedMessage);
-    updateMessagesWithCurrentResultPrune(
-      (item) => (item.id === msg.id ? applyFlagsToMessage(item, finalFlags) : item),
-      { source: "transition-todo-state" }
-    );
-    updateThreadCacheWithFlags(msg.id, finalFlags);
-    if (viewMessage?.id === msg.id && !shouldKeepUpdatedMessage) {
-      setViewMessage(null);
-      setActiveMessageId("");
-    }
+    if (!finalFlags) return;
+
+    reconcileMessageFlags(msg, finalFlags, "transition-todo-state");
   }, [
-    activeAccountId, apiFetch, readErrorMessage, reportError, setActiveMessageId, setViewMessage,
-    shouldKeepMessageInCurrentResults, updateMessagesWithCurrentResultPrune, updateThreadCacheWithFlags, viewMessage?.id
+    reconcileMessageFlags,
+    requestMessageFlagMutation
   ]);
 
   const toggleTodoFlag = useCallback(async (
@@ -671,111 +601,48 @@ export function useMessageMutations({
       let finalFlags = message.flags ?? [];
       
       if (hasTodo) {
-        const removeRes = await apiFetch("/api/message/flags", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            accountId: activeAccountId,
-            messageId: message.id,
-            keyword: TODO_FLAG,
-            value: false
-          })
+        const removeFlags = await requestMessageFlagMutation(message.id, {
+          keyword: TODO_FLAG,
+          value: false
         });
-        if (!removeRes.ok) {
-          reportError(await readErrorMessage(removeRes));
-          return;
-        }
-        const removeData = (await removeRes.json()) as { flags: string[] };
-        finalFlags = removeData.flags;
-        
-        const addRes = await apiFetch("/api/message/flags", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            accountId: activeAccountId,
-            messageId: message.id,
-            keyword: DONE_FLAG,
-            value: true
-          })
+        if (!removeFlags) return;
+
+        const addFlags = await requestMessageFlagMutation(message.id, {
+          keyword: DONE_FLAG,
+          value: true
         });
-        if (!addRes.ok) {
-          reportError(await readErrorMessage(addRes));
-          return;
-        }
-        const addData = (await addRes.json()) as { flags: string[] };
-        finalFlags = addData.flags;
+        if (!addFlags) return;
+        finalFlags = addFlags;
       } else if (hasDone) {
-        const removeRes = await apiFetch("/api/message/flags", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            accountId: activeAccountId,
-            messageId: message.id,
-            keyword: DONE_FLAG,
-            value: false
-          })
+        const removeFlags = await requestMessageFlagMutation(message.id, {
+          keyword: DONE_FLAG,
+          value: false
         });
-        if (!removeRes.ok) {
-          reportError(await readErrorMessage(removeRes));
-          return;
-        }
-        const removeData = (await removeRes.json()) as { flags: string[] };
-        finalFlags = removeData.flags;
-        
-        const addRes = await apiFetch("/api/message/flags", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            accountId: activeAccountId,
-            messageId: message.id,
-            keyword: TODO_FLAG,
-            value: true
-          })
+        if (!removeFlags) return;
+
+        const addFlags = await requestMessageFlagMutation(message.id, {
+          keyword: TODO_FLAG,
+          value: true
         });
-        if (!addRes.ok) {
-          reportError(await readErrorMessage(addRes));
-          return;
-        }
-        const addData = (await addRes.json()) as { flags: string[] };
-        finalFlags = addData.flags;
+        if (!addFlags) return;
+        finalFlags = addFlags;
       } else {
-        const res = await apiFetch("/api/message/flags", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            accountId: activeAccountId,
-            messageId: message.id,
-            keyword: TODO_FLAG,
-            value: true
-          })
+        const flags = await requestMessageFlagMutation(message.id, {
+          keyword: TODO_FLAG,
+          value: true
         });
-        if (!res.ok) {
-          reportError(await readErrorMessage(res));
-          return;
-        }
-        const data = (await res.json()) as { flags: string[] };
-        finalFlags = data.flags;
+        if (!flags) return;
+        finalFlags = flags;
       }
       
-      const updatedMessage = applyFlagsToMessage(message, finalFlags);
-      const shouldKeepUpdatedMessage = shouldKeepMessageInCurrentResults(updatedMessage);
-      updateMessagesWithCurrentResultPrune(
-        (item) => (item.id === message.id ? applyFlagsToMessage(item, finalFlags) : item),
-        { source: "toggle-todo-flag" }
-      );
-      updateThreadCacheWithFlags(message.id, finalFlags);
-      if (viewMessage?.id === message.id && !shouldKeepUpdatedMessage) {
-        setViewMessage(null);
-        setActiveMessageId("");
-      }
+      reconcileMessageFlags(message, finalFlags, "toggle-todo-flag");
       queueFilteredSearchRefresh(hasFilteredSearchCriteria);
     } catch {
       reportError("Failed to update To-Do flag.");
     }
   }, [
-    activeAccountId, apiFetch, hasFilteredSearchCriteria, queueFilteredSearchRefresh, readErrorMessage, reportError,
-    setActiveMessageId, setViewMessage, shouldKeepMessageInCurrentResults, transitionTodoState,
-    updateMessagesWithCurrentResultPrune, updateThreadCacheWithFlags, viewMessage?.id
+    hasFilteredSearchCriteria, queueFilteredSearchRefresh, reconcileMessageFlags, reportError,
+    requestMessageFlagMutation, transitionTodoState
   ]);
 
   const toggleFlaggedFlag = useCallback(async (

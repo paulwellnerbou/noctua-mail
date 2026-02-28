@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
-import { getMessageById } from "@/lib/db";
-import { requireSessionAccountOr403, requireSessionOr401 } from "@/lib/auth";
+import { requireAccountAndMessageContext } from "../routeHelpers";
 
 /**
  * Parse List-Unsubscribe header to extract HTTPS URLs and mailto URLs.
@@ -45,29 +44,19 @@ function parseUnsubscribeHeaders(headerString: string): {
 }
 
 export async function POST(request: Request) {
-  const session = requireSessionOr401(request);
-  if (session instanceof NextResponse) return session;
-
   const payload = (await request.json().catch(() => null)) as
     | { accountId?: string; messageId?: string }
     | null;
-
-  const accountId = payload?.accountId?.trim();
-  const messageId = payload?.messageId?.trim();
-  if (!accountId || !messageId) {
-    return NextResponse.json(
-      { ok: false, message: "Missing accountId or messageId" },
-      { status: 400 }
-    );
-  }
-
-  const access = await requireSessionAccountOr403(session, accountId);
-  if (access instanceof NextResponse) return access;
-
-  const message = await getMessageById(accountId, messageId);
-  if (!message) {
-    return NextResponse.json({ ok: false, message: "Message not found" }, { status: 404 });
-  }
+  const context = await requireAccountAndMessageContext(
+    request,
+    {
+      accountId: payload?.accountId?.trim(),
+      messageId: payload?.messageId?.trim()
+    },
+    { missingFieldsMessage: "Missing accountId or messageId" }
+  );
+  if (context instanceof NextResponse) return context;
+  const { message } = context;
 
   if (!message.listUnsubscribe) {
     return NextResponse.json(
