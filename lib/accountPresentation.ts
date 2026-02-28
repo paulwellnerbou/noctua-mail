@@ -10,7 +10,13 @@ export function sanitizeAccountForClient(account: Account): Account {
     smtp: {
       ...account.smtp,
       password: ""
-    }
+    },
+    caldav: account.caldav
+      ? {
+          ...account.caldav,
+          password: ""
+        }
+      : undefined
   };
 }
 

@@ -12,6 +12,7 @@ import { getMessageListDateDisplay } from "./messageDateDisplay";
 import styles from "./MessageRow.module.css";
 import CategoryBadge from "../CategoryBadge";
 import FlagBadge from "../message/FlagBadge";
+import MessageBadge from "../message/MessageBadge";
 
 type MessageRowProps = {
   message: Message;
@@ -428,13 +429,13 @@ function MessageRow({
                   <CategoryBadge category={message.category as any} showText={false} />
                 )}
             {(threadHasFlagged ?? message.flagged) && (
-              <FlagBadge kind="flagged" onClick={() => toggleFlaggedFlag(message, collapsedThreadMessages)} />
+              <FlagBadge onClick={() => toggleFlaggedFlag(message, collapsedThreadMessages)} />
             )}
             {(threadHasTodo ?? hasTodoFlag(message)) && (
-              <FlagBadge kind="todo" onClick={() => toggleTodoFlag(message, collapsedThreadMessages, "todo")} />
+              <MessageBadge kind="todo" onClick={() => toggleTodoFlag(message, collapsedThreadMessages, "todo")} />
             )}
             {(threadHasDone ?? hasDoneFlag(message)) && (
-              <FlagBadge kind="done" onClick={() => toggleTodoFlag(message, collapsedThreadMessages, "done")} />
+              <MessageBadge kind="done" onClick={() => toggleTodoFlag(message, collapsedThreadMessages, "done")} />
             )}
           </div>
         )}

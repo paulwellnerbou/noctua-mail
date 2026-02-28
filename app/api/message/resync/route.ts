@@ -1,39 +1,23 @@
 import { NextResponse } from "next/server";
 import {
-  getAccounts,
-  getMessageById,
   getMessageIdsByMessageIds,
   getThreadIdsByMessageIds,
   upsertMessages
 } from "@/lib/db";
 import { syncImapMessage } from "@/lib/mail/imap";
 import { sanitizeSyncedMessage } from "@/lib/mail/syncMessageSanitizer";
-import { requireSessionAccountOr403, requireSessionOr401 } from "@/lib/auth";
+import { collectThreadReferenceIds, resolveThreadingForItems } from "@/lib/threading";
+import { requireAccountAndMessageContext } from "../routeHelpers";
 
 export async function POST(request: Request) {
-  const session = requireSessionOr401(request);
-  if (session instanceof NextResponse) return session;
-  const clientId = request.headers.get("x-noctua-client") ?? undefined;
   const payload = (await request.json()) as { accountId: string; messageId: string };
-  if (!payload?.accountId || !payload?.messageId) {
-    return NextResponse.json({ ok: false, message: "Missing accountId/messageId" }, { status: 400 });
-  }
-  const access = await requireSessionAccountOr403(session, payload.accountId);
-  if (access instanceof NextResponse) return access;
-
-  const accounts = await getAccounts();
-  const account = accounts.find((item) => item.id === payload.accountId);
-  if (!account) {
-    return NextResponse.json({ ok: false, message: "Account not found" }, { status: 404 });
-  }
-
-  const existing = await getMessageById(payload.accountId, payload.messageId);
-  if (!existing) {
-    return NextResponse.json(
-      { ok: false, message: "Message not found in local cache. If a sync is in progress, retry later." },
-      { status: 404 }
-    );
-  }
+  const context = await requireAccountAndMessageContext(request, payload, {
+    missingFieldsMessage: "Missing accountId/messageId",
+    missingMessageMessage:
+      "Message not found in local cache. If a sync is in progress, retry later."
+  });
+  if (context instanceof NextResponse) return context;
+  const { account, accountId, clientId, message: existing } = context;
 
   const mailboxPath = existing?.mailboxPath;
   const imapUid = typeof existing?.imapUid === "number" ? existing.imapUid : undefined;
@@ -49,46 +33,24 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: false, message: "Message not found on server." }, { status: 404 });
   }
 
-  const referenceIds = new Set<string>();
-  if (message.inReplyTo) referenceIds.add(message.inReplyTo);
-  (message.references ?? []).forEach((ref) => referenceIds.add(ref));
+  const referenceIds = collectThreadReferenceIds([message]);
   const externalThreadIds =
-    referenceIds.size > 0
-      ? await getThreadIdsByMessageIds(account.id, Array.from(referenceIds))
+    referenceIds.length > 0
+      ? await getThreadIdsByMessageIds(account.id, referenceIds)
       : new Map<string, string>();
   const externalParentIds =
-    referenceIds.size > 0
-      ? await getMessageIdsByMessageIds(account.id, Array.from(referenceIds))
+    referenceIds.length > 0
+      ? await getMessageIdsByMessageIds(account.id, referenceIds)
       : new Map<string, string>();
-  const refs = message.references ?? [];
-  const resolvedThreadId = (() => {
-    if (message.inReplyTo) {
-      const external = externalThreadIds.get(message.inReplyTo);
-      if (external) return external;
-    }
-    const refMatch = refs.find((ref) => externalThreadIds.has(ref));
-    if (refMatch) return externalThreadIds.get(refMatch) ?? undefined;
-    if (message.inReplyTo) return message.inReplyTo;
-    if (refs.length > 0) return refs[refs.length - 1];
-    return message.threadId;
-  })();
-  const resolvedParentId = (() => {
-    if (message.inReplyTo) {
-      const external = externalParentIds.get(message.inReplyTo);
-      if (external) return external;
-    }
-    for (let i = refs.length - 1; i >= 0; i -= 1) {
-      const ref = refs[i];
-      const external = externalParentIds.get(ref);
-      if (external) return external;
-    }
-    return undefined;
-  })();
+  const [resolved] = resolveThreadingForItems([message], {
+    externalThreadIds,
+    externalParentIds
+  });
   const sanitized = await sanitizeSyncedMessage(
     {
       ...message,
-      threadId: resolvedThreadId ?? message.threadId,
-      parentId: resolvedParentId
+      threadId: resolved.threadId,
+      parentId: resolved.parentId
     },
     account.id
   );

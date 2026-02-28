@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
 
-import { getAccounts, getLatestMessageUid } from "@/lib/db";
+import { getLatestMessageUid } from "@/lib/db";
 import { getImapLogger, logImapOp } from "@/lib/mail/imapLogger";
 import { bindImapClientError, buildImapFlowOptions } from "@/lib/mail/imapClientOptions";
-import { requireSessionAccountOr403, requireSessionOr401 } from "@/lib/auth";
+import { requireAccountContext } from "@/app/api/_helpers/accountContext";
 
 type EnvelopeAddress = { name?: string | null; mailbox?: string | null; host?: string | null };
 type Envelope = { subject?: string | null; from?: EnvelopeAddress[] | null; date?: Date | null; messageId?: string | null };
@@ -19,25 +19,16 @@ function formatAddress(addresses?: EnvelopeAddress[] | null) {
 }
 
 export async function GET(request: Request) {
-  const session = requireSessionOr401(request);
-  if (session instanceof NextResponse) return session;
-  const clientId = request.headers.get("x-noctua-client") ?? undefined;
   const { searchParams } = new URL(request.url);
-  const accountId = searchParams.get("accountId");
+  const accountIdParam = searchParams.get("accountId");
   const mailbox = searchParams.get("mailbox") ?? "INBOX";
   const sinceUidNextParam = searchParams.get("sinceUidNext");
   const sinceUidNext = sinceUidNextParam ? Number(sinceUidNextParam) : null;
-  if (!accountId) {
-    return NextResponse.json({ ok: false, message: "Missing accountId" }, { status: 400 });
-  }
-  const access = await requireSessionAccountOr403(session, accountId);
-  if (access instanceof NextResponse) return access;
-
-  const accounts = await getAccounts();
-  const account = accounts.find((item) => item.id === accountId);
-  if (!account) {
-    return NextResponse.json({ ok: false, message: "Account not found" }, { status: 404 });
-  }
+  const accountContext = await requireAccountContext(request, accountIdParam ?? "", {
+    missingAccountMessage: "Missing accountId"
+  });
+  if (accountContext instanceof NextResponse) return accountContext;
+  const { accountId, account, clientId } = accountContext;
 
   let ImapFlow: typeof import("imapflow").ImapFlow;
   try {

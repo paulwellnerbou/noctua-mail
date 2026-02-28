@@ -57,21 +57,33 @@ export default function ThreadView({
             supportsThreads && isThreadLoading && !hasFullThread
               ? [activeMessageFromThread]
               : activeThread;
-          return visibleThread.map((message) => (
-            <div key={message.id} className={styles.threadItem}>
-              <ThreadMessageCard
-                message={message}
-                bodyLoading={activeMessageBodyLoading && message.id === activeMessageFromThread.id}
-                bodyLoadError={
-                  activeMessageBodyError && message.id === activeMessageFromThread.id
-                    ? activeThreadError
-                    : null
-                }
-                {...messageCardProps}
-              />
-              {composeReplyMessageId === message.id && renderComposeInlineCard?.()}
-            </div>
-          ));
+          const { threadViewMode, collapsedMessages } = messageCardProps;
+          return (
+            <>
+              {visibleThread.map((message) => {
+                const isCompactCollapsed =
+                  threadViewMode === "compact" && Boolean(collapsedMessages[message.id]);
+                return (
+                <div
+                  key={message.id}
+                  className={`${styles.threadItem} ${isCompactCollapsed ? styles.compactThreadItem : ""}`}
+                >
+                  <ThreadMessageCard
+                    message={message}
+                    bodyLoading={activeMessageBodyLoading && message.id === activeMessageFromThread.id}
+                    bodyLoadError={
+                      activeMessageBodyError && message.id === activeMessageFromThread.id
+                        ? activeThreadError
+                        : null
+                    }
+                    {...messageCardProps}
+                  />
+                  {composeReplyMessageId === message.id && renderComposeInlineCard?.()}
+                </div>
+                );
+              })}
+            </>
+          );
         })()
       ) : showComposeInline ? null : (
         <Text size="2" color="gray" className={styles.empty}>

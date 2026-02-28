@@ -838,11 +838,15 @@ a {
   position: absolute;
   left: 50%;
   transform: translateX(-50%);
-  pointer-events: none;
+  cursor: pointer;
   color: var(--muted);
   text-align: center;
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
+  font-size: 11px;
+}
+.bottom-center-time:hover {
+  color: var(--text);
 }
 
 .bottom-muted {

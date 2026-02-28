@@ -1,23 +1,21 @@
-import { useEffect, useMemo, useState } from "react";
 import type React from "react";
 import { CalendarDays, GitBranch, MoveRight, Paperclip, Trash2 } from "lucide-react";
 import { Badge, IconButton, Text } from "@radix-ui/themes";
 import { badgeColors } from "@/lib/ui/badgeColors";
-import type { AccountDateFormat, Message } from "@/lib/data";
+import type { Message } from "@/lib/data";
 import { CALENDAR_INVITE_FLAG, hasMessageFlag } from "@/lib/messageFlags";
 import badgeStyles from "../message/MessageBadge.module.css";
 import CategoryBadge from "../CategoryBadge";
 import FlagBadge from "../message/FlagBadge";
+import MessageBadge from "../message/MessageBadge";
 import { shouldShowAttachmentIcon, hasTodoFlag, hasDoneFlag } from "../utils/messageHelpers";
-import {
-  buildMessageListItems,
-  type MessageGroup,
-  type ThreadNode
-} from "./listModel";
 import { getMessageListDateDisplay } from "./messageDateDisplay";
-import { useSelectionSnapshot, type SelectionStore } from "./selectionStore";
+import { useSelectionSnapshot } from "./selectionStore";
 import ThreadMarkers from "./ThreadMarkers";
 import MessageListRenderer from "./MessageListRenderer";
+import type { MessageThreadListProps } from "./messageListViewTypes";
+import { useMessageListItems } from "./useMessageListItems";
+import { useThreadListAnimationState } from "./useThreadListAnimationState";
 import {
   getDragThreadMessageIds,
   getThreadRowDisplayMeta,
@@ -30,68 +28,6 @@ import {
 import { getCollapsedThreadBadgeUnion } from "./threadBadgeUnion";
 import groupStyles from "./MessageCardList.module.css";
 import styles from "./MessageThreadList.module.css";
-
-type MessageThreadListProps = {
-  state: {
-    groupedMessages: MessageGroup[];
-    collapsedGroups: Record<string, boolean>;
-    collapsedThreads: Record<string, boolean>;
-    supportsThreads: boolean;
-    includeThreadAcrossFolders: boolean;
-    searchScope: "folder" | "all";
-    activeFolderId: string;
-    messageById: Map<string, Message>;
-    selectionStore: SelectionStore;
-    draggingMessageIds: Set<string>;
-    pendingMessageActions: Set<string>;
-    preferToDisplay: boolean;
-    userEmail?: string;
-    dateFormat?: AccountDateFormat;
-  };
-  refs: {
-    scrollRef: React.RefObject<HTMLDivElement | null>;
-  };
-  actions: {
-    setCollapsedGroups: React.Dispatch<React.SetStateAction<Record<string, boolean>>>;
-    setCollapsedThreads: React.Dispatch<React.SetStateAction<Record<string, boolean>>>;
-    handleMessageDragStart: (event: React.DragEvent, message: Message, threadMessageIds?: string[]) => void;
-    handleMessageDragEnd: () => void;
-    handleRowClick: (event: React.MouseEvent, message: Message) => void;
-    handleSelectMessage: (message: Message) => void;
-    selectRangeTo: (messageId: string) => void;
-    toggleMessageSelection: (messageId: string, replace?: boolean, setActive?: boolean) => void;
-    selectCollapsedThread: (
-      flat: Array<{ message: Message; depth: number }>,
-      target: Message,
-      options?: { isFlaggedGroup?: boolean }
-    ) => void;
-    handleDeleteMessage: (message: Message) => void;
-    toggleFlaggedFlag: (message: Message, collapsedThreadMessages?: Message[]) => void;
-    toggleTodoFlag: (message: Message, collapsedThreadMessages?: Message[], clickedBadge?: "todo" | "done") => void;
-  };
-  helpers: {
-    buildThreadTree: (items: Message[]) => ThreadNode[];
-    flattenThread: (
-      node: ThreadNode,
-      depth?: number,
-      visited?: Set<string>
-    ) => Array<{ message: Message; depth: number }>;
-    getThreadLatestDate: (node: ThreadNode) => number;
-    getGroupLabel: (group: MessageGroup) => React.ReactNode;
-    renderUnreadDot: (
-      message: Message,
-      options?: { seen?: boolean; threadMessages?: Message[] }
-    ) => React.ReactNode;
-    renderFolderBadges: (folderIds: string[]) => React.ReactNode;
-    handleShowRelated: (message: Message) => void;
-    isTrashFolder: (folderId?: string) => boolean;
-    renderMessageMenu: (
-      message: Message,
-      view: "table" | "list",
-      onOpenChange?: (open: boolean) => void
-    ) => React.ReactNode;
-  };
-};
 
 export default function MessageThreadList({
   state,
@@ -144,31 +80,16 @@ export default function MessageThreadList({
     renderMessageMenu
   } = helpers;
 
-  const [lastGroupToggle, setLastGroupToggle] = useState<{
-    key: string;
-    open: boolean;
-    at: number;
-  } | null>(null);
-  const [lastThreadToggle, setLastThreadToggle] = useState<{
-    key: string;
-    open: boolean;
-    at: number;
-  } | null>(null);
-  const [lastNestedToggle, setLastNestedToggle] = useState<{
-    key: string;
-    open: boolean;
-    at: number;
-  } | null>(null);
-  const [animationClock, setAnimationClock] = useState(0);
-  const [collapsedNestedMessages, setCollapsedNestedMessages] = useState<Record<string, boolean>>({});
-
-  useEffect(() => {
-    if (!animationClock) return;
-    const timer = window.setTimeout(() => setAnimationClock(0), 220);
-    return () => {
-      window.clearTimeout(timer);
-    };
-  }, [animationClock]);
+  const {
+    lastGroupToggle,
+    lastThreadToggle,
+    lastNestedToggle,
+    animationClock,
+    collapsedNestedMessages,
+    toggleGroup,
+    toggleThread,
+    toggleNested
+  } = useThreadListAnimationState();
 
   const rowHeight = 40;
   const groupHeight = 28;
@@ -178,40 +99,22 @@ export default function MessageThreadList({
   const activeThreadKey =
     activeMessage?.threadId ?? activeMessage?.messageId ?? activeMessage?.id;
 
-  const listItems = useMemo(
-    () =>
-      buildMessageListItems({
-        groupedMessages,
-        collapsedGroups,
-        collapsedThreads,
-        supportsThreads,
-        includeThreadAcrossFolders,
-        searchScope,
-        activeFolderId,
-        buildThreadTree,
-        flattenThread,
-        getThreadLatestDate,
-        userEmail,
-        preferToDisplay,
-        mode: "nested",
-        collapsedNestedMessages
-      }),
-    [
-      groupedMessages,
-      collapsedGroups,
-      collapsedThreads,
-      supportsThreads,
-      includeThreadAcrossFolders,
-      searchScope,
-      activeFolderId,
-      buildThreadTree,
-      flattenThread,
-      getThreadLatestDate,
-      userEmail,
-      preferToDisplay,
-      collapsedNestedMessages
-    ]
-  );
+  const listItems = useMessageListItems({
+    groupedMessages,
+    collapsedGroups,
+    collapsedThreads,
+    supportsThreads,
+    includeThreadAcrossFolders,
+    searchScope,
+    activeFolderId,
+    buildThreadTree,
+    flattenThread,
+    getThreadLatestDate,
+    userEmail,
+    preferToDisplay,
+    mode: "nested",
+    collapsedNestedMessages
+  });
 
   return (
     <MessageListRenderer
@@ -223,13 +126,7 @@ export default function MessageThreadList({
       collapsedGroups={collapsedGroups}
       getGroupLabel={getGroupLabel}
       onGroupOpenChange={(groupKey, open) => {
-        const at = Date.now();
-        setLastGroupToggle({ key: groupKey, open, at });
-        setAnimationClock(at);
-        setCollapsedGroups((prev) => ({
-          ...prev,
-          [groupKey]: !open
-        }));
+        toggleGroup(groupKey, open, setCollapsedGroups);
       }}
       classNames={{
         virtualItem: styles.virtualItem,
@@ -338,32 +235,10 @@ export default function MessageThreadList({
               isNestedCollapsed={item.isNestedCollapsed}
               ancestorStopsHere={item.ancestorStopsHere}
               onToggleThread={() => {
-                const willOpen = item.isCollapsed;
-                const at = Date.now();
-                setLastThreadToggle({
-                  key: item.threadGroupId,
-                  open: willOpen,
-                  at
-                });
-                setAnimationClock(at);
-                setCollapsedThreads((prev) => ({
-                  ...prev,
-                  [item.threadGroupId]: !item.isCollapsed
-                }));
+                toggleThread(item.threadGroupId, item.isCollapsed, setCollapsedThreads);
               }}
               onToggleNested={() => {
-                const willOpen = item.isNestedCollapsed;
-                const at = Date.now();
-                setLastNestedToggle({
-                  key: message.id,
-                  open: willOpen,
-                  at
-                });
-                setAnimationClock(at);
-                setCollapsedNestedMessages((prev) => ({
-                  ...prev,
-                  [message.id]: !item.isNestedCollapsed
-                }));
+                toggleNested(message.id, item.isNestedCollapsed);
               }}
             />
             <div
@@ -472,7 +347,6 @@ export default function MessageThreadList({
                       )}
                   {(threadBadgeUnion.threadHasFlagged || message.flagged) && (
                     <FlagBadge
-                      kind="flagged"
                       onClick={() =>
                         toggleFlaggedFlag(
                           message,
@@ -482,7 +356,7 @@ export default function MessageThreadList({
                     />
                   )}
                   {(threadBadgeUnion.threadHasTodo || hasTodoFlag(message)) && (
-                    <FlagBadge
+                    <MessageBadge
                       kind="todo"
                       onClick={() =>
                         toggleTodoFlag(
@@ -494,7 +368,7 @@ export default function MessageThreadList({
                     />
                   )}
                   {(threadBadgeUnion.threadHasDone || hasDoneFlag(message)) && (
-                    <FlagBadge
+                    <MessageBadge
                       kind="done"
                       onClick={() =>
                         toggleTodoFlag(

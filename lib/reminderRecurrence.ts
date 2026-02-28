@@ -193,3 +193,56 @@ export function resolveNextReminderOccurrence(
     triggerAtMs: nextEventStartAtMs - leadMs
   };
 }
+
+export function resolveCurrentOrNextOccurrence(
+  reminder: Omit<ReminderRuleLike, "leadMinutes">,
+  nowMs = Date.now()
+): { eventStartAtMs: number } | null {
+  const eventStartAtMs = Number(reminder.eventStartAtMs);
+  const eventEndAtMsRaw = Number(reminder.eventEndAtMs);
+  const durationMs =
+    Number.isFinite(eventEndAtMsRaw) && eventEndAtMsRaw > eventStartAtMs
+      ? eventEndAtMsRaw - eventStartAtMs
+      : Number.NaN;
+  if (!Number.isFinite(eventStartAtMs) || eventStartAtMs <= 0) {
+    return null;
+  }
+
+  const recurrence = buildRecurrenceQuery({
+    ...reminder,
+    leadMinutes: 0
+  });
+  if (!recurrence) {
+    if (
+      Number.isFinite(durationMs) &&
+      durationMs > 0 &&
+      nowMs >= eventStartAtMs &&
+      nowMs < eventStartAtMs + durationMs
+    ) {
+      return { eventStartAtMs };
+    }
+    return eventStartAtMs >= nowMs ? { eventStartAtMs } : null;
+  }
+
+  if (Number.isFinite(durationMs) && durationMs > 0) {
+    const currentOccurrenceStart = recurrence.before(new Date(nowMs), true);
+    if (currentOccurrenceStart) {
+      const currentOccurrenceStartAtMs = currentOccurrenceStart.getTime();
+      if (
+        Number.isFinite(currentOccurrenceStartAtMs) &&
+        currentOccurrenceStartAtMs > 0 &&
+        nowMs < currentOccurrenceStartAtMs + durationMs
+      ) {
+        return { eventStartAtMs: currentOccurrenceStartAtMs };
+      }
+    }
+  }
+
+  const nextOccurrence = recurrence.after(new Date(nowMs), true);
+  if (!nextOccurrence) return null;
+  const nextEventStartAtMs = nextOccurrence.getTime();
+  if (!Number.isFinite(nextEventStartAtMs) || nextEventStartAtMs <= 0) {
+    return null;
+  }
+  return { eventStartAtMs: nextEventStartAtMs };
+}

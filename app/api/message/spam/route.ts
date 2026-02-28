@@ -1,140 +1,53 @@
 import { NextResponse } from "next/server";
 import {
-  getAccounts,
-  getFolders,
-  getMessageById,
-  relocateMovedMessage,
   updateMessageFlags
 } from "@/lib/db";
-import { moveImapMessage, updateImapFlags } from "@/lib/mail/imap";
-import { moveMessageFiles } from "@/lib/storage";
-import type { Folder } from "@/lib/data";
-import { requireSessionAccountOr403, requireSessionOr401 } from "@/lib/auth";
-
-const JUNK_NAMES = [
-  "junk",
-  "spam",
-  "junk email",
-  "junk e-mail",
-  "bulk",
-  "spam mail",
-  "spam messages"
-];
-
-const normalizeKeyword = (value: string) => value.replace(/[\s-]/g, "").toLowerCase();
-const isNonJunkKeyword = (value: string) => normalizeKeyword(value) === "nonjunk";
-
-function folderMailboxPath(folder: Folder, accountId: string) {
-  if (folder.id.startsWith(`${accountId}:`)) {
-    return folder.id.slice(accountId.length + 1);
-  }
-  return folder.name;
-}
-
-function findJunkFolder(folders: Folder[], accountId: string) {
-  const candidates = folders.filter((folder) => folder.accountId === accountId);
-  const bySpecial = candidates.find((folder) => {
-    const special = (folder.specialUse ?? "").toLowerCase();
-    return special === "\\junk" || special === "\\spam";
-  });
-  if (bySpecial) return bySpecial;
-  const byName = candidates.find((folder) =>
-    JUNK_NAMES.includes(folder.name.trim().toLowerCase())
-  );
-  if (byName) return byName;
-  const byId = candidates.find((folder) =>
-    JUNK_NAMES.some((name) => folder.id.toLowerCase().includes(name))
-  );
-  if (byId) return byId;
-  const byPartial = candidates.find((folder) =>
-    folder.name.toLowerCase().includes("junk") || folder.name.toLowerCase().includes("spam")
-  );
-  if (byPartial) return byPartial;
-  return null;
-}
-
-function mailboxPathFromFolderId(folderId: string, accountId: string) {
-  if (folderId.startsWith(`${accountId}:`)) {
-    return folderId.slice(accountId.length + 1);
-  }
-  return folderId;
-}
+import { withoutNonJunkAndRecentFlags } from "@/lib/messageFlags";
+import { findJunkFolder } from "@/lib/specialFolders";
+import {
+  moveAndRelocateMessageWithFiles,
+  requireImapMessageMutationContext,
+  resolveSpecialFolderAndMailbox,
+} from "../routeHelpers";
+import { clearImapNonJunkFlags } from "../flagMutationHelpers";
 
 export async function POST(request: Request) {
-  const session = requireSessionOr401(request);
-  if (session instanceof NextResponse) return session;
-  const clientId = request.headers.get("x-noctua-client") ?? undefined;
   const payload = (await request.json()) as { accountId: string; messageId: string };
-  if (!payload?.accountId || !payload?.messageId) {
-    return NextResponse.json({ ok: false, message: "Missing accountId or messageId" }, { status: 400 });
-  }
-  const access = await requireSessionAccountOr403(session, payload.accountId);
-  if (access instanceof NextResponse) return access;
-  const accounts = await getAccounts();
-  const account = accounts.find((item) => item.id === payload.accountId);
-  if (!account) {
-    return NextResponse.json({ ok: false, message: "Account not found" }, { status: 404 });
-  }
+  const context = await requireImapMessageMutationContext(request, payload);
+  if (context instanceof NextResponse) return context;
+  const { accountId, account, clientId, message } = context;
 
-  const message = await getMessageById(payload.accountId, payload.messageId);
-  if (!message) {
-    return NextResponse.json({ ok: false, message: "Message not found" }, { status: 404 });
-  }
-  if (!message.imapUid || !message.mailboxPath) {
-    return NextResponse.json(
-      { ok: false, message: "Message is missing IMAP metadata" },
-      { status: 400 }
-    );
-  }
-
-  const folders = await getFolders(payload.accountId);
-  const junkFolder = findJunkFolder(folders, payload.accountId);
-  const junkMailbox = junkFolder ? folderMailboxPath(junkFolder, payload.accountId) : "Junk";
-  const currentMailbox =
-    message.mailboxPath || mailboxPathFromFolderId(message.folderId, payload.accountId);
+  const { folder: junkFolder, mailbox: junkMailbox } = await resolveSpecialFolderAndMailbox(
+    accountId,
+    findJunkFolder,
+    { fallbackMailbox: "Junk" }
+  );
+  const junkMailboxPath = junkMailbox ?? "Junk";
+  const currentMailbox = message.mailboxPath;
 
   const existingFlags = message.flags ?? [];
-  const nonJunkFlags = existingFlags.filter(isNonJunkKeyword);
-  if (nonJunkFlags.length > 0) {
-    for (const flag of nonJunkFlags) {
-      await updateImapFlags(account, currentMailbox, message.imapUid, flag, false, clientId);
-    }
-  }
+  await clearImapNonJunkFlags(account, currentMailbox, message.imapUid, existingFlags, clientId);
 
-  const destinationUid = await moveImapMessage(
+  const { relocated } = await moveAndRelocateMessageWithFiles({
     account,
     currentMailbox,
-    message.imapUid,
-    junkMailbox,
-    clientId
-  );
-  const relocated = await relocateMovedMessage({
-    accountId: payload.accountId,
+    imapUid: message.imapUid,
+    destinationMailbox: junkMailboxPath,
+    clientId,
+    accountId,
     previousId: message.id,
-    destinationFolderId: junkFolder?.id ?? message.folderId,
-    destinationMailboxPath: junkMailbox,
-    destinationUid
+    destinationFolderId: junkFolder?.id ?? message.folderId
   });
-  if (relocated?.changed) {
-    await moveMessageFiles(
-      payload.accountId,
-      relocated.previousId,
-      relocated.nextId,
-      relocated.attachmentIds
-    );
-  }
 
-  const cleanedFlags = existingFlags.filter(
-    (flag) => !isNonJunkKeyword(flag) && flag.toLowerCase() !== "\\recent"
-  );
+  const cleanedFlags = withoutNonJunkAndRecentFlags(existingFlags);
   if (cleanedFlags.length !== existingFlags.length) {
-    await updateMessageFlags(payload.accountId, relocated?.nextId ?? message.id, cleanedFlags);
+    await updateMessageFlags(accountId, relocated?.nextId ?? message.id, cleanedFlags);
   }
   return NextResponse.json({
     ok: true,
     action: "moved",
     junkFolderId: junkFolder?.id ?? null,
-    junkMailbox,
+    junkMailbox: junkMailboxPath,
     flags: cleanedFlags.length !== existingFlags.length ? cleanedFlags : existingFlags,
     previousMessageId: relocated?.previousId ?? message.id,
     messageId: relocated?.nextId ?? message.id

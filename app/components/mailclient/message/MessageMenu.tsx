@@ -16,6 +16,7 @@ import {
   MailX,
   MoreVertical,
   SquareArrowOutUpRight,
+  ListTree,
   Search,
   RefreshCw,
   Reply,
@@ -49,6 +50,7 @@ type MessageMenuAction =
   | "delete"
   | "unsubscribe"
   | "showRelated"
+  | "showThread"
   | "openWindow"
   | "openHtmlWindow"
   | "downloadEml"
@@ -82,6 +84,7 @@ type MessageMenuProps = {
   handleOpenInNewWindow: (message: Message) => void;
   handleOpenHtmlInNewWindow: (message: Message) => void;
   onShowRelated: (message: Message) => void;
+  onShowThread: (message: Message) => void;
   isTrashFolder: (folderId?: string) => boolean;
   isSpamFolder: (folderId?: string) => boolean;
   onOpenChange?: (open: boolean) => void;
@@ -108,6 +111,7 @@ export default function MessageMenu({
   handleOpenInNewWindow,
   handleOpenHtmlInNewWindow,
   onShowRelated,
+  onShowThread,
   isTrashFolder,
   isSpamFolder,
   onOpenChange
@@ -338,6 +342,15 @@ export default function MessageMenu({
                   <Search size={14} />,
                   () => onShowRelated(message),
                   isDisabled("showRelated")
+                )
+              : null,
+            isVisible("showThread")
+              ? buildItem(
+                  "showThread",
+                  "Show thread",
+                  <ListTree size={14} />,
+                  () => onShowThread(message),
+                  isDisabled("showThread")
                 )
               : null,
             isVisible("openWindow")

@@ -113,11 +113,6 @@
   font-weight: 500;
 }
 
-.composeInReplyTo {
-  display: flex;
-  align-items: center;
-}
-
 .composeInputWrap {
   position: relative;
   flex: 1;

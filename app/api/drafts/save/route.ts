@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import {
   deleteMessageById,
-  getAccounts,
   getFolders,
   getMessageById,
   upsertMessages
@@ -9,48 +8,12 @@ import {
 import { appendImapMessage, deleteImapMessage, syncImapMessage } from "@/lib/mail/imap";
 import { parseComposeAttachments, resolveComposeHtml } from "@/lib/mail/composePayload";
 import { buildRawMessage } from "@/lib/mail/smtp";
-import { saveMessageSource } from "@/lib/storage";
-import type { Folder } from "@/lib/data";
-import { requireSessionAccountOr403, requireSessionOr401 } from "@/lib/auth";
-
-const DRAFT_NAMES = [
-  "drafts",
-  "draft",
-  "entwürfe",
-  "entwuerfe",
-  "entwurf",
-  "brouillons",
-  "borradores"
-];
-
-function folderMailboxPath(folder: Folder, accountId: string) {
-  if (folder.id.startsWith(`${accountId}:`)) {
-    return folder.id.slice(accountId.length + 1);
-  }
-  return folder.name;
-}
-
-function findDraftsFolder(folders: Folder[], accountId: string) {
-  const candidates = folders.filter((folder) => folder.accountId === accountId);
-  const bySpecial = candidates.find(
-    (folder) => (folder.specialUse ?? "").toLowerCase() === "\\drafts"
-  );
-  if (bySpecial) return bySpecial;
-  const byName = candidates.find((folder) =>
-    DRAFT_NAMES.includes(folder.name.trim().toLowerCase())
-  );
-  if (byName) return byName;
-  const byId = candidates.find((folder) =>
-    DRAFT_NAMES.some((name) => folder.id.toLowerCase().includes(name))
-  );
-  if (byId) return byId;
-  return candidates.find((folder) => folder.name.toLowerCase().includes("draft")) ?? null;
-}
+import { sanitizeSyncedMessage } from "@/lib/mail/syncMessageSanitizer";
+import { folderMailboxPath } from "@/lib/mailboxPaths";
+import { findDraftsFolder } from "@/lib/specialFolders";
+import { requireAccountContext } from "@/app/api/_helpers/accountContext";
 
 export async function POST(request: Request) {
-  const auth = await requireSessionOr401(request);
-  if (auth instanceof NextResponse) return auth;
-  const clientId = request.headers.get("x-noctua-client") ?? undefined;
   const payload = (await request.json()) as {
     accountId: string;
     draftId?: string | null;
@@ -74,16 +37,11 @@ export async function POST(request: Request) {
       dataUrl?: string;
     }>;
   };
-  if (!payload?.accountId) {
-    return NextResponse.json({ ok: false, message: "Missing accountId" }, { status: 400 });
-  }
-  const access = await requireSessionAccountOr403(auth, payload.accountId);
-  if (access instanceof NextResponse) return access;
-  const accounts = await getAccounts();
-  const account = accounts.find((item) => item.id === payload.accountId);
-  if (!account) {
-    return NextResponse.json({ ok: false, message: "Account not found" }, { status: 404 });
-  }
+  const accountContext = await requireAccountContext(request, payload?.accountId ?? "", {
+    missingAccountMessage: "Missing accountId"
+  });
+  if (accountContext instanceof NextResponse) return accountContext;
+  const { account, accountId, clientId } = accountContext;
   const folders = await getFolders(account.id);
   const draftsFolder = findDraftsFolder(folders, account.id);
   if (!draftsFolder) {
@@ -116,12 +74,12 @@ export async function POST(request: Request) {
   });
 
   if (payload.draftId) {
-    const existing = await getMessageById(payload.accountId, payload.draftId);
+    const existing = await getMessageById(accountId, payload.draftId);
     if (existing?.imapUid && existing.mailboxPath) {
       await deleteImapMessage(account, existing.mailboxPath, existing.imapUid, clientId);
     }
     if (existing) {
-      await deleteMessageById(payload.accountId, existing.id);
+      await deleteMessageById(accountId, existing.id);
     }
   }
 
@@ -130,18 +88,16 @@ export async function POST(request: Request) {
   if (uid) {
     const message = await syncImapMessage(account, draftsMailbox, uid, clientId);
     if (message) {
+      const sanitized = await sanitizeSyncedMessage(message, account.id);
       // Add compose format and quoted HTML edited flag to the message (local DB only, not stored in IMAP)
       if (payload.composeFormat) {
-        message.xComposeFormat = payload.composeFormat;
+        sanitized.xComposeFormat = payload.composeFormat;
       }
       if (typeof payload.quotedHtmlEdited === "boolean") {
-        message.quotedHtmlEdited = payload.quotedHtmlEdited;
+        sanitized.quotedHtmlEdited = payload.quotedHtmlEdited;
       }
-      if (message.source) {
-        await saveMessageSource(account.id, message.id, message.source);
-      }
-      await upsertMessages(account.id, null, [message], false);
-      messageId = message.id;
+      await upsertMessages(account.id, null, [sanitized], false);
+      messageId = sanitized.id;
     }
   }
 

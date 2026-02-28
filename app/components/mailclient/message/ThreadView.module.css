@@ -4,6 +4,15 @@
   gap: var(--space-3);
 }
 
+/* Expanded (non-compact) items get spacing below them */
+.threadItem:not(.compactThreadItem) {
+  margin-bottom: var(--space-3);
+}
+
+.threadItem:not(.compactThreadItem):last-child {
+  margin-bottom: 0;
+}
+
 .loading {
   padding: var(--space-3) var(--space-2);
   color: var(--gray-11);
@@ -13,4 +22,9 @@
 .empty {
   color: var(--gray-11);
   font-size: 13px;
+}
+
+/* Separator only between two adjacent compact-collapsed rows */
+.compactThreadItem + .compactThreadItem {
+  border-top: 1px solid var(--gray-a4);
 }

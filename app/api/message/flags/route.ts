@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
-import { getAccounts, getMessageById, updateMessageFlags } from "@/lib/db";
+import { updateMessageFlags } from "@/lib/db";
 import { updateImapFlags } from "@/lib/mail/imap";
-import { requireSessionAccountOr403, requireSessionOr401 } from "@/lib/auth";
+import { requireImapMessageMutationContext } from "../routeHelpers";
 
 const flagMap: Record<string, string> = {
   seen: "\\Seen",
@@ -11,10 +11,29 @@ const flagMap: Record<string, string> = {
   draft: "\\Draft"
 };
 
+type FlagMutation = {
+  flag: string;
+  value: boolean;
+};
+
+export function buildFlagMutations(payload: {
+  flag?: keyof typeof flagMap;
+  keyword?: string;
+  value: boolean;
+}): FlagMutation[] {
+  const keyword = payload.keyword?.trim();
+  if (keyword) return [{ flag: keyword, value: payload.value }];
+  if (!payload.flag) return [];
+
+  const mutations: FlagMutation[] = [{ flag: flagMap[payload.flag], value: payload.value }];
+  // Replying implies the message is also read.
+  if (payload.flag === "answered" && payload.value) {
+    mutations.push({ flag: flagMap.seen, value: true });
+  }
+  return mutations;
+}
+
 export async function POST(request: Request) {
-  const session = requireSessionOr401(request);
-  if (session instanceof NextResponse) return session;
-  const clientId = request.headers.get("x-noctua-client") ?? undefined;
   const payload = (await request.json()) as {
     accountId: string;
     messageId: string;
@@ -22,46 +41,33 @@ export async function POST(request: Request) {
     keyword?: string;
     value: boolean;
   };
-  if (!payload?.accountId || !payload?.messageId) {
-    return NextResponse.json({ ok: false, message: "Missing accountId or messageId" }, { status: 400 });
-  }
-  const access = await requireSessionAccountOr403(session, payload.accountId);
-  if (access instanceof NextResponse) return access;
-  const accounts = await getAccounts();
-  const account = accounts.find((item) => item.id === payload.accountId);
-  if (!account) {
-    return NextResponse.json({ ok: false, message: "Account not found" }, { status: 404 });
-  }
-  const message = await getMessageById(payload.accountId, payload.messageId);
-  if (!message) {
-    return NextResponse.json({ ok: false, message: "Message not found" }, { status: 404 });
-  }
-  if (!message.imapUid || !message.mailboxPath) {
-    return NextResponse.json(
-      { ok: false, message: "Message is missing IMAP metadata" },
-      { status: 400 }
-    );
-  }
-  const keyword = payload.keyword?.trim();
-  const imapFlag = keyword || (payload.flag ? flagMap[payload.flag] : null);
-  if (!imapFlag) {
+  const context = await requireImapMessageMutationContext(request, payload);
+  if (context instanceof NextResponse) return context;
+  const { accountId, account, clientId, message, messageId } = context;
+  const mutations = buildFlagMutations(payload);
+  if (mutations.length === 0) {
     return NextResponse.json({ ok: false, message: "Unknown flag" }, { status: 400 });
   }
 
-  await updateImapFlags(
-    account,
-    message.mailboxPath,
-    message.imapUid,
-    imapFlag,
-    payload.value,
-    clientId
-  );
+  for (const mutation of mutations) {
+    await updateImapFlags(
+      account,
+      message.mailboxPath,
+      message.imapUid,
+      mutation.flag,
+      mutation.value,
+      clientId
+    );
+  }
 
   const existing = message.flags ?? [];
-  const nextFlags = payload.value
-    ? Array.from(new Set([...existing, imapFlag]))
-    : existing.filter((flag) => flag.toLowerCase() !== imapFlag.toLowerCase());
-  await updateMessageFlags(payload.accountId, payload.messageId, nextFlags);
+  const nextFlags = mutations.reduce((currentFlags, mutation) => {
+    if (mutation.value) {
+      return Array.from(new Set([...currentFlags, mutation.flag]));
+    }
+    return currentFlags.filter((flag) => flag.toLowerCase() !== mutation.flag.toLowerCase());
+  }, existing);
+  await updateMessageFlags(accountId, messageId, nextFlags);
 
   return NextResponse.json({ ok: true, flags: nextFlags });
 }

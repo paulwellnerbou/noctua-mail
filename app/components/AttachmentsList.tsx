@@ -145,7 +145,14 @@ export default function AttachmentsList({
                   event.preventDefault();
                   const url = file.url ?? file.dataUrl;
                   if (!url) return;
-                  openDetachedWindow(url, { width: 920, height: 760 });
+                  if (url.startsWith("data:")) {
+                    fetch(url)
+                      .then((r) => r.blob())
+                      .then((blob) => openDetachedWindow(URL.createObjectURL(blob), { width: 920, height: 760 }))
+                      .catch(() => {});
+                  } else {
+                    openDetachedWindow(url, { width: 920, height: 760 });
+                  }
                 }}
               >
                 <Eye size={12} />

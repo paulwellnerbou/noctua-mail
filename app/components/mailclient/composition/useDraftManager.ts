@@ -1,6 +1,7 @@
 import type React from "react";
 import type { Message } from "@/lib/data";
 import type { ComposePayload } from "./composeContentBuilder";
+import { buildDraftSavePayload, computeDraftHash } from "./draftSaveUtils";
 import type {
   ComposeReplyHeaders,
   ComposeSelectionState,
@@ -255,34 +256,27 @@ export function useDraftManager(params: UseDraftManagerParams) {
   const handleSaveDraft = () => {
     if (!composeOpen || !activeAccountId) return;
     const preferText = composeTab === "html" && composeLastEditedRef.current === "text";
-    const { text, html, attachments, composeFormat } = buildComposePayload({ preferText });
-    const normalizedHtml = html ?? "";
-    const attachmentsHash = attachments
-      .map((att) => `${att.filename}:${att.size}:${att.inline ? "1" : "0"}:${att.cid ?? ""}`)
-      .join("|");
-    const hash = JSON.stringify({
+    const composePayload = buildComposePayload({ preferText });
+    const hash = computeDraftHash({
       to: composeTo,
       cc: composeCc,
       bcc: composeBcc,
       subject: composeSubject,
-      text,
-      html: normalizedHtml,
-      attachments: attachmentsHash
+      text: composePayload.text,
+      html: composePayload.html,
+      attachments: composePayload.attachments
     });
-    const payload: DraftSavePayload = {
-      to: composeTo,
-      cc: composeCc,
-      bcc: composeBcc,
-      subject: composeSubject,
-      text,
-      html: normalizedHtml,
-      composeFormat,
-      quotedHtmlEdited: composeQuotedHtmlEdited,
-      inReplyTo: composeReplyHeaders?.inReplyTo,
-      references: composeReplyHeaders?.references,
-      xForwardedMessageId: composeReplyHeaders?.xForwardedMessageId,
-      attachments
-    };
+    const payload: DraftSavePayload = buildDraftSavePayload(
+      {
+        to: composeTo,
+        cc: composeCc,
+        bcc: composeBcc,
+        subject: composeSubject,
+        composeQuotedHtmlEdited,
+        composeReplyHeaders
+      },
+      composePayload
+    );
     saveDraft(payload, hash);
   };
 

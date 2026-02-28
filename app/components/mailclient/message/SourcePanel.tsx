@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import RawTextPanel from "./RawTextPanel";
 
 type SourcePanelProps = {
@@ -13,10 +13,15 @@ export default function SourcePanel({ messageId, fetchSource, scrubSource }: Sou
     source: string;
     status: "loaded" | "error";
   } | null>(null);
+  const fetchSourceRef = useRef(fetchSource);
+
+  useEffect(() => {
+    fetchSourceRef.current = fetchSource;
+  }, [fetchSource]);
 
   useEffect(() => {
     let active = true;
-    void fetchSource(messageId).then((data) => {
+    void fetchSourceRef.current(messageId).then((data) => {
       if (!active) return;
       if (data === null) {
         console.warn("[noctua] source fetch returned null", { messageId });
@@ -29,7 +34,8 @@ export default function SourcePanel({ messageId, fetchSource, scrubSource }: Sou
       active = false;
       console.info("[noctua] source panel cleanup", { messageId });
     };
-  }, [messageId, fetchSource]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- fetchSource changes frequently; use ref to avoid refetch loops.
+  }, [messageId]);
   const status =
     sourceState && sourceState.messageId === messageId ? sourceState.status : "loading";
   const source = sourceState && sourceState.messageId === messageId ? sourceState.source : "";

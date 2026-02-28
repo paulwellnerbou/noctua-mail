@@ -1,15 +1,14 @@
 import { NextResponse } from "next/server";
 import {
   deleteMessagesByIds,
-  getAccounts,
   getFolders,
   getMessageById,
   listMessageFileRefsByMessageIds
 } from "@/lib/db";
 import { deleteImapMessages } from "@/lib/mail/imap";
 import { deleteMessageFiles } from "@/lib/storage";
-import { requireSessionAccountOr403, requireSessionOr401 } from "@/lib/auth";
-import { findTrashFolder, mailboxPathFromFolderId } from "../trashUtils";
+import { requireAccountContext } from "../../routeHelpers";
+import { findTrashFolder, resolveMessageTrashState } from "../trashUtils";
 
 type BulkDeletePayload = {
   accountId: string;
@@ -17,9 +16,6 @@ type BulkDeletePayload = {
 };
 
 export async function POST(request: Request) {
-  const session = requireSessionOr401(request);
-  if (session instanceof NextResponse) return session;
-  const clientId = request.headers.get("x-noctua-client") ?? undefined;
   const payload = (await request.json()) as BulkDeletePayload;
 
   const normalizedMessageIds = Array.from(
@@ -31,22 +27,15 @@ export async function POST(request: Request) {
       { status: 400 }
     );
   }
-  const access = await requireSessionAccountOr403(session, payload.accountId);
-  if (access instanceof NextResponse) return access;
-
-  const accounts = await getAccounts();
-  const account = accounts.find((item) => item.id === payload.accountId);
-  if (!account) {
-    return NextResponse.json({ ok: false, message: "Account not found" }, { status: 404 });
-  }
+  const accountContext = await requireAccountContext(request, payload.accountId);
+  if (accountContext instanceof NextResponse) return accountContext;
+  const { account, clientId } = accountContext;
 
   const folders = await getFolders(payload.accountId);
   const trashFolder = findTrashFolder(folders, payload.accountId);
   if (!trashFolder) {
     return NextResponse.json({ ok: false, message: "Trash folder not found" }, { status: 400 });
   }
-  const trashMailbox = mailboxPathFromFolderId(trashFolder.id, payload.accountId);
-  const trashDelimiter = trashFolder.delimiter ?? "/";
 
   const messages = await Promise.all(
     normalizedMessageIds.map((messageId) => getMessageById(payload.accountId, messageId))
@@ -63,12 +52,11 @@ export async function POST(request: Request) {
 
   const deleteTargets: Array<{ mailboxPath: string; uid: number; messageId: string }> = [];
   for (const message of existingMessages) {
-    const currentMailbox =
-      message.mailboxPath || mailboxPathFromFolderId(message.folderId, payload.accountId);
-    const isInTrash =
-      message.folderId === trashFolder.id ||
-      currentMailbox === trashMailbox ||
-      currentMailbox.startsWith(`${trashMailbox}${trashDelimiter}`);
+    const { currentMailbox, isInTrash } = resolveMessageTrashState(
+      message,
+      trashFolder,
+      payload.accountId
+    );
     if (!isInTrash) {
       return NextResponse.json(
         { ok: false, message: "Bulk delete only supports messages already in Trash" },

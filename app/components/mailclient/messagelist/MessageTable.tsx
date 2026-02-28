@@ -1,20 +1,18 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type React from "react";
 import { GitBranch, MoveRight, Search, Trash2 } from "lucide-react";
 import { Badge, Checkbox, IconButton, Text } from "@radix-ui/themes";
 import { CaretRightIcon } from "@radix-ui/react-icons";
 import { badgeColors } from "@/lib/ui/badgeColors";
-import type { AccountDateFormat, Message } from "@/lib/data";
+import type { Message } from "@/lib/data";
 import badgeStyles from "../message/MessageBadge.module.css";
-import {
-  buildMessageListItems,
-  type MessageGroup,
-  type ThreadNode
-} from "./listModel";
 import { getMessageListDateDisplay } from "./messageDateDisplay";
-import { useSelectionSnapshot, type SelectionStore } from "./selectionStore";
+import { useSelectionSnapshot } from "./selectionStore";
 import MessageListRenderer from "./MessageListRenderer";
+import type { MessageTableProps } from "./messageListViewTypes";
+import { useMessageListItems } from "./useMessageListItems";
 import {
+  applyToggleWithAnimation,
   getDragThreadMessageIds,
   getThreadRowDisplayMeta,
   getThreadRowSelectionMeta,
@@ -22,79 +20,11 @@ import {
   handleMessageRowKeyDown,
   handleRowCheckboxChange,
   hasSelectionModifier,
-  isRowAnimatedFromGroupToggle
+  isRowAnimatedFromGroupToggle,
+  type ToggleAnimation
 } from "./listInteractions";
 import groupStyles from "./MessageCardList.module.css";
 import styles from "./MessageTable.module.css";
-
-type SortKey = "date" | "from" | "subject";
-
-
-type MessageTableProps = {
-  state: {
-    groupedMessages: MessageGroup[];
-    visibleMessages: Array<{ message: Message }>;
-    selectionStore: SelectionStore;
-    draggingMessageIds: Set<string>;
-    collapsedGroups: Record<string, boolean>;
-    collapsedThreads: Record<string, boolean>;
-    pendingMessageActions: Set<string>;
-    supportsThreads: boolean;
-    includeThreadAcrossFolders: boolean;
-    searchScope: "folder" | "all";
-    activeFolderId: string;
-    messageById: Map<string, Message>;
-    sortDir: "asc" | "desc";
-    preferToDisplay: boolean;
-    userEmail?: string;
-    dateFormat?: AccountDateFormat;
-  };
-  refs: {
-    scrollRef: React.RefObject<HTMLDivElement | null>;
-  };
-  actions: {
-    setSortKey: React.Dispatch<React.SetStateAction<SortKey>>;
-    setSortDir: React.Dispatch<React.SetStateAction<"asc" | "desc">>;
-    setCollapsedGroups: React.Dispatch<React.SetStateAction<Record<string, boolean>>>;
-    setCollapsedThreads: React.Dispatch<React.SetStateAction<Record<string, boolean>>>;
-    setLastSelectedIdRef: (id: string | null) => void;
-    handleMessageDragStart: (event: React.DragEvent, message: Message, threadMessageIds?: string[]) => void;
-    handleMessageDragEnd: () => void;
-    handleRowClick: (event: React.MouseEvent, message: Message) => void;
-    handleSelectMessage: (message: Message) => void;
-    toggleMessageSelection: (messageId: string, replace?: boolean, setActive?: boolean) => void;
-    selectRangeTo: (messageId: string) => void;
-    selectCollapsedThread: (
-      flat: Array<{ message: Message; depth: number }>,
-      target: Message,
-      options?: { isFlaggedGroup?: boolean }
-    ) => void;
-    handleDeleteMessage: (message: Message) => void;
-  };
-  helpers: {
-    buildThreadTree: (items: Message[]) => ThreadNode[];
-    flattenThread: (
-      node: ThreadNode,
-      depth?: number,
-      visited?: Set<string>
-    ) => Array<{ message: Message; depth: number }>;
-    getThreadLatestDate: (node: ThreadNode) => number;
-    getGroupLabel: (group: MessageGroup) => React.ReactNode;
-    renderUnreadDot: (
-      message: Message,
-      options?: { seen?: boolean; threadMessages?: Message[] }
-    ) => React.ReactNode;
-    renderSelectIndicators: (message: Message) => React.ReactNode;
-    renderFolderBadges: (folderIds: string[]) => React.ReactNode;
-    isTrashFolder: (folderId?: string) => boolean;
-    renderMessageMenu: (
-      message: Message,
-      view: "table" | "list",
-      onOpenChange?: (open: boolean) => void
-    ) => React.ReactNode;
-    handleShowRelated: (message: Message) => void;
-  };
-};
 
 export default function MessageTable({
   state,
@@ -179,11 +109,7 @@ export default function MessageTable({
     }, 350);
   };
 
-  const [lastGroupToggle, setLastGroupToggle] = useState<{
-    key: string;
-    open: boolean;
-    at: number;
-  } | null>(null);
+  const [lastGroupToggle, setLastGroupToggle] = useState<ToggleAnimation | null>(null);
   const [animationClock, setAnimationClock] = useState(0);
 
   useEffect(() => {
@@ -199,38 +125,21 @@ export default function MessageTable({
   const activeThreadKey =
     activeMessage?.threadId ?? activeMessage?.messageId ?? activeMessage?.id;
 
-  const listItems = useMemo(
-    () =>
-      buildMessageListItems({
-        groupedMessages,
-        collapsedGroups,
-        collapsedThreads,
-        supportsThreads,
-        includeThreadAcrossFolders,
-        searchScope,
-        activeFolderId,
-        buildThreadTree,
-        flattenThread,
-        getThreadLatestDate,
-        userEmail,
-        preferToDisplay,
-        mode: "flat"
-      }),
-    [
-      groupedMessages,
-      collapsedGroups,
-      collapsedThreads,
-      supportsThreads,
-      includeThreadAcrossFolders,
-      searchScope,
-      activeFolderId,
-      buildThreadTree,
-      flattenThread,
-      getThreadLatestDate,
-      userEmail,
-      preferToDisplay
-    ]
-  );
+  const listItems = useMessageListItems({
+    groupedMessages,
+    collapsedGroups,
+    collapsedThreads,
+    supportsThreads,
+    includeThreadAcrossFolders,
+    searchScope,
+    activeFolderId,
+    buildThreadTree,
+    flattenThread,
+    getThreadLatestDate,
+    userEmail,
+    preferToDisplay,
+    mode: "flat"
+  });
 
   return (
     <div className={styles.table}>
@@ -301,13 +210,13 @@ export default function MessageTable({
         collapsedGroups={collapsedGroups}
         getGroupLabel={getGroupLabel}
         onGroupOpenChange={(groupKey, open) => {
-          const at = Date.now();
-          setLastGroupToggle({ key: groupKey, open, at });
-          setAnimationClock(at);
-          setCollapsedGroups((prev) => ({
-            ...prev,
-            [groupKey]: !open
-          }));
+          applyToggleWithAnimation({
+            key: groupKey,
+            open,
+            setLastToggle: setLastGroupToggle,
+            setAnimationClock,
+            setCollapsedState: setCollapsedGroups
+          });
         }}
         classNames={{
           virtualItem: styles.virtualItem,

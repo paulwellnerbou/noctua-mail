@@ -37,6 +37,15 @@ import { useComposeViewEffects } from "./mailclient/composition/useComposeViewEf
 import { buildSendPayload } from "./mailclient/composition/buildSendPayload";
 import { useComposeDraftAutoSave } from "./mailclient/composition/useComposeDraftAutoSave";
 import { useDraftManager } from "./mailclient/composition/useDraftManager";
+import { useComposeHandlers } from "./mailclient/composition/useComposeHandlers";
+import { useMessageDragDrop } from "./mailclient/useMessageDragDrop";
+import {
+  renderQuickActions as renderQuickActionsHelper,
+  renderMessageMenu as renderMessageMenuHelper,
+  renderSourcePanel as renderSourcePanelHelper,
+  renderMarkdownPanel as renderMarkdownPanelHelper,
+  folderSpecialIcon
+} from "./mailclient/RenderHelpers";
 import MessageListHeader from "./mailclient/messagelist/MessageListHeader";
 import MessageListPane from "./mailclient/messagelist/MessageListPane";
 import MessageListView from "./mailclient/messagelist/MessageListView";
@@ -57,13 +66,14 @@ import {
   getThreadLatestDate,
   type ThreadNode
 } from "./mailclient/messagelist/threadTree";
-import { AlertDialog, Badge, Button, Card, Flex, IconButton, Text } from "@radix-ui/themes";
+import { AlertDialog, Badge, Button, Card, Flex, IconButton, SegmentedControl, Text } from "@radix-ui/themes";
 import MessageMenu from "./mailclient/message/MessageMenu";
 import MessageQuickActions from "./mailclient/message/MessageQuickActions";
 import MessageViewPane from "./mailclient/message/MessageViewPane";
 import MarkdownPanel from "./mailclient/message/MarkdownPanel";
 import MessageSourcePanel from "./mailclient/message/MessageSourcePanel";
-import { TODO_FLAG, DONE_FLAG } from "@/lib/messageFlags";
+import { TODO_FLAG, DONE_FLAG, isMeaningfulNonInlineAttachment } from "@/lib/messageFlags";
+import { INVITE_DECK_GROUP_BY } from "@/lib/messageGrouping";
 import { createComposeAttachment } from "@/lib/mail/composeAttachment";
 import { openDetachedWindow } from "@/lib/ui/openDetachedWindow";
 import { getImapFlagBadges, hasHtmlContent } from "@/lib/ui/messageView";
@@ -73,9 +83,7 @@ import {
   getSearchBadgeLabel,
   getSearchFieldLabel
 } from "@/lib/ui/searchFilters";
-import {
-  useSearchState,
-  VIRTUAL_FOLDERS} from "./mailclient/useSearchState";
+import { useSearchState, VIRTUAL_FOLDERS } from "./mailclient/useSearchState";
 import { useReminderNotifications } from "./mailclient/useReminderNotifications";
 import { useMessageData } from "./mailclient/useMessageData";
 import { useThreadContent } from "./mailclient/useThreadContent";
@@ -85,10 +93,14 @@ import ThreadJsonModal from "./mailclient/message/ThreadJsonModal";
 import ThreadView from "./mailclient/message/ThreadView";
 import TopBar from "./mailclient/TopBar";
 import BottomStatusBar from "./mailclient/status/BottomStatusBar";
+import CalendarSidebarPanel from "./calendar/CalendarSidebarPanel";
 import { useMessageDeleteActions } from "./mailclient/useMessageDeleteActions";
 import { useMessageMoveActions, type UndoMoveTarget } from "./mailclient/useMessageMoveActions";
+import { useMessageMutations } from "./mailclient/useMessageMutations";
 import type { Account, Folder, Message, User } from "@/lib/data";
 import AccountSettingsModal, { type ManageTab } from "./AccountSettingsModal";
+import ThreadDeleteConfirmDialog from "./mailclient/message/ThreadDeleteConfirmDialog";
+import UnsubscribeConfirmDialog from "./mailclient/message/UnsubscribeConfirmDialog";
 import {
   computeGroupMeta,
   isFlaggedMessage,
@@ -165,6 +177,8 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
   const [leftWidth, setLeftWidth] = useState(270);
   const [listWidth, setListWidth] = useState(840);
   const [dragging, setDragging] = useState<"left" | "list" | null>(null);
+  const [calendarSidebarOpen, setCalendarSidebarOpen] = useState(false);
+  const [calendarSidebarWidth] = useState(400);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const dragImageRef = useRef<HTMLDivElement | null>(null);
   const [sortKey, setSortKey] = useState<"date" | "from" | "subject">("date");
@@ -172,6 +186,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
   const [collapsedFolders, setCollapsedFolders] = useState<Record<string, boolean>>({});
   const [folderQuery, setFolderQuery] = useState("");
   const [messageView, setMessageView] = useState<"card" | "table" | "compact" | "threads">("threads");
+  const [threadViewMode, setThreadViewMode] = useState<"full" | "compact">("compact");
   const clientId = useMemo(() => {
     if (typeof window === "undefined") return "";
     const key = "noctuaClientId";
@@ -754,6 +769,13 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     () => (activeVirtualFolder ? [...activeVirtualFolder.queryBadges] : selectedSearchBadges),
     [activeVirtualFolder, selectedSearchBadges]
   );
+  const effectiveGroupBy = useMemo(
+    () =>
+      activeVirtualFolder?.id === "virtual:invite-deck" && groupBy === "date"
+        ? INVITE_DECK_GROUP_BY
+        : groupBy,
+    [activeVirtualFolder?.id, groupBy]
+  );
   const selectedSearchBadgeLabels = useMemo(
     () =>
       activeVirtualFolder
@@ -999,7 +1021,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     effectiveSearchBadges,
     currentSearchExcludedFolderIds,
     supportsThreads,
-    groupBy,
+    groupBy: effectiveGroupBy,
     query,
     authState,
     apiFetch,
@@ -1064,6 +1086,15 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     });
     return items;
   }, [filteredMessages, sortDir, sortKey]);
+  const threadRelatedCandidateIds = useMemo(() => {
+    if (sortedMessages.length === 0) return [];
+    const ids = Array.from(
+      new Set(sortedMessages.map((msg) => msg.threadId).filter(Boolean))
+    );
+    ids.sort();
+    return ids;
+  }, [sortedMessages]);
+  const threadRelatedCandidatesKey = threadRelatedCandidateIds.join("|");
 
   // Memos that depend on messages (from useMessageData)
   const messageCountByFolder = useMemo(() => {
@@ -1240,63 +1271,23 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     [activeAccountId, apiFetch, recipientCacheRef]
   );
 
-  const addComposeFiles = async (files: File[], inline = false, dataUrlOverride?: string) => {
-    if (files.length === 0) return;
-    const attachments = await Promise.all(
-      files.map((file) => createComposeAttachment(file, inline, dataUrlOverride))
-    );
-    composeDirtyRef.current = true;
-    setComposeAttachments((prev) => [...prev, ...attachments]);
-  };
-
-  const removeComposeAttachment = (attachmentId: string) => {
-    composeDirtyRef.current = true;
-    setComposeAttachments((prev) => prev.filter((item) => item.id !== attachmentId));
-  };
-
-  const handleInlineImage = useCallback(async (file: File, dataUrl: string) => {
-    const attachment = await createComposeAttachment(file, true, dataUrl);
-    composeDirtyRef.current = true;
-    setComposeAttachments((prev) => [...prev, attachment]);
-  }, [composeDirtyRef, createComposeAttachment, setComposeAttachments]);
-
-  const handleComposeDragEnter = (event: React.DragEvent) => {
-    event.preventDefault();
-    composeDragDepthRef.current += 1;
-    setComposeDragActive(true);
-  };
-
-  const handleComposeDragLeave = (event: React.DragEvent) => {
-    event.preventDefault();
-    composeDragDepthRef.current = Math.max(0, composeDragDepthRef.current - 1);
-    if (composeDragDepthRef.current === 0) {
-      setComposeDragActive(false);
-    }
-  };
-
-  const handleComposeDragOver = (event: React.DragEvent) => {
-    event.preventDefault();
-    event.dataTransfer.dropEffect = "copy";
-  };
-
-  const handleComposeDrop = async (event: React.DragEvent) => {
-    event.preventDefault();
-    event.stopPropagation();
-    composeDragDepthRef.current = 0;
-    setComposeDragActive(false);
-    const files = Array.from(event.dataTransfer?.files ?? []);
-    if (files.length === 0) return;
-    await addComposeFiles(files, false);
-  };
-
-  const handleComposeAttachmentPick = async (
-    event: React.ChangeEvent<HTMLInputElement>
-  ) => {
-    const files = Array.from(event.target.files ?? []);
-    if (files.length === 0) return;
-    await addComposeFiles(files, false);
-    event.target.value = "";
-  };
+  const {
+    addComposeFiles,
+    removeComposeAttachment,
+    handleInlineImage,
+    handleComposeDragEnter,
+    handleComposeDragLeave,
+    handleComposeDragOver,
+    handleComposeDrop,
+    handleComposeAttachmentPick,
+    loadForwardAttachments
+  } = useComposeHandlers({
+    composeDirtyRef,
+    composeDragDepthRef,
+    setComposeDragActive,
+    setComposeAttachments,
+    apiFetch
+  });
 
   useEffect(() => {
     if (composeTab !== "html") return;
@@ -1341,8 +1332,8 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
 
   const normalizeHtmlDerivedText = (value: string): string =>
     value
-      .replace(/[ \t]+$/gm, "")
-      .replace(/(^|\n)\\--/g, "$1--");
+      .replace(/[ \\t]+$/gm, "")
+      .replace(/(^|\\n)--/g, "$1--");
 
   const currentAccount = accounts.find((account) => account.id === activeAccountId) ?? null;
   const accountSignatures = currentAccount?.settings?.signatures ?? [];
@@ -1386,17 +1377,24 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
       return;
     }
 
+    const afterOpen = (msg: Message) => {
+      openComposeInternal(mode, msg, asNew);
+      if (mode === "forward") {
+        void loadForwardAttachments(msg, setComposeAttachments);
+      }
+    };
+
     const resolved = messageById.get(message.id) ?? message;
     const hasText = Boolean((resolved.body ?? "").trim());
     const hasHtml = hasHtmlContent(resolved.htmlBody);
     if (hasText || hasHtml) {
-      openComposeInternal(mode, resolved, asNew);
+      afterOpen(resolved);
       return;
     }
 
     void (async () => {
-      await ensureMessageContent(resolved, { manual: true });
-      openComposeInternal(mode, messageById.get(resolved.id) ?? resolved, asNew);
+      const hydrated = await ensureMessageContent(resolved, { manual: true });
+      afterOpen(hydrated ?? resolved);
     })();
   };
 
@@ -1595,7 +1593,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     includeThreadAcrossFoldersForList,
     isThreadExcludedFolder: checkIsThreadExcludedFolder,
     supportsThreads,
-    groupBy,
+    groupBy: effectiveGroupBy,
     groupMeta,
     isFlaggedMessage,
     hasDoneFlag,
@@ -1749,6 +1747,14 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     if (!viewMessage) return undefined;
     return filteredMessages.find((m) => m.id === viewMessage.id) ?? viewMessage;
   }, [viewMessage, filteredMessages, hideThreadView, composeOpen, composeMode]);
+  const activeMessageRef = useRef<Message | null>(null);
+  activeMessageRef.current = activeMessage ?? null;
+  const activeMessageThreadKey = (() => {
+    if (!activeMessage) return "";
+    const threadId = activeMessage.threadId ?? activeMessage.messageId ?? activeMessage.id;
+    if (!threadId) return "";
+    return `${activeMessage.accountId}|${activeMessage.id}|${threadId}`;
+  })();
 
   useComposeViewEffects({
     showComposeInline,
@@ -1949,6 +1955,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
         if (composeDraftId && activeAccountId) {
           suppressDraftDeleteReconcile(composeDraftId);
           removeDraftFromUi(composeDraftId);
+          evictMessagesFromThreadCache([composeDraftId]);
           try {
             await apiFetch("/api/drafts/discard", {
               method: "POST",
@@ -2284,341 +2291,40 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
   });
 
 
-  const handleArchiveMessage = async (message: Message) => {
-    try {
-      applyMoveReconcileSuppression([message]);
-      const res = await apiFetch("/api/message/archive", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ accountId: activeAccountId, messageId: message.id })
-      });
-      if (!res.ok) {
-        reportError(await readErrorMessage(res));
-        return;
-      }
-      const data = (await res.json()) as {
-        action: "moved";
-        archiveFolderId?: string | null;
-        previousMessageId?: string;
-        messageId?: string;
-      };
-      const movedMessageId = data.messageId ?? message.id;
-      evictMessageCaches(
-        Array.from(new Set([message.id, movedMessageId]))
-      );
-      const shouldKeepArchivedMessage =
-        searchScope === "all" &&
-        Boolean(data.archiveFolderId) &&
-        shouldKeepMessageInCurrentResults(
-          remapMessageReferenceIds(
-            {
-              ...message,
-              id: movedMessageId,
-              folderId: data.archiveFolderId!
-            },
-            message.id,
-            movedMessageId
-          )
-        );
-      updateMessagesWithCurrentResultPrune((item) => {
-        if (item.id !== message.id) return item;
-        if (searchScope === "all" && data.archiveFolderId) {
-          return remapMessageReferenceIds(
-            { ...item, id: movedMessageId, folderId: data.archiveFolderId! },
-            item.id,
-            movedMessageId
-          );
-        }
-        return null;
-      }, { source: "archive-message" });
-      if (viewMessage?.id === message.id) {
-        if (!shouldKeepArchivedMessage) {
-          setViewMessage(null);
-          setActiveMessageId("");
-        } else if (movedMessageId !== message.id) {
-          setViewMessage({ ...message, id: movedMessageId, folderId: data.archiveFolderId! });
-          setActiveMessageId(movedMessageId);
-        }
-      }
-      const undoTarget: UndoMoveTarget = {
-        messageId: movedMessageId,
-        restoreFolderId: message.folderId
-      };
-      pushNotice({
-        type: "success",
-        title: "Message archived.",
-        description: getMessageSubjectForNotice(message),
-        actionLabel: data.archiveFolderId ? "Undo" : undefined,
-        onAction:
-          data.archiveFolderId
-            ? () => undoMoveOperation([undoTarget], activeAccountId, "Archive undone.")
-            : undefined,
-        durationMs: data.archiveFolderId ? 12000 : NOTICE_TIMEOUTS.success
-      });
-    } catch {
-      reportError("Failed to archive message.");
-    }
-  };
-
-  const handleUnsubscribe = useCallback(
-    async (message: Message) => {
-      const capability = getUnsubscribeCapability(message);
-      if (!capability) return;
-
-      // For one-click, show a confirmation dialog
-      if (capability === "one-click") {
-        // Parse List-Id from the stored header string
-        let listId: string | undefined;
-        if (message.listUnsubscribe) {
-          const lines = message.listUnsubscribe.split("\n");
-          for (const line of lines) {
-            if (line.startsWith("List-Id:")) {
-              listId = line.substring("List-Id:".length).trim();
-              break;
-            }
-          }
-        }
-        const confirmed = await confirmUnsubscribe(message.from, listId);
-        if (!confirmed) return;
-      }
-
-      setPendingMessageActions((prev) => new Set(prev).add(message.id));
-      try {
-        const res = await apiFetch("/api/message/unsubscribe", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            accountId: activeAccountId,
-            messageId: message.id
-          })
-        });
-
-        if (!res.ok) {
-          const errMsg = await readErrorMessage(res);
-          reportError(errMsg || "Failed to unsubscribe");
-          return;
-        }
-
-        const data = (await res.json()) as {
-          ok: boolean;
-          method: "one-click" | "browser" | "mailto";
-          url?: string;
-        };
-
-        if (data.method === "one-click") {
-          pushNotice({
-            type: "success",
-            title: "Unsubscribed",
-            description: "Unsubscribe request sent successfully.",
-            durationMs: NOTICE_TIMEOUTS.success
-          });
-        } else if (data.method === "browser" && data.url) {
-          window.open(data.url, "_blank", "noopener,noreferrer");
-        } else if (data.method === "mailto" && data.url) {
-          window.location.href = data.url;
-        }
-      } catch (error) {
-        reportError(error instanceof Error ? error.message : "Unsubscribe failed");
-      } finally {
-        setPendingMessageActions((prev) => {
-          const next = new Set(prev);
-          next.delete(message.id);
-          return next;
-        });
-      }
-    },
-    [activeAccountId, apiFetch, readErrorMessage, reportError, pushNotice, confirmUnsubscribe]
-  );
-
-  const handleMarkSpam = async (message: Message) => {
-    setPendingMessageActions((prev) => new Set(prev).add(message.id));
-    try {
-      applyMoveReconcileSuppression([message]);
-      const res = await apiFetch("/api/message/spam", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ accountId: activeAccountId, messageId: message.id })
-      });
-      if (!res.ok) {
-        reportError(await readErrorMessage(res));
-        return;
-      }
-      const data = (await res.json()) as {
-        action: "moved";
-        junkFolderId?: string | null;
-        junkMailbox?: string;
-        flags?: string[];
-        previousMessageId?: string;
-        messageId?: string;
-      };
-      const movedMessageId = data.messageId ?? message.id;
-      evictMessageCaches(
-        Array.from(new Set([message.id, movedMessageId]))
-      );
-      const movedSpamMessage =
-        searchScope === "all" && data.junkFolderId
-          ? remapMessageReferenceIds(
-              applyFlagsToMessage(
-                {
-                  ...message,
-                  id: movedMessageId,
-                  folderId: data.junkFolderId!,
-                  mailboxPath: data.junkMailbox ?? message.mailboxPath
-                },
-                data.flags ?? message.flags ?? []
-              ),
-              message.id,
-              movedMessageId
-            )
-          : null;
-      updateMessagesWithCurrentResultPrune((item) => {
-        if (item.id !== message.id) return item;
-        if (searchScope === "all" && data.junkFolderId) {
-          return remapMessageReferenceIds(
-            applyFlagsToMessage(
-              {
-                ...item,
-                id: movedMessageId,
-                folderId: data.junkFolderId!,
-                mailboxPath: data.junkMailbox ?? item.mailboxPath
-              },
-              data.flags ?? item.flags ?? []
-            ),
-            item.id,
-            movedMessageId
-          );
-        }
-        return null;
-      }, { source: "mark-spam" });
-      if (viewMessage?.id === message.id) {
-        if (!movedSpamMessage || !shouldKeepMessageInCurrentResults(movedSpamMessage)) {
-          setViewMessage(null);
-          setActiveMessageId("");
-        } else if (movedMessageId !== message.id) {
-          setViewMessage(movedSpamMessage);
-          setActiveMessageId(movedMessageId);
-        }
-      }
-      const undoTarget: UndoMoveTarget = {
-        messageId: movedMessageId,
-        restoreFolderId: message.folderId
-      };
-      pushNotice({
-        type: "success",
-        title: "Message marked as spam.",
-        description: getMessageSubjectForNotice(message),
-        actionLabel: data.junkFolderId ? "Undo" : undefined,
-        onAction:
-          data.junkFolderId
-            ? () => undoMoveOperation([undoTarget], activeAccountId, "Spam action undone.")
-            : undefined,
-        durationMs: data.junkFolderId ? 12000 : NOTICE_TIMEOUTS.success
-      });
-    } catch {
-      reportError("Failed to mark message as spam.");
-    } finally {
-      setPendingMessageActions((prev) => {
-        const next = new Set(prev);
-        next.delete(message.id);
-        return next;
-      });
-    }
-  };
-
-  const handleMarkNotSpam = async (message: Message) => {
-    setPendingMessageActions((prev) => new Set(prev).add(message.id));
-    try {
-      applyMoveReconcileSuppression([message]);
-      const res = await apiFetch("/api/message/not-spam", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ accountId: activeAccountId, messageId: message.id })
-      });
-      if (!res.ok) {
-        reportError(await readErrorMessage(res));
-        return;
-      }
-      const data = (await res.json()) as {
-        action: "moved";
-        inboxFolderId?: string | null;
-        inboxMailbox?: string;
-        flags?: string[];
-        previousMessageId?: string;
-        messageId?: string;
-      };
-      const movedMessageId = data.messageId ?? message.id;
-      evictMessageCaches(
-        Array.from(new Set([message.id, movedMessageId]))
-      );
-      const movedInboxMessage =
-        searchScope === "all" && data.inboxFolderId
-          ? remapMessageReferenceIds(
-              applyFlagsToMessage(
-                {
-                  ...message,
-                  id: movedMessageId,
-                  folderId: data.inboxFolderId!,
-                  mailboxPath: data.inboxMailbox ?? message.mailboxPath
-                },
-                data.flags ?? message.flags ?? []
-              ),
-              message.id,
-              movedMessageId
-            )
-          : null;
-      updateMessagesWithCurrentResultPrune((item) => {
-        if (item.id !== message.id) return item;
-        if (searchScope === "all" && data.inboxFolderId) {
-          return remapMessageReferenceIds(
-            applyFlagsToMessage(
-              {
-                ...item,
-                id: movedMessageId,
-                folderId: data.inboxFolderId!,
-                mailboxPath: data.inboxMailbox ?? item.mailboxPath
-              },
-              data.flags ?? item.flags ?? []
-            ),
-            item.id,
-            movedMessageId
-          );
-        }
-        return null;
-      }, { source: "mark-not-spam" });
-      if (viewMessage?.id === message.id) {
-        if (!movedInboxMessage || !shouldKeepMessageInCurrentResults(movedInboxMessage)) {
-          setViewMessage(null);
-          setActiveMessageId("");
-        } else if (movedMessageId !== message.id) {
-          setViewMessage(movedInboxMessage);
-          setActiveMessageId(movedMessageId);
-        }
-      }
-      const undoTarget: UndoMoveTarget = {
-        messageId: movedMessageId,
-        restoreFolderId: message.folderId
-      };
-      pushNotice({
-        type: "success",
-        title: "Message marked as not spam.",
-        description: getMessageSubjectForNotice(message),
-        actionLabel: data.inboxFolderId ? "Undo" : undefined,
-        onAction:
-          data.inboxFolderId
-            ? () => undoMoveOperation([undoTarget], activeAccountId, "Not-spam action undone.")
-            : undefined,
-        durationMs: data.inboxFolderId ? 12000 : NOTICE_TIMEOUTS.success
-      });
-    } catch {
-      reportError("Failed to mark message as not spam.");
-    } finally {
-      setPendingMessageActions((prev) => {
-        const next = new Set(prev);
-        next.delete(message.id);
-        return next;
-      });
-    }
-  };
+  const {
+    handleArchiveMessage,
+    handleUnsubscribe,
+    handleMarkSpam,
+    handleMarkNotSpam,
+    updateFlagState,
+    updateKeywordFlag,
+    handleSetCategory,
+    transitionTodoState,
+    toggleTodoFlag,
+    toggleFlaggedFlag
+  } = useMessageMutations({
+    activeAccountId,
+    searchScope,
+    viewMessage,
+    hasFilteredSearchCriteria,
+    apiFetch,
+    readErrorMessage,
+    reportError,
+    pushNotice,
+    updateMessagesWithCurrentResultPrune,
+    setViewMessage,
+    setActiveMessageId,
+    setFolders,
+    setPendingMessageActions,
+    evictMessageCaches,
+    shouldKeepMessageInCurrentResults,
+    undoMoveOperation,
+    confirmUnsubscribe,
+    applyMoveReconcileSuppression,
+    updateThreadCacheWithFlags,
+    updateThreadCacheWithCategory,
+    queueFilteredSearchRefresh
+  });
 
   const isDraftItem = (message: Message) =>
     isDraftMessage(message) || Boolean(message.draft);
@@ -2636,13 +2342,29 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     setActiveFolderId("");
     setQuery(`related:${message.id}`);
   };
+  const handleShowThread = (message: Message) => {
+    const threadId = message.threadId ?? message.messageId ?? message.id;
+    if (!threadId) return;
+    relatedRestoreRef.current = {
+      queryId: threadId,
+      scope: searchScope,
+      folderId: activeFolderId
+    };
+    if (searchScope === "folder" && activeFolderId) {
+      setLastFolderId(activeFolderId);
+    }
+    setSearchScope("all");
+    setActiveFolderId("");
+    setQuery(`thread:${threadId}`);
+  };
+
   const handleFindRelatedByCalendarInviteUid = (eventUid: string) => {
     const normalizedUid = eventUid.trim().replace(/"/g, "");
     if (!normalizedUid) return;
     if (searchScope === "folder" && activeFolderId) {
       setLastFolderId(activeFolderId);
     }
-    const uidQueryTerm = /\s/.test(normalizedUid) ? `"${normalizedUid}"` : normalizedUid;
+    const uidQueryTerm = /\\s/.test(normalizedUid) ? `"${normalizedUid}"` : normalizedUid;
     setSearchScope("all");
     setActiveFolderId("");
     setQuery(`invite:${uidQueryTerm}`);
@@ -2652,497 +2374,61 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     message: Message,
     iconSize = 12,
     origin: "list" | "thread" | "table" = "list"
-  ) => (
-    <MessageQuickActions
-      message={message}
-      iconSize={iconSize}
-      origin={origin}
-      isDraft={isDraftItem(message)}
-      pendingMessageActions={pendingMessageActions}
-      openCompose={openCompose}
-      handleDeleteMessage={handleDeleteMessage}
-      onShowRelated={handleShowRelated}
-      isTrashFolder={isTrashFolder}
-    />
+  ) => renderQuickActionsHelper(
+    message,
+    pendingMessageActions,
+    openCompose,
+    handleDeleteMessage,
+    handleShowRelated,
+    isDraftItem,
+    isTrashFolder,
+    iconSize,
+    origin
   );
 
   const renderMessageMenu = (
     message: Message,
     origin: "list" | "thread" | "table" = "list",
     onOpenChange?: (open: boolean) => void
-  ) => (
-    <MessageMenu
-      message={message}
-      origin={origin}
-      isDraft={isDraftItem(message)}
-      pendingMessageActions={pendingMessageActions}
-      openCompose={openCompose}
-      updateFlagState={updateFlagState}
-      toggleTodoFlag={toggleTodoFlag}
-      handleMarkSpam={handleMarkSpam}
-      handleMarkNotSpam={handleMarkNotSpam}
-      handleArchiveMessage={handleArchiveMessage}
-      handleSetCategory={handleSetCategory}
-      handleDeleteMessage={handleDeleteMessage}
-      handleUnsubscribe={handleUnsubscribe}
-      handleDownloadEml={handleDownloadEml}
-      handleResyncMessage={handleResyncMessage}
-      handleOpenInNewWindow={handleOpenInNewWindow}
-      handleOpenHtmlInNewWindow={handleOpenHtmlInNewWindow}
-      onShowRelated={handleShowRelated}
-      isTrashFolder={isTrashFolder}
-      isSpamFolder={isSpamFolder}
-      onOpenChange={onOpenChange}
-    />
+  ) => renderMessageMenuHelper(
+    message,
+    pendingMessageActions,
+    openCompose,
+    updateFlagStateRef.current,
+    toggleTodoFlagRef.current,
+    handleMarkSpam,
+    handleMarkNotSpam,
+    handleArchiveMessage,
+    handleSetCategory,
+    handleDeleteMessage,
+    handleUnsubscribe,
+    handleDownloadEml,
+    handleResyncMessage,
+    handleOpenInNewWindow,
+    handleOpenHtmlInNewWindow,
+    handleShowRelated,
+    handleShowThread,
+    isDraftItem,
+    isTrashFolder,
+    isSpamFolder,
+    origin,
+    onOpenChange
   );
-
-  const updateFlagState = async (
-    message: Message,
-    flag: "seen" | "answered" | "flagged" | "draft" | "deleted",
-    value: boolean
-  ) => {
-    try {
-      const res = await apiFetch("/api/message/flags", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          accountId: activeAccountId,
-          messageId: message.id,
-          flag,
-          value
-        })
-      });
-      if (!res.ok) {
-        reportError(await readErrorMessage(res));
-        return;
-      }
-      const data = (await res.json()) as { flags: string[] };
-      const updatedMessage = applyFlagsToMessage(message, data.flags);
-      const shouldKeepUpdatedMessage = shouldKeepMessageInCurrentResults(updatedMessage);
-      updateMessagesWithCurrentResultPrune(
-        (item) => (item.id === message.id ? applyFlagsToMessage(item, data.flags) : item),
-        { source: "update-flag-state" }
-      );
-      updateThreadCacheWithFlags(message.id, data.flags);
-      if (flag === "seen") {
-        const nextSeen = Boolean(updatedMessage.seen);
-        setFolders((prev) =>
-          prev.map((folder) => {
-            if (folder.id !== message.folderId) return folder;
-            const unreadCount = folder.unreadCount ?? 0;
-            if (message.seen && !nextSeen) {
-              return { ...folder, unreadCount: unreadCount + 1 };
-            }
-            if (!message.seen && nextSeen) {
-              return { ...folder, unreadCount: Math.max(0, unreadCount - 1) };
-            }
-            return folder;
-          })
-        );
-      }
-      if (viewMessage?.id === message.id && !shouldKeepUpdatedMessage) {
-        setViewMessage(null);
-        setActiveMessageId("");
-      }
-      queueFilteredSearchRefresh(hasFilteredSearchCriteria);
-    } catch {
-      reportError("Failed to update message flag.");
-    }
-  };
-
-  const updateKeywordFlag = async (
-    message: Message,
-    keyword: string,
-    value: boolean
-  ) => {
-    try {
-      const res = await apiFetch("/api/message/flags", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          accountId: activeAccountId,
-          messageId: message.id,
-          keyword,
-          value
-        })
-      });
-      if (!res.ok) {
-        reportError(await readErrorMessage(res));
-        return;
-      }
-      const data = (await res.json()) as { flags: string[] };
-      const updatedMessage = applyFlagsToMessage(message, data.flags);
-      const shouldKeepUpdatedMessage = shouldKeepMessageInCurrentResults(updatedMessage);
-      updateMessagesWithCurrentResultPrune(
-        (item) => (item.id === message.id ? applyFlagsToMessage(item, data.flags) : item),
-        { source: "update-keyword-flag" }
-      );
-      updateThreadCacheWithFlags(message.id, data.flags);
-      if (viewMessage?.id === message.id && !shouldKeepUpdatedMessage) {
-        setViewMessage(null);
-        setActiveMessageId("");
-      }
-      queueFilteredSearchRefresh(hasFilteredSearchCriteria);
-    } catch {
-      reportError("Failed to update message keyword.");
-    }
-  };
 
   const updateFlagStateRef = useRef(updateFlagState);
   updateFlagStateRef.current = updateFlagState;
 
-  const handleSetCategory = async (
-    message: Message,
-    category: "newsletter" | "notification" | "transactional" | null
-  ) => {
-    setPendingMessageActions((prev) => new Set(prev).add(message.id));
-    try {
-      const res = await apiFetch("/api/message/category", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          accountId: activeAccountId,
-          messageId: message.id,
-          category
-        })
-      });
-      if (!res.ok) {
-        reportError(await readErrorMessage(res));
-        return;
-      }
-
-      const data = (await res.json()) as {
-        ok: boolean;
-        message?: Message;
-        previousCategory?: string | null;
-        nextCategory?: string | null;
-      };
-      const updated = data.message;
-      if (!updated) return;
-
-      const shouldKeepUpdatedMessage = shouldKeepMessageInCurrentResults(updated);
-      updateMessagesWithCurrentResultPrune(
-        (item) =>
-          item.id === message.id
-            ? {
-                ...item,
-                category: updated.category ?? null,
-                categoryScore:
-                  typeof updated.categoryScore === "number" ? updated.categoryScore : null,
-                categorySignals: updated.categorySignals ?? []
-              }
-            : item,
-        { source: "set-category" }
-      );
-      updateThreadCacheWithCategory(
-        message.id,
-        updated.category ?? null,
-        typeof updated.categoryScore === "number" ? updated.categoryScore : null,
-        updated.categorySignals ?? []
-      );
-      if (viewMessage?.id === message.id && !shouldKeepUpdatedMessage) {
-        setViewMessage(null);
-        setActiveMessageId("");
-      }
-      queueFilteredSearchRefresh(hasFilteredSearchCriteria);
-      pushNotice({
-        type: "success",
-        title: category ? "Category updated." : "Category removed.",
-        description: getMessageSubjectForNotice(message)
-      });
-    } catch {
-      reportError("Failed to update category.");
-    } finally {
-      setPendingMessageActions((prev) => {
-        const next = new Set(prev);
-        next.delete(message.id);
-        return next;
-      });
-    }
-  };
-
-  // Helper to mark a single message: remove fromFlag, add toFlag
-  const transitionTodoState = async (
-    msg: Message,
-    fromKeyword: string,
-    toKeyword: string
-  ): Promise<void> => {
-    // Remove the old flag
-    const removeRes = await apiFetch("/api/message/flags", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        accountId: activeAccountId,
-        messageId: msg.id,
-        keyword: fromKeyword,
-        value: false
-      })
-    });
-    if (!removeRes.ok) {
-      reportError(await readErrorMessage(removeRes));
-      return;
-    }
-    await removeRes.json();
-
-    // Add the new flag
-    const addRes = await apiFetch("/api/message/flags", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        accountId: activeAccountId,
-        messageId: msg.id,
-        keyword: toKeyword,
-        value: true
-      })
-    });
-    if (!addRes.ok) {
-      reportError(await readErrorMessage(addRes));
-      return;
-    }
-    const addData = (await addRes.json()) as { flags: string[] };
-    const finalFlags = addData.flags;
-    
-    const updatedMessage = applyFlagsToMessage(msg, finalFlags);
-    const shouldKeepUpdatedMessage = shouldKeepMessageInCurrentResults(updatedMessage);
-    updateMessagesWithCurrentResultPrune(
-      (item) => (item.id === msg.id ? applyFlagsToMessage(item, finalFlags) : item),
-      { source: "transition-todo-state" }
-    );
-    updateThreadCacheWithFlags(msg.id, finalFlags);
-    if (viewMessage?.id === msg.id && !shouldKeepUpdatedMessage) {
-      setViewMessage(null);
-      setActiveMessageId("");
-    }
-  };
-
-  const toggleTodoFlag = async (
-    message: Message,
-    collapsedThreadMessages?: Message[],
-    clickedBadge?: "todo" | "done"
-  ) => {
-    try {
-      // Handle bulk operations for collapsed threads
-      if (collapsedThreadMessages && collapsedThreadMessages.length > 0 && clickedBadge) {
-        if (clickedBadge === "todo") {
-          // Mark all To-Do messages as Done
-          const todoMessages = collapsedThreadMessages.filter((m) => hasTodoFlag(m));
-          if (todoMessages.length > 0) {
-            await Promise.all(
-              todoMessages.map((m) => transitionTodoState(m, TODO_FLAG, DONE_FLAG))
-            );
-            queueFilteredSearchRefresh(hasFilteredSearchCriteria);
-          }
-        } else if (clickedBadge === "done") {
-          // Mark all Done messages as To-Do
-          const doneMessages = collapsedThreadMessages.filter((m) => hasDoneFlag(m));
-          if (doneMessages.length > 0) {
-            await Promise.all(
-              doneMessages.map((m) => transitionTodoState(m, DONE_FLAG, TODO_FLAG))
-            );
-            queueFilteredSearchRefresh(hasFilteredSearchCriteria);
-          }
-        }
-        return;
-      }
-
-      // Single message toggle
-      const hasTodo = hasTodoFlag(message);
-      const hasDone = hasDoneFlag(message);
-    
-      // State transitions:
-      // No flag → Add $Todo
-      // Has $Todo → Remove $Todo, Add $Done
-      // Has $Done → Remove $Done, Add $Todo
-      
-      let finalFlags = message.flags ?? [];
-      
-      if (hasTodo) {
-        // Mark as Done: remove $Todo, add $Done
-        // First remove $Todo
-        const removeRes = await apiFetch("/api/message/flags", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            accountId: activeAccountId,
-            messageId: message.id,
-            keyword: TODO_FLAG,
-            value: false
-          })
-        });
-        if (!removeRes.ok) {
-          reportError(await readErrorMessage(removeRes));
-          return;
-        }
-        const removeData = (await removeRes.json()) as { flags: string[] };
-        finalFlags = removeData.flags;
-        
-        // Then add $Done
-        const addRes = await apiFetch("/api/message/flags", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            accountId: activeAccountId,
-            messageId: message.id,
-            keyword: DONE_FLAG,
-            value: true
-          })
-        });
-        if (!addRes.ok) {
-          reportError(await readErrorMessage(addRes));
-          return;
-        }
-        const addData = (await addRes.json()) as { flags: string[] };
-        finalFlags = addData.flags;
-      } else if (hasDone) {
-        // Mark as To-Do: remove $Done, add $Todo
-        // First remove $Done
-        const removeRes = await apiFetch("/api/message/flags", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            accountId: activeAccountId,
-            messageId: message.id,
-            keyword: DONE_FLAG,
-            value: false
-          })
-        });
-        if (!removeRes.ok) {
-          reportError(await readErrorMessage(removeRes));
-          return;
-        }
-        const removeData = (await removeRes.json()) as { flags: string[] };
-        finalFlags = removeData.flags;
-        
-        // Then add $Todo
-        const addRes = await apiFetch("/api/message/flags", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            accountId: activeAccountId,
-            messageId: message.id,
-            keyword: TODO_FLAG,
-            value: true
-          })
-        });
-        if (!addRes.ok) {
-          reportError(await readErrorMessage(addRes));
-          return;
-        }
-        const addData = (await addRes.json()) as { flags: string[] };
-        finalFlags = addData.flags;
-      } else {
-        // No flag → Add $Todo
-        const res = await apiFetch("/api/message/flags", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            accountId: activeAccountId,
-            messageId: message.id,
-            keyword: TODO_FLAG,
-            value: true
-          })
-        });
-        if (!res.ok) {
-          reportError(await readErrorMessage(res));
-          return;
-        }
-        const data = (await res.json()) as { flags: string[] };
-        finalFlags = data.flags;
-      }
-      
-      const updatedMessage = applyFlagsToMessage(message, finalFlags);
-      const shouldKeepUpdatedMessage = shouldKeepMessageInCurrentResults(updatedMessage);
-      updateMessagesWithCurrentResultPrune(
-        (item) => (item.id === message.id ? applyFlagsToMessage(item, finalFlags) : item),
-        { source: "toggle-todo-flag" }
-      );
-      updateThreadCacheWithFlags(message.id, finalFlags);
-      if (viewMessage?.id === message.id && !shouldKeepUpdatedMessage) {
-        setViewMessage(null);
-        setActiveMessageId("");
-      }
-      queueFilteredSearchRefresh(hasFilteredSearchCriteria);
-    } catch {
-      reportError("Failed to update To-Do flag.");
-    }
-  };
-
   const toggleTodoFlagRef = useRef(toggleTodoFlag);
   toggleTodoFlagRef.current = toggleTodoFlag;
 
-  const toggleFlaggedFlag = async (
-    message: Message,
-    collapsedThreadMessages?: Message[]
-  ) => {
-    // If collapsed thread messages provided, unflag all flagged messages in the thread
-    if (collapsedThreadMessages && collapsedThreadMessages.length > 0) {
-      const flaggedMessages = collapsedThreadMessages.filter((m) => isFlaggedMessage(m));
-      if (flaggedMessages.length > 0) {
-        await Promise.all(
-          flaggedMessages.map((m) => updateFlagState(m, "flagged", false))
-        );
-      }
-      return;
-    }
-    // Single message toggle
-    await updateFlagState(message, "flagged", !isFlaggedMessage(message));
-  };
-
-  const buildDragPreview = (dragMessages: Message[]) => {
-    if (dragImageRef.current) {
-      document.body.removeChild(dragImageRef.current);
-      dragImageRef.current = null;
-    }
-    const ghost = document.createElement("div");
-    ghost.className = "drag-ghost";
-    const count = dragMessages.length;
-    const title = dragMessages[0]?.subject ?? "Message";
-    ghost.textContent = count > 1 ? `${count} messages` : title;
-    document.body.appendChild(ghost);
-    dragImageRef.current = ghost;
-    return ghost;
-  };
-
-  const handleMessageDragStart = (
-    event: React.DragEvent,
-    message: Message,
-    threadMessageIds?: string[]
-  ) => {
-    const selected = selectionStore.getIds();
-    const selectedIds = Array.from(selected);
-    const hasThreadMessageIds = Boolean(threadMessageIds && threadMessageIds.length > 0);
-    // Dragging a collapsed thread root should move the whole thread even if only the root is selected.
-    const shouldUseThreadMessageIds =
-      hasThreadMessageIds &&
-      (selected.size === 0 || (selected.size === 1 && selected.has(message.id)));
-    const ids =
-      shouldUseThreadMessageIds
-        ? threadMessageIds!
-        : selected.size > 0 && selected.has(message.id)
-          ? selectedIds
-          : hasThreadMessageIds
-            ? threadMessageIds!
-          : [message.id];
-    const uniqueIds = Array.from(new Set(ids));
-    const items = messages.filter((item) => uniqueIds.includes(item.id));
-    const ghost = buildDragPreview(items);
-    event.dataTransfer.effectAllowed = "move";
-    event.dataTransfer.setData(
-      "application/json",
-      JSON.stringify({ accountId: activeAccountId, messageIds: uniqueIds })
-    );
-    event.dataTransfer.setDragImage(ghost, 26, 26);
-    setDraggingMessageIds(new Set(uniqueIds));
-  };
-
-  const handleMessageDragEnd = () => {
-    setDraggingMessageIds(new Set());
-    setDragOverFolderId(null);
-    if (dragImageRef.current) {
-      document.body.removeChild(dragImageRef.current);
-      dragImageRef.current = null;
-    }
-  };
+  const { handleMessageDragStart, handleMessageDragEnd } = useMessageDragDrop({
+    selectionStore,
+    messages,
+    activeAccountId,
+    setDraggingMessageIds,
+    setDragOverFolderId,
+    dragImageRef
+  });
 
   const adjustMessageZoom = (messageId: string, delta: number) => {
     setMessageZoom((prev) => {
@@ -3160,19 +2446,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     });
   };
 
-  const folderSpecialIcon = (folder: Folder) => {
-    const special = (folder.specialUse ?? "").toLowerCase();
-    if (special === "\\inbox" || folder.name.toLowerCase() === "inbox") return <Inbox size={12} />;
-    if (special === "\\sent" || folder.name.toLowerCase() === "sent") return <Send size={12} />;
-    if (special === "\\drafts" || folder.name.toLowerCase() === "drafts")
-      return <FileText size={12} />;
-    if (special === "\\trash") return <Trash2 size={12} />;
-    if (special === "\\junk" || special === "\\spam" || folder.name.toLowerCase() === "junk")
-      return <ShieldOff size={12} />;
-    if (special === "\\archive" || folder.name.toLowerCase() === "archive")
-      return <Archive size={12} />;
-    return null;
-  };
+  const folderSpecialIconFn = (folder: Folder) => folderSpecialIcon(folder);
 
   useEffect(() => {
     const isTypingTarget = (target: EventTarget | null) => {
@@ -3299,16 +2573,8 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     return source.replace(/([A-Za-z0-9+/=]{200,})/g, "[base64 omitted]");
   };
 
-  const renderSourcePanel = (messageId: string) => (
-    <MessageSourcePanel
-      messageId={messageId}
-      fetchSource={fetchSource}
-      scrubSource={scrubSource}
-    />
-  );
-  const renderMarkdownPanel = (body: string | undefined, messageId: string) => (
-    <MarkdownPanel body={body} fontScale={messageFontScale[messageId] ?? 1} />
-  );
+  const renderSourcePanel = (messageId: string) => renderSourcePanelHelper(messageId, fetchSource, scrubSource);
+  const renderMarkdownPanel = (body: string | undefined, messageId: string) => renderMarkdownPanelHelper(body, messageId, messageFontScale);
 
   const jsonPayload = useMemo(() => {
     const base = omitBody
@@ -3634,6 +2900,24 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
       });
   }, [activeAccountId, accountFolders.length, initialDataReady]);
 
+  // CalDAV periodic sync
+  useEffect(() => {
+    if (!activeAccountId || !initialDataReady) return;
+    const caldav = currentAccount?.caldav;
+    if (!caldav?.url) return;
+    const intervalMs = caldav.syncIntervalMs ?? 15 * 60 * 1000;
+    const doSync = () => {
+      void apiFetch("/api/calendar/sync", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ accountId: activeAccountId })
+      });
+    };
+    doSync();
+    const timer = window.setInterval(doSync, intervalMs);
+    return () => window.clearInterval(timer);
+  }, [activeAccountId, currentAccount?.caldav?.url, currentAccount?.caldav?.syncIntervalMs, initialDataReady, apiFetch]);
+
   useEffect(() => {
     const loadThreadRelated = async () => {
       if (supportsThreads) {
@@ -3652,13 +2936,11 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
         setThreadRelatedMessages([]);
         return;
       }
-      if (!activeAccountId || sortedMessages.length === 0) {
+      if (!activeAccountId || threadRelatedCandidateIds.length === 0) {
         setThreadRelatedMessages([]);
         return;
       }
-      const threadIds = Array.from(
-        new Set(sortedMessages.map((msg) => msg.threadId).filter(Boolean))
-      );
+      const threadIds = threadRelatedCandidateIds;
       if (threadIds.length === 0) {
         setThreadRelatedMessages([]);
         return;
@@ -3684,20 +2966,24 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
       }
     };
     loadThreadRelated();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- threadRelatedCandidateIds churns with list refreshes; keying on threadRelatedCandidatesKey prevents refetch loops.
   }, [
     activeAccountId,
     activeFolderId,
     groupBy,
     includeThreadAcrossFoldersForList,
     searchScope,
-    sortedMessages
+    supportsThreads,
+    threadRelatedCandidatesKey
   ]);
 
   useEffect(() => {
     const loadThreadContent = async () => {
-      if (!activeMessage) return;
+      if (!activeMessageThreadKey) return;
+      const active = activeMessageRef.current;
+      if (!active) return;
       const threadId =
-        activeMessage.threadId ?? activeMessage.messageId ?? activeMessage.id;
+        active.threadId ?? active.messageId ?? active.id;
       if (!threadId) return;
       const loadFailureMessage = "Failed to load message content.";
 
@@ -3708,14 +2994,13 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
         const hasHtml = hasHtmlContent(message.htmlBody);
         return hasText || hasHtml;
       };
-      const cachedActive =
-        cachedThread?.find((item) => item.id === activeMessage.id) ?? null;
-      const activeHasContent = hasContent(cachedActive ?? activeMessage);
+      const cachedActive = cachedThread?.find((item) => item.id === active.id) ?? null;
+      const activeHasContent = hasContent(cachedActive ?? active);
       let hydrationResult: boolean | null = null;
       if (!activeHasContent) {
         clearThreadContentError(threadId);
         setThreadContentLoading(threadId);
-        const hydrationPromise = hydrateMessageOnOpenIfNeeded(activeMessage);
+        const hydrationPromise = hydrateMessageOnOpenIfNeeded(active);
         if (hydrationPromise) {
           const hydrated = await hydrationPromise;
           hydrationResult = Boolean(hydrated);
@@ -3736,7 +3021,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
       ): ThreadNode | null => {
         for (const node of nodes) {
           const nextRoot = currentRoot ?? node;
-          if (node.message.id === activeMessage.id) {
+          if (node.message.id === active.id) {
             return nextRoot;
           }
           const childRoot = findRoot(node.children, nextRoot);
@@ -3747,7 +3032,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
       const localRoot = supportsThreads ? findRoot(threadForest, null) : null;
       const localFlat = localRoot
         ? flattenThread(localRoot).map((item) => item.message)
-        : [activeMessage];
+        : [active];
       const messageIds = Array.from(new Set(localFlat.map((item) => item.id)));
       const threadIds = supportsThreads
         ? Array.from(new Set(localFlat.map((item) => item.threadId).filter(Boolean)))
@@ -3776,8 +3061,8 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
         const filtered = items.filter(
           (item) => item.folderId === activeFolderId || !checkIsThreadExcludedFolder(item.folderId)
         );
-        const loadedActive = filtered.find((item) => item.id === activeMessage.id) ?? null;
-        const loadedHasContent = hasContent(loadedActive ?? activeMessage);
+        const loadedActive = filtered.find((item) => item.id === active.id) ?? null;
+        const loadedHasContent = hasContent(loadedActive ?? active);
         if (hydrationResult === false && !loadedHasContent) {
           setThreadContentError(threadId, loadFailureMessage);
         }
@@ -3792,7 +3077,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
   }, [
     activeAccountId,
     activeFolderId,
-    activeMessage,
+    activeMessageThreadKey,
     groupBy,
     supportsThreads,
     threadEvictVersion,
@@ -4571,93 +3856,17 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
         state={{ inAppNotices }}
         actions={{ onOpenNotice: handleNoticeOpen, onDismissNotice: handleDismissNotice }}
       />
-      <AlertDialog.Root
-        open={Boolean(threadDeleteConfirm)}
+      <ThreadDeleteConfirmDialog
+        threadDeleteConfirm={threadDeleteConfirm}
         onOpenChange={handleThreadDeleteDialogOpenChange}
-      >
-        <AlertDialog.Content size="2" style={{ width: "min(460px, 92vw)" }}>
-          <AlertDialog.Title size="3">
-            {threadDeleteConfirm && threadDeleteConfirm.permanentDeleteCount > 0
-              ? "Delete thread?"
-              : "Move thread to Trash?"}
-          </AlertDialog.Title>
-          <AlertDialog.Description>
-            {threadDeleteConfirm && threadDeleteConfirm.permanentDeleteCount > 0
-              ? threadDeleteConfirm.moveToTrashCount > 0
-                ? `${threadDeleteConfirm.permanentDeleteCount} messages will be deleted permanently, and ${threadDeleteConfirm.moveToTrashCount} will be moved to Trash.`
-                : threadDeleteConfirm.permanentDeleteCount > 1
-                  ? `All ${threadDeleteConfirm.permanentDeleteCount} messages in this thread will be deleted permanently.`
-                  : "This message will be deleted permanently."
-              : threadDeleteConfirm?.messageCount && threadDeleteConfirm.messageCount > 1
-                ? `All ${threadDeleteConfirm.messageCount} messages in this thread will be moved to Trash.`
-                : "This message will be moved to Trash."}
-          </AlertDialog.Description>
-          <Flex gap="3" mt="4" justify="end">
-            <AlertDialog.Cancel>
-              <Button variant="soft" color="gray" onClick={() => resolveThreadDeleteConfirm(false)}>
-                Cancel
-              </Button>
-            </AlertDialog.Cancel>
-            <AlertDialog.Action>
-              <Button
-                color={
-                  threadDeleteConfirm && threadDeleteConfirm.permanentDeleteCount > 0
-                    ? "red"
-                    : "gray"
-                }
-                variant={
-                  threadDeleteConfirm && threadDeleteConfirm.permanentDeleteCount > 0
-                    ? "solid"
-                    : "soft"
-                }
-                onClick={() => resolveThreadDeleteConfirm(true)}
-              >
-                {threadDeleteConfirm && threadDeleteConfirm.permanentDeleteCount > 0
-                  ? "Delete permanently"
-                  : "Move to Trash"}
-              </Button>
-            </AlertDialog.Action>
-          </Flex>
-        </AlertDialog.Content>
-      </AlertDialog.Root>
+        resolveThreadDeleteConfirm={resolveThreadDeleteConfirm}
+      />
 
-      <AlertDialog.Root
-        open={Boolean(unsubscribeConfirm)}
+      <UnsubscribeConfirmDialog
+        unsubscribeConfirm={unsubscribeConfirm}
         onOpenChange={handleUnsubscribeDialogOpenChange}
-      >
-        <AlertDialog.Content size="2" style={{ width: "min(460px, 92vw)" }}>
-          <AlertDialog.Title size="3">Unsubscribe from mailing list?</AlertDialog.Title>
-          <AlertDialog.Description>
-            {unsubscribeConfirm?.sender && (
-              <>
-                <Text weight="medium" style={{ display: "block", marginBottom: "8px" }}>
-                  {unsubscribeConfirm.sender}
-                </Text>
-              </>
-            )}
-            {unsubscribeConfirm?.listId && (
-              <>
-                <Text size="2" color="gray" style={{ display: "block", marginBottom: "8px" }}>
-                  {unsubscribeConfirm.listId}
-                </Text>
-              </>
-            )}
-            This will send a one-click unsubscribe request to the sender.
-          </AlertDialog.Description>
-          <Flex gap="3" mt="4" justify="end">
-            <AlertDialog.Cancel>
-              <Button variant="soft" color="gray" onClick={() => resolveUnsubscribeConfirm(false)}>
-                Cancel
-              </Button>
-            </AlertDialog.Cancel>
-            <AlertDialog.Action>
-              <Button variant="solid" color="blue" onClick={() => resolveUnsubscribeConfirm(true)}>
-                Unsubscribe
-              </Button>
-            </AlertDialog.Action>
-          </Flex>
-        </AlertDialog.Content>
-      </AlertDialog.Root>
+        resolveUnsubscribeConfirm={resolveUnsubscribeConfirm}
+      />
 
       <section className="content-grid" ref={containerRef}>
         <FolderPane
@@ -4898,6 +4107,27 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
             console.info("[noctua] evict thread cache");
             resetThreadCache();
           }}
+          header={activeMessage ? (() => {
+                  const rootSubject =
+                    activeThread[0]?.subject ?? activeMessage?.subject ?? "";
+                  return (
+                    <>
+                      <span style={{ flex: 1, minWidth: 0, fontWeight: 600, fontSize: 16, lineHeight: 1.4, wordBreak: "break-word", overflowWrap: "anywhere", color: "var(--gray-12)" }}>
+                        {rootSubject || "(no subject)"}
+                      </span>
+                      <SegmentedControl.Root
+                        size="1"
+                        value={threadViewMode}
+                        onValueChange={(v) => setThreadViewMode(v as "full" | "compact")}
+                        style={{ flexShrink: 0 }}
+                      >
+                        <SegmentedControl.Item value="compact">Compact</SegmentedControl.Item>
+                        <SegmentedControl.Item value="full">Full</SegmentedControl.Item>
+                      </SegmentedControl.Root>
+                    </>
+                  );
+                })() : undefined
+          }
         >
             {(() => {
               // Render function for ComposeInlineCard with ref
@@ -5038,13 +4268,27 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
                       getPrimaryEmail,
                       extractEmails,
                       onFindRelatedByCalendarInviteUid: handleFindRelatedByCalendarInviteUid,
-                      dateFormat: accountDateFormat
+                      dateFormat: accountDateFormat,
+                      threadViewMode,
+                      userEmail: currentAccount?.email
                     }}
                   />
                 </>
               );
             })()}
         </MessageViewPane>
+
+        {calendarSidebarOpen && activeAccountId && (
+          <>
+            <div className="resizer" style={{ cursor: "default", pointerEvents: "none" }} />
+            <div style={{ width: calendarSidebarWidth, flexShrink: 0, display: "flex", flexDirection: "column", minHeight: 0, overflow: "hidden" }}>
+              <CalendarSidebarPanel
+                accountId={activeAccountId}
+                onClose={() => setCalendarSidebarOpen(false)}
+              />
+            </div>
+          </>
+        )}
       </section>
 
       {manageOpen && editingAccount && (
@@ -5168,6 +4412,18 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
           setExceptionEntries([]);
         }}
         formatRelativeTime={formatRelativeTime}
+        onOpenCalendarSidebar={() => setCalendarSidebarOpen(true)}
+        onOpenCalendarMessage={(messageId) => {
+          const msg = messageById.get(messageId) ?? null;
+          if (msg) {
+            setViewMessage(msg);
+            setActiveMessageId(messageId);
+            return;
+          }
+          void resolveMessageByExternalMessageId(messageId, activeAccountId).then((resolved) => {
+            if (resolved) setViewMessage(resolved);
+          });
+        }}
       />
     </div>
   );

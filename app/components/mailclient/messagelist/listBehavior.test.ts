@@ -2,6 +2,7 @@ import { describe, expect, it } from "bun:test";
 import type { Message } from "@/lib/data";
 import type { ListRowItem, VisibleMessageEntry } from "./listModel";
 import {
+  applyToggleWithAnimation,
   getCollapsedRootThreadMessageIds,
   getDragThreadMessageIds,
   getThreadRowSelectionMeta,
@@ -151,6 +152,59 @@ describe("list selection behavior", () => {
     });
 
     expect(Array.from(store.getIds()).sort()).toEqual(["m1", "m2", "m3", "m4"]);
+  });
+});
+
+describe("list toggle animation helpers", () => {
+  it("records toggle metadata and flips collapsed state for opened groups", () => {
+    let lastToggle: { key: string; open: boolean; at: number } | null = null;
+    let animationClock = 0;
+    let collapsedState: Record<string, boolean> = { groupA: true };
+
+    applyToggleWithAnimation({
+      key: "groupA",
+      open: true,
+      setLastToggle: (next) => {
+        lastToggle = typeof next === "function" ? next(lastToggle) : next;
+      },
+      setAnimationClock: (next) => {
+        animationClock = typeof next === "function" ? next(animationClock) : next;
+      },
+      setCollapsedState: (next) => {
+        collapsedState = typeof next === "function" ? next(collapsedState) : next;
+      }
+    });
+
+    expect(lastToggle).not.toBeNull();
+    expect(lastToggle?.key).toBe("groupA");
+    expect(lastToggle?.open).toBe(true);
+    expect(typeof lastToggle?.at).toBe("number");
+    expect(animationClock).toBe(lastToggle?.at);
+    expect(collapsedState.groupA).toBe(false);
+  });
+
+  it("marks targets collapsed when the toggle closes", () => {
+    let lastToggle: { key: string; open: boolean; at: number } | null = null;
+    let animationClock = 0;
+    let collapsedState: Record<string, boolean> = { threadA: false };
+
+    applyToggleWithAnimation({
+      key: "threadA",
+      open: false,
+      setLastToggle: (next) => {
+        lastToggle = typeof next === "function" ? next(lastToggle) : next;
+      },
+      setAnimationClock: (next) => {
+        animationClock = typeof next === "function" ? next(animationClock) : next;
+      },
+      setCollapsedState: (next) => {
+        collapsedState = typeof next === "function" ? next(collapsedState) : next;
+      }
+    });
+
+    expect(lastToggle?.open).toBe(false);
+    expect(animationClock).toBe(lastToggle?.at);
+    expect(collapsedState.threadA).toBe(true);
   });
 });
 

@@ -1,23 +1,20 @@
-import type { Folder } from "@/lib/data";
+import type { Folder, Message } from "@/lib/data";
+import { folderMailboxPath, mailboxPathFromFolderId } from "@/lib/mailboxPaths";
+export { folderMailboxPath, mailboxPathFromFolderId };
+export { findTrashFolder } from "@/lib/specialFolders";
 
-export function folderMailboxPath(folder: Folder, accountId: string) {
-  if (folder.id.startsWith(`${accountId}:`)) {
-    return folder.id.slice(accountId.length + 1);
-  }
-  return folder.name;
-}
-
-export function mailboxPathFromFolderId(folderId: string, accountId: string) {
-  if (folderId.startsWith(`${accountId}:`)) {
-    return folderId.slice(accountId.length + 1);
-  }
-  return folderId;
-}
-
-export function findTrashFolder(folders: Folder[], accountId: string) {
-  const candidates = folders.filter((folder) => folder.accountId === accountId);
-  const bySpecialUse = candidates.find(
-    (folder) => (folder.specialUse ?? "").trim().toLowerCase() === "\\trash"
-  );
-  return bySpecialUse ?? null;
+export function resolveMessageTrashState(
+  message: Pick<Message, "folderId" | "mailboxPath">,
+  trashFolder: Pick<Folder, "id" | "delimiter">,
+  accountId: string
+) {
+  const trashMailbox = mailboxPathFromFolderId(trashFolder.id, accountId);
+  const currentMailbox =
+    message.mailboxPath || mailboxPathFromFolderId(message.folderId, accountId);
+  const delimiter = trashFolder.delimiter ?? "/";
+  const isInTrash =
+    message.folderId === trashFolder.id ||
+    currentMailbox === trashMailbox ||
+    currentMailbox.startsWith(`${trashMailbox}${delimiter}`);
+  return { currentMailbox, trashMailbox, isInTrash };
 }

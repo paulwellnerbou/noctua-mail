@@ -1,3 +1,11 @@
+export type CaldavConfig = {
+  url: string;
+  user: string;
+  password: string;
+  calendarPath?: string;
+  syncIntervalMs?: number;
+};
+
 export type Account = {
   id: string;
   name: string;
@@ -5,6 +13,7 @@ export type Account = {
   avatar: string;
   ownerUserId?: string;
   settings?: AccountSettings;
+  caldav?: CaldavConfig;
   imap: {
     host: string;
     port: number;
@@ -146,6 +155,37 @@ export type CalendarReminder = {
   triggerAtMs: number;
   createdAtMs: number;
   updatedAtMs: number;
+};
+
+export type CalendarEventSourceType = "local" | "caldav" | "email";
+
+export type CalendarEvent = {
+  id: string;
+  accountId: string;
+  calendarId?: string;
+  eventUid: string;
+  summary: string;
+  description?: string;
+  location?: string;
+  startAtMs: number;
+  endAtMs?: number;
+  allDay: boolean;
+  startTimezone?: string;
+  endTimezone?: string;
+  recurrenceRule?: string;
+  recurrenceDates?: number[];
+  excludedDates?: number[];
+  status?: string;
+  organizer?: string;
+  attendees?: string;
+  remoteEtag?: string;
+  remoteHref?: string;
+  rawIcs?: string;
+  sourceType: CalendarEventSourceType;
+  messageId?: string;
+  createdAtMs: number;
+  updatedAtMs: number;
+  deletedAtMs?: number;
 };
 
 export type User = {

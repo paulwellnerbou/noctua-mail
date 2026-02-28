@@ -109,3 +109,42 @@ export function getUnsubscribeCapability(message: Message): UnsubscribeCapabilit
   if (hasMailto) return "mailto";
   return null;
 }
+
+export type InReplyToRef = {
+  refId: string;
+  target: Message;
+  isForward: boolean;
+};
+
+/**
+ * Resolves the "In Reply To" reference for a message.
+ * Prefers xForwardedMessageId, then inReplyTo, then the last entry in references.
+ * Returns null if no refId is found or if the target message is not in the map.
+ */
+export function resolveInReplyToRef(
+  message: Message,
+  messageByMessageId: Map<string, Message>
+): InReplyToRef | null {
+  const refId =
+    message.xForwardedMessageId ??
+    message.inReplyTo ??
+    (message.references && message.references.length > 0
+      ? message.references[message.references.length - 1]
+      : undefined);
+  if (!refId) return null;
+  const target = messageByMessageId.get(refId);
+  if (!target) return null;
+  return { refId, target, isForward: Boolean(message.xForwardedMessageId) };
+}
+
+/**
+ * Extracts a display name from an RFC 5322 formatted "From" address string.
+ * e.g. `"John Doe" <john@example.com>` → `John Doe`
+ *      `john@example.com` → `john@example.com`
+ */
+export function extractSenderName(from?: string | null): string {
+  if (!from) return "(unknown)";
+  const match = from.match(/^"?([^"<]+)"?\s*</);
+  if (match) return match[1].trim();
+  return from.replace(/<[^>]+>/g, "").trim() || from;
+}

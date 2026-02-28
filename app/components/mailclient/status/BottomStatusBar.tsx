@@ -11,6 +11,7 @@ import {
 import ProcessStatusPopover from "./ProcessStatusPopover";
 import ReminderStatusPopover from "./ReminderStatusPopover";
 import ExceptionStatusPopover from "./ExceptionStatusPopover";
+import CalendarPopover from "@/app/components/calendar/CalendarPopover";
 
 type BottomStatusBarProps = {
   isSyncing: boolean;
@@ -28,6 +29,8 @@ type BottomStatusBarProps = {
   exceptionEntries: ExceptionEntry[];
   onClearExceptions: () => void;
   formatRelativeTime: (timestamp?: number | null) => string;
+  onOpenCalendarSidebar: () => void;
+  onOpenCalendarMessage?: (messageId: string) => void;
 };
 
 export default function BottomStatusBar({
@@ -45,11 +48,14 @@ export default function BottomStatusBar({
   onReportError,
   exceptionEntries,
   onClearExceptions,
-  formatRelativeTime
+  formatRelativeTime,
+  onOpenCalendarSidebar,
+  onOpenCalendarMessage
 }: BottomStatusBarProps) {
   const [processPanelOpen, setProcessPanelOpen] = useState(false);
   const [exceptionPanelOpen, setExceptionPanelOpen] = useState(false);
   const [reminderPanelOpen, setReminderPanelOpen] = useState(false);
+  const [calendarPanelOpen, setCalendarPanelOpen] = useState(false);
   const [currentTimeMs, setCurrentTimeMs] = useState<number | null>(null);
 
   const dateTimeFormatter = useMemo(
@@ -88,6 +94,7 @@ export default function BottomStatusBar({
     if (open) {
       setReminderPanelOpen(false);
       setExceptionPanelOpen(false);
+      setCalendarPanelOpen(false);
     }
   };
 
@@ -96,6 +103,7 @@ export default function BottomStatusBar({
     if (open) {
       setProcessPanelOpen(false);
       setExceptionPanelOpen(false);
+      setCalendarPanelOpen(false);
     }
   };
 
@@ -104,6 +112,16 @@ export default function BottomStatusBar({
     if (open) {
       setProcessPanelOpen(false);
       setReminderPanelOpen(false);
+      setCalendarPanelOpen(false);
+    }
+  };
+
+  const handleCalendarPanelOpenChange = (open: boolean) => {
+    setCalendarPanelOpen(open);
+    if (open) {
+      setProcessPanelOpen(false);
+      setReminderPanelOpen(false);
+      setExceptionPanelOpen(false);
     }
   };
 
@@ -127,9 +145,14 @@ export default function BottomStatusBar({
         value={mailCheckStatusValue}
         tone={mailCheckStatusTone}
       />
-      <div className="bottom-center-time" title={currentDateTimeLabel}>
-        {currentDateTimeLabel}
-      </div>
+      <CalendarPopover
+        open={calendarPanelOpen}
+        accountId={activeAccountId}
+        onOpenChange={handleCalendarPanelOpenChange}
+        onOpenSidebar={onOpenCalendarSidebar}
+        triggerLabel={currentDateTimeLabel}
+        onOpenMessage={onOpenCalendarMessage}
+      />
       <ExceptionStatusPopover
         open={exceptionPanelOpen}
         onOpenChange={handleExceptionPanelOpenChange}
