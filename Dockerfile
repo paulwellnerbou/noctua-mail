@@ -37,6 +37,14 @@ COPY --from=builder /app/public ./public
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
 
+# The sync worker runs as a separate Bun subprocess (bun run scripts/runSyncJob.ts)
+# and is not included in the Next.js standalone bundle. Copy its source files and
+# the full node_modules so it can resolve npm packages and @/* path aliases at runtime.
+COPY --from=builder /app/tsconfig.json ./tsconfig.json
+COPY --from=builder /app/scripts ./scripts
+COPY --from=builder /app/lib ./lib
+COPY --from=deps /app/node_modules ./node_modules
+
 # Create data directory with proper permissions
 RUN mkdir -p /app/.data && chown -R noctua:noctua /app
 
