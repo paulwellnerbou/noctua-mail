@@ -1,5 +1,6 @@
 import {
   cancelCalendarRemindersByEventUid,
+  deleteMessagesByIds,
   getAccounts,
   getFolderIdsByMessageIds,
   listMessageFileRefs,
@@ -26,6 +27,8 @@ export type SyncPayload = {
   fullSync?: boolean;
   mode?: "full" | "recent" | "new";
   recategorizeFolder?: boolean;
+  /** UID of the last successfully processed message from a previous attempt; sync resumes from the next UID. */
+  resumeFromUid?: number;
 };
 
 export type SyncNotificationMessage = {
@@ -40,6 +43,8 @@ export type SyncNotificationMessage = {
 export type SyncOperationResult = {
   count: number;
   newMessages?: SyncNotificationMessage[];
+  /** Highest IMAP UID successfully written to DB; used for resume on retry. */
+  highestProcessedUid?: number;
 };
 
 export type SyncOperationProgressPhase =
@@ -64,6 +69,8 @@ export type SyncOperationProgress = {
   message?: string;
   retryAttempt?: number;
   maxRetries?: number;
+  /** Highest IMAP UID committed to DB so far; emitted after each successful batch write. */
+  highestProcessedUid?: number;
   updatedAt: number;
 };
 
@@ -143,6 +150,8 @@ export async function runSyncOperationBatched(
   const calendarMutations: CalendarReminderMutation[] = [];
   const calendarEventImports: Array<{ messageId: string; icsSource: string }> = [];
   let latestEstimatedTotal: number | undefined;
+  // Highest IMAP UID successfully written to DB — updated after each batch upsert.
+  let highestProcessedUid: number | undefined = payload.resumeFromUid;
 
   emitProgress({
     phase: "starting",
@@ -150,13 +159,18 @@ export async function runSyncOperationBatched(
     message: "Starting sync."
   });
 
-  // Get existing file refs if full sync (for cleanup at the end)
-  const existingFileRefs = payload.fullSync
+  // A fresh full sync (no resume) captures existing message IDs upfront so we
+  // can reconcile orphans (messages deleted from the server) at the end.
+  // Resumed syncs skip reconciliation because we only re-fetch a subset of UIDs.
+  const isFreshFullSync = Boolean(payload.fullSync) && !payload.resumeFromUid;
+  const existingFileRefs = isFreshFullSync
     ? await listMessageFileRefs(account.id, payload.folderId ?? null)
     : [];
 
   // Process each batch as it arrives from IMAP
-  for await (const batch of syncImapAccountBatched(account, mailboxPath, syncMode, clientId)) {
+  for await (const batch of syncImapAccountBatched(account, mailboxPath, syncMode, clientId, 300, {
+    resumeFromUid: payload.resumeFromUid
+  })) {
     folders = batch.folders; // Keep latest folder list
     const batchMessages = batch.messages;
     totalCount = batch.totalProcessed;
@@ -214,21 +228,40 @@ export async function runSyncOperationBatched(
     // drops legitimate cross-folder copies (e.g. self-sent mail in Sent+INBOX).
     const strippedMessages = sanitizedMessages;
 
-    // Write this batch to database
-    // Only replace existing messages on the FIRST batch during full sync
-    // to avoid deleting previous batches.
-    // Always recompute threads after each batch so messages become visible
-    // progressively — without this, messages are invisible until the very
-    // end of a full sync because the UI queries the `threads` table.
+    // Write this batch to database.
+    // Never delete existing messages upfront — we upsert incrementally so
+    // messages remain visible throughout the sync. Orphan reconciliation
+    // (deleting server-removed messages) happens at the end of a fresh full sync.
     await upsertMessages(
       account.id,
       payload.folderId ?? null,
       strippedMessages,
-      Boolean(payload.fullSync && batch.batchNumber === 1),
+      false,
       { recomputeThreads: true }
     );
-    // Track processed IDs
-    strippedMessages.forEach((msg) => allProcessedIds.add(msg.id));
+
+    // Track processed IDs and highest UID for orphan cleanup and resume support.
+    for (const msg of strippedMessages) {
+      allProcessedIds.add(msg.id);
+      if (typeof msg.imapUid === "number" && msg.imapUid > 0) {
+        if (highestProcessedUid === undefined || msg.imapUid > highestProcessedUid) {
+          highestProcessedUid = msg.imapUid;
+        }
+      }
+    }
+
+    // Emit progress after the batch is committed so the retry loop can capture
+    // highestProcessedUid even if the next fetch throws.
+    emitProgress({
+      phase: "fetching",
+      processed: totalCount,
+      batchNumber: batch.batchNumber,
+      batchSize: strippedMessages.length,
+      estimatedTotal: latestEstimatedTotal,
+      percent: calculatePercent(totalCount, latestEstimatedTotal),
+      highestProcessedUid,
+      message: "Batch written to database."
+    });
 
     // Collect ICS sources for calendar event import (all sync modes — upsert is idempotent)
     if (strippedMessages.length > 0) {
@@ -315,20 +348,28 @@ export async function runSyncOperationBatched(
     await recomputeThreadsForAccount(account.id);
   }
 
-  // Clean up deleted messages if full sync
-  if (payload.fullSync && existingFileRefs.length > 0) {
+  // Reconcile orphaned messages for fresh full syncs.
+  // existingFileRefs captured all message IDs (via LEFT JOIN) before this sync
+  // started. Any ID not seen during this sync was deleted from the server.
+  if (isFreshFullSync && existingFileRefs.length > 0) {
     const removed = existingFileRefs.filter((item) => !allProcessedIds.has(item.messageId));
     if (removed.length > 0) {
+      // Guard: skip messages that now live in another folder (cross-folder copies).
       const existingFolderIds = await getFolderIdsByMessageIds(
         account.id,
         removed.map((item) => item.messageId)
       );
-      const safeToDelete = removed.filter((item) => !existingFolderIds.has(item.messageId));
-      if (safeToDelete.length > 0) {
+      const orphaned = removed.filter((item) => !existingFolderIds.has(item.messageId));
+      if (orphaned.length > 0) {
+        // Delete stored attachment files first, then purge DB records.
         await Promise.all(
-          safeToDelete.map((item) =>
+          orphaned.map((item) =>
             deleteMessageFiles(account.id, item.messageId, item.attachmentIds)
           )
+        );
+        await deleteMessagesByIds(
+          account.id,
+          orphaned.map((item) => item.messageId)
         );
       }
     }
@@ -350,7 +391,8 @@ export async function runSyncOperationBatched(
 
   const result = {
     count: totalCount,
-    newMessages: syncMode === "new" ? newNotificationMessages : undefined
+    newMessages: syncMode === "new" ? newNotificationMessages : undefined,
+    highestProcessedUid
   };
   emitProgress({
     phase: "done",

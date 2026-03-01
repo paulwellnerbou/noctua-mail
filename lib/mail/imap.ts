@@ -1304,7 +1304,8 @@ export async function* syncImapAccountBatched(
   mailboxPath?: string,
   mode: "full" | "recent" | "new" = "recent",
   clientId?: string,
-  batchSize = 300
+  batchSize = 300,
+  options?: { resumeFromUid?: number }
 ): AsyncGenerator<ImapSyncBatch> {
   const logContext = buildLogContext(account, clientId);
   const client = buildImapClient(account, logContext);
@@ -1514,9 +1515,13 @@ export async function* syncImapAccountBatched(
     return;
   }
 
-  const searchCriteria = mode === "full" ? { all: true } : {
-    since: new Date(Date.now() - 1000 * 60 * 60 * 24 * 30)
-  };
+  const resumeFromUid = options?.resumeFromUid;
+  const searchCriteria =
+    mode === "full" && typeof resumeFromUid === "number" && resumeFromUid > 0
+      ? { uid: `${resumeFromUid + 1}:*` }
+      : mode === "full"
+        ? { all: true }
+        : { since: new Date(Date.now() - 1000 * 60 * 60 * 24 * 30) };
 
   const start = Date.now();
   for await (const message of client.fetch(searchCriteria, fetchQuery)) {

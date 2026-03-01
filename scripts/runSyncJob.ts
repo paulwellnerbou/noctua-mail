@@ -43,10 +43,24 @@ const derivedMailboxPath = payload.folderId
 const derivedMode: SyncOperationProgress["mode"] =
   payload.mode ?? (payload.fullSync ? "full" : "recent");
 
+// The highest IMAP UID committed to DB across all attempts. Captured via the
+// progress callback (emitted after each successful batch write) so it survives
+// a thrown error. On retry we resume from the next UID, keeping already-synced
+// messages in the DB and visible to the user.
+let highestProcessedUid: number | undefined;
+
 for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+  const resumePayload =
+    highestProcessedUid !== undefined && payload.fullSync
+      ? { ...payload, resumeFromUid: highestProcessedUid }
+      : payload;
+
   try {
-    const result = await runSyncOperation(payload, clientId, {
+    const result = await runSyncOperation(resumePayload, clientId, {
       onProgress: (progress) => {
+        if (typeof progress.highestProcessedUid === "number") {
+          highestProcessedUid = progress.highestProcessedUid;
+        }
         process.stdout.write(`${formatSyncWorkerProgressLine(progress)}\n`);
       }
     });
@@ -65,8 +79,10 @@ for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     const retryAttempt = attempt;
     const delay = Math.min(RETRY_BASE_DELAY_MS * attempt, MAX_RETRY_DELAY_MS);
     const msg = error instanceof Error ? error.message : String(error ?? "unknown error");
+    const resumeNote =
+      highestProcessedUid !== undefined ? `, will resume from UID ${highestProcessedUid + 1}` : "";
     console.error(
-      `[sync] attempt ${attempt}/${MAX_ATTEMPTS} failed (${msg}), retrying in ${delay / 1000}s`
+      `[sync] attempt ${attempt}/${MAX_ATTEMPTS} failed (${msg}), retrying in ${delay / 1000}s${resumeNote}`
     );
     process.stdout.write(
       `${formatSyncWorkerProgressLine({
