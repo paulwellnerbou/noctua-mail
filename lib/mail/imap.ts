@@ -1294,6 +1294,13 @@ export type ImapSyncBatch = {
   estimatedTotal?: number;
 };
 
+export type StoredMailboxCopyCandidate = {
+  id: string;
+  messageId?: string | null;
+  mailboxPath: string;
+  imapUid: number;
+};
+
 /**
  * Batched version of syncImapAccount that yields messages in chunks
  * to reduce memory usage during large folder syncs.
@@ -1636,6 +1643,76 @@ export async function syncImapMessage(
     }
   }
   return message;
+}
+
+export async function findMissingStoredMailboxCopies(
+  account: Account,
+  candidates: StoredMailboxCopyCandidate[],
+  clientId?: string
+) {
+  const validCandidates = candidates.filter(
+    (candidate) =>
+      candidate.mailboxPath.trim().length > 0 &&
+      typeof candidate.imapUid === "number" &&
+      Number.isFinite(candidate.imapUid)
+  );
+  const missingIds = new Set<string>();
+  if (validCandidates.length === 0) return missingIds;
+
+  const logContext = buildLogContext(account, clientId);
+  const client = buildImapClient(account, logContext);
+  let currentMailbox = "";
+
+  try {
+    await logImapOp("connect", { host: account.imap.host, ...logContext }, () =>
+      client.connect()
+    );
+
+    for (const candidate of validCandidates) {
+      const mailboxPath = candidate.mailboxPath.trim();
+      try {
+        if (mailboxPath !== currentMailbox) {
+          await logImapOp(
+            "mailboxOpen",
+            { mailbox: mailboxPath, readOnly: true, ...logContext },
+            () => client.mailboxOpen(mailboxPath, { readOnly: true })
+          );
+          currentMailbox = mailboxPath;
+        }
+        const item = await logImapOp(
+          "fetchOne",
+          { mailbox: mailboxPath, uid: candidate.imapUid, ...logContext },
+          () =>
+            client.fetchOne(
+              String(candidate.imapUid),
+              { uid: true, envelope: true },
+              { uid: true }
+            )
+        );
+        if (!item) {
+          missingIds.add(candidate.id);
+          continue;
+        }
+        const storedMessageId = normalizeEnvelopeHeaderId(candidate.messageId);
+        const fetchedMessageId = normalizeEnvelopeHeaderId(
+          (item.envelope as ImapEnvelope | undefined)?.messageId
+        );
+        if (storedMessageId && fetchedMessageId && storedMessageId !== fetchedMessageId) {
+          missingIds.add(candidate.id);
+        }
+      } catch {
+        missingIds.add(candidate.id);
+      }
+    }
+  } finally {
+    try {
+      await logImapOp("logout", { ...logContext }, () => client.logout());
+    } catch {
+      // ignore logout errors
+    }
+  }
+
+  return missingIds;
 }
 
 export async function appendImapMessage(

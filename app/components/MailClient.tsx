@@ -3847,7 +3847,11 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
           switchAccount: (accountId: string) => {
             void switchAccount(accountId);
           },
-          syncAccount
+          syncAccount,
+          logout: async () => {
+            await apiFetch("/api/auth/logout", { method: "POST", credentials: "include" });
+            setAuthState("unauth");
+          }
         }}
       />
       <InAppNoticeStack

@@ -18,6 +18,7 @@ import { getAttachmentContentBuffer, sanitizeSyncedMessage } from "@/lib/mail/sy
 import { isCalendarAttachment } from "@/lib/messageFlags";
 import { deleteMessageFiles } from "@/lib/storage";
 import { syncImapAccountBatched } from "@/lib/mail/imap";
+import { reconcileVerifiedCrossFolderMoves } from "@/lib/syncMoveReconciliation";
 import { collectThreadReferenceIds, resolveThreadingForItems } from "@/lib/threading";
 import type { CalendarReminderMutation } from "@/lib/calendarReminderMutations";
 
@@ -227,6 +228,11 @@ export async function runSyncOperationBatched(
     // conflicting internal IDs. Pre-filtering by existing ID in another folder
     // drops legitimate cross-folder copies (e.g. self-sent mail in Sent+INBOX).
     const strippedMessages = sanitizedMessages;
+
+    // Another client may have moved a message to this folder, leaving our local
+    // row behind in the previous mailbox. Verify those cross-folder collisions
+    // against IMAP and only relocate rows whose old UID no longer exists.
+    await reconcileVerifiedCrossFolderMoves(account, strippedMessages, clientId);
 
     // Write this batch to database.
     // Never delete existing messages upfront — we upsert incrementally so

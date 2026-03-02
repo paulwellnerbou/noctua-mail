@@ -9,6 +9,7 @@ import {
   Edit3,
   FileText,
   Folder as FolderIcon,
+  LogOut,
   Moon,
   RefreshCw,
   Settings,
@@ -88,6 +89,7 @@ type TopBarProps = {
       mode?: "new" | "full",
       options?: { recategorizeFolder?: boolean }
     ) => void;
+    logout: () => void;
   };
 };
 
@@ -124,7 +126,8 @@ export default function TopBar({ buildVersionLabel = "", state, ui, actions }: T
     startEditAccount,
     deleteAccount,
     switchAccount,
-    syncAccount
+    syncAccount,
+    logout
   } = actions;
   const { searchFieldsLabel, searchBadgesLabel } = ui;
 
@@ -473,6 +476,11 @@ export default function TopBar({ buildVersionLabel = "", state, ui, actions }: T
               </DropdownMenu.Item>
               <DropdownMenu.Separator />
               <DropdownMenu.Item onSelect={() => startEditAccount()}>+ Add account</DropdownMenu.Item>
+              <DropdownMenu.Separator />
+              <DropdownMenu.Item onSelect={logout}>
+                <LogOut size={14} />
+                Logout
+              </DropdownMenu.Item>
             </DropdownMenu.Content>
           </DropdownMenu.Root>
         </div>

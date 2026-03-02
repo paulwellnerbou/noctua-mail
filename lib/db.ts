@@ -51,6 +51,7 @@ import { normalizeReminderDateList, resolveNextReminderOccurrence } from "./remi
 import { resolveCalendarTimeZoneId } from "./calendarTimezones";
 import { collectCalendarReminderMutationsFromCalendarInvite } from "./calendarReminderMutations";
 import type { CalendarReminderMutation } from "./calendarReminderMutations";
+import { isSameMailboxMessageCopy } from "./messageCopies";
 import { getAttachmentContentBuffer } from "./mail/syncMessageSanitizer";
 import { getMessageSource } from "./storage";
 import {
@@ -2634,32 +2635,6 @@ function buildMessageCollisionVariantId(
   return `${baseId}-${suffix}`;
 }
 
-function isSameMailboxMessageCopy(
-  existing: { folderId?: string | null; mailboxPath?: string | null; imapUid?: number | null },
-  incoming: Pick<Message, "folderId" | "mailboxPath" | "imapUid">
-) {
-  if (existing.folderId && incoming.folderId && existing.folderId !== incoming.folderId) {
-    return false;
-  }
-  const existingUid =
-    typeof existing.imapUid === "number" && Number.isFinite(existing.imapUid)
-      ? existing.imapUid
-      : null;
-  const incomingUid =
-    typeof incoming.imapUid === "number" && Number.isFinite(incoming.imapUid)
-      ? incoming.imapUid
-      : null;
-  if (existingUid !== null && incomingUid !== null) {
-    return existingUid === incomingUid;
-  }
-  const existingMailbox = (existing.mailboxPath ?? "").trim().toLowerCase();
-  const incomingMailbox = (incoming.mailboxPath ?? "").trim().toLowerCase();
-  if (existingMailbox && incomingMailbox) {
-    return existingMailbox === incomingMailbox;
-  }
-  return true;
-}
-
 function normalizeSubjectLine(subject?: string | null) {
   let value = (subject ?? "").trim().toLowerCase();
   if (!value) return "";
@@ -4928,6 +4903,50 @@ export async function getMessageById(accountId: string, messageId: string) {
     categorySignals: parseStringArray(row.categorySignals),
     listUnsubscribe: row.listUnsubscribe ?? undefined
   } as Message;
+}
+
+export async function getStoredMessagesByIds(
+  accountId: string,
+  messageIds: string[]
+): Promise<
+  Array<{
+    id: string;
+    messageId?: string | null;
+    folderId: string;
+    mailboxPath?: string | null;
+    imapUid?: number | null;
+  }>
+> {
+  const uniqueIds = Array.from(new Set(messageIds.map((id) => id.trim()).filter(Boolean)));
+  if (uniqueIds.length === 0) return [];
+  const db = await getAccountDb(accountId);
+  const QUERY_BATCH_SIZE = 400;
+  const rows: Array<{
+    id: string;
+    messageId?: string | null;
+    folderId: string;
+    mailboxPath?: string | null;
+    imapUid?: number | null;
+  }> = [];
+  for (let start = 0; start < uniqueIds.length; start += QUERY_BATCH_SIZE) {
+    const chunk = uniqueIds.slice(start, start + QUERY_BATCH_SIZE);
+    rows.push(
+      ...((db
+        .prepare(
+          `SELECT id, messageId, folderId, mailboxPath, imapUid
+           FROM messages
+           WHERE accountId = ? AND id IN (${chunk.map(() => "?").join(",")})`
+        )
+        .all(accountId, ...chunk) as Array<{
+        id: string;
+        messageId?: string | null;
+        folderId: string;
+        mailboxPath?: string | null;
+        imapUid?: number | null;
+      }>))
+    );
+  }
+  return rows;
 }
 
 export async function getAttachmentMeta(accountId: string, messageId: string, attachmentId: string) {

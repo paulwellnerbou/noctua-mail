@@ -13,9 +13,9 @@
   },
   "type": "module",
   "scripts": {
-    "dev": "NOCTUA_DATA_DIR=../noctua-data PORT=3654 bun --bun next dev",
+    "dev": "bun --env-file=${ENV_FILE:-.env.local} --bun next dev",
     "build": "bun --bun scripts/generateBuildVersion.ts && bun --bun next build",
-    "start": "NOCTUA_DATA_DIR=../noctua-data PORT=3654 bun --bun next start",
+    "start": "bun --env-file=${ENV_FILE:-.env.local} --bun next start",
     "lint": "eslint ."
   },
   "dependencies": {

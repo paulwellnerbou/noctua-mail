@@ -260,6 +260,55 @@ export default function AdminTabContent({
           <Card size="2">
             <Flex direction="column" gap="2">
               <Text size="3" weight="medium">
+                Users
+              </Text>
+              {users.length === 0 ? (
+                <Text size="2" color="gray">
+                  {loading ? "Loading users..." : "No users found."}
+                </Text>
+              ) : (
+                <Flex direction="column" gap="3">
+                  {users.map((user) => (
+                    <Card key={user.id} size="1">
+                      <Flex direction="column" gap="2">
+                        <Text size="3" weight="medium">
+                          {user.email}
+                        </Text>
+                        <Text size="2" color="gray">
+                          Role: {user.role} · Created: {user.createdAt ? new Date(user.createdAt).toLocaleString() : "Unknown"}
+                        </Text>
+                        <Text size="1" color="gray" style={{ fontFamily: "monospace", overflowWrap: "anywhere" }}>
+                          User ID: {user.id}
+                        </Text>
+                        {user.accounts.length === 0 ? (
+                          <Text size="2" color="gray">
+                            No linked accounts.
+                          </Text>
+                        ) : (
+                          <Flex direction="column" gap="1">
+                            {user.accounts.map((account) => (
+                              <Flex key={account.id} direction="column" gap="0">
+                                <Text size="2">
+                                  {account.name || account.email} ({account.email})
+                                </Text>
+                                <Text size="1" color="gray" style={{ fontFamily: "monospace", overflowWrap: "anywhere" }}>
+                                  Account ID: {account.id}
+                                </Text>
+                              </Flex>
+                            ))}
+                          </Flex>
+                        )}
+                      </Flex>
+                    </Card>
+                  ))}
+                </Flex>
+              )}
+            </Flex>
+          </Card>
+
+          <Card size="2">
+            <Flex direction="column" gap="2">
+              <Text size="3" weight="medium">
                 Invite codes
               </Text>
               {invites.length === 0 ? (
@@ -310,47 +359,6 @@ export default function AdminTabContent({
                       </Card>
                     );
                   })}
-                </Flex>
-              )}
-            </Flex>
-          </Card>
-
-          <Card size="2">
-            <Flex direction="column" gap="2">
-              <Text size="3" weight="medium">
-                Users
-              </Text>
-              {users.length === 0 ? (
-                <Text size="2" color="gray">
-                  {loading ? "Loading users..." : "No users found."}
-                </Text>
-              ) : (
-                <Flex direction="column" gap="3">
-                  {users.map((user) => (
-                    <Card key={user.id} size="1">
-                      <Flex direction="column" gap="2">
-                        <Text size="3" weight="medium">
-                          {user.email}
-                        </Text>
-                        <Text size="2" color="gray">
-                          Role: {user.role} · Created: {user.createdAt ? new Date(user.createdAt).toLocaleString() : "Unknown"}
-                        </Text>
-                        {user.accounts.length === 0 ? (
-                          <Text size="2" color="gray">
-                            No linked accounts.
-                          </Text>
-                        ) : (
-                          <Flex direction="column" gap="1">
-                            {user.accounts.map((account) => (
-                              <Text key={account.id} size="2">
-                                {account.name || account.email} ({account.email})
-                              </Text>
-                            ))}
-                          </Flex>
-                        )}
-                      </Flex>
-                    </Card>
-                  ))}
                 </Flex>
               )}
             </Flex>

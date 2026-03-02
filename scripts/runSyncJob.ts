@@ -33,6 +33,12 @@ const MAX_ATTEMPTS = MAX_RETRIES + 1;
 const RETRY_BASE_DELAY_MS = 10_000; // 10s, 20s, … capped at 60s
 const MAX_RETRY_DELAY_MS = 60_000;
 
+/** Errors that should abort immediately without retrying. */
+const NON_RETRYABLE_PATTERNS = [
+  "No password configured",
+  "Account not found",
+];
+
 const { clientId, ...payload } = parsed;
 
 // Derive the mailbox path and mode from the payload so we can emit a
@@ -67,8 +73,10 @@ for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     process.stdout.write(`${formatSyncWorkerResultLine(result)}\n`);
     break;
   } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error ?? "unknown error");
+    const isNonRetryable = NON_RETRYABLE_PATTERNS.some((p) => msg.includes(p));
     const isLastAttempt = attempt === MAX_ATTEMPTS;
-    if (isLastAttempt) {
+    if (isNonRetryable || isLastAttempt) {
       if (error instanceof Error) {
         console.error(error.stack ?? error.message);
       } else {
@@ -78,7 +86,6 @@ for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     }
     const retryAttempt = attempt;
     const delay = Math.min(RETRY_BASE_DELAY_MS * attempt, MAX_RETRY_DELAY_MS);
-    const msg = error instanceof Error ? error.message : String(error ?? "unknown error");
     const resumeNote =
       highestProcessedUid !== undefined ? `, will resume from UID ${highestProcessedUid + 1}` : "";
     console.error(
