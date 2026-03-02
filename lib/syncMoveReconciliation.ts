@@ -3,6 +3,16 @@ import type { Account, Message } from "@/lib/data";
 import { findMissingStoredMailboxCopies } from "@/lib/mail/imap";
 import { isSameMailboxMessageCopy } from "@/lib/messageCopies";
 
+type MoveReconciliationCandidate = {
+  id: string;
+  messageId: string | null | undefined;
+  mailboxPath: string;
+  imapUid: number;
+  destinationFolderId: string;
+  destinationMailboxPath: string;
+  destinationUid: number | null;
+};
+
 export async function reconcileVerifiedCrossFolderMoves(
   account: Account,
   messages: Message[],
@@ -36,20 +46,10 @@ export async function reconcileVerifiedCrossFolderMoves(
         destinationFolderId: message.folderId,
         destinationMailboxPath: message.mailboxPath ?? message.folderId.replace(`${account.id}:`, ""),
         destinationUid: message.imapUid ?? null
-      };
+      } satisfies MoveReconciliationCandidate;
     })
     .filter(
-      (
-        candidate
-      ): candidate is {
-        id: string;
-        messageId?: string | null;
-        mailboxPath: string;
-        imapUid: number;
-        destinationFolderId: string;
-        destinationMailboxPath: string;
-        destinationUid: number | null;
-      } => Boolean(candidate)
+      (candidate): candidate is MoveReconciliationCandidate => candidate !== null
     );
   if (candidates.length === 0) return;
 
