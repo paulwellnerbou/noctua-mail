@@ -1,12 +1,18 @@
-import { describe, expect, mock, test } from "bun:test";
+import { afterAll, describe, expect, mock, test } from "bun:test";
 
 const upsertCalendarEventByUid = mock(() => Promise.resolve({ id: "cal-test" } as any));
 const cancelCalendarEventByUid = mock(() => Promise.resolve());
+const actualDb = await import("../db");
 
 mock.module("@/lib/db", () => ({
+  ...actualDb,
   upsertCalendarEventByUid,
   cancelCalendarEventByUid
 }));
+
+afterAll(() => {
+  mock.restore();
+});
 
 const { importEmailCalendarEvents } = await import("./emailEventImporter");
 

@@ -1,18 +1,26 @@
-import { describe, expect, mock, test } from "bun:test";
+import { afterAll, describe, expect, mock, test } from "bun:test";
 import type { Account, Message } from "@/lib/data";
 
 const getStoredMessagesByIds = mock(async () => []);
 const relocateMovedMessage = mock(async () => null);
 const findMissingStoredMailboxCopies = mock(async () => new Set<string>());
+const actualDb = await import("./db");
+const actualImap = await import("./mail/imap");
 
 mock.module("@/lib/db", () => ({
+  ...actualDb,
   getStoredMessagesByIds,
   relocateMovedMessage
 }));
 
 mock.module("@/lib/mail/imap", () => ({
+  ...actualImap,
   findMissingStoredMailboxCopies
 }));
+
+afterAll(() => {
+  mock.restore();
+});
 
 const { reconcileVerifiedCrossFolderMoves } = await import("./syncMoveReconciliation");
 
