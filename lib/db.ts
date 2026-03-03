@@ -15,6 +15,7 @@ import type {
   Attachment,
   CalendarEvent,
   CalendarEventSourceType,
+  MessageCalendarInviteState,
   CalendarReminder,
   CaldavConfig,
   Folder,
@@ -51,6 +52,7 @@ import { normalizeReminderDateList, resolveNextReminderOccurrence } from "./remi
 import { resolveCalendarTimeZoneId } from "./calendarTimezones";
 import { collectCalendarReminderMutationsFromCalendarInvite } from "./calendarReminderMutations";
 import type { CalendarReminderMutation } from "./calendarReminderMutations";
+import type { CalendarInviteActionType } from "./calendarInviteProcessing";
 import { isSameMailboxMessageCopy } from "./messageCopies";
 import { getAttachmentContentBuffer } from "./mail/syncMessageSanitizer";
 import { getMessageSource } from "./storage";
@@ -146,6 +148,20 @@ function ensureCalendarReminderRuntimeSchema(db: any) {
   if (calendarReminderSchemaEnsuredByDb.has(db)) return;
   ensureCalendarReminderOptionalColumns(db);
   calendarReminderSchemaEnsuredByDb.add(db);
+}
+
+function ensureMessageCalendarEventOptionalColumns(db: any) {
+  const messageCalendarColumns = getDbTableColumns(db, "message_calendar_events");
+  if (messageCalendarColumns.size === 0) return;
+  if (!messageCalendarColumns.has("inviteActionType")) {
+    db.prepare(`ALTER TABLE message_calendar_events ADD COLUMN inviteActionType TEXT`).run();
+  }
+  if (!messageCalendarColumns.has("processedAtMs")) {
+    db.prepare(`ALTER TABLE message_calendar_events ADD COLUMN processedAtMs INTEGER`).run();
+  }
+  if (!messageCalendarColumns.has("processedByUserId")) {
+    db.prepare(`ALTER TABLE message_calendar_events ADD COLUMN processedByUserId TEXT`).run();
+  }
 }
 
 async function ensureDatabaseCtor() {
@@ -480,6 +496,9 @@ function initAccountSchema(db: any) {
       accountId TEXT NOT NULL,
       messageId TEXT NOT NULL,
       eventUid TEXT NOT NULL,
+      inviteActionType TEXT,
+      processedAtMs INTEGER,
+      processedByUserId TEXT,
       PRIMARY KEY (accountId, messageId, eventUid),
       FOREIGN KEY(messageId) REFERENCES messages(id) ON DELETE CASCADE
     );
@@ -642,6 +661,7 @@ function initAccountSchema(db: any) {
   if (!messageColumns.has("quotedHtmlEdited")) {
     db.prepare(`ALTER TABLE messages ADD COLUMN quotedHtmlEdited INTEGER DEFAULT 0`).run();
   }
+  ensureMessageCalendarEventOptionalColumns(db);
 
   const reminderColumns = getDbTableColumns(db, "calendar_reminders");
   if (reminderColumns.size > 0) {
@@ -1362,6 +1382,12 @@ type UpsertCalendarReminderInput = {
   leadLabel: string;
 };
 
+type MatchingCalendarReminderRow = {
+  id: string;
+  createdAtMs: number;
+  messageId?: string | null;
+};
+
 type CalendarReminderEventMatch = {
   eventUid?: string;
   eventTitle?: string;
@@ -1525,6 +1551,52 @@ export async function listCalendarReminders(accountId: string, userId: string) {
     .sort((a, b) => a.triggerAtMs - b.triggerAtMs);
 }
 
+function findMatchingCalendarReminderRows(
+  db: any,
+  accountId: string,
+  userId: string,
+  input: {
+    eventUid?: string | null;
+    eventStartAtMs: number;
+    eventTitle: string;
+  }
+) {
+  const eventUidKey = normalizeReminderEventUidKey(input.eventUid);
+  if (eventUidKey) {
+    return db
+      .prepare(
+        `SELECT id, createdAtMs, messageId
+         FROM calendar_reminders
+         WHERE accountId = ? AND userId = ? AND deletedAtMs IS NULL
+           AND (
+             lower(COALESCE(eventUidKey, eventUid, '')) = lower(?)
+             OR (
+               eventStartAtMs = ?
+               AND lower(eventTitle) = lower(?)
+             )
+           )
+         ORDER BY createdAtMs ASC`
+      )
+      .all(
+        accountId,
+        userId,
+        eventUidKey,
+        input.eventStartAtMs,
+        input.eventTitle
+      ) as MatchingCalendarReminderRow[];
+  }
+  return db
+    .prepare(
+      `SELECT id, createdAtMs, messageId
+       FROM calendar_reminders
+       WHERE accountId = ? AND userId = ? AND deletedAtMs IS NULL
+         AND eventStartAtMs = ?
+         AND lower(eventTitle) = lower(?)
+       ORDER BY createdAtMs ASC`
+    )
+    .all(accountId, userId, input.eventStartAtMs, input.eventTitle) as MatchingCalendarReminderRow[];
+}
+
 function upsertCalendarReminderWithDb(
   db: any,
   accountId: string,
@@ -1566,40 +1638,11 @@ function upsertCalendarReminderWithDb(
     throw new Error("Invalid leadLabel");
   }
 
-  const matchingRows = eventUid
-    ? (db
-        .prepare(
-          `SELECT id, createdAtMs, messageId
-           FROM calendar_reminders
-           WHERE accountId = ? AND userId = ? AND deletedAtMs IS NULL
-             AND (
-               lower(COALESCE(eventUidKey, eventUid, '')) = lower(?)
-               OR (
-                 eventStartAtMs = ?
-                 AND lower(eventTitle) = lower(?)
-               )
-             )
-           ORDER BY createdAtMs ASC`
-        )
-        .all(accountId, userId, eventUidKey, eventStartAtMs, eventTitle) as Array<{
-        id: string;
-        createdAtMs: number;
-        messageId?: string | null;
-      }>)
-    : (db
-        .prepare(
-          `SELECT id, createdAtMs, messageId
-           FROM calendar_reminders
-           WHERE accountId = ? AND userId = ? AND deletedAtMs IS NULL
-             AND eventStartAtMs = ?
-             AND lower(eventTitle) = lower(?)
-           ORDER BY createdAtMs ASC`
-        )
-        .all(accountId, userId, eventStartAtMs, eventTitle) as Array<{
-        id: string;
-        createdAtMs: number;
-        messageId?: string | null;
-      }>);
+  const matchingRows = findMatchingCalendarReminderRows(db, accountId, userId, {
+    eventUid,
+    eventStartAtMs,
+    eventTitle
+  });
 
   const primaryRow = matchingRows[0];
   if (primaryRow) {
@@ -1694,6 +1737,42 @@ export async function upsertCalendarReminder(
   return withDbWriteRetry("upsertCalendarReminder", async () => {
     const db = await getAccountDb(accountId);
     return upsertCalendarReminderWithDb(db, accountId, userId, input);
+  });
+}
+
+export async function ensureCalendarReminder(
+  accountId: string,
+  userId: string,
+  input: UpsertCalendarReminderInput
+) {
+  return withDbWriteRetry("ensureCalendarReminder", async () => {
+    const db = await getAccountDb(accountId);
+    const eventTitle = normalizeReminderEventTitle(input.eventTitle);
+    const eventStartAtMs = Number(input.eventStartAtMs);
+    if (!Number.isFinite(eventStartAtMs) || eventStartAtMs <= 0) {
+      throw new Error("Invalid eventStartAtMs");
+    }
+    const matchingRows = findMatchingCalendarReminderRows(db, accountId, userId, {
+      eventUid: normalizeReminderEventUid(input.eventUid),
+      eventStartAtMs,
+      eventTitle
+    });
+    const existing = matchingRows[0];
+    if (!existing) {
+      const created = upsertCalendarReminderWithDb(db, accountId, userId, input);
+      return { reminder: created.reminder, created: true };
+    }
+    const row = db
+      .prepare(
+        `SELECT id, accountId, userId, messageId, eventUid, eventTitle, eventLocation, eventDescription, eventStartAtMs, eventEndAtMs, startTimezone, recurrenceRule, recurrenceDates, excludedDates, leadMinutes, leadLabel, createdAtMs, updatedAtMs
+         FROM calendar_reminders
+         WHERE id = ?`
+      )
+      .get(existing.id) as any;
+    return {
+      reminder: mapCalendarReminderRow(row, { allowPastFallback: true })!,
+      created: false
+    };
   });
 }
 
@@ -2594,6 +2673,15 @@ function normalizeCalendarEventUid(value?: string | null) {
   return normalized || null;
 }
 
+function normalizeCalendarInviteActionType(
+  value?: string | null
+): CalendarInviteActionType | null {
+  if (value === "invitation" || value === "update" || value === "cancellation") {
+    return value;
+  }
+  return null;
+}
+
 function normalizeCalendarEventUids(values?: Array<string | null | undefined> | null) {
   if (!Array.isArray(values) || values.length === 0) return [];
   return Array.from(
@@ -2603,6 +2691,121 @@ function normalizeCalendarEventUids(values?: Array<string | null | undefined> | 
         .filter((value): value is string => Boolean(value))
     )
   );
+}
+
+function mapMessageCalendarInviteStateRow(
+  row: {
+    eventUid?: string | null;
+    inviteActionType?: string | null;
+    processedAtMs?: number | null;
+    processedByUserId?: string | null;
+  }
+): MessageCalendarInviteState | null {
+  const eventUid = normalizeCalendarEventUid(row.eventUid);
+  const actionType = normalizeCalendarInviteActionType(row.inviteActionType);
+  if (!eventUid || !actionType) return null;
+  return {
+    eventUid,
+    actionType,
+    processedAtMs:
+      typeof row.processedAtMs === "number" && Number.isFinite(row.processedAtMs)
+        ? row.processedAtMs
+        : undefined,
+    processedByUserId:
+      typeof row.processedByUserId === "string" && row.processedByUserId.trim()
+        ? row.processedByUserId.trim()
+        : undefined
+  };
+}
+
+export async function upsertMessageCalendarInviteStates(
+  accountId: string,
+  messageId: string,
+  states: Array<{
+    eventUid: string;
+    actionType: CalendarInviteActionType;
+  }>
+) {
+  return withDbWriteRetry("upsertMessageCalendarInviteStates", async () => {
+    const db = await getAccountDb(accountId);
+    ensureMessageCalendarEventOptionalColumns(db);
+    const insert = db.prepare(
+      `INSERT INTO message_calendar_events (
+         accountId,
+         messageId,
+         eventUid,
+         inviteActionType
+       ) VALUES (?, ?, ?, ?)
+       ON CONFLICT(accountId, messageId, eventUid)
+       DO UPDATE SET inviteActionType = excluded.inviteActionType`
+    );
+    const apply = db.transaction(
+      (items: Array<{ eventUid: string; actionType: CalendarInviteActionType }>) => {
+        items.forEach((item) => {
+          const eventUid = normalizeCalendarEventUid(item.eventUid);
+          const actionType = normalizeCalendarInviteActionType(item.actionType);
+          if (!eventUid || !actionType) return;
+          insert.run(accountId, messageId, eventUid, actionType);
+        });
+      }
+    );
+    apply(itemsFromUniqueInviteStates(states));
+  });
+}
+
+export async function markMessageCalendarInviteStatesProcessed(
+  accountId: string,
+  messageId: string,
+  eventUids: string[],
+  processedByUserId?: string | null
+) {
+  return withDbWriteRetry("markMessageCalendarInviteStatesProcessed", async () => {
+    const db = await getAccountDb(accountId);
+    ensureMessageCalendarEventOptionalColumns(db);
+    const normalizedEventUids = normalizeCalendarEventUids(eventUids);
+    if (normalizedEventUids.length === 0) return 0;
+    const now = Date.now();
+    const result = db
+      .prepare(
+        `UPDATE message_calendar_events
+         SET processedAtMs = ?, processedByUserId = ?
+         WHERE accountId = ?
+           AND messageId = ?
+           AND eventUid IN (${normalizedEventUids.map(() => "?").join(",")})`
+      )
+      .run(
+        now,
+        typeof processedByUserId === "string" && processedByUserId.trim()
+          ? processedByUserId.trim()
+          : null,
+        accountId,
+        messageId,
+        ...normalizedEventUids
+      ) as { changes?: number };
+    return result?.changes ?? 0;
+  });
+}
+
+function itemsFromUniqueInviteStates(
+  states: Array<{
+    eventUid: string;
+    actionType: CalendarInviteActionType;
+  }>
+) {
+  const deduped = new Map<
+    string,
+    {
+      eventUid: string;
+      actionType: CalendarInviteActionType;
+    }
+  >();
+  states.forEach((state) => {
+    const eventUid = normalizeCalendarEventUid(state.eventUid);
+    const actionType = normalizeCalendarInviteActionType(state.actionType);
+    if (!eventUid || !actionType) return;
+    deduped.set(eventUid, { eventUid, actionType });
+  });
+  return Array.from(deduped.values());
 }
 
 function normalizeCategory(value?: string | null): CategoryKey | null {
@@ -4465,6 +4668,11 @@ export async function upsertMessages(
     const deleteCalendarEventsForMessage = db.prepare(
       `DELETE FROM message_calendar_events WHERE accountId = ? AND messageId = ?`
     );
+    const selectCalendarEventsForMessage = db.prepare(
+      `SELECT eventUid, inviteActionType, processedAtMs, processedByUserId
+       FROM message_calendar_events
+       WHERE accountId = ? AND messageId = ?`
+    );
     const deleteMessageById = db.prepare(`DELETE FROM messages WHERE accountId = ? AND id = ?`);
     const findMessageById = db.prepare(
       `SELECT id, folderId, mailboxPath, imapUid
@@ -4488,8 +4696,14 @@ export async function upsertMessages(
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
     );
     const insertCalendarEvent = db.prepare(
-      `INSERT OR REPLACE INTO message_calendar_events (accountId, messageId, eventUid)
-       VALUES (?, ?, ?)`
+      `INSERT OR REPLACE INTO message_calendar_events (
+         accountId,
+         messageId,
+         eventUid,
+         inviteActionType,
+         processedAtMs,
+         processedByUserId
+       ) VALUES (?, ?, ?, ?, ?, ?)`
     );
 
     const insertMessage = db.prepare(`
@@ -4616,6 +4830,46 @@ export async function upsertMessages(
         if (shouldDeleteAttachments) {
           deleteAttachmentsForMessage.run(rowId);
         }
+        const preservedCalendarInviteStateByUid = new Map(
+          (
+            selectCalendarEventsForMessage.all(accountId, rowId) as Array<{
+              eventUid?: string | null;
+              inviteActionType?: string | null;
+              processedAtMs?: number | null;
+              processedByUserId?: string | null;
+            }>
+          )
+            .map((row) => {
+              const eventUid = normalizeCalendarEventUid(row.eventUid);
+              if (!eventUid) return null;
+              return [
+                eventUid,
+                {
+                  inviteActionType: row.inviteActionType ?? null,
+                  processedAtMs:
+                    typeof row.processedAtMs === "number" && Number.isFinite(row.processedAtMs)
+                      ? row.processedAtMs
+                      : null,
+                  processedByUserId:
+                    typeof row.processedByUserId === "string" && row.processedByUserId.trim()
+                      ? row.processedByUserId.trim()
+                      : null
+                }
+              ] as const;
+            })
+            .filter(
+              (
+                entry
+              ): entry is readonly [
+                string,
+                {
+                  inviteActionType: string | null;
+                  processedAtMs: number | null;
+                  processedByUserId: string | null;
+                }
+              ] => Boolean(entry)
+            )
+        );
         deleteCalendarEventsForMessage.run(accountId, rowId);
         const normalizedFlags = normalizeImapFlags(message.flags);
         const hasRawFlags = Array.isArray(message.flags);
@@ -4722,7 +4976,15 @@ export async function upsertMessages(
           message.preview
         );
         normalizeCalendarEventUids(message.calendarEventUids).forEach((eventUid) => {
-          insertCalendarEvent.run(accountId, rowId, eventUid);
+          const existing = preservedCalendarInviteStateByUid.get(eventUid);
+          insertCalendarEvent.run(
+            accountId,
+            rowId,
+            eventUid,
+            existing?.inviteActionType ?? null,
+            existing?.processedAtMs ?? null,
+            existing?.processedByUserId ?? null
+          );
         });
         (message.attachments ?? []).forEach((att) => {
           insertAttachment.run(
@@ -4857,6 +5119,22 @@ export async function getMessageById(accountId: string, messageId: string) {
   const attachments = db
     .prepare(`SELECT * FROM attachments WHERE messageId = ?`)
     .all(row.id) as any[];
+  const calendarInviteRows = db
+    .prepare(
+      `SELECT eventUid, inviteActionType, processedAtMs, processedByUserId
+       FROM message_calendar_events
+       WHERE accountId = ? AND messageId = ?
+       ORDER BY eventUid ASC`
+    )
+    .all(accountId, row.id) as Array<{
+    eventUid?: string | null;
+    inviteActionType?: string | null;
+    processedAtMs?: number | null;
+    processedByUserId?: string | null;
+  }>;
+  const calendarInviteStates = calendarInviteRows
+    .map((item) => mapMessageCalendarInviteStateRow(item))
+    .filter((item): item is MessageCalendarInviteState => Boolean(item));
   return {
     id: row.id,
     accountId: row.accountId,
@@ -4901,6 +5179,8 @@ export async function getMessageById(accountId: string, messageId: string) {
     category: row.category ?? undefined,
     categoryScore: typeof row.categoryScore === "number" ? row.categoryScore : undefined,
     categorySignals: parseStringArray(row.categorySignals),
+    calendarEventUids: normalizeCalendarEventUids(calendarInviteRows.map((item) => item.eventUid)),
+    calendarInviteStates,
     listUnsubscribe: row.listUnsubscribe ?? undefined
   } as Message;
 }

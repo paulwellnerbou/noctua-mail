@@ -749,7 +749,8 @@ export default function ThreadMessageCard({
                 <CalendarEventPreview
                   attachments={message.attachments ?? []}
                   accountId={message.accountId}
-                  sourceMessageId={message.messageId}
+                  sourceMessageRowId={message.id}
+                  inviteStates={message.calendarInviteStates}
                   onFindRelatedByInviteUid={onFindRelatedByCalendarInviteUid}
                 />
                 <AttachmentsList attachments={message.attachments ?? []} />

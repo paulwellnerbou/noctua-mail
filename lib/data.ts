@@ -1,3 +1,5 @@
+import type { CalendarInviteActionType } from "./calendarInviteProcessing";
+
 export type CaldavConfig = {
   url: string;
   user: string;
@@ -119,6 +121,7 @@ export type Message = {
   categoryScore?: number | null;
   categorySignals?: string[];
   calendarEventUids?: string[];
+  calendarInviteStates?: MessageCalendarInviteState[];
   listUnsubscribe?: string | null;
   groupKey?: string;
 };
@@ -186,6 +189,13 @@ export type CalendarEvent = {
   createdAtMs: number;
   updatedAtMs: number;
   deletedAtMs?: number;
+};
+
+export type MessageCalendarInviteState = {
+  eventUid: string;
+  actionType: CalendarInviteActionType;
+  processedAtMs?: number;
+  processedByUserId?: string;
 };
 
 export type User = {

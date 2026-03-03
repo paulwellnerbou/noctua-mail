@@ -12,6 +12,7 @@ export type CalendarEventPreview = {
   description?: string;
   location?: string;
   status?: string;
+  sequence?: number;
   organizer?: string;
   start?: Date;
   end?: Date;
@@ -236,6 +237,10 @@ export function parseIcsInvite(source: string): ParsedCalendarInvite {
     if (parsed.name === "DESCRIPTION") current.description = value;
     if (parsed.name === "LOCATION") current.location = value;
     if (parsed.name === "STATUS") current.status = value;
+    if (parsed.name === "SEQUENCE") {
+      const sequence = Number.parseInt(value, 10);
+      if (Number.isFinite(sequence)) current.sequence = sequence;
+    }
     if (parsed.name === "ORGANIZER") current.organizer = parseOrganizer(value, parsed.params);
     if (parsed.name === "RRULE") current.recurrenceRule = value.toUpperCase();
     if (parsed.name === "EXDATE") {

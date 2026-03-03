@@ -9,6 +9,7 @@ import rrulePlugin from "@fullcalendar/rrule";
 import type { EventClickArg, DateSelectArg, DatesSetArg, EventInput } from "@fullcalendar/core";
 import type { CalendarEvent } from "@/lib/data";
 import type { CalendarReminder } from "@/lib/data";
+import { buildFullCalendarRecurringFields } from "@/lib/fullcalendarRecurrence";
 import "./fullcalendar-theme.css";
 
 export type CalendarViewHandle = {
@@ -35,16 +36,9 @@ function calendarEventToFcEvent(ev: CalendarEvent): EventInput {
     classNames: [`fc-event-${ev.sourceType}`],
     extendedProps: { kind: "event", data: ev }
   };
-  if (ev.recurrenceRule) {
-    return {
-      ...base,
-      rrule: {
-        dtstart: new Date(ev.startAtMs).toISOString(),
-        freq: "weekly", // will be overridden by rrule string below
-        ...parseRruleForFc(ev.recurrenceRule, ev.startAtMs)
-      },
-      duration: ev.endAtMs ? { milliseconds: ev.endAtMs - ev.startAtMs } : undefined
-    };
+  const recurringFields = buildFullCalendarRecurringFields(ev);
+  if (recurringFields) {
+    return { ...base, ...recurringFields };
   }
   return base;
 }
@@ -59,14 +53,6 @@ function reminderToFcEvent(r: CalendarReminder): EventInput {
     allDay: false,
     classNames: ["fc-event-reminder"],
     extendedProps: { kind: "reminder", data: r }
-  };
-}
-
-function parseRruleForFc(rule: string, startMs: number): Record<string, unknown> {
-  // Pass the raw rrule string through to the rrule plugin
-  return {
-    dtstart: new Date(startMs).toISOString(),
-    rrule: rule.startsWith("RRULE:") ? rule : `RRULE:${rule}`
   };
 }
 

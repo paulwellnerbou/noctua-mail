@@ -1,5 +1,4 @@
 import {
-  cancelCalendarRemindersByEventUid,
   deleteMessagesByIds,
   getAccounts,
   getFolderIdsByMessageIds,
@@ -7,20 +6,17 @@ import {
   recomputeCategoriesForAccount,
   recomputeThreadsForAccount,
   getMessageIdsByMessageIds,
-  rescheduleCalendarRemindersByEventUid,
   getThreadIdsByMessageIds,
   saveFoldersForAccount,
   upsertMessages
 } from "@/lib/db";
-import { collectCalendarReminderMutationsFromCalendarInvite } from "@/lib/calendarReminderMutations";
-import { importEmailCalendarEvents } from "@/lib/caldav/emailEventImporter";
+import { processCalendarInviteForMessage } from "@/lib/calendarInviteProcessor";
 import { getAttachmentContentBuffer, sanitizeSyncedMessage } from "@/lib/mail/syncMessageSanitizer";
 import { isCalendarAttachment } from "@/lib/messageFlags";
 import { deleteMessageFiles } from "@/lib/storage";
 import { syncImapAccountBatched } from "@/lib/mail/imap";
 import { reconcileVerifiedCrossFolderMoves } from "@/lib/syncMoveReconciliation";
 import { collectThreadReferenceIds, resolveThreadingForItems } from "@/lib/threading";
-import type { CalendarReminderMutation } from "@/lib/calendarReminderMutations";
 
 export type SyncPayload = {
   accountId: string;
@@ -148,8 +144,7 @@ export async function runSyncOperationBatched(
   const allProcessedIds = new Set<string>();
   const allReferenceIds = new Set<string>();
   const newNotificationMessages: SyncNotificationMessage[] = [];
-  const calendarMutations: CalendarReminderMutation[] = [];
-  const calendarEventImports: Array<{ messageId: string; icsSource: string }> = [];
+  const calendarInviteImports: Array<{ messageId: string; icsSource: string }> = [];
   let latestEstimatedTotal: number | undefined;
   // Highest IMAP UID successfully written to DB — updated after each batch upsert.
   let highestProcessedUid: number | undefined = payload.resumeFromUid;
@@ -280,17 +275,7 @@ export async function runSyncOperationBatched(
           const attachmentBuffer = getAttachmentContentBuffer(attachment);
           if (!attachmentBuffer) return;
           const icsSource = attachmentBuffer.toString("utf8");
-          calendarEventImports.push({ messageId: message.id, icsSource });
-
-          // Also collect reminder mutations for "new" mode
-          if (syncMode === "new") {
-            calendarMutations.push(
-              ...collectCalendarReminderMutationsFromCalendarInvite(
-                icsSource,
-                message.messageId ?? undefined
-              )
-            );
-          }
+          calendarInviteImports.push({ messageId: message.id, icsSource });
         });
       });
 
@@ -322,29 +307,15 @@ export async function runSyncOperationBatched(
     message: "Applying synchronized changes."
   });
 
-  // Import calendar events from ICS attachments (all sync modes)
-  for (const imp of calendarEventImports) {
-    await importEmailCalendarEvents(account.id, imp.messageId, imp.icsSource);
-  }
-
-  // Process calendar reminders after all batches (new mode only)
-  for (const mutation of calendarMutations) {
-    if (mutation.kind === "cancel") {
-      await cancelCalendarRemindersByEventUid(account.id, mutation.eventUid);
-    } else {
-      await rescheduleCalendarRemindersByEventUid(account.id, mutation.eventUid, {
-        eventTitle: mutation.eventTitle,
-        eventLocation: mutation.eventLocation,
-        eventDescription: mutation.eventDescription,
-        startTimezone: mutation.startTimezone,
-        recurrenceRule: mutation.recurrenceRule,
-        recurrenceDates: mutation.recurrenceDates,
-        excludedDates: mutation.excludedDates,
-        eventStartAtMs: mutation.eventStartAtMs,
-        eventEndAtMs: mutation.eventEndAtMs,
-        messageId: mutation.messageId
-      });
-    }
+  for (const invite of calendarInviteImports) {
+    await processCalendarInviteForMessage({
+      accountId: account.id,
+      messageId: invite.messageId,
+      icsSource: invite.icsSource,
+      process: syncMode === "new",
+      reminderUserId: syncMode === "new" ? account.ownerUserId : undefined,
+      processedByUserId: syncMode === "new" ? account.ownerUserId : undefined
+    });
   }
 
   if (payload.fullSync && totalCount > 0) {

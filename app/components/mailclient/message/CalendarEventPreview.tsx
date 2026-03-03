@@ -1,11 +1,15 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { CalendarDays, Search, Info } from "lucide-react";
 import { Badge, Button, Dialog, Flex, Text } from "@radix-ui/themes";
-import type { Attachment } from "@/lib/data";
+import type { Attachment, MessageCalendarInviteState } from "@/lib/data";
 import {
   parseIcsEvents,
   type CalendarEventPreview as CalendarEventPreviewType
 } from "@/lib/calendar";
+import {
+  collectCalendarInviteMutationGroups,
+  inferCalendarInviteActionType
+} from "@/lib/calendarInviteProcessing";
 import { isCalendarAttachment } from "@/lib/messageFlags";
 import { resolveNextReminderOccurrence } from "@/lib/reminderRecurrence";
 import { CALENDAR_REMINDERS_UPDATED_EVENT } from "../utils/calendarReminders";
@@ -78,12 +82,14 @@ function resolveEventDisplayRange(event: CalendarEventPreviewType, nowMs = Date.
 export default function CalendarEventPreview({
   attachments,
   accountId,
-  sourceMessageId,
+  sourceMessageRowId,
+  inviteStates,
   onFindRelatedByInviteUid
 }: {
   attachments: Attachment[];
   accountId: string;
-  sourceMessageId?: string;
+  sourceMessageRowId?: string;
+  inviteStates?: MessageCalendarInviteState[];
   onFindRelatedByInviteUid?: (uid: string) => void;
 }) {
   const attachment = useMemo(
@@ -100,6 +106,8 @@ export default function CalendarEventPreview({
 
   const [rawIcsOpen, setRawIcsOpen] = useState(false);
   const [mountTime] = useState(Date.now);
+  const [processingInviteUid, setProcessingInviteUid] = useState<string | null>(null);
+  const [inviteStateOverrides, setInviteStateOverrides] = useState<Record<string, boolean>>({});
 
   // Trigger refresh when reminders change (so EventDetailView re-fetches)
   const [reminderVersion, setReminderVersion] = useState(0);
@@ -135,6 +143,11 @@ export default function CalendarEventPreview({
     return () => { active = false; };
   }, [attachment]);
 
+  useEffect(() => {
+    setInviteStateOverrides({});
+    setProcessingInviteUid(null);
+  }, [sourceMessageRowId, attachment?.id]);
+
   const hasCurrentResult = Boolean(attachment && result.attachmentId === attachment.id);
   const events = hasCurrentResult ? result.events : [];
   const rawSource = hasCurrentResult ? result.rawSource : "";
@@ -154,6 +167,63 @@ export default function CalendarEventPreview({
     });
     return groupItemsByRelativeTime(entries, (e) => e.displayStartAtMs, nowMs);
   }, [hasCurrentResult, result.events, mountTime]);
+
+  const inviteActionTypeByUid = useMemo(() => {
+    const map = new Map<string, ReturnType<typeof inferCalendarInviteActionType>>();
+    if (!rawSource.trim()) return map;
+    collectCalendarInviteMutationGroups(rawSource).forEach((group) => {
+      map.set(group.eventUid.trim().toLowerCase(), inferCalendarInviteActionType(group));
+    });
+    return map;
+  }, [rawSource]);
+
+  const inviteStateByUid = useMemo(() => {
+    const map = new Map<string, MessageCalendarInviteState>();
+    (inviteStates ?? []).forEach((state) => {
+      const eventUid = state.eventUid?.trim().toLowerCase();
+      if (!eventUid) return;
+      map.set(eventUid, state);
+    });
+    return map;
+  }, [inviteStates]);
+
+  const handleProcessInvite = useCallback(
+    async (eventUid?: string) => {
+      if (!accountId.trim() || !sourceMessageRowId?.trim() || !rawSource.trim()) return;
+      const normalizedEventUid = eventUid?.trim().toLowerCase() ?? "";
+      setProcessingInviteUid(normalizedEventUid || "__all__");
+      try {
+        const res = await fetch("/api/calendar/invites/process", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            accountId,
+            messageId: sourceMessageRowId,
+            icsSource: rawSource
+          })
+        });
+        if (!res.ok) {
+          throw new Error(`process invite failed (${res.status})`);
+        }
+        const payload = (await res.json()) as {
+          states?: Array<{ eventUid?: string; processed?: boolean }>;
+        };
+        const nextOverrides: Record<string, boolean> = {};
+        (payload.states ?? []).forEach((state) => {
+          const uid = state.eventUid?.trim().toLowerCase();
+          if (!uid) return;
+          nextOverrides[uid] = Boolean(state.processed);
+        });
+        setInviteStateOverrides((prev) => ({ ...prev, ...nextOverrides }));
+        window.dispatchEvent(new Event(CALENDAR_REMINDERS_UPDATED_EVENT));
+      } catch {
+        // ignore; preview keeps existing state
+      } finally {
+        setProcessingInviteUid(null);
+      }
+    },
+    [accountId, rawSource, sourceMessageRowId]
+  );
 
   const loading = !hasCurrentResult;
   const hasError = hasCurrentResult && result.error;
@@ -260,9 +330,23 @@ export default function CalendarEventPreview({
                       recurrenceDates={toMsArray(event.recurrenceDates)}
                       excludedDates={toMsArray(event.excludedDates)}
                       status={event.status}
-                      messageId={sourceMessageId}
+                      messageId={sourceMessageRowId}
                       eventStartAtMs={event.start?.getTime()}
                       eventEndAtMs={event.end?.getTime()}
+                      inviteProcessing={(() => {
+                        const eventUid = event.uid?.trim().toLowerCase() ?? "";
+                        if (!eventUid) return undefined;
+                        const state = inviteStateByUid.get(eventUid);
+                        return {
+                          actionType:
+                            state?.actionType ?? inviteActionTypeByUid.get(eventUid) ?? "invitation",
+                          processed:
+                            inviteStateOverrides[eventUid] ??
+                            Boolean(state?.processedAtMs),
+                          processing: processingInviteUid === eventUid || processingInviteUid === "__all__",
+                          onProcess: () => handleProcessInvite(event.uid)
+                        };
+                      })()}
                     />
                   );
                 })}

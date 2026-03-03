@@ -1,4 +1,7 @@
-import { parseIcsInvite } from "./calendar";
+import {
+  collectCalendarInviteMutationGroups,
+  inferCalendarInviteActionType
+} from "./calendarInviteProcessing";
 
 export type CalendarReminderMutation =
   | { kind: "cancel"; eventUid: string }
@@ -18,14 +21,6 @@ export type CalendarReminderMutation =
     };
 
 type CalendarReminderUpdateMutation = Extract<CalendarReminderMutation, { kind: "update" }>;
-
-type CalendarEventMutationGroup = {
-  eventUid: string;
-  canceledWhole: boolean;
-  baseUpdate: CalendarReminderUpdateMutation | null;
-  addedRecurrenceDates: number[];
-  addedExcludedDates: number[];
-};
 
 function normalizeDateList(values: number[]) {
   if (values.length === 0) return undefined;
@@ -50,95 +45,49 @@ export function collectCalendarReminderMutationsFromCalendarInvite(
   icsSource: string,
   messageId?: string | null
 ): CalendarReminderMutation[] {
-  const parsed = parseIcsInvite(icsSource);
-  const method = parsed.method?.trim().toUpperCase() || "";
-  const groupsByUid = new Map<string, CalendarEventMutationGroup>();
-
-  const getGroup = (eventUid: string) => {
-    let group = groupsByUid.get(eventUid);
-    if (group) return group;
-    group = {
-      eventUid,
-      canceledWhole: false,
-      baseUpdate: null,
-      addedRecurrenceDates: [],
-      addedExcludedDates: []
-    };
-    groupsByUid.set(eventUid, group);
-    return group;
-  };
-
-  parsed.events.forEach((event) => {
-    const eventUid = event.uid?.trim();
-    if (!eventUid) return;
-    const group = getGroup(eventUid);
-    const status = event.status?.trim().toUpperCase() || "";
-    const cancelled = method === "CANCEL" || status === "CANCELLED";
-    const recurrenceIdAtMs = asTimestampMs(event.recurrenceId);
-    const hasRecurrenceId = Number.isFinite(recurrenceIdAtMs);
-
-    if (cancelled) {
-      if (hasRecurrenceId) {
-        group.addedExcludedDates.push(recurrenceIdAtMs);
-        return;
-      }
-      group.canceledWhole = true;
-      return;
-    }
-
-    const eventStartAtMs = asTimestampMs(event.start);
-    if (!Number.isFinite(eventStartAtMs)) {
-      if (hasRecurrenceId) {
-        group.addedExcludedDates.push(recurrenceIdAtMs);
-      }
-      return;
-    }
-
-    if (hasRecurrenceId) {
-      group.addedExcludedDates.push(recurrenceIdAtMs);
-      group.addedRecurrenceDates.push(eventStartAtMs);
-      return;
-    }
-
-    group.baseUpdate = {
-      kind: "update",
-      eventUid,
-      eventTitle: event.summary?.trim() || "Calendar event",
-      eventLocation: event.location?.trim() || undefined,
-      eventDescription: event.description?.trim() || undefined,
-      startTimezone: event.startTimezone?.trim() || undefined,
-      recurrenceRule: event.recurrenceRule?.trim() || undefined,
-      recurrenceDates: event.recurrenceDates?.map((value) => value.getTime()),
-      excludedDates: event.excludedDates?.map((value) => value.getTime()),
-      eventStartAtMs,
-      eventEndAtMs:
-        event.end && Number.isFinite(event.end.getTime()) && event.end.getTime() > 0
-          ? event.end.getTime()
-          : undefined,
-      messageId: messageId ?? undefined
-    };
-  });
+  const groups = collectCalendarInviteMutationGroups(icsSource);
 
   const mutations: CalendarReminderMutation[] = [];
-  groupsByUid.forEach((group) => {
-    if (group.canceledWhole) {
+  groups.forEach((group) => {
+    if (inferCalendarInviteActionType(group) === "cancellation") {
       mutations.push({ kind: "cancel", eventUid: group.eventUid });
       return;
     }
-    if (!group.baseUpdate) {
+    if (!group.baseEvent) {
       // Instance-only updates/cancellations are not enough to define full event state.
       return;
     }
+    const eventStartAtMs = asTimestampMs(group.baseEvent.start);
+    if (!Number.isFinite(eventStartAtMs)) return;
+    const baseUpdate: CalendarReminderUpdateMutation = {
+      kind: "update",
+      eventUid: group.eventUid,
+      eventTitle: group.baseEvent.summary?.trim() || "Calendar event",
+      eventLocation: group.baseEvent.location?.trim() || undefined,
+      eventDescription: group.baseEvent.description?.trim() || undefined,
+      startTimezone: group.baseEvent.startTimezone?.trim() || undefined,
+      recurrenceRule: group.baseEvent.recurrenceRule?.trim() || undefined,
+      recurrenceDates: group.baseEvent.recurrenceDates?.map((value) => value.getTime()),
+      excludedDates: group.baseEvent.excludedDates?.map((value) => value.getTime()),
+      eventStartAtMs,
+      eventEndAtMs:
+        group.baseEvent.end &&
+        Number.isFinite(group.baseEvent.end.getTime()) &&
+        group.baseEvent.end.getTime() > 0
+          ? group.baseEvent.end.getTime()
+          : undefined,
+      messageId: messageId ?? undefined
+    };
     const mergedRecurrenceDates = normalizeDateList([
-      ...(group.baseUpdate.recurrenceDates ?? []),
+      ...(baseUpdate.recurrenceDates ?? []),
       ...group.addedRecurrenceDates
     ]);
     const mergedExcludedDates = normalizeDateList([
-      ...(group.baseUpdate.excludedDates ?? []),
+      ...(baseUpdate.excludedDates ?? []),
       ...group.addedExcludedDates
     ]);
     mutations.push({
-      ...group.baseUpdate,
+      ...baseUpdate,
       recurrenceDates: mergedRecurrenceDates,
       excludedDates: mergedExcludedDates
     });

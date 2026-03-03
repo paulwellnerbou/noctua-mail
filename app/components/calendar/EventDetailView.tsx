@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 import { AlarmClock, AlarmClockPlus, Clock, Mail, MapPin, Repeat, Trash2, User } from "lucide-react";
 import { Badge, Button, Dialog, Flex, Select, Text } from "@radix-ui/themes";
 import { buildCalendarRecurrenceSummary, formatCalendarEventDate } from "@/lib/calendar";
+import type { CalendarInviteActionType } from "@/lib/calendarInviteProcessing";
 import { formatCalendarTimeZoneShortLabel } from "@/lib/calendarTimezones";
 import { sanitizeHtmlForDisplay, stripStyleTags } from "@/lib/html";
 import { resolveNextReminderOccurrence } from "@/lib/reminderRecurrence";
@@ -42,6 +43,12 @@ export type EventDetailViewProps = {
   eventStartAtMs?: number;
   eventEndAtMs?: number;
   onOpenMessage?: (messageId: string) => void;
+  inviteProcessing?: {
+    actionType: CalendarInviteActionType;
+    processed: boolean;
+    processing?: boolean;
+    onProcess?: () => void | Promise<void>;
+  };
 };
 
 function parseHttpUrl(value?: string): string | null {
@@ -119,7 +126,8 @@ export default function EventDetailView({
   messageId,
   eventStartAtMs,
   eventEndAtMs,
-  onOpenMessage
+  onOpenMessage,
+  inviteProcessing
 }: EventDetailViewProps) {
   const resolvedStartMs = startMs ?? eventStartAtMs;
 
@@ -264,6 +272,30 @@ export default function EventDetailView({
   return (
     <article className={styles.event}>
       <h5 className={styles.eventTitle}>{title || "Untitled Event"}</h5>
+
+      {inviteProcessing && (
+        <div className={styles.inviteStatusRow}>
+          <Text size="1" color={inviteProcessing.processed ? "green" : "gray"}>
+            {inviteProcessing.actionType === "cancellation"
+              ? "Cancellation"
+              : inviteProcessing.actionType === "update"
+                ? "Update"
+                : "Invitation"}{" "}
+            {inviteProcessing.processed ? "processed" : "not processed"}
+          </Text>
+          {!inviteProcessing.processed && inviteProcessing.onProcess && (
+            <Button
+              size="1"
+              variant="soft"
+              color="indigo"
+              disabled={inviteProcessing.processing}
+              onClick={() => void inviteProcessing.onProcess?.()}
+            >
+              {inviteProcessing.processing ? "Processing…" : "Process"}
+            </Button>
+          )}
+        </div>
+      )}
 
       {/* Time */}
       {timeRange && (
