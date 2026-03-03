@@ -12,6 +12,7 @@ import {
 import { mergeLoadedMessageCount, resolveLoadedMessageCount } from "./utils/listCount";
 import { logListDebug, summarizeMessageForListDebug } from "./messagelist/listDebug";
 import type { SearchBadgesState } from "./useSearchState";
+import { INVITE_DECK_GROUP_BY } from "@/lib/messageGrouping";
 
 type ApiFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
@@ -151,7 +152,8 @@ export function useMessageData({
 
   const buildQueryParams = (page: number) => {
     const trimmedQuery = query.trim();
-    const pageSize = searchScope === "all" ? 600 : 300;
+    const pageSize =
+      groupBy === INVITE_DECK_GROUP_BY ? 200 : searchScope === "all" ? 600 : 300;
     const params = new URLSearchParams({
       accountId: activeAccountId,
       page: String(page),

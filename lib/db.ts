@@ -2423,6 +2423,56 @@ async function getInviteDeckGroupKeysByMessageId(
   return groupsByMessageId;
 }
 
+async function getInviteDeckGroupSummary(params: {
+  db: any;
+  accountId: string;
+  where: string;
+  args: any[];
+  nowMs?: number;
+}) {
+  const { db, accountId, where, args, nowMs = Date.now() } = params;
+  const rows = db
+    .prepare(
+      `
+      SELECT m.id AS id, m.dateValue AS dateValue
+      FROM messages m
+      WHERE ${where}
+    `
+    )
+    .all(...args) as Array<{ id?: string | null; dateValue?: number | null }>;
+
+  const normalizedRows = rows
+    .map((row) => ({
+      id: String(row.id ?? "").trim(),
+      dateValue: Number(row.dateValue ?? 0)
+    }))
+    .filter((row) => row.id);
+
+  const groupsByMessageId = await getInviteDeckGroupKeysByMessageId(
+    db,
+    accountId,
+    normalizedRows.map((row) => row.id),
+    nowMs
+  );
+  const counts = normalizedRows.reduce((acc, row) => {
+    const key =
+      groupsByMessageId.get(row.id) ??
+      buildTimeGroupKey(row.dateValue, INVITE_DECK_GROUP_BY, nowMs);
+    acc.set(key, (acc.get(key) ?? 0) + 1);
+    return acc;
+  }, new Map<string, number>());
+  const groupRows = Array.from(counts.entries()).map(([key, count]) => ({ key, count }));
+
+  return {
+    groups: groupsFromRows(
+      sortGroupsForGroupBy(groupRows, INVITE_DECK_GROUP_BY),
+      INVITE_DECK_GROUP_BY
+    ),
+    groupsByMessageId,
+    total: normalizedRows.length
+  };
+}
+
 function buildSearchTokens(raw?: string | null) {
   if (!raw) return [];
   return raw
@@ -3129,30 +3179,13 @@ async function getGroupCounts(params: {
 
   if (groupBy === "date" || groupBy === INVITE_DECK_GROUP_BY) {
     if (groupBy === INVITE_DECK_GROUP_BY) {
-      const rows = db
-        .prepare(
-          `
-          SELECT m.id AS id, m.dateValue AS dateValue
-          FROM messages m
-          WHERE ${where}
-        `
-        )
-        .all(...args) as Array<{ id: string; dateValue: number }>;
-      const inviteDeckGroupsByMessageId = await getInviteDeckGroupKeysByMessageId(
+      const inviteDeckSummary = await getInviteDeckGroupSummary({
         db,
         accountId,
-        rows.map((row) => row.id)
-      );
-      const groupRows = Array.from(
-        rows.reduce((counts, row) => {
-          const key =
-            inviteDeckGroupsByMessageId.get(row.id) ??
-            buildTimeGroupKey(Number(row.dateValue ?? 0), INVITE_DECK_GROUP_BY);
-          counts.set(key, (counts.get(key) ?? 0) + 1);
-          return counts;
-        }, new Map<string, number>())
-      ).map(([key, count]) => ({ key, count }));
-      return groupsFromRows(sortGroupsForGroupBy(groupRows, groupBy), groupBy);
+        where,
+        args
+      });
+      return inviteDeckSummary.groups;
     }
 
     const now = new Date();
@@ -3925,14 +3958,17 @@ export async function listMessages(params: {
     `
     )
     .all(...args, pageSize, offset) as any[];
-  const inviteDeckGroupsByMessageId =
+  const inviteDeckSummary =
     groupBy === INVITE_DECK_GROUP_BY
-      ? await getInviteDeckGroupKeysByMessageId(
+      ? await getInviteDeckGroupSummary({
           db,
           accountId,
-          rows.map((row) => String(row.id ?? ""))
-        )
-      : new Map<string, string>();
+          where,
+          args
+        })
+      : null;
+  const inviteDeckGroupsByMessageId =
+    inviteDeckSummary?.groupsByMessageId ?? new Map<string, string>();
 
   const items: Message[] = rows.map((row) => {
     const message: Message = {
@@ -3982,25 +4018,29 @@ export async function listMessages(params: {
     return message;
   });
 
-  const groups = await getGroupCounts({
-    accountId,
-    folderId,
-    query: query ?? undefined,
-    groupBy,
-    fields,
-    badges,
-    attachmentsOnly,
-    excludedFolderIds
-  });
-  const total = await getTotalCount({
-    accountId,
-    folderId,
-    query: query ?? undefined,
-    fields,
-    badges,
-    attachmentsOnly,
-    excludedFolderIds
-  });
+  const groups =
+    inviteDeckSummary?.groups ??
+    (await getGroupCounts({
+      accountId,
+      folderId,
+      query: query ?? undefined,
+      groupBy,
+      fields,
+      badges,
+      attachmentsOnly,
+      excludedFolderIds
+    }));
+  const total =
+    inviteDeckSummary?.total ??
+    (await getTotalCount({
+      accountId,
+      folderId,
+      query: query ?? undefined,
+      fields,
+      badges,
+      attachmentsOnly,
+      excludedFolderIds
+    }));
   const hasMore = offset + items.length < total;
   return { items, groups, total, hasMore, baseCount: items.length };
 }
@@ -4145,6 +4185,15 @@ export async function listThreads(params: {
   let threadTotal = 0;
   let total = 0;
   let baseCount = 0;
+  const inviteDeckSummaryPromise =
+    groupBy === INVITE_DECK_GROUP_BY
+      ? getInviteDeckGroupSummary({
+          db,
+          accountId,
+          where,
+          args
+        })
+      : null;
 
   if (isUnfilteredThreadList) {
     if (shouldPrioritizeFlaggedThreads) {
@@ -4286,15 +4335,17 @@ export async function listThreads(params: {
       .get(accountId, ...args) as { count: number };
     threadTotal = threadTotalRow?.count ?? 0;
 
-    total = await getTotalCount({
-      accountId,
-      folderId,
-      query: query ?? undefined,
-      fields,
-      badges,
-      attachmentsOnly,
-      excludedFolderIds
-    });
+    if (groupBy !== INVITE_DECK_GROUP_BY) {
+      total = await getTotalCount({
+        accountId,
+        folderId,
+        query: query ?? undefined,
+        fields,
+        badges,
+        attachmentsOnly,
+        excludedFolderIds
+      });
+    }
 
     const threadIdsForBaseCount = threadRows.map((row) => row.threadId);
     const baseCountRow =
@@ -4372,6 +4423,9 @@ export async function listThreads(params: {
           )
           .all(...threadMessageArgs, ...threadIds) as any[])
       : [];
+  const inviteDeckSummary = inviteDeckSummaryPromise
+    ? await inviteDeckSummaryPromise
+    : null;
   const inviteDeckThreadGroupsByMessageId =
     groupBy === INVITE_DECK_GROUP_BY
       ? await getInviteDeckGroupKeysByMessageId(
@@ -4429,19 +4483,21 @@ export async function listThreads(params: {
     return message;
   });
 
-  const groups = await getGroupCounts({
-    accountId,
-    folderId,
-    query: query ?? undefined,
-    groupBy,
-    fields,
-    badges,
-    attachmentsOnly,
-    excludedFolderIds
-  });
+  const groups =
+    inviteDeckSummary?.groups ??
+    (await getGroupCounts({
+      accountId,
+      folderId,
+      query: query ?? undefined,
+      groupBy,
+      fields,
+      badges,
+      attachmentsOnly,
+      excludedFolderIds
+    }));
 
   const hasMore = offset + threadRows.length < threadTotal;
-  return { items, groups, total, hasMore, baseCount };
+  return { items, groups, total: inviteDeckSummary?.total ?? total, hasMore, baseCount };
 }
 
 export async function listThreadMessages(params: {
