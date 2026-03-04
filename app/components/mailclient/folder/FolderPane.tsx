@@ -1,5 +1,5 @@
 import type React from "react";
-import { MoreVertical } from "lucide-react";
+import { MoreVertical, X } from "lucide-react";
 import { Badge, DropdownMenu, IconButton, TextField } from "@radix-ui/themes";
 import { badgeColors } from "@/lib/ui/badgeColors";
 import styles from "./FolderTree.module.css";
@@ -138,7 +138,21 @@ export default function FolderPane({ state, actions, children }: FolderPaneProps
               onChange={(event) => setFolderQuery(event.target.value)}
               id="folder-search-input"
               className={styles.folderSearchInput}
-            />
+            >
+              {folderQuery ? (
+                <TextField.Slot side="right">
+                  <IconButton
+                    size="1"
+                    variant="ghost"
+                    onClick={() => setFolderQuery("")}
+                    aria-label="Clear folder search"
+                    title="Clear folder search"
+                  >
+                    <X size={12} />
+                  </IconButton>
+                </TextField.Slot>
+              ) : null}
+            </TextField.Root>
           </div>
           {children}
         </div>

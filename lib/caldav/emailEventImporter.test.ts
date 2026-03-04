@@ -48,14 +48,14 @@ describe("importEmailCalendarEvents", () => {
     expect(fields.summary).toBe("Team Meeting");
     expect(fields.location).toBe("Conference Room");
     expect(fields.sourceType).toBe("email");
-    expect(fields.status).toBe("TENTATIVE");
+    expect(fields.status).toBeUndefined();
     expect(fields.messageId).toBe("msg-1");
     expect(fields.rawIcs).toBe(ics);
     expect(fields.allDay).toBe(false);
     expect(fields.startAtMs).toBe(new Date("2026-06-01T10:00:00Z").getTime());
   });
 
-  test("forces TENTATIVE status regardless of ICS STATUS field", async () => {
+  test("preserves ICS status when present", async () => {
     upsertCalendarEventByUid.mockClear();
 
     const ics = makeIcs([
@@ -70,7 +70,7 @@ describe("importEmailCalendarEvents", () => {
     await importEmailCalendarEvents("acc-1", "msg-2", ics);
 
     const [, fields] = upsertCalendarEventByUid.mock.calls[0];
-    expect(fields.status).toBe("TENTATIVE");
+    expect(fields.status).toBe("CONFIRMED");
   });
 
   test("cancels whole event on METHOD:CANCEL", async () => {

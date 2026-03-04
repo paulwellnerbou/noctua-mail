@@ -37,3 +37,20 @@ export function buildImapMessageRowId(messageId?: string | null, fallback?: Mess
   ].join("|");
   return `imap-${hashIdSeed(`fallback:${fallbackSeed}`)}`;
 }
+
+export function toBaseMessageRowIdFromCollisionVariant(messageId: string) {
+  const trimmed = messageId.trim();
+  const match = trimmed.match(/^(.*)-([a-f0-9]{12})$/i);
+  if (!match) return null;
+  return match[1] || null;
+}
+
+export function buildMessageRowIdLookupCandidates(messageId: string) {
+  const normalized = messageId.trim();
+  const candidates = [normalized];
+  const baseId = toBaseMessageRowIdFromCollisionVariant(normalized);
+  if (baseId && baseId !== normalized) {
+    candidates.push(baseId);
+  }
+  return candidates;
+}

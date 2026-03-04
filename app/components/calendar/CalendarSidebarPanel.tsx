@@ -9,6 +9,7 @@ import type { CalendarEvent } from "@/lib/data";
 import type { CalendarReminder } from "@/lib/data";
 import dynamic from "next/dynamic";
 import EventDialog from "./EventDialog";
+import EventDetailPanel from "./EventDetailPanel";
 import styles from "./CalendarSidebarPanel.module.css";
 
 const CalendarView = dynamic(() => import("./CalendarView"), { ssr: false });
@@ -16,12 +17,20 @@ const CalendarView = dynamic(() => import("./CalendarView"), { ssr: false });
 type Props = {
   accountId: string;
   onClose: () => void;
+  onOpenMessage?: (messageId: string) => void;
+  onFindRelatedByInviteUid?: (uid: string) => void;
 };
 
-export default function CalendarSidebarPanel({ accountId, onClose }: Props) {
+export default function CalendarSidebarPanel({
+  accountId,
+  onClose,
+  onOpenMessage,
+  onFindRelatedByInviteUid
+}: Props) {
   const calendarRef = useRef<FullCalendar>(null);
+  const [selectedEvent, setSelectedEvent] = useState<CalendarEvent | CalendarReminder | null>(null);
+  const [selectedKind, setSelectedKind] = useState<"event" | "reminder" | null>(null);
   const [eventDialogOpen, setEventDialogOpen] = useState(false);
-  const [editingEvent, setEditingEvent] = useState<Partial<CalendarEvent> | undefined>();
   const [createStart, setCreateStart] = useState<Date | undefined>();
   const [createEnd, setCreateEnd] = useState<Date | undefined>();
   const [createAllDay, setCreateAllDay] = useState(false);
@@ -31,15 +40,13 @@ export default function CalendarSidebarPanel({ accountId, onClose }: Props) {
   };
 
   const handleEventClick = (ev: CalendarEvent | CalendarReminder, kind: "event" | "reminder") => {
-    if (kind === "event") {
-      setEditingEvent(ev as CalendarEvent);
-      setCreateStart(undefined);
-      setEventDialogOpen(true);
-    }
+    setSelectedEvent(ev);
+    setSelectedKind(kind);
   };
 
   const handleCreateEvent = (start: Date, end: Date, allDay: boolean) => {
-    setEditingEvent(undefined);
+    setSelectedEvent(null);
+    setSelectedKind(null);
     setCreateStart(start);
     setCreateEnd(end);
     setCreateAllDay(allDay);
@@ -52,6 +59,12 @@ export default function CalendarSidebarPanel({ accountId, onClose }: Props) {
   };
 
   const handleDeleted = () => {
+    calendarRef.current?.getApi().refetchEvents();
+  };
+
+  const handleEventUpdated = (event: CalendarEvent) => {
+    setSelectedEvent(event);
+    setSelectedKind("event");
     calendarRef.current?.getApi().refetchEvents();
   };
 
@@ -82,23 +95,36 @@ export default function CalendarSidebarPanel({ accountId, onClose }: Props) {
         </Flex>
       </Flex>
       <div className={styles.calendarContainer}>
-        <CalendarView
-          accountId={accountId}
-          calendarRef={calendarRef}
-          onEventClick={handleEventClick}
-          onCreateEvent={handleCreateEvent}
-        />
+        {selectedEvent && selectedKind ? (
+          <EventDetailPanel
+            event={selectedEvent}
+            kind={selectedKind}
+            accountId={accountId}
+            onBack={() => {
+              setSelectedEvent(null);
+              setSelectedKind(null);
+            }}
+            onOpenMessage={onOpenMessage}
+            onFindRelatedByInviteUid={onFindRelatedByInviteUid}
+            onEventUpdated={handleEventUpdated}
+          />
+        ) : (
+          <CalendarView
+            accountId={accountId}
+            calendarRef={calendarRef}
+            onEventClick={handleEventClick}
+            onCreateEvent={handleCreateEvent}
+          />
+        )}
       </div>
       <EventDialog
         open={eventDialogOpen}
         accountId={accountId}
-        event={editingEvent}
         defaultStart={createStart}
         defaultEnd={createEnd}
         defaultAllDay={createAllDay}
         onClose={() => {
           setEventDialogOpen(false);
-          setEditingEvent(undefined);
         }}
         onSaved={handleSaved}
         onDeleted={handleDeleted}

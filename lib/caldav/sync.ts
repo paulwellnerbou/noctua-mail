@@ -85,6 +85,7 @@ export async function syncCalendarEvents(accountId: string): Promise<CalendarSyn
                 if (!preview.start) continue;
                 const dbEvent = calendarPreviewToDbEvent(preview, accountId, "caldav", {
                   calendarId,
+                  accountEmail: account.email,
                   remoteEtag: remote.etag,
                   remoteHref: remote.href,
                   rawIcs: remote.icsData
@@ -101,6 +102,13 @@ export async function syncCalendarEvents(accountId: string): Promise<CalendarSyn
               const previews = parseIcsEvents(remote.icsData);
               const preview = previews[0];
               if (preview?.start) {
+                const previewEvent = calendarPreviewToDbEvent(preview, accountId, "caldav", {
+                  calendarId,
+                  accountEmail: account.email,
+                  remoteEtag: remote.etag,
+                  remoteHref: remote.href,
+                  rawIcs: remote.icsData
+                });
                 const updated: CalendarEvent = {
                   ...local,
                   summary: preview.summary?.trim() || local.summary,
@@ -116,6 +124,11 @@ export async function syncCalendarEvents(accountId: string): Promise<CalendarSyn
                   excludedDates: preview.excludedDates?.map((d) => d.getTime()),
                   status: preview.status,
                   organizer: preview.organizer,
+                  attendees: previewEvent.attendees,
+                  myPartstat: previewEvent.myPartstat,
+                  myPartstatUpdatedAtMs: previewEvent.myPartstatUpdatedAtMs,
+                  myAttendeeEmail: previewEvent.myAttendeeEmail,
+                  replyRequested: previewEvent.replyRequested,
                   remoteEtag: remote.etag,
                   remoteHref: remote.href,
                   rawIcs: remote.icsData,

@@ -13,6 +13,7 @@ import {
   requireAccountContext,
   type AccountContext
 } from "@/app/api/_helpers/accountContext";
+import { appendMessageIdToError } from "./errorFormatting";
 
 export { requireAccountContext };
 
@@ -86,7 +87,13 @@ export async function requireAccountAndMessageContext(
   const message = await getMessageById(accountId, messageId);
   if (!message) {
     return NextResponse.json(
-      { ok: false, message: options?.missingMessageMessage ?? "Message not found" },
+      {
+        ok: false,
+        message: appendMessageIdToError(
+          options?.missingMessageMessage ?? "Message not found",
+          messageId
+        )
+      },
       { status: 404 }
     );
   }
@@ -97,7 +104,10 @@ export async function requireAccountAndMessageContext(
       return NextResponse.json(
         {
           ok: false,
-          message: options?.missingImapMetadataMessage ?? "Message is missing IMAP metadata"
+          message: appendMessageIdToError(
+            options?.missingImapMetadataMessage ?? "Message is missing IMAP metadata",
+            messageId
+          )
         },
         { status: 400 }
       );

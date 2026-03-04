@@ -1,22 +1,21 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { CalendarDays, Search, Info } from "lucide-react";
-import { Badge, Button, Dialog, Flex, Text } from "@radix-ui/themes";
-import type { Attachment, MessageCalendarInviteState } from "@/lib/data";
+import { CalendarDays } from "lucide-react";
+import type { Attachment, CalendarEvent, MessageCalendarInviteState } from "@/lib/data";
 import {
   parseIcsEvents,
   type CalendarEventPreview as CalendarEventPreviewType
 } from "@/lib/calendar";
 import {
   collectCalendarInviteMutationGroups,
-  inferCalendarInviteActionType
+  inferCalendarInviteMessageActionType
 } from "@/lib/calendarInviteProcessing";
+import { normalizeCalendarIcsLineEndings } from "@/lib/calendarIcs";
 import { isCalendarAttachment } from "@/lib/messageFlags";
 import { resolveNextReminderOccurrence } from "@/lib/reminderRecurrence";
 import { CALENDAR_REMINDERS_UPDATED_EVENT } from "../utils/calendarReminders";
 import { groupItemsByRelativeTime } from "../utils/relativeTimeGroups";
-import DialogTitleBar from "./DialogTitleBar";
-import RawTextPanel from "./RawTextPanel";
 import EventDetailView from "@/app/components/calendar/EventDetailView";
+import InviteAttachmentControls from "@/app/components/calendar/InviteAttachmentControls";
 import styles from "./CalendarEventPreview.module.css";
 
 function readDataUrl(dataUrl: string) {
@@ -30,24 +29,6 @@ function readDataUrl(dataUrl: string) {
   try { return decodeURIComponent(payload); } catch { return payload; }
 }
 
-function normalizeLineEndings(value: string) {
-  return value.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
-}
-
-function extractIcsUid(rawSource: string) {
-  if (!rawSource) return "";
-  const unfolded = normalizeLineEndings(rawSource).replace(/\n[ \t]/g, "");
-  for (const line of unfolded.split("\n")) {
-    const sep = line.indexOf(":");
-    if (sep < 0) continue;
-    const key = line.slice(0, sep).trim().toUpperCase();
-    if (key !== "UID" && !key.startsWith("UID;")) continue;
-    const uid = line.slice(sep + 1).trim();
-    if (uid) return uid;
-  }
-  return "";
-}
-
 function toMsArray(values?: Date[]) {
   if (!values || values.length === 0) return undefined;
   const next = values
@@ -55,6 +36,17 @@ function toMsArray(values?: Date[]) {
     .filter((v) => Number.isFinite(v) && v > 0)
     .map((v) => Math.round(v));
   return next.length > 0 ? next : undefined;
+}
+
+function parseAttendees(json?: string) {
+  if (!json) return [];
+  try {
+    const parsed = JSON.parse(json) as unknown;
+    if (Array.isArray(parsed)) return parsed.map(String);
+    return [];
+  } catch {
+    return [];
+  }
 }
 
 function resolveEventDisplayRange(event: CalendarEventPreviewType, nowMs = Date.now()) {
@@ -84,13 +76,17 @@ export default function CalendarEventPreview({
   accountId,
   sourceMessageRowId,
   inviteStates,
-  onFindRelatedByInviteUid
+  onFindRelatedByInviteUid,
+  readErrorMessage,
+  reportError
 }: {
   attachments: Attachment[];
   accountId: string;
   sourceMessageRowId?: string;
   inviteStates?: MessageCalendarInviteState[];
   onFindRelatedByInviteUid?: (uid: string) => void;
+  readErrorMessage: (res: Response) => Promise<string>;
+  reportError: (message: string) => void;
 }) {
   const attachment = useMemo(
     () => attachments.find((a) => isCalendarAttachment(a) && Boolean(a.url || a.dataUrl)) ?? null,
@@ -104,10 +100,10 @@ export default function CalendarEventPreview({
     error: boolean;
   }>({ attachmentId: "", events: [], rawSource: "", error: false });
 
-  const [rawIcsOpen, setRawIcsOpen] = useState(false);
   const [mountTime] = useState(Date.now);
   const [processingInviteUid, setProcessingInviteUid] = useState<string | null>(null);
   const [inviteStateOverrides, setInviteStateOverrides] = useState<Record<string, boolean>>({});
+  const [storedEventsByUid, setStoredEventsByUid] = useState<Record<string, CalendarEvent>>({});
 
   // Trigger refresh when reminders change (so EventDetailView re-fetches)
   const [reminderVersion, setReminderVersion] = useState(0);
@@ -146,16 +142,17 @@ export default function CalendarEventPreview({
   useEffect(() => {
     setInviteStateOverrides({});
     setProcessingInviteUid(null);
+    setStoredEventsByUid({});
   }, [sourceMessageRowId, attachment?.id]);
 
   const hasCurrentResult = Boolean(attachment && result.attachmentId === attachment.id);
-  const events = hasCurrentResult ? result.events : [];
+  const events = useMemo(
+    () => (hasCurrentResult ? result.events : []),
+    [hasCurrentResult, result.events]
+  );
   const rawSource = hasCurrentResult ? result.rawSource : "";
-  const normalizedRawSource = normalizeLineEndings(rawSource);
-  const canViewRawIcs = normalizedRawSource.trim().length > 0;
-  const rawIcsUid =
-    events.find((e) => (e.uid ?? "").trim().length > 0)?.uid?.trim() ??
-    extractIcsUid(normalizedRawSource);
+  const normalizedRawSource = normalizeCalendarIcsLineEndings(rawSource);
+  const rawIcsUid = events.find((e) => (e.uid ?? "").trim().length > 0)?.uid?.trim();
   const relatedInviteUid = rawIcsUid?.trim() ?? "";
 
   const groupedEvents = useMemo(() => {
@@ -169,10 +166,10 @@ export default function CalendarEventPreview({
   }, [hasCurrentResult, result.events, mountTime]);
 
   const inviteActionTypeByUid = useMemo(() => {
-    const map = new Map<string, ReturnType<typeof inferCalendarInviteActionType>>();
+    const map = new Map<string, ReturnType<typeof inferCalendarInviteMessageActionType>>();
     if (!rawSource.trim()) return map;
     collectCalendarInviteMutationGroups(rawSource).forEach((group) => {
-      map.set(group.eventUid.trim().toLowerCase(), inferCalendarInviteActionType(group));
+      map.set(group.eventUid.trim().toLowerCase(), inferCalendarInviteMessageActionType(group));
     });
     return map;
   }, [rawSource]);
@@ -186,6 +183,52 @@ export default function CalendarEventPreview({
     });
     return map;
   }, [inviteStates]);
+
+  const eventUids = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          events
+            .map((event) => event.uid?.trim())
+            .filter((value): value is string => Boolean(value))
+        )
+      ),
+    [events]
+  );
+
+  const refreshStoredEvents = useCallback(async () => {
+    if (!accountId.trim()) return;
+    if (eventUids.length === 0) {
+      setStoredEventsByUid({});
+      return;
+    }
+    try {
+      const responses = await Promise.all(
+        eventUids.map(async (eventUid) => {
+          const params = new URLSearchParams({
+            accountId,
+            eventUid
+          });
+          const res = await fetch(`/api/calendar/events?${params.toString()}`, { cache: "no-store" });
+          if (!res.ok) return null;
+          const payload = (await res.json()) as { event?: CalendarEvent | null };
+          return payload.event ? [eventUid.trim().toLowerCase(), payload.event] as const : null;
+        })
+      );
+      const next: Record<string, CalendarEvent> = {};
+      responses.forEach((entry) => {
+        if (!entry) return;
+        next[entry[0]] = entry[1];
+      });
+      setStoredEventsByUid(next);
+    } catch {
+      // ignore
+    }
+  }, [accountId, eventUids]);
+
+  useEffect(() => {
+    void refreshStoredEvents();
+  }, [refreshStoredEvents]);
 
   const handleProcessInvite = useCallback(
     async (eventUid?: string) => {
@@ -203,7 +246,8 @@ export default function CalendarEventPreview({
           })
         });
         if (!res.ok) {
-          throw new Error(`process invite failed (${res.status})`);
+          reportError(await readErrorMessage(res));
+          return;
         }
         const payload = (await res.json()) as {
           states?: Array<{ eventUid?: string; processed?: boolean }>;
@@ -215,14 +259,15 @@ export default function CalendarEventPreview({
           nextOverrides[uid] = Boolean(state.processed);
         });
         setInviteStateOverrides((prev) => ({ ...prev, ...nextOverrides }));
+        await refreshStoredEvents();
         window.dispatchEvent(new Event(CALENDAR_REMINDERS_UPDATED_EVENT));
-      } catch {
-        // ignore; preview keeps existing state
+      } catch (error) {
+        reportError(error instanceof Error ? error.message : "Failed to process calendar invite.");
       } finally {
         setProcessingInviteUid(null);
       }
     },
-    [accountId, rawSource, sourceMessageRowId]
+    [accountId, rawSource, readErrorMessage, refreshStoredEvents, reportError, sourceMessageRowId]
   );
 
   const loading = !hasCurrentResult;
@@ -242,62 +287,14 @@ export default function CalendarEventPreview({
           <CalendarDays size={14} />
           <span>Calendar Event</span>
         </div>
-        <Flex align="center" gap="2" className={styles.attachmentControls}>
-          <a
-            className={styles.attachmentLink}
-            href={attachment.url ?? attachment.dataUrl ?? "#"}
-            onClick={(e) => { if (!attachment.url && !attachment.dataUrl) e.preventDefault(); }}
-          >
-            <Badge size="1" variant="soft" color="indigo" className={styles.attachmentBadge}>
-              {downloadFilename}
-            </Badge>
-          </a>
-          <Dialog.Root open={rawIcsOpen} onOpenChange={setRawIcsOpen}>
-            <Button
-              size="1"
-              variant="soft"
-              color="gray"
-              className={styles.infoButton}
-              title="Find related"
-              aria-label="Find related"
-              disabled={!relatedInviteUid || !onFindRelatedByInviteUid}
-              onClick={() => { if (relatedInviteUid) onFindRelatedByInviteUid?.(relatedInviteUid); }}
-            >
-              <Search size={12} />
-            </Button>
-            <Button
-              size="1"
-              variant="soft"
-              color="gray"
-              className={styles.infoButton}
-              title="Show raw ICS content"
-              aria-label="Show raw ICS content"
-              disabled={!canViewRawIcs}
-              onClick={() => setRawIcsOpen(true)}
-            >
-              <Info size={12} />
-            </Button>
-            <Dialog.Content size="4" className={styles.rawIcsDialog}>
-              <Flex direction="column" gap="3">
-                <DialogTitleBar title="Raw ICS Content" onClose={() => setRawIcsOpen(false)} />
-                <Text size="2" color="gray">{downloadFilename}</Text>
-                {rawIcsUid ? (
-                  <div className={styles.uidRow}>
-                    <span className={styles.uidLabel}>UID</span>
-                    <span className={styles.uidValue}>{rawIcsUid}</span>
-                  </div>
-                ) : null}
-                <RawTextPanel
-                  text={canViewRawIcs ? normalizedRawSource : ""}
-                  copyText={canViewRawIcs ? normalizedRawSource : ""}
-                  copyLabel="Copy ICS"
-                  emptyText="Raw ICS content is unavailable."
-                  className={styles.rawIcsPanel}
-                />
-              </Flex>
-            </Dialog.Content>
-          </Dialog.Root>
-        </Flex>
+        <InviteAttachmentControls
+          downloadLabel={downloadFilename}
+          downloadFilename={downloadFilename}
+          downloadHref={attachment.url ?? attachment.dataUrl ?? undefined}
+          rawIcsSource={normalizedRawSource}
+          relatedInviteUid={relatedInviteUid}
+          onFindRelatedByInviteUid={onFindRelatedByInviteUid}
+        />
       </div>
 
       {loading ? (
@@ -312,6 +309,19 @@ export default function CalendarEventPreview({
               <div className={styles.eventList}>
                 {bucket.items.map(({ event, index, displayStart, displayEnd }) => {
                   const reminderKey = event.uid ?? `${attachment.id}-${index}`;
+                  const storedEvent = event.uid?.trim()
+                    ? storedEventsByUid[event.uid.trim().toLowerCase()]
+                    : undefined;
+                  const inviteActionType = (() => {
+                    const eventUid = event.uid?.trim().toLowerCase() ?? "";
+                    if (!eventUid) return undefined;
+                    const state = inviteStateByUid.get(eventUid);
+                    return inviteActionTypeByUid.get(eventUid) ?? state?.actionType ?? "invitation";
+                  })();
+                  const forceOccurrenceResponse = Boolean(
+                    event.recurrenceId &&
+                    (inviteActionType === "update" || inviteActionType === "cancellation")
+                  );
                   return (
                     <EventDetailView
                       key={`${reminderKey}-${reminderVersion}`}
@@ -326,23 +336,38 @@ export default function CalendarEventPreview({
                       location={event.location}
                       description={event.description}
                       organizer={event.organizer}
+                      attendees={parseAttendees(storedEvent?.attendees)}
                       recurrenceRule={event.recurrenceRule}
                       recurrenceDates={toMsArray(event.recurrenceDates)}
                       excludedDates={toMsArray(event.excludedDates)}
                       status={event.status}
+                      myPartstat={storedEvent?.myPartstat}
+                      replyRequested={storedEvent?.replyRequested}
+                      canRespond={Boolean(storedEvent?.rawIcs && storedEvent?.myAttendeeEmail)}
+                      sourceType={storedEvent?.sourceType}
                       messageId={sourceMessageRowId}
+                      eventId={storedEvent?.id}
                       eventStartAtMs={event.start?.getTime()}
                       eventEndAtMs={event.end?.getTime()}
+                      onEventUpdated={(updatedEvent) => {
+                        const normalizedUid = updatedEvent.eventUid.trim().toLowerCase();
+                        setStoredEventsByUid((prev) => ({ ...prev, [normalizedUid]: updatedEvent }));
+                      }}
+                      onInviteProcessed={(processedEventUid) => {
+                        const normalizedUid = processedEventUid.trim().toLowerCase();
+                        if (!normalizedUid) return;
+                        setInviteStateOverrides((prev) => ({ ...prev, [normalizedUid]: true }));
+                      }}
+                      responseOccurrenceLabel={forceOccurrenceResponse ? "This occurrence" : "Next occurrence"}
+                      forceOccurrenceResponse={forceOccurrenceResponse}
                       inviteProcessing={(() => {
                         const eventUid = event.uid?.trim().toLowerCase() ?? "";
                         if (!eventUid) return undefined;
-                        const state = inviteStateByUid.get(eventUid);
                         return {
-                          actionType:
-                            state?.actionType ?? inviteActionTypeByUid.get(eventUid) ?? "invitation",
+                          actionType: inviteActionType,
                           processed:
                             inviteStateOverrides[eventUid] ??
-                            Boolean(state?.processedAtMs),
+                            Boolean(inviteStateByUid.get(eventUid)?.processedAtMs),
                           processing: processingInviteUid === eventUid || processingInviteUid === "__all__",
                           onProcess: () => handleProcessInvite(event.uid)
                         };

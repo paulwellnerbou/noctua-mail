@@ -2,9 +2,15 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { AlarmClock, AlarmClockPlus, Clock, Mail, MapPin, Repeat, Trash2, User } from "lucide-react";
-import { Badge, Button, Dialog, Flex, Select, Text } from "@radix-ui/themes";
+import { Badge, Button, Dialog, Flex, Select, Switch, Text } from "@radix-ui/themes";
 import { buildCalendarRecurrenceSummary, formatCalendarEventDate } from "@/lib/calendar";
 import type { CalendarInviteActionType } from "@/lib/calendarInviteProcessing";
+import type {
+  CalendarEvent,
+  CalendarParticipationScope,
+  CalendarParticipationStatus
+} from "@/lib/data";
+import { formatCalendarParticipationLabel } from "@/lib/calendarParticipation";
 import { formatCalendarTimeZoneShortLabel } from "@/lib/calendarTimezones";
 import { sanitizeHtmlForDisplay, stripStyleTags } from "@/lib/html";
 import { resolveNextReminderOccurrence } from "@/lib/reminderRecurrence";
@@ -37,12 +43,20 @@ export type EventDetailViewProps = {
   recurrenceDates?: number[];
   excludedDates?: number[];
   status?: string;
+  myPartstat?: CalendarParticipationStatus;
+  replyRequested?: boolean;
+  canRespond?: boolean;
   sourceType?: string;
   messageId?: string;
+  eventId?: string;
   /** The canonical event start used for reminder matching (e.g. original series start for recurring events) */
   eventStartAtMs?: number;
   eventEndAtMs?: number;
   onOpenMessage?: (messageId: string) => void;
+  onEventUpdated?: (event: CalendarEvent) => void;
+  onInviteProcessed?: (eventUid: string) => void;
+  responseOccurrenceLabel?: string;
+  forceOccurrenceResponse?: boolean;
   inviteProcessing?: {
     actionType: CalendarInviteActionType;
     processed: boolean;
@@ -105,6 +119,31 @@ const SOURCE_COLORS: Record<string, "blue" | "green" | "indigo"> = {
   email: "indigo"
 };
 
+function getParticipationColor(
+  status?: CalendarParticipationStatus
+): "green" | "red" | "orange" | "gray" {
+  if (status === "ACCEPTED") return "green";
+  if (status === "DECLINED") return "red";
+  if (status === "TENTATIVE") return "orange";
+  return "gray";
+}
+
+function isReplyChoice(status?: CalendarParticipationStatus) {
+  return status === "ACCEPTED" || status === "DECLINED" || status === "TENTATIVE";
+}
+
+function getReplyActionLabel(status?: CalendarParticipationStatus) {
+  if (status === "ACCEPTED") return "Accept";
+  if (status === "DECLINED") return "Decline";
+  if (status === "TENTATIVE") return "Mark tentative";
+  return "Respond";
+}
+
+function getOccurrenceInviteActionLabel(actionType?: CalendarInviteActionType) {
+  if (actionType === "cancellation") return "RSVP: Cancel";
+  return "RSVP";
+}
+
 export default function EventDetailView({
   accountId,
   eventUid,
@@ -122,11 +161,19 @@ export default function EventDetailView({
   recurrenceDates,
   excludedDates,
   status,
+  myPartstat,
+  replyRequested,
+  canRespond = false,
   sourceType,
   messageId,
+  eventId,
   eventStartAtMs,
   eventEndAtMs,
   onOpenMessage,
+  onEventUpdated,
+  onInviteProcessed,
+  responseOccurrenceLabel = "This occurrence",
+  forceOccurrenceResponse = false,
   inviteProcessing
 }: EventDetailViewProps) {
   const resolvedStartMs = startMs ?? eventStartAtMs;
@@ -176,6 +223,25 @@ export default function EventDetailView({
   const [savingReminder, setSavingReminder] = useState(false);
   const [deletingReminder, setDeletingReminder] = useState(false);
   const [reminderNotice, setReminderNotice] = useState<string | null>(null);
+  const [currentMyPartstat, setCurrentMyPartstat] = useState(myPartstat);
+  const [currentParticipationScope, setCurrentParticipationScope] =
+    useState<CalendarParticipationScope>("series");
+  const [isRecurringParticipation, setIsRecurringParticipation] = useState(Boolean(recurrenceRule?.trim()));
+  const [responseDialogOpen, setResponseDialogOpen] = useState(false);
+  const [draftPartstat, setDraftPartstat] = useState<CalendarParticipationStatus>("NEEDS-ACTION");
+  const [draftScope, setDraftScope] = useState<CalendarParticipationScope>("series");
+  const [sendReply, setSendReply] = useState(replyRequested !== false);
+  const [submittingResponse, setSubmittingResponse] = useState(false);
+
+  useEffect(() => {
+    setCurrentMyPartstat(myPartstat);
+    setCurrentParticipationScope(forceOccurrenceResponse ? "occurrence" : "series");
+    setIsRecurringParticipation(Boolean(recurrenceRule?.trim()));
+  }, [eventId, resolvedStartMs, myPartstat, recurrenceRule, forceOccurrenceResponse]);
+
+  useEffect(() => {
+    setSendReply(replyRequested !== false);
+  }, [replyRequested]);
 
   const canScheduleReminder = (() => {
     if (!canonicalStartMs) return false;
@@ -219,6 +285,81 @@ export default function EventDetailView({
     const t = window.setTimeout(() => setReminderNotice(null), 3000);
     return () => window.clearTimeout(t);
   }, [reminderNotice]);
+
+  useEffect(() => {
+    let active = true;
+    if (!accountId || !eventId || !canRespond) return;
+    const loadParticipation = async () => {
+      try {
+        const params = new URLSearchParams({
+          accountId,
+          eventId
+        });
+        if (Number.isFinite(resolvedStartMs)) {
+          params.set("occurrenceStartAtMs", String(resolvedStartMs));
+        }
+        const res = await fetch(`/api/calendar/events/participation?${params.toString()}`, {
+          cache: "no-store"
+        });
+        const payload = (await res.json().catch(() => null)) as
+          | {
+              ok?: boolean;
+              participation?: {
+                partstat?: CalendarParticipationStatus;
+                scope?: CalendarParticipationScope;
+                isRecurring?: boolean;
+              };
+            }
+          | null;
+        if (!active || !res.ok || payload?.ok !== true || !payload.participation) return;
+        setCurrentMyPartstat(payload.participation.partstat);
+        setCurrentParticipationScope(
+          forceOccurrenceResponse
+            ? "occurrence"
+            : payload.participation.scope === "occurrence"
+              ? "occurrence"
+              : "series"
+        );
+        setIsRecurringParticipation(Boolean(payload.participation.isRecurring));
+      } catch {
+        // ignore
+      }
+    };
+    void loadParticipation();
+    return () => {
+      active = false;
+    };
+  }, [accountId, canRespond, eventId, resolvedStartMs, forceOccurrenceResponse]);
+
+  const canChooseOccurrenceScope =
+    !forceOccurrenceResponse && isRecurringParticipation && Number.isFinite(resolvedStartMs);
+  const effectiveResponseScope: CalendarParticipationScope =
+    forceOccurrenceResponse && Number.isFinite(resolvedStartMs) ? "occurrence" : draftScope;
+  const hasOccurrenceCancellationAction =
+    forceOccurrenceResponse &&
+    Boolean(inviteProcessing?.onProcess) &&
+    inviteProcessing?.actionType === "cancellation";
+  const currentScopeLabel = currentParticipationScope === "occurrence"
+    ? responseOccurrenceLabel
+    : "Whole series";
+  const responseTargetLabel = `${responseOccurrenceLabel}: ${timeRange || "Selected event"}`;
+
+  const openResponseDialog = () => {
+    setDraftPartstat(
+      isReplyChoice(currentMyPartstat)
+        ? currentMyPartstat
+        : "NEEDS-ACTION"
+    );
+    setDraftScope(
+      forceOccurrenceResponse && Number.isFinite(resolvedStartMs)
+        ? "occurrence"
+        : canChooseOccurrenceScope
+          ? currentParticipationScope
+          : "series"
+    );
+    setSendReply(replyRequested !== false);
+    setResponseDialogOpen(true);
+  };
 
   const handleScheduleReminder = async () => {
     if (!accountId || !canonicalStartMs) return;
@@ -269,6 +410,77 @@ export default function EventDetailView({
     }
   };
 
+  const handleRespond = async () => {
+    if (!accountId || !eventId) return;
+    if (!isReplyChoice(draftPartstat)) {
+      setReminderNotice("Choose a response first.");
+      return;
+    }
+    setSubmittingResponse(true);
+    try {
+      const res = await fetch(`/api/calendar/events/${encodeURIComponent(eventId)}/respond`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          accountId,
+          partstat: draftPartstat,
+          scope: effectiveResponseScope,
+          sendReply,
+          occurrenceStartAtMs:
+            effectiveResponseScope === "occurrence" && Number.isFinite(resolvedStartMs)
+              ? resolvedStartMs
+              : undefined
+        })
+      });
+      const payload = (await res.json().catch(() => null)) as
+        | {
+            ok?: boolean;
+            message?: string;
+            event?: CalendarEvent;
+            participation?: {
+              partstat?: CalendarParticipationStatus;
+              scope?: CalendarParticipationScope;
+            };
+          }
+        | null;
+      if (!res.ok || payload?.ok !== true || !payload.event || !payload.participation) {
+        setReminderNotice(payload?.message || "Failed to update RSVP response.");
+        return;
+      }
+      setCurrentMyPartstat(payload.participation.partstat);
+      setCurrentParticipationScope(
+        forceOccurrenceResponse
+          ? "occurrence"
+          : payload.participation.scope === "occurrence"
+            ? "occurrence"
+            : "series"
+      );
+      onEventUpdated?.(payload.event);
+      if (eventUid?.trim()) {
+        onInviteProcessed?.(eventUid.trim());
+      }
+      setResponseDialogOpen(false);
+      const savedLabel = formatCalendarParticipationLabel(payload.participation.partstat);
+      const appliedLabel =
+        (forceOccurrenceResponse ? "occurrence" : payload.participation.scope) === "occurrence"
+          ? responseOccurrenceLabel.toLowerCase()
+          : "whole series";
+      setReminderNotice(
+        sendReply
+          ? `Response sent: ${savedLabel} (${appliedLabel}).`
+          : `Response saved locally: ${savedLabel} (${appliedLabel}).`
+      );
+    } catch {
+      setReminderNotice("Failed to update RSVP response.");
+    } finally {
+      setSubmittingResponse(false);
+    }
+  };
+
+  const currentParticipationColor = getParticipationColor(currentMyPartstat);
+  const currentParticipationLabel = formatCalendarParticipationLabel(currentMyPartstat) || "Needs action";
+  const replyActionLabel = getReplyActionLabel(draftPartstat);
+
   return (
     <article className={styles.event}>
       <h5 className={styles.eventTitle}>{title || "Untitled Event"}</h5>
@@ -283,7 +495,7 @@ export default function EventDetailView({
                 : "Invitation"}{" "}
             {inviteProcessing.processed ? "processed" : "not processed"}
           </Text>
-          {!inviteProcessing.processed && inviteProcessing.onProcess && (
+          {!inviteProcessing.processed && inviteProcessing.onProcess && !hasOccurrenceCancellationAction && (
             <Button
               size="1"
               variant="soft"
@@ -362,11 +574,20 @@ export default function EventDetailView({
       )}
 
       {/* Badges */}
-      {(status || sourceType) && (
+      {(status || currentMyPartstat || sourceType) && (
         <div className={styles.badges}>
           {status && (
             <Badge size="1" color={status === "CANCELLED" ? "red" : status === "TENTATIVE" ? "orange" : "gray"} variant="soft">
               {status}
+            </Badge>
+          )}
+          {currentMyPartstat && (
+            <Badge
+              size="1"
+              color={currentParticipationColor}
+              variant="soft"
+            >
+              You: {formatCalendarParticipationLabel(currentMyPartstat)}
             </Badge>
           )}
           {sourceType && (
@@ -377,9 +598,39 @@ export default function EventDetailView({
         </div>
       )}
 
+      {currentMyPartstat && (canChooseOccurrenceScope || forceOccurrenceResponse) && !hasOccurrenceCancellationAction && (
+        <p className={styles.scopeNote}>Your RSVP applies to: {currentScopeLabel}</p>
+      )}
+
       {/* Reminder controls */}
       {canonicalStartMs && (
         <div className={styles.actions}>
+          {hasOccurrenceCancellationAction && !inviteProcessing?.processed && (
+            <Button
+              size="1"
+              variant="soft"
+              color={inviteProcessing?.actionType === "cancellation" ? "red" : "indigo"}
+              disabled={Boolean(inviteProcessing?.processing)}
+              onClick={() => void inviteProcessing?.onProcess?.()}
+            >
+              {inviteProcessing?.processing
+                ? inviteProcessing.actionType === "cancellation"
+                  ? "Cancelling..."
+                  : "Updating..."
+                : getOccurrenceInviteActionLabel(inviteProcessing?.actionType)}
+            </Button>
+          )}
+          {eventId && canRespond && !hasOccurrenceCancellationAction && (
+            <Button
+              size="1"
+              variant="soft"
+              color={currentParticipationColor}
+              disabled={submittingResponse}
+              onClick={openResponseDialog}
+            >
+              RSVP: {currentParticipationLabel}
+            </Button>
+          )}
           <Button
             size="1"
             variant="soft"
@@ -400,7 +651,7 @@ export default function EventDetailView({
               onClick={() => void handleDeleteReminder()}
             >
               <Trash2 size={14} />
-              {deletingReminder ? "Removing…" : "Remove"}
+              {deletingReminder ? "Removing…" : "Remove reminder"}
             </Button>
           )}
           {messageId && onOpenMessage && (
@@ -412,9 +663,123 @@ export default function EventDetailView({
         </div>
       )}
 
+      {replyRequested === false && currentMyPartstat && (
+        <p className={styles.notice}>The organizer did not request a reply.</p>
+      )}
+
       {reminderNotice && (
         <p className={styles.notice}>{reminderNotice}</p>
       )}
+
+      <Dialog.Root
+        open={responseDialogOpen}
+        onOpenChange={(open) => {
+          if (!open && !submittingResponse) setResponseDialogOpen(false);
+        }}
+      >
+        <Dialog.Content size="2" className={styles.responseDialog}>
+          <Flex direction="column" gap="3">
+            <Dialog.Title size="4">Respond to invitation</Dialog.Title>
+
+            <div className={styles.responseSummary}>
+              <Text size="2" weight="medium">{title || "Untitled Event"}</Text>
+              {timeRange && (
+                <Text size="1" color="gray">{responseTargetLabel}</Text>
+              )}
+              {organizer && (
+                <Text size="1" color="gray">Organizer: {organizer}</Text>
+              )}
+            </div>
+
+            <Flex direction="column" gap="2">
+              <Text size="2" weight="medium">Your response</Text>
+              <Flex gap="2" wrap="wrap">
+                <Button
+                  size="1"
+                  variant={draftPartstat === "ACCEPTED" ? "solid" : "soft"}
+                  color="green"
+                  onClick={() => setDraftPartstat("ACCEPTED")}
+                >
+                  Accept
+                </Button>
+                <Button
+                  size="1"
+                  variant={draftPartstat === "TENTATIVE" ? "solid" : "soft"}
+                  color="orange"
+                  onClick={() => setDraftPartstat("TENTATIVE")}
+                >
+                  Tentative
+                </Button>
+                <Button
+                  size="1"
+                  variant={draftPartstat === "DECLINED" ? "solid" : "soft"}
+                  color="red"
+                  onClick={() => setDraftPartstat("DECLINED")}
+                >
+                  Decline
+                </Button>
+              </Flex>
+            </Flex>
+
+            {canChooseOccurrenceScope && (
+              <Flex direction="column" gap="2">
+                <Text size="2" weight="medium">Apply to</Text>
+                <Select.Root
+                  value={draftScope}
+                  onValueChange={(value) => setDraftScope(value as CalendarParticipationScope)}
+                >
+                  <Select.Trigger />
+                  <Select.Content position="popper">
+                    <Select.Item value="occurrence">{responseOccurrenceLabel}</Select.Item>
+                    <Select.Item value="series">Whole series</Select.Item>
+                  </Select.Content>
+                </Select.Root>
+              </Flex>
+            )}
+
+            <Flex direction="column" gap="2">
+              <Text size="2" weight="medium">Notify organizer</Text>
+              <Flex align="center" justify="between" gap="3" className={styles.responseToggleRow}>
+                <div className={styles.responseToggleText}>
+                  <Text size="2">Send reply email</Text>
+                  {replyRequested === false && (
+                    <Text size="1" color="gray">
+                      The organizer did not request a reply. You can still send one.
+                    </Text>
+                  )}
+                </div>
+                <Switch
+                  checked={sendReply}
+                  onCheckedChange={setSendReply}
+                  disabled={submittingResponse}
+                  aria-label="Send reply to organizer"
+                />
+              </Flex>
+            </Flex>
+
+            <Flex justify="end" gap="2">
+              <Button
+                variant="soft"
+                color="gray"
+                disabled={submittingResponse}
+                onClick={() => setResponseDialogOpen(false)}
+              >
+                Cancel
+              </Button>
+              <Button
+                disabled={submittingResponse || !isReplyChoice(draftPartstat)}
+                onClick={() => void handleRespond()}
+              >
+                {submittingResponse
+                  ? "Saving..."
+                  : sendReply
+                    ? `${replyActionLabel} and send response`
+                    : `${replyActionLabel} and save without sending response`}
+              </Button>
+            </Flex>
+          </Flex>
+        </Dialog.Content>
+      </Dialog.Root>
 
       {/* Reminder modal */}
       <Dialog.Root open={reminderModalOpen} onOpenChange={(open) => { if (!open) setReminderModalOpen(false); }}>

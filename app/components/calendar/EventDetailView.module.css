@@ -96,6 +96,39 @@
   color: var(--indigo-11);
 }
 
+.scopeNote {
+  margin: 0;
+  font-size: 11px;
+  color: var(--gray-10);
+}
+
+.responseDialog {
+  width: min(440px, 92vw);
+}
+
+.responseSummary {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--space-2);
+  border-radius: var(--radius-2);
+  background: var(--gray-2);
+  border: 1px solid var(--gray-4);
+}
+
+.responseToggleRow {
+  padding: var(--space-2);
+  border-radius: var(--radius-2);
+  background: var(--gray-2);
+  border: 1px solid var(--gray-4);
+}
+
+.responseToggleText {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
 .reminderDialog {
   width: min(420px, 92vw);
 }

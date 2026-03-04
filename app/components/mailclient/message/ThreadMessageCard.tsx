@@ -85,6 +85,8 @@ type ThreadMessageCardProps = {
   extractEmails: (value?: string) => string[];
   onFindRelatedByCalendarInviteUid?: (uid: string) => void;
   handleUnsubscribe: (message: Message) => void;
+  readErrorMessage: (res: Response) => Promise<string>;
+  reportError: (message: string) => void;
   dateFormat?: AccountDateFormat;
   threadViewMode?: "full" | "compact";
   userEmail?: string;
@@ -131,6 +133,8 @@ export default function ThreadMessageCard({
   extractEmails,
   onFindRelatedByCalendarInviteUid,
   handleUnsubscribe,
+  readErrorMessage,
+  reportError,
   dateFormat,
   threadViewMode,
   userEmail
@@ -752,6 +756,8 @@ export default function ThreadMessageCard({
                   sourceMessageRowId={message.id}
                   inviteStates={message.calendarInviteStates}
                   onFindRelatedByInviteUid={onFindRelatedByCalendarInviteUid}
+                  readErrorMessage={readErrorMessage}
+                  reportError={reportError}
                 />
                 <AttachmentsList attachments={message.attachments ?? []} />
               </div>

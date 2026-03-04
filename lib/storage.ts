@@ -1,6 +1,7 @@
 import { promises as fs } from "fs";
 import path from "path";
 import type { Account, Folder, Message } from "./data";
+import { buildMessageRowIdLookupCandidates } from "./messageIds";
 import {
   getAttachmentMessageDir,
   getAttachmentsDir,
@@ -51,23 +52,6 @@ function attachmentObjectFileName(attachmentId: string) {
 
 function sourceFilePath(accountId: string, messageId: string) {
   return path.join(getSourcesAccountDir(accountId), sourceObjectFileName(messageId));
-}
-
-function toBaseMessageIdFromCollisionVariant(messageId: string) {
-  const trimmed = messageId.trim();
-  const match = trimmed.match(/^(.*)-([a-f0-9]{12})$/i);
-  if (!match) return null;
-  return match[1] || null;
-}
-
-function buildMessageIdLookupCandidates(messageId: string) {
-  const normalized = messageId.trim();
-  const candidates = [normalized];
-  const baseId = toBaseMessageIdFromCollisionVariant(normalized);
-  if (baseId && baseId !== normalized) {
-    candidates.push(baseId);
-  }
-  return candidates;
 }
 
 function sourceLegacyFilePath(accountId: string, messageId: string) {
@@ -206,7 +190,7 @@ export async function saveMessageSource(
 
 export async function getMessageSource(accountId: string, messageId: string) {
   await ensureSourcesDir();
-  const candidates = buildMessageIdLookupCandidates(messageId);
+  const candidates = buildMessageRowIdLookupCandidates(messageId);
   for (const candidateId of candidates) {
     try {
       return await fs.readFile(sourceFilePath(accountId, candidateId), "utf-8");
@@ -235,7 +219,7 @@ export async function getAttachmentData(
   attachmentId: string
 ) {
   await ensureAttachmentsDir();
-  const candidates = buildMessageIdLookupCandidates(messageId);
+  const candidates = buildMessageRowIdLookupCandidates(messageId);
   for (const candidateId of candidates) {
     try {
       return await fs.readFile(attachmentFilePath(accountId, candidateId, attachmentId));

@@ -1,19 +1,18 @@
 .header {
   display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 12px;
+  margin-bottom: 6px;
+}
+
+.infoRow {
+  display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  margin-bottom: 6px;
-  flex-wrap: nowrap;
-}
-
-.titleBlock {
   min-width: 0;
-  flex: 1 1 auto;
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 2px;
+  flex-wrap: wrap;
 }
 
 .meta {
@@ -27,13 +26,12 @@
   max-width: 100%;
 }
 
-.actions {
+.actionsRow {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 8px;
-  flex-wrap: nowrap;
-  justify-content: flex-end;
-  flex: 0 0 auto;
+  flex-wrap: wrap;
 }
 
 .segmented {
@@ -49,9 +47,22 @@
   display: flex;
   align-items: center;
   gap: 8px;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .groupSelectTrigger {
   min-width: 170px;
+}
+
+.threadDateSelectTrigger {
+  min-width: 108px;
+}
+
+@media (max-width: 760px) {
+  .infoRow,
+  .actionsRow,
+  .rightActions {
+    align-items: flex-start;
+  }
 }

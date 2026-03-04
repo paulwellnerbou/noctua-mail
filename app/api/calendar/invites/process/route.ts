@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireAccountContext } from "@/app/api/_helpers/accountContext";
+import { appendMessageIdToError } from "@/app/api/message/errorFormatting";
 import { processCalendarInviteForMessage } from "@/lib/calendarInviteProcessor";
 import { getMessageById } from "@/lib/db";
 
@@ -27,7 +28,10 @@ export async function POST(request: Request) {
 
   const message = await getMessageById(accountContext.accountId, messageId);
   if (!message) {
-    return NextResponse.json({ ok: false, message: "Message not found" }, { status: 404 });
+    return NextResponse.json(
+      { ok: false, message: appendMessageIdToError("Message not found", messageId) },
+      { status: 404 }
+    );
   }
 
   const result = await processCalendarInviteForMessage({
@@ -35,6 +39,7 @@ export async function POST(request: Request) {
     messageId,
     icsSource,
     process: true,
+    accountEmail: accountContext.account.email,
     reminderUserId: accountContext.session.userId,
     processedByUserId: accountContext.session.userId
   });

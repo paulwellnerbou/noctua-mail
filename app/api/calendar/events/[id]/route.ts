@@ -80,6 +80,17 @@ export async function PUT(
     recurrenceDates: body?.recurrenceDates !== undefined ? toPositiveNumberArray(body.recurrenceDates) : existing.recurrenceDates,
     excludedDates: body?.excludedDates !== undefined ? toPositiveNumberArray(body.excludedDates) : existing.excludedDates,
     status: body?.status !== undefined ? body.status?.trim() || undefined : existing.status,
+    organizer: body?.organizer !== undefined ? body.organizer?.trim() || undefined : existing.organizer,
+    attendees: body?.attendees !== undefined ? body.attendees ?? undefined : existing.attendees,
+    myPartstat: body?.myPartstat !== undefined ? body.myPartstat ?? undefined : existing.myPartstat,
+    myPartstatUpdatedAtMs:
+      body?.myPartstatUpdatedAtMs !== undefined
+        ? toFiniteNumber(body.myPartstatUpdatedAtMs) || undefined
+        : existing.myPartstatUpdatedAtMs,
+    myAttendeeEmail:
+      body?.myAttendeeEmail !== undefined ? body.myAttendeeEmail?.trim() || undefined : existing.myAttendeeEmail,
+    replyRequested:
+      body?.replyRequested !== undefined ? Boolean(body.replyRequested) : existing.replyRequested,
     remoteEtag: body?.remoteEtag !== undefined ? body.remoteEtag?.trim() || undefined : existing.remoteEtag,
     remoteHref: body?.remoteHref !== undefined ? body.remoteHref?.trim() || undefined : existing.remoteHref,
     rawIcs: body?.rawIcs !== undefined ? body.rawIcs ?? undefined : existing.rawIcs,

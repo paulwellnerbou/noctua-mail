@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { getMessageById } from "@/lib/db";
 import { requireSessionAccountOr403, requireSessionOr401 } from "@/lib/auth";
+import { appendMessageIdToError } from "../errorFormatting";
 import {
   appendUnreferencedInlineImages,
   escapeHtml,
@@ -84,7 +85,7 @@ export async function GET(request: Request) {
 
   const message = await getMessageById(accountId, messageId);
   if (!message) {
-    return htmlError(404, "Message not found.");
+    return htmlError(404, appendMessageIdToError("Message not found.", messageId));
   }
 
   if (!message.htmlBody || !message.htmlBody.trim()) {

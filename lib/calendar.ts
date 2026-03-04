@@ -1,4 +1,5 @@
 import { RRule } from "rrule";
+import type { CalendarParticipationStatus } from "./data";
 import {
   fromCalendarTimeZoneWallDate,
   isValidCalendarTimeZone,
@@ -14,6 +15,7 @@ export type CalendarEventPreview = {
   status?: string;
   sequence?: number;
   organizer?: string;
+  organizerEmail?: string;
   start?: Date;
   end?: Date;
   allDay: boolean;
@@ -24,6 +26,15 @@ export type CalendarEventPreview = {
   recurrenceIdTimezone?: string;
   recurrenceDates?: Date[];
   excludedDates?: Date[];
+  attendeeDetails?: CalendarAttendeePreview[];
+};
+
+export type CalendarAttendeePreview = {
+  name?: string;
+  email?: string;
+  partstat?: CalendarParticipationStatus;
+  rsvp?: boolean;
+  role?: string;
 };
 
 export type ParsedCalendarInvite = {
@@ -201,6 +212,44 @@ function parseOrganizer(value: string, params: Record<string, string>) {
   return decodeIcsText(normalized);
 }
 
+function parseCalendarEmailAddress(value: string) {
+  const normalized = decodeIcsText(value.replace(/^mailto:/i, "").trim());
+  return normalized || undefined;
+}
+
+function normalizeParticipationStatus(value?: string) {
+  const normalized = value?.trim().toUpperCase();
+  if (!normalized) return undefined;
+  if (
+    normalized === "NEEDS-ACTION" ||
+    normalized === "ACCEPTED" ||
+    normalized === "DECLINED" ||
+    normalized === "TENTATIVE" ||
+    normalized === "DELEGATED"
+  ) {
+    return normalized as CalendarParticipationStatus;
+  }
+  return undefined;
+}
+
+function parseBooleanParam(value?: string) {
+  const normalized = value?.trim().toUpperCase();
+  if (normalized === "TRUE") return true;
+  if (normalized === "FALSE") return false;
+  return undefined;
+}
+
+function parseAttendee(value: string, params: Record<string, string>): CalendarAttendeePreview {
+  const name = decodeIcsText(params.CN ?? "").trim() || undefined;
+  return {
+    name,
+    email: parseCalendarEmailAddress(value),
+    partstat: normalizeParticipationStatus(params.PARTSTAT),
+    rsvp: parseBooleanParam(params.RSVP),
+    role: decodeIcsText(params.ROLE ?? "").trim() || undefined
+  };
+}
+
 export function parseIcsInvite(source: string): ParsedCalendarInvite {
   if (!source.trim()) return { events: [] };
   const lines = unfoldLines(source);
@@ -241,7 +290,13 @@ export function parseIcsInvite(source: string): ParsedCalendarInvite {
       const sequence = Number.parseInt(value, 10);
       if (Number.isFinite(sequence)) current.sequence = sequence;
     }
-    if (parsed.name === "ORGANIZER") current.organizer = parseOrganizer(value, parsed.params);
+    if (parsed.name === "ORGANIZER") {
+      current.organizer = parseOrganizer(value, parsed.params);
+      current.organizerEmail = parseCalendarEmailAddress(value);
+    }
+    if (parsed.name === "ATTENDEE") {
+      current.attendeeDetails = [...(current.attendeeDetails ?? []), parseAttendee(value, parsed.params)];
+    }
     if (parsed.name === "RRULE") current.recurrenceRule = value.toUpperCase();
     if (parsed.name === "EXDATE") {
       const dates = parseMultiDateValues(parsed.value, parsed.params.TZID ?? current.startTimezone);
@@ -373,18 +428,27 @@ export function buildCalendarRecurrenceSummary(event: CalendarEventPreview): str
   if (!recurrenceRule) return null;
   const parsedRule = parseRecurrenceRule(event);
   const fallbackFields = parseRRuleFields(recurrenceRule);
-  const base = (() => {
+  const rawBase = (() => {
     if (!parsedRule) return buildRecurrenceFallbackLabel(recurrenceRule);
     const asText = parsedRule.toText().trim();
     return asText ? capitalizeFirstLetter(asText) : buildRecurrenceFallbackLabel(recurrenceRule);
   })();
+  const untilTextMatch = rawBase.match(/^(.*?)(?:,\s*)?\s+until\s+(.+)$/i);
+  const base = untilTextMatch?.[1]?.trim().replace(/[,\s]+$/g, "") || rawBase;
+  const untilDetailFromBase = untilTextMatch?.[2]?.trim()
+    ? `until ${untilTextMatch[2].trim()}`
+    : null;
 
   const details: string[] = [];
   if (event.start) {
     details.push(`starting ${formatRecurrenceBoundaryDate(event, event.start)}`);
   }
 
-  const hasUntilInBase = /\buntil\b/i.test(base);
+  if (untilDetailFromBase) {
+    details.push(untilDetailFromBase);
+  }
+
+  const hasUntilInBase = Boolean(untilDetailFromBase) || /\buntil\b/i.test(base);
   const untilDate = parsedRule?.options.until;
   if (untilDate instanceof Date && !hasUntilInBase) {
     details.push(`until ${formatRecurrenceBoundaryDate(event, untilDate)}`);

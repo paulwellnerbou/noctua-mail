@@ -4,7 +4,11 @@ import type React from "react";
 import { useCallback } from "react";
 import type { Message } from "@/lib/data";
 import type { SelectionStore } from "./messagelist/selectionStore";
-import { getMessageSubjectForNotice, remapMessageReferenceIds } from "./utils/messageMutation";
+import {
+  getMessageSubjectForNotice,
+  pruneDetachedCrossFolderThreadMessages,
+  remapMessageReferenceIds
+} from "./utils/messageMutation";
 
 export type UndoMoveTarget = {
   messageId: string;
@@ -55,6 +59,7 @@ type UseMessageMoveActionsOptions = {
   activeMessageId: string;
   activeFolderId: string;
   searchScope: "folder" | "all";
+  includeThreadAcrossFoldersForList: boolean;
   messages: Message[];
   selectionStore: SelectionStore;
   folderById: Map<string, { name: string }>;
@@ -88,6 +93,7 @@ export function useMessageMoveActions({
   activeMessageId,
   activeFolderId,
   searchScope,
+  includeThreadAcrossFoldersForList,
   messages,
   selectionStore,
   folderById,
@@ -223,7 +229,12 @@ export function useMessageMoveActions({
             if (!keep) return;
             nextById.set(updated.id, updated);
           });
-          return changed ? Array.from(nextById.values()) : prev;
+          const nextMessages = changed ? Array.from(nextById.values()) : prev;
+          return pruneDetachedCrossFolderThreadMessages(nextMessages, {
+            searchScope,
+            activeFolderId,
+            includeThreadAcrossFoldersForList
+          });
         });
         if (
           updateActiveMessage &&
@@ -330,14 +341,13 @@ export function useMessageMoveActions({
       apiFetch,
       clearSelectionState,
       folderById,
-      getMessageSubjectForNotice,
       messages,
       noticeSuccessTimeout,
       pushNotice,
-      remapMessageReferenceIds,
       readErrorMessage,
       reportError,
       searchScope,
+      includeThreadAcrossFoldersForList,
       selectionStore,
       shouldKeepMessageInResults,
       setActiveMessageId,

@@ -7,6 +7,7 @@ import {
 import { syncImapMessage } from "@/lib/mail/imap";
 import { sanitizeSyncedMessage } from "@/lib/mail/syncMessageSanitizer";
 import { collectThreadReferenceIds, resolveThreadingForItems } from "@/lib/threading";
+import { appendMessageIdToError } from "../errorFormatting";
 import { requireAccountAndMessageContext } from "../routeHelpers";
 
 export async function POST(request: Request) {
@@ -17,20 +18,26 @@ export async function POST(request: Request) {
       "Message not found in local cache. If a sync is in progress, retry later."
   });
   if (context instanceof NextResponse) return context;
-  const { account, accountId, clientId, message: existing } = context;
+  const { account, accountId, clientId, message: existing, messageId } = context;
 
   const mailboxPath = existing?.mailboxPath;
   const imapUid = typeof existing?.imapUid === "number" ? existing.imapUid : undefined;
   if (!mailboxPath || typeof imapUid !== "number" || Number.isNaN(imapUid)) {
     return NextResponse.json(
-      { ok: false, message: "Message is missing IMAP metadata to re-sync." },
+      {
+        ok: false,
+        message: appendMessageIdToError("Message is missing IMAP metadata to re-sync.", messageId)
+      },
       { status: 400 }
     );
   }
 
   const message = await syncImapMessage(account, mailboxPath, imapUid, clientId);
   if (!message) {
-    return NextResponse.json({ ok: false, message: "Message not found on server." }, { status: 404 });
+    return NextResponse.json(
+      { ok: false, message: appendMessageIdToError("Message not found on server.", messageId) },
+      { status: 404 }
+    );
   }
 
   const referenceIds = collectThreadReferenceIds([message]);

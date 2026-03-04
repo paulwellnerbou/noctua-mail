@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { getMessageSource } from "@/lib/storage";
 import { getMessageById } from "@/lib/db";
 import { requireSessionAccountOr403, requireSessionOr401 } from "@/lib/auth";
+import { appendMessageIdToError } from "@/app/api/message/errorFormatting";
 
 export async function GET(request: Request) {
   const session = requireSessionOr401(request);
@@ -18,7 +19,10 @@ export async function GET(request: Request) {
 
   const message = await getMessageById(accountId, messageId);
   if (!message) {
-    return NextResponse.json({ ok: false, message: "Message not found" }, { status: 404 });
+    return NextResponse.json(
+      { ok: false, message: appendMessageIdToError("Message not found", messageId) },
+      { status: 404 }
+    );
   }
 
   const storedSource = await getMessageSource(accountId, messageId);

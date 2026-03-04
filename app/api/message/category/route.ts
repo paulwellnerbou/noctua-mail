@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { applyCategoryFeedback } from "@/lib/db";
+import { appendMessageIdToError } from "../errorFormatting";
 import { requireAccountAndMessageContext } from "../routeHelpers";
 
 export async function POST(request: Request) {
@@ -37,7 +38,10 @@ export async function POST(request: Request) {
   try {
     const result = await applyCategoryFeedback(accountId, messageId, normalizedCategory);
     if (!result.message) {
-      return NextResponse.json({ ok: false, message: "Message not found" }, { status: 404 });
+      return NextResponse.json(
+        { ok: false, message: appendMessageIdToError("Message not found", messageId) },
+        { status: 404 }
+      );
     }
     return NextResponse.json({
       ok: true,
@@ -49,7 +53,10 @@ export async function POST(request: Request) {
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to update message category";
     if (message === "Message not found") {
-      return NextResponse.json({ ok: false, message }, { status: 404 });
+      return NextResponse.json(
+        { ok: false, message: appendMessageIdToError(message, messageId) },
+        { status: 404 }
+      );
     }
     return NextResponse.json({ ok: false, message }, { status: 500 });
   }

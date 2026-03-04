@@ -1,7 +1,10 @@
 "use client";
 
+import { useMemo } from "react";
 import { ArrowLeft } from "lucide-react";
 import type { CalendarEvent, CalendarReminder } from "@/lib/data";
+import { buildCalendarIcsFilename } from "@/lib/calendarIcs";
+import InviteAttachmentControls from "./InviteAttachmentControls";
 import EventDetailView from "./EventDetailView";
 import styles from "./EventDetailPanel.module.css";
 
@@ -11,6 +14,8 @@ type Props = {
   accountId: string;
   onBack: () => void;
   onOpenMessage?: (messageId: string) => void;
+  onFindRelatedByInviteUid?: (uid: string) => void;
+  onEventUpdated?: (event: CalendarEvent) => void;
 };
 
 function parseAttendees(json?: string): string[] {
@@ -24,7 +29,15 @@ function parseAttendees(json?: string): string[] {
   }
 }
 
-export default function EventDetailPanel({ event, kind, accountId, onBack, onOpenMessage }: Props) {
+export default function EventDetailPanel({
+  event,
+  kind,
+  accountId,
+  onBack,
+  onOpenMessage,
+  onFindRelatedByInviteUid,
+  onEventUpdated
+}: Props) {
   const isCalEvent = kind === "event";
   const calEv = isCalEvent ? (event as CalendarEvent) : null;
   const reminder = !isCalEvent ? (event as CalendarReminder) : null;
@@ -40,6 +53,22 @@ export default function EventDetailPanel({ event, kind, accountId, onBack, onOpe
         return (startMs ?? 0) + dur;
       })();
 
+  const inviteControls = useMemo(() => {
+    const eventUid = calEv?.eventUid ?? reminder?.eventUid;
+    const rawIcsSource = calEv?.rawIcs;
+    if (!eventUid && !rawIcsSource) return null;
+    const filename = buildCalendarIcsFilename(eventUid);
+    return (
+      <InviteAttachmentControls
+        downloadLabel={filename}
+        downloadFilename={filename}
+        rawIcsSource={rawIcsSource}
+        relatedInviteUid={eventUid}
+        onFindRelatedByInviteUid={onFindRelatedByInviteUid}
+      />
+    );
+  }, [calEv?.eventUid, calEv?.rawIcs, onFindRelatedByInviteUid, reminder?.eventUid]);
+
   return (
     <div className={styles.panel}>
       <div className={styles.subheader}>
@@ -47,6 +76,9 @@ export default function EventDetailPanel({ event, kind, accountId, onBack, onOpe
           <ArrowLeft size={13} />
           Back
         </button>
+        <div className={styles.subheaderActions}>
+          {inviteControls}
+        </div>
       </div>
       <div className={styles.body}>
         <EventDetailView
@@ -66,11 +98,17 @@ export default function EventDetailPanel({ event, kind, accountId, onBack, onOpe
           recurrenceDates={calEv?.recurrenceDates ?? reminder?.recurrenceDates}
           excludedDates={calEv?.excludedDates ?? reminder?.excludedDates}
           status={calEv?.status}
+          myPartstat={calEv?.myPartstat}
+          replyRequested={calEv?.replyRequested}
+          canRespond={Boolean(calEv?.rawIcs && calEv?.myAttendeeEmail)}
           sourceType={calEv?.sourceType}
           messageId={calEv?.messageId ?? reminder?.messageId}
+          eventId={calEv?.id}
           eventStartAtMs={calEv?.startAtMs ?? reminder?.eventStartAtMs}
           eventEndAtMs={calEv?.endAtMs ?? reminder?.eventEndAtMs}
           onOpenMessage={onOpenMessage}
+          onEventUpdated={onEventUpdated}
+          responseOccurrenceLabel="This occurrence"
         />
       </div>
     </div>

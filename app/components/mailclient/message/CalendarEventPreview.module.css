@@ -16,28 +16,6 @@
   gap: var(--space-2);
 }
 
-.attachmentControls {
-  flex-shrink: 0;
-  --attachment-control-height: 26px;
-}
-
-.attachmentLink {
-  text-decoration: none;
-}
-
-.attachmentBadge {
-  cursor: pointer;
-  display: inline-flex;
-  align-items: center;
-  min-height: var(--attachment-control-height);
-  line-height: 1;
-}
-
-.infoButton {
-  flex-shrink: 0;
-  height: var(--attachment-control-height);
-}
-
 .title {
   display: inline-flex;
   align-items: center;
@@ -78,35 +56,4 @@
   margin: 0;
   font-size: 12px;
   color: var(--gray-11);
-}
-
-.rawIcsDialog.rawIcsDialog {
-  width: min(1320px, 99vw);
-  max-width: min(1320px, 99vw);
-}
-
-.uidRow {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 8px;
-  align-items: start;
-}
-
-.uidLabel {
-  font-size: 12px;
-  line-height: 1.4;
-  font-weight: 600;
-  color: var(--gray-11);
-}
-
-.uidValue {
-  font-size: 12px;
-  line-height: 1.4;
-  color: var(--gray-12);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-  word-break: break-all;
-}
-
-.rawIcsPanel {
-  max-height: min(68vh, 560px);
 }

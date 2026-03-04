@@ -5,9 +5,11 @@ export type CalendarInviteActionType = "invitation" | "update" | "cancellation";
 export type CalendarInviteMutationGroup = {
   eventUid: string;
   canceledWhole: boolean;
+  hasCancellation: boolean;
   baseEvent: CalendarEventPreview | null;
   addedRecurrenceDates: number[];
   addedExcludedDates: number[];
+  instanceOccurrences: Array<{ startAtMs: number; endAtMs?: number }>;
   hasInstanceChanges: boolean;
   sequence: number;
 };
@@ -42,6 +44,14 @@ export function inferCalendarInviteActionType(
   return "invitation";
 }
 
+export function inferCalendarInviteMessageActionType(
+  group: CalendarInviteMutationGroup
+): CalendarInviteActionType {
+  if (group.hasCancellation) return "cancellation";
+  if (group.hasInstanceChanges || group.sequence > 0) return "update";
+  return "invitation";
+}
+
 export function collectCalendarInviteMutationGroups(icsSource: string): CalendarInviteMutationGroup[] {
   const parsed = parseIcsInvite(icsSource);
   const method = parsed.method?.trim().toUpperCase() || "";
@@ -53,9 +63,11 @@ export function collectCalendarInviteMutationGroups(icsSource: string): Calendar
     group = {
       eventUid,
       canceledWhole: false,
+      hasCancellation: false,
       baseEvent: null,
       addedRecurrenceDates: [],
       addedExcludedDates: [],
+      instanceOccurrences: [],
       hasInstanceChanges: false,
       sequence: 0
     };
@@ -78,6 +90,7 @@ export function collectCalendarInviteMutationGroups(icsSource: string): Calendar
     }
 
     if (cancelled) {
+      group.hasCancellation = true;
       if (hasRecurrenceId) {
         group.addedExcludedDates.push(recurrenceIdAtMs);
         group.hasInstanceChanges = true;
@@ -97,8 +110,16 @@ export function collectCalendarInviteMutationGroups(icsSource: string): Calendar
     }
 
     if (hasRecurrenceId) {
+      const eventEndAtMs = asTimestampMs(event.end);
       group.addedExcludedDates.push(recurrenceIdAtMs);
       group.addedRecurrenceDates.push(eventStartAtMs);
+      group.instanceOccurrences.push({
+        startAtMs: eventStartAtMs,
+        endAtMs:
+          Number.isFinite(eventEndAtMs) && eventEndAtMs > eventStartAtMs
+            ? eventEndAtMs
+            : undefined
+      });
       group.hasInstanceChanges = true;
       return;
     }

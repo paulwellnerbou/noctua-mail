@@ -1,7 +1,9 @@
 import { describe, expect, it } from "bun:test";
 import {
   buildTimeGroupKey,
+  buildWeekGroupKey,
   buildInviteDeckGroupKeyFromEvent,
+  buildInviteDeckGroupKeyFromBounds,
   DATE_GROUP_ORDER,
   INVITE_DECK_GROUP_BY,
   INVITE_DECK_GROUP_ORDER,
@@ -32,6 +34,17 @@ describe("buildTimeGroupKey", () => {
     expect(buildTimeGroupKey(localDateMs(2026, 1, 27, 12), "date", nowMs)).toBe("Yesterday");
     expect(buildTimeGroupKey(localDateMs(2026, 1, 24, 12), "date", nowMs)).toBe("This Week");
     expect(buildTimeGroupKey(localDateMs(2026, 1, 10, 12), "date", nowMs)).toBe("Older");
+  });
+});
+
+describe("buildWeekGroupKey", () => {
+  it("matches SQLite-style local week buckets with Monday-based week numbering", () => {
+    expect(buildWeekGroupKey(localDateMs(2026, 0, 1, 12))).toBe("2026-W00");
+    expect(buildWeekGroupKey(localDateMs(2026, 0, 5, 12))).toBe("2026-W01");
+    expect(buildWeekGroupKey(localDateMs(2025, 11, 31, 12))).toBe("2025-W52");
+    expect(buildWeekGroupKey(localDateMs(2024, 5, 17, 12))).toBe("2024-W25");
+    expect(buildWeekGroupKey(localDateMs(2024, 5, 23, 12))).toBe("2024-W25");
+    expect(buildWeekGroupKey(localDateMs(2024, 5, 24, 12))).toBe("2024-W26");
   });
 });
 
@@ -91,5 +104,33 @@ describe("buildInviteDeckGroupKeyFromEvent", () => {
         nowMs
       )
     ).toBe("PAST");
+  });
+});
+
+describe("buildInviteDeckGroupKeyFromBounds", () => {
+  const nowMs = localDateMs(2026, 1, 28, 12);
+
+  it("treats bounded events ending in the past as PAST", () => {
+    expect(
+      buildInviteDeckGroupKeyFromBounds(
+        {
+          eventFirstStartAtMs: localDateMs(2026, 1, 27, 9),
+          eventLastEndAtMs: localDateMs(2026, 1, 27, 10)
+        },
+        nowMs
+      )
+    ).toBe("PAST");
+  });
+
+  it("treats unbounded events as UPCOMING", () => {
+    expect(
+      buildInviteDeckGroupKeyFromBounds(
+        {
+          eventFirstStartAtMs: localDateMs(2026, 1, 1, 9),
+          eventLastEndAtMs: null
+        },
+        nowMs
+      )
+    ).toBe("UPCOMING");
   });
 });

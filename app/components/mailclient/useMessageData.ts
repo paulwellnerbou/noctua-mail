@@ -13,6 +13,7 @@ import { mergeLoadedMessageCount, resolveLoadedMessageCount } from "./utils/list
 import { logListDebug, summarizeMessageForListDebug } from "./messagelist/listDebug";
 import type { SearchBadgesState } from "./useSearchState";
 import { INVITE_DECK_GROUP_BY } from "@/lib/messageGrouping";
+import type { ThreadDateSource } from "@/lib/threadDate";
 
 type ApiFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
@@ -31,6 +32,7 @@ export type UseMessageDataParams = {
   currentSearchExcludedFolderIds: string[];
   supportsThreads: boolean;
   groupBy: string;
+  threadDateSource: ThreadDateSource;
   query: string;
   authState: "loading" | "ok" | "unauth";
   apiFetch: ApiFetch;
@@ -56,6 +58,7 @@ export function useMessageData({
   currentSearchExcludedFolderIds,
   supportsThreads,
   groupBy,
+  threadDateSource,
   query,
   authState,
   apiFetch,
@@ -160,6 +163,9 @@ export function useMessageData({
       pageSize: String(pageSize),
       groupBy
     });
+    if (supportsThreads) {
+      params.set("threadDateSource", threadDateSource);
+    }
     if (!isRelatedSearch && trimmedQuery) {
       params.set("fields", selectedSearchFields.join(","));
     }

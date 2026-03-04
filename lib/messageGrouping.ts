@@ -16,9 +16,32 @@ export type InviteDeckEventTiming = {
   excludedDates?: number[];
 };
 
+export type InviteDeckEventBounds = {
+  eventFirstStartAtMs?: number;
+  eventLastEndAtMs?: number | null;
+};
+
 function getLocalDayStartMs(timestampMs: number) {
   const date = new Date(timestampMs);
   return new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+}
+
+function getLocalDateOrdinal(date: Date) {
+  return Math.floor(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()) / DAY_MS);
+}
+
+export function buildWeekGroupKey(timestampMs: number) {
+  const date = new Date(timestampMs);
+  const year = date.getFullYear();
+  const jan1 = new Date(year, 0, 1);
+  const dayOfYear = getLocalDateOrdinal(date) - getLocalDateOrdinal(jan1);
+  const jan1Weekday = jan1.getDay();
+  const firstMondayOffset = jan1Weekday === 1 ? 0 : (8 - jan1Weekday) % 7;
+  const week =
+    dayOfYear < firstMondayOffset
+      ? 0
+      : Math.floor((dayOfYear - firstMondayOffset) / 7) + 1;
+  return `${year}-W${String(week).padStart(2, "0")}`;
 }
 
 export function buildTimeGroupKey(timestampMs: number, groupBy: string, nowMs = Date.now()) {
@@ -65,4 +88,22 @@ export function buildInviteDeckGroupKeyFromEvent(
   nowMs = Date.now()
 ) {
   return resolveCurrentOrNextOccurrence(event, nowMs) ? "UPCOMING" : "PAST";
+}
+
+export function buildInviteDeckGroupKeyFromBounds(
+  event: InviteDeckEventBounds,
+  nowMs = Date.now()
+) {
+  const eventFirstStartAtMs = Number(event.eventFirstStartAtMs);
+  if (!Number.isFinite(eventFirstStartAtMs) || eventFirstStartAtMs <= 0) {
+    return null;
+  }
+  if (event.eventLastEndAtMs === null || event.eventLastEndAtMs === undefined) {
+    return "UPCOMING";
+  }
+  const eventLastEndAtMs = Number(event.eventLastEndAtMs);
+  if (!Number.isFinite(eventLastEndAtMs) || eventLastEndAtMs <= 0) {
+    return "UPCOMING";
+  }
+  return eventLastEndAtMs < nowMs ? "PAST" : "UPCOMING";
 }

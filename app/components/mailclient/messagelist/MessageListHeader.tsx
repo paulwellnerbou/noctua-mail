@@ -2,6 +2,7 @@ import { startTransition, useEffect, useRef, useState } from "react";
 import type React from "react";
 import { ChevronsDown, ChevronsUp, GitBranch, RefreshCw } from "lucide-react";
 import { IconButton, SegmentedControl, Select, Text } from "@radix-ui/themes";
+import type { ThreadDateSource } from "@/lib/threadDate";
 import styles from "./MessageListHeader.module.css";
 
 type MessageGroup = {
@@ -21,6 +22,7 @@ type MessageListHeaderProps = {
     hasMoreMessages: boolean;
     messageView: "card" | "table" | "compact" | "threads";
     groupBy: "none" | "date" | "week" | "sender" | "domain" | "year" | "folder";
+    threadDateSource: ThreadDateSource;
     threadsEnabled: boolean;
     threadsAllowed: boolean;
     groupedMessages: MessageGroup[];
@@ -32,6 +34,7 @@ type MessageListHeaderProps = {
     setGroupBy: React.Dispatch<
       React.SetStateAction<"none" | "date" | "week" | "sender" | "domain" | "year" | "folder">
     >;
+    setThreadDateSource: React.Dispatch<React.SetStateAction<ThreadDateSource>>;
     setThreadsEnabled: React.Dispatch<React.SetStateAction<boolean>>;
     toggleAllGroups: () => void;
   };
@@ -50,17 +53,26 @@ export default function MessageListHeader({ state, actions }: MessageListHeaderP
     hasMoreMessages,
     messageView,
     groupBy,
+    threadDateSource,
     threadsEnabled,
     threadsAllowed,
     groupedMessages,
     collapsedGroups
   } = state;
-  const { setMessagesPage, setMessageView, setGroupBy, setThreadsEnabled, toggleAllGroups } =
-    actions;
+  const {
+    setMessagesPage,
+    setMessageView,
+    setGroupBy,
+    setThreadDateSource,
+    setThreadsEnabled,
+    toggleAllGroups
+  } = actions;
   const [localView, setLocalView] = useState(messageView);
   const [localGroupBy, setLocalGroupBy] = useState(groupBy);
+  const [localThreadDateSource, setLocalThreadDateSource] = useState(threadDateSource);
   const viewFrameRef = useRef<number | null>(null);
   const groupFrameRef = useRef<number | null>(null);
+  const threadDateFrameRef = useRef<number | null>(null);
 
   useEffect(() => {
     setLocalView(messageView);
@@ -69,6 +81,10 @@ export default function MessageListHeader({ state, actions }: MessageListHeaderP
   useEffect(() => {
     setLocalGroupBy(groupBy);
   }, [groupBy]);
+
+  useEffect(() => {
+    setLocalThreadDateSource(threadDateSource);
+  }, [threadDateSource]);
 
   const scheduleCommit = (ref: React.MutableRefObject<number | null>, fn: () => void) => {
     if (ref.current) window.cancelAnimationFrame(ref.current);
@@ -90,6 +106,12 @@ export default function MessageListHeader({ state, actions }: MessageListHeaderP
     scheduleCommit(groupFrameRef, () => setGroupBy(next));
   };
 
+  const handleThreadDateSourceChange = (value: string) => {
+    const next = value as ThreadDateSource;
+    setLocalThreadDateSource(next);
+    scheduleCommit(threadDateFrameRef, () => setThreadDateSource(next));
+  };
+
   const handleThreadsToggle = () => {
     if (!threadsAllowed) return;
     startTransition(() => setThreadsEnabled((value) => !value));
@@ -102,10 +124,11 @@ export default function MessageListHeader({ state, actions }: MessageListHeaderP
   const title =
     activeVirtualFolderName?.trim() ||
     (searchScope === "folder" ? activeFolderName?.trim() || "Everything" : "Everything");
+  const showThreadDateSelect = ["date", "week", "year"].includes(localGroupBy);
 
   return (
     <div className={styles.header}>
-      <div className={styles.titleBlock}>
+      <div className={styles.infoRow}>
         <Text as="div" size="3" weight="bold">
           {title}
         </Text>
@@ -136,7 +159,7 @@ export default function MessageListHeader({ state, actions }: MessageListHeaderP
           )}
         </div>
       </div>
-      <div className={styles.actions}>
+      <div className={styles.actionsRow}>
         {collapseViewSwitcher ? (
           <Select.Root
             size="2"
@@ -181,6 +204,19 @@ export default function MessageListHeader({ state, actions }: MessageListHeaderP
               <Select.Item value="none">Group: None</Select.Item>
             </Select.Content>
           </Select.Root>
+          {showThreadDateSelect && (
+            <Select.Root
+              size="2"
+              value={localThreadDateSource}
+              onValueChange={handleThreadDateSourceChange}
+            >
+              <Select.Trigger className={styles.threadDateSelectTrigger} color="gray" />
+              <Select.Content position="popper">
+                <Select.Item value="latestReceivedDateValue">Received</Select.Item>
+                <Select.Item value="latestDateValue">Activity</Select.Item>
+              </Select.Content>
+            </Select.Root>
+          )}
           <IconButton
             size="2"
             variant="soft"

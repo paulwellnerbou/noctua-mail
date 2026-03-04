@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { X } from "lucide-react";
 import { Box, Flex, IconButton, Popover, Text } from "@radix-ui/themes";
+import RawTextPanel from "../message/RawTextPanel";
 import { getExceptionDetail, getExceptionSummary } from "../utils/clientHelpers";
 import type { ExceptionEntry } from "../types";
 import {
@@ -110,7 +111,12 @@ export default function ExceptionStatusPopover({
                   <Text size="1" color="gray" className="exception-meta">
                     {formatRelativeTime(selectedException.timestamp)}
                   </Text>
-                  <pre className="exception-detail">{selectedExceptionDetail}</pre>
+                  <RawTextPanel
+                    text={selectedExceptionDetail}
+                    copyText={selectedExceptionDetail}
+                    copyLabel="Copy error"
+                    constrainHeight={false}
+                  />
                 </>
               ) : null}
             </>

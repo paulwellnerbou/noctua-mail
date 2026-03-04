@@ -161,6 +161,13 @@ export type CalendarReminder = {
 };
 
 export type CalendarEventSourceType = "local" | "caldav" | "email";
+export type CalendarParticipationStatus =
+  | "NEEDS-ACTION"
+  | "ACCEPTED"
+  | "DECLINED"
+  | "TENTATIVE"
+  | "DELEGATED";
+export type CalendarParticipationScope = "series" | "occurrence";
 
 export type CalendarEvent = {
   id: string;
@@ -181,6 +188,10 @@ export type CalendarEvent = {
   status?: string;
   organizer?: string;
   attendees?: string;
+  myPartstat?: CalendarParticipationStatus;
+  myPartstatUpdatedAtMs?: number;
+  myAttendeeEmail?: string;
+  replyRequested?: boolean;
   remoteEtag?: string;
   remoteHref?: string;
   rawIcs?: string;

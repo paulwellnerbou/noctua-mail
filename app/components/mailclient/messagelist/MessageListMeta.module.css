@@ -16,10 +16,24 @@
   flex-wrap: wrap;
   align-items: center;
   gap: 6px;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
 }
 
 .searchBadge {
   text-transform: none;
+  max-width: 100%;
+  min-width: 0;
+}
+
+.searchBadgeLabel {
+  display: block;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .loadingCard {

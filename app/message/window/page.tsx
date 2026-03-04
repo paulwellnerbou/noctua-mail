@@ -6,6 +6,7 @@ import { useSearchParams } from "next/navigation";
 import { Text } from "@radix-ui/themes";
 import { normalizeAccountDateFormat } from "@/lib/dateFormatting";
 import type { Account, AccountDateFormat, Folder, Message } from "@/lib/data";
+import { notifyDetachedMessageDeleted } from "@/lib/ui/detachedMessageEvents";
 import { getImapFlagBadges, hasHtmlContent } from "@/lib/ui/messageView";
 import { openDetachedWindow } from "@/lib/ui/openDetachedWindow";
 import MessageMenu from "@/app/components/mailclient/message/MessageMenu";
@@ -18,6 +19,12 @@ import styles from "./page.module.css";
 
 type MessageTab = "html" | "text" | "markdown" | "source";
 type ComposeMode = "new" | "reply" | "replyAll" | "forward" | "edit" | "editAsNew";
+type DeleteResponse = {
+  action: "deleted" | "moved";
+  trashFolderId?: string | null;
+  messageId?: string;
+  previousMessageId?: string;
+};
 
 function extractEmails(value?: string) {
   if (!value) return [];
@@ -109,6 +116,12 @@ export default function MessageWindowPage() {
     () => new Map(folders.map((folder) => [folder.id, folder])),
     [folders]
   );
+  const isTrashFolder = useCallback(
+    (folderId?: string | null) =>
+      ((folderId ? folderById.get(folderId) : null)?.specialUse ?? "").toLowerCase() ===
+      "\\trash",
+    [folderById]
+  );
 
   const handleDownloadEml = useCallback(async (target: Message) => {
     try {
@@ -197,6 +210,47 @@ export default function MessageWindowPage() {
     [runMessageFlagRequest]
   );
 
+  const handleDeleteMessage = useCallback(
+    async (target: Message) => {
+      setPendingMessageActions((prev) => new Set(prev).add(target.id));
+      setActionError("");
+      try {
+        const res = await fetch("/api/message/delete", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          credentials: "include",
+          body: JSON.stringify({
+            accountId: target.accountId,
+            messageId: target.id
+          })
+        });
+        if (!res.ok) {
+          const body = (await res.json().catch(() => null)) as { message?: string } | null;
+          setActionError(body?.message || `Failed to delete message (${res.status}).`);
+          return;
+        }
+        const data = (await res.json()) as DeleteResponse;
+        notifyDetachedMessageDeleted({
+          accountId: target.accountId,
+          action: data.action,
+          previousMessageId: data.previousMessageId ?? target.id,
+          messageId: data.messageId ?? target.id,
+          trashFolderId: data.trashFolderId ?? null
+        });
+        window.close();
+      } catch {
+        setActionError("Failed to delete message.");
+      } finally {
+        setPendingMessageActions((prev) => {
+          const next = new Set(prev);
+          next.delete(target.id);
+          return next;
+        });
+      }
+    },
+    []
+  );
+
   const handleOpenHtmlInNewWindow = useCallback((target: Message) => {
     const params = new URLSearchParams({
       accountId: target.accountId,
@@ -271,13 +325,6 @@ export default function MessageWindowPage() {
   };
 
   const safeMessage = message;
-  const disabledQuickActions = useMemo(
-    () =>
-      safeMessage
-        ? new Set<string>([safeMessage.id, ...Array.from(pendingMessageActions)])
-        : new Set<string>(pendingMessageActions),
-    [pendingMessageActions, safeMessage]
-  );
   const noop = () => {};
   const renderState = (message: string, color: "gray" | "red" = "gray") => (
     <div className={styles.state}>
@@ -336,11 +383,18 @@ export default function MessageWindowPage() {
                     iconSize={14}
                     origin="thread"
                     isDraft={Boolean(target.draft)}
-                    pendingMessageActions={disabledQuickActions}
+                    actionVisibility={{
+                      editDraft: false,
+                      reply: false,
+                      replyAll: false,
+                      forward: false,
+                      showRelated: false
+                    }}
+                    pendingMessageActions={pendingMessageActions}
                     openCompose={noop}
-                    handleDeleteMessage={noop}
+                    handleDeleteMessage={handleDeleteMessage}
                     onShowRelated={noop}
-                    isTrashFolder={() => false}
+                    isTrashFolder={isTrashFolder}
                   />
                 ),
                 renderMessageMenu: (target, _view, onOpenChange) => (
@@ -359,7 +413,6 @@ export default function MessageWindowPage() {
                       spam: false,
                       archive: false,
                       category: false,
-                      delete: false,
                       showRelated: false,
                       showThread: false,
                       openWindow: false,
@@ -373,7 +426,7 @@ export default function MessageWindowPage() {
                     handleMarkNotSpam={noop}
                     handleArchiveMessage={noop}
                     handleSetCategory={noop}
-                    handleDeleteMessage={noop}
+                    handleDeleteMessage={handleDeleteMessage}
                     handleUnsubscribe={noop}
                     handleDownloadEml={handleDownloadEml}
                     handleResyncMessage={noop}
@@ -381,7 +434,7 @@ export default function MessageWindowPage() {
                     handleOpenHtmlInNewWindow={handleOpenHtmlInNewWindow}
                     onShowRelated={noop}
                     onShowThread={noop}
-                    isTrashFolder={() => false}
+                    isTrashFolder={isTrashFolder}
                     isSpamFolder={() => false}
                     onOpenChange={onOpenChange}
                   />

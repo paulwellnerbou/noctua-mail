@@ -1,5 +1,9 @@
 import type { CalendarEvent } from "@/lib/data";
 import type { CalendarEventPreview } from "@/lib/calendar";
+import {
+  mergeCalendarParticipation,
+  resolveCalendarParticipationFromPreview
+} from "@/lib/calendarParticipation";
 
 function formatIcsDate(ms: number, allDay: boolean, timezone?: string): string {
   const date = new Date(ms);
@@ -116,6 +120,7 @@ export function calendarPreviewToDbEvent(
     remoteHref?: string;
     rawIcs?: string;
     messageId?: string;
+    accountEmail?: string;
   }
 ): CalendarEvent {
   function generateId() {
@@ -126,6 +131,10 @@ export function calendarPreviewToDbEvent(
   }
 
   const now = Date.now();
+  const participation = mergeCalendarParticipation(
+    undefined,
+    resolveCalendarParticipationFromPreview(preview, extra?.accountEmail)
+  );
   return {
     id: generateId(),
     accountId,
@@ -144,6 +153,11 @@ export function calendarPreviewToDbEvent(
     excludedDates: preview.excludedDates?.map((d) => d.getTime()),
     status: preview.status,
     organizer: preview.organizer,
+    attendees: participation.attendees,
+    myPartstat: participation.myPartstat,
+    myPartstatUpdatedAtMs: participation.myPartstatUpdatedAtMs,
+    myAttendeeEmail: participation.myAttendeeEmail,
+    replyRequested: participation.replyRequested,
     sourceType,
     messageId: extra?.messageId,
     remoteEtag: extra?.remoteEtag,

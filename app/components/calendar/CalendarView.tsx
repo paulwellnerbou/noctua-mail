@@ -9,7 +9,10 @@ import rrulePlugin from "@fullcalendar/rrule";
 import type { EventClickArg, DateSelectArg, DatesSetArg, EventInput } from "@fullcalendar/core";
 import type { CalendarEvent } from "@/lib/data";
 import type { CalendarReminder } from "@/lib/data";
-import { buildFullCalendarRecurringFields } from "@/lib/fullcalendarRecurrence";
+import {
+  expandCalendarEventForRange,
+  filterCalendarReminderDuplicates
+} from "@/lib/calendarOccurrences";
 import "./fullcalendar-theme.css";
 
 export type CalendarViewHandle = {
@@ -26,21 +29,20 @@ type Props = {
   calendarRef?: React.RefObject<FullCalendar | null>;
 };
 
-function calendarEventToFcEvent(ev: CalendarEvent): EventInput {
-  const base: EventInput = {
-    id: ev.id,
+function calendarEventToFcEvent(
+  ev: CalendarEvent,
+  displayStartAtMs = ev.startAtMs,
+  displayEndAtMs = ev.endAtMs
+): EventInput {
+  return {
+    id: ev.recurrenceRule?.trim() ? `${ev.id}-${displayStartAtMs}` : ev.id,
     title: ev.summary,
-    start: new Date(ev.startAtMs),
-    end: ev.endAtMs ? new Date(ev.endAtMs) : undefined,
+    start: new Date(displayStartAtMs),
+    end: displayEndAtMs ? new Date(displayEndAtMs) : undefined,
     allDay: ev.allDay,
     classNames: [`fc-event-${ev.sourceType}`],
     extendedProps: { kind: "event", data: ev }
   };
-  const recurringFields = buildFullCalendarRecurringFields(ev);
-  if (recurringFields) {
-    return { ...base, ...recurringFields };
-  }
-  return base;
 }
 
 function reminderToFcEvent(r: CalendarReminder): EventInput {
@@ -90,9 +92,23 @@ export default function CalendarView({
           ? ((await remindersRes.json()) as { items?: CalendarReminder[] })
           : { items: [] };
 
+        const visibleEvents = (eventsData.items ?? []).flatMap((event) =>
+          expandCalendarEventForRange(event, startMs, endMs)
+        );
+        const visibleReminders = filterCalendarReminderDuplicates(
+          remindersData.items ?? [],
+          visibleEvents
+        );
+
         const events: EventInput[] = [
-          ...(eventsData.items ?? []).map(calendarEventToFcEvent),
-          ...(remindersData.items ?? []).map(reminderToFcEvent)
+          ...visibleEvents.map((occurrence) =>
+            calendarEventToFcEvent(
+              occurrence.event,
+              occurrence.displayStartAtMs,
+              occurrence.displayEndAtMs
+            )
+          ),
+          ...visibleReminders.map(reminderToFcEvent)
         ];
         setFcEvents(events);
       } catch (err) {

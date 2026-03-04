@@ -19,12 +19,13 @@ function generateId() {
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const accountId = searchParams.get("accountId")?.trim() ?? "";
+  const eventUid = searchParams.get("eventUid")?.trim() ?? "";
   const startMs = toFiniteNumber(searchParams.get("startMs"));
   const endMs = toFiniteNumber(searchParams.get("endMs"));
   if (!accountId) {
     return NextResponse.json({ ok: false, message: "Missing accountId" }, { status: 400 });
   }
-  if (!Number.isFinite(startMs) || !Number.isFinite(endMs)) {
+  if (!eventUid && (!Number.isFinite(startMs) || !Number.isFinite(endMs))) {
     return NextResponse.json({ ok: false, message: "Missing or invalid startMs/endMs" }, { status: 400 });
   }
   const accountContext = await requireAccountContext(request, accountId, {
@@ -32,6 +33,10 @@ export async function GET(request: Request) {
   });
   if (accountContext instanceof NextResponse) return accountContext;
   try {
+    if (eventUid) {
+      const event = await getCalendarEventByUid(accountId, eventUid);
+      return NextResponse.json({ ok: true, event });
+    }
     const events = await listCalendarEvents(accountId, startMs, endMs);
     return NextResponse.json({ ok: true, items: events });
   } catch (err) {
@@ -86,6 +91,10 @@ export async function POST(request: Request) {
     status: body?.status?.trim() || undefined,
     organizer: body?.organizer?.trim() || undefined,
     attendees: body?.attendees ?? undefined,
+    myPartstat: body?.myPartstat ?? undefined,
+    myPartstatUpdatedAtMs: toFiniteNumber(body?.myPartstatUpdatedAtMs) || undefined,
+    myAttendeeEmail: body?.myAttendeeEmail?.trim() || undefined,
+    replyRequested: body?.replyRequested === undefined ? undefined : Boolean(body.replyRequested),
     remoteEtag: body?.remoteEtag?.trim() || undefined,
     remoteHref: body?.remoteHref?.trim() || undefined,
     rawIcs: body?.rawIcs ?? undefined,

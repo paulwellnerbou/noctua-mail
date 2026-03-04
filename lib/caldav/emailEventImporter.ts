@@ -1,10 +1,16 @@
 import { inferCalendarInviteActionType, collectCalendarInviteMutationGroups } from "@/lib/calendarInviteProcessing";
+import {
+  mergeCalendarParticipation,
+  resolveCalendarParticipationFromPreview
+} from "@/lib/calendarParticipation";
+import { resolveEmailCalendarEventStatus } from "@/lib/calendarEventStatus";
 import { cancelCalendarEventByUid, upsertCalendarEventByUid } from "@/lib/db";
 
 export async function importEmailCalendarEvents(
   accountId: string,
   messageId: string,
-  icsSource: string
+  icsSource: string,
+  accountEmail?: string | null
 ): Promise<void> {
   if (!icsSource?.trim()) return;
   try {
@@ -27,6 +33,10 @@ export async function importEmailCalendarEvents(
       const base = group.baseEvent;
       const startMs = base.start?.getTime();
       if (!startMs || !Number.isFinite(startMs)) continue;
+      const participation = mergeCalendarParticipation(
+        undefined,
+        resolveCalendarParticipationFromPreview(base, accountEmail)
+      );
 
       const baseRecurrenceDates = base.recurrenceDates?.map((d) => d.getTime()) ?? [];
       const baseExcludedDates = base.excludedDates?.map((d) => d.getTime()) ?? [];
@@ -58,8 +68,12 @@ export async function importEmailCalendarEvents(
         recurrenceRule: base.recurrenceRule?.trim() || undefined,
         recurrenceDates: mergedRecurrenceDates,
         excludedDates: mergedExcludedDates,
-        // Force TENTATIVE for email-sourced events
-        status: "TENTATIVE",
+        status: resolveEmailCalendarEventStatus(base.status),
+        attendees: participation.attendees,
+        myPartstat: participation.myPartstat,
+        myPartstatUpdatedAtMs: participation.myPartstatUpdatedAtMs,
+        myAttendeeEmail: participation.myAttendeeEmail,
+        replyRequested: participation.replyRequested,
         sourceType: "email",
         messageId,
         rawIcs: icsSource

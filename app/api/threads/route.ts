@@ -15,6 +15,7 @@ export async function GET(request: Request) {
   const page = Number(searchParams.get("page") ?? "1") || 1;
   const pageSize = Number(searchParams.get("pageSize") ?? "300") || 300;
   const groupBy = searchParams.get("groupBy") ?? "date";
+  const threadDateSource = searchParams.get("threadDateSource") ?? undefined;
   const fields = searchParams.get("fields")?.split(",").filter(Boolean) ?? [];
   const folderId = searchParams.get("folderId");
   const badges = searchParams.get("badges")?.split(",").filter(Boolean);
@@ -31,6 +32,7 @@ export async function GET(request: Request) {
     page,
     pageSize,
     groupBy,
+    threadDateSource,
     fields,
     query,
     badges,

@@ -21,6 +21,7 @@ type Props = {
   onOpenSidebar: () => void;
   triggerLabel: string;
   onOpenMessage?: (messageId: string) => void;
+  onFindRelatedByInviteUid?: (uid: string) => void;
 };
 
 type Position = { x: number; y: number };
@@ -42,7 +43,8 @@ export default function CalendarPopover({
   onOpenChange,
   onOpenSidebar,
   triggerLabel,
-  onOpenMessage
+  onOpenMessage,
+  onFindRelatedByInviteUid
 }: Props) {
   const calendarRef = useRef<FullCalendar>(null);
   const [position, setPosition] = useState<Position>(getInitialPosition);
@@ -103,6 +105,12 @@ export default function CalendarPopover({
     setSelectedKind(null);
   };
 
+  const handleEventUpdated = (event: CalendarEvent) => {
+    setSelectedEvent(event);
+    setSelectedKind("event");
+    calendarRef.current?.getApi().refetchEvents();
+  };
+
   const handleEventSaved = () => {
     calendarRef.current?.getApi().refetchEvents();
     handleBackFromDetail();
@@ -139,6 +147,11 @@ export default function CalendarPopover({
             accountId={accountId}
             onBack={handleBackFromDetail}
             onOpenMessage={onOpenMessage ? (id) => { onOpenMessage(id); onOpenChange(false); } : undefined}
+            onFindRelatedByInviteUid={onFindRelatedByInviteUid ? (uid) => {
+              onFindRelatedByInviteUid(uid);
+              onOpenChange(false);
+            } : undefined}
+            onEventUpdated={handleEventUpdated}
           />
         ) : (
           <CalendarView

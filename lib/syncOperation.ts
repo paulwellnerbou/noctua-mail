@@ -313,6 +313,7 @@ export async function runSyncOperationBatched(
       messageId: invite.messageId,
       icsSource: invite.icsSource,
       process: syncMode === "new",
+      accountEmail: account.email,
       reminderUserId: syncMode === "new" ? account.ownerUserId : undefined,
       processedByUserId: syncMode === "new" ? account.ownerUserId : undefined
     });

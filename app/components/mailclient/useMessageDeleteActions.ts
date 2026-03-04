@@ -6,7 +6,10 @@ import type { Folder, Message } from "@/lib/data";
 import type { SelectionStore } from "./messagelist/selectionStore";
 import { resolveCollapsedThreadSelectionTarget } from "./messagelist/listSelection";
 import type { MoveMessagesToFolder, UndoMoveTarget } from "./useMessageMoveActions";
-import { getMessageSubjectForNotice } from "./utils/messageMutation";
+import {
+  getMessageSubjectForNotice,
+  pruneDetachedCrossFolderThreadMessages
+} from "./utils/messageMutation";
 
 const getThreadKey = (item: Message) => item.threadId ?? item.messageId ?? item.id;
 
@@ -45,6 +48,8 @@ type UseMessageDeleteActionsOptions = {
   collapsedThreads: Record<string, boolean>;
   includeFlaggedGroup: boolean;
   searchScope: "folder" | "all";
+  activeFolderId: string;
+  includeThreadAcrossFoldersForList: boolean;
   folders: Folder[];
   messages: Message[];
   threadScopeMessages: Message[];
@@ -84,6 +89,8 @@ export function useMessageDeleteActions({
   collapsedThreads,
   includeFlaggedGroup,
   searchScope,
+  activeFolderId,
+  includeThreadAcrossFoldersForList,
   folders,
   messages,
   threadScopeMessages,
@@ -146,13 +153,27 @@ export function useMessageDeleteActions({
       markMessagesMutated?.();
       setMessages((prev) => {
         if (data.action === "deleted" || !data.trashFolderId) {
-          return prev.filter((item) => item.id !== target.id);
+          return pruneDetachedCrossFolderThreadMessages(
+            prev.filter((item) => item.id !== target.id),
+            {
+              searchScope,
+              activeFolderId,
+              includeThreadAcrossFoldersForList
+            }
+          );
         }
         if (data.action === "moved") {
           if (!(searchScope === "all" && data.trashFolderId)) {
-            return prev.filter((item) => item.id !== target.id);
+            return pruneDetachedCrossFolderThreadMessages(
+              prev.filter((item) => item.id !== target.id),
+              {
+                searchScope,
+                activeFolderId,
+                includeThreadAcrossFoldersForList
+              }
+            );
           }
-          return prev.flatMap((item) => {
+          const next = prev.flatMap((item) => {
             if (item.id !== target.id) return [item];
             const updated = {
               ...item,
@@ -165,6 +186,11 @@ export function useMessageDeleteActions({
               : true;
             return keep ? [updated] : [];
           });
+          return pruneDetachedCrossFolderThreadMessages(next, {
+            searchScope,
+            activeFolderId,
+            includeThreadAcrossFoldersForList
+          });
         }
         return prev;
       });
@@ -172,7 +198,9 @@ export function useMessageDeleteActions({
     },
     [
       activeAccountId,
+      activeFolderId,
       apiFetch,
+      includeThreadAcrossFoldersForList,
       markMessagesMutated,
       readErrorMessage,
       searchScope,
@@ -202,15 +230,27 @@ export function useMessageDeleteActions({
       const data = (await res.json()) as BulkDeleteResponse;
       const deletedIds = new Set((data.deletedIds ?? []).filter(Boolean));
       markMessagesMutated?.();
-      setMessages((prev) => prev.filter((item) => !deletedIds.has(item.id)));
+      setMessages((prev) =>
+        pruneDetachedCrossFolderThreadMessages(
+          prev.filter((item) => !deletedIds.has(item.id)),
+          {
+            searchScope,
+            activeFolderId,
+            includeThreadAcrossFoldersForList
+          }
+        )
+      );
       return uniqueIds.filter((id) => deletedIds.has(id));
     },
     [
       activeAccountId,
+      activeFolderId,
       apiFetch,
       deleteSingleMessagePermanently,
+      includeThreadAcrossFoldersForList,
       markMessagesMutated,
       readErrorMessage,
+      searchScope,
       setMessages
     ]
   );

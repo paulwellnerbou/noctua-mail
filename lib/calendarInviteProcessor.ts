@@ -4,6 +4,7 @@ import {
   cancelCalendarRemindersByEventUid,
   ensureCalendarReminder,
   getCalendarEventByUid,
+  listCalendarInviteSourceMessagesByEventUid,
   markMessageCalendarInviteStatesProcessed,
   rescheduleCalendarRemindersByEventUid,
   upsertCalendarEventByUid,
@@ -12,9 +13,18 @@ import {
 import {
   collectCalendarInviteMutationGroups,
   inferCalendarInviteActionType,
+  inferCalendarInviteMessageActionType,
   type CalendarInviteActionType,
   type CalendarInviteMutationGroup
 } from "@/lib/calendarInviteProcessing";
+import { parseIcsInvite } from "@/lib/calendar";
+import {
+  mergeCalendarParticipation,
+  resolveCalendarParticipationFromPreview
+} from "@/lib/calendarParticipation";
+import { resolveEmailCalendarEventStatus } from "@/lib/calendarEventStatus";
+import { deriveInviteDeckEventBounds } from "@/lib/inviteDeckEventBounds";
+import { getMessageSource } from "@/lib/storage";
 
 const DEFAULT_AUTOMATIC_REMINDER = {
   leadMinutes: 15,
@@ -42,11 +52,16 @@ function buildMergedCalendarEventFields(
   group: CalendarInviteMutationGroup,
   messageId: string,
   icsSource: string,
-  existingEvent?: CalendarEvent | null
+  existingEvent?: CalendarEvent | null,
+  accountEmail?: string | null
 ): Omit<CalendarEvent, "id" | "accountId" | "createdAtMs" | "updatedAtMs" | "deletedAtMs"> | null {
   const base = group.baseEvent;
   const startAtMs = base?.start?.getTime() ?? existingEvent?.startAtMs ?? Number.NaN;
   if (!Number.isFinite(startAtMs) || startAtMs <= 0) return null;
+  const participation = mergeCalendarParticipation(
+    existingEvent,
+    resolveCalendarParticipationFromPreview(base ?? {}, accountEmail)
+  );
 
   const mergedRecurrenceDates = normalizeDateList([
     ...(existingEvent?.recurrenceDates ?? []),
@@ -75,8 +90,12 @@ function buildMergedCalendarEventFields(
     recurrenceRule: base?.recurrenceRule?.trim() || existingEvent?.recurrenceRule || undefined,
     recurrenceDates: mergedRecurrenceDates,
     excludedDates: mergedExcludedDates,
-    status: "TENTATIVE",
-    attendees: existingEvent?.attendees,
+    status: resolveEmailCalendarEventStatus(base?.status, existingEvent?.status),
+    attendees: participation.attendees,
+    myPartstat: participation.myPartstat,
+    myPartstatUpdatedAtMs: participation.myPartstatUpdatedAtMs,
+    myAttendeeEmail: participation.myAttendeeEmail,
+    replyRequested: participation.replyRequested,
     remoteEtag: existingEvent?.remoteEtag,
     remoteHref: existingEvent?.remoteHref,
     sourceType: "email",
@@ -85,11 +104,43 @@ function buildMergedCalendarEventFields(
   };
 }
 
+async function hydrateExistingEventFromPriorInviteSource(
+  accountId: string,
+  messageId: string,
+  eventUid: string,
+  accountEmail?: string | null
+) {
+  const candidates = await listCalendarInviteSourceMessagesByEventUid(accountId, eventUid, {
+    excludeMessageId: messageId
+  });
+  for (const candidate of candidates) {
+    const source = await getMessageSource(accountId, candidate.messageId);
+    if (!source?.trim()) continue;
+    const parsed = parseIcsInvite(source);
+    if (parsed.method?.trim().toUpperCase() !== "REQUEST") continue;
+    const candidateGroup = collectCalendarInviteMutationGroups(source).find(
+      (group) => group.eventUid.trim().toLowerCase() === eventUid.trim().toLowerCase()
+    );
+    if (!candidateGroup?.baseEvent) continue;
+    const mergedEvent = buildMergedCalendarEventFields(
+      candidateGroup,
+      candidate.messageId,
+      source,
+      null,
+      accountEmail
+    );
+    if (!mergedEvent) continue;
+    return upsertCalendarEventByUid(accountId, mergedEvent);
+  }
+  return null;
+}
+
 export type ProcessCalendarInviteForMessageParams = {
   accountId: string;
   messageId: string;
   icsSource: string;
   process: boolean;
+  accountEmail?: string | null;
   reminderUserId?: string | null;
   processedByUserId?: string | null;
 };
@@ -107,6 +158,7 @@ export async function processCalendarInviteForMessage({
   messageId,
   icsSource,
   process,
+  accountEmail,
   reminderUserId,
   processedByUserId
 }: ProcessCalendarInviteForMessageParams): Promise<ProcessCalendarInviteForMessageResult> {
@@ -126,7 +178,8 @@ export async function processCalendarInviteForMessage({
 
   const inviteStates = groups.map((group) => ({
     eventUid: group.eventUid,
-    actionType: resolveInviteActionType(group, existingEventsByUid.get(group.eventUid))
+    actionType: inferCalendarInviteMessageActionType(group),
+    ...deriveInviteDeckEventBounds(group)
   }));
   await upsertMessageCalendarInviteStates(accountId, messageId, inviteStates);
 
@@ -140,7 +193,7 @@ export async function processCalendarInviteForMessage({
   const processedStateByUid = new Map<string, boolean>();
 
   for (const group of groups) {
-    const existingEvent = existingEventsByUid.get(group.eventUid) ?? null;
+    let existingEvent = existingEventsByUid.get(group.eventUid) ?? null;
     const actionType = resolveInviteActionType(group, existingEvent);
 
     try {
@@ -152,7 +205,23 @@ export async function processCalendarInviteForMessage({
         continue;
       }
 
-      const mergedEvent = buildMergedCalendarEventFields(group, messageId, icsSource, existingEvent);
+      if (!existingEvent && !group.baseEvent && group.hasInstanceChanges) {
+        existingEvent = await hydrateExistingEventFromPriorInviteSource(
+          accountId,
+          messageId,
+          group.eventUid,
+          accountEmail
+        );
+        existingEventsByUid.set(group.eventUid, existingEvent);
+      }
+
+      const mergedEvent = buildMergedCalendarEventFields(
+        group,
+        messageId,
+        icsSource,
+        existingEvent,
+        accountEmail
+      );
       if (!mergedEvent) {
         processedStateByUid.set(group.eventUid, false);
         continue;

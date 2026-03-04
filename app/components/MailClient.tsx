@@ -74,8 +74,16 @@ import MarkdownPanel from "./mailclient/message/MarkdownPanel";
 import MessageSourcePanel from "./mailclient/message/MessageSourcePanel";
 import { TODO_FLAG, DONE_FLAG, isMeaningfulNonInlineAttachment } from "@/lib/messageFlags";
 import { INVITE_DECK_GROUP_BY } from "@/lib/messageGrouping";
+import {
+  DEFAULT_THREAD_DATE_SOURCE,
+  type ThreadDateSource
+} from "@/lib/threadDate";
 import { createComposeAttachment } from "@/lib/mail/composeAttachment";
 import { openDetachedWindow } from "@/lib/ui/openDetachedWindow";
+import {
+  DETACHED_MESSAGE_DELETE_EVENT_STORAGE_KEY,
+  parseDetachedMessageDeleteEvent
+} from "@/lib/ui/detachedMessageEvents";
 import { getImapFlagBadges, hasHtmlContent } from "@/lib/ui/messageView";
 import {
   SEARCH_BADGE_ORDER,
@@ -124,6 +132,7 @@ import {
 import { extractEmails } from "./mailclient/utils/clientHelpers";
 import {
   getMessageSubjectForNotice,
+  pruneDetachedCrossFolderThreadMessages,
   remapMessageReferenceIds
 } from "./mailclient/utils/messageMutation";
 import {
@@ -303,6 +312,8 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
   const [groupBy, setGroupBy] = useState<
     "none" | "date" | "week" | "sender" | "domain" | "year" | "folder"
   >("date");
+  const [threadDateSource, setThreadDateSource] =
+    useState<ThreadDateSource>(DEFAULT_THREAD_DATE_SOURCE);
   const [collapsedThreads, setCollapsedThreads] = useState<Record<string, boolean>>({});
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
   const selectionStoreRef = useRef<ReturnType<typeof createSelectionStore> | null>(null);
@@ -663,7 +674,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
   );
   const messagesKey = useMemo(
     () =>
-      `${activeAccountId}|${searchScope}|${everywhereExclusionKey}|${activeFolderId}|${activeVirtualFolder?.id ?? ""}|${trimmedQuery}|${groupBy}|${threadsEnabled ? "threads-on" : "threads-off"}|${searchFieldKey}|${Object.entries(searchBadges)
+      `${activeAccountId}|${searchScope}|${everywhereExclusionKey}|${activeFolderId}|${activeVirtualFolder?.id ?? ""}|${trimmedQuery}|${groupBy}|${threadDateSource}|${threadsEnabled ? "threads-on" : "threads-off"}|${searchFieldKey}|${Object.entries(searchBadges)
         .filter(([, enabled]) => enabled)
         .map(([key]) => key)
         .join(",")}`,
@@ -673,6 +684,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
       activeVirtualFolder?.id,
       everywhereExclusionKey,
       groupBy,
+      threadDateSource,
       trimmedQuery,
       threadsEnabled,
       searchFieldKey,
@@ -1022,6 +1034,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     currentSearchExcludedFolderIds,
     supportsThreads,
     groupBy: effectiveGroupBy,
+    threadDateSource,
     query,
     authState,
     apiFetch,
@@ -2218,7 +2231,12 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
             prunedSample: pruned.slice(0, LIST_DEBUG_SAMPLE_LIMIT)
           });
         }
-        return changed ? next : prev;
+        const candidate = changed ? next : prev;
+        return pruneDetachedCrossFolderThreadMessages(candidate, {
+          searchScope,
+          activeFolderId,
+          includeThreadAcrossFoldersForList
+        });
       });
     },
     [
@@ -2226,7 +2244,9 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
       activeFolderId,
       evaluateMessageInCurrentResults,
       effectiveSearchBadges,
+      includeThreadAcrossFoldersForList,
       searchScope,
+      setMessages
     ]
   );
 
@@ -2235,6 +2255,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     activeMessageId,
     activeFolderId,
     searchScope,
+    includeThreadAcrossFoldersForList,
     messages,
     selectionStore,
     folderById,
@@ -2262,6 +2283,8 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     collapsedThreads,
     includeFlaggedGroup: !(searchScope === "folder" && isTrashFolder(activeFolderId)),
     searchScope,
+    activeFolderId,
+    includeThreadAcrossFoldersForList,
     folders,
     messages,
     threadScopeMessages,
@@ -2368,6 +2391,18 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     setSearchScope("all");
     setActiveFolderId("");
     setQuery(`invite:${uidQueryTerm}`);
+  };
+
+  const handleOpenCalendarMessage = (messageId: string) => {
+    const msg = messageById.get(messageId) ?? null;
+    if (msg) {
+      setViewMessage(msg);
+      setActiveMessageId(messageId);
+      return;
+    }
+    void resolveMessageByExternalMessageId(messageId, activeAccountId).then((resolved) => {
+      if (resolved) setViewMessage(resolved);
+    });
   };
 
   const renderQuickActions = (
@@ -2920,38 +2955,82 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
 
   useEffect(() => {
     const loadThreadRelated = async () => {
+      const debugBase = {
+        activeAccountId,
+        activeFolderId,
+        searchScope,
+        supportsThreads,
+        includeThreadAcrossFoldersForList,
+        candidateCount: threadRelatedCandidateIds.length,
+        candidateSample: threadRelatedCandidateIds.slice(0, 8),
+        groupBy
+      };
+      logListDebug("info", "thread-related:list-effect:start", debugBase);
       if (supportsThreads) {
+        logListDebug("info", "thread-related:list-effect:skip", {
+          ...debugBase,
+          reason: "supports-threads"
+        });
         setThreadRelatedMessages([]);
         return;
       }
       if (!includeThreadAcrossFoldersForList) {
+        logListDebug("info", "thread-related:list-effect:skip", {
+          ...debugBase,
+          reason: "cross-folder-disabled"
+        });
         setThreadRelatedMessages([]);
         return;
       }
       if (isDraftsFolder(activeFolderId)) {
+        logListDebug("info", "thread-related:list-effect:skip", {
+          ...debugBase,
+          reason: "drafts-folder"
+        });
         setThreadRelatedMessages([]);
         return;
       }
       if (searchScope !== "folder" || !activeFolderId) {
+        logListDebug("info", "thread-related:list-effect:skip", {
+          ...debugBase,
+          reason: "not-folder-scope-or-missing-folder"
+        });
         setThreadRelatedMessages([]);
         return;
       }
       if (!activeAccountId || threadRelatedCandidateIds.length === 0) {
+        logListDebug("info", "thread-related:list-effect:skip", {
+          ...debugBase,
+          reason: "missing-account-or-empty-candidates"
+        });
         setThreadRelatedMessages([]);
         return;
       }
       const threadIds = threadRelatedCandidateIds;
       if (threadIds.length === 0) {
+        logListDebug("info", "thread-related:list-effect:skip", {
+          ...debugBase,
+          reason: "empty-thread-ids-after-normalization"
+        });
         setThreadRelatedMessages([]);
         return;
       }
       try {
+        logListDebug("info", "thread-related:list-effect:request", {
+          ...debugBase,
+          threadCount: threadIds.length,
+          threadSample: threadIds.slice(0, 8)
+        });
         const res = await apiFetch(`/api/thread/related`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ accountId: activeAccountId, threadIds, groupBy })
         });
         if (!res.ok) {
+          logListDebug("warn", "thread-related:list-effect:error-response", {
+            ...debugBase,
+            status: res.status
+          });
           setThreadRelatedMessages([]);
           return;
         }
@@ -2960,8 +3039,17 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
         const filtered = items.filter(
           (item) => item.folderId !== activeFolderId && !checkIsThreadExcludedFolder(item.folderId)
         );
+        logListDebug("info", "thread-related:list-effect:response", {
+          ...debugBase,
+          returnedCount: items.length,
+          filteredCount: filtered.length
+        });
         setThreadRelatedMessages(filtered);
-      } catch {
+      } catch (error) {
+        logListDebug("warn", "thread-related:list-effect:exception", {
+          ...debugBase,
+          error: error instanceof Error ? error.message : String(error)
+        });
         setThreadRelatedMessages([]);
       }
     };
@@ -2979,12 +3067,39 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
 
   useEffect(() => {
     const loadThreadContent = async () => {
-      if (!activeMessageThreadKey) return;
+      const debugBase = {
+        activeAccountId,
+        activeFolderId,
+        activeMessageThreadKey,
+        supportsThreads,
+        groupBy
+      };
+      logListDebug("info", "thread-related:content-effect:start", debugBase);
+      if (!activeMessageThreadKey) {
+        logListDebug("info", "thread-related:content-effect:skip", {
+          ...debugBase,
+          reason: "missing-active-message-thread-key"
+        });
+        return;
+      }
       const active = activeMessageRef.current;
-      if (!active) return;
+      if (!active) {
+        logListDebug("info", "thread-related:content-effect:skip", {
+          ...debugBase,
+          reason: "missing-active-message"
+        });
+        return;
+      }
       const threadId =
         active.threadId ?? active.messageId ?? active.id;
-      if (!threadId) return;
+      if (!threadId) {
+        logListDebug("info", "thread-related:content-effect:skip", {
+          ...debugBase,
+          reason: "missing-thread-id",
+          activeMessageId: active.id
+        });
+        return;
+      }
       const loadFailureMessage = "Failed to load message content.";
 
       const cachedThread = threadContentByIdRef.current[threadId];
@@ -3009,9 +3124,23 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
         clearThreadContentError(threadId);
       }
       if (supportsThreads && cachedThread && cachedThread.length > 0 && activeHasContent) {
+        logListDebug("info", "thread-related:content-effect:skip", {
+          ...debugBase,
+          reason: "cached-thread-with-content-supports-threads",
+          threadId,
+          cachedCount: cachedThread.length,
+          activeMessageId: active.id
+        });
         return;
       }
       if (!supportsThreads && activeHasContent && cachedThread && cachedThread.length > 0) {
+        logListDebug("info", "thread-related:content-effect:skip", {
+          ...debugBase,
+          reason: "cached-thread-with-content-no-thread-support",
+          threadId,
+          cachedCount: cachedThread.length,
+          activeMessageId: active.id
+        });
         return;
       }
 
@@ -3041,6 +3170,18 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
       setThreadContentLoading(threadId);
       clearThreadContentError(threadId);
       try {
+        logListDebug("info", "thread-related:content-effect:request", {
+          ...debugBase,
+          threadId,
+          activeMessageId: active.id,
+          cachedCount: cachedThread?.length ?? 0,
+          activeHasContent,
+          hydrationResult,
+          messageCount: messageIds.length,
+          threadCount: threadIds.length,
+          messageSample: messageIds.slice(0, 8),
+          threadSample: threadIds.slice(0, 8)
+        });
         const res = await apiFetch(`/api/thread/related`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -3052,6 +3193,11 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
           })
         });
         if (!res.ok) {
+          logListDebug("warn", "thread-related:content-effect:error-response", {
+            ...debugBase,
+            threadId,
+            status: res.status
+          });
           setThreadContentError(threadId, loadFailureMessage);
           setThreadContentLoading(null);
           return;
@@ -3063,11 +3209,23 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
         );
         const loadedActive = filtered.find((item) => item.id === active.id) ?? null;
         const loadedHasContent = hasContent(loadedActive ?? active);
+        logListDebug("info", "thread-related:content-effect:response", {
+          ...debugBase,
+          threadId,
+          returnedCount: items.length,
+          filteredCount: filtered.length,
+          loadedHasContent
+        });
         if (hydrationResult === false && !loadedHasContent) {
           setThreadContentError(threadId, loadFailureMessage);
         }
         upsertThreadCache(threadId, filtered);
-      } catch {
+      } catch (error) {
+        logListDebug("warn", "thread-related:content-effect:exception", {
+          ...debugBase,
+          threadId,
+          error: error instanceof Error ? error.message : String(error)
+        });
         setThreadContentError(threadId, loadFailureMessage);
       } finally {
         setThreadContentLoading(null);
@@ -3576,6 +3734,37 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
       });
     }
   };
+
+  useEffect(() => {
+    const handleDetachedMessageDelete = (event: StorageEvent) => {
+      if (event.key !== DETACHED_MESSAGE_DELETE_EVENT_STORAGE_KEY) return;
+      const payload = parseDetachedMessageDeleteEvent(event.newValue);
+      if (!payload) return;
+      const affectedIds = Array.from(
+        new Set([payload.previousMessageId, payload.messageId].filter(Boolean))
+      );
+      if (affectedIds.length > 0) {
+        evictMessageCaches(affectedIds);
+      }
+      if (
+        payload.accountId === activeAccountId &&
+        (affectedIds.includes(activeMessageId) ||
+          (viewMessage?.id ? affectedIds.includes(viewMessage.id) : false))
+      ) {
+        setViewMessage(null);
+        setActiveMessageId("");
+      }
+      void refreshFolders();
+      if (payload.accountId === activeAccountId) {
+        void refreshMailboxDataRef.current();
+      }
+    };
+
+    window.addEventListener("storage", handleDetachedMessageDelete);
+    return () => {
+      window.removeEventListener("storage", handleDetachedMessageDelete);
+    };
+  }, [activeAccountId, activeMessageId, evictMessageCaches, refreshFolders, viewMessage?.id]);
   const { saveDraft, handleDiscardDraft, handleSaveDraft } = useDraftManager({
     activeAccountId,
     composeOpen,
@@ -3945,6 +4134,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
                 hasMoreMessages,
                 messageView,
                 groupBy,
+                threadDateSource,
                 threadsEnabled,
                 threadsAllowed,
                 groupedMessages,
@@ -3954,6 +4144,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
                 setMessagesPage,
                 setMessageView,
                 setGroupBy,
+                setThreadDateSource,
                 setThreadsEnabled,
                 toggleAllGroups
               }}
@@ -3989,8 +4180,9 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
                               variant="soft"
                               color="gray"
                               className={listMetaStyles.searchBadge}
+                              title={badge.label}
                             >
-                              {badge.label}
+                              <span className={listMetaStyles.searchBadgeLabel}>{badge.label}</span>
                             </Badge>
                           ))}
                         </div>
@@ -4272,6 +4464,8 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
                       getPrimaryEmail,
                       extractEmails,
                       onFindRelatedByCalendarInviteUid: handleFindRelatedByCalendarInviteUid,
+                      readErrorMessage,
+                      reportError,
                       dateFormat: accountDateFormat,
                       threadViewMode,
                       userEmail: currentAccount?.email
@@ -4289,6 +4483,8 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
               <CalendarSidebarPanel
                 accountId={activeAccountId}
                 onClose={() => setCalendarSidebarOpen(false)}
+                onOpenMessage={handleOpenCalendarMessage}
+                onFindRelatedByInviteUid={handleFindRelatedByCalendarInviteUid}
               />
             </div>
           </>
@@ -4417,17 +4613,8 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
         }}
         formatRelativeTime={formatRelativeTime}
         onOpenCalendarSidebar={() => setCalendarSidebarOpen(true)}
-        onOpenCalendarMessage={(messageId) => {
-          const msg = messageById.get(messageId) ?? null;
-          if (msg) {
-            setViewMessage(msg);
-            setActiveMessageId(messageId);
-            return;
-          }
-          void resolveMessageByExternalMessageId(messageId, activeAccountId).then((resolved) => {
-            if (resolved) setViewMessage(resolved);
-          });
-        }}
+        onOpenCalendarMessage={handleOpenCalendarMessage}
+        onFindRelatedCalendarInviteUid={handleFindRelatedByCalendarInviteUid}
       />
     </div>
   );

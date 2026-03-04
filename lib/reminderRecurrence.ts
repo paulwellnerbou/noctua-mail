@@ -7,7 +7,7 @@ import {
 
 export const REMINDER_DUE_LOOKBACK_MS = 7 * 24 * 60 * 60 * 1000;
 
-type ReminderRuleLike = {
+type RecurrenceRuleLike = {
   eventStartAtMs: number;
   eventEndAtMs?: number;
   leadMinutes: number;
@@ -49,7 +49,7 @@ type RecurrenceQuery = {
   before: (date: Date, inc?: boolean) => Date | null;
 };
 
-function buildRecurrenceQuery(reminder: ReminderRuleLike): RecurrenceQuery | null {
+function buildRecurrenceQuery(reminder: RecurrenceRuleLike): RecurrenceQuery | null {
   const normalizedRule = normalizeRecurrenceRule(reminder.recurrenceRule);
   if (!normalizedRule) return null;
   const startAtMs = Number(reminder.eventStartAtMs);
@@ -105,8 +105,81 @@ function buildRecurrenceQuery(reminder: ReminderRuleLike): RecurrenceQuery | nul
   }
 }
 
+export function listRecurrenceOccurrenceStartsInRange(
+  reminder: Omit<RecurrenceRuleLike, "leadMinutes">,
+  rangeStartMs: number,
+  rangeEndMs: number
+): number[] {
+  const eventStartAtMs = Number(reminder.eventStartAtMs);
+  const eventEndAtMsRaw = Number(reminder.eventEndAtMs);
+  const durationMs =
+    Number.isFinite(eventEndAtMsRaw) && eventEndAtMsRaw > eventStartAtMs
+      ? eventEndAtMsRaw - eventStartAtMs
+      : Number.NaN;
+  if (
+    !Number.isFinite(eventStartAtMs) ||
+    eventStartAtMs <= 0 ||
+    !Number.isFinite(rangeStartMs) ||
+    !Number.isFinite(rangeEndMs) ||
+    rangeEndMs <= rangeStartMs
+  ) {
+    return [];
+  }
+
+  const recurrence = buildRecurrenceQuery({
+    ...reminder,
+    leadMinutes: 0
+  });
+  if (!recurrence) {
+    if (eventStartAtMs >= rangeStartMs && eventStartAtMs < rangeEndMs) {
+      return [eventStartAtMs];
+    }
+    if (
+      Number.isFinite(durationMs) &&
+      durationMs > 0 &&
+      eventStartAtMs < rangeStartMs &&
+      eventStartAtMs + durationMs > rangeStartMs
+    ) {
+      return [eventStartAtMs];
+    }
+    return [];
+  }
+
+  const occurrenceStarts: number[] = [];
+  const seen = new Set<number>();
+  const pushOccurrence = (value?: Date | null) => {
+    if (!value) return;
+    const atMs = value.getTime();
+    if (!Number.isFinite(atMs) || atMs <= 0 || atMs >= rangeEndMs) return;
+    if (
+      atMs < rangeStartMs &&
+      (!Number.isFinite(durationMs) || durationMs <= 0 || atMs + durationMs <= rangeStartMs)
+    ) {
+      return;
+    }
+    if (seen.has(atMs)) return;
+    seen.add(atMs);
+    occurrenceStarts.push(atMs);
+  };
+
+  if (Number.isFinite(durationMs) && durationMs > 0) {
+    pushOccurrence(recurrence.before(new Date(rangeStartMs), true));
+  }
+
+  let cursor = recurrence.after(new Date(rangeStartMs), true);
+  let iterations = 0;
+  while (cursor && cursor.getTime() < rangeEndMs && iterations < 4096) {
+    pushOccurrence(cursor);
+    cursor = recurrence.after(cursor, false);
+    iterations += 1;
+  }
+
+  occurrenceStarts.sort((a, b) => a - b);
+  return occurrenceStarts;
+}
+
 export function resolveNextReminderOccurrence(
-  reminder: ReminderRuleLike,
+  reminder: RecurrenceRuleLike,
   nowMs = Date.now()
 ): { eventStartAtMs: number; triggerAtMs: number } | null {
   const eventStartAtMs = Number(reminder.eventStartAtMs);
@@ -195,7 +268,7 @@ export function resolveNextReminderOccurrence(
 }
 
 export function resolveCurrentOrNextOccurrence(
-  reminder: Omit<ReminderRuleLike, "leadMinutes">,
+  reminder: Omit<RecurrenceRuleLike, "leadMinutes">,
   nowMs = Date.now()
 ): { eventStartAtMs: number } | null {
   const eventStartAtMs = Number(reminder.eventStartAtMs);
