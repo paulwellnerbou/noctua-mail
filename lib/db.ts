@@ -406,7 +406,7 @@ function backfillEmailCalendarEventParticipation(db: any, accountEmail?: string 
     const participation = mergeCalendarParticipation(
       {
         attendees: row.attendees ?? undefined,
-        myPartstat: row.myPartstat ?? undefined,
+        myPartstat: normalizeCalendarParticipationStatus(row.myPartstat),
         myPartstatUpdatedAtMs:
           typeof row.myPartstatUpdatedAtMs === "number" ? row.myPartstatUpdatedAtMs : undefined,
         myAttendeeEmail: row.myAttendeeEmail ?? undefined,
@@ -5111,6 +5111,7 @@ export async function listThreads(params: {
       listUnsubscribe: row.listUnsubscribe ?? undefined
     };
     const threadDateValue = threadDateValueByThreadId.get(message.threadId);
+    message.threadSortDateValue = threadDateValue ?? message.dateValue;
     (message as any).groupKey =
       inviteDeckThreadGroupsByMessageId.get(message.id) ??
       buildGroupKey(
@@ -5152,14 +5153,23 @@ export async function listThreadMessages(params: {
   threadIds: string[];
   messageIds?: string[];
   groupBy?: string;
+  threadDateSource?: ThreadDateSource;
 }) {
-  const { accountId, threadIds, messageIds = [], groupBy = "date" } = params;
+  const {
+    accountId,
+    threadIds,
+    messageIds = [],
+    groupBy = "date",
+    threadDateSource = DEFAULT_THREAD_DATE_SOURCE
+  } = params;
   const uniqueThreads = Array.from(new Set(threadIds.filter(Boolean)));
   const uniqueMessages = Array.from(new Set(messageIds.filter(Boolean)));
   if (uniqueThreads.length === 0 && uniqueMessages.length === 0) {
     return { items: [] as Message[] };
   }
   const db = await getAccountDb(accountId);
+  const normalizedThreadDateSource = normalizeThreadDateSource(threadDateSource);
+  const threadDateColumn = getThreadDateColumn(groupBy, normalizedThreadDateSource);
   const clauses: string[] = [];
   const args: any[] = [accountId];
   if (uniqueThreads.length > 0) {
@@ -5179,6 +5189,43 @@ export async function listThreadMessages(params: {
     `
     )
     .all(...args) as any[];
+  const rowThreadIds = Array.from(
+    new Set(
+      rows
+        .map((row) => String(row.threadId ?? "").trim())
+        .filter(Boolean)
+    )
+  );
+  const threadDateValueByThreadId =
+    rowThreadIds.length > 0
+      ? new Map(
+          (
+            db
+              .prepare(
+                `
+                SELECT threadId, ${threadDateColumn} as threadDateValue, latestDateValue
+                FROM threads
+                WHERE accountId = ? AND threadId IN (${rowThreadIds.map(() => "?").join(",")})
+              `
+              )
+              .all(accountId, ...rowThreadIds) as Array<{
+              threadId?: string | null;
+              threadDateValue?: number | null;
+              latestDateValue?: number | null;
+            }>
+          )
+            .flatMap((row): Array<[string, number]> => {
+              const threadId = String(row.threadId ?? "").trim();
+              if (!threadId) return [];
+              const threadDateValue = Number.isFinite(Number(row.threadDateValue))
+                ? Number(row.threadDateValue)
+                : Number.isFinite(Number(row.latestDateValue))
+                  ? Number(row.latestDateValue)
+                  : 0;
+              return [[threadId, threadDateValue]];
+            })
+        )
+      : new Map<string, number>();
 
   const ids = rows.map((row) => row.id);
   const attachmentRows =
@@ -5250,8 +5297,15 @@ export async function listThreadMessages(params: {
       categorySignals: parseStringArray(row.categorySignals),
       listUnsubscribe: row.listUnsubscribe ?? undefined
     };
+    const threadDateValue = threadDateValueByThreadId.get(message.threadId);
+    message.threadSortDateValue = threadDateValue ?? message.dateValue;
     (message as any).groupKey =
-      inviteDeckThreadMessageGroupsByMessageId.get(message.id) ?? buildGroupKey(message, groupBy);
+      inviteDeckThreadMessageGroupsByMessageId.get(message.id) ??
+      buildGroupKey(
+        message,
+        groupBy,
+        isThreadDateSensitiveGroupBy(groupBy) ? threadDateValue : undefined
+      );
     return message;
   });
 

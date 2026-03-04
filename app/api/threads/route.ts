@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { listThreads } from "@/lib/db";
 import { requireSessionAccountOr403, requireSessionOr401 } from "@/lib/auth";
+import { normalizeThreadDateSource } from "@/lib/threadDate";
 
 export async function GET(request: Request) {
   const session = requireSessionOr401(request);
@@ -15,7 +16,7 @@ export async function GET(request: Request) {
   const page = Number(searchParams.get("page") ?? "1") || 1;
   const pageSize = Number(searchParams.get("pageSize") ?? "300") || 300;
   const groupBy = searchParams.get("groupBy") ?? "date";
-  const threadDateSource = searchParams.get("threadDateSource") ?? undefined;
+  const threadDateSource = normalizeThreadDateSource(searchParams.get("threadDateSource"));
   const fields = searchParams.get("fields")?.split(",").filter(Boolean) ?? [];
   const folderId = searchParams.get("folderId");
   const badges = searchParams.get("badges")?.split(",").filter(Boolean);

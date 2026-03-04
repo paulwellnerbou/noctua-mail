@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { listThreadMessages } from "@/lib/db";
 import { requireSessionAccountOr403, requireSessionOr401 } from "@/lib/auth";
+import { normalizeThreadDateSource } from "@/lib/threadDate";
 
 export async function POST(request: Request) {
   const session = requireSessionOr401(request);
@@ -10,6 +11,7 @@ export async function POST(request: Request) {
     threadIds?: string[];
     messageIds?: string[];
     groupBy?: string;
+    threadDateSource?: string;
   };
   const accountId = payload.accountId;
   const threadIds = Array.isArray(payload.threadIds)
@@ -27,6 +29,13 @@ export async function POST(request: Request) {
   const access = await requireSessionAccountOr403(session, accountId);
   if (access instanceof NextResponse) return access;
   const groupBy = payload.groupBy ?? "date";
-  const data = await listThreadMessages({ accountId, threadIds, messageIds, groupBy });
+  const threadDateSource = normalizeThreadDateSource(payload.threadDateSource);
+  const data = await listThreadMessages({
+    accountId,
+    threadIds,
+    messageIds,
+    groupBy,
+    threadDateSource
+  });
   return NextResponse.json({ items: data.items });
 }

@@ -2963,7 +2963,8 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
         includeThreadAcrossFoldersForList,
         candidateCount: threadRelatedCandidateIds.length,
         candidateSample: threadRelatedCandidateIds.slice(0, 8),
-        groupBy
+        groupBy,
+        threadDateSource
       };
       logListDebug("info", "thread-related:list-effect:start", debugBase);
       if (supportsThreads) {
@@ -3024,7 +3025,12 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
         const res = await apiFetch(`/api/thread/related`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ accountId: activeAccountId, threadIds, groupBy })
+          body: JSON.stringify({
+            accountId: activeAccountId,
+            threadIds,
+            groupBy,
+            threadDateSource
+          })
         });
         if (!res.ok) {
           logListDebug("warn", "thread-related:list-effect:error-response", {
@@ -3059,6 +3065,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     activeAccountId,
     activeFolderId,
     groupBy,
+    threadDateSource,
     includeThreadAcrossFoldersForList,
     searchScope,
     supportsThreads,
@@ -3072,7 +3079,8 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
         activeFolderId,
         activeMessageThreadKey,
         supportsThreads,
-        groupBy
+        groupBy,
+        threadDateSource
       };
       logListDebug("info", "thread-related:content-effect:start", debugBase);
       if (!activeMessageThreadKey) {
@@ -3189,7 +3197,8 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
             accountId: activeAccountId,
             threadIds,
             messageIds,
-            groupBy
+            groupBy,
+            threadDateSource
           })
         });
         if (!res.ok) {
@@ -3237,6 +3246,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     activeFolderId,
     activeMessageThreadKey,
     groupBy,
+    threadDateSource,
     supportsThreads,
     threadEvictVersion,
     clearThreadContentError,

@@ -364,7 +364,7 @@ export default function CalendarEventPreview({
                         const eventUid = event.uid?.trim().toLowerCase() ?? "";
                         if (!eventUid) return undefined;
                         return {
-                          actionType: inviteActionType,
+                          actionType: inviteActionType ?? "invitation",
                           processed:
                             inviteStateOverrides[eventUid] ??
                             Boolean(inviteStateByUid.get(eventUid)?.processedAtMs),

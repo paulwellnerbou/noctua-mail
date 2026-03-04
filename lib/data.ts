@@ -124,6 +124,7 @@ export type Message = {
   calendarInviteStates?: MessageCalendarInviteState[];
   listUnsubscribe?: string | null;
   groupKey?: string;
+  threadSortDateValue?: number;
 };
 
 export type Attachment = {

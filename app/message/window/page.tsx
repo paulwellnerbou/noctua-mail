@@ -259,6 +259,21 @@ export default function MessageWindowPage() {
     openDetachedWindow(`/api/message/html?${params.toString()}`);
   }, []);
 
+  const readErrorMessage = useCallback(async (res: Response) => {
+    try {
+      const data = (await res.json().catch(() => null)) as { message?: string; error?: string } | null;
+      if (typeof data?.message === "string" && data.message.trim()) return data.message;
+      if (typeof data?.error === "string" && data.error.trim()) return data.error;
+    } catch {
+      // ignore
+    }
+    return `Request failed (${res.status})`;
+  }, []);
+
+  const reportError = useCallback((message: string) => {
+    setActionError(message);
+  }, []);
+
   const fetchSource = useCallback(async (targetMessageId: string) => {
     const existing = sourceFetchRef.current.get(targetMessageId);
     if (existing) return existing;
@@ -440,6 +455,8 @@ export default function MessageWindowPage() {
                   />
                 ),
                 handleUnsubscribe: noop,
+                readErrorMessage,
+                reportError,
                 collapsedMessages,
                 setCollapsedMessages,
                 messageTabs,

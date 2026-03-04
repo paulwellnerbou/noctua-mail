@@ -350,8 +350,13 @@ export function buildThreadGroupEntries(params: {
     flattenThread,
     getThreadLatestDate
   } = params;
+  const getThreadSortDate = (node: ThreadNode) => {
+    const explicit = Number(node.message.threadSortDateValue);
+    if (Number.isFinite(explicit)) return explicit;
+    return getThreadLatestDate(node);
+  };
   return buildThreadTree(group.items)
-    .sort((a, b) => getThreadLatestDate(b) - getThreadLatestDate(a))
+    .sort((a, b) => getThreadSortDate(b) - getThreadSortDate(a))
     .map((root) => {
       const threadGroupId = root.message.threadId ?? root.message.messageId ?? root.message.id;
       const fullFlat = flattenThread(root, 0);
