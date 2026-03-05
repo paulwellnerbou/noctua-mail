@@ -1,6 +1,6 @@
 (function () {
   var config = {
-    "appEnvironmentLabel": ""
+    "appEnvironmentLabel": "Local"
   };
   window.__NOCTUA_RUNTIME_CONFIG__ = config;
 })();
