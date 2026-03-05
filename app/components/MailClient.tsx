@@ -169,12 +169,10 @@ function shortenRelatedNoticeSubject(subject: string, maxChars: number) {
 
 type MailClientProps = {
   buildVersionLabel?: string;
-  appEnvironmentLabel?: string;
 };
 
 export default function MailClient({
-  buildVersionLabel = "",
-  appEnvironmentLabel = ""
+  buildVersionLabel = ""
 }: MailClientProps) {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [folders, setFolders] = useState<Folder[]>([]);
@@ -332,6 +330,7 @@ export default function MailClient({
   const [omitBody, setOmitBody] = useState(true);
   const [collapsedMessages, setCollapsedMessages] = useState<Record<string, boolean>>({});
   const [messageFontScale, setMessageFontScale] = useState<Record<string, number>>({});
+  const [appEnvironmentLabel, setAppEnvironmentLabel] = useState("");
   const [authState, setAuthState] = useState<"loading" | "ok" | "unauth">("loading");
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const isAdminUser = currentUser?.role === "admin";
@@ -2809,6 +2808,24 @@ export default function MailClient({
     if (typeof window === "undefined") return;
     currentBuildVersionRef.current = buildVersionLabel.trim();
   }, [buildVersionLabel]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const runtimeConfig = (
+      window as Window & {
+        __NOCTUA_RUNTIME_CONFIG__?: {
+          appTitle?: string;
+          appEnvironmentLabel?: string;
+        };
+      }
+    ).__NOCTUA_RUNTIME_CONFIG__;
+    const nextLabel = runtimeConfig?.appEnvironmentLabel?.trim() ?? "";
+    setAppEnvironmentLabel((prev) => (prev === nextLabel ? prev : nextLabel));
+    const nextTitle = runtimeConfig?.appTitle?.trim() ?? "";
+    if (nextTitle && document.title !== nextTitle) {
+      document.title = nextTitle;
+    }
+  }, []);
 
   useEffect(() => {
     if (typeof window === "undefined") return;

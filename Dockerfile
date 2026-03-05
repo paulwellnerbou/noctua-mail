@@ -36,9 +36,10 @@ RUN groupadd -g 999 noctua && useradd -u 999 -g noctua -s /bin/bash noctua
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
+COPY scripts/container-entrypoint.sh /app/entrypoint.sh
 
 # Create data directory with proper permissions
-RUN mkdir -p /app/.data && chown -R noctua:noctua /app
+RUN chmod +x /app/entrypoint.sh && mkdir -p /app/.data && chown -R noctua:noctua /app
 
 # Switch to non-root user
 USER noctua
@@ -55,5 +56,5 @@ ENV APP_ENV_LABEL=
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
   CMD bun --bun -e "fetch('http://localhost:3654/').then(r => r.ok ? process.exit(0) : process.exit(1)).catch(() => process.exit(1))"
 
-# Run standalone server
-CMD ["bun", "--bun", "server.js"]
+# Generate runtime config and run standalone server
+CMD ["/app/entrypoint.sh"]

@@ -1,15 +1,14 @@
 import type { Metadata, Viewport } from "next";
 import type { CSSProperties, ReactNode } from "react";
 import { Theme } from "@radix-ui/themes";
+import Script from "next/script";
 import { APP_THEME_COLOR } from "@/lib/ui/theme";
-import { getAppTitle } from "@/lib/appBranding";
+import { DEFAULT_APP_TITLE } from "@/lib/appBranding";
 import "@radix-ui/themes/styles.css";
 import "./globals.css";
 
-const appTitle = getAppTitle();
-
 export const metadata: Metadata = {
-  title: appTitle,
+  title: DEFAULT_APP_TITLE,
   description: "Modern webmail client prototype",
   manifest: "/manifest.webmanifest",
   icons: {
@@ -32,6 +31,9 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
+      <head>
+        <Script src="/runtime-config.js" strategy="beforeInteractive" />
+      </head>
       <body suppressHydrationWarning>
         <Theme
           grayColor="sand"
