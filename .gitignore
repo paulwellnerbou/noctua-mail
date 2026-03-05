@@ -32,3 +32,6 @@ pnpm-debug.log*
 
 # build artifacts
 *.tsbuildinfo
+
+# generated runtime config
+public/runtime-config.js
