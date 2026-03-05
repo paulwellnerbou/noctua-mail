@@ -66,6 +66,11 @@ fi
 
 # Start new container
 echo "Starting new container..."
+DEFAULT_APP_ENV_LABEL=""
+if [[ "$INSTANCE" == "dev" ]]; then
+  DEFAULT_APP_ENV_LABEL="DEV"
+fi
+APP_ENV_LABEL_VALUE="${APP_ENV_LABEL:-$DEFAULT_APP_ENV_LABEL}"
 docker run -d \
   --name noctua-mail-$INSTANCE \
   --restart unless-stopped \
@@ -78,6 +83,7 @@ docker run -d \
   -e SESSION_SEAL_KEY="${SESSION_SEAL_KEY:-}" \
   -e IMAP_SECRET_KEY="${IMAP_SECRET_KEY:-}" \
   -e IMAP_CREDENTIALS_STORAGE="${IMAP_CREDENTIALS_STORAGE:-both}" \
+  -e APP_ENV_LABEL="$APP_ENV_LABEL_VALUE" \
   "$FULL_IMAGE"
 
 # Wait for container to be healthy

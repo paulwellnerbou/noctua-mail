@@ -44,6 +44,22 @@
   margin: 0;
 }
 
+.brandTitleWrap {
+  position: relative;
+  display: inline-flex;
+  align-items: flex-start;
+  max-width: 100%;
+}
+
+.brandEnvLabel {
+  position: absolute;
+  top: -6px;
+  right: -26px;
+  z-index: 1;
+  transform: rotate(30deg);
+  transform-origin: center;
+}
+
 .brandVersion {
   margin-top: 2px;
   font-size: 10px;

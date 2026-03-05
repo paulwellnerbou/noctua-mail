@@ -49,6 +49,7 @@ EXPOSE 3654
 # Set default environment variables
 ENV PORT=3654
 ENV NOCTUA_DATA_DIR=/app/.data/
+ENV APP_ENV_LABEL=
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \

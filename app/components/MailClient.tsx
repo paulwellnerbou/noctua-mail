@@ -169,9 +169,13 @@ function shortenRelatedNoticeSubject(subject: string, maxChars: number) {
 
 type MailClientProps = {
   buildVersionLabel?: string;
+  appEnvironmentLabel?: string;
 };
 
-export default function MailClient({ buildVersionLabel = "" }: MailClientProps) {
+export default function MailClient({
+  buildVersionLabel = "",
+  appEnvironmentLabel = ""
+}: MailClientProps) {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [folders, setFolders] = useState<Folder[]>([]);
   const [activeAccountId, setActiveAccountId] = useState("");
@@ -442,6 +446,12 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
   const refreshMailboxDataRef = useRef<() => Promise<boolean>>(async () => false);
   const setMessagesRef = useRef<React.Dispatch<React.SetStateAction<Message[]>>>(() => {});
   const updateMessagesRef = useRef<(updater: (message: Message) => Message | null, options?: { source?: string }) => void>(() => {});
+  const forwardMessageResultPruneUpdate = useCallback(
+    (updater: (message: Message) => Message | null, options?: { source?: string }) => {
+      updateMessagesRef.current(updater, options);
+    },
+    []
+  );
   const searchScopeRef = useRef<"folder" | "all">("folder");
   const activeVirtualFolderIdRef = useRef("");
   const threadMessagesRef = useRef<Message[]>([]);
@@ -602,8 +612,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     setActiveFolderId,
     isNotificationSuppressedFolder: (folderId: string) =>
       checkIsNotificationSuppressedFolder(folderId, accountFolders),
-    updateMessagesWithCurrentResultPrune: (updater, options) =>
-      updateMessagesRef.current(updater, options),
+    updateMessagesWithCurrentResultPrune: forwardMessageResultPruneUpdate,
     inboxFolder: inboxFolder ?? null,
     currentKeyRef
   });
@@ -1171,8 +1180,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     apiFetch,
     readErrorMessage,
     reportError,
-    updateMessagesWithCurrentResultPrune: (updater, options) =>
-      updateMessagesRef.current(updater, options),
+    updateMessagesWithCurrentResultPrune: forwardMessageResultPruneUpdate,
     messageById,
     threadMessagesRef
   });
@@ -2249,6 +2257,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
       setMessages
     ]
   );
+  updateMessagesRef.current = updateMessagesWithCurrentResultPrune;
 
   const { handleMoveMessages, moveMessagesToFolder } = useMessageMoveActions({
     activeAccountId,
@@ -4011,6 +4020,7 @@ export default function MailClient({ buildVersionLabel = "" }: MailClientProps) 
     <div className="app-shell">
       <TopBar
         buildVersionLabel={buildVersionLabel}
+        appEnvironmentLabel={appEnvironmentLabel}
         state={{
           query,
           searchScope,

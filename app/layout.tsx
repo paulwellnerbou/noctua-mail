@@ -2,11 +2,14 @@ import type { Metadata, Viewport } from "next";
 import type { CSSProperties, ReactNode } from "react";
 import { Theme } from "@radix-ui/themes";
 import { APP_THEME_COLOR } from "@/lib/ui/theme";
+import { getAppTitle } from "@/lib/appBranding";
 import "@radix-ui/themes/styles.css";
 import "./globals.css";
 
+const appTitle = getAppTitle();
+
 export const metadata: Metadata = {
-  title: "Noctua Mail",
+  title: appTitle,
   description: "Modern webmail client prototype",
   manifest: "/manifest.webmanifest",
   icons: {

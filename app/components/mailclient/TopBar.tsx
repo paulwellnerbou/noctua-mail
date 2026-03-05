@@ -22,6 +22,7 @@ import { Badge, Button, DropdownMenu, IconButton, TextField } from "@radix-ui/th
 import { badgeColors } from "@/lib/ui/badgeColors";
 import { SEARCH_BADGE_OPTIONS, SEARCH_FIELD_OPTIONS } from "@/lib/ui/searchFilters";
 import type { Account, Folder } from "@/lib/data";
+import EnvironmentLabel from "./EnvironmentLabel";
 import styles from "./TopBar.module.css";
 
 type SearchFields = {
@@ -48,6 +49,7 @@ type ComposeMode = "new" | "reply" | "replyAll" | "forward" | "edit" | "editAsNe
 
 type TopBarProps = {
   buildVersionLabel?: string;
+  appEnvironmentLabel?: string;
   state: {
     query: string;
     searchScope: "folder" | "all";
@@ -93,7 +95,13 @@ type TopBarProps = {
   };
 };
 
-export default function TopBar({ buildVersionLabel = "", state, ui, actions }: TopBarProps) {
+export default function TopBar({
+  buildVersionLabel = "",
+  appEnvironmentLabel = "",
+  state,
+  ui,
+  actions
+}: TopBarProps) {
   const {
     query,
     searchScope,
@@ -202,7 +210,15 @@ export default function TopBar({ buildVersionLabel = "", state, ui, actions }: T
           />
         </div>
         <div className={styles.brandText}>
-          <h1 className={styles.brandTitle}>Noctua Mail</h1>
+          <div className={styles.brandTitleWrap}>
+            <h1 className={styles.brandTitle}>Noctua Mail</h1>
+            {appEnvironmentLabel ? (
+              <EnvironmentLabel
+                label={appEnvironmentLabel}
+                className={styles.brandEnvLabel}
+              />
+            ) : null}
+          </div>
           {buildVersionLabel ? (
             <div className={styles.brandVersion} title={`Build ${buildVersionLabel}`}>
               {buildVersionLabel}
