@@ -2814,17 +2814,12 @@ export default function MailClient({
     const runtimeConfig = (
       window as Window & {
         __NOCTUA_RUNTIME_CONFIG__?: {
-          appTitle?: string;
           appEnvironmentLabel?: string;
         };
       }
     ).__NOCTUA_RUNTIME_CONFIG__;
     const nextLabel = runtimeConfig?.appEnvironmentLabel?.trim() ?? "";
     setAppEnvironmentLabel((prev) => (prev === nextLabel ? prev : nextLabel));
-    const nextTitle = runtimeConfig?.appTitle?.trim() ?? "";
-    if (nextTitle && document.title !== nextTitle) {
-      document.title = nextTitle;
-    }
   }, []);
 
   useEffect(() => {
