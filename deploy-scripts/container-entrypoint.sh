@@ -11,15 +11,15 @@ else
 fi
 
 # Replace build-time title placeholder in generated server/client assets.
-# This keeps metadata static while still allowing runtime environment branding.
+# This keeps metadata static and avoids client-side title mutation.
 APP_TITLE="$APP_TITLE" bun --eval '
 const fs = require("node:fs");
 const path = require("node:path");
 
 const PLACEHOLDER = "__NOCTUA_APP_TITLE__";
 const replacement = process.env.APP_TITLE || "Noctua Mail";
-const roots = ["/app/.next", "/app/server.js"];
-const allowedExtensions = new Set([".html", ".js"]);
+const roots = ["/app/.next"];
+const allowedExtensions = new Set([".html", ".rsc", ".webmanifest", ".body"]);
 let updatedFiles = 0;
 
 function visit(target) {
@@ -61,6 +61,6 @@ for (const root of roots) {
 console.log(`[entrypoint] replaced title placeholder in ${updatedFiles} file(s)`);
 '
 
-APP_ENV_LABEL="$ENV_LABEL" bun --bun /app/scripts/generateRuntimeConfig.ts
+APP_ENV_LABEL="$ENV_LABEL" bun --bun /app/build-scripts/generateRuntimeConfig.ts
 
 exec bun --bun server.js

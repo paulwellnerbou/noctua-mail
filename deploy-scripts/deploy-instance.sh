@@ -4,11 +4,11 @@ set -e
 # Deploy a specific instance (dev or prod) to the VPS WITHOUT git checkout
 # This script is designed to be piped via SSH from CI/CD
 # Usage: ssh user@host "bash -s" < deploy-instance.sh <instance> <image_tag>
-# 
+#
 # ```bash
 # Manual deployment from local machine
-# ssh root@YOUR_VPS_IP 'bash -s' < scripts/deploy-instance.sh dev latest
-# ssh root@YOUR_VPS_IP 'bash -s' < scripts/deploy-instance.sh prod latest
+# ssh root@YOUR_VPS_IP 'bash -s' < deploy-scripts/deploy-instance.sh dev latest
+# ssh root@YOUR_VPS_IP 'bash -s' < deploy-scripts/deploy-instance.sh prod latest
 # ```
 
 INSTANCE=${1:-dev}  # dev or prod

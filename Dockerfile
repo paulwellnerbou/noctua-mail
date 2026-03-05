@@ -37,8 +37,8 @@ RUN groupadd -g 999 noctua && useradd -u 999 -g noctua -s /bin/bash noctua
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
-COPY scripts/generateRuntimeConfig.ts /app/scripts/generateRuntimeConfig.ts
-COPY scripts/container-entrypoint.sh /app/entrypoint.sh
+COPY build-scripts/generateRuntimeConfig.ts /app/build-scripts/generateRuntimeConfig.ts
+COPY deploy-scripts/container-entrypoint.sh /app/entrypoint.sh
 
 # Create data directory with proper permissions
 RUN chmod +x /app/entrypoint.sh && mkdir -p /app/.data && chown -R noctua:noctua /app

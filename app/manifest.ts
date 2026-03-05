@@ -1,10 +1,11 @@
 import type { MetadataRoute } from "next";
 import { APP_THEME_COLOR } from "@/lib/ui/theme";
+import { DEFAULT_APP_TITLE } from "@/lib/appBranding";
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: "Noctua Mail",
-    short_name: "Noctua Mail",
+    name: DEFAULT_APP_TITLE,
+    short_name: DEFAULT_APP_TITLE,
     description: "Modern webmail client prototype",
     start_url: "/",
     display: "standalone",

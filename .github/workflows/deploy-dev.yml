@@ -44,7 +44,7 @@ jobs:
              IMAGE_NAME=${{ github.repository }} \
              GITHUB_TOKEN=${{ secrets.GITHUB_TOKEN }} \
              GITHUB_ACTOR=${{ github.actor }} \
-             bash -s" < scripts/deploy-instance.sh dev ${{ env.IMAGE_TAG }}
+             bash -s" < deploy-scripts/deploy-instance.sh dev ${{ env.IMAGE_TAG }}
 
       - name: Verify deployment
         run: |
