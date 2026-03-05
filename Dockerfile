@@ -14,6 +14,7 @@ COPY . .
 
 # Set build-time environment variables
 ENV NEXT_TELEMETRY_DISABLED=1
+ENV NOCTUA_STATIC_APP_TITLE=__NOCTUA_APP_TITLE__
 ARG NOCTUA_BUILD_HASH
 ARG NOCTUA_BUILD_TIME
 ENV NEXT_PUBLIC_BUILD_HASH=$NOCTUA_BUILD_HASH
@@ -36,6 +37,7 @@ RUN groupadd -g 999 noctua && useradd -u 999 -g noctua -s /bin/bash noctua
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
+COPY scripts/generateRuntimeConfig.ts /app/scripts/generateRuntimeConfig.ts
 COPY scripts/container-entrypoint.sh /app/entrypoint.sh
 
 # Create data directory with proper permissions

@@ -13,9 +13,9 @@
   },
   "type": "module",
   "scripts": {
-    "dev": "bun --env-file=${ENV_FILE:-.env.local} --bun next dev",
+    "dev": "bun --env-file=${ENV_FILE:-.env.local} --bun scripts/generateRuntimeConfig.ts && bun --env-file=${ENV_FILE:-.env.local} --bun next dev",
     "build": "bun --bun scripts/generateBuildVersion.ts && bun --bun next build",
-    "start": "bun --env-file=${ENV_FILE:-.env.local} --bun next start",
+    "start": "bun --env-file=${ENV_FILE:-.env.local} --bun scripts/generateRuntimeConfig.ts && bun --env-file=${ENV_FILE:-.env.local} --bun next start",
     "lint": "eslint ."
   },
   "dependencies": {

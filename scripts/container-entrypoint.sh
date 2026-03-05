@@ -10,24 +10,57 @@ else
   APP_TITLE="$BASE_TITLE"
 fi
 
-js_escape() {
-  printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g'
+# Replace build-time title placeholder in generated server/client assets.
+# This keeps metadata static while still allowing runtime environment branding.
+APP_TITLE="$APP_TITLE" bun --eval '
+const fs = require("node:fs");
+const path = require("node:path");
+
+const PLACEHOLDER = "__NOCTUA_APP_TITLE__";
+const replacement = process.env.APP_TITLE || "Noctua Mail";
+const roots = ["/app/.next", "/app/server.js"];
+const allowedExtensions = new Set([".html", ".js"]);
+let updatedFiles = 0;
+
+function visit(target) {
+  let stat;
+  try {
+    stat = fs.statSync(target);
+  } catch {
+    return;
+  }
+
+  if (stat.isDirectory()) {
+    for (const entry of fs.readdirSync(target)) {
+      visit(path.join(target, entry));
+    }
+    return;
+  }
+
+  if (!stat.isFile()) return;
+  if (!allowedExtensions.has(path.extname(target))) return;
+
+  let content;
+  try {
+    content = fs.readFileSync(target, "utf8");
+  } catch {
+    return;
+  }
+  if (!content.includes(PLACEHOLDER)) return;
+
+  const nextContent = content.split(PLACEHOLDER).join(replacement);
+  if (nextContent === content) return;
+  fs.writeFileSync(target, nextContent);
+  updatedFiles += 1;
 }
 
-ESCAPED_TITLE="$(js_escape "$APP_TITLE")"
-ESCAPED_ENV_LABEL="$(js_escape "$ENV_LABEL")"
+for (const root of roots) {
+  visit(root);
+}
 
-cat > /app/public/runtime-config.js <<EOF
-(function () {
-  var config = {
-    appTitle: "${ESCAPED_TITLE}",
-    appEnvironmentLabel: "${ESCAPED_ENV_LABEL}"
-  };
-  window.__NOCTUA_RUNTIME_CONFIG__ = config;
-  if (config.appTitle) {
-    document.title = config.appTitle;
-  }
-})();
-EOF
+console.log(`[entrypoint] replaced title placeholder in ${updatedFiles} file(s)`);
+'
+
+APP_ENV_LABEL="$ENV_LABEL" bun --bun /app/scripts/generateRuntimeConfig.ts
 
 exec bun --bun server.js
