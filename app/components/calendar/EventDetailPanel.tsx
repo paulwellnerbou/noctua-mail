@@ -16,6 +16,7 @@ type Props = {
   onOpenMessage?: (messageId: string) => void;
   onFindRelatedByInviteUid?: (uid: string) => void;
   onEventUpdated?: (event: CalendarEvent) => void;
+  onEventDeleted?: () => void;
 };
 
 function parseAttendees(json?: string): string[] {
@@ -36,7 +37,8 @@ export default function EventDetailPanel({
   onBack,
   onOpenMessage,
   onFindRelatedByInviteUid,
-  onEventUpdated
+  onEventUpdated,
+  onEventDeleted
 }: Props) {
   const isCalEvent = kind === "event";
   const calEv = isCalEvent ? (event as CalendarEvent) : null;
@@ -108,6 +110,7 @@ export default function EventDetailPanel({
           eventEndAtMs={calEv?.endAtMs ?? reminder?.eventEndAtMs}
           onOpenMessage={onOpenMessage}
           onEventUpdated={onEventUpdated}
+          onEventDeleted={onEventDeleted}
           responseOccurrenceLabel="This occurrence"
         />
       </div>

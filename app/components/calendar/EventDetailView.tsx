@@ -54,6 +54,7 @@ export type EventDetailViewProps = {
   eventEndAtMs?: number;
   onOpenMessage?: (messageId: string) => void;
   onEventUpdated?: (event: CalendarEvent) => void;
+  onEventDeleted?: () => void;
   onInviteProcessed?: (eventUid: string) => void;
   responseOccurrenceLabel?: string;
   forceOccurrenceResponse?: boolean;
@@ -171,6 +172,7 @@ export default function EventDetailView({
   eventEndAtMs,
   onOpenMessage,
   onEventUpdated,
+  onEventDeleted,
   onInviteProcessed,
   responseOccurrenceLabel = "This occurrence",
   forceOccurrenceResponse = false,
@@ -232,6 +234,7 @@ export default function EventDetailView({
   const [draftScope, setDraftScope] = useState<CalendarParticipationScope>("series");
   const [sendReply, setSendReply] = useState(replyRequested !== false);
   const [submittingResponse, setSubmittingResponse] = useState(false);
+  const [deletingEvent, setDeletingEvent] = useState(false);
 
   useEffect(() => {
     setCurrentMyPartstat(myPartstat);
@@ -407,6 +410,22 @@ export default function EventDetailView({
       setReminderNotice("Failed to remove reminder.");
     } finally {
       setDeletingReminder(false);
+    }
+  };
+
+  const handleDeleteEvent = async () => {
+    if (!accountId || !eventId) return;
+    setDeletingEvent(true);
+    try {
+      const params = new URLSearchParams({ accountId, soft: "true" });
+      await fetch(`/api/calendar/events/${encodeURIComponent(eventId)}?${params.toString()}`, {
+        method: "DELETE"
+      });
+      onEventDeleted?.();
+    } catch {
+      setReminderNotice("Failed to delete event.");
+    } finally {
+      setDeletingEvent(false);
     }
   };
 
@@ -658,6 +677,18 @@ export default function EventDetailView({
             <Button size="1" variant="soft" color="gray" onClick={() => onOpenMessage(messageId)}>
               <Mail size={12} />
               Open email
+            </Button>
+          )}
+          {eventId && currentMyPartstat === "DECLINED" && onEventDeleted && (
+            <Button
+              size="1"
+              variant="soft"
+              color="red"
+              disabled={deletingEvent}
+              onClick={() => void handleDeleteEvent()}
+            >
+              <Trash2 size={14} />
+              {deletingEvent ? "Removing…" : "Remove declined event"}
             </Button>
           )}
         </div>

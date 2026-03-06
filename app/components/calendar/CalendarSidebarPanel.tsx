@@ -3,7 +3,7 @@
 import { useRef, useState } from "react";
 import FullCalendar from "@fullcalendar/react";
 import { Flex, Heading, IconButton } from "@radix-ui/themes";
-import { X, ExternalLink } from "lucide-react";
+import { X, ExternalLink, RefreshCw } from "lucide-react";
 import { openDetachedWindow } from "@/lib/ui/openDetachedWindow";
 import type { CalendarEvent } from "@/lib/data";
 import type { CalendarReminder } from "@/lib/data";
@@ -30,6 +30,7 @@ export default function CalendarSidebarPanel({
   const calendarRef = useRef<FullCalendar>(null);
   const [selectedEvent, setSelectedEvent] = useState<CalendarEvent | CalendarReminder | null>(null);
   const [selectedKind, setSelectedKind] = useState<"event" | "reminder" | null>(null);
+  const [recomputingRelations, setRecomputingRelations] = useState(false);
   const [eventDialogOpen, setEventDialogOpen] = useState(false);
   const [createStart, setCreateStart] = useState<Date | undefined>();
   const [createEnd, setCreateEnd] = useState<Date | undefined>();
@@ -37,6 +38,29 @@ export default function CalendarSidebarPanel({
 
   const handleOpenWindow = () => {
     openDetachedWindow(`/calendar/window?accountId=${encodeURIComponent(accountId)}`);
+  };
+
+  const handleRecomputeRelations = async () => {
+    if (recomputingRelations) return;
+    setRecomputingRelations(true);
+    try {
+      const res = await fetch("/api/calendar/recompute-relations", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ accountId })
+      });
+      const data = await res.json();
+      if (data.ok) {
+        console.log("[Calendar] Recomputed event relations:", data);
+        calendarRef.current?.getApi().refetchEvents();
+      } else {
+        console.error("[Calendar] Recompute relations failed:", data);
+      }
+    } catch (err) {
+      console.error("[Calendar] Recompute relations error:", err);
+    } finally {
+      setRecomputingRelations(false);
+    }
   };
 
   const handleEventClick = (ev: CalendarEvent | CalendarReminder, kind: "event" | "reminder") => {
@@ -68,11 +92,28 @@ export default function CalendarSidebarPanel({
     calendarRef.current?.getApi().refetchEvents();
   };
 
+  const handleEventDeleted = () => {
+    setSelectedEvent(null);
+    setSelectedKind(null);
+    calendarRef.current?.getApi().refetchEvents();
+  };
+
   return (
     <div className={styles.panel}>
       <Flex align="center" justify="between" className={styles.header}>
         <Heading size="2">Calendar</Heading>
         <Flex gap="1" align="center">
+          <IconButton
+            size="1"
+            variant="ghost"
+            color="gray"
+            title="Recompute event-email relations"
+            aria-label="Recompute event-email relations"
+            disabled={recomputingRelations}
+            onClick={handleRecomputeRelations}
+          >
+            <RefreshCw size={13} style={recomputingRelations ? { opacity: 0.5 } : undefined} />
+          </IconButton>
           <IconButton
             size="1"
             variant="ghost"
@@ -107,6 +148,7 @@ export default function CalendarSidebarPanel({
             onOpenMessage={onOpenMessage}
             onFindRelatedByInviteUid={onFindRelatedByInviteUid}
             onEventUpdated={handleEventUpdated}
+            onEventDeleted={handleEventDeleted}
           />
         ) : (
           <CalendarView

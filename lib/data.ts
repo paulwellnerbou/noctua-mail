@@ -198,6 +198,8 @@ export type CalendarEvent = {
   rawIcs?: string;
   sourceType: CalendarEventSourceType;
   messageId?: string;
+  /** Per-occurrence message links for rescheduled occurrences. Key = occurrence startAtMs as string. */
+  occurrenceMessageIds?: Record<string, string>;
   createdAtMs: number;
   updatedAtMs: number;
   deletedAtMs?: number;

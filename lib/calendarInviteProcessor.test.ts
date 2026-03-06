@@ -128,7 +128,8 @@ describe("processCalendarInviteForMessage", () => {
     expect(bootstrappedFields.recurrenceRule).toBe("FREQ=WEEKLY");
 
     const [, finalFields] = upsertCalendarEventByUid.mock.calls[1];
-    expect(finalFields.messageId).toBe("msg-cancel");
+    // messageId should stay pointing to the series invite, not the occurrence cancellation
+    expect(finalFields.messageId).toBe("msg-base");
     expect(finalFields.excludedDates).toContain(new Date("2026-06-08T10:00:00Z").getTime());
     expect(cancelCalendarEventByUid).not.toHaveBeenCalled();
     expect(markMessageCalendarInviteStatesProcessed).toHaveBeenCalledWith(

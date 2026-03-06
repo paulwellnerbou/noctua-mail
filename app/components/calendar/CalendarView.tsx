@@ -40,7 +40,10 @@ function calendarEventToFcEvent(
     start: new Date(displayStartAtMs),
     end: displayEndAtMs ? new Date(displayEndAtMs) : undefined,
     allDay: ev.allDay,
-    classNames: [`fc-event-${ev.sourceType}`],
+    classNames: [
+      `fc-event-${ev.sourceType}`,
+      ...(ev.myPartstat ? [`fc-event-partstat-${ev.myPartstat.toLowerCase().replace(/-/g, "")}`] : [])
+    ],
     extendedProps: { kind: "event", data: ev }
   };
 }

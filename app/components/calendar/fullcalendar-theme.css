@@ -107,6 +107,28 @@
   --fc-event-border-color: var(--accent-9);
 }
 
+/* Participation status styles (override source type colors) */
+.fc .fc-event.fc-event-partstat-accepted {
+  --fc-event-bg-color: var(--blue-9, #0072d6);
+  --fc-event-border-color: var(--blue-9, #0072d6);
+}
+
+.fc .fc-event.fc-event-partstat-tentative,
+.fc .fc-event.fc-event-partstat-needsaction {
+  --fc-event-bg-color: var(--amber-9, #f59e0b);
+  --fc-event-border-color: var(--amber-9, #f59e0b);
+}
+
+.fc .fc-event.fc-event-partstat-declined {
+  --fc-event-bg-color: var(--red-5, #fca5a5);
+  --fc-event-border-color: var(--red-5, #fca5a5);
+  opacity: 0.75;
+}
+
+.fc .fc-event.fc-event-partstat-declined .fc-event-title {
+  text-decoration: line-through;
+}
+
 /* Compact mode */
 .fc-compact .fc-toolbar {
   display: none;

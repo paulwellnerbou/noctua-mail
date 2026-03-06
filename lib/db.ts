@@ -71,6 +71,7 @@ import {
   extractEmailCalendarEventStatusFromIcs,
   normalizeCalendarEventStatus
 } from "./calendarEventStatus";
+import { deriveInviteDeckEventBounds } from "./inviteDeckEventBounds";
 import {
   mergeCalendarParticipation,
   normalizeCalendarParticipationStatus,
@@ -132,6 +133,7 @@ const CALENDAR_EVENT_RUNTIME_SIGNATURE = [
   "myPartstatUpdatedAtMs",
   "myAttendeeEmail",
   "replyRequested",
+  "occurrenceMessageIds",
   "emailStatusBackfillV1",
   "emailParticipationBackfillV1"
 ].join("|");
@@ -320,6 +322,9 @@ function ensureCalendarEventOptionalColumns(db: any) {
   }
   if (!calendarEventColumns.has("replyRequested")) {
     db.prepare(`ALTER TABLE calendar_events ADD COLUMN replyRequested INTEGER`).run();
+  }
+  if (!calendarEventColumns.has("occurrenceMessageIds")) {
+    db.prepare(`ALTER TABLE calendar_events ADD COLUMN occurrenceMessageIds TEXT`).run();
   }
 }
 
@@ -941,6 +946,7 @@ function initAccountSchema(db: any) {
       rawIcs TEXT,
       sourceType TEXT NOT NULL DEFAULT 'local',
       messageId TEXT,
+      occurrenceMessageIds TEXT,
       createdAtMs INTEGER NOT NULL,
       updatedAtMs INTEGER NOT NULL,
       deletedAtMs INTEGER
@@ -2369,6 +2375,38 @@ async function collectCalendarReminderMutationsByEventUidFromSource(
   return mutationsByUid;
 }
 
+async function collectInviteDeckGroupsByEventUidKeyFromSource(
+  source: string,
+  nowMs: number
+): Promise<Map<string, string>> {
+  const result = new Map<string, string>();
+  if (!source.trim()) return result;
+  try {
+    const parsed = await simpleParser(source);
+    const parsedAttachments = (parsed.attachments ?? []) as Attachment[];
+    parsedAttachments.forEach((attachment) => {
+      if (!isCalendarAttachment(attachment)) return;
+      const attachmentBuffer = getAttachmentContentBuffer(attachment);
+      if (!attachmentBuffer) return;
+      const groups = collectCalendarInviteMutationGroups(attachmentBuffer.toString("utf8"));
+      groups.forEach((group) => {
+        const eventUidKey = normalizeReminderEventUidKey(group.eventUid);
+        if (!eventUidKey) return;
+        if (result.get(eventUidKey) === "UPCOMING") return;
+        const bounds = deriveInviteDeckEventBounds(group);
+        const nextGroup = buildInviteDeckGroupKeyFromBounds(bounds, nowMs);
+        if (nextGroup === null) return;
+        if (nextGroup === "UPCOMING" || !result.has(eventUidKey)) {
+          result.set(eventUidKey, nextGroup);
+        }
+      });
+    });
+  } catch {
+    return result;
+  }
+  return result;
+}
+
 export async function autoCreateCalendarRemindersFromInvites(
   accountId: string,
   userId: string,
@@ -2817,25 +2855,11 @@ async function getInviteDeckGroupKeysByMessageId(
     if (groupsByMessageId.get(messageId) === "UPCOMING") continue;
     const source = await getMessageSource(accountId, messageId);
     if (!source) continue;
-    const mutationsByUid = await collectCalendarReminderMutationsByEventUidFromSource(
-      source,
-      messageId
-    );
+    const groupsByEventUidKey = await collectInviteDeckGroupsByEventUidKeyFromSource(source, nowMs);
     let fallbackGroup: string | null = null;
     missingEventUids.forEach((eventUidKey) => {
-      const mutation = mutationsByUid.get(eventUidKey);
-      if (!mutation || mutation.kind !== "update") return;
-      const nextGroup = buildInviteDeckGroupKeyFromEvent(
-        {
-          eventStartAtMs: mutation.eventStartAtMs,
-          eventEndAtMs: mutation.eventEndAtMs,
-          startTimezone: mutation.startTimezone,
-          recurrenceRule: mutation.recurrenceRule,
-          recurrenceDates: mutation.recurrenceDates,
-          excludedDates: mutation.excludedDates
-        },
-        nowMs
-      );
+      const nextGroup = groupsByEventUidKey.get(eventUidKey);
+      if (!nextGroup) return;
       if (nextGroup === "UPCOMING") {
         fallbackGroup = "UPCOMING";
         return;
@@ -7106,6 +7130,7 @@ function rowToCalendarEvent(row: any): CalendarEvent {
     rawIcs: row.rawIcs ?? undefined,
     sourceType: (row.sourceType as CalendarEventSourceType) ?? "local",
     messageId: row.messageId ?? undefined,
+    occurrenceMessageIds: row.occurrenceMessageIds ? JSON.parse(row.occurrenceMessageIds) : undefined,
     createdAtMs: row.createdAtMs,
     updatedAtMs: row.updatedAtMs,
     deletedAtMs: row.deletedAtMs ?? undefined
@@ -7336,8 +7361,8 @@ export async function upsertCalendarEvent(
       startAtMs, endAtMs, allDay, startTimezone, endTimezone,
       recurrenceRule, recurrenceDates, excludedDates,
       status, organizer, attendees, myPartstat, myPartstatUpdatedAtMs, myAttendeeEmail, replyRequested,
-      remoteEtag, remoteHref, rawIcs, sourceType, messageId, createdAtMs, updatedAtMs, deletedAtMs
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      remoteEtag, remoteHref, rawIcs, sourceType, messageId, occurrenceMessageIds, createdAtMs, updatedAtMs, deletedAtMs
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     event.id,
     event.accountId,
@@ -7366,10 +7391,37 @@ export async function upsertCalendarEvent(
     event.rawIcs ?? null,
     event.sourceType,
     event.messageId ?? null,
+    event.occurrenceMessageIds && Object.keys(event.occurrenceMessageIds).length > 0
+      ? JSON.stringify(event.occurrenceMessageIds)
+      : null,
     event.createdAtMs,
     event.updatedAtMs,
     event.deletedAtMs ?? null
   );
+}
+
+export async function updateCalendarEventMessageRelations(
+  accountId: string,
+  eventId: string,
+  messageId: string | null,
+  occurrenceMessageIds: Record<string, string> | undefined
+): Promise<void> {
+  return withDbWriteRetry("updateCalendarEventMessageRelations", async () => {
+    const db = await getAccountDb(accountId);
+    db.prepare(
+      `UPDATE calendar_events
+       SET messageId = ?, occurrenceMessageIds = ?, updatedAtMs = ?
+       WHERE accountId = ? AND id = ?`
+    ).run(
+      messageId,
+      occurrenceMessageIds && Object.keys(occurrenceMessageIds).length > 0
+        ? JSON.stringify(occurrenceMessageIds)
+        : null,
+      Date.now(),
+      accountId,
+      eventId
+    );
+  });
 }
 
 export async function deleteCalendarEvent(

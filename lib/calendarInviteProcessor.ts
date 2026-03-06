@@ -99,7 +99,24 @@ function buildMergedCalendarEventFields(
     remoteEtag: existingEvent?.remoteEtag,
     remoteHref: existingEvent?.remoteHref,
     sourceType: "email",
-    messageId,
+    // Only update messageId when the incoming ICS has a full base event (series invite/update).
+    // For occurrence-only changes (e.g. single-occurrence cancellation), preserve the existing
+    // event's messageId so "Open email" continues to point to the original series invite.
+    messageId: group.baseEvent ? messageId : (existingEvent?.messageId ?? messageId),
+    // Merge per-occurrence message links: add/update links for rescheduled occurrences from this ICS.
+    // instanceOccurrences is only populated for REQUEST with RECURRENCE-ID (not CANCEL), so
+    // these are occurrences that are actually visible in the calendar at the new start time.
+    occurrenceMessageIds: (() => {
+      const existing = existingEvent?.occurrenceMessageIds ?? {};
+      if (group.instanceOccurrences.length > 0) {
+        const merged = { ...existing };
+        for (const occ of group.instanceOccurrences) {
+          merged[String(occ.startAtMs)] = messageId;
+        }
+        return merged;
+      }
+      return Object.keys(existing).length > 0 ? existing : undefined;
+    })(),
     rawIcs: icsSource
   };
 }
