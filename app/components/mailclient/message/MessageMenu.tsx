@@ -9,6 +9,7 @@ import {
   Edit3,
   FileText,
   Flag,
+  FolderInput,
   Forward,
   Mail,
   MailCheck,
@@ -47,6 +48,7 @@ type MessageMenuAction =
   | "spam"
   | "archive"
   | "category"
+  | "moveTo"
   | "delete"
   | "unsubscribe"
   | "showRelated"
@@ -85,6 +87,7 @@ type MessageMenuProps = {
   handleOpenHtmlInNewWindow: (message: Message) => void;
   onShowRelated: (message: Message) => void;
   onShowThread: (message: Message) => void;
+  onMoveTo: (message: Message) => void;
   isTrashFolder: (folderId?: string) => boolean;
   isSpamFolder: (folderId?: string) => boolean;
   onOpenChange?: (open: boolean) => void;
@@ -112,6 +115,7 @@ export default function MessageMenu({
   handleOpenHtmlInNewWindow,
   onShowRelated,
   onShowThread,
+  onMoveTo,
   isTrashFolder,
   isSpamFolder,
   onOpenChange
@@ -322,6 +326,15 @@ export default function MessageMenu({
                   <MailX size={14} />,
                   () => handleUnsubscribe(message),
                   isDisabled("unsubscribe")
+                )
+              : null,
+            isVisible("moveTo")
+              ? buildItem(
+                  "moveTo",
+                  "Move to...",
+                  <FolderInput size={14} />,
+                  () => onMoveTo(message),
+                  isDisabled("moveTo")
                 )
               : null,
             showDeleteInMenu && isVisible("delete")

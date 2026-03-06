@@ -26,6 +26,7 @@ import {
 import LoginOverlay from "./auth/LoginOverlay";
 import FolderPane from "./mailclient/folder/FolderPane";
 import FolderTree from "./mailclient/folder/FolderTree";
+import MoveToDialog, { recordRecentMoveFolder } from "./mailclient/message/MoveToDialog";
 import InAppNoticeStack, { type InAppNotice } from "./mailclient/InAppNoticeStack";
 import ComposeInlineCard from "./mailclient/composition/ComposeInlineCard";
 import ComposeMinimized from "./mailclient/composition/ComposeMinimized";
@@ -328,6 +329,7 @@ export default function MailClient({
   const [threadsEnabled, setThreadsEnabled] = useState(true);
   const [showJson, setShowJson] = useState(false);
   const [omitBody, setOmitBody] = useState(true);
+  const [moveToDialogMessage, setMoveToDialogMessage] = useState<Message | null>(null);
   const [collapsedMessages, setCollapsedMessages] = useState<Record<string, boolean>>({});
   const [messageFontScale, setMessageFontScale] = useState<Record<string, number>>({});
   const [appEnvironmentLabel, setAppEnvironmentLabel] = useState("");
@@ -2389,6 +2391,10 @@ export default function MailClient({
     setQuery(`thread:${threadId}`);
   };
 
+  const handleMoveTo = (message: Message) => {
+    setMoveToDialogMessage(message);
+  };
+
   const handleFindRelatedByCalendarInviteUid = (eventUid: string) => {
     const normalizedUid = eventUid.trim().replace(/"/g, "");
     if (!normalizedUid) return;
@@ -2451,6 +2457,7 @@ export default function MailClient({
     handleOpenHtmlInNewWindow,
     handleShowRelated,
     handleShowThread,
+    handleMoveTo,
     isDraftItem,
     isTrashFolder,
     isSpamFolder,
@@ -4623,6 +4630,19 @@ export default function MailClient({
         jsonPayload={jsonPayload}
         onClose={() => setShowJson(false)}
         onToggleOmitBody={() => setOmitBody((value) => !value)}
+      />
+      <MoveToDialog
+        open={moveToDialogMessage !== null}
+        onOpenChange={(open) => { if (!open) setMoveToDialogMessage(null); }}
+        accountId={activeAccountId}
+        rootFolders={rootFolders}
+        folderTree={folderTree}
+        folderById={folderById}
+        onMove={(folderId) => {
+          if (!moveToDialogMessage) return;
+          recordRecentMoveFolder(activeAccountId, folderId);
+          void moveMessagesToFolder(folderId, { messageIds: [moveToDialogMessage.id] });
+        }}
       />
       <BottomStatusBar
         isSyncing={isSyncing}
