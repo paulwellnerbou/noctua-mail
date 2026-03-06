@@ -449,6 +449,7 @@ export default function MessageWindowPage() {
                     handleOpenHtmlInNewWindow={handleOpenHtmlInNewWindow}
                     onShowRelated={noop}
                     onShowThread={noop}
+                    onMoveTo={noop}
                     isTrashFolder={isTrashFolder}
                     isSpamFolder={() => false}
                     onOpenChange={onOpenChange}
