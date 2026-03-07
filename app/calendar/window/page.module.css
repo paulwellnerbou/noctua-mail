@@ -6,6 +6,12 @@
   overflow: hidden;
 }
 
+.detailContainer {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
 .state {
   flex: 1;
   display: flex;

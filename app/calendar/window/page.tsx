@@ -8,6 +8,7 @@ import type { CalendarEvent } from "@/lib/data";
 import type { CalendarReminder } from "@/lib/data";
 import dynamic from "next/dynamic";
 import EventDialog from "@/app/components/calendar/EventDialog";
+import EventDetailPanel from "@/app/components/calendar/EventDetailPanel";
 import styles from "./page.module.css";
 
 const CalendarView = dynamic(() => import("@/app/components/calendar/CalendarView"), { ssr: false });
@@ -17,22 +18,23 @@ function CalendarWindowContent() {
   const accountId = searchParams.get("accountId") ?? "";
   const calendarRef = useRef<FullCalendar>(null);
 
+  const [selectedEvent, setSelectedEvent] = useState<CalendarEvent | CalendarReminder | null>(null);
+  const [selectedKind, setSelectedKind] = useState<"event" | "reminder" | null>(null);
+  const [selectedOccurrenceStartAtMs, setSelectedOccurrenceStartAtMs] = useState<number | undefined>();
   const [eventDialogOpen, setEventDialogOpen] = useState(false);
-  const [editingEvent, setEditingEvent] = useState<Partial<CalendarEvent> | undefined>();
   const [createStart, setCreateStart] = useState<Date | undefined>();
   const [createEnd, setCreateEnd] = useState<Date | undefined>();
   const [createAllDay, setCreateAllDay] = useState(false);
 
-  const handleEventClick = (ev: CalendarEvent | CalendarReminder, kind: "event" | "reminder") => {
-    if (kind === "event") {
-      setEditingEvent(ev as CalendarEvent);
-      setCreateStart(undefined);
-      setEventDialogOpen(true);
-    }
+  const handleEventClick = (ev: CalendarEvent | CalendarReminder, kind: "event" | "reminder", occurrenceStartAtMs?: number) => {
+    setSelectedEvent(ev);
+    setSelectedKind(kind);
+    setSelectedOccurrenceStartAtMs(occurrenceStartAtMs);
   };
 
   const handleCreateEvent = (start: Date, end: Date, allDay: boolean) => {
-    setEditingEvent(undefined);
+    setSelectedEvent(null);
+    setSelectedKind(null);
     setCreateStart(start);
     setCreateEnd(end);
     setCreateAllDay(allDay);
@@ -44,6 +46,18 @@ function CalendarWindowContent() {
   };
 
   const handleDeleted = () => {
+    calendarRef.current?.getApi().refetchEvents();
+  };
+
+  const handleEventUpdated = (event: CalendarEvent) => {
+    setSelectedEvent(event);
+    setSelectedKind("event");
+    calendarRef.current?.getApi().refetchEvents();
+  };
+
+  const handleEventDeleted = () => {
+    setSelectedEvent(null);
+    setSelectedKind(null);
     calendarRef.current?.getApi().refetchEvents();
   };
 
@@ -59,22 +73,38 @@ function CalendarWindowContent() {
 
   return (
     <div className={styles.page}>
-      <CalendarView
-        accountId={accountId}
-        calendarRef={calendarRef}
-        onEventClick={handleEventClick}
-        onCreateEvent={handleCreateEvent}
-      />
+      {selectedEvent && selectedKind ? (
+        <div className={styles.detailContainer}>
+          <EventDetailPanel
+            event={selectedEvent}
+            kind={selectedKind}
+            accountId={accountId}
+            occurrenceStartAtMs={selectedOccurrenceStartAtMs}
+            onBack={() => {
+              setSelectedEvent(null);
+              setSelectedKind(null);
+              setSelectedOccurrenceStartAtMs(undefined);
+            }}
+            onEventUpdated={handleEventUpdated}
+            onEventDeleted={handleEventDeleted}
+          />
+        </div>
+      ) : (
+        <CalendarView
+          accountId={accountId}
+          calendarRef={calendarRef}
+          onEventClick={handleEventClick}
+          onCreateEvent={handleCreateEvent}
+        />
+      )}
       <EventDialog
         open={eventDialogOpen}
         accountId={accountId}
-        event={editingEvent}
         defaultStart={createStart}
         defaultEnd={createEnd}
         defaultAllDay={createAllDay}
         onClose={() => {
           setEventDialogOpen(false);
-          setEditingEvent(undefined);
         }}
         onSaved={handleSaved}
         onDeleted={handleDeleted}
