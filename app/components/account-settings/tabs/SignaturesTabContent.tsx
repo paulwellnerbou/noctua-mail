@@ -88,7 +88,8 @@ export default function SignaturesTabContent({
                   </Field>
                   <Field label="Signature text">
                     <TextArea
-                      rows={4}
+                      rows={8}
+                      style={{ resize: "vertical" }}
                       value={signature.body}
                       onChange={(event) => {
                         const nextSignatures = signatures.map((entry) =>

@@ -12,6 +12,7 @@ type Props = {
   event: CalendarEvent | CalendarReminder;
   kind: "event" | "reminder";
   accountId: string;
+  occurrenceStartAtMs?: number;
   onBack: () => void;
   onOpenMessage?: (messageId: string) => void;
   onFindRelatedByInviteUid?: (uid: string) => void;
@@ -34,6 +35,7 @@ export default function EventDetailPanel({
   event,
   kind,
   accountId,
+  occurrenceStartAtMs,
   onBack,
   onOpenMessage,
   onFindRelatedByInviteUid,
@@ -105,6 +107,11 @@ export default function EventDetailPanel({
           canRespond={Boolean(calEv?.rawIcs && calEv?.myAttendeeEmail)}
           sourceType={calEv?.sourceType}
           messageId={calEv?.messageId ?? reminder?.messageId}
+          occurrenceMessageId={
+            occurrenceStartAtMs != null && calEv?.occurrenceMessageIds
+              ? calEv.occurrenceMessageIds[String(occurrenceStartAtMs)]
+              : undefined
+          }
           eventId={calEv?.id}
           eventStartAtMs={calEv?.startAtMs ?? reminder?.eventStartAtMs}
           eventEndAtMs={calEv?.endAtMs ?? reminder?.eventEndAtMs}

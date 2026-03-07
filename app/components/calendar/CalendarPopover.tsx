@@ -17,6 +17,7 @@ const CalendarView = dynamic(() => import("./CalendarView"), { ssr: false });
 type Props = {
   open: boolean;
   accountId: string;
+  firstDay?: 0 | 1;
   onOpenChange: (open: boolean) => void;
   onOpenSidebar: () => void;
   triggerLabel: string;
@@ -40,6 +41,7 @@ function getInitialPosition(): Position {
 export default function CalendarPopover({
   open,
   accountId,
+  firstDay,
   onOpenChange,
   onOpenSidebar,
   triggerLabel,
@@ -157,6 +159,7 @@ export default function CalendarPopover({
           <CalendarView
             accountId={accountId}
             calendarRef={calendarRef}
+            firstDay={firstDay}
             onEventClick={handleEventClick}
             onCreateEvent={(start, end, allDay) => {
               setCreateStart(start);

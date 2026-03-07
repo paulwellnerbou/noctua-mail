@@ -23,7 +23,12 @@ export type CalendarViewHandle = {
 type Props = {
   accountId: string;
   compact?: boolean;
-  onEventClick?: (event: CalendarEvent | CalendarReminder, kind: "event" | "reminder") => void;
+  firstDay?: 0 | 1;
+  onEventClick?: (
+    event: CalendarEvent | CalendarReminder,
+    kind: "event" | "reminder",
+    occurrenceStartAtMs?: number
+  ) => void;
   onDateClick?: (date: Date) => void;
   onCreateEvent?: (start: Date, end: Date, allDay: boolean) => void;
   calendarRef?: React.RefObject<FullCalendar | null>;
@@ -44,7 +49,7 @@ function calendarEventToFcEvent(
       `fc-event-${ev.sourceType}`,
       ...(ev.myPartstat ? [`fc-event-partstat-${ev.myPartstat.toLowerCase().replace(/-/g, "")}`] : [])
     ],
-    extendedProps: { kind: "event", data: ev }
+    extendedProps: { kind: "event", data: ev, displayStartAtMs }
   };
 }
 
@@ -64,6 +69,7 @@ function reminderToFcEvent(r: CalendarReminder): EventInput {
 export default function CalendarView({
   accountId,
   compact = false,
+  firstDay = 1,
   onEventClick,
   onDateClick,
   onCreateEvent,
@@ -135,8 +141,12 @@ export default function CalendarView({
 
   const handleEventClick = useCallback(
     (arg: EventClickArg) => {
-      const props = arg.event.extendedProps as { kind: "event" | "reminder"; data: CalendarEvent | CalendarReminder };
-      onEventClick?.(props.data, props.kind);
+      const props = arg.event.extendedProps as {
+        kind: "event" | "reminder";
+        data: CalendarEvent | CalendarReminder;
+        displayStartAtMs?: number;
+      };
+      onEventClick?.(props.data, props.kind, props.displayStartAtMs);
     },
     [onEventClick]
   );
@@ -168,6 +178,7 @@ export default function CalendarView({
           plugins={[dayGridPlugin, rrulePlugin]}
           initialView="dayGridMonth"
           headerToolbar={false}
+          firstDay={firstDay}
           events={fcEvents}
           datesSet={handleDatesSet}
           eventClick={handleEventClick}
@@ -190,6 +201,7 @@ export default function CalendarView({
         center: "title",
         right: "dayGridMonth,timeGridWeek,timeGridDay"
       }}
+      firstDay={firstDay}
       events={fcEvents}
       datesSet={handleDatesSet}
       eventClick={handleEventClick}

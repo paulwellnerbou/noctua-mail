@@ -278,6 +278,8 @@ export function useAccountController({
     if (refreshed.ok) {
       const nextAccounts = (await refreshed.json()) as Account[];
       setAccounts(nextAccounts);
+      setManageOpen(false);
+      setEditingAccount(null);
     } else {
       reportError(await readErrorMessage(refreshed));
     }

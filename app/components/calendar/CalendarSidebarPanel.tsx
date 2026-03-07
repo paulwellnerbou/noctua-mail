@@ -16,6 +16,7 @@ const CalendarView = dynamic(() => import("./CalendarView"), { ssr: false });
 
 type Props = {
   accountId: string;
+  firstDay?: 0 | 1;
   onClose: () => void;
   onOpenMessage?: (messageId: string) => void;
   onFindRelatedByInviteUid?: (uid: string) => void;
@@ -23,6 +24,7 @@ type Props = {
 
 export default function CalendarSidebarPanel({
   accountId,
+  firstDay,
   onClose,
   onOpenMessage,
   onFindRelatedByInviteUid
@@ -30,6 +32,7 @@ export default function CalendarSidebarPanel({
   const calendarRef = useRef<FullCalendar>(null);
   const [selectedEvent, setSelectedEvent] = useState<CalendarEvent | CalendarReminder | null>(null);
   const [selectedKind, setSelectedKind] = useState<"event" | "reminder" | null>(null);
+  const [selectedOccurrenceStartAtMs, setSelectedOccurrenceStartAtMs] = useState<number | undefined>();
   const [recomputingRelations, setRecomputingRelations] = useState(false);
   const [eventDialogOpen, setEventDialogOpen] = useState(false);
   const [createStart, setCreateStart] = useState<Date | undefined>();
@@ -63,9 +66,14 @@ export default function CalendarSidebarPanel({
     }
   };
 
-  const handleEventClick = (ev: CalendarEvent | CalendarReminder, kind: "event" | "reminder") => {
+  const handleEventClick = (
+    ev: CalendarEvent | CalendarReminder,
+    kind: "event" | "reminder",
+    occurrenceStartAtMs?: number
+  ) => {
     setSelectedEvent(ev);
     setSelectedKind(kind);
+    setSelectedOccurrenceStartAtMs(occurrenceStartAtMs);
   };
 
   const handleCreateEvent = (start: Date, end: Date, allDay: boolean) => {
@@ -141,9 +149,11 @@ export default function CalendarSidebarPanel({
             event={selectedEvent}
             kind={selectedKind}
             accountId={accountId}
+            occurrenceStartAtMs={selectedOccurrenceStartAtMs}
             onBack={() => {
               setSelectedEvent(null);
               setSelectedKind(null);
+              setSelectedOccurrenceStartAtMs(undefined);
             }}
             onOpenMessage={onOpenMessage}
             onFindRelatedByInviteUid={onFindRelatedByInviteUid}
@@ -154,6 +164,7 @@ export default function CalendarSidebarPanel({
           <CalendarView
             accountId={accountId}
             calendarRef={calendarRef}
+            firstDay={firstDay}
             onEventClick={handleEventClick}
             onCreateEvent={handleCreateEvent}
           />

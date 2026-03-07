@@ -32,6 +32,7 @@ type BottomStatusBarProps = {
   onOpenCalendarSidebar: () => void;
   onOpenCalendarMessage?: (messageId: string) => void;
   onFindRelatedCalendarInviteUid?: (uid: string) => void;
+  calendarFirstDay?: 0 | 1;
 };
 
 export default function BottomStatusBar({
@@ -52,7 +53,8 @@ export default function BottomStatusBar({
   formatRelativeTime,
   onOpenCalendarSidebar,
   onOpenCalendarMessage,
-  onFindRelatedCalendarInviteUid
+  onFindRelatedCalendarInviteUid,
+  calendarFirstDay
 }: BottomStatusBarProps) {
   const [processPanelOpen, setProcessPanelOpen] = useState(false);
   const [exceptionPanelOpen, setExceptionPanelOpen] = useState(false);
@@ -150,6 +152,7 @@ export default function BottomStatusBar({
       <CalendarPopover
         open={calendarPanelOpen}
         accountId={activeAccountId}
+        firstDay={calendarFirstDay}
         onOpenChange={handleCalendarPanelOpenChange}
         onOpenSidebar={onOpenCalendarSidebar}
         triggerLabel={currentDateTimeLabel}

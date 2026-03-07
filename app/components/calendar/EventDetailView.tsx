@@ -48,6 +48,8 @@ export type EventDetailViewProps = {
   canRespond?: boolean;
   sourceType?: string;
   messageId?: string;
+  /** Email specific to this occurrence (e.g. a reschedule or update for just this date). */
+  occurrenceMessageId?: string;
   eventId?: string;
   /** The canonical event start used for reminder matching (e.g. original series start for recurring events) */
   eventStartAtMs?: number;
@@ -167,6 +169,7 @@ export default function EventDetailView({
   canRespond = false,
   sourceType,
   messageId,
+  occurrenceMessageId,
   eventId,
   eventStartAtMs,
   eventEndAtMs,
@@ -673,10 +676,21 @@ export default function EventDetailView({
               {deletingReminder ? "Removing…" : "Remove reminder"}
             </Button>
           )}
+          {occurrenceMessageId && onOpenMessage && (
+            <Button
+              size="1"
+              variant="soft"
+              color="gray"
+              onClick={() => onOpenMessage(occurrenceMessageId)}
+            >
+              <Mail size={12} />
+              Open occurrence email
+            </Button>
+          )}
           {messageId && onOpenMessage && (
             <Button size="1" variant="soft" color="gray" onClick={() => onOpenMessage(messageId)}>
               <Mail size={12} />
-              Open email
+              {occurrenceMessageId ? "Open series email" : "Open email"}
             </Button>
           )}
           {eventId && currentMyPartstat === "DECLINED" && onEventDeleted && (

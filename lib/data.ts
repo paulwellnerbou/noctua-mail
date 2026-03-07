@@ -49,6 +49,9 @@ export type AccountSettings = {
   appearance?: {
     dateFormat?: AccountDateFormat;
   };
+  calendar?: {
+    weekStartsOn?: "monday" | "sunday";
+  };
   signatures?: {
     id: string;
     name: string;

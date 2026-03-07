@@ -77,12 +77,38 @@ export default function CalendarTabContent({
 
   const canTest = Boolean(caldav?.url?.trim() && caldav?.user?.trim() && caldav?.password?.trim());
 
+  const weekStartsOn = editingAccount.settings?.calendar?.weekStartsOn ?? "monday";
+
+  const updateWeekStartsOn = (value: "monday" | "sunday") => {
+    onUpdateAccount({
+      ...editingAccount,
+      settings: {
+        ...editingAccount.settings,
+        calendar: {
+          ...editingAccount.settings?.calendar,
+          weekStartsOn: value
+        }
+      }
+    });
+  };
+
   return (
     <Flex direction="column" gap="4" style={{ height: "100%", minHeight: 0 }}>
       <Flex direction="column" gap="4" style={{ flex: "1 1 auto", minHeight: 0, overflow: "auto" }}>
-        <Text size="2" color="gray">
-          Connect to a CalDAV server to sync calendar events.
-        </Text>
+        <Flex direction="column" gap="3">
+          <Text size="3" weight="medium">
+            Appearance
+          </Text>
+          <Field label="Week starts on">
+            <Select.Root value={weekStartsOn} onValueChange={(v) => updateWeekStartsOn(v as "monday" | "sunday")}>
+              <Select.Trigger style={{ width: "100%" }} />
+              <Select.Content position="popper">
+                <Select.Item value="monday">Monday</Select.Item>
+                <Select.Item value="sunday">Sunday</Select.Item>
+              </Select.Content>
+            </Select.Root>
+          </Field>
+        </Flex>
 
         <Flex direction="column" gap="3">
           <Flex align="center" gap="2">

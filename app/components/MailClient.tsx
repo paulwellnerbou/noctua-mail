@@ -1358,6 +1358,7 @@ export default function MailClient({
       .replace(/(^|\\n)--/g, "$1--");
 
   const currentAccount = accounts.find((account) => account.id === activeAccountId) ?? null;
+  const calendarFirstDay: 0 | 1 = currentAccount?.settings?.calendar?.weekStartsOn === "sunday" ? 0 : 1;
   const accountSignatures = currentAccount?.settings?.signatures ?? [];
   const defaultSignatureId = currentAccount?.settings?.defaultSignatureId ?? "";
   const selectedSignature =
@@ -4521,6 +4522,7 @@ export default function MailClient({
             <div style={{ width: calendarSidebarWidth, flexShrink: 0, display: "flex", flexDirection: "column", minHeight: 0, overflow: "hidden" }}>
               <CalendarSidebarPanel
                 accountId={activeAccountId}
+                firstDay={calendarFirstDay}
                 onClose={() => setCalendarSidebarOpen(false)}
                 onOpenMessage={handleOpenCalendarMessage}
                 onFindRelatedByInviteUid={handleFindRelatedByCalendarInviteUid}
@@ -4667,6 +4669,7 @@ export default function MailClient({
         onOpenCalendarSidebar={() => setCalendarSidebarOpen(true)}
         onOpenCalendarMessage={handleOpenCalendarMessage}
         onFindRelatedCalendarInviteUid={handleFindRelatedByCalendarInviteUid}
+        calendarFirstDay={calendarFirstDay}
       />
     </div>
   );
