@@ -15,9 +15,6 @@
 }
 
 .header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
   padding: 7px 10px;
   background: var(--surface-2);
   border-bottom: 1px solid var(--border);
@@ -29,36 +26,7 @@
   cursor: grabbing;
 }
 
-.headerTitle {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
 
-.headerActions {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-}
-
-.headerButton {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  padding: 0;
-  background: none;
-  border: none;
-  border-radius: var(--radius-2);
-  color: var(--gray-11);
-  cursor: pointer;
-}
-
-.headerButton:hover {
-  background: var(--gray-a3);
-  color: var(--gray-12);
-}
 
 .body {
   flex: 1;

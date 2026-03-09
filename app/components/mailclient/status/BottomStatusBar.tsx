@@ -17,6 +17,7 @@ type BottomStatusBarProps = {
   isSyncing: boolean;
   isRecomputingThreads: boolean;
   isRecomputingCategories: boolean;
+  isRecomputingCalendarRelations: boolean;
   syncingFolders: Set<string>;
   syncProgressItems: SyncJobProgress[];
   accountFolders: Folder[];
@@ -32,6 +33,7 @@ type BottomStatusBarProps = {
   onOpenCalendarSidebar: () => void;
   onOpenCalendarMessage?: (messageId: string) => void;
   onFindRelatedCalendarInviteUid?: (uid: string) => void;
+  onRecomputeCalendarRelations: () => Promise<void>;
   calendarFirstDay?: 0 | 1;
 };
 
@@ -39,6 +41,7 @@ export default function BottomStatusBar({
   isSyncing,
   isRecomputingThreads,
   isRecomputingCategories,
+  isRecomputingCalendarRelations,
   syncingFolders,
   syncProgressItems,
   accountFolders,
@@ -54,6 +57,7 @@ export default function BottomStatusBar({
   onOpenCalendarSidebar,
   onOpenCalendarMessage,
   onFindRelatedCalendarInviteUid,
+  onRecomputeCalendarRelations,
   calendarFirstDay
 }: BottomStatusBarProps) {
   const [processPanelOpen, setProcessPanelOpen] = useState(false);
@@ -140,6 +144,7 @@ export default function BottomStatusBar({
         isSyncing={isSyncing}
         isRecomputingThreads={isRecomputingThreads}
         isRecomputingCategories={isRecomputingCategories}
+        isRecomputingCalendarRelations={isRecomputingCalendarRelations}
         syncingFolders={syncingFolders}
         syncProgressItems={syncProgressItems}
         accountFolders={accountFolders}
@@ -158,6 +163,8 @@ export default function BottomStatusBar({
         triggerLabel={currentDateTimeLabel}
         onOpenMessage={onOpenCalendarMessage}
         onFindRelatedByInviteUid={onFindRelatedCalendarInviteUid}
+        onRecomputeRelations={onRecomputeCalendarRelations}
+        isRecomputingRelations={isRecomputingCalendarRelations}
       />
       <ExceptionStatusPopover
         open={exceptionPanelOpen}

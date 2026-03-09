@@ -2,8 +2,8 @@
 
 import { useRef, useState } from "react";
 import FullCalendar from "@fullcalendar/react";
-import { Flex, Heading, IconButton } from "@radix-ui/themes";
-import { X, ExternalLink, RefreshCw } from "lucide-react";
+import { DropdownMenu, Flex, Heading, IconButton } from "@radix-ui/themes";
+import { X, ExternalLink, MoreVertical } from "lucide-react";
 import { openDetachedWindow } from "@/lib/ui/openDetachedWindow";
 import type { CalendarEvent } from "@/lib/data";
 import type { CalendarReminder } from "@/lib/data";
@@ -20,6 +20,8 @@ type Props = {
   onClose: () => void;
   onOpenMessage?: (messageId: string) => void;
   onFindRelatedByInviteUid?: (uid: string) => void;
+  onRecomputeRelations?: () => Promise<void>;
+  isRecomputingRelations?: boolean;
 };
 
 export default function CalendarSidebarPanel({
@@ -27,13 +29,14 @@ export default function CalendarSidebarPanel({
   firstDay,
   onClose,
   onOpenMessage,
-  onFindRelatedByInviteUid
+  onFindRelatedByInviteUid,
+  onRecomputeRelations,
+  isRecomputingRelations
 }: Props) {
   const calendarRef = useRef<FullCalendar>(null);
   const [selectedEvent, setSelectedEvent] = useState<CalendarEvent | CalendarReminder | null>(null);
   const [selectedKind, setSelectedKind] = useState<"event" | "reminder" | null>(null);
   const [selectedOccurrenceStartAtMs, setSelectedOccurrenceStartAtMs] = useState<number | undefined>();
-  const [recomputingRelations, setRecomputingRelations] = useState(false);
   const [eventDialogOpen, setEventDialogOpen] = useState(false);
   const [createStart, setCreateStart] = useState<Date | undefined>();
   const [createEnd, setCreateEnd] = useState<Date | undefined>();
@@ -44,26 +47,9 @@ export default function CalendarSidebarPanel({
   };
 
   const handleRecomputeRelations = async () => {
-    if (recomputingRelations) return;
-    setRecomputingRelations(true);
-    try {
-      const res = await fetch("/api/calendar/recompute-relations", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ accountId })
-      });
-      const data = await res.json();
-      if (data.ok) {
-        console.log("[Calendar] Recomputed event relations:", data);
-        calendarRef.current?.getApi().refetchEvents();
-      } else {
-        console.error("[Calendar] Recompute relations failed:", data);
-      }
-    } catch (err) {
-      console.error("[Calendar] Recompute relations error:", err);
-    } finally {
-      setRecomputingRelations(false);
-    }
+    if (!onRecomputeRelations) return;
+    await onRecomputeRelations();
+    calendarRef.current?.getApi().refetchEvents();
   };
 
   const handleEventClick = (
@@ -111,17 +97,21 @@ export default function CalendarSidebarPanel({
       <Flex align="center" justify="between" className={styles.header}>
         <Heading size="2">Calendar</Heading>
         <Flex gap="1" align="center">
-          <IconButton
-            size="1"
-            variant="ghost"
-            color="gray"
-            title="Recompute event-email relations"
-            aria-label="Recompute event-email relations"
-            disabled={recomputingRelations}
-            onClick={handleRecomputeRelations}
-          >
-            <RefreshCw size={13} style={recomputingRelations ? { opacity: 0.5 } : undefined} />
-          </IconButton>
+          <DropdownMenu.Root>
+            <DropdownMenu.Trigger>
+              <IconButton size="1" variant="ghost" color="gray" title="Calendar options" aria-label="Calendar options">
+                <MoreVertical size={13} />
+              </IconButton>
+            </DropdownMenu.Trigger>
+            <DropdownMenu.Content align="end" sideOffset={4}>
+              <DropdownMenu.Item
+                disabled={isRecomputingRelations}
+                onSelect={() => void handleRecomputeRelations()}
+              >
+                Recompute event associations
+              </DropdownMenu.Item>
+            </DropdownMenu.Content>
+          </DropdownMenu.Root>
           <IconButton
             size="1"
             variant="ghost"

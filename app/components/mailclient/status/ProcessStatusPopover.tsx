@@ -16,6 +16,7 @@ type ProcessStatusPopoverProps = {
   isSyncing: boolean;
   isRecomputingThreads: boolean;
   isRecomputingCategories: boolean;
+  isRecomputingCalendarRelations: boolean;
   syncingFolders: Set<string>;
   syncProgressItems: SyncJobProgress[];
   accountFolders: Folder[];
@@ -86,6 +87,7 @@ export default function ProcessStatusPopover({
   isSyncing,
   isRecomputingThreads,
   isRecomputingCategories,
+  isRecomputingCalendarRelations,
   syncingFolders,
   syncProgressItems,
   accountFolders
@@ -127,7 +129,8 @@ export default function ProcessStatusPopover({
   ];
   const additionalProcessRows = [
     isRecomputingThreads ? "Recomputing threads…" : "",
-    isRecomputingCategories ? "Recomputing categories…" : ""
+    isRecomputingCategories ? "Recomputing categories…" : "",
+    isRecomputingCalendarRelations ? "Recomputing calendar event associations…" : ""
   ].filter(Boolean);
   const activeProcessCount = syncRows.length + additionalProcessRows.length;
   const latestSyncProgress = sortedSyncProgressItems[0] ?? null;

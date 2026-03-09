@@ -9,10 +9,14 @@ export type ExceptionEntry = {
   timestamp: number;
 };
 
-export type ThreadDeleteConfirmState = {
+export type DeleteConfirmState = {
+  kind: "message" | "messages" | "thread";
   messageCount: number;
   moveToTrashCount: number;
   permanentDeleteCount: number;
+  calendarLinkedMessageCount: number;
+  calendarLinkedReminderCount: number;
+  calendarLinkedEventCount: number;
 };
 
 export type NoticeInput = Omit<InAppNotice, "id" | "expiresAt"> & {

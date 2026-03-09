@@ -3,9 +3,14 @@
 import type React from "react";
 import { useCallback } from "react";
 import type { Folder, Message } from "@/lib/data";
+import type { DeleteConfirmState } from "./types";
 import type { SelectionStore } from "./messagelist/selectionStore";
 import { resolveCollapsedThreadSelectionTarget } from "./messagelist/listSelection";
 import type { MoveMessagesToFolder, UndoMoveTarget } from "./useMessageMoveActions";
+import {
+  collectDeleteConfirmEventUids,
+  summarizeDeleteCalendarAssociations
+} from "./utils/deleteConfirm";
 import {
   getMessageSubjectForNotice,
   pruneDetachedCrossFolderThreadMessages
@@ -35,10 +40,9 @@ type DeleteNoticeInput = {
   durationMs?: number | null;
 };
 
-type ConfirmThreadDeleteInput = {
-  messageCount: number;
-  moveToTrashCount: number;
-  permanentDeleteCount: number;
+type DeleteAssociationLookupResponse = {
+  reminders?: Array<{ id?: string; messageId?: string | null; eventUid?: string | null }>;
+  events?: Array<{ id?: string; eventUid?: string | null }>;
 };
 
 type UseMessageDeleteActionsOptions = {
@@ -70,7 +74,7 @@ type UseMessageDeleteActionsOptions = {
   readErrorMessage: (res: Response) => Promise<string>;
   reportError: (message: string) => void;
   pushNotice: (input: DeleteNoticeInput) => void;
-  confirmThreadDelete: (input: ConfirmThreadDeleteInput) => Promise<boolean>;
+  confirmDelete: (input: DeleteConfirmState) => Promise<boolean>;
   undoMoveOperation: (
     targets: UndoMoveTarget[],
     accountId: string,
@@ -111,7 +115,7 @@ export function useMessageDeleteActions({
   readErrorMessage,
   reportError,
   pushNotice,
-  confirmThreadDelete,
+  confirmDelete,
   undoMoveOperation,
   noticeSuccessTimeout,
   onMessagesRemoved,
@@ -136,6 +140,63 @@ export function useMessageDeleteActions({
     const bySpecialUse = candidates.find((folder) => (folder.specialUse ?? "").toLowerCase() === "\\trash");
     return bySpecialUse?.id ?? null;
   }, [activeAccountId, folders]);
+
+  const buildDeleteConfirmState = useCallback(
+    async (
+      targets: Message[],
+      kind: DeleteConfirmState["kind"]
+    ): Promise<DeleteConfirmState> => {
+      const trashFolderId = findTrashFolderId();
+      const permanentDeleteCount = targets.filter((target) =>
+        isPermanentDeleteTarget(target, trashFolderId)
+      ).length;
+      const eventUids = collectDeleteConfirmEventUids(targets);
+      let calendarLinkedMessageCount = 0;
+      let calendarLinkedReminderCount = 0;
+      let calendarLinkedEventCount = 0;
+
+      if (targets.length > 0) {
+        try {
+          const res = await apiFetch("/api/message/delete/associations", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              accountId: activeAccountId,
+              messageIds: targets.map((target) => target.id),
+              eventUids
+            })
+          });
+          if (res.ok) {
+            const data = (await res.json()) as DeleteAssociationLookupResponse;
+            const summary = summarizeDeleteCalendarAssociations(targets, {
+              reminders: (data.reminders ?? []).flatMap((item) =>
+                item.id ? [{ id: item.id, messageId: item.messageId, eventUid: item.eventUid }] : []
+              ),
+              events: (data.events ?? []).flatMap((item) =>
+                item.id ? [{ id: item.id, eventUid: item.eventUid }] : []
+              )
+            });
+            calendarLinkedMessageCount = summary.linkedMessageCount;
+            calendarLinkedReminderCount = summary.linkedReminderCount;
+            calendarLinkedEventCount = summary.linkedEventCount;
+          }
+        } catch {
+          // Ignore lookup failures and preserve the default delete flow.
+        }
+      }
+
+      return {
+        kind,
+        messageCount: targets.length,
+        moveToTrashCount: targets.length - permanentDeleteCount,
+        permanentDeleteCount,
+        calendarLinkedMessageCount,
+        calendarLinkedReminderCount,
+        calendarLinkedEventCount
+      };
+    },
+    [activeAccountId, apiFetch, findTrashFolderId, isPermanentDeleteTarget]
+  );
 
   const deleteSingleMessagePermanently = useCallback(
     async (target: Message) => {
@@ -466,10 +527,10 @@ export function useMessageDeleteActions({
       clearSelectionState,
       deleteMessagesPermanently,
       findTrashFolderId,
-      getMessageSubjectForNotice,
       isPermanentDeleteTarget,
       lastSelectedIdRef,
       moveMessagesToFolder,
+      messages,
       pushDeleteNotice,
       refreshFolders,
       reportError,
@@ -498,17 +559,16 @@ export function useMessageDeleteActions({
         collapsedThreads[threadId] &&
         threadItems.length > 1;
       const targets = isCollapsedThread ? threadItems : [message];
-      if (isCollapsedThread) {
-        const trashFolderId = findTrashFolderId();
-        const permanentDeleteCount = targets.filter((target) =>
-          isPermanentDeleteTarget(target, trashFolderId)
-        ).length;
-        const moveToTrashCount = targets.length - permanentDeleteCount;
-        const confirmed = await confirmThreadDelete({
-          messageCount: threadItems.length,
-          moveToTrashCount,
-          permanentDeleteCount
-        });
+      const deleteConfirm = await buildDeleteConfirmState(
+        targets,
+        isCollapsedThread ? "thread" : "message"
+      );
+      const requiresDeleteConfirm =
+        isCollapsedThread ||
+        deleteConfirm.calendarLinkedReminderCount > 0 ||
+        deleteConfirm.calendarLinkedEventCount > 0;
+      if (requiresDeleteConfirm) {
+        const confirmed = await confirmDelete(deleteConfirm);
         if (!confirmed) return;
       }
       await runDeleteTransaction(targets, {
@@ -518,10 +578,9 @@ export function useMessageDeleteActions({
     },
     [
       activeAccountId,
+      buildDeleteConfirmState,
       collapsedThreads,
-      confirmThreadDelete,
-      findTrashFolderId,
-      isPermanentDeleteTarget,
+      confirmDelete,
       runDeleteTransaction,
       supportsThreads,
       threadScopeMessages
@@ -539,12 +598,23 @@ export function useMessageDeleteActions({
             messages.find((item) => item.id === id)
         )
         .filter((message): message is Message => Boolean(message));
+      const deleteConfirm = await buildDeleteConfirmState(
+        targets,
+        targets.length > 1 ? "messages" : "message"
+      );
+      const requiresDeleteConfirm =
+        deleteConfirm.calendarLinkedReminderCount > 0 ||
+        deleteConfirm.calendarLinkedEventCount > 0;
+      if (requiresDeleteConfirm) {
+        const confirmed = await confirmDelete(deleteConfirm);
+        if (!confirmed) return;
+      }
       await runDeleteTransaction(targets, {
         errorMessage: "Failed to delete messages.",
         clearSelectionWhenActiveRemains: true
       });
     },
-    [messages, runDeleteTransaction, threadScopeMessages]
+    [buildDeleteConfirmState, confirmDelete, messages, runDeleteTransaction, threadScopeMessages]
   );
 
   return {

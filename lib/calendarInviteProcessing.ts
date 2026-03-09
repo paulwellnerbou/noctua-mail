@@ -55,6 +55,7 @@ export function inferCalendarInviteMessageActionType(
 export function collectCalendarInviteMutationGroups(icsSource: string): CalendarInviteMutationGroup[] {
   const parsed = parseIcsInvite(icsSource);
   const method = parsed.method?.trim().toUpperCase() || "";
+  if (method === "REPLY") return [];
   const groupsByUid = new Map<string, CalendarInviteMutationGroup>();
 
   const getGroup = (eventUid: string) => {

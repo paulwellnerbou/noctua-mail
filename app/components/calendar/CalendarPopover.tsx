@@ -3,8 +3,8 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import FullCalendar from "@fullcalendar/react";
-import { Heading } from "@radix-ui/themes";
-import { CalendarDays, ExternalLink, PanelRight, X } from "lucide-react";
+import { DropdownMenu, Flex, Heading, IconButton } from "@radix-ui/themes";
+import { CalendarDays, ExternalLink, MoreVertical, PanelRight, X } from "lucide-react";
 import type { CalendarEvent, CalendarReminder } from "@/lib/data";
 import { openDetachedWindow } from "@/lib/ui/openDetachedWindow";
 import dynamic from "next/dynamic";
@@ -23,6 +23,8 @@ type Props = {
   triggerLabel: string;
   onOpenMessage?: (messageId: string) => void;
   onFindRelatedByInviteUid?: (uid: string) => void;
+  onRecomputeRelations?: () => Promise<void>;
+  isRecomputingRelations?: boolean;
 };
 
 type Position = { x: number; y: number };
@@ -46,7 +48,9 @@ export default function CalendarPopover({
   onOpenSidebar,
   triggerLabel,
   onOpenMessage,
-  onFindRelatedByInviteUid
+  onFindRelatedByInviteUid,
+  onRecomputeRelations,
+  isRecomputingRelations
 }: Props) {
   const calendarRef = useRef<FullCalendar>(null);
   const [position, setPosition] = useState<Position>(getInitialPosition);
@@ -87,6 +91,12 @@ export default function CalendarPopover({
     document.addEventListener("mouseup", onUp);
   };
 
+  const handleRecomputeRelations = async () => {
+    if (!onRecomputeRelations) return;
+    await onRecomputeRelations();
+    calendarRef.current?.getApi().refetchEvents();
+  };
+
   const handleOpenWindow = () => {
     openDetachedWindow(`/calendar/window?accountId=${encodeURIComponent(accountId)}`);
     onOpenChange(false);
@@ -123,23 +133,38 @@ export default function CalendarPopover({
       className={styles.floatingPanel}
       style={{ left: position.x, top: position.y }}
     >
-      <div className={styles.header} onMouseDown={handleDragStart}>
-        <div className={styles.headerTitle}>
+      <Flex align="center" justify="between" className={styles.header} onMouseDown={handleDragStart}>
+        <Flex align="center" gap="2">
           <CalendarDays size={14} />
           <Heading size="3">Calendar</Heading>
-        </div>
-        <div className={styles.headerActions}>
-          <button className={styles.headerButton} title="Open in sidebar" aria-label="Open calendar in sidebar" onClick={handleOpenSidebar}>
-            <PanelRight size={16} />
-          </button>
-          <button className={styles.headerButton} title="Open in window" aria-label="Open calendar in window" onClick={handleOpenWindow}>
-            <ExternalLink size={16} />
-          </button>
-          <button className={styles.headerButton} aria-label="Close calendar" onClick={() => onOpenChange(false)}>
-            <X size={16} />
-          </button>
-        </div>
-      </div>
+        </Flex>
+        <Flex gap="2" align="center">
+          <DropdownMenu.Root>
+            <DropdownMenu.Trigger>
+              <IconButton size="1" variant="ghost" color="gray" title="Calendar options" aria-label="Calendar options">
+                <MoreVertical size={14} />
+              </IconButton>
+            </DropdownMenu.Trigger>
+            <DropdownMenu.Content align="end" sideOffset={4}>
+              <DropdownMenu.Item
+                disabled={isRecomputingRelations}
+                onSelect={() => void handleRecomputeRelations()}
+              >
+                Recompute event associations
+              </DropdownMenu.Item>
+            </DropdownMenu.Content>
+          </DropdownMenu.Root>
+          <IconButton size="1" variant="ghost" color="gray" title="Open in sidebar" aria-label="Open calendar in sidebar" onClick={handleOpenSidebar}>
+            <PanelRight size={14} />
+          </IconButton>
+          <IconButton size="1" variant="ghost" color="gray" title="Open in window" aria-label="Open calendar in window" onClick={handleOpenWindow}>
+            <ExternalLink size={14} />
+          </IconButton>
+          <IconButton size="1" variant="ghost" color="gray" aria-label="Close calendar" onClick={() => onOpenChange(false)}>
+            <X size={14} />
+          </IconButton>
+        </Flex>
+      </Flex>
 
       <div className={styles.body}>
         {selectedEvent && selectedKind ? (

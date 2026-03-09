@@ -1955,6 +1955,92 @@ export async function listCalendarReminders(accountId: string, userId: string) {
     .sort((a, b) => a.triggerAtMs - b.triggerAtMs);
 }
 
+export async function listDeleteCalendarAssociations(
+  accountId: string,
+  userId: string,
+  messageIds: string[],
+  eventUids: string[]
+) {
+  const uniqueMessageIds = Array.from(
+    new Set(messageIds.map((value) => value.trim()).filter((value): value is string => Boolean(value)))
+  );
+  const uniqueEventUidKeys = Array.from(
+    new Set(
+      eventUids
+        .map((value) => normalizeReminderEventUidKey(value))
+        .filter((value): value is string => Boolean(value))
+    )
+  );
+  if (uniqueMessageIds.length === 0 && uniqueEventUidKeys.length === 0) {
+    return { reminders: [], events: [] };
+  }
+
+  const db = await getAccountDb(accountId);
+  const reminderClauses: string[] = [];
+  const reminderArgs: Array<string> = [accountId, userId];
+
+  if (uniqueMessageIds.length > 0) {
+    const placeholders = uniqueMessageIds.map(() => "?").join(", ");
+    reminderClauses.push(`messageId IN (${placeholders})`);
+    reminderArgs.push(...uniqueMessageIds);
+  }
+
+  if (uniqueEventUidKeys.length > 0) {
+    const placeholders = uniqueEventUidKeys.map(() => "?").join(", ");
+    reminderClauses.push(`lower(COALESCE(eventUidKey, eventUid, '')) IN (${placeholders})`);
+    reminderArgs.push(...uniqueEventUidKeys);
+  }
+
+  const reminderRows =
+    reminderClauses.length > 0
+      ? (db
+          .prepare(
+            `SELECT id, messageId, eventUid
+             FROM calendar_reminders
+             WHERE accountId = ? AND userId = ? AND deletedAtMs IS NULL
+               AND (${reminderClauses.join(" OR ")})`
+          )
+          .all(...reminderArgs) as Array<{
+          id?: string | null;
+          messageId?: string | null;
+          eventUid?: string | null;
+        }>)
+      : [];
+
+  const eventRows =
+    uniqueEventUidKeys.length > 0
+      ? (db
+          .prepare(
+            `SELECT id, eventUid
+             FROM calendar_events
+             WHERE accountId = ? AND deletedAtMs IS NULL
+               AND lower(COALESCE(eventUidKey, eventUid, '')) IN (${uniqueEventUidKeys
+                 .map(() => "?")
+                 .join(", ")})`
+          )
+          .all(accountId, ...uniqueEventUidKeys) as Array<{
+          id?: string | null;
+          eventUid?: string | null;
+        }>)
+      : [];
+
+  return {
+    reminders: reminderRows
+      .map((row) => ({
+        id: row.id?.trim() ?? "",
+        messageId: row.messageId?.trim() || undefined,
+        eventUid: row.eventUid?.trim() || undefined
+      }))
+      .filter((row) => Boolean(row.id)),
+    events: eventRows
+      .map((row) => ({
+        id: row.id?.trim() ?? "",
+        eventUid: row.eventUid?.trim() || undefined
+      }))
+      .filter((row) => Boolean(row.id))
+  };
+}
+
 function findMatchingCalendarReminderRows(
   db: any,
   accountId: string,
@@ -3341,6 +3427,20 @@ export async function markMessageCalendarInviteStatesProcessed(
       ) as { changes?: number };
     return result?.changes ?? 0;
   });
+}
+
+export async function deleteMessageCalendarInviteStateByMessageAndEvent(
+  accountId: string,
+  messageId: string,
+  eventUid: string
+): Promise<void> {
+  const db = await getAccountDb(accountId);
+  const normalizedEventUid = normalizeCalendarEventUid(eventUid);
+  if (!normalizedEventUid) return;
+  db.prepare(
+    `DELETE FROM message_calendar_events
+     WHERE accountId = ? AND messageId = ? AND lower(eventUid) = lower(?)`
+  ).run(accountId, messageId, normalizedEventUid);
 }
 
 export async function listCalendarInviteSourceMessagesByEventUid(

@@ -66,6 +66,17 @@ function reminderToFcEvent(r: CalendarReminder): EventInput {
   };
 }
 
+const CALENDAR_VIEW_KEY = "noctua:calendarView";
+const ALLOWED_VIEWS = ["dayGridMonth", "timeGridWeek", "timeGridDay"];
+
+function getSavedView(): string {
+  try {
+    const v = localStorage.getItem(CALENDAR_VIEW_KEY);
+    if (v && ALLOWED_VIEWS.includes(v)) return v;
+  } catch {}
+  return "dayGridMonth";
+}
+
 export default function CalendarView({
   accountId,
   compact = false,
@@ -79,6 +90,7 @@ export default function CalendarView({
   const calendarRef = (externalRef ?? internalRef) as React.RefObject<FullCalendar>;
   const [fcEvents, setFcEvents] = useState<EventInput[]>([]);
   const fetchRangeRef = useRef<{ startMs: number; endMs: number } | null>(null);
+  const [initialView] = useState<string>(getSavedView);
 
   const fetchEvents = useCallback(
     async (startMs: number, endMs: number) => {
@@ -129,6 +141,7 @@ export default function CalendarView({
 
   const handleDatesSet = useCallback(
     (arg: DatesSetArg) => {
+      try { localStorage.setItem(CALENDAR_VIEW_KEY, arg.view.type); } catch {}
       const startMs = arg.start.getTime();
       const endMs = arg.end.getTime();
       const prev = fetchRangeRef.current;
@@ -195,7 +208,7 @@ export default function CalendarView({
     <FullCalendar
       ref={calendarRef}
       plugins={[dayGridPlugin, timeGridPlugin, interactionPlugin, rrulePlugin]}
-      initialView="dayGridMonth"
+      initialView={initialView}
       headerToolbar={{
         left: "prev,next today",
         center: "title",

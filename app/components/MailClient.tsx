@@ -108,7 +108,7 @@ import { useMessageMoveActions, type UndoMoveTarget } from "./mailclient/useMess
 import { useMessageMutations } from "./mailclient/useMessageMutations";
 import type { Account, Folder, Message, User } from "@/lib/data";
 import AccountSettingsModal, { type ManageTab } from "./AccountSettingsModal";
-import ThreadDeleteConfirmDialog from "./mailclient/message/ThreadDeleteConfirmDialog";
+import DeleteConfirmDialog from "./mailclient/message/DeleteConfirmDialog";
 import UnsubscribeConfirmDialog from "./mailclient/message/UnsubscribeConfirmDialog";
 import {
   computeGroupMeta,
@@ -146,7 +146,7 @@ import {
   NOTICE_TIMEOUTS,
   THREAD_COLLAPSE_SETTLE_MS
 } from "./mailclient/constants";
-import type { ThreadDeleteConfirmState } from "./mailclient/types";
+import type { DeleteConfirmState } from "./mailclient/types";
 import { normalizeAccountDateFormat } from "@/lib/dateFormatting";
 type AuthMeResponse = {
   ok?: boolean;
@@ -190,6 +190,7 @@ export default function MailClient({
   const [listWidth, setListWidth] = useState(840);
   const [dragging, setDragging] = useState<"left" | "list" | null>(null);
   const [calendarSidebarOpen, setCalendarSidebarOpen] = useState(false);
+  const [isRecomputingCalendarRelations, setIsRecomputingCalendarRelations] = useState(false);
   const [calendarSidebarWidth] = useState(400);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const dragImageRef = useRef<HTMLDivElement | null>(null);
@@ -339,10 +340,8 @@ export default function MailClient({
   const [initialDataReady, setInitialDataReady] = useState(false);
   const [sessionTtlSeconds, setSessionTtlSeconds] = useState<number | null>(null);
   const [pendingMessageActions, setPendingMessageActions] = useState<Set<string>>(new Set());
-  const [threadDeleteConfirm, setThreadDeleteConfirm] = useState<ThreadDeleteConfirmState | null>(
-    null
-  );
-  const threadDeleteConfirmResolveRef = useRef<((confirmed: boolean) => void) | null>(null);
+  const [deleteConfirm, setDeleteConfirm] = useState<DeleteConfirmState | null>(null);
+  const deleteConfirmResolveRef = useRef<((confirmed: boolean) => void) | null>(null);
   const [unsubscribeConfirm, setUnsubscribeConfirm] = useState<{
     sender: string;
     listId?: string;
@@ -2037,40 +2036,32 @@ export default function MailClient({
     }
   };
 
-  const resolveThreadDeleteConfirm = useCallback((confirmed: boolean) => {
-    const resolve = threadDeleteConfirmResolveRef.current;
-    threadDeleteConfirmResolveRef.current = null;
-    setThreadDeleteConfirm(null);
+  const resolveDeleteConfirm = useCallback((confirmed: boolean) => {
+    const resolve = deleteConfirmResolveRef.current;
+    deleteConfirmResolveRef.current = null;
+    setDeleteConfirm(null);
     resolve?.(confirmed);
   }, []);
 
-  const confirmThreadDelete = useCallback(
-    ({
-      messageCount,
-      moveToTrashCount,
-      permanentDeleteCount
-    }: {
-      messageCount: number;
-      moveToTrashCount: number;
-      permanentDeleteCount: number;
-    }) =>
+  const confirmDelete = useCallback(
+    (nextDeleteConfirm: DeleteConfirmState) =>
       new Promise<boolean>((resolve) => {
-        if (threadDeleteConfirmResolveRef.current) {
-          threadDeleteConfirmResolveRef.current(false);
+        if (deleteConfirmResolveRef.current) {
+          deleteConfirmResolveRef.current(false);
         }
-        threadDeleteConfirmResolveRef.current = resolve;
-        setThreadDeleteConfirm({ messageCount, moveToTrashCount, permanentDeleteCount });
+        deleteConfirmResolveRef.current = resolve;
+        setDeleteConfirm(nextDeleteConfirm);
       }),
     []
   );
 
-  const handleThreadDeleteDialogOpenChange = useCallback(
+  const handleDeleteDialogOpenChange = useCallback(
     (open: boolean) => {
       if (!open) {
-        resolveThreadDeleteConfirm(false);
+        resolveDeleteConfirm(false);
       }
     },
-    [resolveThreadDeleteConfirm]
+    [resolveDeleteConfirm]
   );
 
   const resolveUnsubscribeConfirm = useCallback((confirmed: boolean) => {
@@ -2103,9 +2094,9 @@ export default function MailClient({
 
   useEffect(() => {
     return () => {
-      if (threadDeleteConfirmResolveRef.current) {
-        threadDeleteConfirmResolveRef.current(false);
-        threadDeleteConfirmResolveRef.current = null;
+      if (deleteConfirmResolveRef.current) {
+        deleteConfirmResolveRef.current(false);
+        deleteConfirmResolveRef.current = null;
       }
     };
   }, []);
@@ -2316,7 +2307,7 @@ export default function MailClient({
     readErrorMessage,
     reportError,
     pushNotice,
-    confirmThreadDelete,
+    confirmDelete,
     undoMoveOperation,
     noticeSuccessTimeout: NOTICE_TIMEOUTS.success,
     onMessagesRemoved: evictMessageCaches,
@@ -2406,6 +2397,26 @@ export default function MailClient({
     setSearchScope("all");
     setActiveFolderId("");
     setQuery(`invite:${uidQueryTerm}`);
+  };
+
+  const handleRecomputeCalendarRelations = async () => {
+    if (isRecomputingCalendarRelations || !activeAccountId) return;
+    setIsRecomputingCalendarRelations(true);
+    try {
+      const res = await fetch("/api/calendar/recompute-relations", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ accountId: activeAccountId })
+      });
+      const data = await res.json();
+      if (!data.ok) {
+        console.error("[Calendar] Recompute relations failed:", data);
+      }
+    } catch (err) {
+      console.error("[Calendar] Recompute relations error:", err);
+    } finally {
+      setIsRecomputingCalendarRelations(false);
+    }
   };
 
   const handleOpenCalendarMessage = (messageId: string) => {
@@ -4089,10 +4100,10 @@ export default function MailClient({
         state={{ inAppNotices }}
         actions={{ onOpenNotice: handleNoticeOpen, onDismissNotice: handleDismissNotice }}
       />
-      <ThreadDeleteConfirmDialog
-        threadDeleteConfirm={threadDeleteConfirm}
-        onOpenChange={handleThreadDeleteDialogOpenChange}
-        resolveThreadDeleteConfirm={resolveThreadDeleteConfirm}
+      <DeleteConfirmDialog
+        deleteConfirm={deleteConfirm}
+        onOpenChange={handleDeleteDialogOpenChange}
+        resolveDeleteConfirm={resolveDeleteConfirm}
       />
 
       <UnsubscribeConfirmDialog
@@ -4526,6 +4537,8 @@ export default function MailClient({
                 onClose={() => setCalendarSidebarOpen(false)}
                 onOpenMessage={handleOpenCalendarMessage}
                 onFindRelatedByInviteUid={handleFindRelatedByCalendarInviteUid}
+                onRecomputeRelations={handleRecomputeCalendarRelations}
+                isRecomputingRelations={isRecomputingCalendarRelations}
               />
             </div>
           </>
@@ -4650,6 +4663,7 @@ export default function MailClient({
         isSyncing={isSyncing}
         isRecomputingThreads={isRecomputingThreads}
         isRecomputingCategories={isRecomputingCategories}
+        isRecomputingCalendarRelations={isRecomputingCalendarRelations}
         syncingFolders={syncingFolders}
         syncProgressItems={Object.values(syncProgressByJobId)}
         accountFolders={accountFolders}
@@ -4669,6 +4683,7 @@ export default function MailClient({
         onOpenCalendarSidebar={() => setCalendarSidebarOpen(true)}
         onOpenCalendarMessage={handleOpenCalendarMessage}
         onFindRelatedCalendarInviteUid={handleFindRelatedByCalendarInviteUid}
+        onRecomputeCalendarRelations={handleRecomputeCalendarRelations}
         calendarFirstDay={calendarFirstDay}
       />
     </div>

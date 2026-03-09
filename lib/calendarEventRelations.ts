@@ -1,5 +1,6 @@
 import { collectCalendarInviteMutationGroups } from "./calendarInviteProcessing";
 import {
+  deleteMessageCalendarInviteStateByMessageAndEvent,
   listCalendarEventsBySource,
   listCalendarInviteSourceMessagesByEventUid,
   updateCalendarEventMessageRelations
@@ -90,9 +91,14 @@ export async function recomputeCalendarEventMessageRelations(accountId: string):
       const candidates: MessageCandidate[] = [];
       for (const sm of sourceMessages) {
         const icsSource = await getMessageSource(accountId, sm.messageId);
-        if (icsSource?.trim()) {
-          candidates.push({ messageId: sm.messageId, icsSource, dateValue: sm.dateValue });
+        if (!icsSource?.trim()) continue;
+        const groups = collectCalendarInviteMutationGroups(icsSource);
+        if (groups.length === 0) {
+          // METHOD:REPLY or otherwise non-actionable — remove stale association
+          await deleteMessageCalendarInviteStateByMessageAndEvent(accountId, sm.messageId, event.eventUid);
+          continue;
         }
+        candidates.push({ messageId: sm.messageId, icsSource, dateValue: sm.dateValue });
       }
 
       const relations = resolveEventMessageRelations(candidates);
