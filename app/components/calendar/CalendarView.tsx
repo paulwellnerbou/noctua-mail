@@ -57,7 +57,7 @@ function reminderToFcEvent(r: CalendarReminder): EventInput {
   const startMs = r.nextEventStartAtMs ?? r.eventStartAtMs;
   return {
     id: `reminder-${r.id}`,
-    title: r.eventTitle,
+    title: `🔔 ${r.eventTitle}`,
     start: new Date(startMs),
     end: r.eventEndAtMs ? new Date(startMs + (r.eventEndAtMs - r.eventStartAtMs)) : undefined,
     allDay: false,

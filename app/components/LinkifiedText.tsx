@@ -1,17 +1,15 @@
 import type { ReactNode } from "react";
-
-const urlPattern = /(https?:\/\/[^\s]+)/g;
+import { splitTextWithUrls } from "@/lib/linkify";
 
 export function linkifyText(text: string, linkClassName?: string): ReactNode[] {
-  const parts = text.split(urlPattern);
-  return parts.map((part, index) => {
-    if (/^https?:\/\//.test(part)) {
+  return splitTextWithUrls(text).map((segment, index) => {
+    if (segment.type === "url") {
       return (
-        <a key={index} href={part} target="_blank" rel="noreferrer" className={linkClassName}>
-          {part}
+        <a key={index} href={segment.value} target="_blank" rel="noreferrer" className={linkClassName}>
+          {segment.value}
         </a>
       );
     }
-    return <span key={index}>{part}</span>;
+    return <span key={index}>{segment.value}</span>;
   });
 }

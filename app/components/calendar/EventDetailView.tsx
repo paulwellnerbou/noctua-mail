@@ -12,7 +12,7 @@ import type {
 } from "@/lib/data";
 import { formatCalendarParticipationLabel } from "@/lib/calendarParticipation";
 import { formatCalendarTimeZoneShortLabel } from "@/lib/calendarTimezones";
-import { sanitizeHtmlForDisplay, stripStyleTags } from "@/lib/html";
+import { linkifyHtmlTextNodes, sanitizeHtmlForDisplay, stripStyleTags } from "@/lib/html";
 import { resolveNextReminderOccurrence } from "@/lib/reminderRecurrence";
 import { linkifyText } from "@/app/components/LinkifiedText";
 import {
@@ -109,7 +109,7 @@ function enforceSafeLinks(html: string) {
 }
 
 function sanitizeDescriptionHtml(value: string) {
-  return enforceSafeLinks(sanitizeHtmlForDisplay(stripStyleTags(value)));
+  return enforceSafeLinks(linkifyHtmlTextNodes(sanitizeHtmlForDisplay(stripStyleTags(value))));
 }
 
 function formatTriggerDate(date: Date) {
