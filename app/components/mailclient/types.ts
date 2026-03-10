@@ -9,6 +9,8 @@ export type ExceptionEntry = {
   timestamp: number;
 };
 
+export type DeleteConfirmAction = "cancel" | "delete_mail_only" | "delete_linked_and_mail";
+
 export type DeleteConfirmState = {
   kind: "message" | "messages" | "thread";
   messageCount: number;
@@ -17,6 +19,8 @@ export type DeleteConfirmState = {
   calendarLinkedMessageCount: number;
   calendarLinkedReminderCount: number;
   calendarLinkedEventCount: number;
+  linkedReminderIds: string[];
+  linkedEventIds: string[];
 };
 
 export type NoticeInput = Omit<InAppNotice, "id" | "expiresAt"> & {

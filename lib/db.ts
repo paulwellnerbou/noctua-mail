@@ -2008,17 +2008,34 @@ export async function listDeleteCalendarAssociations(
       : [];
 
   const eventRows =
-    uniqueEventUidKeys.length > 0
+    uniqueMessageIds.length > 0 || uniqueEventUidKeys.length > 0
       ? (db
           .prepare(
-            `SELECT id, eventUid
-             FROM calendar_events
-             WHERE accountId = ? AND deletedAtMs IS NULL
-               AND lower(COALESCE(eventUidKey, eventUid, '')) IN (${uniqueEventUidKeys
-                 .map(() => "?")
-                 .join(", ")})`
+            `SELECT DISTINCT ce.id, ce.eventUid
+             FROM calendar_events ce
+             WHERE ce.accountId = ? AND ce.deletedAtMs IS NULL
+               AND (
+                 ${
+                   uniqueMessageIds.length > 0
+                     ? `EXISTS (
+                         SELECT 1
+                         FROM message_calendar_events mce
+                         WHERE mce.accountId = ce.accountId
+                           AND mce.messageId IN (${uniqueMessageIds.map(() => "?").join(", ")})
+                           AND lower(COALESCE(mce.eventUidKey, mce.eventUid, '')) = lower(COALESCE(ce.eventUid, ''))
+                       )`
+                     : "0"
+                 }
+                 ${
+                   uniqueEventUidKeys.length > 0
+                     ? `OR lower(COALESCE(ce.eventUid, '')) IN (${uniqueEventUidKeys
+                         .map(() => "?")
+                         .join(", ")})`
+                     : ""
+                 }
+               )`
           )
-          .all(accountId, ...uniqueEventUidKeys) as Array<{
+          .all(accountId, ...uniqueMessageIds, ...uniqueEventUidKeys) as Array<{
           id?: string | null;
           eventUid?: string | null;
         }>)

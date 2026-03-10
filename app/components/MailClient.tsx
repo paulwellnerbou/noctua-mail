@@ -146,7 +146,7 @@ import {
   NOTICE_TIMEOUTS,
   THREAD_COLLAPSE_SETTLE_MS
 } from "./mailclient/constants";
-import type { DeleteConfirmState } from "./mailclient/types";
+import type { DeleteConfirmAction, DeleteConfirmState } from "./mailclient/types";
 import { normalizeAccountDateFormat } from "@/lib/dateFormatting";
 type AuthMeResponse = {
   ok?: boolean;
@@ -341,7 +341,7 @@ export default function MailClient({
   const [sessionTtlSeconds, setSessionTtlSeconds] = useState<number | null>(null);
   const [pendingMessageActions, setPendingMessageActions] = useState<Set<string>>(new Set());
   const [deleteConfirm, setDeleteConfirm] = useState<DeleteConfirmState | null>(null);
-  const deleteConfirmResolveRef = useRef<((confirmed: boolean) => void) | null>(null);
+  const deleteConfirmResolveRef = useRef<((action: DeleteConfirmAction) => void) | null>(null);
   const [unsubscribeConfirm, setUnsubscribeConfirm] = useState<{
     sender: string;
     listId?: string;
@@ -2036,18 +2036,18 @@ export default function MailClient({
     }
   };
 
-  const resolveDeleteConfirm = useCallback((confirmed: boolean) => {
+  const resolveDeleteConfirm = useCallback((action: DeleteConfirmAction) => {
     const resolve = deleteConfirmResolveRef.current;
     deleteConfirmResolveRef.current = null;
     setDeleteConfirm(null);
-    resolve?.(confirmed);
+    resolve?.(action);
   }, []);
 
   const confirmDelete = useCallback(
     (nextDeleteConfirm: DeleteConfirmState) =>
-      new Promise<boolean>((resolve) => {
+      new Promise<DeleteConfirmAction>((resolve) => {
         if (deleteConfirmResolveRef.current) {
-          deleteConfirmResolveRef.current(false);
+          deleteConfirmResolveRef.current("cancel");
         }
         deleteConfirmResolveRef.current = resolve;
         setDeleteConfirm(nextDeleteConfirm);
@@ -2058,7 +2058,7 @@ export default function MailClient({
   const handleDeleteDialogOpenChange = useCallback(
     (open: boolean) => {
       if (!open) {
-        resolveDeleteConfirm(false);
+        resolveDeleteConfirm("cancel");
       }
     },
     [resolveDeleteConfirm]
@@ -2095,7 +2095,7 @@ export default function MailClient({
   useEffect(() => {
     return () => {
       if (deleteConfirmResolveRef.current) {
-        deleteConfirmResolveRef.current(false);
+        deleteConfirmResolveRef.current("cancel");
         deleteConfirmResolveRef.current = null;
       }
     };

@@ -1,11 +1,11 @@
 import React from "react";
 import { AlertDialog, Button, Flex } from "@radix-ui/themes";
-import type { DeleteConfirmState } from "../types";
+import type { DeleteConfirmAction, DeleteConfirmState } from "../types";
 
 interface DeleteConfirmDialogProps {
   deleteConfirm: DeleteConfirmState | null;
   onOpenChange: (open: boolean) => void;
-  resolveDeleteConfirm: (confirmed: boolean) => void;
+  resolveDeleteConfirm: (action: DeleteConfirmAction) => void;
 }
 
 function formatCountLabel(count: number, singular: string, plural = `${singular}s`) {
@@ -81,6 +81,23 @@ function getCalendarAssociationDescription(deleteConfirm: DeleteConfirmState) {
   return `${subject} linked to ${joinNatural(linkedItems)}. Deleting the email will not remove ${linkedItemCount === 1 ? "that calendar item" : "those calendar items"}.`;
 }
 
+function getDeleteLinkedLabel(deleteConfirm: DeleteConfirmState) {
+  if (deleteConfirm.calendarLinkedEventCount > 0 && deleteConfirm.calendarLinkedReminderCount > 0) {
+    return "Delete event/reminder and Mail";
+  }
+  if (deleteConfirm.calendarLinkedEventCount > 0) {
+    return deleteConfirm.calendarLinkedEventCount === 1
+      ? "Delete event and Mail"
+      : "Delete events and Mail";
+  }
+  if (deleteConfirm.calendarLinkedReminderCount > 0) {
+    return deleteConfirm.calendarLinkedReminderCount === 1
+      ? "Delete reminder and Mail"
+      : "Delete reminders and Mail";
+  }
+  return "Delete Mail only";
+}
+
 export default function DeleteConfirmDialog({
   deleteConfirm,
   onOpenChange,
@@ -88,6 +105,9 @@ export default function DeleteConfirmDialog({
 }: DeleteConfirmDialogProps) {
   const calendarDescription =
     deleteConfirm ? getCalendarAssociationDescription(deleteConfirm) : null;
+  const hasLinkedCalendarItems =
+    Boolean(deleteConfirm) &&
+    (deleteConfirm.calendarLinkedReminderCount > 0 || deleteConfirm.calendarLinkedEventCount > 0);
 
   return (
     <AlertDialog.Root open={Boolean(deleteConfirm)} onOpenChange={onOpenChange}>
@@ -101,21 +121,44 @@ export default function DeleteConfirmDialog({
         </AlertDialog.Description>
         <Flex gap="3" mt="4" justify="end">
           <AlertDialog.Cancel>
-            <Button variant="soft" color="gray" onClick={() => resolveDeleteConfirm(false)}>
+            <Button variant="soft" color="gray" onClick={() => resolveDeleteConfirm("cancel")}>
               Cancel
             </Button>
           </AlertDialog.Cancel>
-          <AlertDialog.Action>
-            <Button
-              color={deleteConfirm && deleteConfirm.permanentDeleteCount > 0 ? "red" : "gray"}
-              variant={deleteConfirm && deleteConfirm.permanentDeleteCount > 0 ? "solid" : "soft"}
-              onClick={() => resolveDeleteConfirm(true)}
-            >
-              {deleteConfirm && deleteConfirm.permanentDeleteCount > 0
-                ? "Delete permanently"
-                : "Move to Trash"}
-            </Button>
-          </AlertDialog.Action>
+          {hasLinkedCalendarItems ? (
+            <>
+              <AlertDialog.Action>
+                <Button
+                  variant="soft"
+                  color="gray"
+                  onClick={() => resolveDeleteConfirm("delete_mail_only")}
+                >
+                  Delete Mail only
+                </Button>
+              </AlertDialog.Action>
+              <AlertDialog.Action>
+                <Button
+                  color={deleteConfirm && deleteConfirm.permanentDeleteCount > 0 ? "red" : "gray"}
+                  variant={deleteConfirm && deleteConfirm.permanentDeleteCount > 0 ? "solid" : "soft"}
+                  onClick={() => resolveDeleteConfirm("delete_linked_and_mail")}
+                >
+                  {deleteConfirm ? getDeleteLinkedLabel(deleteConfirm) : "Delete Mail only"}
+                </Button>
+              </AlertDialog.Action>
+            </>
+          ) : (
+            <AlertDialog.Action>
+              <Button
+                color={deleteConfirm && deleteConfirm.permanentDeleteCount > 0 ? "red" : "gray"}
+                variant={deleteConfirm && deleteConfirm.permanentDeleteCount > 0 ? "solid" : "soft"}
+                onClick={() => resolveDeleteConfirm("delete_mail_only")}
+              >
+                {deleteConfirm && deleteConfirm.permanentDeleteCount > 0
+                  ? "Delete permanently"
+                  : "Move to Trash"}
+              </Button>
+            </AlertDialog.Action>
+          )}
         </Flex>
       </AlertDialog.Content>
     </AlertDialog.Root>

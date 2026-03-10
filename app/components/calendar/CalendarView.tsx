@@ -6,7 +6,7 @@ import dayGridPlugin from "@fullcalendar/daygrid";
 import timeGridPlugin from "@fullcalendar/timegrid";
 import interactionPlugin from "@fullcalendar/interaction";
 import rrulePlugin from "@fullcalendar/rrule";
-import type { EventClickArg, DateSelectArg, DatesSetArg, EventInput } from "@fullcalendar/core";
+import type { EventClickArg, DatesSetArg, EventInput } from "@fullcalendar/core";
 import type { CalendarEvent } from "@/lib/data";
 import type { CalendarReminder } from "@/lib/data";
 import {
@@ -30,7 +30,6 @@ type Props = {
     occurrenceStartAtMs?: number
   ) => void;
   onDateClick?: (date: Date) => void;
-  onCreateEvent?: (start: Date, end: Date, allDay: boolean) => void;
   calendarRef?: React.RefObject<FullCalendar | null>;
 };
 
@@ -83,7 +82,6 @@ export default function CalendarView({
   firstDay = 1,
   onEventClick,
   onDateClick,
-  onCreateEvent,
   calendarRef: externalRef
 }: Props) {
   const internalRef = useRef<FullCalendar>(null);
@@ -171,13 +169,6 @@ export default function CalendarView({
     [onDateClick]
   );
 
-  const handleSelect = useCallback(
-    (arg: DateSelectArg) => {
-      onCreateEvent?.(arg.start, arg.end, arg.allDay);
-    },
-    [onCreateEvent]
-  );
-
   // Refetch when accountId changes
   useEffect(() => {
     fetchRangeRef.current = null;
@@ -219,8 +210,6 @@ export default function CalendarView({
       datesSet={handleDatesSet}
       eventClick={handleEventClick}
       dateClick={handleDateClick}
-      selectable={Boolean(onCreateEvent)}
-      select={handleSelect}
       height="100%"
       fixedWeekCount={false}
     />

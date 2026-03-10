@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { AlarmClock, AlarmClockPlus, Clock, Mail, MapPin, Repeat, Trash2, User } from "lucide-react";
+import { AlarmClock, AlarmClockPlus, Clock, Mail, MapPin, Repeat, Trash2, User, Users } from "lucide-react";
 import { Badge, Button, Dialog, Flex, Select, Switch, Text } from "@radix-ui/themes";
 import { buildCalendarRecurrenceSummary, formatCalendarEventDate } from "@/lib/calendar";
 import type { CalendarInviteActionType } from "@/lib/calendarInviteProcessing";
@@ -564,20 +564,21 @@ export default function EventDetailView({
 
       {/* Organizer */}
       {organizer && (
-        <div className={styles.metaRow}>
-          <User size={12} />
-          <span>{organizer}</span>
+        <div className={styles.metaRowWrap}>
+          <User size={14} className={styles.metaIcon} aria-hidden />
+          <span className={styles.metaText}>
+            <span className={styles.metaInlineLabel}>Organizer:</span> {organizer}
+          </span>
         </div>
       )}
 
       {/* Attendees */}
       {attendees && attendees.length > 0 && (
-        <div className={styles.metaRow}>
-          <User size={12} />
-          <Flex direction="column" gap="1">
-            <Text size="1" color="gray">Attendees</Text>
-            {attendees.map((a) => <Text key={a} size="2">{a}</Text>)}
-          </Flex>
+        <div className={styles.metaRowWrap}>
+          <Users size={14} className={styles.metaIcon} aria-hidden />
+          <span className={styles.metaText}>
+            <span className={styles.metaInlineLabel}>Attendees:</span> {attendees.join(", ")}
+          </span>
         </div>
       )}
 

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import FullCalendar from "@fullcalendar/react";
 import { DropdownMenu, Flex, Heading, IconButton } from "@radix-ui/themes";
@@ -8,7 +8,6 @@ import { CalendarDays, ExternalLink, MoreVertical, PanelRight, X } from "lucide-
 import type { CalendarEvent, CalendarReminder } from "@/lib/data";
 import { openDetachedWindow } from "@/lib/ui/openDetachedWindow";
 import dynamic from "next/dynamic";
-import EventDialog from "./EventDialog";
 import EventDetailPanel from "./EventDetailPanel";
 import styles from "./CalendarPopover.module.css";
 
@@ -58,11 +57,6 @@ export default function CalendarPopover({
 
   const [selectedEvent, setSelectedEvent] = useState<CalendarEvent | CalendarReminder | null>(null);
   const [selectedKind, setSelectedKind] = useState<"event" | "reminder" | null>(null);
-
-  const [eventDialogOpen, setEventDialogOpen] = useState(false);
-  const [createStart, setCreateStart] = useState<Date | undefined>();
-  const [createEnd, setCreateEnd] = useState<Date | undefined>();
-  const [createAllDay, setCreateAllDay] = useState(false);
 
   // Drag handling
   const handleDragStart = (e: React.MouseEvent<HTMLDivElement>) => {
@@ -123,11 +117,6 @@ export default function CalendarPopover({
     calendarRef.current?.getApi().refetchEvents();
   };
 
-  const handleEventSaved = () => {
-    calendarRef.current?.getApi().refetchEvents();
-    handleBackFromDetail();
-  };
-
   const panel = open ? (
     <div
       className={styles.floatingPanel}
@@ -186,12 +175,6 @@ export default function CalendarPopover({
             calendarRef={calendarRef}
             firstDay={firstDay}
             onEventClick={handleEventClick}
-            onCreateEvent={(start, end, allDay) => {
-              setCreateStart(start);
-              setCreateEnd(end);
-              setCreateAllDay(allDay);
-              setEventDialogOpen(true);
-            }}
           />
         )}
       </div>
@@ -211,16 +194,6 @@ export default function CalendarPopover({
       </button>
 
       {typeof document !== "undefined" && panel ? createPortal(panel, document.querySelector(".radix-themes") ?? document.body) : null}
-
-      <EventDialog
-        open={eventDialogOpen}
-        accountId={accountId}
-        defaultStart={createStart}
-        defaultEnd={createEnd}
-        defaultAllDay={createAllDay}
-        onClose={() => setEventDialogOpen(false)}
-        onSaved={handleEventSaved}
-      />
     </>
   );
 }

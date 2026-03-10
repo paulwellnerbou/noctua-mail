@@ -8,7 +8,6 @@ import { openDetachedWindow } from "@/lib/ui/openDetachedWindow";
 import type { CalendarEvent } from "@/lib/data";
 import type { CalendarReminder } from "@/lib/data";
 import dynamic from "next/dynamic";
-import EventDialog from "./EventDialog";
 import EventDetailPanel from "./EventDetailPanel";
 import styles from "./CalendarSidebarPanel.module.css";
 
@@ -37,10 +36,6 @@ export default function CalendarSidebarPanel({
   const [selectedEvent, setSelectedEvent] = useState<CalendarEvent | CalendarReminder | null>(null);
   const [selectedKind, setSelectedKind] = useState<"event" | "reminder" | null>(null);
   const [selectedOccurrenceStartAtMs, setSelectedOccurrenceStartAtMs] = useState<number | undefined>();
-  const [eventDialogOpen, setEventDialogOpen] = useState(false);
-  const [createStart, setCreateStart] = useState<Date | undefined>();
-  const [createEnd, setCreateEnd] = useState<Date | undefined>();
-  const [createAllDay, setCreateAllDay] = useState(false);
 
   const handleOpenWindow = () => {
     openDetachedWindow(`/calendar/window?accountId=${encodeURIComponent(accountId)}`);
@@ -60,24 +55,6 @@ export default function CalendarSidebarPanel({
     setSelectedEvent(ev);
     setSelectedKind(kind);
     setSelectedOccurrenceStartAtMs(occurrenceStartAtMs);
-  };
-
-  const handleCreateEvent = (start: Date, end: Date, allDay: boolean) => {
-    setSelectedEvent(null);
-    setSelectedKind(null);
-    setCreateStart(start);
-    setCreateEnd(end);
-    setCreateAllDay(allDay);
-    setEventDialogOpen(true);
-  };
-
-  const handleSaved = () => {
-    // Trigger calendar refresh by resetting the view range
-    calendarRef.current?.getApi().refetchEvents();
-  };
-
-  const handleDeleted = () => {
-    calendarRef.current?.getApi().refetchEvents();
   };
 
   const handleEventUpdated = (event: CalendarEvent) => {
@@ -156,22 +133,9 @@ export default function CalendarSidebarPanel({
             calendarRef={calendarRef}
             firstDay={firstDay}
             onEventClick={handleEventClick}
-            onCreateEvent={handleCreateEvent}
           />
         )}
       </div>
-      <EventDialog
-        open={eventDialogOpen}
-        accountId={accountId}
-        defaultStart={createStart}
-        defaultEnd={createEnd}
-        defaultAllDay={createAllDay}
-        onClose={() => {
-          setEventDialogOpen(false);
-        }}
-        onSaved={handleSaved}
-        onDeleted={handleDeleted}
-      />
     </div>
   );
 }

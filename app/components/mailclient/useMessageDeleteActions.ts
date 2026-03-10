@@ -3,7 +3,7 @@
 import type React from "react";
 import { useCallback } from "react";
 import type { Folder, Message } from "@/lib/data";
-import type { DeleteConfirmState } from "./types";
+import type { DeleteConfirmAction, DeleteConfirmState } from "./types";
 import type { SelectionStore } from "./messagelist/selectionStore";
 import { resolveCollapsedThreadSelectionTarget } from "./messagelist/listSelection";
 import type { MoveMessagesToFolder, UndoMoveTarget } from "./useMessageMoveActions";
@@ -74,7 +74,7 @@ type UseMessageDeleteActionsOptions = {
   readErrorMessage: (res: Response) => Promise<string>;
   reportError: (message: string) => void;
   pushNotice: (input: DeleteNoticeInput) => void;
-  confirmDelete: (input: DeleteConfirmState) => Promise<boolean>;
+  confirmDelete: (input: DeleteConfirmState) => Promise<DeleteConfirmAction>;
   undoMoveOperation: (
     targets: UndoMoveTarget[],
     accountId: string,
@@ -154,6 +154,8 @@ export function useMessageDeleteActions({
       let calendarLinkedMessageCount = 0;
       let calendarLinkedReminderCount = 0;
       let calendarLinkedEventCount = 0;
+      let linkedReminderIds: string[] = [];
+      let linkedEventIds: string[] = [];
 
       if (targets.length > 0) {
         try {
@@ -179,6 +181,12 @@ export function useMessageDeleteActions({
             calendarLinkedMessageCount = summary.linkedMessageCount;
             calendarLinkedReminderCount = summary.linkedReminderCount;
             calendarLinkedEventCount = summary.linkedEventCount;
+            linkedReminderIds = Array.from(
+              new Set((data.reminders ?? []).flatMap((item) => (item.id ? [item.id] : [])))
+            );
+            linkedEventIds = Array.from(
+              new Set((data.events ?? []).flatMap((item) => (item.id ? [item.id] : [])))
+            );
           }
         } catch {
           // Ignore lookup failures and preserve the default delete flow.
@@ -192,10 +200,34 @@ export function useMessageDeleteActions({
         permanentDeleteCount,
         calendarLinkedMessageCount,
         calendarLinkedReminderCount,
-        calendarLinkedEventCount
+        calendarLinkedEventCount,
+        linkedReminderIds,
+        linkedEventIds
       };
     },
     [activeAccountId, apiFetch, findTrashFolderId, isPermanentDeleteTarget]
+  );
+
+  const deleteLinkedCalendarAssociations = useCallback(
+    async (deleteConfirm: DeleteConfirmState) => {
+      if (deleteConfirm.linkedReminderIds.length === 0 && deleteConfirm.linkedEventIds.length === 0) {
+        return;
+      }
+      const res = await apiFetch("/api/message/delete/linked-calendar", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          accountId: activeAccountId,
+          reminderIds: deleteConfirm.linkedReminderIds,
+          eventIds: deleteConfirm.linkedEventIds
+        })
+      });
+      if (!res.ok) {
+        const errorMessage = await readErrorMessage(res);
+        throw new Error(errorMessage || "Failed to delete linked calendar items.");
+      }
+    },
+    [activeAccountId, apiFetch, readErrorMessage]
   );
 
   const deleteSingleMessagePermanently = useCallback(
@@ -568,8 +600,20 @@ export function useMessageDeleteActions({
         deleteConfirm.calendarLinkedReminderCount > 0 ||
         deleteConfirm.calendarLinkedEventCount > 0;
       if (requiresDeleteConfirm) {
-        const confirmed = await confirmDelete(deleteConfirm);
-        if (!confirmed) return;
+        const action = await confirmDelete(deleteConfirm);
+        if (action === "cancel") return;
+        if (action === "delete_linked_and_mail") {
+          try {
+            await deleteLinkedCalendarAssociations(deleteConfirm);
+          } catch (error) {
+            if (error instanceof Error && error.message) {
+              reportError(error.message);
+            } else {
+              reportError("Failed to delete linked calendar items.");
+            }
+            return;
+          }
+        }
       }
       await runDeleteTransaction(targets, {
         errorMessage: "Failed to delete message.",
@@ -581,6 +625,8 @@ export function useMessageDeleteActions({
       buildDeleteConfirmState,
       collapsedThreads,
       confirmDelete,
+      deleteLinkedCalendarAssociations,
+      reportError,
       runDeleteTransaction,
       supportsThreads,
       threadScopeMessages
@@ -606,15 +652,35 @@ export function useMessageDeleteActions({
         deleteConfirm.calendarLinkedReminderCount > 0 ||
         deleteConfirm.calendarLinkedEventCount > 0;
       if (requiresDeleteConfirm) {
-        const confirmed = await confirmDelete(deleteConfirm);
-        if (!confirmed) return;
+        const action = await confirmDelete(deleteConfirm);
+        if (action === "cancel") return;
+        if (action === "delete_linked_and_mail") {
+          try {
+            await deleteLinkedCalendarAssociations(deleteConfirm);
+          } catch (error) {
+            if (error instanceof Error && error.message) {
+              reportError(error.message);
+            } else {
+              reportError("Failed to delete linked calendar items.");
+            }
+            return;
+          }
+        }
       }
       await runDeleteTransaction(targets, {
         errorMessage: "Failed to delete messages.",
         clearSelectionWhenActiveRemains: true
       });
     },
-    [buildDeleteConfirmState, confirmDelete, messages, runDeleteTransaction, threadScopeMessages]
+    [
+      buildDeleteConfirmState,
+      confirmDelete,
+      deleteLinkedCalendarAssociations,
+      messages,
+      reportError,
+      runDeleteTransaction,
+      threadScopeMessages
+    ]
   );
 
   return {

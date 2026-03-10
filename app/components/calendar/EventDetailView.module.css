@@ -31,6 +31,29 @@
   color: var(--gray-11);
 }
 
+.metaRowWrap {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--gray-11);
+}
+
+.metaIcon {
+  flex: 0 0 auto;
+  color: var(--gray-10);
+  margin-top: 1px;
+}
+
+.metaText {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.metaInlineLabel {
+  color: var(--gray-10);
+}
+
 .tzLabel {
   font-size: 11px;
   color: var(--gray-10);

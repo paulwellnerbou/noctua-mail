@@ -8,7 +8,6 @@ import { MoreVertical } from "lucide-react";
 import type { CalendarEvent } from "@/lib/data";
 import type { CalendarReminder } from "@/lib/data";
 import dynamic from "next/dynamic";
-import EventDialog from "@/app/components/calendar/EventDialog";
 import EventDetailPanel from "@/app/components/calendar/EventDetailPanel";
 import styles from "./page.module.css";
 
@@ -23,32 +22,11 @@ function CalendarWindowContent() {
   const [selectedEvent, setSelectedEvent] = useState<CalendarEvent | CalendarReminder | null>(null);
   const [selectedKind, setSelectedKind] = useState<"event" | "reminder" | null>(null);
   const [selectedOccurrenceStartAtMs, setSelectedOccurrenceStartAtMs] = useState<number | undefined>();
-  const [eventDialogOpen, setEventDialogOpen] = useState(false);
-  const [createStart, setCreateStart] = useState<Date | undefined>();
-  const [createEnd, setCreateEnd] = useState<Date | undefined>();
-  const [createAllDay, setCreateAllDay] = useState(false);
 
   const handleEventClick = (ev: CalendarEvent | CalendarReminder, kind: "event" | "reminder", occurrenceStartAtMs?: number) => {
     setSelectedEvent(ev);
     setSelectedKind(kind);
     setSelectedOccurrenceStartAtMs(occurrenceStartAtMs);
-  };
-
-  const handleCreateEvent = (start: Date, end: Date, allDay: boolean) => {
-    setSelectedEvent(null);
-    setSelectedKind(null);
-    setCreateStart(start);
-    setCreateEnd(end);
-    setCreateAllDay(allDay);
-    setEventDialogOpen(true);
-  };
-
-  const handleSaved = () => {
-    calendarRef.current?.getApi().refetchEvents();
-  };
-
-  const handleDeleted = () => {
-    calendarRef.current?.getApi().refetchEvents();
   };
 
   const handleEventUpdated = (event: CalendarEvent) => {
@@ -135,21 +113,8 @@ function CalendarWindowContent() {
           accountId={accountId}
           calendarRef={calendarRef}
           onEventClick={handleEventClick}
-          onCreateEvent={handleCreateEvent}
         />
       )}
-      <EventDialog
-        open={eventDialogOpen}
-        accountId={accountId}
-        defaultStart={createStart}
-        defaultEnd={createEnd}
-        defaultAllDay={createAllDay}
-        onClose={() => {
-          setEventDialogOpen(false);
-        }}
-        onSaved={handleSaved}
-        onDeleted={handleDeleted}
-      />
     </div>
   );
 }
