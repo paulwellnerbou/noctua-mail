@@ -83,8 +83,9 @@ export async function POST(request: Request) {
     }
   }
 
-  const uid = await appendImapMessage(account, draftsMailbox, raw, ["\\Draft"], clientId);
+  const uid = await appendImapMessage(account, draftsMailbox, raw, ["\\Draft", "\\Seen"], clientId);
   let messageId: string | null = null;
+  let savedMessage = null;
   if (uid) {
     const message = await syncImapMessage(account, draftsMailbox, uid, clientId);
     if (message) {
@@ -98,8 +99,9 @@ export async function POST(request: Request) {
       }
       await upsertMessages(account.id, null, [sanitized], false);
       messageId = sanitized.id;
+      savedMessage = sanitized;
     }
   }
 
-  return NextResponse.json({ ok: true, draftId: messageId });
+  return NextResponse.json({ ok: true, draftId: messageId, message: savedMessage });
 }

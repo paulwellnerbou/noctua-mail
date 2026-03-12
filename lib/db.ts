@@ -45,6 +45,7 @@ import { withDbWriteRetry } from "./dbWriteRetry";
 import { createHash, randomUUID } from "crypto";
 import { buildMessageRowIdLookupCandidates } from "./messageIds";
 import {
+  buildMessageGroupKey,
   buildInviteDeckGroupKeyFromEvent,
   buildInviteDeckGroupKeyFromBounds,
   buildTimeGroupKey,
@@ -2810,27 +2811,7 @@ export async function cancelCalendarRemindersByEventUid(accountId: string, event
 }
 
 function buildGroupKey(message: Message, groupBy: string, dateValueOverride?: number) {
-  const effectiveDateValue =
-    typeof dateValueOverride === "number" && Number.isFinite(dateValueOverride)
-      ? dateValueOverride
-      : message.dateValue;
-  const date = new Date(effectiveDateValue);
-  if (groupBy === "date" || groupBy === INVITE_DECK_GROUP_BY) {
-    return buildTimeGroupKey(effectiveDateValue, groupBy);
-  }
-  if (groupBy === "week") {
-    return buildWeekGroupKey(effectiveDateValue);
-  }
-  if (groupBy === "year") return String(date.getFullYear());
-  if (groupBy === "domain") {
-    const emailMatch = message.from.match(/<([^>]+)>/);
-    const email = emailMatch ? emailMatch[1] : message.from;
-    const domain = email.split("@")[1];
-    return domain ? domain.toLowerCase() : "Unknown";
-  }
-  if (groupBy === "sender") return message.from;
-  if (groupBy === "folder") return message.folderId;
-  return "All";
+  return buildMessageGroupKey(message, groupBy, dateValueOverride);
 }
 
 function buildGroupLabel(key: string, groupBy: string) {
@@ -5456,25 +5437,44 @@ export async function listThreadMessages(params: {
 export async function getThreadIdsByMessageIds(accountId: string, messageIds: string[]) {
   if (messageIds.length === 0) return new Map<string, string>();
   const db = await getAccountDb(accountId);
+  const requestedIds = Array.from(new Set(messageIds.map((value) => value.trim()).filter(Boolean)));
+  if (requestedIds.length === 0) return new Map<string, string>();
   const rows = db
     .prepare(
       `SELECT messageId, threadId, dateValue, id
        FROM messages
-       WHERE accountId = ? AND messageId IN (${messageIds.map(() => "?").join(",")})
+       WHERE accountId = ?
+         AND (
+           messageId IN (${requestedIds.map(() => "?").join(",")})
+           OR threadId IN (${requestedIds.map(() => "?").join(",")})
+         )
        ORDER BY dateValue ASC, id ASC`
     )
-    .all(accountId, ...messageIds) as Array<{
+    .all(accountId, ...requestedIds, ...requestedIds) as Array<{
     messageId: string | null;
     threadId: string | null;
     dateValue: number;
     id: string;
   }>;
   const map = new Map<string, string>();
+  const requestedIdSet = new Set(requestedIds);
   rows.forEach((row) => {
     // The same Message-ID may appear in multiple folders. Use the oldest copy
     // as the canonical external thread mapping to keep sync-time threading stable.
-    if (row.messageId && row.threadId && !map.has(row.messageId)) {
+    if (
+      row.messageId &&
+      row.threadId &&
+      requestedIdSet.has(row.messageId) &&
+      !map.has(row.messageId)
+    ) {
       map.set(row.messageId, row.threadId);
+    }
+    if (
+      row.threadId &&
+      requestedIdSet.has(row.threadId) &&
+      !map.has(row.threadId)
+    ) {
+      map.set(row.threadId, row.threadId);
     }
   });
   return map;

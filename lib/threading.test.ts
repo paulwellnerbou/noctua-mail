@@ -109,6 +109,50 @@ describe("resolveThreadingForItems", () => {
     expect(resolved.threadId).toBe("<shared-thread@example.com>");
     expect(resolved.parentId).toBe("imap-root");
   });
+
+  it("merges GitLab note replies into an existing merge-request thread by shared references", () => {
+    const mergeRequestId = "<merge_request_462663618@gitlab.com>";
+    const discussionId = "<note_3153489529@gitlab.com>";
+    const items = [
+      {
+        id: "imap-mr-update",
+        dateValue: 1773238813000,
+        messageId: "<b3e49f0eec7a9e7bb4f2c4814093fef3@gitlab.com>",
+        inReplyTo: mergeRequestId,
+        references: ["<reply-3-epc133l0c6bgkjcj37xbfwgsz@gitlab.com>", mergeRequestId],
+        threadId: mergeRequestId
+      },
+      {
+        id: "imap-note-root",
+        dateValue: 1773238872000,
+        messageId: discussionId,
+        inReplyTo: mergeRequestId,
+        references: ["<reply-3-b0qecshn7yl48sqqmhc7c3dw0@gitlab.com>", mergeRequestId],
+        threadId: discussionId
+      },
+      {
+        id: "imap-note-reply",
+        dateValue: 1773305371000,
+        messageId: "<note_3153555479@gitlab.com>",
+        inReplyTo: discussionId,
+        references: [
+          "<reply-3-8qzfa0w60rkdmapb4bs21i60b@gitlab.com>",
+          mergeRequestId,
+          "<note_3150793383@gitlab.com>",
+          discussionId
+        ],
+        threadId: discussionId
+      }
+    ];
+
+    const resolved = resolveThreadingForItems(items);
+    expect(resolved.map((item) => item.threadId)).toEqual([
+      mergeRequestId,
+      mergeRequestId,
+      mergeRequestId
+    ]);
+    expect(resolved[2]?.parentId).toBe("imap-note-root");
+  });
 });
 
 describe("collectThreadReferenceIds", () => {

@@ -73,7 +73,7 @@ export function useReminderNotifications({
       id: makeClientId(),
       expiresAt: timeoutMs == null ? null : Date.now() + timeoutMs
     };
-    setInAppNotices((prev) => [...prev, nextNotice].slice(-8));
+    setInAppNotices((prev) => [...prev, nextNotice].slice(-3));
   }, []);
 
   const dismissNotice = useCallback((noticeId: string) => {

@@ -32,6 +32,7 @@ import ComposeInlineCard from "./mailclient/composition/ComposeInlineCard";
 import ComposeMinimized from "./mailclient/composition/ComposeMinimized";
 import ComposeMessageField from "./mailclient/composition/ComposeMessageField";
 import ComposeModal from "./mailclient/composition/ComposeModal";
+import { reconcileSavedDraftMessages } from "./mailclient/composition/draftListState";
 import { useComposeController } from "./mailclient/composition/useComposeController";
 import { useComposeState } from "./mailclient/composition/useComposeState";
 import { useComposeViewEffects } from "./mailclient/composition/useComposeViewEffects";
@@ -74,7 +75,7 @@ import MessageViewPane from "./mailclient/message/MessageViewPane";
 import MarkdownPanel from "./mailclient/message/MarkdownPanel";
 import MessageSourcePanel from "./mailclient/message/MessageSourcePanel";
 import { TODO_FLAG, DONE_FLAG, isMeaningfulNonInlineAttachment } from "@/lib/messageFlags";
-import { INVITE_DECK_GROUP_BY } from "@/lib/messageGrouping";
+import { buildMessageGroupKey, INVITE_DECK_GROUP_BY } from "@/lib/messageGrouping";
 import {
   DEFAULT_THREAD_DATE_SOURCE,
   type ThreadDateSource
@@ -2251,6 +2252,38 @@ export default function MailClient({
     ]
   );
   updateMessagesRef.current = updateMessagesWithCurrentResultPrune;
+  const reconcileSavedDraftInUi = useCallback(
+    (savedDraft: Message, previousDraftId: string | null) => {
+      const nextSavedDraft = {
+        ...savedDraft,
+        groupKey: buildMessageGroupKey(savedDraft, effectiveGroupBy)
+      };
+      const includeSavedDraft = shouldKeepMessageInCurrentResults(nextSavedDraft);
+      setMessages((prev) =>
+        reconcileSavedDraftMessages({
+          messages: prev,
+          savedDraft: nextSavedDraft,
+          previousDraftId,
+          includeSavedDraft
+        })
+      );
+
+      if (viewMessage?.id === previousDraftId || viewMessage?.id === nextSavedDraft.id) {
+        setViewMessage(nextSavedDraft);
+      }
+      if (activeMessageId === previousDraftId || activeMessageId === nextSavedDraft.id) {
+        setActiveMessageId(nextSavedDraft.id);
+      }
+    },
+    [
+      activeMessageId,
+      effectiveGroupBy,
+      setMessages,
+      setViewMessage,
+      shouldKeepMessageInCurrentResults,
+      viewMessage?.id
+    ]
+  );
 
   const { handleMoveMessages, moveMessagesToFolder } = useMessageMoveActions({
     activeAccountId,
@@ -2953,6 +2986,13 @@ export default function MailClient({
 
     const hasAccountFolders = accountFolders.length > 0;
 
+    // For returning users, wait until the active folder is selected before starting
+    // sync, so the syncAccount closure captures the correct activeFolderId. Without
+    // this guard, activeFolderId is "" when the effect first fires (it gets set by a
+    // sibling effect that runs in the same flush), causing refreshMailboxData() to be
+    // skipped after sync completes and the user sees stale mail.
+    if (hasAccountFolders && !activeFolderId) return;
+
     const syncStatus = initialSyncStatusRef.current[activeAccountId];
     if (syncStatus === "running" || syncStatus === "done") return;
 
@@ -2973,7 +3013,7 @@ export default function MailClient({
       .catch(() => {
         delete initialSyncStatusRef.current[accountId];
       });
-  }, [activeAccountId, accountFolders.length, initialDataReady]);
+  }, [activeAccountId, accountFolders.length, initialDataReady, activeFolderId]);
 
   // CalDAV periodic sync
   useEffect(() => {
@@ -3852,6 +3892,7 @@ export default function MailClient({
     isDraftsFolder,
     suppressDraftDeleteReconcile,
     removeDraftFromUi,
+    reconcileSavedDraftInUi,
     refreshFolders,
     refreshMailboxData,
     apiFetch,

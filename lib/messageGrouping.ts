@@ -1,3 +1,4 @@
+import type { Message } from "./data";
 import { resolveCurrentOrNextOccurrence } from "./reminderRecurrence";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -60,6 +61,35 @@ export function buildTimeGroupKey(timestampMs: number, groupBy: string, nowMs = 
     return "Older";
   }
 
+  return "All";
+}
+
+export function buildMessageGroupKey(
+  message: Pick<Message, "dateValue" | "from" | "folderId">,
+  groupBy: string,
+  dateValueOverride?: number
+) {
+  const effectiveDateValue =
+    typeof dateValueOverride === "number" && Number.isFinite(dateValueOverride)
+      ? dateValueOverride
+      : message.dateValue;
+  const date = new Date(effectiveDateValue);
+
+  if (groupBy === "date" || groupBy === INVITE_DECK_GROUP_BY) {
+    return buildTimeGroupKey(effectiveDateValue, groupBy);
+  }
+  if (groupBy === "week") {
+    return buildWeekGroupKey(effectiveDateValue);
+  }
+  if (groupBy === "year") return String(date.getFullYear());
+  if (groupBy === "domain") {
+    const emailMatch = message.from.match(/<([^>]+)>/);
+    const email = emailMatch ? emailMatch[1] : message.from;
+    const domain = email.split("@")[1];
+    return domain ? domain.toLowerCase() : "Unknown";
+  }
+  if (groupBy === "sender") return message.from;
+  if (groupBy === "folder") return message.folderId;
   return "All";
 }
 

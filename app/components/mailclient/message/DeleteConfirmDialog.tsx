@@ -107,7 +107,7 @@ export default function DeleteConfirmDialog({
     deleteConfirm ? getCalendarAssociationDescription(deleteConfirm) : null;
   const hasLinkedCalendarItems =
     Boolean(deleteConfirm) &&
-    (deleteConfirm.calendarLinkedReminderCount > 0 || deleteConfirm.calendarLinkedEventCount > 0);
+    (deleteConfirm!.calendarLinkedReminderCount > 0 || deleteConfirm!.calendarLinkedEventCount > 0);
 
   return (
     <AlertDialog.Root open={Boolean(deleteConfirm)} onOpenChange={onOpenChange}>

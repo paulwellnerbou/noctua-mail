@@ -105,7 +105,7 @@ export default function MoveToDialog({
         onOpenAutoFocus={(e) => e.preventDefault()}
       >
         <div className={styles.dialogHeader}>
-          <span className={styles.dialogTitle}>Move to...</span>
+          <Dialog.Title className={styles.dialogTitle}>Move to...</Dialog.Title>
           <Dialog.Close>
             <IconButton variant="ghost" size="1" aria-label="Close">
               <X size={14} />

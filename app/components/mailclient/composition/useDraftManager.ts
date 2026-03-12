@@ -60,6 +60,7 @@ export type UseDraftManagerParams = {
   // MailClient-specific callbacks
   suppressDraftDeleteReconcile: (draftId: string | null) => void;
   removeDraftFromUi: (draftId: string | null) => void;
+  reconcileSavedDraftInUi: (savedDraft: Message, previousDraftId: string | null) => void;
   refreshFolders: () => Promise<unknown>;
   refreshMailboxData: () => Promise<unknown>;
 
@@ -110,6 +111,7 @@ export function useDraftManager(params: UseDraftManagerParams) {
     isDraftsFolder,
     suppressDraftDeleteReconcile,
     removeDraftFromUi,
+    reconcileSavedDraftInUi,
     refreshFolders,
     refreshMailboxData,
     apiFetch,
@@ -146,18 +148,24 @@ export function useDraftManager(params: UseDraftManagerParams) {
         setDraftSaveError(message || "Draft save failed.");
         return;
       }
-      const data = (await res.json()) as { draftId?: string | null };
+      const previousDraftId = composeDraftIdRef.current;
+      const data = (await res.json()) as { draftId?: string | null; message?: Message | null };
+      const savedDraft = data?.message ?? null;
       if (data?.draftId) {
-        const previousDraftId = composeDraftIdRef.current;
         if (previousDraftId && previousDraftId !== data.draftId) {
-          setMessages((prev) => prev.filter((msg) => msg.id !== previousDraftId));
-          if (viewMessage?.id === previousDraftId) {
-            setViewMessage({ ...viewMessage, id: data.draftId });
-            setActiveMessageId(data.draftId);
+          if (!savedDraft) {
+            setMessages((prev) => prev.filter((msg) => msg.id !== previousDraftId));
+            if (viewMessage?.id === previousDraftId) {
+              setViewMessage({ ...viewMessage, id: data.draftId });
+              setActiveMessageId(data.draftId);
+            }
           }
         }
         composeDraftIdRef.current = data.draftId;
         setComposeDraftId(data.draftId);
+      }
+      if (savedDraft) {
+        reconcileSavedDraftInUi(savedDraft, previousDraftId);
       }
       lastDraftHashRef.current = hash;
       const latestHash = currentDraftHashRef.current;
@@ -167,7 +175,7 @@ export function useDraftManager(params: UseDraftManagerParams) {
       setDraftSavedAt(Date.now());
       setDraftSaveError(null);
       await refreshFolders();
-      if (searchScope === "folder" && isDraftsFolder(activeFolderId)) {
+      if (!savedDraft && searchScope === "folder" && isDraftsFolder(activeFolderId)) {
         await refreshMailboxData();
       }
     } catch {

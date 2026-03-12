@@ -61,6 +61,11 @@ export function resolveThreadingForItems<T extends ThreadingItem>(
     normalizedInReplyTo: normalizeHeaderId(item.inReplyTo),
     normalizedReferences: normalizeReferenceIds(item.references)
   }));
+  const knownThreadIds = new Set<string>();
+  prepared.forEach((entry) => {
+    const threadId = normalizeHeaderId(entry.item.threadId);
+    if (threadId) knownThreadIds.add(threadId);
+  });
   const byMessageId = new Map<string, PreparedThreadingItem<T>>();
   prepared.forEach((entry) => {
     if (!entry.normalizedMessageId) return;
@@ -78,6 +83,21 @@ export function resolveThreadingForItems<T extends ThreadingItem>(
     for (let i = entry.normalizedReferences.length - 1; i >= 0; i -= 1) {
       const parent = byMessageId.get(entry.normalizedReferences[i]);
       if (parent) return parent;
+    }
+    return null;
+  };
+  const findKnownThreadId = (entry: PreparedThreadingItem<T>) => {
+    for (const ref of entry.normalizedReferences) {
+      if (knownThreadIds.has(ref)) return ref;
+      const external = externalThreadIds.get(ref);
+      if (external) return external;
+    }
+    if (entry.normalizedInReplyTo) {
+      if (knownThreadIds.has(entry.normalizedInReplyTo)) {
+        return entry.normalizedInReplyTo;
+      }
+      const external = externalThreadIds.get(entry.normalizedInReplyTo);
+      if (external) return external;
     }
     return null;
   };
@@ -119,21 +139,11 @@ export function resolveThreadingForItems<T extends ThreadingItem>(
       return fallback;
     }
     stack.add(entry.item.id);
-    let resolved: string | null = null;
-    const localParent = findLocalParent(entry);
-    if (localParent) {
-      resolved = resolveThreadId(localParent, stack);
-    }
-    if (!resolved && entry.normalizedInReplyTo) {
-      resolved = externalThreadIds.get(entry.normalizedInReplyTo) ?? null;
-    }
+    let resolved: string | null = findKnownThreadId(entry);
     if (!resolved) {
-      for (const ref of entry.normalizedReferences) {
-        const external = externalThreadIds.get(ref);
-        if (external) {
-          resolved = external;
-          break;
-        }
+      const localParent = findLocalParent(entry);
+      if (localParent) {
+        resolved = resolveThreadId(localParent, stack);
       }
     }
     if (!resolved) {

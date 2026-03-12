@@ -511,6 +511,9 @@ export function useSyncController({
         );
       }
       await syncNewlyDetectedFolders(knownFolderIds, mode);
+      if (currentKeyRef.current === selectionKey) {
+        await refreshMailboxData();
+      }
       setIsSyncing(false);
     })();
   };

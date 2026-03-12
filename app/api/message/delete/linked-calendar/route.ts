@@ -49,7 +49,7 @@ export async function POST(request: Request) {
     );
     return NextResponse.json({
       ok: true,
-      deletedReminders: reminderResults.reduce((sum, value) => sum + value, 0),
+      deletedReminders: reminderResults.reduce<number>((sum, value) => sum + value, 0),
       deletedEvents: eventIds.length
     });
   } catch (error) {
