@@ -568,6 +568,10 @@ export function useMessageMutations({
     requestMessageFlagMutation
   ]);
 
+  const clearTodoFlag = useCallback(async (message: Message) => {
+    await updateKeywordFlag(message, TODO_FLAG, false);
+  }, [updateKeywordFlag]);
+
   const toggleTodoFlag = useCallback(async (
     message: Message,
     collapsedThreadMessages?: Message[],
@@ -670,6 +674,7 @@ export function useMessageMutations({
     updateKeywordFlag,
     handleSetCategory,
     transitionTodoState,
+    clearTodoFlag,
     toggleTodoFlag,
     toggleFlaggedFlag
   };

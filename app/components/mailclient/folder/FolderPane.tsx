@@ -35,10 +35,11 @@ type FolderPaneProps = {
     recomputeThreads: () => void;
     recomputeCategories: () => void;
   };
+  topSlot?: React.ReactNode;
   children?: React.ReactNode;
 };
 
-export default function FolderPane({ state, actions, children }: FolderPaneProps) {
+export default function FolderPane({ state, actions, topSlot, children }: FolderPaneProps) {
   const {
     leftWidth,
     folderQuery,
@@ -88,6 +89,7 @@ export default function FolderPane({ state, actions, children }: FolderPaneProps
               ))}
             </div>
           ) : null}
+          {topSlot}
           <div className={styles.treeHeader}>
             <div>
               <div className={styles.panelTitle}>Folders</div>

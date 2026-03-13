@@ -101,13 +101,16 @@ import { useSyncController } from "./mailclient/useSyncController";
 import { useAccountController } from "./mailclient/useAccountController";
 import ThreadJsonModal from "./mailclient/message/ThreadJsonModal";
 import ThreadView from "./mailclient/message/ThreadView";
+import TopicPickerDialog from "./mailclient/TopicPickerDialog";
+import TopicBadge from "./mailclient/TopicBadge";
+import TopicsSidebarSection from "./mailclient/folder/TopicsSidebarSection";
 import TopBar from "./mailclient/TopBar";
 import BottomStatusBar from "./mailclient/status/BottomStatusBar";
 import CalendarSidebarPanel from "./calendar/CalendarSidebarPanel";
 import { useMessageDeleteActions } from "./mailclient/useMessageDeleteActions";
 import { useMessageMoveActions, type UndoMoveTarget } from "./mailclient/useMessageMoveActions";
 import { useMessageMutations } from "./mailclient/useMessageMutations";
-import type { Account, Folder, Message, User } from "@/lib/data";
+import type { Account, Folder, Message, Topic, TopicColor, User } from "@/lib/data";
 import AccountSettingsModal, { type ManageTab } from "./AccountSettingsModal";
 import DeleteConfirmDialog from "./mailclient/message/DeleteConfirmDialog";
 import UnsubscribeConfirmDialog from "./mailclient/message/UnsubscribeConfirmDialog";
@@ -201,6 +204,13 @@ export default function MailClient({
   const [folderQuery, setFolderQuery] = useState("");
   const [messageView, setMessageView] = useState<"card" | "table" | "compact" | "threads">("threads");
   const [threadViewMode, setThreadViewMode] = useState<"full" | "compact">("compact");
+  const [allTopics, setAllTopics] = useState<Topic[]>([]);
+  const [messageTopicsById, setMessageTopicsById] = useState<Map<string, Topic[]>>(new Map());
+  const [topicPickerOpen, setTopicPickerOpen] = useState(false);
+  const [topicPickerMessage, setTopicPickerMessage] = useState<Message | null>(null);
+  const [topicSuggestions, setTopicSuggestions] = useState<Topic[]>([]);
+  const [topicSidebarCollapsed, setTopicSidebarCollapsed] = useState(false);
+
   const clientId = useMemo(() => {
     if (typeof window === "undefined") return "";
     const key = "noctuaClientId";
@@ -1432,6 +1442,70 @@ export default function MailClient({
       setMessageView(preferred);
     }
   }, [currentAccount?.settings?.layout?.defaultView]);
+  // Load all topics when account changes
+  useEffect(() => {
+    if (!activeAccountId) return;
+    apiFetch(`/api/topics?accountId=${encodeURIComponent(activeAccountId)}`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.ok && Array.isArray(data.topics)) setAllTopics(data.topics);
+      })
+      .catch(() => {});
+  }, [activeAccountId, apiFetch]);
+
+  // Derive topics map from messages (topics are now included in the messages API response)
+  useEffect(() => {
+    const next = new Map<string, Topic[]>();
+    for (const msg of messages) {
+      if (msg.threadId && msg.topics && msg.topics.length > 0 && !next.has(msg.threadId)) {
+        next.set(msg.threadId, msg.topics);
+      }
+    }
+    setMessageTopicsById(next);
+  }, [messages]);
+
+  const handleAssignTopics = useCallback((message: Message) => {
+    setTopicPickerMessage(message);
+    setTopicSuggestions([]);
+    setTopicPickerOpen(true);
+    const params = new URLSearchParams({ accountId: activeAccountId ?? "" });
+    if (message.threadId) params.set("threadId", message.threadId);
+    if (message.fromEmail) params.set("fromEmail", message.fromEmail);
+    if (message.listId) params.set("listId", message.listId);
+    if (message.to) params.set("to", message.to);
+    if (message.cc) params.set("cc", message.cc);
+    apiFetch(`/api/message/topics/suggest?${params}`)
+      .then((r) => r.json())
+      .then((data) => { if (data.ok) setTopicSuggestions(data.suggestions ?? []); })
+      .catch(() => {});
+  }, [activeAccountId, apiFetch]);
+
+  const handleCreateTopic = useCallback(async (name: string, color: TopicColor | null): Promise<Topic> => {
+    const res = await apiFetch("/api/topics", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ accountId: activeAccountId, name, color })
+    });
+    const data = await res.json();
+    if (!data.ok) throw new Error(data.message ?? "Failed to create topic");
+    setAllTopics((prev) => [...prev, data.topic].sort((a, b) => a.name.localeCompare(b.name)));
+    return data.topic;
+  }, [activeAccountId, apiFetch]);
+
+  const handleSaveMessageTopics = useCallback(async (topicIds: string[]) => {
+    if (!topicPickerMessage) return;
+    const res = await apiFetch("/api/message/topics", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ accountId: activeAccountId, threadId: topicPickerMessage.threadId, action: "set", topicIds })
+    });
+    const data = await res.json();
+    if (data.ok && Array.isArray(data.topics)) {
+      const threadId = topicPickerMessage.threadId;
+      setMessages((prev) => prev.map((msg) => msg.threadId === threadId ? { ...msg, topics: data.topics } : msg));
+    }
+  }, [activeAccountId, apiFetch, topicPickerMessage]);
+
   const includeThreadAcrossFoldersForList =
     includeThreadAcrossFolders &&
     !isDraftsFolder(activeFolderId) &&
@@ -2358,6 +2432,7 @@ export default function MailClient({
     updateKeywordFlag,
     handleSetCategory,
     transitionTodoState,
+    clearTodoFlag,
     toggleTodoFlag,
     toggleFlaggedFlag
   } = useMessageMutations({
@@ -2490,6 +2565,7 @@ export default function MailClient({
     openCompose,
     updateFlagStateRef.current,
     toggleTodoFlagRef.current,
+    clearTodoFlagRef.current,
     handleMarkSpam,
     handleMarkNotSpam,
     handleArchiveMessage,
@@ -2502,6 +2578,7 @@ export default function MailClient({
     handleOpenHtmlInNewWindow,
     handleShowRelated,
     handleShowThread,
+    handleAssignTopics,
     handleMoveTo,
     isDraftItem,
     isTrashFolder,
@@ -2515,6 +2592,9 @@ export default function MailClient({
 
   const toggleTodoFlagRef = useRef(toggleTodoFlag);
   toggleTodoFlagRef.current = toggleTodoFlag;
+
+  const clearTodoFlagRef = useRef(clearTodoFlag);
+  clearTodoFlagRef.current = clearTodoFlag;
 
   const { handleMessageDragStart, handleMessageDragEnd } = useMessageDragDrop({
     selectionStore,
@@ -4153,6 +4233,16 @@ export default function MailClient({
         resolveUnsubscribeConfirm={resolveUnsubscribeConfirm}
       />
 
+      <TopicPickerDialog
+        open={topicPickerOpen}
+        onOpenChange={setTopicPickerOpen}
+        allTopics={allTopics}
+        messageTopics={topicPickerMessage ? (messageTopicsById.get(topicPickerMessage.threadId) ?? []) : []}
+        suggestions={topicSuggestions}
+        onSave={handleSaveMessageTopics}
+        onCreateTopic={handleCreateTopic}
+      />
+
       <section className="content-grid" ref={containerRef}>
         <FolderPane
           state={{
@@ -4170,6 +4260,23 @@ export default function MailClient({
             recomputeThreads,
             recomputeCategories
           }}
+          topSlot={
+            <TopicsSidebarSection
+              topics={allTopics}
+              activeTopicId={query.startsWith("topic:") ? query.slice("topic:".length) : null}
+              collapsed={topicSidebarCollapsed}
+              onToggleCollapsed={() => setTopicSidebarCollapsed((v) => !v)}
+              onTopicClick={(topicId) => {
+                const current = query.startsWith("topic:") ? query.slice("topic:".length) : null;
+                if (current === topicId) {
+                  setQuery("");
+                } else {
+                  setQuery(`topic:${topicId}`);
+                  setSearchScope("all");
+                }
+              }}
+            />
+          }
         >
           <FolderTree
             state={{
@@ -4316,11 +4423,13 @@ export default function MailClient({
                 searchScope,
                 activeFolderId,
                 messageById,
+                messageTopicsById,
                 sortDir,
                 listIsNarrow,
                 preferToDisplay,
                 userEmail: currentAccount?.email,
-                dateFormat: accountDateFormat
+                dateFormat: accountDateFormat,
+                topicColorRows: currentAccount?.settings?.appearance?.topicColorRows ?? false
               }}
               actions={{
                 setSortKey,
@@ -4398,21 +4507,31 @@ export default function MailClient({
           header={activeMessage ? (() => {
                   const rootSubject =
                     activeThread[0]?.subject ?? activeMessage?.subject ?? "";
+                  const threadTopics = messageTopicsById.get(activeMessage.threadId) ?? [];
                   return (
-                    <>
-                      <span style={{ flex: 1, minWidth: 0, fontWeight: 600, fontSize: 16, lineHeight: 1.4, wordBreak: "break-word", overflowWrap: "anywhere", color: "var(--gray-12)" }}>
-                        {rootSubject || "(no subject)"}
-                      </span>
-                      <SegmentedControl.Root
-                        size="1"
-                        value={threadViewMode}
-                        onValueChange={(v) => setThreadViewMode(v as "full" | "compact")}
-                        style={{ flexShrink: 0 }}
-                      >
-                        <SegmentedControl.Item value="compact">Compact</SegmentedControl.Item>
-                        <SegmentedControl.Item value="full">Full</SegmentedControl.Item>
-                      </SegmentedControl.Root>
-                    </>
+                    <Flex direction="column" gap="2" style={{ flex: 1, minWidth: 0 }}>
+                      <Flex align="center" gap="3">
+                        <span style={{ flex: 1, minWidth: 0, fontWeight: 600, fontSize: 16, lineHeight: 1.4, wordBreak: "break-word", overflowWrap: "anywhere", color: "var(--gray-12)" }}>
+                          {rootSubject || "(no subject)"}
+                        </span>
+                        <SegmentedControl.Root
+                          size="1"
+                          value={threadViewMode}
+                          onValueChange={(v) => setThreadViewMode(v as "full" | "compact")}
+                          style={{ flexShrink: 0 }}
+                        >
+                          <SegmentedControl.Item value="compact">Compact</SegmentedControl.Item>
+                          <SegmentedControl.Item value="full">Full</SegmentedControl.Item>
+                        </SegmentedControl.Root>
+                      </Flex>
+                      {threadTopics.length > 0 && (
+                        <Flex gap="1" wrap="wrap" justify="end">
+                          {threadTopics.map((topic) => (
+                            <TopicBadge key={topic.id} topic={topic} size="1" />
+                          ))}
+                        </Flex>
+                      )}
+                    </Flex>
                   );
                 })() : undefined
           }
@@ -4606,6 +4725,7 @@ export default function MailClient({
           }}
           apiFetch={apiFetch}
           readErrorMessage={readErrorMessage}
+          onTopicsChanged={setAllTopics}
         />
       )}
 

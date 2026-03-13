@@ -11,8 +11,10 @@ import commonStyles from "./MessageListCommon.module.css";
 import { getMessageListDateDisplay } from "./messageDateDisplay";
 import styles from "./MessageRow.module.css";
 import CategoryBadge from "../CategoryBadge";
+import TopicBadge from "../TopicBadge";
 import FlagBadge from "../message/FlagBadge";
 import MessageBadge from "../message/MessageBadge";
+import type { Topic } from "@/lib/data";
 
 type MessageRowProps = {
   message: Message;
@@ -71,8 +73,10 @@ type MessageRowProps = {
   threadHasDone?: boolean;
   threadHasAttachments?: boolean;
   threadHasCalendar?: boolean;
+  messageTopics?: Topic[];
   collapsedThreadMessages?: Message[];
   dateFormat?: AccountDateFormat;
+  topicColorRows?: boolean;
 };
 
 function MessageRow({
@@ -132,8 +136,10 @@ function MessageRow({
   threadHasDone,
   threadHasAttachments,
   threadHasCalendar,
+  messageTopics,
   collapsedThreadMessages,
-  dateFormat
+  dateFormat,
+  topicColorRows
 }: MessageRowProps) {
   const [optimisticSelected, setOptimisticSelected] = useState<boolean | null>(null);
   const [optimisticActive, setOptimisticActive] = useState(false);
@@ -197,6 +203,8 @@ function MessageRow({
   const fromLineTooltip =
     fromTooltip && fromTooltip.trim() ? fromTooltip : message.from;
   const dateDisplay = getMessageListDateDisplay(message.dateValue, message.date, dateFormat);
+  const firstTopicColor = topicColorRows ? (messageTopics?.[0]?.color ?? null) : null;
+  const topicTintVar = firstTopicColor ? ({ "--topic-tint": `var(--${firstTopicColor}-a2)`, "--topic-tint-selected": `var(--${firstTopicColor}-a3)` } as React.CSSProperties) : undefined;
 
   const handleCheckboxClick = (event: React.MouseEvent<HTMLButtonElement>) => {
     event.stopPropagation();
@@ -272,7 +280,7 @@ function MessageRow({
       onPointerDown={handlePointerDown}
       onMouseEnter={onMouseEnter}
       onMouseLeave={onMouseLeave}
-      style={paddingLeft ? { paddingLeft: `${paddingLeft}px` } : undefined}
+      style={{ ...(paddingLeft ? { paddingLeft: `${paddingLeft}px` } : {}), ...topicTintVar }}
       onKeyDown={onRowKeyDown}
     >
       <div className={headerClassName}>
@@ -428,6 +436,9 @@ function MessageRow({
               : message.category && (
                   <CategoryBadge category={message.category as any} showText={false} />
                 )}
+            {messageTopics && messageTopics.map((topic) => (
+              <TopicBadge key={topic.id} topic={topic} showText size="1" />
+            ))}
             {(threadHasFlagged ?? message.flagged) && (
               <FlagBadge onClick={() => toggleFlaggedFlag(message, collapsedThreadMessages)} />
             )}
@@ -480,6 +491,7 @@ const areEqual = (prev: MessageRowProps, next: MessageRowProps) =>
   prev.categoryIcon === next.categoryIcon &&
   prev.threadHasFlagged === next.threadHasFlagged &&
   prev.threadHasTodo === next.threadHasTodo &&
-  prev.threadHasDone === next.threadHasDone;
+  prev.threadHasDone === next.threadHasDone &&
+  prev.messageTopics === next.messageTopics;
 
 export default memo(MessageRow, areEqual);

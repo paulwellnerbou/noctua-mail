@@ -1,4 +1,5 @@
 import type React from "react";
+import type { CSSProperties } from "react";
 import type { Message } from "@/lib/data";
 import { CALENDAR_INVITE_FLAG, hasMessageFlag } from "@/lib/messageFlags";
 import MessageRow from "./MessageRow";
@@ -46,7 +47,9 @@ export default function MessageCardList({
     listIsNarrow,
     preferToDisplay,
     userEmail,
-    dateFormat
+    dateFormat,
+    messageTopicsById,
+    topicColorRows
   } = state;
   const { scrollRef } = refs;
 
@@ -201,6 +204,8 @@ export default function MessageCardList({
           item
         });
         const useCompactThreadContainer = isCompactView && supportsThreads;
+        const firstTopicColor = topicColorRows ? (messageTopicsById?.get(message.threadId)?.[0]?.color ?? null) : null;
+        const topicTintVar = firstTopicColor ? ({ "--topic-tint": `var(--${firstTopicColor}-a2)`, "--topic-tint-selected": `var(--${firstTopicColor}-a3)` } as CSSProperties) : undefined;
         const hasExternalThreadCaret =
           useCompactThreadContainer &&
           ((item.depth === 0 && item.threadIndex === 0 && item.threadSize > 1) ||
@@ -235,7 +240,7 @@ export default function MessageCardList({
         });
 
         return (
-          <div className={compactThreadRowClassName}>
+          <div className={compactThreadRowClassName} style={useCompactThreadContainer ? topicTintVar : undefined}>
             {isCompactView && supportsThreads && (
               <ThreadMarkers
                 depth={item.depth}
@@ -399,10 +404,12 @@ export default function MessageCardList({
               threadHasDone={threadBadgeUnion?.threadHasDone}
               threadHasAttachments={threadBadgeUnion?.threadHasAttachments}
               threadHasCalendar={threadBadgeUnion?.threadHasCalendar}
+              messageTopics={messageTopicsById?.get(message.threadId)}
               collapsedThreadMessages={
                 isCollapsedThreadRoot ? item.fullFlat.map((entry) => entry.message) : undefined
               }
               dateFormat={dateFormat}
+              topicColorRows={topicColorRows}
             />
           </div>
         );

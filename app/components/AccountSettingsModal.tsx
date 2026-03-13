@@ -1,15 +1,16 @@
 import { useState } from "react";
 import { X } from "lucide-react";
 import { Dialog, Flex, IconButton, Tabs } from "@radix-ui/themes";
-import type { Account, AccountSettings } from "@/lib/data";
+import type { Account, AccountSettings, Topic } from "@/lib/data";
 import AccountTabContent from "@/app/components/account-settings/tabs/AccountTabContent";
 import SignaturesTabContent from "@/app/components/account-settings/tabs/SignaturesTabContent";
 import PreferencesTabContent from "@/app/components/account-settings/tabs/PreferencesTabContent";
 import CategorizationTabContent from "@/app/components/account-settings/tabs/CategorizationTabContent";
 import AdminTabContent from "@/app/components/account-settings/tabs/AdminTabContent";
 import CalendarTabContent from "@/app/components/account-settings/tabs/CalendarTabContent";
+import TopicsTabContent from "@/app/components/account-settings/tabs/TopicsTabContent";
 
-export type ManageTab = "account" | "signatures" | "preferences" | "categorization" | "calendar" | "admin";
+export type ManageTab = "account" | "signatures" | "preferences" | "categorization" | "calendar" | "topics" | "admin";
 
 function deriveImapSecurity(imap: Account["imap"]): "tls" | "starttls" | "none" {
   if (imap.secure) return "tls";
@@ -35,6 +36,7 @@ type Props = {
   onNotifySuccess?: (title: string, description: string) => void;
   apiFetch?: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
   readErrorMessage?: (res: Response) => Promise<string>;
+  onTopicsChanged?: (topics: Topic[]) => void;
 };
 
 export default function AccountSettingsModal({
@@ -49,7 +51,8 @@ export default function AccountSettingsModal({
   isAdminUser = false,
   onNotifySuccess,
   apiFetch,
-  readErrorMessage
+  readErrorMessage,
+  onTopicsChanged
 }: Props) {
   const [localAccount, setLocalAccount] = useState<Account>(initialAccount);
   const [imapSecurity, setImapSecurity] = useState<"tls" | "starttls" | "none">(() =>
@@ -171,6 +174,9 @@ export default function AccountSettingsModal({
               <Tabs.Trigger value="calendar" disabled={!isExistingAccount}>
                 Calendar
               </Tabs.Trigger>
+              <Tabs.Trigger value="topics" disabled={!isExistingAccount}>
+                Topics
+              </Tabs.Trigger>
               {isAdminUser && (
                 <Tabs.Trigger value="admin" disabled={!isExistingAccount}>
                   Admin
@@ -241,6 +247,21 @@ export default function AccountSettingsModal({
                 editingAccount={localAccount}
                 isExistingAccount={isExistingAccount}
                 onUpdateAccount={setLocalAccount}
+                onClose={onClose}
+                onSave={handleSave}
+              />
+            </Tabs.Content>
+
+            <Tabs.Content value="topics" style={{ flex: "1 1 auto", minHeight: 0, overflow: "auto", padding: "var(--space-2)" }}>
+              <TopicsTabContent
+                accountId={localAccount.id}
+                isActive={manageTab === "topics"}
+                isExistingAccount={isExistingAccount}
+                apiFetch={apiFetch}
+                onTopicsChanged={onTopicsChanged}
+                topicColorRows={localAccount.settings?.appearance?.topicColorRows ?? false}
+                onUpdateSettings={handleUpdateSettings}
+                currentAppearance={localAccount.settings?.appearance}
                 onClose={onClose}
                 onSave={handleSave}
               />

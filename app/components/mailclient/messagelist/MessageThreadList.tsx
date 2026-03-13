@@ -1,4 +1,5 @@
 import type React from "react";
+import type { CSSProperties } from "react";
 import { CalendarDays, GitBranch, MoveRight, Paperclip, Trash2 } from "lucide-react";
 import { Badge, IconButton, Text } from "@radix-ui/themes";
 import { badgeColors } from "@/lib/ui/badgeColors";
@@ -8,6 +9,7 @@ import badgeStyles from "../message/MessageBadge.module.css";
 import CategoryBadge from "../CategoryBadge";
 import FlagBadge from "../message/FlagBadge";
 import MessageBadge from "../message/MessageBadge";
+import TopicBadge from "../TopicBadge";
 import { shouldShowAttachmentIcon, hasTodoFlag, hasDoneFlag } from "../utils/messageHelpers";
 import { getMessageListDateDisplay } from "./messageDateDisplay";
 import { useSelectionSnapshot } from "./selectionStore";
@@ -44,12 +46,14 @@ export default function MessageThreadList({
     searchScope,
     activeFolderId,
     messageById,
+    messageTopicsById,
     selectionStore,
     draggingMessageIds,
     pendingMessageActions,
     preferToDisplay,
     userEmail,
-    dateFormat
+    dateFormat,
+    topicColorRows
   } = state;
   const { scrollRef } = refs;
 
@@ -223,8 +227,11 @@ export default function MessageThreadList({
           .filter(Boolean)
           .join(" ");
 
+        const firstTopicColor = topicColorRows ? (messageTopicsById?.get(message.threadId)?.[0]?.color ?? null) : null;
+        const topicTintVar = firstTopicColor ? ({ "--topic-tint": `var(--${firstTopicColor}-a2)`, "--topic-tint-selected": `var(--${firstTopicColor}-a3)` } as CSSProperties) : undefined;
+
         return (
-          <div className={rowContainerClassName}>
+          <div className={rowContainerClassName} style={topicTintVar}>
             <ThreadMarkers
               depth={item.depth}
               threadIndex={item.threadIndex}
@@ -379,6 +386,9 @@ export default function MessageThreadList({
                       }
                     />
                   )}
+                  {messageTopicsById?.get(message.threadId)?.map((topic) => (
+                    <TopicBadge key={topic.id} topic={topic} size="1" />
+                  ))}
                 </span>
 
                 <span className={styles.cellDate}>

@@ -1,5 +1,5 @@
 import type React from "react";
-import type { AccountDateFormat, Message } from "@/lib/data";
+import type { AccountDateFormat, Message, Topic } from "@/lib/data";
 import type { MessageGroup, ThreadNode } from "./listModel";
 import type { SelectionStore } from "./selectionStore";
 
@@ -18,11 +18,13 @@ export type MessageListViewState = {
   searchScope: "folder" | "all";
   activeFolderId: string;
   messageById: Map<string, Message>;
+  messageTopicsById: Map<string, Topic[]>;
   sortDir: "asc" | "desc";
   listIsNarrow: boolean;
   preferToDisplay: boolean;
   userEmail?: string;
   dateFormat?: AccountDateFormat;
+  topicColorRows?: boolean;
 };
 
 export type MessageListViewRefs = {

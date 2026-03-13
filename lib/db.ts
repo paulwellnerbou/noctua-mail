@@ -24,6 +24,8 @@ import type {
   InviteCode,
   MailboxState,
   Message,
+  Topic,
+  TopicColor,
   User
 } from "./data";
 import { decodeSecret, encodeSecret, shouldStorePasswordInDb } from "./secret";
@@ -796,7 +798,8 @@ function initAccountSchema(db: any) {
       category TEXT,
       categoryScore REAL,
       categorySignals TEXT,
-      categoryManualState TEXT
+      categoryManualState TEXT,
+      listId TEXT
     );
 
     CREATE TABLE IF NOT EXISTS attachments (
@@ -862,6 +865,24 @@ function initAccountSchema(db: any) {
       createdAt INTEGER NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS topics (
+      id TEXT PRIMARY KEY,
+      accountId TEXT NOT NULL,
+      name TEXT NOT NULL,
+      color TEXT NOT NULL,
+      imapKeyword TEXT NOT NULL,
+      createdAt INTEGER NOT NULL,
+      updatedAt INTEGER NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS thread_topics (
+      threadId TEXT NOT NULL,
+      topicId TEXT NOT NULL,
+      accountId TEXT NOT NULL,
+      assignedAt INTEGER NOT NULL,
+      PRIMARY KEY (threadId, topicId)
+    );
+
     CREATE TABLE IF NOT EXISTS calendar_reminders (
       id TEXT PRIMARY KEY,
       accountId TEXT NOT NULL,
@@ -918,6 +939,12 @@ function initAccountSchema(db: any) {
       ON calendar_reminders(accountId, userId, updatedAtMs DESC);
     CREATE INDEX IF NOT EXISTS idx_category_feedback_events_account_created
       ON category_feedback_events(accountId, createdAt DESC);
+    CREATE INDEX IF NOT EXISTS idx_topics_account
+      ON topics(accountId);
+    CREATE INDEX IF NOT EXISTS idx_thread_topics_thread
+      ON thread_topics(threadId);
+    CREATE INDEX IF NOT EXISTS idx_thread_topics_topic
+      ON thread_topics(topicId);
 
     CREATE TABLE IF NOT EXISTS calendar_events (
       id TEXT PRIMARY KEY,
@@ -994,6 +1021,9 @@ function initAccountSchema(db: any) {
   }
   if (!messageColumns.has("listUnsubscribe")) {
     db.prepare(`ALTER TABLE messages ADD COLUMN listUnsubscribe TEXT`).run();
+  }
+  if (!messageColumns.has("listId")) {
+    db.prepare(`ALTER TABLE messages ADD COLUMN listId TEXT`).run();
   }
   if (!messageColumns.has("xComposeFormat")) {
     db.prepare(`ALTER TABLE messages ADD COLUMN xComposeFormat TEXT`).run();
@@ -1089,6 +1119,11 @@ async function getAccountDb(accountId: string) {
 }
 
 export type GroupMeta = { key: string; label: string; count: number };
+
+export async function withAccountDb<T>(accountId: string, fn: (db: any) => T | Promise<T>): Promise<T> {
+  const db = await getAccountDb(accountId);
+  return fn(db);
+}
 
 function resolveAccountDbPathForPersist(accountId: string, dbPath?: string | null) {
   if (dbPath && dbPath.trim().length > 0) return dbPath;
@@ -3132,8 +3167,19 @@ function parseSearchInput(
     }
   );
 
-  const rawQuery = withoutThread.trim();
-  const queryTokens = buildSearchTokens(withoutThread);
+  // Extract "topic:" terms (exact topic ID match)
+  const topicTerms: string[] = [];
+  const withoutTopic = withoutThread.replace(
+    /(^|\s)topic:("([^"]+)"|\S+)/gi,
+    (match, lead, term) => {
+      const cleaned = term.replace(/^"|"$/g, "").trim();
+      if (cleaned) topicTerms.push(cleaned);
+      return lead ? " " : "";
+    }
+  );
+
+  const rawQuery = withoutTopic.trim();
+  const queryTokens = buildSearchTokens(withoutTopic);
   const columns = normalizeSearchFields(fields);
   const includeAttachmentFilenames = shouldSearchAttachmentFilenames(fields);
   const ftsTokenQueries = buildScopedFtsTokenQueries(queryTokens, columns);
@@ -3147,6 +3193,7 @@ function parseSearchInput(
     inTerms,
     inviteUidTerms,
     threadTerms,
+    topicTerms,
     rawQuery,
     attachmentFilenameTerms
   };
@@ -3798,7 +3845,7 @@ async function getGroupCounts(params: {
   const db = await getAccountDb(accountId);
   const accountEmail = await getAccountEmail(accountId);
 
-  const { ftsTokenQueries, fromTerms, toTerms, inTerms, inviteUidTerms, threadTerms, rawQuery, attachmentFilenameTerms } = parseSearchInput(
+  const { ftsTokenQueries, fromTerms, toTerms, inTerms, inviteUidTerms, threadTerms, topicTerms, rawQuery, attachmentFilenameTerms } = parseSearchInput(
     query,
     fields,
     accountEmail
@@ -3828,6 +3875,12 @@ async function getGroupCounts(params: {
     where += " AND m.threadId = ?";
   });
   threadTerms.forEach((term) => args.push(term));
+
+  // Apply "topic:" filter (messages assigned to a topic)
+  topicTerms.forEach((topicId) => {
+    where += " AND EXISTS (SELECT 1 FROM thread_topics tt WHERE tt.threadId = m.threadId AND tt.topicId = ?)";
+    args.push(topicId);
+  });
 
   // Apply "in:" filter (searches in folder names)
   if (inTerms.length > 0) {
@@ -4007,7 +4060,7 @@ async function getTotalCount(params: {
     params;
   const accountEmail = await getAccountEmail(accountId);
 
-  const { ftsTokenQueries, fromTerms, toTerms, inTerms, inviteUidTerms, threadTerms, rawQuery, attachmentFilenameTerms } = parseSearchInput(
+  const { ftsTokenQueries, fromTerms, toTerms, inTerms, inviteUidTerms, threadTerms, topicTerms, rawQuery, attachmentFilenameTerms } = parseSearchInput(
     query,
     fields,
     accountEmail
@@ -4037,6 +4090,12 @@ async function getTotalCount(params: {
     where += " AND m.threadId = ?";
   });
   threadTerms.forEach((term) => args.push(term));
+
+  // Apply "topic:" filter (messages assigned to a topic)
+  topicTerms.forEach((topicId) => {
+    where += " AND EXISTS (SELECT 1 FROM thread_topics tt WHERE tt.threadId = m.threadId AND tt.topicId = ?)";
+    args.push(topicId);
+  });
 
   // Apply "in:" filter (searches in folder names)
   if (inTerms.length > 0) {
@@ -4473,6 +4532,7 @@ export async function listRelatedMessages(params: {
       quotedHtmlEdited: row.quotedHtmlEdited ? true : false,
       subject: row.subject,
       from: row.fromAddr,
+      fromEmail: row.fromEmail ?? undefined,
       to: row.toAddr,
       cc: row.ccAddr ?? undefined,
       bcc: row.bccAddr ?? undefined,
@@ -4497,7 +4557,8 @@ export async function listRelatedMessages(params: {
       category: row.category ?? undefined,
       categoryScore: typeof row.categoryScore === "number" ? row.categoryScore : undefined,
       categorySignals: parseStringArray(row.categorySignals),
-      listUnsubscribe: row.listUnsubscribe ?? undefined
+      listUnsubscribe: row.listUnsubscribe ?? undefined,
+      listId: row.listId ?? undefined
     };
     (message as any).groupKey =
       inviteDeckGroupsByMessageId.get(message.id) ?? buildGroupKey(message, groupBy);
@@ -4513,6 +4574,7 @@ export async function listRelatedMessages(params: {
       threadId: row.threadId,
       subject: row.subject,
       from: row.fromAddr,
+      fromEmail: row.fromEmail ?? undefined,
       to: row.toAddr,
       preview: row.preview,
       date: row.date,
@@ -4576,7 +4638,7 @@ export async function listMessages(params: {
   const offset = (page - 1) * pageSize;
   const accountEmail = await getAccountEmail(accountId);
 
-  const { ftsTokenQueries, fromTerms, toTerms, inTerms, inviteUidTerms, threadTerms, rawQuery, attachmentFilenameTerms } = parseSearchInput(
+  const { ftsTokenQueries, fromTerms, toTerms, inTerms, inviteUidTerms, threadTerms, topicTerms, rawQuery, attachmentFilenameTerms } = parseSearchInput(
     query,
     fields,
     accountEmail
@@ -4607,6 +4669,12 @@ export async function listMessages(params: {
     where += " AND m.threadId = ?";
   });
   threadTerms.forEach((term) => args.push(term));
+
+  // Apply "topic:" filter (messages assigned to a topic)
+  topicTerms.forEach((topicId) => {
+    where += " AND EXISTS (SELECT 1 FROM thread_topics tt WHERE tt.threadId = m.threadId AND tt.topicId = ?)";
+    args.push(topicId);
+  });
 
   // Apply "in:" filter (searches in folder names)
   if (inTerms.length > 0) {
@@ -4735,6 +4803,7 @@ export async function listMessages(params: {
       quotedHtmlEdited: row.quotedHtmlEdited ? true : false,
       subject: row.subject,
       from: row.fromAddr,
+      fromEmail: row.fromEmail ?? undefined,
       to: row.toAddr,
       cc: row.ccAddr ?? undefined,
       bcc: row.bccAddr ?? undefined,
@@ -4759,7 +4828,8 @@ export async function listMessages(params: {
       category: row.category ?? undefined,
       categoryScore: typeof row.categoryScore === "number" ? row.categoryScore : undefined,
       categorySignals: parseStringArray(row.categorySignals),
-      listUnsubscribe: row.listUnsubscribe ?? undefined
+      listUnsubscribe: row.listUnsubscribe ?? undefined,
+      listId: row.listId ?? undefined
     };
     (message as any).groupKey =
       inviteDeckGroupsByMessageId.get(message.id) ?? buildGroupKey(message, groupBy);
@@ -4826,7 +4896,7 @@ export async function listThreads(params: {
   const normalizedThreadDateSource = normalizeThreadDateSource(threadDateSource);
   const threadDateColumn = getThreadDateColumn(groupBy, normalizedThreadDateSource);
 
-  const { ftsTokenQueries, fromTerms, toTerms, inTerms, inviteUidTerms, threadTerms, rawQuery, attachmentFilenameTerms } = parseSearchInput(
+  const { ftsTokenQueries, fromTerms, toTerms, inTerms, inviteUidTerms, threadTerms, topicTerms, rawQuery, attachmentFilenameTerms } = parseSearchInput(
     query,
     fields,
     accountEmail
@@ -4857,6 +4927,12 @@ export async function listThreads(params: {
     where += " AND m.threadId = ?";
   });
   threadTerms.forEach((term) => args.push(term));
+
+  // Apply "topic:" filter (messages assigned to a topic)
+  topicTerms.forEach((topicId) => {
+    where += " AND EXISTS (SELECT 1 FROM thread_topics tt WHERE tt.threadId = m.threadId AND tt.topicId = ?)";
+    args.push(topicId);
+  });
 
   // Apply "in:" filter (searches in folder names)
   if (inTerms.length > 0) {
@@ -5206,6 +5282,7 @@ export async function listThreads(params: {
       quotedHtmlEdited: row.quotedHtmlEdited ? true : false,
       subject: row.subject,
       from: row.fromAddr,
+      fromEmail: row.fromEmail ?? undefined,
       to: row.toAddr,
       cc: row.ccAddr ?? undefined,
       bcc: row.bccAddr ?? undefined,
@@ -5230,7 +5307,8 @@ export async function listThreads(params: {
       category: row.category ?? undefined,
       categoryScore: typeof row.categoryScore === "number" ? row.categoryScore : undefined,
       categorySignals: parseStringArray(row.categorySignals),
-      listUnsubscribe: row.listUnsubscribe ?? undefined
+      listUnsubscribe: row.listUnsubscribe ?? undefined,
+      listId: row.listId ?? undefined
     };
     const threadDateValue = threadDateValueByThreadId.get(message.threadId);
     message.threadSortDateValue = threadDateValue ?? message.dateValue;
@@ -5395,6 +5473,7 @@ export async function listThreadMessages(params: {
       quotedHtmlEdited: row.quotedHtmlEdited ? true : false,
       subject: row.subject,
       from: row.fromAddr,
+      fromEmail: row.fromEmail ?? undefined,
       to: row.toAddr,
       cc: row.ccAddr ?? undefined,
       bcc: row.bccAddr ?? undefined,
@@ -5417,7 +5496,8 @@ export async function listThreadMessages(params: {
       category: row.category ?? undefined,
       categoryScore: typeof row.categoryScore === "number" ? row.categoryScore : undefined,
       categorySignals: parseStringArray(row.categorySignals),
-      listUnsubscribe: row.listUnsubscribe ?? undefined
+      listUnsubscribe: row.listUnsubscribe ?? undefined,
+      listId: row.listId ?? undefined
     };
     const threadDateValue = threadDateValueByThreadId.get(message.threadId);
     message.threadSortDateValue = threadDateValue ?? message.dateValue;
@@ -5619,8 +5699,8 @@ export async function upsertMessages(
         id, accountId, folderId, threadId, parentId, messageId, inReplyTo, "references", xForwardedMessageId, xComposeFormat, quotedHtmlEdited,
         subject, fromAddr, fromEmail, toAddr, ccAddr, bccAddr, mailboxPath, imapUid, preview, date, dateValue,
         body, htmlBody, priority, hasSource, unread, flags, seen, answered, flagged, deleted, draft, recent,
-        category, categoryScore, categorySignals, categoryManualState, listUnsubscribe
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        category, categoryScore, categorySignals, categoryManualState, listUnsubscribe, listId
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     const insertFts = db.prepare(`
       INSERT INTO message_fts (messageId, subject, fromAddr, toAddr, ccAddr, bccAddr, body, preview)
@@ -5894,7 +5974,8 @@ export async function upsertMessages(
           categoryScore,
           categorySignals ? JSON.stringify(categorySignals) : null,
           manualCategoryState,
-          message.listUnsubscribe ?? null
+          message.listUnsubscribe ?? null,
+          message.listId ?? null
         );
         deleteFts.run(rowId);
         insertFts.run(

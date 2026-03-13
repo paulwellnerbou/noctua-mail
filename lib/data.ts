@@ -48,6 +48,7 @@ export type AccountSettings = {
   };
   appearance?: {
     dateFormat?: AccountDateFormat;
+    topicColorRows?: boolean;
   };
   calendar?: {
     weekStartsOn?: "monday" | "sunday";
@@ -94,6 +95,7 @@ export type Message = {
   quotedHtmlEdited?: boolean;
   subject: string;
   from: string;
+  fromEmail?: string;
   to: string;
   cc?: string;
   bcc?: string;
@@ -126,9 +128,55 @@ export type Message = {
   calendarEventUids?: string[];
   calendarInviteStates?: MessageCalendarInviteState[];
   listUnsubscribe?: string | null;
+  listId?: string | null;
   groupKey?: string;
   threadSortDateValue?: number;
+  topics?: Topic[];
 };
+
+export const TOPIC_COLORS = [
+  "tomato", "red", "ruby", "crimson", "pink", "plum",
+  "purple", "violet", "iris", "indigo", "blue", "sky",
+  "cyan", "teal", "mint", "jade", "green", "grass", "lime",
+  "yellow", "amber", "orange", "gold", "bronze", "brown",
+  "sand", "slate", "mauve", "olive", "sage", "gray",
+] as const;
+
+export type TopicColor = (typeof TOPIC_COLORS)[number];
+
+/** Returns the Radix scale name for use as a Badge color prop. */
+export function topicColorToScale(color: string | null | undefined): TopicColor {
+  if (!color) return "gray";
+  return (TOPIC_COLORS as readonly string[]).includes(color) ? (color as TopicColor) : "gray";
+}
+
+/** Returns a CSS var reference for a topic color dot/indicator. */
+export function topicColorToCssVar(color: string | null | undefined, shade = 9): string {
+  if (!color) return `var(--gray-${shade})`;
+  return `var(--${color}-${shade})`;
+}
+
+export type Topic = {
+  id: string;
+  accountId: string;
+  name: string;
+  color: TopicColor | null;
+  imapKeyword: string;
+  createdAt: number;
+  updatedAt: number;
+};
+
+// Signals used to derive topic suggestions from past manual assignments.
+// No manual rules table — the app learns from what the user has tagged before.
+// See getTopicSuggestionsForMessage() in lib/topics.ts.
+export const TOPIC_SUGGESTION_SIGNALS = [
+  "senderEmail",    // exact sender email address, e.g. "noreply@gitlab.com"
+  "senderDomain",   // domain part of sender email, e.g. "gitlab.com"
+  "recipient",      // email address appearing in To or CC
+  "listId",         // List-Id header, e.g. "ndrde/code/unified-sophora/api"
+] as const;
+
+export type TopicSuggestionSignal = (typeof TOPIC_SUGGESTION_SIGNALS)[number];
 
 export type Attachment = {
   id: string;

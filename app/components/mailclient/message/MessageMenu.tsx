@@ -44,6 +44,7 @@ type MessageMenuAction =
   | "markRead"
   | "flag"
   | "todo"
+  | "unmarkTodo"
   | "answered"
   | "spam"
   | "archive"
@@ -53,6 +54,7 @@ type MessageMenuAction =
   | "unsubscribe"
   | "showRelated"
   | "showThread"
+  | "topics"
   | "openWindow"
   | "openHtmlWindow"
   | "downloadEml"
@@ -72,6 +74,7 @@ type MessageMenuProps = {
     value: boolean
   ) => void;
   toggleTodoFlag: (message: Message) => void;
+  clearTodoFlag: (message: Message) => void;
   handleMarkSpam: (message: Message) => void;
   handleMarkNotSpam: (message: Message) => void;
   handleArchiveMessage: (message: Message) => void;
@@ -87,6 +90,7 @@ type MessageMenuProps = {
   handleOpenHtmlInNewWindow: (message: Message) => void;
   onShowRelated: (message: Message) => void;
   onShowThread: (message: Message) => void;
+  onAssignTopics: (message: Message) => void;
   onMoveTo: (message: Message) => void;
   isTrashFolder: (folderId?: string) => boolean;
   isSpamFolder: (folderId?: string) => boolean;
@@ -103,6 +107,7 @@ export default function MessageMenu({
   openCompose,
   updateFlagState,
   toggleTodoFlag,
+  clearTodoFlag,
   handleMarkSpam,
   handleMarkNotSpam,
   handleArchiveMessage,
@@ -115,6 +120,7 @@ export default function MessageMenu({
   handleOpenHtmlInNewWindow,
   onShowRelated,
   onShowThread,
+  onAssignTopics,
   onMoveTo,
   isTrashFolder,
   isSpamFolder,
@@ -123,6 +129,8 @@ export default function MessageMenu({
   const showDeleteInMenu = origin !== "table";
   const allowThreadDeletion = origin !== "thread";
   const inSpamFolder = isSpamFolder(message.folderId);
+  const hasTodo = hasTodoFlag(message);
+  const hasDone = hasDoneFlag(message);
   const selectedCategory =
     message.category === "newsletter" ||
     message.category === "notification" ||
@@ -157,6 +165,34 @@ export default function MessageMenu({
       <span className={styles.menuLabel}>{label}</span>
     </span>
   );
+  const todoItems = isVisible("todo")
+    ? hasTodo
+      ? [
+          buildItem(
+            "todo",
+            "Mark as Done",
+            <CheckSquare size={14} />,
+            () => toggleTodoFlag(message),
+            isDisabled("todo")
+          ),
+          buildItem(
+            "unmarkTodo",
+            "Unmark as To-Do",
+            <Square size={14} />,
+            () => clearTodoFlag(message),
+            isDisabled("todo")
+          )
+        ]
+      : [
+          buildItem(
+            "todo",
+            "Mark as To-Do",
+            hasDone ? <SquareCheckBig size={14} /> : <Square size={14} />,
+            () => toggleTodoFlag(message),
+            isDisabled("todo")
+          )
+        ]
+    : [];
 
   return (
     <DropdownMenu.Root onOpenChange={onOpenChange}>
@@ -226,23 +262,7 @@ export default function MessageMenu({
                   isDisabled("flag")
                 )
               : null,
-            isVisible("todo")
-              ? buildItem(
-                  "todo",
-                  hasTodoFlag(message)
-                    ? "Mark as Done"
-                    : hasDoneFlag(message)
-                      ? "Mark as To-Do"
-                      : "Mark as To-Do",
-                  hasTodoFlag(message)
-                    ? <CheckSquare size={14} />
-                    : hasDoneFlag(message)
-                      ? <SquareCheckBig size={14} />
-                      : <Square size={14} />,
-                  () => toggleTodoFlag(message),
-                  isDisabled("todo")
-                )
-              : null,
+            ...todoItems,
             isVisible("answered")
               ? buildItem(
                   "answered",
@@ -317,6 +337,15 @@ export default function MessageMenu({
                       </DropdownMenu.Item>
                     </DropdownMenu.SubContent>
                   </DropdownMenu.Sub>
+                )
+              : null,
+            isVisible("topics")
+              ? buildItem(
+                  "topics",
+                  "Add topic...",
+                  <Tags size={14} />,
+                  () => onAssignTopics(message),
+                  isDisabled("topics")
                 )
               : null,
             isVisible("unsubscribe") && getUnsubscribeCapability(message)

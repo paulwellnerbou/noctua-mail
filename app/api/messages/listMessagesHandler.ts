@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { listMessages } from "@/lib/db";
+import { getTopicsForThreads } from "@/lib/topics";
 import { requireSessionAccountOr403, requireSessionOr401 } from "@/lib/auth";
 
 type ListMessagesHandlerOptions = {
@@ -45,6 +46,11 @@ export async function handleListMessagesRequest(
     attachmentsOnly,
     excludedFolderIds
   });
+  const threadIds = [...new Set(data.items.map((m) => m.threadId).filter(Boolean))];
+  const topicsMap = threadIds.length > 0 ? await getTopicsForThreads(accountId, threadIds) : new Map();
+  for (const item of data.items) {
+    if (item.threadId) item.topics = topicsMap.get(item.threadId) ?? [];
+  }
   return NextResponse.json({
     items: data.items,
     groups: data.groups,

@@ -437,6 +437,7 @@ export default function MessageWindowPage() {
                     openCompose={noop}
                     updateFlagState={updateFlagState}
                     toggleTodoFlag={noop}
+                    clearTodoFlag={noop}
                     handleMarkSpam={noop}
                     handleMarkNotSpam={noop}
                     handleArchiveMessage={noop}
@@ -449,6 +450,7 @@ export default function MessageWindowPage() {
                     handleOpenHtmlInNewWindow={handleOpenHtmlInNewWindow}
                     onShowRelated={noop}
                     onShowThread={noop}
+                    onAssignTopics={noop}
                     onMoveTo={noop}
                     isTrashFolder={isTrashFolder}
                     isSpamFolder={() => false}

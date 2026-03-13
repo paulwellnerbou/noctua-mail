@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import type React from "react";
+import type { CSSProperties } from "react";
 import { GitBranch, MoveRight, Search, Trash2 } from "lucide-react";
 import { Badge, Checkbox, IconButton, Text } from "@radix-ui/themes";
 import { CaretRightIcon } from "@radix-ui/react-icons";
 import { badgeColors } from "@/lib/ui/badgeColors";
 import type { Message } from "@/lib/data";
+import TopicBadge from "../TopicBadge";
 import badgeStyles from "../message/MessageBadge.module.css";
 import { getMessageListDateDisplay } from "./messageDateDisplay";
 import { useSelectionSnapshot } from "./selectionStore";
@@ -45,10 +47,12 @@ export default function MessageTable({
     searchScope,
     activeFolderId,
     messageById,
+    messageTopicsById,
     sortDir,
     preferToDisplay,
     userEmail,
-    dateFormat
+    dateFormat,
+    topicColorRows
   } = state;
   const { scrollRef } = refs;
   const {
@@ -289,9 +293,13 @@ export default function MessageTable({
             .filter(Boolean)
             .join(" ");
 
+          const firstTopicColor = topicColorRows ? (messageTopicsById?.get(message.threadId)?.[0]?.color ?? null) : null;
+          const topicTintVar = firstTopicColor ? ({ "--topic-tint": `var(--${firstTopicColor}-a2)`, "--topic-tint-selected": `var(--${firstTopicColor}-a3)` } as CSSProperties) : undefined;
+
           return (
             <div
               className={rowClassName}
+              style={topicTintVar}
               role="button"
               tabIndex={0}
               draggable
@@ -453,6 +461,9 @@ export default function MessageTable({
                 >
                   {renderFolderBadges(item.folderIds)}
                   <span className={styles.cellSubjectText}>{message.subject}</span>
+                  {messageTopicsById?.get(message.threadId)?.map((topic) => (
+                    <TopicBadge key={topic.id} topic={topic} size="1" />
+                  ))}
                 </span>
                 <span className={styles.cellDate}>
                   <Text as="span" size="1" title={dateDisplay.tooltip}>

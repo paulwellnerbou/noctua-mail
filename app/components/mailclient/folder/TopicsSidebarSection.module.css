@@ -1,0 +1,35 @@
+.section {
+  border-bottom: 1px solid var(--gray-a4);
+  padding-bottom: 8px;
+  margin-bottom: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.header {
+  margin-bottom: 4px;
+}
+
+.headerBtn {
+  width: 100%;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  color: inherit;
+  justify-content: space-between;
+  opacity: 0.7;
+}
+
+.headerBtn:hover {
+  opacity: 1;
+}
+
+.colorDot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--dot-color);
+  flex-shrink: 0;
+}

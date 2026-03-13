@@ -731,6 +731,7 @@ function buildLightweightImapMessage(params: {
     categoryScore: classification.categoryScore,
     categorySignals: classification.categorySignals,
     listUnsubscribe,
+    listId: listIdVal ?? null,
     calendarEventUids
   } as Message;
 }
@@ -910,6 +911,7 @@ async function parseImapMessage(
     categoryScore: classification.categoryScore,
     categorySignals: classification.categorySignals,
     listUnsubscribe,
+    listId: listIdVal ?? null,
     calendarEventUids
   } as Message;
 }
