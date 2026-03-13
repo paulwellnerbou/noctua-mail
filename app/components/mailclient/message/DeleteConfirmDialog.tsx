@@ -1,6 +1,7 @@
 import React from "react";
 import { AlertDialog, Button, Flex } from "@radix-ui/themes";
 import type { DeleteConfirmAction, DeleteConfirmState } from "../types";
+import AlertDialogContent from "./AlertDialogContent";
 
 interface DeleteConfirmDialogProps {
   deleteConfirm: DeleteConfirmState | null;
@@ -111,7 +112,7 @@ export default function DeleteConfirmDialog({
 
   return (
     <AlertDialog.Root open={Boolean(deleteConfirm)} onOpenChange={onOpenChange}>
-      <AlertDialog.Content size="2" style={{ width: "min(460px, 92vw)" }}>
+      <AlertDialogContent size="2">
         <AlertDialog.Title size="3">
           {deleteConfirm ? getDeleteTitle(deleteConfirm) : "Delete message?"}
         </AlertDialog.Title>
@@ -160,7 +161,7 @@ export default function DeleteConfirmDialog({
             </AlertDialog.Action>
           )}
         </Flex>
-      </AlertDialog.Content>
+      </AlertDialogContent>
     </AlertDialog.Root>
   );
 }

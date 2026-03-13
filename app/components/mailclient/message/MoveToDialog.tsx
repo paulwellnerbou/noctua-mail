@@ -61,7 +61,6 @@ export default function MoveToDialog({
 
   const recentIds = useMemo(
     () => (open ? getRecentMoveFolderIds(accountId) : []),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [open, accountId]
   );
 
@@ -72,15 +71,12 @@ export default function MoveToDialog({
 
   const folderQueryText = query.trim().toLowerCase();
 
-  const hasFolderMatch = useCallback(
-    (folder: Folder): boolean => {
-      if (!folderQueryText) return true;
-      if (folder.name.toLowerCase().includes(folderQueryText)) return true;
-      const children = folderTree.get(folder.id) ?? [];
-      return children.some((child) => hasFolderMatch(child));
-    },
-    [folderQueryText, folderTree]
-  );
+  function hasFolderMatch(folder: Folder): boolean {
+    if (!folderQueryText) return true;
+    if (folder.name.toLowerCase().includes(folderQueryText)) return true;
+    const children = folderTree.get(folder.id) ?? [];
+    return children.some((child) => hasFolderMatch(child));
+  }
 
   const onToggleCollapse = useCallback((folderId: string) => {
     setCollapsedFolders((prev) => ({ ...prev, [folderId]: !prev[folderId] }));

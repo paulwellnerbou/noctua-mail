@@ -1,5 +1,6 @@
 import React from "react";
 import { AlertDialog, Button, Flex, Text } from "@radix-ui/themes";
+import AlertDialogContent from "./AlertDialogContent";
 
 interface UnsubscribeConfirmDialogProps {
   unsubscribeConfirm: { sender: string; listId?: string } | null;
@@ -14,7 +15,7 @@ export default function UnsubscribeConfirmDialog({
 }: UnsubscribeConfirmDialogProps) {
   return (
     <AlertDialog.Root open={Boolean(unsubscribeConfirm)} onOpenChange={onOpenChange}>
-      <AlertDialog.Content size="2" style={{ width: "min(460px, 92vw)" }}>
+      <AlertDialogContent size="2">
         <AlertDialog.Title size="3">Unsubscribe from mailing list?</AlertDialog.Title>
         <AlertDialog.Description>
           {unsubscribeConfirm?.sender && (
@@ -45,7 +46,7 @@ export default function UnsubscribeConfirmDialog({
             </Button>
           </AlertDialog.Action>
         </Flex>
-      </AlertDialog.Content>
+      </AlertDialogContent>
     </AlertDialog.Root>
   );
 }

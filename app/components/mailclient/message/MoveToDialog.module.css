@@ -5,7 +5,7 @@
   padding: 0;
   overflow: hidden;
   max-height: 520px;
-  width: 380px;
+  width: min(560px, 92vw);
 }
 
 .dialogHeader {
