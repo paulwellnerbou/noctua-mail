@@ -1,9 +1,33 @@
 import { randomUUID } from "crypto";
-import { withAccountDb } from "./db";
+import { getThreadIdsByMessageIds, withAccountDb } from "./db";
 import type { Topic, TopicColor } from "./data";
+import { TOPIC_COLORS } from "./data";
+import { withDbWriteRetry } from "./dbWriteRetry";
 
 export type TopicSignalStat = { value: string; count: number };
 export type TopicStat = { topicId: string; threadCount: number; topSignals: TopicSignalStat[] };
+export type TopicTransferTopic = Pick<
+  Topic,
+  "id" | "name" | "color" | "imapKeyword" | "createdAt" | "updatedAt"
+>;
+export type TopicTransferThread = {
+  threadId: string;
+  topicIds: string[];
+  messageIds: string[];
+};
+export type TopicTransferData = {
+  version: 1;
+  exportedAt: number;
+  topics: TopicTransferTopic[];
+  threads: TopicTransferThread[];
+};
+export type TopicTransferImportSummary = {
+  topicCount: number;
+  threadCount: number;
+  assignmentCount: number;
+  resolvedThreadCount: number;
+  unresolvedThreadCount: number;
+};
 
 type MessageSignals = {
   fromEmail?: string | null;
@@ -12,6 +36,13 @@ type MessageSignals = {
   listId?: string | null;
   /** threadId of the thread being evaluated — excluded from learning corpus */
   threadId?: string | null;
+};
+
+type NormalizedTopicTransferData = {
+  version: 1;
+  exportedAt: number;
+  topics: TopicTransferTopic[];
+  threads: TopicTransferThread[];
 };
 
 function slugify(name: string): string {
@@ -26,6 +57,169 @@ function buildImapKeyword(id: string): string {
   // IMAP keywords must be printable ASCII ATOM chars (RFC 3501).
   // Using the topic ID gives a stable, unique, readable-enough keyword.
   return `noctua-topic-${id}`;
+}
+
+function normalizeTopicColor(value: unknown): TopicColor | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return (TOPIC_COLORS as readonly string[]).includes(trimmed) ? (trimmed as TopicColor) : null;
+}
+
+function normalizeTransferStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
+  const normalized: string[] = [];
+  value.forEach((entry) => {
+    if (typeof entry !== "string") return;
+    const trimmed = entry.trim();
+    if (!trimmed || seen.has(trimmed)) return;
+    seen.add(trimmed);
+    normalized.push(trimmed);
+  });
+  return normalized;
+}
+
+function normalizeTransferTimestamp(value: unknown, fallback: number) {
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+function normalizeTopicTransferData(input: unknown): NormalizedTopicTransferData {
+  if (!input || typeof input !== "object") {
+    throw new Error("Invalid topics data file.");
+  }
+  const raw = input as Record<string, unknown>;
+  if (raw.version !== 1) {
+    throw new Error("Unsupported topics data version.");
+  }
+
+  const now = Date.now();
+  const rawTopics = raw.topics;
+  if (!Array.isArray(rawTopics)) {
+    throw new Error("Invalid topics data file.");
+  }
+
+  const topics: TopicTransferTopic[] = [];
+  const topicIds = new Set<string>();
+  rawTopics.forEach((entry) => {
+    if (!entry || typeof entry !== "object") {
+      throw new Error("Invalid topics data file.");
+    }
+    const row = entry as Record<string, unknown>;
+    const id = typeof row.id === "string" ? row.id.trim() : "";
+    const name = typeof row.name === "string" ? row.name.trim() : "";
+    if (!id || !name) {
+      throw new Error("Invalid topics data file.");
+    }
+    if (topicIds.has(id)) {
+      throw new Error(`Duplicate topic ID in topics data: ${id}`);
+    }
+    topicIds.add(id);
+    topics.push({
+      id,
+      name,
+      color: normalizeTopicColor(row.color),
+      imapKeyword: buildImapKeyword(id),
+      createdAt: normalizeTransferTimestamp(row.createdAt, now),
+      updatedAt: normalizeTransferTimestamp(row.updatedAt, now)
+    });
+  });
+
+  const rawThreads = raw.threads;
+  if (!Array.isArray(rawThreads)) {
+    throw new Error("Invalid topics data file.");
+  }
+
+  const threadsById = new Map<string, { topicIds: Set<string>; messageIds: Set<string> }>();
+  rawThreads.forEach((entry) => {
+    if (!entry || typeof entry !== "object") {
+      throw new Error("Invalid topics data file.");
+    }
+    const row = entry as Record<string, unknown>;
+    const threadId = typeof row.threadId === "string" ? row.threadId.trim() : "";
+    if (!threadId) {
+      throw new Error("Invalid topics data file.");
+    }
+    const nextTopicIds = normalizeTransferStringArray(row.topicIds);
+    if (nextTopicIds.length === 0) return;
+    nextTopicIds.forEach((topicId) => {
+      if (!topicIds.has(topicId)) {
+        throw new Error(`Topics data references unknown topic: ${topicId}`);
+      }
+    });
+    const nextMessageIds = normalizeTransferStringArray(row.messageIds);
+    const existing = threadsById.get(threadId) ?? { topicIds: new Set<string>(), messageIds: new Set<string>() };
+    nextTopicIds.forEach((topicId) => existing.topicIds.add(topicId));
+    nextMessageIds.forEach((messageId) => existing.messageIds.add(messageId));
+    threadsById.set(threadId, existing);
+  });
+
+  return {
+    version: 1,
+    exportedAt: normalizeTransferTimestamp(raw.exportedAt, now),
+    topics,
+    threads: Array.from(threadsById.entries())
+      .map(([threadId, value]) => ({
+        threadId,
+        topicIds: Array.from(value.topicIds).sort(),
+        messageIds: Array.from(value.messageIds)
+      }))
+      .sort((a, b) => a.threadId.localeCompare(b.threadId))
+  };
+}
+
+function getTransferMessageIdsByThread(db: any, accountId: string, threadIds: string[]) {
+  const result = new Map<string, string[]>();
+  if (threadIds.length === 0) return result;
+
+  const seenByThread = new Map<string, Set<string>>();
+  const batchSize = 400;
+  for (let start = 0; start < threadIds.length; start += batchSize) {
+    const chunk = threadIds.slice(start, start + batchSize);
+    const rows = db
+      .prepare(
+        `SELECT threadId, messageId, dateValue, id
+         FROM messages
+         WHERE accountId = ?
+           AND threadId IN (${chunk.map(() => "?").join(",")})
+           AND COALESCE(messageId, '') <> ''
+         ORDER BY threadId ASC, dateValue ASC, id ASC`
+      )
+      .all(accountId, ...chunk) as Array<{
+      threadId?: string | null;
+      messageId?: string | null;
+    }>;
+
+    rows.forEach((row) => {
+      const threadId = String(row.threadId ?? "").trim();
+      const messageId = String(row.messageId ?? "").trim();
+      if (!threadId || !messageId) return;
+      const seen = seenByThread.get(threadId) ?? new Set<string>();
+      if (seen.has(messageId)) return;
+      seen.add(messageId);
+      seenByThread.set(threadId, seen);
+      const list = result.get(threadId) ?? [];
+      list.push(messageId);
+      result.set(threadId, list);
+    });
+  }
+
+  return result;
+}
+
+function resolveImportedThreadId(
+  thread: TopicTransferThread,
+  threadIdsByMessageId: Map<string, string>
+) {
+  if (threadIdsByMessageId.has(thread.threadId)) {
+    return { threadId: threadIdsByMessageId.get(thread.threadId)!, resolved: true };
+  }
+  for (const messageId of thread.messageIds) {
+    const resolvedThreadId = threadIdsByMessageId.get(messageId);
+    if (resolvedThreadId) {
+      return { threadId: resolvedThreadId, resolved: true };
+    }
+  }
+  return { threadId: thread.threadId, resolved: false };
 }
 
 // Future: IMAP keyword sync
@@ -220,6 +414,131 @@ export async function removeThreadTopic(
       `DELETE FROM thread_topics WHERE threadId = ? AND topicId = ? AND accountId = ?`
     ).run(threadId, topicId, accountId);
   });
+}
+
+export async function exportTopicTransferData(accountId: string): Promise<TopicTransferData> {
+  return withAccountDb(accountId, (db) => {
+    const topics = (db
+      .prepare(`SELECT * FROM topics WHERE accountId = ? ORDER BY name ASC`)
+      .all(accountId) as any[]).map((row) => {
+      const topic = rowToTopic(row);
+      return {
+        id: topic.id,
+        name: topic.name,
+        color: topic.color,
+        imapKeyword: topic.imapKeyword,
+        createdAt: topic.createdAt,
+        updatedAt: topic.updatedAt
+      };
+    });
+
+    const rows = db
+      .prepare(
+        `SELECT threadId, topicId
+         FROM thread_topics
+         WHERE accountId = ?
+         ORDER BY threadId ASC, topicId ASC`
+      )
+      .all(accountId) as Array<{ threadId?: string | null; topicId?: string | null }>;
+
+    const threadIds = Array.from(
+      new Set(rows.map((row) => String(row.threadId ?? "").trim()).filter(Boolean))
+    );
+    const messageIdsByThread = getTransferMessageIdsByThread(db, accountId, threadIds);
+    const threadsById = new Map<string, { topicIds: Set<string>; messageIds: string[] }>();
+
+    rows.forEach((row) => {
+      const threadId = String(row.threadId ?? "").trim();
+      const topicId = String(row.topicId ?? "").trim();
+      if (!threadId || !topicId) return;
+      const existing = threadsById.get(threadId) ?? {
+        topicIds: new Set<string>(),
+        messageIds: messageIdsByThread.get(threadId) ?? []
+      };
+      existing.topicIds.add(topicId);
+      threadsById.set(threadId, existing);
+    });
+
+    return {
+      version: 1,
+      exportedAt: Date.now(),
+      topics,
+      threads: Array.from(threadsById.entries()).map(([threadId, value]) => ({
+        threadId,
+        topicIds: Array.from(value.topicIds).sort(),
+        messageIds: value.messageIds
+      }))
+    };
+  });
+}
+
+export async function importTopicTransferData(
+  accountId: string,
+  input: unknown
+): Promise<TopicTransferImportSummary> {
+  const data = normalizeTopicTransferData(input);
+  const threadLookupIds = Array.from(
+    new Set(data.threads.flatMap((thread) => [thread.threadId, ...thread.messageIds]))
+  );
+  const threadIdsByMessageId = await getThreadIdsByMessageIds(accountId, threadLookupIds);
+
+  return withDbWriteRetry("importTopicTransferData", async () =>
+    withAccountDb(accountId, (db) => {
+      const clearThreadTopics = db.prepare(`DELETE FROM thread_topics WHERE accountId = ?`);
+      const clearTopics = db.prepare(`DELETE FROM topics WHERE accountId = ?`);
+      const insertTopic = db.prepare(
+        `INSERT INTO topics (id, accountId, name, color, imapKeyword, createdAt, updatedAt)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`
+      );
+      const insertThreadTopic = db.prepare(
+        `INSERT OR IGNORE INTO thread_topics (threadId, topicId, accountId, assignedAt)
+         VALUES (?, ?, ?, ?)`
+      );
+
+      const applyImport = db.transaction(() => {
+        clearThreadTopics.run(accountId);
+        clearTopics.run(accountId);
+
+        data.topics.forEach((topic) => {
+          insertTopic.run(
+            topic.id,
+            accountId,
+            topic.name,
+            topic.color ?? "",
+            buildImapKeyword(topic.id),
+            topic.createdAt,
+            topic.updatedAt
+          );
+        });
+
+        const importedAt = Date.now();
+        let assignmentCount = 0;
+        let resolvedThreadCount = 0;
+        let unresolvedThreadCount = 0;
+
+        data.threads.forEach((thread) => {
+          const resolvedThread = resolveImportedThreadId(thread, threadIdsByMessageId);
+          if (resolvedThread.resolved) resolvedThreadCount += 1;
+          else unresolvedThreadCount += 1;
+
+          thread.topicIds.forEach((topicId) => {
+            insertThreadTopic.run(resolvedThread.threadId, topicId, accountId, importedAt);
+            assignmentCount += 1;
+          });
+        });
+
+        return {
+          topicCount: data.topics.length,
+          threadCount: data.threads.length,
+          assignmentCount,
+          resolvedThreadCount,
+          unresolvedThreadCount
+        };
+      });
+
+      return applyImport() as TopicTransferImportSummary;
+    })
+  );
 }
 
 /**

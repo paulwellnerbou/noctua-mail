@@ -22,6 +22,11 @@ Automatic message categorization into **Newsletter**, **Notification**, and **Tr
 
 See `doc/CATEGORIZATION.md` for technical details.
 
+### 🏷️ Topics
+Local topic tagging for threads with lightweight learning from your past assignments:
+- **Manual topic assignment** from the message menu for projects, interests, or workflows
+- **Learned suggestions** based on sender, recipient, and mailing-list signals from previously tagged threads
+
 ### 🔗 Related Mails
 Discover connections across your inbox with related mails. When viewing any email, instantly find related messages based on:
 - **Subject similarity** – Find conversations on similar topics

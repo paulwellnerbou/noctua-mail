@@ -1,11 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ChangeEvent } from "react";
 import { Pencil, Plus, Trash2 } from "lucide-react";
 import { Badge, Button, Card, Flex, IconButton, Switch, Text, TextField } from "@radix-ui/themes";
 import type { AccountSettings, Topic, TopicColor } from "@/lib/data";
 import { topicColorToScale } from "@/lib/data";
-import type { TopicStat } from "@/lib/topics";
+import type { TopicStat, TopicTransferImportSummary } from "@/lib/topics";
 import TopicColorPicker from "@/app/components/mailclient/TopicColorPicker";
 import styles from "./TopicsTabContent.module.css";
 
@@ -20,6 +20,18 @@ type Props = {
   currentAppearance?: AccountSettings["appearance"];
   onClose?: () => void;
   onSave?: () => void;
+};
+
+type TopicTransferExportResponse = {
+  ok?: boolean;
+  data?: unknown;
+  message?: string;
+};
+
+type TopicTransferImportResponse = {
+  ok?: boolean;
+  summary?: TopicTransferImportSummary;
+  message?: string;
 };
 
 export default function TopicsTabContent({
@@ -45,10 +57,23 @@ export default function TopicsTabContent({
   const [newColor, setNewColor] = useState<TopicColor | null>(null);
   const [showCreate, setShowCreate] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [importing, setImporting] = useState(false);
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const importInputRef = useRef<HTMLInputElement | null>(null);
+
+  const readError = useCallback(async (res: Response) => {
+    try {
+      const data = (await res.json()) as { message?: string; error?: string };
+      return data?.message || data?.error || `Request failed (${res.status})`;
+    } catch {
+      return `Request failed (${res.status})`;
+    }
+  }, []);
 
   const loadTopics = useCallback(async () => {
-    if (!accountId) return;
+    if (!accountId) return [];
     setLoading(true);
     try {
       const [topicsRes, statsRes] = await Promise.all([
@@ -57,12 +82,16 @@ export default function TopicsTabContent({
       ]);
       const topicsData = await topicsRes.json();
       const statsData = await statsRes.json();
-      if (topicsData.ok && Array.isArray(topicsData.topics)) setTopics(topicsData.topics);
+      const nextTopics = topicsData.ok && Array.isArray(topicsData.topics) ? topicsData.topics : [];
+      setTopics(nextTopics);
       if (statsData.ok && Array.isArray(statsData.stats)) {
         setStatsById(new Map((statsData.stats as TopicStat[]).map((s) => [s.topicId, s])));
+      } else {
+        setStatsById(new Map());
       }
+      return nextTopics as Topic[];
     } catch {
-      // ignore
+      return [];
     } finally {
       setLoading(false);
     }
@@ -76,6 +105,7 @@ export default function TopicsTabContent({
     if (!newName.trim() || !accountId) return;
     setSaving(true);
     setError("");
+    setNotice("");
     try {
       const res = await request("/api/topics", {
         method: "POST",
@@ -108,6 +138,7 @@ export default function TopicsTabContent({
     if (!accountId) return;
     setSaving(true);
     setError("");
+    setNotice("");
     try {
       const res = await request(`/api/topics/${encodeURIComponent(topicId)}`, {
         method: "PUT",
@@ -131,6 +162,8 @@ export default function TopicsTabContent({
 
   const handleDelete = async (topicId: string) => {
     if (!accountId) return;
+    setError("");
+    setNotice("");
     try {
       await request(`/api/topics/${encodeURIComponent(topicId)}?accountId=${encodeURIComponent(accountId)}`, {
         method: "DELETE"
@@ -143,6 +176,85 @@ export default function TopicsTabContent({
     }
   };
 
+  const handleExport = useCallback(async () => {
+    if (!accountId) return;
+    setExporting(true);
+    setError("");
+    setNotice("");
+    try {
+      const res = await request(`/api/topics/transfer?accountId=${encodeURIComponent(accountId)}`);
+      if (!res.ok) {
+        setError(await readError(res));
+        return;
+      }
+      const data = (await res.json()) as TopicTransferExportResponse;
+      if (!data?.ok || !data.data) {
+        setError(data?.message ?? "Failed to export topics data.");
+        return;
+      }
+
+      const blob = new Blob([JSON.stringify(data.data, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = `noctua-topics-${accountId}-${new Date().toISOString().slice(0, 10)}.json`;
+      link.click();
+      window.setTimeout(() => URL.revokeObjectURL(url), 0);
+      setNotice("Topics data exported.");
+    } catch {
+      setError("Failed to export topics data.");
+    } finally {
+      setExporting(false);
+    }
+  }, [accountId, readError, request]);
+
+  const handleImportFile = useCallback(async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file || !accountId) {
+      event.target.value = "";
+      return;
+    }
+
+    const confirmed = window.confirm(
+      "Importing topics data replaces all current topics and topic assignments for this account. Continue?"
+    );
+    if (!confirmed) {
+      event.target.value = "";
+      return;
+    }
+
+    setImporting(true);
+    setError("");
+    setNotice("");
+    try {
+      const parsed = JSON.parse(await file.text()) as unknown;
+      const res = await request("/api/topics/transfer", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ accountId, data: parsed })
+      });
+      if (!res.ok) {
+        setError(await readError(res));
+        return;
+      }
+      const data = (await res.json()) as TopicTransferImportResponse;
+      if (!data?.ok || !data.summary) {
+        setError(data?.message ?? "Failed to import topics data.");
+        return;
+      }
+      const nextTopics = await loadTopics();
+      onTopicsChanged?.(nextTopics);
+      setNotice(
+        `Imported ${data.summary.topicCount} topics and ${data.summary.assignmentCount} assignments.`
+      );
+    } catch (error) {
+      setError(error instanceof SyntaxError ? "Invalid JSON file." : "Failed to import topics data.");
+    } finally {
+      event.target.value = "";
+      setImporting(false);
+    }
+  }, [accountId, loadTopics, onTopicsChanged, readError, request]);
+
   if (!isExistingAccount) return null;
 
   const topicsWithSignals = topics.filter((t) => (statsById.get(t.id)?.topSignals.length ?? 0) > 0);
@@ -150,10 +262,18 @@ export default function TopicsTabContent({
   return (
     <Flex direction="column" gap="4" style={{ height: "100%", minHeight: 0 }}>
     <div style={{ flex: "1 1 auto", minHeight: 0, overflow: "auto" }}>
-    <Flex direction="column" gap="4">
+      <Flex direction="column" gap="4">
       <Text size="2" color="gray">
         Topics let you group messages by project, interest, or any category you choose. Assign topics from the message menu.
       </Text>
+
+      <input
+        ref={importInputRef}
+        type="file"
+        accept="application/json,.json"
+        onChange={handleImportFile}
+        style={{ display: "none" }}
+      />
 
       {/* Settings */}
       <Flex direction="column" gap="3">
@@ -185,11 +305,41 @@ export default function TopicsTabContent({
         </Flex>
       </Flex>
 
+      {/* Sync */}
+      <Flex direction="column" gap="3">
+        <Text size="3" weight="medium">Sync</Text>
+        <Text size="2" color="gray">
+          Export or import all local topics data for this account, including topic assignments used for learning.
+        </Text>
+        <Flex align="center" gap="2" wrap="wrap">
+          <Button
+            size="1"
+            variant="soft"
+            onClick={() => void handleExport()}
+            disabled={!accountId || exporting || importing}
+          >
+            {exporting ? "Exporting..." : "Export"}
+          </Button>
+          <Button
+            size="1"
+            variant="soft"
+            onClick={() => importInputRef.current?.click()}
+            disabled={!accountId || exporting || importing}
+          >
+            {importing ? "Importing..." : "Import"}
+          </Button>
+          <Text size="1" color="gray">
+            Import replaces the current local Topics data for this account.
+          </Text>
+        </Flex>
+      </Flex>
+
       {/* Topics */}
       <Flex direction="column" gap="3">
         <Text size="3" weight="medium">Topics</Text>
 
         {error && <Text size="2" color="red">{error}</Text>}
+        {notice && <Text size="2" color="green">{notice}</Text>}
         {loading && <Text size="2" color="gray">Loading…</Text>}
 
         {topics.length > 0 && (
