@@ -177,7 +177,7 @@ NOCTUA_DATA_DIR=../noctua-data  # Default: .data/
 
 ## ℹ️ Current Limitations
 
-- **Desktop-optimized** – While installable as a PWA, the UI is currently optimized for desktop use. Mails for mobile devices are better managed in a real app instead of a browser based webmail client. Mobile support will be improved over time, but it is not the primary focus.
+- **Desktop-optimized** – Installable as a PWA, the UI is currently optimized and targeted for desktop use. Mails for mobile devices are better managed in a real app instead of a browser based webmail client. Mobile support will be improved over time, but it is not the primary focus.
 
 ---
 
@@ -198,7 +198,7 @@ This project is licensed under the [Elastic License 2.0](LICENSE).
 
 Contributions are welcome! Feel free to open issues or submit pull requests.
 
-The code is primarily written by AI agents (Claude, Codex, GitHub Copilot, Antigravity). I don't strive for a clean code base, but a working product. I do welcome improvements and optimizations.
+The code is primarily written by AI agents (Claude, Codex, GitHub Copilot, Antigravity).
 
 ---
 
