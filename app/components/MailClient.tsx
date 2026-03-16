@@ -1698,13 +1698,14 @@ export default function MailClient({
   const removeDraftFromUi = useCallback(
     (draftId: string | null) => {
       if (!draftId) return;
+      evictMessageCaches([draftId]);
       setMessages((prev) => prev.filter((msg) => msg.id !== draftId));
       if (viewMessage?.id === draftId) {
         setViewMessage(null);
         setActiveMessageId("");
       }
     },
-    [setMessages, viewMessage?.id]
+    [evictMessageCaches, setMessages, viewMessage?.id]
   );
   const {
     threadScopeMessages,
@@ -2081,7 +2082,6 @@ export default function MailClient({
         if (composeDraftId && activeAccountId) {
           suppressDraftDeleteReconcile(composeDraftId);
           removeDraftFromUi(composeDraftId);
-          evictMessagesFromThreadCache([composeDraftId]);
           try {
             await apiFetch("/api/drafts/discard", {
               method: "POST",
