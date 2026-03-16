@@ -1,5 +1,5 @@
 import type React from "react";
-import { Fragment } from "react";
+import { Fragment, useState } from "react";
 import {
   Archive,
   CheckSquare,
@@ -30,9 +30,10 @@ import {
   Trash2
 } from "lucide-react";
 import { DropdownMenu, IconButton } from "@radix-ui/themes";
-import type { Message } from "@/lib/data";
+import type { Message, Topic, Folder } from "@/lib/data";
 import { hasTodoFlag, hasDoneFlag, getUnsubscribeCapability } from "../utils/messageHelpers";
 import styles from "./MessageMenu.module.css";
+import TopicBadge from "../TopicBadge";
 
 type ComposeMode = "new" | "reply" | "replyAll" | "forward" | "edit" | "editAsNew";
 type MessageMenuAction =
@@ -90,7 +91,12 @@ type MessageMenuProps = {
   handleOpenHtmlInNewWindow: (message: Message) => void;
   onShowRelated: (message: Message) => void;
   onShowThread: (message: Message) => void;
+  allTopics: Topic[];
+  onFetchSuggestions: (message: Message) => Promise<Topic[]>;
   onAssignTopics: (message: Message) => void;
+  onToggleTopic: (message: Message, topicId: string) => void;
+  onGetRecentFolders: () => Folder[];
+  onMoveToFolder: (message: Message, folderId: string) => void;
   onMoveTo: (message: Message) => void;
   isTrashFolder: (folderId?: string) => boolean;
   isSpamFolder: (folderId?: string) => boolean;
@@ -120,12 +126,19 @@ export default function MessageMenu({
   handleOpenHtmlInNewWindow,
   onShowRelated,
   onShowThread,
+  allTopics,
+  onFetchSuggestions,
   onAssignTopics,
+  onToggleTopic,
+  onGetRecentFolders,
+  onMoveToFolder,
   onMoveTo,
   isTrashFolder,
   isSpamFolder,
   onOpenChange
 }: MessageMenuProps) {
+  const [suggestions, setSuggestions] = useState<Topic[]>([]);
+  const [recentFolders, setRecentFolders] = useState<Folder[]>([]);
   const showDeleteInMenu = origin !== "table";
   const allowThreadDeletion = origin !== "thread";
   const inSpamFolder = isSpamFolder(message.folderId);
@@ -340,12 +353,74 @@ export default function MessageMenu({
                 )
               : null,
             isVisible("topics")
-              ? buildItem(
-                  "topics",
-                  "Add topic...",
-                  <Tags size={14} />,
-                  () => onAssignTopics(message),
-                  isDisabled("topics")
+              ? (
+                  <DropdownMenu.Sub
+                    key="topics"
+                    onOpenChange={(open) => { if (open) onFetchSuggestions(message).then(setSuggestions); }}
+                  >
+                    <DropdownMenu.SubTrigger disabled={isDisabled("topics")}>
+                      <span className={styles.menuIcon}><Tags size={14} /></span>
+                      <span className={styles.menuLabel}>Topics</span>
+                    </DropdownMenu.SubTrigger>
+                    <DropdownMenu.SubContent className={styles.menuContent}>
+                      {suggestions.length > 0 && (
+                        <DropdownMenu.Label>Suggested</DropdownMenu.Label>
+                      )}
+                      {suggestions.map((topic: Topic) => {
+                        const assigned = message.topics?.some((t) => t.id === topic.id) ?? false;
+                        const score = topic.matchCount;
+                        const scoreLabel = score === undefined ? null
+                          : Number.isInteger(score) ? String(score)
+                          : score.toFixed(2);
+                        return (
+                          <DropdownMenu.Item
+                            key={topic.id}
+                            onSelect={(e) => { e.preventDefault(); onToggleTopic(message, topic.id); }}
+                          >
+                            <span className={styles.menuIcon}>
+                              {assigned ? <CircleDot size={14} /> : <Circle size={14} />}
+                            </span>
+                            <TopicBadge topic={topic} size="1" />
+                            {scoreLabel !== null && (
+                              <span style={{ marginLeft: "auto", fontSize: "0.75em", opacity: 0.45 }}>
+                                {scoreLabel}
+                              </span>
+                            )}
+                          </DropdownMenu.Item>
+                        );
+                      })}
+                      {(() => {
+                        const suggestionIds = new Set(suggestions.map((t) => t.id));
+                        const rest = allTopics.filter((t) => !suggestionIds.has(t.id)).slice(0, 10);
+                        if (rest.length === 0) return null;
+                        return (
+                          <>
+                            <DropdownMenu.Separator />
+                            <DropdownMenu.Label>All topics</DropdownMenu.Label>
+                            {rest.map((topic) => {
+                              const assigned = message.topics?.some((t) => t.id === topic.id) ?? false;
+                              return (
+                                <DropdownMenu.Item
+                                  key={topic.id}
+                                  onSelect={(e) => { e.preventDefault(); onToggleTopic(message, topic.id); }}
+                                >
+                                  <span className={styles.menuIcon}>
+                                    {assigned ? <CircleDot size={14} /> : <Circle size={14} />}
+                                  </span>
+                                  <TopicBadge topic={topic} size="1" />
+                                </DropdownMenu.Item>
+                              );
+                            })}
+                          </>
+                        );
+                      })()}
+                      <DropdownMenu.Separator />
+                      <DropdownMenu.Item onSelect={() => onAssignTopics(message)}>
+                        <span className={styles.menuIcon}><Tags size={14} /></span>
+                        <span className={styles.menuLabel}>Manage topics...</span>
+                      </DropdownMenu.Item>
+                    </DropdownMenu.SubContent>
+                  </DropdownMenu.Sub>
                 )
               : null,
             isVisible("unsubscribe") && getUnsubscribeCapability(message)
@@ -358,12 +433,32 @@ export default function MessageMenu({
                 )
               : null,
             isVisible("moveTo")
-              ? buildItem(
-                  "moveTo",
-                  "Move to...",
-                  <FolderInput size={14} />,
-                  () => onMoveTo(message),
-                  isDisabled("moveTo")
+              ? (
+                  <DropdownMenu.Sub
+                    key="moveTo"
+                    onOpenChange={(open) => { if (open) setRecentFolders(onGetRecentFolders()); }}
+                  >
+                    <DropdownMenu.SubTrigger disabled={isDisabled("moveTo")}>
+                      <span className={styles.menuIcon}><FolderInput size={14} /></span>
+                      <span className={styles.menuLabel}>Move to</span>
+                    </DropdownMenu.SubTrigger>
+                    <DropdownMenu.SubContent className={styles.menuContent}>
+                      {recentFolders.map((folder) => (
+                        <DropdownMenu.Item
+                          key={folder.id}
+                          onSelect={() => onMoveToFolder(message, folder.id)}
+                        >
+                          <span className={styles.menuIcon}><FolderInput size={14} /></span>
+                          <span className={styles.menuLabel}>{folder.name}</span>
+                        </DropdownMenu.Item>
+                      ))}
+                      {recentFolders.length > 0 && <DropdownMenu.Separator />}
+                      <DropdownMenu.Item onSelect={() => onMoveTo(message)}>
+                        <span className={styles.menuIcon}><FolderInput size={14} /></span>
+                        <span className={styles.menuLabel}>More...</span>
+                      </DropdownMenu.Item>
+                    </DropdownMenu.SubContent>
+                  </DropdownMenu.Sub>
                 )
               : null,
             showDeleteInMenu && isVisible("delete")

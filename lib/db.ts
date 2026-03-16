@@ -3474,6 +3474,26 @@ export async function markMessageCalendarInviteStatesProcessed(
   });
 }
 
+export async function clearMessageCalendarInviteStatesProcessedByEventUid(
+  accountId: string,
+  eventUid: string
+) {
+  return withDbWriteRetry("clearMessageCalendarInviteStatesProcessedByEventUid", async () => {
+    const db = await getAccountDb(accountId);
+    ensureMessageCalendarEventOptionalColumns(db);
+    const normalizedEventUid = normalizeCalendarEventUid(eventUid);
+    if (!normalizedEventUid) return 0;
+    const result = db
+      .prepare(
+        `UPDATE message_calendar_events
+         SET processedAtMs = NULL, processedByUserId = NULL
+         WHERE accountId = ? AND lower(eventUid) = lower(?)`
+      )
+      .run(accountId, normalizedEventUid) as { changes?: number };
+    return result?.changes ?? 0;
+  });
+}
+
 export async function deleteMessageCalendarInviteStateByMessageAndEvent(
   accountId: string,
   messageId: string,

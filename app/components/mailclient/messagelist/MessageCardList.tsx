@@ -205,7 +205,7 @@ export default function MessageCardList({
         });
         const useCompactThreadContainer = isCompactView && supportsThreads;
         const firstTopicColor = topicColorRows ? (messageTopicsById?.get(message.threadId)?.[0]?.color ?? null) : null;
-        const topicTintVar = firstTopicColor ? ({ "--topic-tint": `var(--${firstTopicColor}-a2)`, "--topic-tint-selected": `var(--${firstTopicColor}-a3)` } as CSSProperties) : undefined;
+        const topicTintVar = firstTopicColor ? ({ "--topic-tint": `var(--${firstTopicColor}-a3)`, "--topic-tint-selected": `var(--${firstTopicColor}-a4)` } as CSSProperties) : undefined;
         const hasExternalThreadCaret =
           useCompactThreadContainer &&
           ((item.depth === 0 && item.threadIndex === 0 && item.threadSize > 1) ||

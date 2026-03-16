@@ -1,17 +1,12 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useRef } from "react";
 import FullCalendar from "@fullcalendar/react";
 import { DropdownMenu, Flex, Heading, IconButton } from "@radix-ui/themes";
 import { X, ExternalLink, MoreVertical } from "lucide-react";
 import { openDetachedWindow } from "@/lib/ui/openDetachedWindow";
-import type { CalendarEvent } from "@/lib/data";
-import type { CalendarReminder } from "@/lib/data";
-import dynamic from "next/dynamic";
-import EventDetailPanel from "./EventDetailPanel";
+import CalendarEventBrowser from "./CalendarEventBrowser";
 import styles from "./CalendarSidebarPanel.module.css";
-
-const CalendarView = dynamic(() => import("./CalendarView"), { ssr: false });
 
 type Props = {
   accountId: string;
@@ -33,9 +28,6 @@ export default function CalendarSidebarPanel({
   isRecomputingRelations
 }: Props) {
   const calendarRef = useRef<FullCalendar>(null);
-  const [selectedEvent, setSelectedEvent] = useState<CalendarEvent | CalendarReminder | null>(null);
-  const [selectedKind, setSelectedKind] = useState<"event" | "reminder" | null>(null);
-  const [selectedOccurrenceStartAtMs, setSelectedOccurrenceStartAtMs] = useState<number | undefined>();
 
   const handleOpenWindow = () => {
     openDetachedWindow(`/calendar/window?accountId=${encodeURIComponent(accountId)}`);
@@ -44,28 +36,6 @@ export default function CalendarSidebarPanel({
   const handleRecomputeRelations = async () => {
     if (!onRecomputeRelations) return;
     await onRecomputeRelations();
-    calendarRef.current?.getApi().refetchEvents();
-  };
-
-  const handleEventClick = (
-    ev: CalendarEvent | CalendarReminder,
-    kind: "event" | "reminder",
-    occurrenceStartAtMs?: number
-  ) => {
-    setSelectedEvent(ev);
-    setSelectedKind(kind);
-    setSelectedOccurrenceStartAtMs(occurrenceStartAtMs);
-  };
-
-  const handleEventUpdated = (event: CalendarEvent) => {
-    setSelectedEvent(event);
-    setSelectedKind("event");
-    calendarRef.current?.getApi().refetchEvents();
-  };
-
-  const handleEventDeleted = () => {
-    setSelectedEvent(null);
-    setSelectedKind(null);
     calendarRef.current?.getApi().refetchEvents();
   };
 
@@ -111,30 +81,13 @@ export default function CalendarSidebarPanel({
         </Flex>
       </Flex>
       <div className={styles.calendarContainer}>
-        {selectedEvent && selectedKind ? (
-          <EventDetailPanel
-            event={selectedEvent}
-            kind={selectedKind}
-            accountId={accountId}
-            occurrenceStartAtMs={selectedOccurrenceStartAtMs}
-            onBack={() => {
-              setSelectedEvent(null);
-              setSelectedKind(null);
-              setSelectedOccurrenceStartAtMs(undefined);
-            }}
-            onOpenMessage={onOpenMessage}
-            onFindRelatedByInviteUid={onFindRelatedByInviteUid}
-            onEventUpdated={handleEventUpdated}
-            onEventDeleted={handleEventDeleted}
-          />
-        ) : (
-          <CalendarView
-            accountId={accountId}
-            calendarRef={calendarRef}
-            firstDay={firstDay}
-            onEventClick={handleEventClick}
-          />
-        )}
+        <CalendarEventBrowser
+          accountId={accountId}
+          firstDay={firstDay}
+          calendarRef={calendarRef}
+          onOpenMessage={onOpenMessage}
+          onFindRelatedByInviteUid={onFindRelatedByInviteUid}
+        />
       </div>
     </div>
   );

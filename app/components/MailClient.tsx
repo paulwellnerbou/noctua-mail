@@ -26,7 +26,7 @@ import {
 import LoginOverlay from "./auth/LoginOverlay";
 import FolderPane from "./mailclient/folder/FolderPane";
 import FolderTree from "./mailclient/folder/FolderTree";
-import MoveToDialog, { recordRecentMoveFolder } from "./mailclient/message/MoveToDialog";
+import MoveToDialog, { recordRecentMoveFolder, getRecentMoveFolderIds } from "./mailclient/message/MoveToDialog";
 import InAppNoticeStack, { type InAppNotice } from "./mailclient/InAppNoticeStack";
 import ComposeInlineCard from "./mailclient/composition/ComposeInlineCard";
 import ComposeMinimized from "./mailclient/composition/ComposeMinimized";
@@ -1480,6 +1480,17 @@ export default function MailClient({
       .catch(() => {});
   }, [activeAccountId, apiFetch]);
 
+  const handleFetchSuggestions = useCallback(async (message: Message): Promise<Topic[]> => {
+    const params = new URLSearchParams({ accountId: activeAccountId ?? "" });
+    if (message.threadId) params.set("threadId", message.threadId);
+    if (message.fromEmail) params.set("fromEmail", message.fromEmail);
+    if (message.listId) params.set("listId", message.listId);
+    if (message.to) params.set("to", message.to);
+    if (message.cc) params.set("cc", message.cc);
+    const data = await apiFetch(`/api/message/topics/suggest?${params}`).then((r) => r.json()).catch(() => ({}));
+    return data.ok ? (data.suggestions ?? []) : [];
+  }, [activeAccountId, apiFetch]);
+
   const handleCreateTopic = useCallback(async (name: string, color: TopicColor | null): Promise<Topic> => {
     const res = await apiFetch("/api/topics", {
       method: "POST",
@@ -1505,6 +1516,24 @@ export default function MailClient({
       setMessages((prev) => prev.map((msg) => msg.threadId === threadId ? { ...msg, topics: data.topics } : msg));
     }
   }, [activeAccountId, apiFetch, topicPickerMessage]);
+
+  const handleToggleTopic = useCallback(async (message: Message, topicId: string) => {
+    const currentTopics = messageTopicsById.get(message.threadId) ?? [];
+    const isAssigned = currentTopics.some((t) => t.id === topicId);
+    const newTopicIds = isAssigned
+      ? currentTopics.filter((t) => t.id !== topicId).map((t) => t.id)
+      : [...currentTopics.map((t) => t.id), topicId];
+    const res = await apiFetch("/api/message/topics", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ accountId: activeAccountId, threadId: message.threadId, action: "set", topicIds: newTopicIds })
+    });
+    const data = await res.json();
+    if (data.ok && Array.isArray(data.topics)) {
+      const threadId = message.threadId;
+      setMessages((prev) => prev.map((msg) => msg.threadId === threadId ? { ...msg, topics: data.topics } : msg));
+    }
+  }, [activeAccountId, apiFetch, messageTopicsById]);
 
   const includeThreadAcrossFoldersForList =
     includeThreadAcrossFolders &&
@@ -2495,6 +2524,16 @@ export default function MailClient({
     setMoveToDialogMessage(message);
   };
 
+  const handleGetRecentFolders = useCallback((): Folder[] => {
+    return getRecentMoveFolderIds(activeAccountId ?? "")
+      .flatMap((id) => (folderById.has(id) ? [folderById.get(id)!] : []));
+  }, [activeAccountId, folderById]);
+
+  const handleMoveToFolder = useCallback((message: Message, folderId: string) => {
+    recordRecentMoveFolder(activeAccountId ?? "", folderId);
+    void moveMessagesToFolder(folderId, { messageIds: [message.id] });
+  }, [activeAccountId, moveMessagesToFolder]);
+
   const handleFindRelatedByCalendarInviteUid = (eventUid: string) => {
     const normalizedUid = eventUid.trim().replace(/"/g, "");
     if (!normalizedUid) return;
@@ -2578,7 +2617,12 @@ export default function MailClient({
     handleOpenHtmlInNewWindow,
     handleShowRelated,
     handleShowThread,
+    allTopics,
     handleAssignTopics,
+    handleToggleTopic,
+    handleFetchSuggestions,
+    handleGetRecentFolders,
+    handleMoveToFolder,
     handleMoveTo,
     isDraftItem,
     isTrashFolder,

@@ -421,9 +421,13 @@ export default function EventDetailView({
     setDeletingEvent(true);
     try {
       const params = new URLSearchParams({ accountId, soft: "true" });
-      await fetch(`/api/calendar/events/${encodeURIComponent(eventId)}?${params.toString()}`, {
+      const res = await fetch(`/api/calendar/events/${encodeURIComponent(eventId)}?${params.toString()}`, {
         method: "DELETE"
       });
+      if (!res.ok) {
+        setReminderNotice("Failed to delete event.");
+        return;
+      }
       onEventDeleted?.();
     } catch {
       setReminderNotice("Failed to delete event.");
@@ -694,7 +698,7 @@ export default function EventDetailView({
               {occurrenceMessageId ? "Open series email" : "Open email"}
             </Button>
           )}
-          {eventId && currentMyPartstat === "DECLINED" && onEventDeleted && (
+          {eventId && onEventDeleted && (
             <Button
               size="1"
               variant="soft"
@@ -703,7 +707,7 @@ export default function EventDetailView({
               onClick={() => void handleDeleteEvent()}
             >
               <Trash2 size={14} />
-              {deletingEvent ? "Removing…" : "Remove declined event"}
+              {deletingEvent ? "Removing…" : "Delete event"}
             </Button>
           )}
         </div>

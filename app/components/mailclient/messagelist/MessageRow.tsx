@@ -204,7 +204,7 @@ function MessageRow({
     fromTooltip && fromTooltip.trim() ? fromTooltip : message.from;
   const dateDisplay = getMessageListDateDisplay(message.dateValue, message.date, dateFormat);
   const firstTopicColor = topicColorRows ? (messageTopics?.[0]?.color ?? null) : null;
-  const topicTintVar = firstTopicColor ? ({ "--topic-tint": `var(--${firstTopicColor}-a2)`, "--topic-tint-selected": `var(--${firstTopicColor}-a3)` } as React.CSSProperties) : undefined;
+  const topicTintVar = firstTopicColor ? ({ "--topic-tint": `var(--${firstTopicColor}-a3)`, "--topic-tint-selected": `var(--${firstTopicColor}-a4)` } as React.CSSProperties) : undefined;
 
   const handleCheckboxClick = (event: React.MouseEvent<HTMLButtonElement>) => {
     event.stopPropagation();

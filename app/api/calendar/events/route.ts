@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import {
-  deleteCalendarEvent,
   getCalendarEventByUid,
   listCalendarEvents,
   upsertCalendarEvent
@@ -8,6 +7,7 @@ import {
 import { requireAccountContext } from "@/app/api/_helpers/accountContext";
 import type { CalendarEvent, CalendarEventSourceType } from "@/lib/data";
 import { toFiniteNumber, toPositiveNumberArray } from "@/app/api/_helpers/numberParsing";
+import { deleteCalendarEventAndRelatedData } from "@/lib/calendarEventDeletion";
 
 function generateId() {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
@@ -129,7 +129,10 @@ export async function DELETE(request: Request) {
   });
   if (accountContext instanceof NextResponse) return accountContext;
   try {
-    await deleteCalendarEvent(accountId, eventId);
+    const result = await deleteCalendarEventAndRelatedData({ accountId, eventId });
+    if (!result.deleted) {
+      return NextResponse.json({ ok: false, message: "Event not found" }, { status: 404 });
+    }
     return NextResponse.json({ ok: true });
   } catch (err) {
     console.error("[calendar/events] DELETE error:", err);

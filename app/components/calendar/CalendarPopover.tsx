@@ -5,13 +5,9 @@ import { createPortal } from "react-dom";
 import FullCalendar from "@fullcalendar/react";
 import { DropdownMenu, Flex, Heading, IconButton } from "@radix-ui/themes";
 import { CalendarDays, ExternalLink, MoreVertical, PanelRight, X } from "lucide-react";
-import type { CalendarEvent, CalendarReminder } from "@/lib/data";
 import { openDetachedWindow } from "@/lib/ui/openDetachedWindow";
-import dynamic from "next/dynamic";
-import EventDetailPanel from "./EventDetailPanel";
+import CalendarEventBrowser from "./CalendarEventBrowser";
 import styles from "./CalendarPopover.module.css";
-
-const CalendarView = dynamic(() => import("./CalendarView"), { ssr: false });
 
 type Props = {
   open: boolean;
@@ -54,9 +50,6 @@ export default function CalendarPopover({
   const calendarRef = useRef<FullCalendar>(null);
   const [position, setPosition] = useState<Position>(getInitialPosition);
   const dragStateRef = useRef({ active: false, startX: 0, startY: 0, posX: 0, posY: 0 });
-
-  const [selectedEvent, setSelectedEvent] = useState<CalendarEvent | CalendarReminder | null>(null);
-  const [selectedKind, setSelectedKind] = useState<"event" | "reminder" | null>(null);
 
   // Drag handling
   const handleDragStart = (e: React.MouseEvent<HTMLDivElement>) => {
@@ -101,22 +94,6 @@ export default function CalendarPopover({
     onOpenChange(false);
   };
 
-  const handleEventClick = (ev: CalendarEvent | CalendarReminder, kind: "event" | "reminder") => {
-    setSelectedEvent(ev);
-    setSelectedKind(kind);
-  };
-
-  const handleBackFromDetail = () => {
-    setSelectedEvent(null);
-    setSelectedKind(null);
-  };
-
-  const handleEventUpdated = (event: CalendarEvent) => {
-    setSelectedEvent(event);
-    setSelectedKind("event");
-    calendarRef.current?.getApi().refetchEvents();
-  };
-
   const panel = open ? (
     <div
       className={styles.floatingPanel}
@@ -156,27 +133,19 @@ export default function CalendarPopover({
       </Flex>
 
       <div className={styles.body}>
-        {selectedEvent && selectedKind ? (
-          <EventDetailPanel
-            event={selectedEvent}
-            kind={selectedKind}
-            accountId={accountId}
-            onBack={handleBackFromDetail}
-            onOpenMessage={onOpenMessage ? (id) => { onOpenMessage(id); onOpenChange(false); } : undefined}
-            onFindRelatedByInviteUid={onFindRelatedByInviteUid ? (uid) => {
-              onFindRelatedByInviteUid(uid);
-              onOpenChange(false);
-            } : undefined}
-            onEventUpdated={handleEventUpdated}
-          />
-        ) : (
-          <CalendarView
-            accountId={accountId}
-            calendarRef={calendarRef}
-            firstDay={firstDay}
-            onEventClick={handleEventClick}
-          />
-        )}
+        <CalendarEventBrowser
+          accountId={accountId}
+          firstDay={firstDay}
+          calendarRef={calendarRef}
+          onOpenMessage={onOpenMessage ? (id) => {
+            onOpenMessage(id);
+            onOpenChange(false);
+          } : undefined}
+          onFindRelatedByInviteUid={onFindRelatedByInviteUid ? (uid) => {
+            onFindRelatedByInviteUid(uid);
+            onOpenChange(false);
+          } : undefined}
+        />
       </div>
     </div>
   ) : null;

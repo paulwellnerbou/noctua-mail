@@ -450,7 +450,12 @@ export default function MessageWindowPage() {
                     handleOpenHtmlInNewWindow={handleOpenHtmlInNewWindow}
                     onShowRelated={noop}
                     onShowThread={noop}
+                    allTopics={[]}
+                    onFetchSuggestions={async () => []}
                     onAssignTopics={noop}
+                    onToggleTopic={noop}
+                    onGetRecentFolders={() => []}
+                    onMoveToFolder={noop}
                     onMoveTo={noop}
                     isTrashFolder={isTrashFolder}
                     isSpamFolder={() => false}

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireAccountContext } from "@/app/api/_helpers/accountContext";
-import { deleteCalendarEvent, deleteCalendarReminderById } from "@/lib/db";
+import { deleteCalendarReminderById } from "@/lib/db";
+import { deleteCalendarEventAndRelatedData } from "@/lib/calendarEventDeletion";
 
 type DeleteLinkedCalendarPayload = {
   accountId?: string;
@@ -45,7 +46,9 @@ export async function POST(request: Request) {
       })
     );
     await Promise.all(
-      eventIds.map((eventId) => deleteCalendarEvent(accountContext.accountId, eventId))
+      eventIds.map((eventId) =>
+        deleteCalendarEventAndRelatedData({ accountId: accountContext.accountId, eventId })
+      )
     );
     return NextResponse.json({
       ok: true,

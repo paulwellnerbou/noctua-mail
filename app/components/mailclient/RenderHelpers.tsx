@@ -1,6 +1,6 @@
 import React from "react";
 import { Inbox, Send, FileText, Trash2, ShieldOff, Archive } from "lucide-react";
-import type { Message, Folder } from "@/lib/data";
+import type { Message, Folder, Topic } from "@/lib/data";
 import type { ComposeMode } from "./composition/composeTypes";
 import MessageQuickActions from "./message/MessageQuickActions";
 import MessageMenu from "./message/MessageMenu";
@@ -50,7 +50,12 @@ export const renderMessageMenu = (
   handleOpenHtmlInNewWindow: (msg: Message) => void,
   handleShowRelated: (target: Message) => void,
   handleShowThread: (target: Message) => void,
+  allTopics: Topic[],
   handleAssignTopics: (target: Message) => void,
+  handleToggleTopic: (target: Message, topicId: string) => void,
+  handleFetchSuggestions: (target: Message) => Promise<Topic[]>,
+  handleGetRecentFolders: () => Folder[],
+  handleMoveToFolder: (target: Message, folderId: string) => void,
   handleMoveTo: (target: Message) => void,
   isDraftItem: (msg: Message) => boolean,
   isTrashFolder: (folderId?: string | null) => boolean,
@@ -79,7 +84,12 @@ export const renderMessageMenu = (
     handleOpenHtmlInNewWindow={handleOpenHtmlInNewWindow}
     onShowRelated={handleShowRelated}
     onShowThread={handleShowThread}
+    allTopics={allTopics}
+    onFetchSuggestions={handleFetchSuggestions}
     onAssignTopics={handleAssignTopics}
+    onToggleTopic={handleToggleTopic}
+    onGetRecentFolders={handleGetRecentFolders}
+    onMoveToFolder={handleMoveToFolder}
     onMoveTo={handleMoveTo}
     isTrashFolder={isTrashFolder as any}
     isSpamFolder={isSpamFolder as any}

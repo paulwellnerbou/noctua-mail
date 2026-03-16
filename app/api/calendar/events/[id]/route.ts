@@ -1,13 +1,12 @@
 import { NextResponse } from "next/server";
 import {
-  deleteCalendarEvent,
   getCalendarEventById,
-  softDeleteCalendarEvent,
   upsertCalendarEvent
 } from "@/lib/db";
 import { requireAccountContext } from "@/app/api/_helpers/accountContext";
 import type { CalendarEvent } from "@/lib/data";
 import { toFiniteNumber, toPositiveNumberArray } from "@/app/api/_helpers/numberParsing";
+import { deleteCalendarEventAndRelatedData } from "@/lib/calendarEventDeletion";
 
 export async function GET(
   request: Request,
@@ -123,10 +122,13 @@ export async function DELETE(
   });
   if (accountContext instanceof NextResponse) return accountContext;
   try {
-    if (soft) {
-      await softDeleteCalendarEvent(accountId, eventId);
-    } else {
-      await deleteCalendarEvent(accountId, eventId);
+    const result = await deleteCalendarEventAndRelatedData({
+      accountId,
+      eventId,
+      softDelete: soft
+    });
+    if (!result.deleted) {
+      return NextResponse.json({ ok: false, message: "Event not found" }, { status: 404 });
     }
     return NextResponse.json({ ok: true });
   } catch (err) {

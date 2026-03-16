@@ -354,6 +354,6 @@ export async function getTopicSuggestionsForMessage(
       )
       .all(...queryArgs) as any[];
 
-    return rows.map(rowToTopic);
+    return rows.map((row) => ({ ...rowToTopic(row), matchCount: row.matchCount as number }));
   });
 }

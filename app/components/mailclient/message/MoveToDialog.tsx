@@ -9,7 +9,7 @@ import { folderSpecialIcon } from "../RenderHelpers";
 import styles from "./MoveToDialog.module.css";
 
 const RECENT_MOVE_FOLDERS_KEY = "noctua-recent-move-folders";
-const MAX_RECENT = 5;
+const MAX_RECENT = 10;
 
 export function getRecentMoveFolderIds(accountId: string): string[] {
   if (typeof window === "undefined") return [];

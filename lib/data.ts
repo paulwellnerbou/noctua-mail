@@ -164,6 +164,7 @@ export type Topic = {
   imapKeyword: string;
   createdAt: number;
   updatedAt: number;
+  matchCount?: number;
 };
 
 // Signals used to derive topic suggestions from past manual assignments.

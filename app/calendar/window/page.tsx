@@ -5,41 +5,14 @@ import { useSearchParams } from "next/navigation";
 import FullCalendar from "@fullcalendar/react";
 import { DropdownMenu, IconButton, Text } from "@radix-ui/themes";
 import { MoreVertical } from "lucide-react";
-import type { CalendarEvent } from "@/lib/data";
-import type { CalendarReminder } from "@/lib/data";
-import dynamic from "next/dynamic";
-import EventDetailPanel from "@/app/components/calendar/EventDetailPanel";
+import CalendarEventBrowser from "@/app/components/calendar/CalendarEventBrowser";
 import styles from "./page.module.css";
-
-const CalendarView = dynamic(() => import("@/app/components/calendar/CalendarView"), { ssr: false });
 
 function CalendarWindowContent() {
   const searchParams = useSearchParams();
   const accountId = searchParams.get("accountId") ?? "";
   const calendarRef = useRef<FullCalendar>(null);
   const [recomputingRelations, setRecomputingRelations] = useState(false);
-
-  const [selectedEvent, setSelectedEvent] = useState<CalendarEvent | CalendarReminder | null>(null);
-  const [selectedKind, setSelectedKind] = useState<"event" | "reminder" | null>(null);
-  const [selectedOccurrenceStartAtMs, setSelectedOccurrenceStartAtMs] = useState<number | undefined>();
-
-  const handleEventClick = (ev: CalendarEvent | CalendarReminder, kind: "event" | "reminder", occurrenceStartAtMs?: number) => {
-    setSelectedEvent(ev);
-    setSelectedKind(kind);
-    setSelectedOccurrenceStartAtMs(occurrenceStartAtMs);
-  };
-
-  const handleEventUpdated = (event: CalendarEvent) => {
-    setSelectedEvent(event);
-    setSelectedKind("event");
-    calendarRef.current?.getApi().refetchEvents();
-  };
-
-  const handleEventDeleted = () => {
-    setSelectedEvent(null);
-    setSelectedKind(null);
-    calendarRef.current?.getApi().refetchEvents();
-  };
 
   const handleRecomputeRelations = async () => {
     if (recomputingRelations) return;
@@ -92,29 +65,12 @@ function CalendarWindowContent() {
           </DropdownMenu.Content>
         </DropdownMenu.Root>
       </div>
-      {selectedEvent && selectedKind ? (
-        <div className={styles.detailContainer}>
-          <EventDetailPanel
-            event={selectedEvent}
-            kind={selectedKind}
-            accountId={accountId}
-            occurrenceStartAtMs={selectedOccurrenceStartAtMs}
-            onBack={() => {
-              setSelectedEvent(null);
-              setSelectedKind(null);
-              setSelectedOccurrenceStartAtMs(undefined);
-            }}
-            onEventUpdated={handleEventUpdated}
-            onEventDeleted={handleEventDeleted}
-          />
-        </div>
-      ) : (
-        <CalendarView
+      <div className={styles.detailContainer}>
+        <CalendarEventBrowser
           accountId={accountId}
           calendarRef={calendarRef}
-          onEventClick={handleEventClick}
         />
-      )}
+      </div>
     </div>
   );
 }
