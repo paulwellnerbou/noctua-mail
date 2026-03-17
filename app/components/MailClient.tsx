@@ -2376,7 +2376,12 @@ export default function MailClient({
           messages: prev,
           savedDraft: nextSavedDraft,
           previousDraftId,
-          includeSavedDraft
+          includeSavedDraft,
+          pruneOptions: {
+            searchScope,
+            activeFolderId,
+            includeThreadAcrossFoldersForList
+          }
         })
       );
 
@@ -2389,7 +2394,10 @@ export default function MailClient({
     },
     [
       activeMessageId,
+      activeFolderId,
       effectiveGroupBy,
+      includeThreadAcrossFoldersForList,
+      searchScope,
       setMessages,
       setViewMessage,
       shouldKeepMessageInCurrentResults,

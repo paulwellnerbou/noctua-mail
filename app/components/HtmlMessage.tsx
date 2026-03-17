@@ -207,7 +207,7 @@ function HtmlMessage({
       : "color: var(--mail-view-fg, var(--text, #1a1a1a));";
     root.innerHTML = `
       <style>
-        :host { display: block; width: 100%; ${hostTextColor} color-scheme: ${
+        :host { display: block; width: 100%; max-width: 100%; box-sizing: border-box; ${hostTextColor} color-scheme: ${
           darkMode ? "dark" : "light"
         }; font-size: 100%; }
         :where(.content) {
@@ -215,12 +215,19 @@ function HtmlMessage({
           color: inherit;
           background: transparent;
           font-size: 100%;
+          width: 100%;
+          max-width: 100%;
+          min-width: 0;
+          box-sizing: border-box;
         }
         .html-scale {
           transform: scale(var(--zoom));
           transform-origin: top left;
           width: calc(100% / var(--zoom));
+          max-width: 100%;
+          box-sizing: border-box;
         }
+        :where(.email-body) { width: 100%; max-width: 100%; min-width: 0; box-sizing: border-box; }
         :where(.email-body) a { color: ${linkColor}; }
         :where(img) { max-width: 100%; height: auto; }
         :where(blockquote) { border-left: 3px solid ${blockquoteBorder}; margin: 8px 0; padding-left: 12px; }

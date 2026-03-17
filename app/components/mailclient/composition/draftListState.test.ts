@@ -48,4 +48,53 @@ describe("reconcileSavedDraftMessages", () => {
 
     expect(result).toEqual([]);
   });
+
+  it("prunes cross-folder drafts when the active folder has no thread anchor", () => {
+    const saved = makeMessage({
+      id: "draft-new",
+      folderId: "account-1:Drafts",
+      threadId: "thread-1"
+    });
+
+    const result = reconcileSavedDraftMessages({
+      messages: [],
+      savedDraft: saved,
+      previousDraftId: null,
+      includeSavedDraft: true,
+      pruneOptions: {
+        searchScope: "folder",
+        activeFolderId: "account-1:INBOX",
+        includeThreadAcrossFoldersForList: true
+      }
+    });
+
+    expect(result).toEqual([]);
+  });
+
+  it("keeps cross-folder drafts when the active folder still anchors the thread", () => {
+    const inbox = makeMessage({
+      id: "message-inbox",
+      folderId: "account-1:INBOX",
+      threadId: "thread-1"
+    });
+    const saved = makeMessage({
+      id: "draft-new",
+      folderId: "account-1:Drafts",
+      threadId: "thread-1"
+    });
+
+    const result = reconcileSavedDraftMessages({
+      messages: [inbox],
+      savedDraft: saved,
+      previousDraftId: null,
+      includeSavedDraft: true,
+      pruneOptions: {
+        searchScope: "folder",
+        activeFolderId: "account-1:INBOX",
+        includeThreadAcrossFoldersForList: true
+      }
+    });
+
+    expect(result).toEqual([inbox, saved]);
+  });
 });
