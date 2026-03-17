@@ -1,9 +1,11 @@
 import { NextResponse } from "next/server";
 import { getMessageById } from "@/lib/db";
 import { requireSessionAccountOr403, requireSessionOr401 } from "@/lib/auth";
+import { formatMessagePageTitle } from "@/lib/appBranding";
 import { appendMessageIdToError } from "../errorFormatting";
 import {
   appendUnreferencedInlineImages,
+  ensureHtmlDocumentTitle,
   escapeHtml,
   sanitizeHtmlForDisplay,
   stripConditionalComments
@@ -40,18 +42,7 @@ function postprocessHtml(
 }
 
 function asHtmlDocument(subject: string, html: string) {
-  if (/<html[\s>]/i.test(html)) return html;
-  return `<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width,initial-scale=1">
-    <title>${escapeHtml(subject || "Message HTML")}</title>
-  </head>
-  <body>
-    ${html}
-  </body>
-</html>`;
+  return ensureHtmlDocumentTitle(html, formatMessagePageTitle(subject || "Message HTML"));
 }
 
 function htmlError(status: number, message: string) {

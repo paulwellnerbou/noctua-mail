@@ -6,6 +6,7 @@ import { useSearchParams } from "next/navigation";
 import { Text } from "@radix-ui/themes";
 import { normalizeAccountDateFormat } from "@/lib/dateFormatting";
 import type { Account, AccountDateFormat, Folder, Message } from "@/lib/data";
+import { formatMessagePageTitle } from "@/lib/appBranding";
 import { notifyDetachedMessageDeleted } from "@/lib/ui/detachedMessageEvents";
 import { getImapFlagBadges, hasHtmlContent } from "@/lib/ui/messageView";
 import { openDetachedWindow } from "@/lib/ui/openDetachedWindow";
@@ -58,6 +59,11 @@ export default function MessageWindowPage() {
   const messageRefs = useRef<Map<string, HTMLElement>>(new Map());
   const sourceFetchRef = useRef<Map<string, Promise<string | null>>>(new Map());
   const missingParams = !accountId || !messageId;
+
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    document.title = formatMessagePageTitle(message?.subject);
+  }, [message?.subject]);
 
   useEffect(() => {
     let active = true;

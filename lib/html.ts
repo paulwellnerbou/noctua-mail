@@ -14,7 +14,14 @@ type InlineImageAttachment = {
 };
 
 export function stripConditionalComments(input: string) {
-  return input.replace(/<!--\s*\[if[\s\S]*?<!\s*\[endif\s*\]\s*-->/gi, "");
+  return input
+    .replace(/<!--\s*\[if([^\]]+)\]>(?!\s*<!--)([\s\S]*?)<!\s*\[endif\s*\]-->/gi, (match, condition) => {
+      return String(condition).trim().startsWith("!") ? match : "";
+    })
+    .replace(/<!--\s*\[if[^\]]+\]>\s*<!-->/gi, "")
+    .replace(/<!--\s*\[if[^\]]+\]>\s*<!--\s*-->/gi, "")
+    .replace(/<!--\s*\[if[^\]]+\]>\s*<!---->/gi, "")
+    .replace(/<!--\s*<!\s*\[endif\s*\]\s*-->/gi, "");
 }
 
 export function stripStyleTags(input: string) {
@@ -36,6 +43,33 @@ export function escapeHtml(value: string) {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
+}
+
+export function ensureHtmlDocumentTitle(html: string, title: string) {
+  const nextTitle = `<title>${escapeHtml(title)}</title>`;
+
+  if (!/<html[\s>]/i.test(html)) {
+    return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    ${nextTitle}
+  </head>
+  <body>
+    ${html}
+  </body>
+</html>`;
+  }
+
+  if (/<head[\s>]/i.test(html)) {
+    if (/<title[\s>][\s\S]*?<\/title>/i.test(html)) {
+      return html.replace(/<title[\s>][\s\S]*?<\/title>/i, nextTitle);
+    }
+    return html.replace(/<head([^>]*)>/i, `<head$1>${nextTitle}`);
+  }
+
+  return html.replace(/<html([^>]*)>/i, `<html$1><head>${nextTitle}</head>`);
 }
 
 function buildLinkHtml(url: string) {
