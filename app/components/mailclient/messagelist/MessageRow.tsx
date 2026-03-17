@@ -5,6 +5,7 @@ import { Badge, Checkbox, IconButton, Text } from "@radix-ui/themes";
 import { CaretRightIcon } from "@radix-ui/react-icons";
 import { badgeColors } from "@/lib/ui/badgeColors";
 import type { AccountDateFormat, Message } from "@/lib/data";
+import SenderIcon from "../SenderIcon";
 import { hasTodoFlag, hasDoneFlag } from "../utils/messageHelpers";
 import badgeStyles from "../message/MessageBadge.module.css";
 import commonStyles from "./MessageListCommon.module.css";
@@ -77,6 +78,7 @@ type MessageRowProps = {
   collapsedThreadMessages?: Message[];
   dateFormat?: AccountDateFormat;
   topicColorRows?: boolean;
+  senderIconsEnabled?: boolean;
 };
 
 function MessageRow({
@@ -139,7 +141,8 @@ function MessageRow({
   messageTopics,
   collapsedThreadMessages,
   dateFormat,
-  topicColorRows
+  topicColorRows,
+  senderIconsEnabled = true
 }: MessageRowProps) {
   const [optimisticSelected, setOptimisticSelected] = useState<boolean | null>(null);
   const [optimisticActive, setOptimisticActive] = useState(false);
@@ -302,6 +305,16 @@ function MessageRow({
           title={fromLineTooltip}
         >
           <span className={styles.fromContent}>
+            {!showRecipientIcon && (
+              <SenderIcon
+                accountId={message.accountId}
+                from={message.from}
+                fromEmail={message.fromEmail}
+                enabled={senderIconsEnabled}
+                className={styles.senderIcon}
+                title={fromLineTooltip}
+              />
+            )}
             {showRecipientIcon && (
               <span className={styles.recipientIcon} title="Recipients" aria-label="Recipients">
                 <MoveRight size={12} />
@@ -492,6 +505,7 @@ const areEqual = (prev: MessageRowProps, next: MessageRowProps) =>
   prev.threadHasFlagged === next.threadHasFlagged &&
   prev.threadHasTodo === next.threadHasTodo &&
   prev.threadHasDone === next.threadHasDone &&
-  prev.messageTopics === next.messageTopics;
+  prev.messageTopics === next.messageTopics &&
+  prev.senderIconsEnabled === next.senderIconsEnabled;
 
 export default memo(MessageRow, areEqual);

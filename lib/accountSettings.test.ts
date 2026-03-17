@@ -32,7 +32,7 @@ describe("normalizeAccountSettings", () => {
     expect(normalizeAccountSettings({})).toEqual({
       threading: { includeAcrossFolders: true },
       layout: { defaultView: "threads" },
-      appearance: { dateFormat: "locale" },
+      appearance: { dateFormat: "locale", senderIcons: true },
       signatures: [],
       defaultSignatureId: ""
     });
@@ -111,5 +111,18 @@ describe("hasSavableAccountSettingsChanges", () => {
     });
 
     expect(hasSavableAccountSettingsChanges(initial, current, "topics")).toBe(false);
+  });
+
+  it("treats the default sender icon setting as unchanged", () => {
+    const initial = makeAccount({ settings: {} });
+    const current = makeAccount({
+      settings: {
+        appearance: {
+          senderIcons: true
+        }
+      }
+    });
+
+    expect(hasSavableAccountSettingsChanges(initial, current, "preferences")).toBe(false);
   });
 });

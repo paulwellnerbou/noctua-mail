@@ -13,6 +13,9 @@ export function normalizeAccountSettings(settings?: AccountSettings) {
   }
   if (!next.appearance) next.appearance = {};
   next.appearance.dateFormat = normalizeAccountDateFormat(next.appearance.dateFormat);
+  if (next.appearance.senderIcons === undefined) {
+    next.appearance.senderIcons = true;
+  }
   if (!next.signatures) next.signatures = [];
   if (next.defaultSignatureId === undefined) {
     next.defaultSignatureId = "";
@@ -35,7 +38,8 @@ function normalizeComparableSettings(settings?: AccountSettings) {
     ...normalized,
     appearance: {
       ...normalized.appearance,
-      topicColorRows: normalized.appearance?.topicColorRows ?? false
+      topicColorRows: normalized.appearance?.topicColorRows ?? false,
+      senderIcons: normalized.appearance?.senderIcons ?? true
     },
     calendar: {
       ...normalized.calendar,
@@ -75,7 +79,8 @@ function getTabSaveSnapshot(account: Account, tab: AccountSettingsSaveTab, isAdm
         threading: settings.threading,
         layout: settings.layout,
         appearance: {
-          dateFormat: settings.appearance.dateFormat
+          dateFormat: settings.appearance.dateFormat,
+          senderIcons: settings.appearance.senderIcons
         },
         sync: isAdminUser ? settings.sync ?? {} : undefined
       };

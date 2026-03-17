@@ -6,6 +6,7 @@ import { Badge, Checkbox, IconButton, Text } from "@radix-ui/themes";
 import { CaretRightIcon } from "@radix-ui/react-icons";
 import { badgeColors } from "@/lib/ui/badgeColors";
 import type { Message } from "@/lib/data";
+import SenderIcon from "../SenderIcon";
 import TopicBadge from "../TopicBadge";
 import badgeStyles from "../message/MessageBadge.module.css";
 import { getMessageListDateDisplay } from "./messageDateDisplay";
@@ -52,7 +53,8 @@ export default function MessageTable({
     preferToDisplay,
     userEmail,
     dateFormat,
-    topicColorRows
+    topicColorRows,
+    senderIconsEnabled
   } = state;
   const { scrollRef } = refs;
   const {
@@ -427,6 +429,16 @@ export default function MessageTable({
                     <span className={`${styles.threadCaret} ${styles.threadCaretSpacer}`}>
                       <CaretRightIcon />
                     </span>
+                  )}
+                  {!item.showRecipientIcon && (
+                    <SenderIcon
+                      accountId={message.accountId}
+                      from={message.from}
+                      fromEmail={message.fromEmail}
+                      enabled={senderIconsEnabled}
+                      className={styles.senderIcon}
+                      title={item.fromTooltip}
+                    />
                   )}
                   {item.showRecipientIcon && (
                     <span className={styles.recipientIcon} title="Recipients" aria-label="Recipients">

@@ -25,6 +25,7 @@ export type MessageListViewState = {
   userEmail?: string;
   dateFormat?: AccountDateFormat;
   topicColorRows?: boolean;
+  senderIconsEnabled?: boolean;
 };
 
 export type MessageListViewRefs = {

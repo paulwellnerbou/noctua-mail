@@ -49,6 +49,7 @@ export type AccountSettings = {
   appearance?: {
     dateFormat?: AccountDateFormat;
     topicColorRows?: boolean;
+    senderIcons?: boolean;
   };
   calendar?: {
     weekStartsOn?: "monday" | "sunday";

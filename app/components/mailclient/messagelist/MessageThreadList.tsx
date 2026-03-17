@@ -4,6 +4,7 @@ import { CalendarDays, GitBranch, MoveRight, Paperclip, Trash2 } from "lucide-re
 import { Badge, IconButton, Text } from "@radix-ui/themes";
 import { badgeColors } from "@/lib/ui/badgeColors";
 import type { Message } from "@/lib/data";
+import SenderIcon from "../SenderIcon";
 import { CALENDAR_INVITE_FLAG, hasMessageFlag } from "@/lib/messageFlags";
 import badgeStyles from "../message/MessageBadge.module.css";
 import CategoryBadge from "../CategoryBadge";
@@ -53,7 +54,8 @@ export default function MessageThreadList({
     preferToDisplay,
     userEmail,
     dateFormat,
-    topicColorRows
+    topicColorRows,
+    senderIconsEnabled
   } = state;
   const { scrollRef } = refs;
 
@@ -296,6 +298,16 @@ export default function MessageThreadList({
                 )}
 
                 <span className={styles.cellFrom} title={item.fromTooltip}>
+                  {!item.showRecipientIcon && (
+                    <SenderIcon
+                      accountId={message.accountId}
+                      from={message.from}
+                      fromEmail={message.fromEmail}
+                      enabled={senderIconsEnabled}
+                      className={styles.senderIcon}
+                      title={item.fromTooltip}
+                    />
+                  )}
                   {item.showRecipientIcon && (
                     <span
                       className={styles.recipientIcon}

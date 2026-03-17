@@ -26,6 +26,7 @@ import MessageRecipientMetaField from "./MessageRecipientMetaField";
 import CategoryBadge from "../CategoryBadge";
 import FlagBadge from "./FlagBadge";
 import MessageBadge from "./MessageBadge";
+import SenderIcon from "../SenderIcon";
 import InReplyToReferenceRow from "../InReplyToReferenceRow";
 import { hasNonInlineAttachments, getUnsubscribeCapability, resolveInReplyToRef } from "../utils/messageHelpers";
 import { getMessageFromDisplay } from "../messagelist/threadGroupUtils";
@@ -90,6 +91,7 @@ type ThreadMessageCardProps = {
   dateFormat?: AccountDateFormat;
   threadViewMode?: "full" | "compact";
   userEmail?: string;
+  senderIconsEnabled?: boolean;
 };
 
 export default function ThreadMessageCard({
@@ -137,7 +139,8 @@ export default function ThreadMessageCard({
   reportError,
   dateFormat,
   threadViewMode,
-  userEmail
+  userEmail,
+  senderIconsEnabled = true
 }: ThreadMessageCardProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const toValue = (message.to ?? "").trim() || "(no recipients)";
@@ -491,6 +494,17 @@ export default function ThreadMessageCard({
               className={`${styles.compactSender} ${!message.seen ? styles.compactSenderUnread : ""}`}
               title={fromDisplay.tooltip || message.from}
             >
+              {!fromDisplay.showRecipientIcon && (
+                <SenderIcon
+                  accountId={message.accountId}
+                  from={message.from}
+                  fromEmail={message.fromEmail}
+                  enabled={senderIconsEnabled}
+                  size="md"
+                  className={styles.compactSenderIcon}
+                  title={fromDisplay.tooltip || message.from}
+                />
+              )}
               {fromDisplay.showRecipientIcon && (
                 <span className={styles.compactRecipientIcon} aria-label="Recipients">
                   <MoveRight size={12} />
@@ -693,13 +707,24 @@ export default function ThreadMessageCard({
                 </div>
               )}
               <div className={`${styles.metaLine} ${styles.metaSplit}`}>
-                <MessageRecipientMetaField
-                  label="From"
-                  value={message.from}
-                  copyValue={getPrimaryEmail(message.from) ?? ""}
-                  variant="segment"
-                  className={styles.metaSegmentFrom}
-                />
+                <div className={`${styles.metaSegment} ${styles.metaSegmentFrom}`}>
+                  <SenderIcon
+                    accountId={message.accountId}
+                    from={message.from}
+                    fromEmail={message.fromEmail}
+                    enabled={senderIconsEnabled}
+                    size="md"
+                    className={styles.metaSenderIcon}
+                    title={message.from}
+                  />
+                  <MessageRecipientMetaField
+                    label="From"
+                    value={message.from}
+                    copyValue={getPrimaryEmail(message.from) ?? ""}
+                    variant="segment"
+                    className={styles.metaSegmentField}
+                  />
+                </div>
                 <div className={`${styles.metaSegment} ${styles.metaSegmentDate}`}>
                   <span className={styles.metaLabel}>Date:</span>
                   <span className={styles.metaValue} title={dateDisplay.tooltip}>

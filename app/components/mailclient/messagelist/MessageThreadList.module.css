@@ -313,6 +313,10 @@
   gap: 6px;
 }
 
+.senderIcon {
+  flex: 0 0 auto;
+}
+
 .cellFromText {
   min-width: 0;
   overflow: hidden;

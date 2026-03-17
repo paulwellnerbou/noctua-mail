@@ -160,6 +160,10 @@
   min-width: 0;
 }
 
+.senderIcon {
+  flex: 0 0 auto;
+}
+
 .recipientIcon {
   display: inline-flex;
   align-items: center;

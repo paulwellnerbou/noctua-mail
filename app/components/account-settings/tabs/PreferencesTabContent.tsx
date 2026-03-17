@@ -1,4 +1,4 @@
-import { Button, Flex, Grid, Select, Text, TextField } from "@radix-ui/themes";
+import { Button, Flex, Grid, Select, Switch, Text, TextField } from "@radix-ui/themes";
 import Field from "@/app/components/account-settings/Field";
 import type { Account, AccountDateFormat, AccountSettings } from "@/lib/data";
 import { ACCOUNT_DATE_FORMAT_OPTIONS, normalizeAccountDateFormat } from "@/lib/dateFormatting";
@@ -110,6 +110,28 @@ export default function PreferencesTabContent({
                   ))}
                 </Select.Content>
               </Select.Root>
+            </Field>
+            <Field
+              label="Sender icons"
+              hint="Show remote sender logos or avatars when available."
+            >
+              <Flex asChild align="center" gap="2">
+                <label>
+                  <Switch
+                    size="1"
+                    checked={editingAccount.settings?.appearance?.senderIcons ?? true}
+                    onCheckedChange={(checked) =>
+                      onUpdateSettings({
+                        appearance: {
+                          ...(editingAccount.settings?.appearance ?? {}),
+                          senderIcons: checked
+                        }
+                      })
+                    }
+                  />
+                  <Text size="2">Show sender icons</Text>
+                </label>
+              </Flex>
             </Field>
           </Grid>
         </Flex>

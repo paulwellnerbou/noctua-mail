@@ -4514,7 +4514,8 @@ export default function MailClient({
                 preferToDisplay,
                 userEmail: currentAccount?.email,
                 dateFormat: accountDateFormat,
-                topicColorRows: currentAccount?.settings?.appearance?.topicColorRows ?? false
+                topicColorRows: currentAccount?.settings?.appearance?.topicColorRows ?? false,
+                senderIconsEnabled: currentAccount?.settings?.appearance?.senderIcons ?? true
               }}
               actions={{
                 setSortKey,
@@ -4764,7 +4765,8 @@ export default function MailClient({
                       reportError,
                       dateFormat: accountDateFormat,
                       threadViewMode,
-                      userEmail: currentAccount?.email
+                      userEmail: currentAccount?.email,
+                      senderIconsEnabled: currentAccount?.settings?.appearance?.senderIcons ?? true
                     }}
                   />
                 </>

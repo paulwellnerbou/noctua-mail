@@ -49,7 +49,8 @@ export default function MessageCardList({
     userEmail,
     dateFormat,
     messageTopicsById,
-    topicColorRows
+    topicColorRows,
+    senderIconsEnabled
   } = state;
   const { scrollRef } = refs;
 
@@ -410,6 +411,7 @@ export default function MessageCardList({
               }
               dateFormat={dateFormat}
               topicColorRows={topicColorRows}
+              senderIconsEnabled={senderIconsEnabled}
             />
           </div>
         );
