@@ -20,6 +20,7 @@ type Props = {
   currentAppearance?: AccountSettings["appearance"];
   onClose?: () => void;
   onSave?: () => void;
+  canSave?: boolean;
 };
 
 type TopicTransferExportResponse = {
@@ -44,7 +45,8 @@ export default function TopicsTabContent({
   onUpdateSettings,
   currentAppearance,
   onClose,
-  onSave
+  onSave,
+  canSave
 }: Props) {
   const request = apiFetch ?? fetch;
   const [topics, setTopics] = useState<Topic[]>([]);
@@ -461,7 +463,7 @@ export default function TopicsTabContent({
       <Button size="2" variant="soft" color="gray" onClick={onClose}>
         Cancel
       </Button>
-      <Button size="2" onClick={onSave} disabled={!isExistingAccount}>
+      <Button size="2" onClick={onSave} disabled={!isExistingAccount || !canSave}>
         Save
       </Button>
     </Flex>

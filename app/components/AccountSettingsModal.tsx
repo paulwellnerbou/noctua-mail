@@ -1,7 +1,8 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { X } from "lucide-react";
 import { Dialog, Flex, IconButton, Tabs } from "@radix-ui/themes";
 import type { Account, AccountSettings, Topic } from "@/lib/data";
+import { hasSavableAccountSettingsChanges } from "@/lib/accountSettings";
 import AccountTabContent from "@/app/components/account-settings/tabs/AccountTabContent";
 import SignaturesTabContent from "@/app/components/account-settings/tabs/SignaturesTabContent";
 import PreferencesTabContent from "@/app/components/account-settings/tabs/PreferencesTabContent";
@@ -66,11 +67,34 @@ export default function AccountSettingsModal({
   const [imapProbe, setImapProbe] = useState<{ tls?: boolean; starttls?: boolean } | null>(null);
   const [smtpProbe, setSmtpProbe] = useState<{ tls?: boolean; starttls?: boolean } | null>(null);
 
-  if (!isOpen) return null;
-
   const fetchFn = apiFetch ?? fetch;
 
   const handleSave = () => onSave(localAccount);
+
+  const canSaveAccountTab = useMemo(
+    () =>
+      hasSavableAccountSettingsChanges(initialAccount, localAccount, "account", { isAdminUser }) &&
+      Boolean(localAccount.email?.trim()),
+    [initialAccount, isAdminUser, localAccount]
+  );
+  const canSaveSignaturesTab = useMemo(
+    () => hasSavableAccountSettingsChanges(initialAccount, localAccount, "signatures", { isAdminUser }),
+    [initialAccount, isAdminUser, localAccount]
+  );
+  const canSavePreferencesTab = useMemo(
+    () => hasSavableAccountSettingsChanges(initialAccount, localAccount, "preferences", { isAdminUser }),
+    [initialAccount, isAdminUser, localAccount]
+  );
+  const canSaveCalendarTab = useMemo(
+    () => hasSavableAccountSettingsChanges(initialAccount, localAccount, "calendar", { isAdminUser }),
+    [initialAccount, isAdminUser, localAccount]
+  );
+  const canSaveTopicsTab = useMemo(
+    () => hasSavableAccountSettingsChanges(initialAccount, localAccount, "topics", { isAdminUser }),
+    [initialAccount, isAdminUser, localAccount]
+  );
+
+  if (!isOpen) return null;
 
   const handleUpdateSettings = (next: AccountSettings) => {
     setLocalAccount((prev) => ({
@@ -199,6 +223,7 @@ export default function AccountSettingsModal({
                 onClose={onClose}
                 onSave={handleSave}
                 onDelete={onDelete}
+                canSave={canSaveAccountTab}
                 onUpdateAccount={setLocalAccount}
                 onRunProbe={runProbe}
               />
@@ -211,6 +236,7 @@ export default function AccountSettingsModal({
                 onUpdateSettings={handleUpdateSettings}
                 onClose={onClose}
                 onSave={handleSave}
+                canSave={canSaveSignaturesTab}
               />
             </Tabs.Content>
 
@@ -218,9 +244,11 @@ export default function AccountSettingsModal({
               <PreferencesTabContent
                 editingAccount={localAccount}
                 isExistingAccount={isExistingAccount}
+                isAdminUser={isAdminUser}
                 onUpdateSettings={handleUpdateSettings}
                 onClose={onClose}
                 onSave={handleSave}
+                canSave={canSavePreferencesTab}
               />
             </Tabs.Content>
 
@@ -249,6 +277,7 @@ export default function AccountSettingsModal({
                 onUpdateAccount={setLocalAccount}
                 onClose={onClose}
                 onSave={handleSave}
+                canSave={canSaveCalendarTab}
               />
             </Tabs.Content>
 
@@ -264,6 +293,7 @@ export default function AccountSettingsModal({
                 currentAppearance={localAccount.settings?.appearance}
                 onClose={onClose}
                 onSave={handleSave}
+                canSave={canSaveTopicsTab}
               />
             </Tabs.Content>
 

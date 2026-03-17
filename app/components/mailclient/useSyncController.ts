@@ -70,6 +70,13 @@ type NewSyncFolderDecision = {
     | "status-error";
 };
 
+type FolderConsistencyResult = {
+  ok?: boolean;
+  needsRepair?: boolean;
+  recommendedMode?: "none" | "new" | "full";
+  reasons?: string[];
+};
+
 export function useSyncController({
   activeAccountId,
   activeFolderId,
@@ -144,7 +151,9 @@ export function useSyncController({
       folderId: string,
       awaitDeep?: boolean,
       allowRefresh?: boolean,
-      mode?: "recent" | "new" | "full"
+      mode?: "recent" | "new" | "full",
+      allowDeep?: boolean,
+      options?: { recategorizeFolder?: boolean }
     ) => Promise<unknown>
   >(async () => null);
 
@@ -294,6 +303,20 @@ export function useSyncController({
     }
     return Array.isArray(data.decisions) ? data.decisions : [];
   };
+
+  const checkFolderConsistency = useCallback(async (
+    folderId: string
+  ): Promise<FolderConsistencyResult> => {
+    const response = await apiFetch("/api/folders/consistency", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ accountId: activeAccountId, folderId })
+    });
+    if (!response.ok) {
+      throw new Error(await readErrorMessage(response));
+    }
+    return (await response.json()) as FolderConsistencyResult;
+  }, [activeAccountId, apiFetch, readErrorMessage]);
 
   const syncFolderWithBackground = async (
     folderId: string,
@@ -518,6 +541,62 @@ export function useSyncController({
     })();
   };
   syncAccountRef.current = syncAccount;
+
+  useEffect(() => {
+    if (authState !== "ok") return;
+    if (searchScope !== "folder") return;
+    if (!activeAccountId || !activeFolderId || activeVirtualFolderId) return;
+    if (syncStateRef.current.isSyncing || syncStateRef.current.syncingFolders.has(activeFolderId)) {
+      return;
+    }
+
+    const repairKey = `${activeAccountId}:${activeFolderId}`;
+    if (autoRepairAttemptedFolderIdsRef.current.has(repairKey)) return;
+
+    let cancelled = false;
+    autoRepairAttemptedFolderIdsRef.current.add(repairKey);
+
+    void (async () => {
+      try {
+        const result = await checkFolderConsistency(activeFolderId);
+        if (cancelled || !result.needsRepair) return;
+
+        const mode = result.recommendedMode === "full" ? "full" : "new";
+        await syncFolderWithBackgroundRef.current(
+          activeFolderId,
+          true,
+          true,
+          mode,
+          mode === "new"
+        );
+      } catch (error) {
+        if (!cancelled) {
+          reportError(
+            error instanceof Error
+              ? error.message
+              : "Folder consistency check failed due to a network error."
+          );
+        }
+      } finally {
+        autoRepairAttemptedFolderIdsRef.current.delete(repairKey);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      autoRepairAttemptedFolderIdsRef.current.delete(repairKey);
+    };
+  }, [
+    activeAccountId,
+    activeFolderId,
+    activeVirtualFolderId,
+    authState,
+    searchScope,
+    apiFetch,
+    checkFolderConsistency,
+    readErrorMessage,
+    reportError
+  ]);
 
   const recomputeThreads = async () => {
     if (!activeAccountId) return;

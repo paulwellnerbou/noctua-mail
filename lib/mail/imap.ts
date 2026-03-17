@@ -476,6 +476,54 @@ async function listImapRaw(account: Account, logContext?: ImapLogContext) {
   }
 }
 
+export type ImapMailboxStatusSnapshot = {
+  mailboxPath: string;
+  uidNext: number | null;
+  messages: number | null;
+  unseen: number | null;
+  uidValidity: string | null;
+};
+
+export async function getImapMailboxStatus(
+  account: Account,
+  mailboxPath: string,
+  clientId?: string
+): Promise<ImapMailboxStatusSnapshot> {
+  const logContext = buildLogContext(account, clientId);
+  const client = buildImapClient(account, logContext);
+
+  try {
+    await logImapOp("connect", { host: account.imap.host, ...logContext }, () => client.connect());
+    const status = await logImapOp(
+      "status",
+      { mailbox: mailboxPath, ...logContext },
+      () =>
+        client.status(mailboxPath, {
+          uidNext: true,
+          messages: true,
+          unseen: true,
+          uidValidity: true
+        })
+    );
+    return {
+      mailboxPath,
+      uidNext: toFiniteNumber((status as { uidNext?: unknown })?.uidNext) ?? null,
+      messages: toFiniteNumber((status as { messages?: unknown })?.messages) ?? null,
+      unseen: toFiniteNumber((status as { unseen?: unknown })?.unseen) ?? null,
+      uidValidity:
+        (status as { uidValidity?: unknown })?.uidValidity == null
+          ? null
+          : String((status as { uidValidity?: unknown }).uidValidity),
+    };
+  } finally {
+    try {
+      await logImapOp("logout", { ...logContext }, () => client.logout());
+    } catch {
+      // ignore logout errors
+    }
+  }
+}
+
 function deriveFlagState(flags: string[]) {
   const hasFlag = (flag: string) =>
     flags.some((value) => value.toLowerCase() === flag.toLowerCase());

@@ -20,6 +20,7 @@ const SYNC_INTERVAL_OPTIONS = [
 type Props = {
   editingAccount: Account;
   isExistingAccount: boolean;
+  canSave: boolean;
   onUpdateAccount: (next: Account) => void;
   onClose: () => void;
   onSave: () => void;
@@ -28,6 +29,7 @@ type Props = {
 export default function CalendarTabContent({
   editingAccount,
   isExistingAccount,
+  canSave,
   onUpdateAccount,
   onClose,
   onSave
@@ -226,7 +228,7 @@ export default function CalendarTabContent({
         <Button size="2" variant="soft" color="gray" onClick={onClose}>
           Cancel
         </Button>
-        <Button size="2" onClick={onSave} disabled={!isExistingAccount}>
+        <Button size="2" onClick={onSave} disabled={!isExistingAccount || !canSave}>
           Save
         </Button>
       </Flex>

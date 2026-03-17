@@ -265,10 +265,14 @@ export function useAccountController({
   const saveAccountSettings = async (account: Account) => {
     const exists = accounts.find((a) => a.id === account.id);
     if (!exists) return;
+    const caldav = account.caldav?.url?.trim() ? account.caldav : null;
     const res = await apiFetch(`/api/accounts/${account.id}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ settings: account.settings ?? {} })
+      body: JSON.stringify({
+        settings: account.settings ?? {},
+        caldav
+      })
     });
     if (!res.ok) {
       reportError(await readErrorMessage(res));

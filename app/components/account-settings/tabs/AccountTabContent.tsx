@@ -17,6 +17,7 @@ type Props = {
   onClose: () => void;
   onSave: () => void;
   onDelete: () => void;
+  canSave: boolean;
   onUpdateAccount: (next: Account) => void;
   onRunProbe: (protocol: "imap" | "smtp") => void;
 };
@@ -35,6 +36,7 @@ export default function AccountTabContent({
   onClose,
   onSave,
   onDelete,
+  canSave,
   onUpdateAccount,
   onRunProbe
 }: Props) {
@@ -277,7 +279,7 @@ export default function AccountTabContent({
           <Button size="2" variant="soft" color="gray" onClick={onClose}>
             Cancel
           </Button>
-          <Button size="2" onClick={onSave}>
+          <Button size="2" onClick={onSave} disabled={!canSave}>
             Save
           </Button>
         </Flex>

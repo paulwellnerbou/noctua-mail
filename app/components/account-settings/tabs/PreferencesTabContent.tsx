@@ -6,6 +6,8 @@ import { ACCOUNT_DATE_FORMAT_OPTIONS, normalizeAccountDateFormat } from "@/lib/d
 type Props = {
   editingAccount: Account;
   isExistingAccount: boolean;
+  isAdminUser: boolean;
+  canSave: boolean;
   onUpdateSettings: (next: AccountSettings) => void;
   onClose: () => void;
   onSave: () => void;
@@ -14,6 +16,8 @@ type Props = {
 export default function PreferencesTabContent({
   editingAccount,
   isExistingAccount,
+  isAdminUser,
+  canSave,
   onUpdateSettings,
   onClose,
   onSave
@@ -110,72 +114,77 @@ export default function PreferencesTabContent({
           </Grid>
         </Flex>
 
-        <Flex direction="column" gap="3">
-          <Text size="3" weight="medium">
-            Performance
-          </Text>
-          <Text size="1" color="gray">
-            Controls IMAP polling cadence and how many folders stay on IDLE.
-          </Text>
-          <Grid columns="2" gap="3">
-            <Field label="Max idle sessions" hint="Number of folders kept on IMAP IDLE simultaneously.">
-              <TextField.Root
-                type="number"
-                min={1}
-                placeholder="Default: 3"
-                value={editingAccount.settings?.sync?.maxIdleSessions ?? ""}
-                onChange={(event) => {
-                  const value = event.target.value;
-                  onUpdateSettings({
-                    sync: {
-                      ...(editingAccount.settings?.sync ?? {}),
-                      maxIdleSessions: value === "" ? undefined : Number(value)
-                    }
-                  });
-                }}
-              />
-            </Field>
-            <Field label="Background folder poll (ms)" hint="How often non-INBOX folders are checked for updates.">
-              <TextField.Root
-                type="number"
-                min={10000}
-                step={1000}
-                placeholder="Default: 900000"
-                value={editingAccount.settings?.sync?.backgroundPollIntervalMs ?? ""}
-                onChange={(event) => {
-                  const value = event.target.value;
-                  onUpdateSettings({
-                    sync: {
-                      ...(editingAccount.settings?.sync ?? {}),
-                      backgroundPollIntervalMs: value === "" ? undefined : Number(value)
-                    }
-                  });
-                }}
-              />
-            </Field>
-            <Field
-              label="INBOX poll fallback (ms)"
-              hint="Used when stream/IDLE is unavailable (e.g. hidden tab/network issues)."
-            >
-              <TextField.Root
-                type="number"
-                min={10000}
-                step={1000}
-                placeholder="Default: 300000"
-                value={editingAccount.settings?.sync?.pollIntervalMs ?? ""}
-                onChange={(event) => {
-                  const value = event.target.value;
-                  onUpdateSettings({
-                    sync: {
-                      ...(editingAccount.settings?.sync ?? {}),
-                      pollIntervalMs: value === "" ? undefined : Number(value)
-                    }
-                  });
-                }}
-              />
-            </Field>
-          </Grid>
-        </Flex>
+        {isAdminUser && (
+          <Flex direction="column" gap="3">
+            <Text size="3" weight="medium">
+              Performance
+            </Text>
+            <Text size="1" color="gray">
+              Controls IMAP polling cadence and how many folders stay on IDLE.
+            </Text>
+            <Grid columns="2" gap="3">
+              <Field label="Max idle sessions" hint="Number of folders kept on IMAP IDLE simultaneously.">
+                <TextField.Root
+                  type="number"
+                  min={1}
+                  placeholder="Default: 3"
+                  value={editingAccount.settings?.sync?.maxIdleSessions ?? ""}
+                  onChange={(event) => {
+                    const value = event.target.value;
+                    onUpdateSettings({
+                      sync: {
+                        ...(editingAccount.settings?.sync ?? {}),
+                        maxIdleSessions: value === "" ? undefined : Number(value)
+                      }
+                    });
+                  }}
+                />
+              </Field>
+              <Field
+                label="Background folder poll (ms)"
+                hint="How often non-INBOX folders are checked for updates."
+              >
+                <TextField.Root
+                  type="number"
+                  min={10000}
+                  step={1000}
+                  placeholder="Default: 900000"
+                  value={editingAccount.settings?.sync?.backgroundPollIntervalMs ?? ""}
+                  onChange={(event) => {
+                    const value = event.target.value;
+                    onUpdateSettings({
+                      sync: {
+                        ...(editingAccount.settings?.sync ?? {}),
+                        backgroundPollIntervalMs: value === "" ? undefined : Number(value)
+                      }
+                    });
+                  }}
+                />
+              </Field>
+              <Field
+                label="INBOX poll fallback (ms)"
+                hint="Used when stream/IDLE is unavailable (e.g. hidden tab/network issues)."
+              >
+                <TextField.Root
+                  type="number"
+                  min={10000}
+                  step={1000}
+                  placeholder="Default: 300000"
+                  value={editingAccount.settings?.sync?.pollIntervalMs ?? ""}
+                  onChange={(event) => {
+                    const value = event.target.value;
+                    onUpdateSettings({
+                      sync: {
+                        ...(editingAccount.settings?.sync ?? {}),
+                        pollIntervalMs: value === "" ? undefined : Number(value)
+                      }
+                    });
+                  }}
+                />
+              </Field>
+            </Grid>
+          </Flex>
+        )}
       </Flex>
 
       <Flex
@@ -188,7 +197,7 @@ export default function PreferencesTabContent({
         <Button size="2" variant="soft" color="gray" onClick={onClose}>
           Cancel
         </Button>
-        <Button size="2" onClick={onSave} disabled={!isExistingAccount}>
+        <Button size="2" onClick={onSave} disabled={!isExistingAccount || !canSave}>
           Save
         </Button>
       </Flex>

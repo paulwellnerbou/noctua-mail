@@ -312,7 +312,7 @@ export default function CategorizationTabContent({
         <Button size="2" variant="soft" color="gray" onClick={onClose}>
           Cancel
         </Button>
-        <Button size="2" onClick={onSave} disabled={!isExistingAccount}>
+        <Button size="2" onClick={onSave} disabled>
           Save
         </Button>
       </Flex>

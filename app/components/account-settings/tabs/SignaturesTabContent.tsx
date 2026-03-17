@@ -5,6 +5,7 @@ import type { Account, AccountSettings } from "@/lib/data";
 type Props = {
   editingAccount: Account;
   isExistingAccount: boolean;
+  canSave: boolean;
   onUpdateSettings: (next: AccountSettings) => void;
   onClose: () => void;
   onSave: () => void;
@@ -13,6 +14,7 @@ type Props = {
 export default function SignaturesTabContent({
   editingAccount,
   isExistingAccount,
+  canSave,
   onUpdateSettings,
   onClose,
   onSave
@@ -136,7 +138,7 @@ export default function SignaturesTabContent({
         <Button size="2" variant="soft" color="gray" onClick={onClose}>
           Cancel
         </Button>
-        <Button size="2" onClick={onSave} disabled={!isExistingAccount}>
+        <Button size="2" onClick={onSave} disabled={!isExistingAccount || !canSave}>
           Save
         </Button>
       </Flex>

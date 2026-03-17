@@ -28,6 +28,7 @@ import type {
   TopicColor,
   User
 } from "./data";
+import { normalizeAccountSettings } from "./accountSettings";
 import { decodeSecret, encodeSecret, shouldStorePasswordInDb } from "./secret";
 import { applyCachedCredentials } from "./credentials";
 import {
@@ -42,7 +43,6 @@ import {
   DONE_FLAG,
   normalizeImapFlags
 } from "./messageFlags";
-import { normalizeAccountDateFormat } from "./dateFormatting";
 import { withDbWriteRetry } from "./dbWriteRetry";
 import { createHash, randomUUID } from "crypto";
 import { buildMessageRowIdLookupCandidates } from "./messageIds";
@@ -1330,25 +1330,6 @@ export async function deleteAccountControlPlane(accountId: string) {
     await cleanupAccountLifecycleArtifacts(accountId, dbPath, deleteShardFile);
     return true;
   });
-}
-
-function normalizeAccountSettings(settings?: AccountSettings) {
-  const next: AccountSettings = settings ? JSON.parse(JSON.stringify(settings)) : {};
-  if (!next.threading) next.threading = {};
-  if (next.threading.includeAcrossFolders === undefined) {
-    next.threading.includeAcrossFolders = true;
-  }
-  if (!next.layout) next.layout = {};
-  if (!next.layout.defaultView) {
-    next.layout.defaultView = "threads";
-  }
-  if (!next.appearance) next.appearance = {};
-  next.appearance.dateFormat = normalizeAccountDateFormat(next.appearance.dateFormat);
-  if (!next.signatures) next.signatures = [];
-  if (next.defaultSignatureId === undefined) {
-    next.defaultSignatureId = "";
-  }
-  return next;
 }
 
 // Users

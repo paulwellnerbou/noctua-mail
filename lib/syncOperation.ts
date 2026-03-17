@@ -75,6 +75,21 @@ export type SyncOperationOptions = {
   onProgress?: (progress: SyncOperationProgress) => void;
 };
 
+export function resolveOrphanedMessageFileRefs(params: {
+  removed: Array<{ messageId: string; attachmentIds: string[] }>;
+  existingFolderIds: Map<string, string>;
+  currentFolderId?: string | null;
+}) {
+  const { removed, existingFolderIds, currentFolderId = null } = params;
+  if (removed.length === 0) return [];
+  if (!currentFolderId) return removed;
+  return removed.filter((item) => {
+    const existingFolderId = existingFolderIds.get(item.messageId);
+    if (!existingFolderId) return true;
+    return existingFolderId === currentFolderId;
+  });
+}
+
 export async function runSyncOperation(
   payload: SyncPayload,
   clientId?: string,
@@ -332,12 +347,17 @@ export async function runSyncOperationBatched(
   if (isFreshFullSync && existingFileRefs.length > 0) {
     const removed = existingFileRefs.filter((item) => !allProcessedIds.has(item.messageId));
     if (removed.length > 0) {
-      // Guard: skip messages that now live in another folder (cross-folder copies).
+      // Guard: skip rows that were relocated to another folder during sync.
+      // Rows still present in the current folder are stale and must be deleted.
       const existingFolderIds = await getFolderIdsByMessageIds(
         account.id,
         removed.map((item) => item.messageId)
       );
-      const orphaned = removed.filter((item) => !existingFolderIds.has(item.messageId));
+      const orphaned = resolveOrphanedMessageFileRefs({
+        removed,
+        existingFolderIds,
+        currentFolderId: payload.folderId ?? null
+      });
       if (orphaned.length > 0) {
         // Delete stored attachment files first, then purge DB records.
         await Promise.all(
