@@ -18,6 +18,46 @@ function getPrimaryEmail(value?: string) {
   return extractEmails(value)[0] ?? null;
 }
 
+function splitAddressList(value?: string | null): string[] {
+  const input = (value ?? "").trim();
+  if (!input) return [];
+
+  const parts: string[] = [];
+  let current = "";
+  let inQuotes = false;
+  let angleDepth = 0;
+
+  for (let i = 0; i < input.length; i += 1) {
+    const char = input[i];
+    const prev = i > 0 ? input[i - 1] : "";
+
+    if (char === "\"" && prev !== "\\") {
+      inQuotes = !inQuotes;
+      current += char;
+      continue;
+    }
+
+    if (!inQuotes) {
+      if (char === "<") {
+        angleDepth += 1;
+      } else if (char === ">" && angleDepth > 0) {
+        angleDepth -= 1;
+      } else if (char === "," && angleDepth === 0) {
+        const next = current.trim();
+        if (next) parts.push(next);
+        current = "";
+        continue;
+      }
+    }
+
+    current += char;
+  }
+
+  const tail = current.trim();
+  if (tail) parts.push(tail);
+  return parts;
+}
+
 export function getDisplayRecipient(value: string): string {
   if (!value) return "";
   const match = value.match(/(.+)<([^>]+)>/);
@@ -176,9 +216,9 @@ export function computeComposeInitState(
 
     let to: string;
     if (isSentByCurrentUser) {
-      const firstTo = message.to ? getDisplayRecipient(message.to.split(",")[0].trim()) : "";
-      const firstCc = message.cc ? getDisplayRecipient(message.cc.split(",")[0].trim()) : "";
-      const firstBcc = message.bcc ? getDisplayRecipient(message.bcc.split(",")[0].trim()) : "";
+      const firstTo = getDisplayRecipient(splitAddressList(message.to)[0] ?? "");
+      const firstCc = getDisplayRecipient(splitAddressList(message.cc)[0] ?? "");
+      const firstBcc = getDisplayRecipient(splitAddressList(message.bcc)[0] ?? "");
       to = firstTo || firstCc || firstBcc || "";
     } else {
       to = fromRecipient || uniqueEmails(fromEmails).join(", ");
@@ -222,8 +262,7 @@ export function computeComposeInitState(
       toList = uniqueRecipients(
         toEmails
           .map((email) => {
-            const match = (message.to ?? "")
-              .split(",")
+            const match = splitAddressList(message.to)
               .find((r) => r.toLowerCase().includes(email.toLowerCase()));
             return match ? getDisplayRecipient(match.trim()) : email;
           })
@@ -236,9 +275,9 @@ export function computeComposeInitState(
         toList.map((r) => (getPrimaryEmail(r) || r).toLowerCase())
       );
       const allRecipientParts = [
-        ...(message.to ?? "").split(","),
-        ...(message.cc ?? "").split(","),
-        ...(message.bcc ?? "").split(",")
+        ...splitAddressList(message.to),
+        ...splitAddressList(message.cc),
+        ...splitAddressList(message.bcc)
       ]
         .map((s) => s.trim())
         .filter(Boolean);

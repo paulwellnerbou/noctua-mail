@@ -5626,6 +5626,46 @@ export async function getFolderIdsByMessageIds(accountId: string, messageIds: st
   return map;
 }
 
+export async function getThreadMessageIdsForMove(params: {
+  accountId: string;
+  threadId: string;
+  sourceFolderId?: string | null;
+  excludedFolderIds?: string[];
+}) {
+  const { accountId, threadId, sourceFolderId, excludedFolderIds = [] } = params;
+  const normalizedThreadId = threadId.trim();
+  if (!normalizedThreadId) return [] as string[];
+  const uniqueExcludedFolderIds = Array.from(
+    new Set(excludedFolderIds.map((folderId) => folderId.trim()).filter(Boolean))
+  );
+  const db = await getAccountDb(accountId);
+  const clauses = [
+    "accountId = ?",
+    "threadId = ?",
+    "COALESCE(deleted, 0) = 0"
+  ];
+  const args: Array<string> = [accountId, normalizedThreadId];
+  if (sourceFolderId?.trim()) {
+    clauses.push("folderId = ?");
+    args.push(sourceFolderId.trim());
+  }
+  if (uniqueExcludedFolderIds.length > 0) {
+    clauses.push(`folderId NOT IN (${uniqueExcludedFolderIds.map(() => "?").join(",")})`);
+    args.push(...uniqueExcludedFolderIds);
+  }
+  const rows = db
+    .prepare(
+      `SELECT id
+       FROM messages
+       WHERE ${clauses.join(" AND ")}
+       ORDER BY dateValue ASC, id ASC`
+    )
+    .all(...args) as Array<{ id?: string | null }>;
+  return rows
+    .map((row) => String(row.id ?? "").trim())
+    .filter(Boolean);
+}
+
 export async function upsertMessages(
   accountId: string,
   folderId: string | null,

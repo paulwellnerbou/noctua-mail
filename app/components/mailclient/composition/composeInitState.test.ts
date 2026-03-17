@@ -178,6 +178,20 @@ describe("computeComposeInitState — reply", () => {
     expect(fields.composeTo).toBe("Bob <bob@example.com>");
   });
 
+  it("preserves quoted commas in the first recipient when replying to self", () => {
+    const fields = computeComposeInitState(
+      "reply",
+      makeMessage({
+        from: "me@example.com",
+        to: '"Lobe, Nadine" <n.lobe@sthree.com>, Carol <carol@example.com>'
+      }),
+      false,
+      opts,
+      deps
+    );
+    expect(fields.composeTo).toBe("Lobe, Nadine <n.lobe@sthree.com>");
+  });
+
   it("prefixes subject with Re:", () => {
     const fields = computeComposeInitState(
       "reply",
@@ -291,6 +305,23 @@ describe("computeComposeInitState — replyAll", () => {
     const allRecipients = [fields.composeTo, fields.composeCc].filter(Boolean).join(",");
     const aliceCount = (allRecipients.match(/alice@example\.com/gi) ?? []).length;
     expect(aliceCount).toBe(1);
+  });
+
+  it("keeps quoted-comma recipient names intact when replying all to a sent message", () => {
+    const fields = computeComposeInitState(
+      "replyAll",
+      makeMessage({
+        from: "me@example.com",
+        to: '"Lobe, Nadine" <n.lobe@sthree.com>, Bob <bob@example.com>',
+        cc: '"Smith, Carol" <carol@example.com>'
+      }),
+      false,
+      opts,
+      deps
+    );
+    expect(fields.composeTo).toContain("Lobe, Nadine <n.lobe@sthree.com>");
+    expect(fields.composeTo).toContain("Bob <bob@example.com>");
+    expect(fields.composeCc).toBe("carol@example.com");
   });
 });
 

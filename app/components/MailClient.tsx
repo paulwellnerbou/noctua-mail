@@ -136,6 +136,10 @@ import {
 } from "./mailclient/utils/folderHelpers";
 import { extractEmails } from "./mailclient/utils/clientHelpers";
 import {
+  resolveMoveTargetRequest,
+  type MoveTargetRequest
+} from "./mailclient/utils/messageMove";
+import {
   getMessageSubjectForNotice,
   pruneDetachedCrossFolderThreadMessages,
   remapMessageReferenceIds
@@ -174,6 +178,11 @@ function shortenRelatedNoticeSubject(subject: string, maxChars: number) {
 
 type MailClientProps = {
   buildVersionLabel?: string;
+};
+
+type MoveToDialogState = {
+  message: Message;
+  request: MoveTargetRequest;
 };
 
 export default function MailClient({
@@ -341,7 +350,7 @@ export default function MailClient({
   const [threadsEnabled, setThreadsEnabled] = useState(true);
   const [showJson, setShowJson] = useState(false);
   const [omitBody, setOmitBody] = useState(true);
-  const [moveToDialogMessage, setMoveToDialogMessage] = useState<Message | null>(null);
+  const [moveToDialogState, setMoveToDialogState] = useState<MoveToDialogState | null>(null);
   const [collapsedMessages, setCollapsedMessages] = useState<Record<string, boolean>>({});
   const [messageFontScale, setMessageFontScale] = useState<Record<string, number>>({});
   const [appEnvironmentLabel, setAppEnvironmentLabel] = useState("");
@@ -2520,19 +2529,51 @@ export default function MailClient({
     setQuery(`thread:${threadId}`);
   };
 
-  const handleMoveTo = (message: Message) => {
-    setMoveToDialogMessage(message);
-  };
+  const buildMoveTargetRequest = useCallback(
+    (message: Message, origin: "list" | "thread" | "table" = "list") =>
+      resolveMoveTargetRequest({
+        message,
+        origin,
+        activeAccountId,
+        searchScope,
+        activeFolderId,
+        folders,
+        visibleMessages,
+        threadScopeMessages
+      }),
+    [
+      activeAccountId,
+      activeFolderId,
+      folders,
+      searchScope,
+      threadScopeMessages,
+      visibleMessages
+    ]
+  );
+
+  const handleMoveTo = useCallback(
+    (message: Message, origin: "list" | "thread" | "table" = "list") => {
+      setMoveToDialogState({
+        message,
+        request: buildMoveTargetRequest(message, origin)
+      });
+    },
+    [buildMoveTargetRequest]
+  );
 
   const handleGetRecentFolders = useCallback((): Folder[] => {
     return getRecentMoveFolderIds(activeAccountId ?? "")
       .flatMap((id) => (folderById.has(id) ? [folderById.get(id)!] : []));
   }, [activeAccountId, folderById]);
 
-  const handleMoveToFolder = useCallback((message: Message, folderId: string) => {
-    recordRecentMoveFolder(activeAccountId ?? "", folderId);
-    void moveMessagesToFolder(folderId, { messageIds: [message.id] });
-  }, [activeAccountId, moveMessagesToFolder]);
+  const handleMoveToFolder = useCallback(
+    (message: Message, folderId: string, origin: "list" | "thread" | "table" = "list") => {
+      recordRecentMoveFolder(activeAccountId ?? "", folderId);
+      const request = buildMoveTargetRequest(message, origin);
+      void moveMessagesToFolder(folderId, request);
+    },
+    [activeAccountId, buildMoveTargetRequest, moveMessagesToFolder]
+  );
 
   const handleFindRelatedByCalendarInviteUid = (eventUid: string) => {
     const normalizedUid = eventUid.trim().replace(/"/g, "");
@@ -2622,8 +2663,8 @@ export default function MailClient({
     handleToggleTopic,
     handleFetchSuggestions,
     handleGetRecentFolders,
-    handleMoveToFolder,
-    handleMoveTo,
+    (target, folderId) => handleMoveToFolder(target, folderId, origin),
+    (target) => handleMoveTo(target, origin),
     isDraftItem,
     isTrashFolder,
     isSpamFolder,
@@ -4852,16 +4893,16 @@ export default function MailClient({
         onToggleOmitBody={() => setOmitBody((value) => !value)}
       />
       <MoveToDialog
-        open={moveToDialogMessage !== null}
-        onOpenChange={(open) => { if (!open) setMoveToDialogMessage(null); }}
+        open={moveToDialogState !== null}
+        onOpenChange={(open) => { if (!open) setMoveToDialogState(null); }}
         accountId={activeAccountId}
         rootFolders={rootFolders}
         folderTree={folderTree}
         folderById={folderById}
         onMove={(folderId) => {
-          if (!moveToDialogMessage) return;
+          if (!moveToDialogState) return;
           recordRecentMoveFolder(activeAccountId, folderId);
-          void moveMessagesToFolder(folderId, { messageIds: [moveToDialogMessage.id] });
+          void moveMessagesToFolder(folderId, moveToDialogState.request);
         }}
       />
       <BottomStatusBar

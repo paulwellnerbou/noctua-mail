@@ -1,24 +1,39 @@
 import { NextResponse } from "next/server";
 
 import {
+  getThreadMessageIdsForMove,
   getFolders,
   stageMessageMoves
 } from "@/lib/db";
 import { enqueueMessageMoveJobs } from "@/lib/messageMoveJobs";
 import { folderMailboxPath } from "@/lib/mailboxPaths";
+import { findDraftsFolder, findSentFolder } from "@/lib/specialFolders";
 import { requireAccountContext } from "../routeHelpers";
 
 type MovePayload = {
   accountId: string;
-  messageIds: string[];
+  messageIds?: string[];
   destinationFolderId: string;
+  threadMove?: {
+    threadId: string;
+    sourceFolderId?: string | null;
+  };
 };
 
 export async function POST(request: Request) {
   const payload = (await request.json()) as MovePayload;
-  const { accountId, messageIds, destinationFolderId } = payload;
+  const { accountId, destinationFolderId, threadMove } = payload;
+  const messageIds = Array.from(
+    new Set((payload.messageIds ?? []).map((id) => id.trim()).filter(Boolean))
+  );
+  const normalizedThreadId = threadMove?.threadId?.trim() ?? "";
+  const sourceFolderId = threadMove?.sourceFolderId?.trim() ?? "";
 
-  if (!accountId || !Array.isArray(messageIds) || messageIds.length === 0 || !destinationFolderId) {
+  if (
+    !accountId ||
+    !destinationFolderId ||
+    (messageIds.length === 0 && !normalizedThreadId)
+  ) {
     return NextResponse.json({ ok: false, message: "Invalid payload" }, { status: 400 });
   }
   const accountContext = await requireAccountContext(request, accountId);
@@ -35,9 +50,36 @@ export async function POST(request: Request) {
   }
 
   const destinationMailbox = folderMailboxPath(destinationFolder, accountId);
+  const excludedFolderIds =
+    sourceFolderId
+      ? []
+      : [
+          findSentFolder(folders, accountId)?.id ?? "",
+          findDraftsFolder(folders, accountId)?.id ?? ""
+        ].filter(Boolean);
+  const threadMessageIds = normalizedThreadId
+    ? await getThreadMessageIdsForMove({
+        accountId,
+        threadId: normalizedThreadId,
+        sourceFolderId: sourceFolderId || null,
+        excludedFolderIds
+      })
+    : [];
+  const targetMessageIds = Array.from(new Set([...messageIds, ...threadMessageIds]));
+  if (targetMessageIds.length === 0) {
+    return NextResponse.json({
+      ok: true,
+      queued: false,
+      destinationFolderId,
+      destinationMailbox,
+      moved: 0,
+      movedIds: [],
+      undoTargets: []
+    });
+  }
   const staged = await stageMessageMoves({
     accountId,
-    messageIds,
+    messageIds: targetMessageIds,
     destinationFolderId,
     destinationMailboxPath: destinationMailbox
   });
@@ -54,13 +96,18 @@ export async function POST(request: Request) {
     previousId: item.messageId,
     nextId: item.messageId
   }));
+  const undoTargets = staged.map((item) => ({
+    messageId: item.messageId,
+    restoreFolderId: item.sourceFolderId
+  }));
 
   return NextResponse.json({
     ok: true,
-    queued: true,
+    queued: staged.length > 0,
     destinationFolderId,
     destinationMailbox,
     moved: movedIds.length,
-    movedIds
+    movedIds,
+    undoTargets
   });
 }

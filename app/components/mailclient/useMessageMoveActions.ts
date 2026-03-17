@@ -4,6 +4,7 @@ import type React from "react";
 import { useCallback } from "react";
 import type { Message } from "@/lib/data";
 import type { SelectionStore } from "./messagelist/selectionStore";
+import type { ThreadMoveRequest } from "./utils/messageMove";
 import {
   getMessageSubjectForNotice,
   pruneDetachedCrossFolderThreadMessages,
@@ -30,6 +31,7 @@ type MoveApiResponse = {
   destinationFolderId: string;
   destinationMailbox?: string;
   movedIds?: Array<{ previousId: string; nextId: string }>;
+  undoTargets?: UndoMoveTarget[];
 };
 
 export type MoveMessagesResult = {
@@ -42,6 +44,7 @@ export type MoveMessagesResult = {
 
 export type MoveMessagesOptions = {
   messageIds?: string[];
+  threadMove?: ThreadMoveRequest;
   showNotice?: boolean;
   clearSelectionOnSuccess?: boolean;
   managePendingState?: boolean;
@@ -130,21 +133,16 @@ export function useMessageMoveActions({
             : activeMessageId
               ? [activeMessageId]
               : [];
-      if (!ids.length) return null;
       const uniqueIds = Array.from(new Set(ids));
+      const threadMove = options?.threadMove;
+      if (uniqueIds.length === 0 && !threadMove) return null;
       const idSet = new Set(uniqueIds);
       const sourceTargets = messages
         .filter((item) => item.accountId === activeAccountId && idSet.has(item.id))
-      const undoTargets: UndoMoveTarget[] = sourceTargets.map((item) => ({
+      const localUndoTargets: UndoMoveTarget[] = sourceTargets.map((item) => ({
         messageId: item.id,
         restoreFolderId: item.folderId
       }));
-      const singleTarget =
-        uniqueIds.length === 1
-          ? sourceTargets[0] ?? null
-          : null;
-      const singleSubject =
-        uniqueIds.length === 1 ? getMessageSubjectForNotice(singleTarget) : undefined;
       const managePendingState = options?.managePendingState ?? true;
       const clearSelectionOnSuccess = options?.clearSelectionOnSuccess ?? true;
       const updateActiveMessage = options?.updateActiveMessage ?? true;
@@ -165,7 +163,8 @@ export function useMessageMoveActions({
           body: JSON.stringify({
             accountId: activeAccountId,
             messageIds: uniqueIds,
-            destinationFolderId
+            destinationFolderId,
+            threadMove
           })
         });
         if (!res.ok) {
@@ -188,13 +187,30 @@ export function useMessageMoveActions({
                 .filter(Boolean)
             )
           : new Set(uniqueIds);
+        const movedCount = movedPreviousIds.size;
+        if (movedCount === 0) {
+          return null;
+        }
         const resolveMovedId = (id: string) => idRemap.get(id) ?? id;
-        const mappedUndoTargets = undoTargets
+        const fallbackUndoTargets = localUndoTargets
           .filter((target) => movedPreviousIds.has(target.messageId))
           .map((target) => ({
             ...target,
             messageId: resolveMovedId(target.messageId)
           }));
+        const responseUndoTargets = Array.isArray(data.undoTargets)
+          ? data.undoTargets
+              .filter(
+                (target): target is UndoMoveTarget =>
+                  Boolean(target?.messageId) && Boolean(target?.restoreFolderId)
+              )
+              .map((target) => ({
+                ...target,
+                messageId: resolveMovedId(target.messageId)
+              }))
+          : [];
+        const mappedUndoTargets =
+          responseUndoTargets.length > 0 ? responseUndoTargets : fallbackUndoTargets;
         markMessagesMutated?.();
         setMessages((prev) => {
           let changed = false;
@@ -272,21 +288,27 @@ export function useMessageMoveActions({
             setViewMessage(activeUpdated);
           }
         }
-        if (clearSelectionOnSuccess) {
+        if (clearSelectionOnSuccess && movedCount > 0) {
           clearSelectionState();
         }
         const destinationName = folderById.get(destinationFolderId)?.name ?? "folder";
+        const singleTarget =
+          movedCount === 1
+            ? messages.find((item) => movedPreviousIds.has(item.id)) ?? null
+            : null;
+        const singleSubject =
+          movedCount === 1 ? getMessageSubjectForNotice(singleTarget) : undefined;
         if (showNotice) {
           pushNotice({
             type: "success",
             title:
               queued
-                ? uniqueIds.length === 1
+                ? movedCount === 1
                   ? `Moving message to ${destinationName} in background.`
-                  : `Moving ${uniqueIds.length} messages to ${destinationName} in background.`
-                : uniqueIds.length === 1
+                  : `Moving ${movedCount} messages to ${destinationName} in background.`
+                : movedCount === 1
                   ? `Moved message to ${destinationName}.`
-                  : `Moved ${uniqueIds.length} messages to ${destinationName}.`,
+                  : `Moved ${movedCount} messages to ${destinationName}.`,
             description: singleSubject,
             actionLabel: mappedUndoTargets.length > 0 ? "Undo" : undefined,
             onAction:
@@ -311,7 +333,7 @@ export function useMessageMoveActions({
             )
           );
         }
-        const resultIds = data.movedIds ? Array.from(movedPreviousIds) : uniqueIds;
+        const resultIds = Array.from(movedPreviousIds);
         return {
           ids: resultIds,
           undoTargets: mappedUndoTargets,
