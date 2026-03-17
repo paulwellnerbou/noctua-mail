@@ -1,6 +1,13 @@
 import { memo, useEffect, useRef } from "react";
 import { sanitizeHtmlForDisplay, stripConditionalComments } from "@/lib/html";
 import { useMessageLinkPreview } from "@/app/components/mailclient/message/MessageLinkPreviewContext";
+import {
+  acquireEmailFonts,
+  extractTrustedFontStylesheetImportsFromHtml,
+  isTrustedFontStylesheetUrl,
+  releaseEmailFonts,
+  stripPromotedFontImports
+} from "@/app/components/emailFontRegistry";
 
 const stylesheetCache = new Map<string, string>();
 
@@ -163,7 +170,15 @@ function HtmlMessage({
     const rawHtml = html || "";
     const cleanedHtml = stripConditionalComments(rawHtml);
     const hasExplicitColor = /(^|[^-])color\s*:/i.test(cleanedHtml);
-    const externalStylesheets = extractStylesheetLinks(cleanedHtml);
+    const stylesheetLinks = extractStylesheetLinks(cleanedHtml);
+    const fontStylesheetUrls = Array.from(
+      new Set([
+        ...extractTrustedFontStylesheetImportsFromHtml(cleanedHtml),
+        ...stylesheetLinks.filter(isTrustedFontStylesheetUrl)
+      ])
+    );
+    const promotedFontStylesheetUrls = new Set(fontStylesheetUrls);
+    const externalStylesheets = stylesheetLinks.filter((href) => !promotedFontStylesheetUrls.has(href));
     const safeHtml = sanitizeHtmlForDisplay(cleanedHtml);
     const hostEl = root.host as HTMLElement;
     hostEl.setAttribute("data-theme", darkMode ? "dark" : "light");
@@ -174,7 +189,7 @@ function HtmlMessage({
     const linkColor = darkMode ? "#b8d5ff" : "#1847d5";
     let injectedCss = "";
     const withRewrites = safeHtml.replace(/<style[^>]*>([\s\S]*?)<\/style>/gi, (match, css) => {
-      const scaledCss = scaleFontSizes(css);
+      const scaledCss = scaleFontSizes(stripPromotedFontImports(css, promotedFontStylesheetUrls));
       const rewritten = extractPrefersColorScheme(scaledCss, darkMode ? "dark" : "light");
       if (rewritten.injected) {
         injectedCss += `\n${rewritten.injected}`;
@@ -260,6 +275,7 @@ function HtmlMessage({
     root.addEventListener("focusin", handleFocusIn);
     root.addEventListener("focusout", handleFocusOut);
     hostEl.addEventListener("mouseleave", handleHostMouseLeave);
+    void acquireEmailFonts(fontStylesheetUrls);
     let cancelled = false;
     (async () => {
       const missing = externalStylesheets.filter((href) => !stylesheetCache.has(href));
@@ -297,6 +313,7 @@ function HtmlMessage({
       root.removeEventListener("focusin", handleFocusIn);
       root.removeEventListener("focusout", handleFocusOut);
       hostEl.removeEventListener("mouseleave", handleHostMouseLeave);
+      releaseEmailFonts(fontStylesheetUrls);
     };
   }, [darkMode, html, zoom, fontScale, setLinkPreviewUrl]);
 
