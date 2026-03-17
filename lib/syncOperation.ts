@@ -13,6 +13,7 @@ import {
 import { processCalendarInviteForMessage } from "@/lib/calendarInviteProcessor";
 import { getAttachmentContentBuffer, sanitizeSyncedMessage } from "@/lib/mail/syncMessageSanitizer";
 import { isCalendarAttachment } from "@/lib/messageFlags";
+import { extractPrimaryEmail, normalizeEmailAddress } from "@/lib/senderIdentity";
 import { deleteMessageFiles } from "@/lib/storage";
 import { syncImapAccountBatched } from "@/lib/mail/imap";
 import { reconcileVerifiedCrossFolderMoves } from "@/lib/syncMoveReconciliation";
@@ -74,6 +75,40 @@ export type SyncOperationProgress = {
 export type SyncOperationOptions = {
   onProgress?: (progress: SyncOperationProgress) => void;
 };
+
+const GOOGLE_CALENDAR_SYNC_SENDER = "noreply-calendar-sync@google.com";
+
+function extractMessageHeaderSection(source?: string | null) {
+  if (!source) return "";
+  const separatorMatch = source.match(/\r?\n\r?\n/);
+  if (!separatorMatch || typeof separatorMatch.index !== "number") {
+    return source;
+  }
+  return source.slice(0, separatorMatch.index);
+}
+
+export function isGoogleCalendarSyncMessage(params: {
+  from?: string | null;
+  fromEmail?: string | null;
+  source?: string | null;
+}) {
+  const directFromEmail =
+    normalizeEmailAddress(params.fromEmail) ?? extractPrimaryEmail(params.from) ?? null;
+  if (directFromEmail === GOOGLE_CALENDAR_SYNC_SENDER) {
+    return true;
+  }
+  const headerSection = extractMessageHeaderSection(params.source).toLowerCase();
+  if (!headerSection) return false;
+  return headerSection.includes(GOOGLE_CALENDAR_SYNC_SENDER);
+}
+
+export function shouldAutoProcessCalendarInviteMessage(params: {
+  from?: string | null;
+  fromEmail?: string | null;
+  source?: string | null;
+}) {
+  return !isGoogleCalendarSyncMessage(params);
+}
 
 export function resolveOrphanedMessageFileRefs(params: {
   removed: Array<{ messageId: string; attachmentIds: string[] }>;
@@ -159,7 +194,8 @@ export async function runSyncOperationBatched(
   const allProcessedIds = new Set<string>();
   const allReferenceIds = new Set<string>();
   const newNotificationMessages: SyncNotificationMessage[] = [];
-  const calendarInviteImports: Array<{ messageId: string; icsSource: string }> = [];
+  const calendarInviteImports: Array<{ messageId: string; icsSource: string; process: boolean }> =
+    [];
   let latestEstimatedTotal: number | undefined;
   // Highest IMAP UID successfully written to DB — updated after each batch upsert.
   let highestProcessedUid: number | undefined = payload.resumeFromUid;
@@ -285,12 +321,23 @@ export async function runSyncOperationBatched(
       const syncedMessages = normalizedMessages.filter((message) => strippedIds.has(message.id));
 
       syncedMessages.forEach((message) => {
+        const shouldProcessInvite =
+          syncMode === "new" &&
+          shouldAutoProcessCalendarInviteMessage({
+            from: message.from,
+            fromEmail: message.fromEmail,
+            source: message.source
+          });
         (message.attachments ?? []).forEach((attachment) => {
           if (!isCalendarAttachment(attachment)) return;
           const attachmentBuffer = getAttachmentContentBuffer(attachment);
           if (!attachmentBuffer) return;
           const icsSource = attachmentBuffer.toString("utf8");
-          calendarInviteImports.push({ messageId: message.id, icsSource });
+          calendarInviteImports.push({
+            messageId: message.id,
+            icsSource,
+            process: shouldProcessInvite
+          });
         });
       });
 
@@ -327,7 +374,7 @@ export async function runSyncOperationBatched(
       accountId: account.id,
       messageId: invite.messageId,
       icsSource: invite.icsSource,
-      process: syncMode === "new",
+      process: invite.process,
       accountEmail: account.email,
       reminderUserId: syncMode === "new" ? account.ownerUserId : undefined,
       processedByUserId: syncMode === "new" ? account.ownerUserId : undefined
