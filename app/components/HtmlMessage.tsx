@@ -1,5 +1,6 @@
 import { memo, useEffect, useRef } from "react";
 import { sanitizeHtmlForDisplay, stripConditionalComments } from "@/lib/html";
+import { useMessageLinkPreview } from "@/app/components/mailclient/message/MessageLinkPreviewContext";
 
 const stylesheetCache = new Map<string, string>();
 
@@ -129,6 +130,19 @@ function extractPrefersColorScheme(css: string, theme: "dark" | "light") {
   return { stripped: output, injected };
 }
 
+function getClosestAnchor(target: EventTarget | null) {
+  if (!(target instanceof Element)) return null;
+  const anchor = target.closest("a");
+  return anchor instanceof HTMLAnchorElement ? anchor : null;
+}
+
+function getAnchorPreviewUrl(anchor: HTMLAnchorElement | null) {
+  if (!anchor) return null;
+  const href = anchor.getAttribute("href")?.trim();
+  if (!href) return null;
+  return anchor.href || href;
+}
+
 function HtmlMessage({
   html,
   darkMode,
@@ -141,6 +155,7 @@ function HtmlMessage({
   zoom?: number;
 }) {
   const hostRef = useRef<HTMLDivElement | null>(null);
+  const setLinkPreviewUrl = useMessageLinkPreview();
 
   useEffect(() => {
     if (!hostRef.current) return;
@@ -218,6 +233,33 @@ function HtmlMessage({
       link.setAttribute("target", "_blank");
       link.setAttribute("rel", "noreferrer noopener");
     });
+    const updateLinkPreview = (value: string | null) => {
+      setLinkPreviewUrl(value);
+    };
+    const handleMouseOver = (event: Event) => {
+      updateLinkPreview(getAnchorPreviewUrl(getClosestAnchor(event.target)));
+    };
+    const handleMouseOut = (event: Event) => {
+      const currentAnchor = getClosestAnchor(event.target);
+      if (!currentAnchor) return;
+      const relatedAnchor = getClosestAnchor((event as MouseEvent).relatedTarget);
+      if (relatedAnchor === currentAnchor) return;
+      updateLinkPreview(getAnchorPreviewUrl(relatedAnchor));
+    };
+    const handleFocusIn = (event: Event) => {
+      updateLinkPreview(getAnchorPreviewUrl(getClosestAnchor(event.target)));
+    };
+    const handleFocusOut = (event: Event) => {
+      updateLinkPreview(getAnchorPreviewUrl(getClosestAnchor((event as FocusEvent).relatedTarget)));
+    };
+    const handleHostMouseLeave = () => {
+      updateLinkPreview(null);
+    };
+    root.addEventListener("mouseover", handleMouseOver);
+    root.addEventListener("mouseout", handleMouseOut);
+    root.addEventListener("focusin", handleFocusIn);
+    root.addEventListener("focusout", handleFocusOut);
+    hostEl.addEventListener("mouseleave", handleHostMouseLeave);
     let cancelled = false;
     (async () => {
       const missing = externalStylesheets.filter((href) => !stylesheetCache.has(href));
@@ -249,8 +291,14 @@ function HtmlMessage({
     })();
     return () => {
       cancelled = true;
+      updateLinkPreview(null);
+      root.removeEventListener("mouseover", handleMouseOver);
+      root.removeEventListener("mouseout", handleMouseOut);
+      root.removeEventListener("focusin", handleFocusIn);
+      root.removeEventListener("focusout", handleFocusOut);
+      hostEl.removeEventListener("mouseleave", handleHostMouseLeave);
     };
-  }, [darkMode, html, zoom, fontScale]);
+  }, [darkMode, html, zoom, fontScale, setLinkPreviewUrl]);
 
   return <div className="html-message" ref={hostRef} />;
 }

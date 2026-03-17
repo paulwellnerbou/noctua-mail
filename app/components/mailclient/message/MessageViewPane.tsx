@@ -1,5 +1,9 @@
+"use client";
+
+import { useCallback, useState } from "react";
 import type React from "react";
 import { Button } from "@radix-ui/themes";
+import { MessageLinkPreviewProvider } from "./MessageLinkPreviewContext";
 import styles from "./MessageViewPane.module.css";
 
 type MessageViewPaneProps = {
@@ -17,6 +21,11 @@ export default function MessageViewPane({
   header,
   hideToolbar = false
 }: MessageViewPaneProps) {
+  const [linkPreviewUrl, setLinkPreviewUrl] = useState<string | null>(null);
+  const handleLinkPreviewChange = useCallback((nextValue: string | null) => {
+    setLinkPreviewUrl((currentValue) => (currentValue === nextValue ? currentValue : nextValue));
+  }, []);
+
   return (
     <section className={styles.pane}>
       {!hideToolbar && (
@@ -45,7 +54,21 @@ export default function MessageViewPane({
         </div>
       )}
       {header && <div className={styles.threadHeader}>{header}</div>}
-      <div className={styles.threadView}>{children}</div>
+      <div className={styles.threadViewShell}>
+        <MessageLinkPreviewProvider value={handleLinkPreviewChange}>
+          <div
+            className={styles.threadView}
+            onMouseLeave={() => handleLinkPreviewChange(null)}
+          >
+            {children}
+          </div>
+        </MessageLinkPreviewProvider>
+        {linkPreviewUrl ? (
+          <div className={styles.linkPreviewOverlay} title={linkPreviewUrl}>
+            {linkPreviewUrl}
+          </div>
+        ) : null}
+      </div>
     </section>
   );
 }

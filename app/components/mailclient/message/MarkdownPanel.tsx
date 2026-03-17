@@ -1,7 +1,9 @@
+import { useEffect } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkBreaks from "remark-breaks";
 import remarkGfm from "remark-gfm";
 import { normalizeMarkdownBody } from "./normalizeMarkdownBody";
+import { useMessageLinkPreview } from "./MessageLinkPreviewContext";
 
 type MarkdownPanelProps = {
   body?: string;
@@ -9,6 +11,10 @@ type MarkdownPanelProps = {
 };
 
 export default function MarkdownPanel({ body, fontScale = 1 }: MarkdownPanelProps) {
+  const setLinkPreviewUrl = useMessageLinkPreview();
+
+  useEffect(() => () => setLinkPreviewUrl(null), [setLinkPreviewUrl]);
+
   return (
     <div
       className="markdown-view"
@@ -19,7 +25,26 @@ export default function MarkdownPanel({ body, fontScale = 1 }: MarkdownPanelProp
       <ReactMarkdown
         remarkPlugins={[remarkGfm, remarkBreaks]}
         components={{
-          a: ({ node, ...props }) => <a {...props} target="_blank" rel="noreferrer" />
+          a: ({ node, href, ...props }) => (
+            <a
+              {...props}
+              href={href}
+              target="_blank"
+              rel="noreferrer"
+              onMouseEnter={(event) => {
+                setLinkPreviewUrl(event.currentTarget.href || href || null);
+              }}
+              onMouseLeave={() => {
+                setLinkPreviewUrl(null);
+              }}
+              onFocus={(event) => {
+                setLinkPreviewUrl(event.currentTarget.href || href || null);
+              }}
+              onBlur={() => {
+                setLinkPreviewUrl(null);
+              }}
+            />
+          )
         }}
       >
         {normalizeMarkdownBody(body ?? "")}
