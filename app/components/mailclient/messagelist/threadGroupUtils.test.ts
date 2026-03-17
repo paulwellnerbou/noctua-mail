@@ -1,7 +1,10 @@
 import { describe, expect, it } from "bun:test";
 import type { Message } from "@/lib/data";
 import { buildThreadTree, flattenThread, getThreadLatestDate } from "./threadTree";
-import { buildThreadGroupEntries } from "./threadGroupUtils";
+import {
+  buildThreadGroupEntries,
+  getCollapsedThreadIconParticipant
+} from "./threadGroupUtils";
 
 function makeMessage(
   id: string,
@@ -54,5 +57,52 @@ describe("buildThreadGroupEntries", () => {
 
     expect(entries[0]?.threadGroupId).toBe("thread-b");
     expect(entries[1]?.threadGroupId).toBe("thread-a");
+  });
+});
+
+describe("getCollapsedThreadIconParticipant", () => {
+  it("prefers a non-user sender over the account sender in collapsed threads", () => {
+    const fullFlat = [
+      {
+        message: makeMessage("m1", "thread-a", 100, {
+          from: "Me <me@example.com>",
+          fromEmail: "me@example.com",
+          to: "Bob <bob@example.com>"
+        }),
+        depth: 0
+      },
+      {
+        message: makeMessage("m2", "thread-a", 200, {
+          from: "Bob <bob@example.com>",
+          fromEmail: "bob@example.com",
+          to: "Me <me@example.com>"
+        }),
+        depth: 1
+      }
+    ];
+
+    expect(getCollapsedThreadIconParticipant(fullFlat, "me@example.com")).toEqual({
+      from: "Bob <bob@example.com>",
+      fromEmail: "bob@example.com"
+    });
+  });
+
+  it("falls back to the first non-user recipient when the thread only contains sent messages", () => {
+    const fullFlat = [
+      {
+        message: makeMessage("m1", "thread-a", 100, {
+          from: "Me <me@example.com>",
+          fromEmail: "me@example.com",
+          to: "Bob <bob@example.com>, Me <me@example.com>",
+          cc: "Carol <carol@example.com>"
+        }),
+        depth: 0
+      }
+    ];
+
+    expect(getCollapsedThreadIconParticipant(fullFlat, "me@example.com")).toEqual({
+      from: "Bob <bob@example.com>",
+      fromEmail: "bob@example.com"
+    });
   });
 });

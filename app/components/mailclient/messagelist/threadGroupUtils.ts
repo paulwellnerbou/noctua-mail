@@ -13,6 +13,8 @@ export type FromDisplayInfo = {
   tooltip: string;
   isFromUser?: boolean;
   showRecipientIcon?: boolean;
+  iconFrom?: string;
+  iconFromEmail?: string | null;
 };
 
 type RecipientFields = {
@@ -98,6 +100,21 @@ const recipientTooltip = (fields?: RecipientFields): string => {
     .join(", ");
 };
 
+const getOtherRecipientParticipant = (fields?: RecipientFields, userEmail?: string) => {
+  const normalizedUserEmail = userEmail?.trim().toLowerCase() ?? null;
+  for (const value of [fields?.to, fields?.cc, fields?.bcc]) {
+    for (const recipient of splitRecipients(value)) {
+      const email = extractPrimaryEmail(recipient);
+      if (email && normalizedUserEmail && email === normalizedUserEmail) continue;
+      return {
+        from: recipient,
+        fromEmail: email
+      };
+    }
+  }
+  return null;
+};
+
 export function getMessageFromDisplay(
   fromValue: string,
   recipients?: RecipientFields,
@@ -142,8 +159,38 @@ export function getMessageFromDisplay(
     text: displayText,
     tooltip: normalized,
     isFromUser,
-    showRecipientIcon: false
+    showRecipientIcon: false,
+    iconFrom: normalized,
+    iconFromEmail: extractPrimaryEmail(normalized)
   };
+}
+
+export function getCollapsedThreadIconParticipant(
+  fullFlat: Array<{ message: Message; depth: number }>,
+  userEmail?: string
+) {
+  const normalizedUserEmail = userEmail?.trim().toLowerCase() ?? null;
+
+  for (const { message } of fullFlat) {
+    const normalizedFrom = normalizeFromValue(message.from ?? "");
+    if (!normalizedFrom) continue;
+    const fromEmail = extractPrimaryEmail(normalizedFrom);
+    if (fromEmail && normalizedUserEmail && fromEmail === normalizedUserEmail) continue;
+    return {
+      from: normalizedFrom,
+      fromEmail
+    };
+  }
+
+  for (const { message } of fullFlat) {
+    const recipient = getOtherRecipientParticipant(
+      { to: message.to, cc: message.cc, bcc: message.bcc },
+      userEmail
+    );
+    if (recipient) return recipient;
+  }
+
+  return null;
 }
 
 export function getCollapsedThreadFromDisplay(
@@ -177,9 +224,12 @@ export function getCollapsedThreadFromDisplay(
   if (!fromTexts.length) {
     return { text: "", tooltip: "" };
   }
+  const iconParticipant = getCollapsedThreadIconParticipant(fullFlat, userEmail);
   return {
     text: fromTexts.join(", "),
-    tooltip: fromTooltips.join(", ")
+    tooltip: fromTooltips.join(", "),
+    iconFrom: iconParticipant?.from,
+    iconFromEmail: iconParticipant?.fromEmail ?? null
   };
 }
 

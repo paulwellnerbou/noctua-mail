@@ -301,8 +301,8 @@ export default function MessageThreadList({
                   {!item.showRecipientIcon && (
                     <SenderIcon
                       accountId={message.accountId}
-                      from={message.from}
-                      fromEmail={message.fromEmail}
+                      from={item.iconFrom}
+                      fromEmail={item.iconFromEmail}
                       enabled={senderIconsEnabled}
                       className={styles.senderIcon}
                       title={item.fromTooltip}

@@ -57,6 +57,8 @@ type MessageRowProps = {
   fromText?: string;
   fromTooltip?: string;
   showRecipientIcon?: boolean;
+  iconFrom?: string;
+  iconFromEmail?: string;
   folderBadges: React.ReactNode;
   folderBadgeKey?: string;
   showFolderBadgesInSubjectMeta: boolean;
@@ -121,6 +123,8 @@ function MessageRow({
   fromText,
   fromTooltip,
   showRecipientIcon = false,
+  iconFrom,
+  iconFromEmail,
   folderBadges,
   folderBadgeKey,
   showFolderBadgesInSubjectMeta,
@@ -308,8 +312,8 @@ function MessageRow({
             {!showRecipientIcon && (
               <SenderIcon
                 accountId={message.accountId}
-                from={message.from}
-                fromEmail={message.fromEmail}
+                from={iconFrom ?? message.from}
+                fromEmail={iconFromEmail ?? message.fromEmail}
                 enabled={senderIconsEnabled}
                 className={styles.senderIcon}
                 title={fromLineTooltip}

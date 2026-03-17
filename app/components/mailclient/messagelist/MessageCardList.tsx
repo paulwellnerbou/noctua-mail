@@ -375,6 +375,8 @@ export default function MessageCardList({
               fromText={item.fromText}
               fromTooltip={item.fromTooltip}
               showRecipientIcon={item.showRecipientIcon}
+              iconFrom={item.iconFrom}
+              iconFromEmail={item.iconFromEmail}
               folderBadges={renderFolderBadges(item.folderIds)}
               folderBadgeKey={folderBadgeKey}
               showFolderBadgesInSubjectMeta

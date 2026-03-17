@@ -91,6 +91,28 @@ type UseMessageMoveActionsOptions = {
   }) => void;
 };
 
+export function shouldKeepMovedMessageVisible(params: {
+  message: Message;
+  searchScope: "folder" | "all";
+  activeFolderId: string;
+  shouldKeepMessageInResults?: (message: Message) => boolean;
+}) {
+  const {
+    message,
+    searchScope,
+    activeFolderId,
+    shouldKeepMessageInResults
+  } = params;
+  if (shouldKeepMessageInResults) {
+    return shouldKeepMessageInResults(message);
+  }
+  return !(
+    searchScope === "folder" &&
+    activeFolderId &&
+    message.folderId !== activeFolderId
+  );
+}
+
 export function useMessageMoveActions({
   activeAccountId,
   activeMessageId,
@@ -229,18 +251,12 @@ export function useMessageMoveActions({
               imapUid: queued ? undefined : item.imapUid
             };
             const updated = remapMessageReferenceIds(updatedBase, item.id, resolvedId);
-            // For explicitly moved messages in folder scope, always remove from the
-            // current folder view — don't let the cross-folder thread exception keep
-            // them visible after they've been intentionally moved elsewhere.
-            const movedToOtherFolder =
-              searchScope === "folder" &&
-              activeFolderId &&
-              updated.folderId !== activeFolderId;
-            const keep = movedToOtherFolder
-              ? false
-              : shouldKeepMessageInResults
-                ? shouldKeepMessageInResults(updated)
-                : true;
+            const keep = shouldKeepMovedMessageVisible({
+              message: updated,
+              searchScope,
+              activeFolderId,
+              shouldKeepMessageInResults
+            });
             changed = true;
             if (!keep) return;
             nextById.set(updated.id, updated);
@@ -272,13 +288,12 @@ export function useMessageMoveActions({
               )
             : null;
           const activeStillVisible = activeUpdated
-            ? shouldKeepMessageInResults
-              ? shouldKeepMessageInResults(activeUpdated)
-              : !(
-                  searchScope === "folder" &&
-                  activeFolderId &&
-                  activeUpdated.folderId !== activeFolderId
-                )
+            ? shouldKeepMovedMessageVisible({
+                message: activeUpdated,
+                searchScope,
+                activeFolderId,
+                shouldKeepMessageInResults
+              })
             : false;
           if (!activeStillVisible) {
             setActiveMessageId("");

@@ -48,6 +48,8 @@ export type ListRowItem = {
   fromText: string;
   fromTooltip: string;
   showRecipientIcon: boolean;
+  iconFrom: string;
+  iconFromEmail?: string;
   isLastInDepth: boolean;
   hasChildren: boolean;
   isNestedCollapsed: boolean;
@@ -328,6 +330,8 @@ export function buildMessageListItems(params: BuildMessageListItemsParams): List
             fromText: fromDisplay.text,
             fromTooltip: fromDisplay.tooltip,
             showRecipientIcon: Boolean(fromDisplay.showRecipientIcon),
+            iconFrom: fromDisplay.iconFrom ?? message.from,
+            iconFromEmail: fromDisplay.iconFromEmail ?? message.fromEmail,
             isLastInDepth,
             hasChildren,
             isNestedCollapsed,
@@ -369,6 +373,8 @@ export function buildMessageListItems(params: BuildMessageListItemsParams): List
         fromText: fromDisplay.text,
         fromTooltip: fromDisplay.tooltip,
         showRecipientIcon: Boolean(fromDisplay.showRecipientIcon),
+        iconFrom: fromDisplay.iconFrom ?? message.from,
+        iconFromEmail: fromDisplay.iconFromEmail ?? message.fromEmail,
         isLastInDepth: true,
         hasChildren: false,
         isNestedCollapsed: false,

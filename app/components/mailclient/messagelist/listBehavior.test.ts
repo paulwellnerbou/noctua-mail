@@ -56,6 +56,8 @@ function makeRow(
     fromText: message.from,
     fromTooltip: message.from,
     showRecipientIcon: false,
+    iconFrom: message.from,
+    iconFromEmail: message.fromEmail,
     isLastInDepth: true,
     hasChildren: false,
     isNestedCollapsed: false,
