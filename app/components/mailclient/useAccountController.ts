@@ -2,6 +2,12 @@
 
 import type React from "react";
 import { useCallback, useEffect } from "react";
+import {
+  buildAccountFolderDeletePath,
+  buildAccountFolderRenamePath,
+  buildAccountFoldersCreatePath,
+  buildAccountFoldersPath
+} from "@/lib/accountApiPaths";
 import type { Account, Folder, Message, User } from "@/lib/data";
 import type { ManageTab } from "../AccountSettingsModal";
 import type { SyncJobResult } from "./types";
@@ -114,14 +120,18 @@ export function useAccountController({
             preferredAccountId = meData.accountId.trim();
           }
         }
-        const [accountsRes, foldersRes] = await Promise.all([
-          apiFetch("/api/accounts"),
-          apiFetch("/api/folders")
-        ]);
+        const accountsRes = await apiFetch("/api/accounts");
         let loadedAccounts = false;
         let loadedFolders = false;
         if (accountsRes.ok) {
           const nextAccounts = (await accountsRes.json()) as Account[];
+          const resolvedAccountId =
+            preferredAccountId &&
+            nextAccounts.some((account) => account.id === preferredAccountId)
+              ? preferredAccountId
+              : nextAccounts.find((account) => account.id === activeAccountId)?.id ??
+                nextAccounts[0]?.id ??
+                "";
           setAccounts(nextAccounts);
           setActiveAccountId((prev) => {
             if (
@@ -133,16 +143,22 @@ export function useAccountController({
             if (nextAccounts.find((account) => account.id === prev)) return prev;
             return nextAccounts[0]?.id ?? prev;
           });
+          if (resolvedAccountId) {
+            const foldersRes = await apiFetch(buildAccountFoldersPath(resolvedAccountId));
+            if (foldersRes.ok) {
+              const nextFolders = (await foldersRes.json()) as Folder[];
+              setFolders(nextFolders);
+              loadedFolders = true;
+            } else {
+              reportError(await readErrorMessage(foldersRes));
+            }
+          } else {
+            setFolders([]);
+            loadedFolders = true;
+          }
           loadedAccounts = true;
         } else {
           reportError(await readErrorMessage(accountsRes));
-        }
-        if (foldersRes.ok) {
-          const nextFolders = (await foldersRes.json()) as Folder[];
-          setFolders(nextFolders);
-          loadedFolders = true;
-        } else {
-          reportError(await readErrorMessage(foldersRes));
         }
         if (loadedAccounts && loadedFolders) {
           setInitialDataReady(true);
@@ -155,6 +171,7 @@ export function useAccountController({
     },
     [
       apiFetch,
+      activeAccountId,
       readErrorMessage,
       reportError,
       setAccounts,
@@ -332,11 +349,10 @@ export function useAccountController({
     const name = window.prompt("New subfolder name");
     if (!name?.trim()) return;
     try {
-      const res = await apiFetch("/api/folders/create", {
+      const res = await apiFetch(buildAccountFoldersCreatePath(activeAccountId), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          accountId: activeAccountId,
           name: name.trim(),
           parentId: folder.id
         })
@@ -356,14 +372,10 @@ export function useAccountController({
     const name = window.prompt("Rename folder", folder.name);
     if (!name?.trim() || name.trim() === folder.name) return;
     try {
-      const res = await apiFetch("/api/folders/rename", {
+      const res = await apiFetch(buildAccountFolderRenamePath(activeAccountId, folder.id), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          accountId: activeAccountId,
-          folderId: folder.id,
-          name: name.trim()
-        })
+        body: JSON.stringify({ name: name.trim() })
       });
       if (!res.ok) {
         reportError(await readErrorMessage(res));
@@ -386,13 +398,10 @@ export function useAccountController({
       return next;
     });
     try {
-      const res = await apiFetch("/api/folders/delete", {
+      const res = await apiFetch(buildAccountFolderDeletePath(activeAccountId, folder.id), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          accountId: activeAccountId,
-          folderId: folder.id
-        })
+        body: JSON.stringify({})
       });
       if (!res.ok) {
         reportError(await readErrorMessage(res));

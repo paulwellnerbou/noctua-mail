@@ -9,6 +9,10 @@ import {
   collectCalendarInviteMutationGroups,
   inferCalendarInviteMessageActionType
 } from "@/lib/calendarInviteProcessing";
+import {
+  buildAccountCalendarEventsPath,
+  buildAccountCalendarInvitesProcessPath
+} from "@/lib/accountApiPaths";
 import { normalizeCalendarIcsLineEndings } from "@/lib/calendarIcs";
 import { isCalendarAttachment } from "@/lib/messageFlags";
 import { resolveNextReminderOccurrence } from "@/lib/reminderRecurrence";
@@ -205,11 +209,8 @@ export default function CalendarEventPreview({
     try {
       const responses = await Promise.all(
         eventUids.map(async (eventUid) => {
-          const params = new URLSearchParams({
-            accountId,
-            eventUid
-          });
-          const res = await fetch(`/api/calendar/events?${params.toString()}`, { cache: "no-store" });
+          const params = new URLSearchParams({ eventUid });
+          const res = await fetch(buildAccountCalendarEventsPath(accountId, params), { cache: "no-store" });
           if (!res.ok) return null;
           const payload = (await res.json()) as { event?: CalendarEvent | null };
           return payload.event ? [eventUid.trim().toLowerCase(), payload.event] as const : null;
@@ -236,11 +237,10 @@ export default function CalendarEventPreview({
       const normalizedEventUid = eventUid?.trim().toLowerCase() ?? "";
       setProcessingInviteUid(normalizedEventUid || "__all__");
       try {
-        const res = await fetch("/api/calendar/invites/process", {
+        const res = await fetch(buildAccountCalendarInvitesProcessPath(accountId), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            accountId,
             messageId: sourceMessageRowId,
             icsSource: rawSource
           })

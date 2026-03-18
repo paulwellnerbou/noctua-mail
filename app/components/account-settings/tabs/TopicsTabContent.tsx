@@ -3,7 +3,13 @@
 import { useCallback, useEffect, useRef, useState, type ChangeEvent } from "react";
 import { Pencil, Plus, Trash2 } from "lucide-react";
 import { Badge, Button, Card, Flex, IconButton, Switch, Text, TextField } from "@radix-ui/themes";
-import type { AccountSettings, Topic, TopicColor } from "@/lib/data";
+import {
+  buildAccountTopicPath,
+  buildAccountTopicStatsPath,
+  buildAccountTopicsPath,
+  buildAccountTopicTransferPath
+} from "@/lib/accountApiPaths";
+import type { AccountSettings, Topic, TopicColor, TopicSuggestionSignal } from "@/lib/data";
 import { topicColorToScale } from "@/lib/data";
 import type { TopicStat, TopicTransferImportSummary } from "@/lib/topics";
 import TopicColorPicker from "@/app/components/mailclient/TopicColorPicker";
@@ -33,6 +39,14 @@ type TopicTransferImportResponse = {
   ok?: boolean;
   summary?: TopicTransferImportSummary;
   message?: string;
+};
+
+const TOPIC_SIGNAL_LABELS: Record<TopicSuggestionSignal, string> = {
+  senderEmail: "sender",
+  senderDomain: "sender domain",
+  recipient: "recipient",
+  listId: "listId",
+  jiraProjectKey: "JIRA project"
 };
 
 export default function TopicsTabContent({
@@ -79,8 +93,8 @@ export default function TopicsTabContent({
     setLoading(true);
     try {
       const [topicsRes, statsRes] = await Promise.all([
-        request(`/api/topics?accountId=${encodeURIComponent(accountId)}`),
-        request(`/api/topics/stats?accountId=${encodeURIComponent(accountId)}`)
+        request(buildAccountTopicsPath(accountId)),
+        request(buildAccountTopicStatsPath(accountId))
       ]);
       const topicsData = await topicsRes.json();
       const statsData = await statsRes.json();
@@ -109,10 +123,10 @@ export default function TopicsTabContent({
     setError("");
     setNotice("");
     try {
-      const res = await request("/api/topics", {
+      const res = await request(buildAccountTopicsPath(accountId), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ accountId, name: newName.trim(), color: newColor })
+        body: JSON.stringify({ name: newName.trim(), color: newColor })
       });
       const data = await res.json();
       if (!data.ok) { setError(data.message ?? "Failed to create topic"); return; }
@@ -142,10 +156,10 @@ export default function TopicsTabContent({
     setError("");
     setNotice("");
     try {
-      const res = await request(`/api/topics/${encodeURIComponent(topicId)}`, {
+      const res = await request(buildAccountTopicPath(accountId, topicId), {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ accountId, name: editName.trim(), color: editColor })
+        body: JSON.stringify({ name: editName.trim(), color: editColor })
       });
       const data = await res.json();
       if (!data.ok) { setError(data.message ?? "Failed to update topic"); return; }
@@ -167,7 +181,7 @@ export default function TopicsTabContent({
     setError("");
     setNotice("");
     try {
-      await request(`/api/topics/${encodeURIComponent(topicId)}?accountId=${encodeURIComponent(accountId)}`, {
+      await request(buildAccountTopicPath(accountId, topicId), {
         method: "DELETE"
       });
       const next = topics.filter((t) => t.id !== topicId);
@@ -184,7 +198,7 @@ export default function TopicsTabContent({
     setError("");
     setNotice("");
     try {
-      const res = await request(`/api/topics/transfer?accountId=${encodeURIComponent(accountId)}`);
+      const res = await request(buildAccountTopicTransferPath(accountId));
       if (!res.ok) {
         setError(await readError(res));
         return;
@@ -230,10 +244,10 @@ export default function TopicsTabContent({
     setNotice("");
     try {
       const parsed = JSON.parse(await file.text()) as unknown;
-      const res = await request("/api/topics/transfer", {
+      const res = await request(buildAccountTopicTransferPath(accountId), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ accountId, data: parsed })
+        body: JSON.stringify({ data: parsed })
       });
       if (!res.ok) {
         setError(await readError(res));
@@ -436,10 +450,9 @@ export default function TopicsTabContent({
                     {topicIdx > 0 && <div className={styles.signalDivider} />}
                     <Badge color={topicColorToScale(topic.color) as any} variant="soft" size="1" style={{ alignSelf: "flex-start" }}>{topic.name}</Badge>
                     {signals.map((s) => {
-                      const isListId = s.value.includes("<") || s.value.includes("@");
                       return (
-                        <Text key={s.value} size="1" color="gray" style={{ overflowWrap: "anywhere" }}>
-                          {isListId ? "listId" : "domain"}: {s.value} · {s.count} {s.count === 1 ? "thread" : "threads"}
+                        <Text key={`${s.type}:${s.value}`} size="1" color="gray" style={{ overflowWrap: "anywhere" }}>
+                          {TOPIC_SIGNAL_LABELS[s.type]}: {s.value} · {s.count} {s.count === 1 ? "thread" : "threads"}
                         </Text>
                       );
                     })}

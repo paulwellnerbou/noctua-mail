@@ -28,11 +28,15 @@ import FolderPane from "./mailclient/folder/FolderPane";
 import FolderTree from "./mailclient/folder/FolderTree";
 import MoveToDialog, { recordRecentMoveFolder, getRecentMoveFolderIds } from "./mailclient/message/MoveToDialog";
 import InAppNoticeStack, { type InAppNotice } from "./mailclient/InAppNoticeStack";
+import BuildRefreshDialog from "./mailclient/BuildRefreshDialog";
 import ComposeInlineCard from "./mailclient/composition/ComposeInlineCard";
 import ComposeMinimized from "./mailclient/composition/ComposeMinimized";
 import ComposeMessageField from "./mailclient/composition/ComposeMessageField";
 import ComposeModal from "./mailclient/composition/ComposeModal";
-import { reconcileSavedDraftMessages } from "./mailclient/composition/draftListState";
+import {
+  buildSavedDraftListMessage,
+  reconcileSavedDraftMessages
+} from "./mailclient/composition/draftListState";
 import { useComposeController } from "./mailclient/composition/useComposeController";
 import { useComposeState } from "./mailclient/composition/useComposeState";
 import { useComposeViewEffects } from "./mailclient/composition/useComposeViewEffects";
@@ -75,12 +79,29 @@ import MessageViewPane from "./mailclient/message/MessageViewPane";
 import MarkdownPanel from "./mailclient/message/MarkdownPanel";
 import MessageSourcePanel from "./mailclient/message/MessageSourcePanel";
 import { TODO_FLAG, DONE_FLAG, isMeaningfulNonInlineAttachment } from "@/lib/messageFlags";
-import { buildMessageGroupKey, INVITE_DECK_GROUP_BY } from "@/lib/messageGrouping";
+import { INVITE_DECK_GROUP_BY } from "@/lib/messageGrouping";
 import {
   DEFAULT_THREAD_DATE_SOURCE,
   type ThreadDateSource
 } from "@/lib/threadDate";
 import { createComposeAttachment } from "@/lib/mail/composeAttachment";
+import {
+  buildAccountApiPath,
+  buildAccountCalendarRecomputeRelationsPath,
+  buildAccountCalendarSyncPath,
+  buildAccountComposeRecipientsPath,
+  buildAccountDraftDiscardPath,
+  buildAccountFoldersPath,
+  buildAccountMessageTopicsPath,
+  buildAccountMessageTopicSuggestionsPath,
+  buildAccountMessagesActionPath,
+  buildAccountMessageHtmlPath,
+  buildAccountMessagePath,
+  buildAccountMessageSourcePath,
+  buildAccountMessagesPath,
+  buildAccountSmtpSendPath,
+  buildAccountTopicsPath
+} from "@/lib/accountApiPaths";
 import { openDetachedWindow } from "@/lib/ui/openDetachedWindow";
 import {
   DETACHED_MESSAGE_DELETE_EVENT_STORAGE_KEY,
@@ -98,6 +119,7 @@ import { useReminderNotifications } from "./mailclient/useReminderNotifications"
 import { useMessageData } from "./mailclient/useMessageData";
 import { useThreadContent } from "./mailclient/useThreadContent";
 import { useSyncController } from "./mailclient/useSyncController";
+import { useTopics } from "./mailclient/useTopics";
 import { useAccountController } from "./mailclient/useAccountController";
 import ThreadJsonModal from "./mailclient/message/ThreadJsonModal";
 import ThreadView from "./mailclient/message/ThreadView";
@@ -145,12 +167,9 @@ import {
   remapMessageReferenceIds
 } from "./mailclient/utils/messageMutation";
 import {
-  CALENDAR_REMINDERS_UPDATED_EVENT,
   markReminderDeliveredOnClientById
 } from "./mailclient/utils/calendarReminders";
 import {
-  BUILD_VERSION_POLL_INTERVAL_MS,
-  CALENDAR_REMINDER_REFRESH_INTERVAL_MS,
   NOTICE_TIMEOUTS,
   THREAD_COLLAPSE_SETTLE_MS
 } from "./mailclient/constants";
@@ -213,7 +232,6 @@ export default function MailClient({
   const [folderQuery, setFolderQuery] = useState("");
   const [messageView, setMessageView] = useState<"card" | "table" | "compact" | "threads">("threads");
   const [threadViewMode, setThreadViewMode] = useState<"full" | "compact">("compact");
-  const [allTopics, setAllTopics] = useState<Topic[]>([]);
   const [messageTopicsById, setMessageTopicsById] = useState<Map<string, Topic[]>>(new Map());
   const [topicPickerOpen, setTopicPickerOpen] = useState(false);
   const [topicPickerMessage, setTopicPickerMessage] = useState<Message | null>(null);
@@ -243,6 +261,12 @@ export default function MailClient({
     },
     [clientId]
   );
+  const {
+    allTopics,
+    setAllTopics,
+    topicMessageCountById,
+    refreshTopicStats
+  } = useTopics({ activeAccountId, apiFetch });
 
   const readErrorMessage = useCallback(async (res: Response) => {
     if (res.status === 401) {
@@ -299,15 +323,13 @@ export default function MailClient({
     setExceptionEntries,
     pendingCalendarReminders,
     inAppNotices,
+    requiredBuildVersion,
     swRegistrationRef,
-    currentBuildVersionRef,
     pushNotice,
     dismissNotice,
     reportError,
-    checkForBuildUpdate,
     showNotification,
-    syncReminderStateToServiceWorker,
-    processDueCalendarReminders,
+    refreshForBuildUpdate,
     refreshPendingCalendarReminders
   } = useReminderNotifications({
     activeAccountId,
@@ -318,8 +340,12 @@ export default function MailClient({
   });
 
   const refreshFolders = useCallback(async (): Promise<Folder[] | null> => {
+    if (!activeAccountId) {
+      setFolders([]);
+      return [];
+    }
     try {
-      const foldersRes = await apiFetch("/api/folders");
+      const foldersRes = await apiFetch(buildAccountFoldersPath(activeAccountId));
       if (foldersRes.ok) {
         const nextFolders = (await foldersRes.json()) as Folder[];
         setFolders(nextFolders);
@@ -331,7 +357,7 @@ export default function MailClient({
       reportError("Failed to refresh folders.");
     }
     return null;
-  }, [apiFetch, reportError, readErrorMessage, setFolders]);
+  }, [activeAccountId, apiFetch, reportError, readErrorMessage, setFolders]);
 
   const [groupBy, setGroupBy] = useState<
     "none" | "date" | "week" | "sender" | "domain" | "year" | "folder"
@@ -970,11 +996,10 @@ export default function MailClient({
     });
     try {
       for (const [destinationFolderId, messageIds] of grouped.entries()) {
-        const res = await apiFetch("/api/message/move", {
+        const res = await apiFetch(buildAccountMessagesActionPath(accountId, "move"), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            accountId,
             messageIds,
             destinationFolderId
           })
@@ -1294,13 +1319,12 @@ export default function MailClient({
         if (cached) return cached;
       }
       const params = new URLSearchParams({
-        accountId: activeAccountId,
         limit: "20"
       });
       if (trimmedQuery) {
         params.set("q", trimmedQuery);
       }
-      const res = await apiFetch(`/api/compose/recipients?${params.toString()}`, { signal });
+      const res = await apiFetch(buildAccountComposeRecipientsPath(activeAccountId, params), { signal });
       if (!res.ok) return [];
       const data = (await res.json()) as { recipients?: string[] };
       const list = data.recipients ?? [];
@@ -1451,16 +1475,6 @@ export default function MailClient({
       setMessageView(preferred);
     }
   }, [currentAccount?.settings?.layout?.defaultView]);
-  // Load all topics when account changes
-  useEffect(() => {
-    if (!activeAccountId) return;
-    apiFetch(`/api/topics?accountId=${encodeURIComponent(activeAccountId)}`)
-      .then((res) => res.json())
-      .then((data) => {
-        if (data.ok && Array.isArray(data.topics)) setAllTopics(data.topics);
-      })
-      .catch(() => {});
-  }, [activeAccountId, apiFetch]);
 
   // Derive topics map from messages (topics are now included in the messages API response)
   useEffect(() => {
@@ -1477,34 +1491,28 @@ export default function MailClient({
     setTopicPickerMessage(message);
     setTopicSuggestions([]);
     setTopicPickerOpen(true);
-    const params = new URLSearchParams({ accountId: activeAccountId ?? "" });
+    const params = new URLSearchParams();
     if (message.threadId) params.set("threadId", message.threadId);
-    if (message.fromEmail) params.set("fromEmail", message.fromEmail);
-    if (message.listId) params.set("listId", message.listId);
-    if (message.to) params.set("to", message.to);
-    if (message.cc) params.set("cc", message.cc);
-    apiFetch(`/api/message/topics/suggest?${params}`)
+    apiFetch(buildAccountMessageTopicSuggestionsPath(activeAccountId, params), { cache: "no-store" })
       .then((r) => r.json())
       .then((data) => { if (data.ok) setTopicSuggestions(data.suggestions ?? []); })
       .catch(() => {});
   }, [activeAccountId, apiFetch]);
 
   const handleFetchSuggestions = useCallback(async (message: Message): Promise<Topic[]> => {
-    const params = new URLSearchParams({ accountId: activeAccountId ?? "" });
+    const params = new URLSearchParams();
     if (message.threadId) params.set("threadId", message.threadId);
-    if (message.fromEmail) params.set("fromEmail", message.fromEmail);
-    if (message.listId) params.set("listId", message.listId);
-    if (message.to) params.set("to", message.to);
-    if (message.cc) params.set("cc", message.cc);
-    const data = await apiFetch(`/api/message/topics/suggest?${params}`).then((r) => r.json()).catch(() => ({}));
+    const data = await apiFetch(buildAccountMessageTopicSuggestionsPath(activeAccountId, params), { cache: "no-store" })
+      .then((r) => r.json())
+      .catch(() => ({}));
     return data.ok ? (data.suggestions ?? []) : [];
   }, [activeAccountId, apiFetch]);
 
   const handleCreateTopic = useCallback(async (name: string, color: TopicColor | null): Promise<Topic> => {
-    const res = await apiFetch("/api/topics", {
+    const res = await apiFetch(buildAccountTopicsPath(activeAccountId), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ accountId: activeAccountId, name, color })
+      body: JSON.stringify({ name, color })
     });
     const data = await res.json();
     if (!data.ok) throw new Error(data.message ?? "Failed to create topic");
@@ -1514,17 +1522,18 @@ export default function MailClient({
 
   const handleSaveMessageTopics = useCallback(async (topicIds: string[]) => {
     if (!topicPickerMessage) return;
-    const res = await apiFetch("/api/message/topics", {
+    const res = await apiFetch(buildAccountMessageTopicsPath(activeAccountId), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ accountId: activeAccountId, threadId: topicPickerMessage.threadId, action: "set", topicIds })
+      body: JSON.stringify({ threadId: topicPickerMessage.threadId, action: "set", topicIds })
     });
     const data = await res.json();
     if (data.ok && Array.isArray(data.topics)) {
       const threadId = topicPickerMessage.threadId;
       setMessages((prev) => prev.map((msg) => msg.threadId === threadId ? { ...msg, topics: data.topics } : msg));
+      void refreshTopicStats(activeAccountId);
     }
-  }, [activeAccountId, apiFetch, topicPickerMessage]);
+  }, [activeAccountId, apiFetch, refreshTopicStats, topicPickerMessage]);
 
   const handleToggleTopic = useCallback(async (message: Message, topicId: string) => {
     const currentTopics = messageTopicsById.get(message.threadId) ?? [];
@@ -1532,17 +1541,18 @@ export default function MailClient({
     const newTopicIds = isAssigned
       ? currentTopics.filter((t) => t.id !== topicId).map((t) => t.id)
       : [...currentTopics.map((t) => t.id), topicId];
-    const res = await apiFetch("/api/message/topics", {
+    const res = await apiFetch(buildAccountMessageTopicsPath(activeAccountId), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ accountId: activeAccountId, threadId: message.threadId, action: "set", topicIds: newTopicIds })
+      body: JSON.stringify({ threadId: message.threadId, action: "set", topicIds: newTopicIds })
     });
     const data = await res.json();
     if (data.ok && Array.isArray(data.topics)) {
       const threadId = message.threadId;
       setMessages((prev) => prev.map((msg) => msg.threadId === threadId ? { ...msg, topics: data.topics } : msg));
+      void refreshTopicStats(activeAccountId);
     }
-  }, [activeAccountId, apiFetch, messageTopicsById]);
+  }, [activeAccountId, apiFetch, messageTopicsById, refreshTopicStats]);
 
   const includeThreadAcrossFoldersForList =
     includeThreadAcrossFolders &&
@@ -2075,10 +2085,10 @@ export default function MailClient({
         composeReplyMessage,
         accountFromValue: getAccountFromValue(currentAccount)
       });
-      const res = await apiFetch("/api/smtp", {
+      const res = await apiFetch(buildAccountSmtpSendPath(activeAccountId), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ accountId: activeAccountId, ...smtpPayload })
+        body: JSON.stringify(smtpPayload)
       });
       if (res.ok) {
         if (composeReplyMessage) {
@@ -2092,13 +2102,10 @@ export default function MailClient({
           suppressDraftDeleteReconcile(composeDraftId);
           removeDraftFromUi(composeDraftId);
           try {
-            await apiFetch("/api/drafts/discard", {
+            await apiFetch(buildAccountDraftDiscardPath(activeAccountId, composeDraftId), {
               method: "POST",
               headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                accountId: activeAccountId,
-                draftId: composeDraftId
-              })
+              body: JSON.stringify({})
             });
           } catch {
             // ignore draft cleanup errors
@@ -2366,10 +2373,13 @@ export default function MailClient({
   updateMessagesRef.current = updateMessagesWithCurrentResultPrune;
   const reconcileSavedDraftInUi = useCallback(
     (savedDraft: Message, previousDraftId: string | null) => {
-      const nextSavedDraft = {
-        ...savedDraft,
-        groupKey: buildMessageGroupKey(savedDraft, effectiveGroupBy)
-      };
+      const nextSavedDraft = buildSavedDraftListMessage({
+        messages,
+        savedDraft,
+        previousDraftId,
+        groupBy: effectiveGroupBy,
+        threadDateSource
+      });
       const includeSavedDraft = shouldKeepMessageInCurrentResults(nextSavedDraft);
       setMessages((prev) =>
         reconcileSavedDraftMessages({
@@ -2397,10 +2407,12 @@ export default function MailClient({
       activeFolderId,
       effectiveGroupBy,
       includeThreadAcrossFoldersForList,
+      messages,
       searchScope,
       setMessages,
       setViewMessage,
       shouldKeepMessageInCurrentResults,
+      threadDateSource,
       viewMessage?.id
     ]
   );
@@ -2599,10 +2611,10 @@ export default function MailClient({
     if (isRecomputingCalendarRelations || !activeAccountId) return;
     setIsRecomputingCalendarRelations(true);
     try {
-      const res = await fetch("/api/calendar/recompute-relations", {
+      const res = await fetch(buildAccountCalendarRecomputeRelationsPath(activeAccountId), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ accountId: activeAccountId })
+        body: JSON.stringify({})
       });
       const data = await res.json();
       if (!data.ok) {
@@ -3031,11 +3043,6 @@ export default function MailClient({
 
   useEffect(() => {
     if (typeof window === "undefined") return;
-    currentBuildVersionRef.current = buildVersionLabel.trim();
-  }, [buildVersionLabel]);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
     const runtimeConfig = (
       window as Window & {
         __NOCTUA_RUNTIME_CONFIG__?: {
@@ -3046,81 +3053,6 @@ export default function MailClient({
     const nextLabel = runtimeConfig?.appEnvironmentLabel?.trim() ?? "";
     setAppEnvironmentLabel((prev) => (prev === nextLabel ? prev : nextLabel));
   }, []);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    let active = true;
-    const run = () => {
-      if (!active) return;
-      void checkForBuildUpdate();
-    };
-    void run();
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === "visible") {
-        run();
-      }
-    };
-    const interval = window.setInterval(run, BUILD_VERSION_POLL_INTERVAL_MS);
-    window.addEventListener("focus", run);
-    document.addEventListener("visibilitychange", handleVisibilityChange);
-    return () => {
-      active = false;
-      window.clearInterval(interval);
-      window.removeEventListener("focus", run);
-      document.removeEventListener("visibilitychange", handleVisibilityChange);
-    };
-  }, [checkForBuildUpdate]);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    let active = true;
-    const run = () => {
-      if (!active) return;
-      void refreshPendingCalendarReminders();
-    };
-    void run();
-    const handleUpdate = () => {
-      run();
-    };
-    window.addEventListener(CALENDAR_REMINDERS_UPDATED_EVENT, handleUpdate);
-    return () => {
-      active = false;
-      window.removeEventListener(CALENDAR_REMINDERS_UPDATED_EVENT, handleUpdate);
-    };
-  }, [refreshPendingCalendarReminders]);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    let active = true;
-    const run = () => {
-      if (!active) return;
-      void refreshPendingCalendarReminders();
-    };
-    const interval = window.setInterval(run, CALENDAR_REMINDER_REFRESH_INTERVAL_MS);
-    return () => {
-      active = false;
-      window.clearInterval(interval);
-    };
-  }, [refreshPendingCalendarReminders]);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    let active = true;
-    const run = () => {
-      if (!active) return;
-      void processDueCalendarReminders(pendingCalendarReminders);
-    };
-    void run();
-    const interval = window.setInterval(run, 15_000);
-    return () => {
-      active = false;
-      window.clearInterval(interval);
-    };
-  }, [pendingCalendarReminders, processDueCalendarReminders]);
-
-  useEffect(() => {
-    void syncReminderStateToServiceWorker(pendingCalendarReminders);
-  }, [pendingCalendarReminders, syncReminderStateToServiceWorker]);
 
   useEffect(() => {
     if (authState !== "ok" || !sessionTtlSeconds) return;
@@ -3195,11 +3127,7 @@ export default function MailClient({
     if (!caldav?.url) return;
     const intervalMs = caldav.syncIntervalMs ?? 15 * 60 * 1000;
     const doSync = () => {
-      void apiFetch("/api/calendar/sync", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ accountId: activeAccountId })
-      });
+      void apiFetch(buildAccountCalendarSyncPath(activeAccountId), { method: "POST" });
     };
     doSync();
     const timer = window.setInterval(doSync, intervalMs);
@@ -3275,11 +3203,10 @@ export default function MailClient({
           threadCount: threadIds.length,
           threadSample: threadIds.slice(0, 8)
         });
-        const res = await apiFetch(`/api/thread/related`, {
+        const res = await apiFetch(buildAccountApiPath(activeAccountId, "/thread/related"), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            accountId: activeAccountId,
             threadIds,
             groupBy,
             threadDateSource
@@ -3443,11 +3370,10 @@ export default function MailClient({
           messageSample: messageIds.slice(0, 8),
           threadSample: threadIds.slice(0, 8)
         });
-        const res = await apiFetch(`/api/thread/related`, {
+        const res = await apiFetch(buildAccountApiPath(activeAccountId, "/thread/related"), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            accountId: activeAccountId,
             threadIds,
             messageIds,
             groupBy,
@@ -3817,9 +3743,7 @@ export default function MailClient({
       if (!accountId) return null;
       try {
         const res = await apiFetch(
-          `/api/message?accountId=${encodeURIComponent(accountId)}&messageId=${encodeURIComponent(
-            messageId
-          )}`,
+          buildAccountMessagePath(accountId, messageId),
           { cache: "no-store" }
         );
         if (res.status === 404) {
@@ -3944,9 +3868,7 @@ export default function MailClient({
   const handleDownloadEml = async (message: Message) => {
     try {
       const res = await apiFetch(
-        `/api/source?accountId=${encodeURIComponent(activeAccountId)}&messageId=${encodeURIComponent(
-          message.id
-        )}`
+        buildAccountMessageSourcePath(activeAccountId, message.id)
       );
       if (!res.ok) {
         reportError(await readErrorMessage(res));
@@ -3984,11 +3906,7 @@ export default function MailClient({
 
   const handleOpenHtmlInNewWindow = (message: Message) => {
     if (typeof window === "undefined") return;
-    const params = new URLSearchParams({
-      accountId: message.accountId,
-      messageId: message.id
-    });
-    const opened = openDetachedWindow(`/api/message/html?${params.toString()}`);
+    const opened = openDetachedWindow(buildAccountMessageHtmlPath(message.accountId, message.id));
     if (!opened) {
       pushNotice({
         type: "warning",
@@ -4115,9 +4033,11 @@ export default function MailClient({
     const accountId = activeAccountId;
     void (async () => {
       try {
-        const res = await apiFetch(
-          `/api/messages?accountId=${encodeURIComponent(accountId)}&folderId=${encodeURIComponent(folderId)}&pageSize=1`
-        );
+        const params = new URLSearchParams({
+          folderId,
+          pageSize: "1"
+        });
+        const res = await apiFetch(buildAccountMessagesPath(accountId, params));
         if (!res.ok) return;
         const data = (await res.json()) as { total?: number };
         if (typeof data?.total === "number" && data.total > 0) {
@@ -4314,6 +4234,10 @@ export default function MailClient({
         state={{ inAppNotices }}
         actions={{ onOpenNotice: handleNoticeOpen, onDismissNotice: handleDismissNotice }}
       />
+      <BuildRefreshDialog
+        buildVersion={requiredBuildVersion}
+        onRefresh={refreshForBuildUpdate}
+      />
       <DeleteConfirmDialog
         deleteConfirm={deleteConfirm}
         onOpenChange={handleDeleteDialogOpenChange}
@@ -4356,6 +4280,7 @@ export default function MailClient({
           topSlot={
             <TopicsSidebarSection
               topics={allTopics}
+              topicMessageCountById={topicMessageCountById}
               activeTopicId={query.startsWith("topic:") ? query.slice("topic:".length) : null}
               collapsed={topicSidebarCollapsed}
               onToggleCollapsed={() => setTopicSidebarCollapsed((v) => !v)}
@@ -4723,6 +4648,7 @@ export default function MailClient({
                     threadContentById={threadContentById}
                     threadContentLoading={threadContentLoading}
                     threadContentErrorById={threadContentErrorById}
+                    composeDraftId={composeDraftId}
                     composeReplyMessageId={
                       showComposeInline && replyMessageInThread && composeReplyMessage
                         ? composeReplyMessage.id
@@ -4820,7 +4746,12 @@ export default function MailClient({
           }}
           apiFetch={apiFetch}
           readErrorMessage={readErrorMessage}
-          onTopicsChanged={setAllTopics}
+          onTopicsChanged={(topics) => {
+            setAllTopics(topics);
+            if (activeAccountId) {
+              void refreshTopicStats(activeAccountId);
+            }
+          }}
         />
       )}
 

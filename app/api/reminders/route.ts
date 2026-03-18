@@ -9,9 +9,12 @@ import {
 import { requireAccountContext } from "@/app/api/_helpers/accountContext";
 import { toFiniteNumber, toPositiveNumberArray } from "@/app/api/_helpers/numberParsing";
 
-export async function GET(request: Request) {
+export async function handleListCalendarRemindersRequest(
+  request: Request,
+  options?: { accountId?: string | null }
+) {
   const { searchParams } = new URL(request.url);
-  const accountId = searchParams.get("accountId")?.trim() ?? "";
+  const accountId = options?.accountId ?? "";
   const accountContext = await requireAccountContext(request, accountId, {
     missingAccountMessage: "Missing accountId"
   });
@@ -20,7 +23,10 @@ export async function GET(request: Request) {
   return NextResponse.json({ ok: true, items });
 }
 
-export async function POST(request: Request) {
+export async function handleUpsertCalendarReminderRequest(
+  request: Request,
+  options?: { accountId?: string | null }
+) {
   const payload = (await request.json()) as {
     accountId?: string;
     id?: string;
@@ -38,7 +44,7 @@ export async function POST(request: Request) {
     leadMinutes?: number;
     leadLabel?: string;
   };
-  const accountId = payload.accountId?.trim() ?? "";
+  const accountId = options?.accountId ?? "";
   const accountContext = await requireAccountContext(request, accountId, {
     missingAccountMessage: "Missing accountId"
   });
@@ -90,7 +96,10 @@ export async function POST(request: Request) {
   return NextResponse.json({ ok: true, ...result }, { status: result.replaced ? 200 : 201 });
 }
 
-export async function DELETE(request: Request) {
+export async function handleDeleteCalendarReminderRequest(
+  request: Request,
+  options?: { accountId?: string | null }
+) {
   const payload = (await request.json()) as {
     accountId?: string;
     clearAll?: boolean;
@@ -99,7 +108,7 @@ export async function DELETE(request: Request) {
     eventTitle?: string;
     eventStartAtMs?: number;
   };
-  const accountId = payload.accountId?.trim() ?? "";
+  const accountId = options?.accountId ?? "";
   const accountContext = await requireAccountContext(request, accountId, {
     missingAccountMessage: "Missing accountId"
   });
@@ -133,3 +142,9 @@ export async function DELETE(request: Request) {
   });
   return NextResponse.json({ ok: true, deleted });
 }
+
+export {
+  legacyAccountRouteRemoved as GET,
+  legacyAccountRouteRemoved as POST,
+  legacyAccountRouteRemoved as DELETE
+} from "@/app/api/_helpers/legacyAccountRouteRemoved";

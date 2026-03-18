@@ -2,6 +2,10 @@
 
 import type React from "react";
 import { useCallback } from "react";
+import {
+  buildAccountMessageActionPath,
+  buildAccountMessagesActionPath
+} from "@/lib/accountApiPaths";
 import type { Folder, Message } from "@/lib/data";
 import type { DeleteConfirmAction, DeleteConfirmState } from "./types";
 import type { SelectionStore } from "./messagelist/selectionStore";
@@ -159,15 +163,17 @@ export function useMessageDeleteActions({
 
       if (targets.length > 0) {
         try {
-          const res = await apiFetch("/api/message/delete/associations", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              accountId: activeAccountId,
-              messageIds: targets.map((target) => target.id),
-              eventUids
-            })
-          });
+          const res = await apiFetch(
+            buildAccountMessagesActionPath(activeAccountId, "delete/associations"),
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                messageIds: targets.map((target) => target.id),
+                eventUids
+              })
+            }
+          );
           if (res.ok) {
             const data = (await res.json()) as DeleteAssociationLookupResponse;
             const summary = summarizeDeleteCalendarAssociations(targets, {
@@ -213,15 +219,17 @@ export function useMessageDeleteActions({
       if (deleteConfirm.linkedReminderIds.length === 0 && deleteConfirm.linkedEventIds.length === 0) {
         return;
       }
-      const res = await apiFetch("/api/message/delete/linked-calendar", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          accountId: activeAccountId,
-          reminderIds: deleteConfirm.linkedReminderIds,
-          eventIds: deleteConfirm.linkedEventIds
-        })
-      });
+      const res = await apiFetch(
+        buildAccountMessagesActionPath(activeAccountId, "delete/linked-calendar"),
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            reminderIds: deleteConfirm.linkedReminderIds,
+            eventIds: deleteConfirm.linkedEventIds
+          })
+        }
+      );
       if (!res.ok) {
         const errorMessage = await readErrorMessage(res);
         throw new Error(errorMessage || "Failed to delete linked calendar items.");
@@ -232,10 +240,8 @@ export function useMessageDeleteActions({
 
   const deleteSingleMessagePermanently = useCallback(
     async (target: Message) => {
-      const res = await apiFetch("/api/message/delete", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ accountId: activeAccountId, messageId: target.id })
+      const res = await apiFetch(buildAccountMessageActionPath(activeAccountId, target.id, "delete"), {
+        method: "POST"
       });
       if (!res.ok) {
         const errorMessage = await readErrorMessage(res);
@@ -311,10 +317,10 @@ export function useMessageDeleteActions({
         const result = await deleteSingleMessagePermanently(single);
         return result.action === "deleted" ? [single.id] : [];
       }
-      const res = await apiFetch("/api/message/delete/bulk", {
+      const res = await apiFetch(buildAccountMessagesActionPath(activeAccountId, "delete/bulk"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ accountId: activeAccountId, messageIds: uniqueIds })
+        body: JSON.stringify({ messageIds: uniqueIds })
       });
       if (!res.ok) {
         const errorMessage = await readErrorMessage(res);

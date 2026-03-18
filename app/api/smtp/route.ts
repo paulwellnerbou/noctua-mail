@@ -14,9 +14,12 @@ function buildMessageId(address: string) {
   return `<${randomUUID()}@${safeDomain}>`;
 }
 
-export async function POST(request: Request) {
+export async function handleSendSmtpRequest(
+  request: Request,
+  options?: { accountId?: string | null }
+) {
   const payload = (await request.json()) as {
-    accountId: string;
+    accountId?: string;
     to?: string;
     cc?: string;
     bcc?: string;
@@ -37,9 +40,13 @@ export async function POST(request: Request) {
       dataUrl?: string;
     }>;
   };
-  const accountContext = await requireAccountContext(request, payload?.accountId ?? "", {
-    missingAccountMessage: "Missing accountId"
-  });
+  const accountContext = await requireAccountContext(
+    request,
+    options?.accountId ?? "",
+    {
+      missingAccountMessage: "Missing accountId"
+    }
+  );
   if (accountContext instanceof NextResponse) return accountContext;
   const { account, clientId } = accountContext;
   const to = payload.to?.trim() ?? "";
@@ -91,3 +98,5 @@ export async function POST(request: Request) {
 
   return NextResponse.json({ ok: true });
 }
+
+export { legacyAccountRouteRemoved as POST } from "@/app/api/_helpers/legacyAccountRouteRemoved";

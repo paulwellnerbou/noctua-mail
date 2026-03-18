@@ -18,9 +18,12 @@ function formatAddress(addresses?: EnvelopeAddress[] | null) {
   return parts.filter(Boolean).join(", ");
 }
 
-export async function GET(request: Request) {
+export async function handleImapPollRequest(
+  request: Request,
+  options?: { accountId?: string | null }
+) {
   const { searchParams } = new URL(request.url);
-  const accountIdParam = searchParams.get("accountId");
+  const accountIdParam = options?.accountId ?? "";
   const mailbox = searchParams.get("mailbox") ?? "INBOX";
   const sinceUidNextParam = searchParams.get("sinceUidNext");
   const sinceUidNext = sinceUidNextParam ? Number(sinceUidNextParam) : null;
@@ -118,3 +121,5 @@ export async function GET(request: Request) {
     }
   }
 }
+
+export { legacyAccountRouteRemoved as GET } from "@/app/api/_helpers/legacyAccountRouteRemoved";

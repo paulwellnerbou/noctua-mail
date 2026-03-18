@@ -3,12 +3,15 @@ import { requireSessionAccountOr403, requireSessionOr401 } from "@/lib/auth";
 import { getAccountById } from "@/lib/db";
 import { resolveSenderIcon } from "@/lib/senderIcons";
 
-export async function GET(request: Request) {
+export async function handleGetSenderIconRequest(
+  request: Request,
+  options?: { accountId?: string | null }
+) {
   const session = requireSessionOr401(request);
   if (session instanceof NextResponse) return session;
 
   const url = new URL(request.url);
-  const accountId = url.searchParams.get("accountId")?.trim() ?? "";
+  const accountId = options?.accountId ?? "";
   const from = url.searchParams.get("from") ?? "";
   const fromEmail = url.searchParams.get("fromEmail") ?? "";
 
@@ -38,3 +41,5 @@ export async function GET(request: Request) {
     }
   });
 }
+
+export { legacyAccountRouteRemoved as GET } from "@/app/api/_helpers/legacyAccountRouteRemoved";

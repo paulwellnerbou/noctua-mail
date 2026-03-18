@@ -2,11 +2,14 @@ import { NextResponse } from "next/server";
 import { listRecipientSuggestions } from "@/lib/db";
 import { requireSessionAccountOr403, requireSessionOr401 } from "@/lib/auth";
 
-export async function GET(request: Request) {
+export async function handleListRecipientSuggestionsRequest(
+  request: Request,
+  options?: { accountId?: string | null }
+) {
   const session = requireSessionOr401(request);
   if (session instanceof NextResponse) return session;
   const { searchParams } = new URL(request.url);
-  const accountId = searchParams.get("accountId");
+  const accountId = options?.accountId ?? "";
   if (!accountId) {
     return NextResponse.json({ ok: false, message: "Missing accountId" }, { status: 400 });
   }
@@ -22,3 +25,5 @@ export async function GET(request: Request) {
   );
   return NextResponse.json({ ok: true, recipients: results });
 }
+
+export { legacyAccountRouteRemoved as GET } from "@/app/api/_helpers/legacyAccountRouteRemoved";

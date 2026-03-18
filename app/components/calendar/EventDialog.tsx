@@ -3,6 +3,10 @@
 import { useEffect, useState } from "react";
 import { Button, Checkbox, Dialog, Flex, Grid, Select, Text, TextArea, TextField } from "@radix-ui/themes";
 import { Trash2 } from "lucide-react";
+import {
+  buildAccountCalendarEventPath,
+  buildAccountCalendarEventsPath
+} from "@/lib/accountApiPaths";
 import type { CalendarEvent } from "@/lib/data";
 import DialogTitleBar from "@/app/components/mailclient/message/DialogTitleBar";
 
@@ -114,11 +118,10 @@ export default function EventDialog({
     setError("");
     try {
       const url = isEditing
-        ? `/api/calendar/events/${encodeURIComponent(event!.id!)}`
-        : "/api/calendar/events";
+        ? buildAccountCalendarEventPath(accountId, event!.id!)
+        : buildAccountCalendarEventsPath(accountId);
       const method = isEditing ? "PUT" : "POST";
       const body = {
-        accountId,
         id: event?.id,
         eventUid: event?.eventUid,
         summary: summary.trim(),
@@ -154,10 +157,10 @@ export default function EventDialog({
     setDeleting(true);
     setError("");
     try {
-      const res = await fetch("/api/calendar/events", {
+      const res = await fetch(buildAccountCalendarEventsPath(accountId), {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ accountId, eventId: event.id })
+        body: JSON.stringify({ eventId: event.id })
       });
       if (!res.ok) {
         setError("Failed to delete event.");

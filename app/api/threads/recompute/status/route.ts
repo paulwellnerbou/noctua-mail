@@ -1,6 +1,1 @@
-import { getThreadRecomputeJob } from "@/lib/threadRecomputeJobs";
-import { handleRecomputeStatusRequest } from "@/app/api/_helpers/recomputeJobs";
-
-export async function GET(request: Request) {
-  return handleRecomputeStatusRequest(request, getThreadRecomputeJob);
-}
+export { legacyAccountRouteRemoved as GET } from "@/app/api/_helpers/legacyAccountRouteRemoved";

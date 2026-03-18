@@ -4,13 +4,20 @@ import { getAttachmentMeta } from "@/lib/db";
 import { requireSessionAccountOr403, requireSessionOr401 } from "@/lib/auth";
 import { extractAttachmentBufferFromSource } from "@/lib/mail/attachmentFromSource";
 
-export async function GET(request: Request) {
+export async function handleGetAttachmentRequest(
+  request: Request,
+  options?: {
+    accountId?: string | null;
+    messageId?: string | null;
+    attachmentId?: string | null;
+  }
+) {
   const session = requireSessionOr401(request);
   if (session instanceof NextResponse) return session;
   const { searchParams } = new URL(request.url);
-  const accountId = searchParams.get("accountId");
-  const messageId = searchParams.get("messageId");
-  const attachmentId = searchParams.get("attachmentId");
+  const accountId = options?.accountId ?? "";
+  const messageId = options?.messageId ?? "";
+  const attachmentId = options?.attachmentId ?? "";
 
   if (!accountId || !messageId || !attachmentId) {
     return NextResponse.json({ ok: false, message: "Missing parameters" }, { status: 400 });
@@ -59,3 +66,5 @@ export async function GET(request: Request) {
     }
   });
 }
+
+export { legacyAccountRouteRemoved as GET } from "@/app/api/_helpers/legacyAccountRouteRemoved";

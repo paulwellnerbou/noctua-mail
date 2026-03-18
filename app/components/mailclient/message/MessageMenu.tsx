@@ -368,7 +368,7 @@ export default function MessageMenu({
                       )}
                       {suggestions.map((topic: Topic) => {
                         const assigned = message.topics?.some((t) => t.id === topic.id) ?? false;
-                        const score = topic.matchCount;
+                        const score = topic.suggestionScore;
                         const scoreLabel = score === undefined ? null
                           : Number.isInteger(score) ? String(score)
                           : score.toFixed(2);

@@ -4,11 +4,14 @@ import { getTopicsForThreads } from "@/lib/topics";
 import { requireSessionAccountOr403, requireSessionOr401 } from "@/lib/auth";
 import { normalizeThreadDateSource } from "@/lib/threadDate";
 
-export async function GET(request: Request) {
+export async function handleListThreadsRequest(
+  request: Request,
+  options?: { accountId?: string | null }
+) {
   const session = requireSessionOr401(request);
   if (session instanceof NextResponse) return session;
   const { searchParams } = new URL(request.url);
-  const accountId = searchParams.get("accountId");
+  const accountId = options?.accountId ?? "";
   if (!accountId) {
     return NextResponse.json({ ok: false, message: "Missing accountId" }, { status: 400 });
   }
@@ -55,3 +58,5 @@ export async function GET(request: Request) {
     hasMore: data.hasMore
   });
 }
+
+export { legacyAccountRouteRemoved as GET } from "@/app/api/_helpers/legacyAccountRouteRemoved";

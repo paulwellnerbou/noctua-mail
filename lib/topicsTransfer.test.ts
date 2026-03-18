@@ -6,6 +6,8 @@ import type { Account, Folder, Message } from "./data";
 import {
   createTopic,
   exportTopicTransferData,
+  getTopicStats,
+  getTopicSuggestionsForMessage,
   getTopicsForThread,
   importTopicTransferData,
   listTopics,
@@ -202,5 +204,66 @@ describe("topic transfer", () => {
 
     const unresolvedTopics = await getTopicsForThread(accountId, "missing-thread");
     expect(unresolvedTopics.map((item) => item.id)).toEqual(["topic-new"]);
+  });
+
+  test("exports and imports retained learning data independently of local messages", async () => {
+    const sourceAccountId = "acc-topics-learning-source";
+    const targetAccountId = "acc-topics-learning-target";
+    const sourceFolder = buildFolder(sourceAccountId);
+    const { saveFoldersForAccount, upsertAccount, upsertMessages } = await dbModulePromise;
+
+    await upsertAccount(buildAccount(sourceAccountId));
+    await upsertAccount(buildAccount(targetAccountId));
+    await saveFoldersForAccount(sourceAccountId, [sourceFolder]);
+
+    await upsertMessages(
+      sourceAccountId,
+      sourceFolder.id,
+      [
+        {
+          ...buildMessage({
+            id: "source-learning-message",
+            accountId: sourceAccountId,
+            folderId: sourceFolder.id,
+            threadId: "source-learning-thread",
+            messageId: "<learning-source@example.com>",
+            dateValue: Date.UTC(2026, 2, 15, 11, 0, 0)
+          }),
+          subject: "[subshell Support] (UNSAPIX-24) Bug report",
+          from: "Support <noreply@subshell.com>",
+          fromEmail: "noreply@subshell.com"
+        }
+      ],
+      true,
+      { recomputeThreads: false }
+    );
+
+    const topic = await createTopic(sourceAccountId, "Support", "blue");
+    await setThreadTopics(sourceAccountId, "source-learning-thread", [topic.id]);
+
+    const exported = await exportTopicTransferData(sourceAccountId);
+    const summary = await importTopicTransferData(targetAccountId, exported);
+    expect(summary.topicCount).toBe(1);
+
+    const stats = await getTopicStats(targetAccountId, {
+      accountEmail: "owner@example.com"
+    });
+    expect(stats).toHaveLength(1);
+    expect(stats[0]?.topSignals).toEqual(expect.arrayContaining([
+      { type: "senderEmail", value: "noreply@subshell.com", count: 1 },
+      { type: "senderDomain", value: "subshell.com", count: 1 },
+      { type: "jiraProjectKey", value: "UNSAPIX", count: 1 }
+    ]));
+
+    const suggestions = await getTopicSuggestionsForMessage(targetAccountId, {
+      fromEmail: "noreply@subshell.com",
+      subject: "[subshell Support] (UNSAPIX-999) Imported target",
+      messageId: "<JIRA.900.1773827820586@Atlassian.JIRA>",
+      to: "owner@example.com"
+    }, {
+      accountEmail: "owner@example.com"
+    });
+
+    expect(suggestions.map((item) => item.name)).toEqual(["Support"]);
   });
 });

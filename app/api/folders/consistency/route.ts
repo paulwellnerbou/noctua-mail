@@ -9,16 +9,23 @@ type FolderConsistencyPayload = {
   folderId?: string;
 };
 
-export async function POST(request: Request) {
+export async function handleFolderConsistencyRequest(
+  request: Request,
+  options?: { accountId?: string | null; folderId?: string | null }
+) {
   const payload = (await request.json()) as FolderConsistencyPayload;
 
-  const accountContext = await requireAccountContext(request, payload?.accountId ?? "", {
-    missingAccountMessage: "Missing accountId"
-  });
+  const accountContext = await requireAccountContext(
+    request,
+    options?.accountId ?? "",
+    {
+      missingAccountMessage: "Missing accountId"
+    }
+  );
   if (accountContext instanceof NextResponse) return accountContext;
   const { accountId, account, clientId } = accountContext;
 
-  const folderId = typeof payload?.folderId === "string" ? payload.folderId.trim() : "";
+  const folderId = options?.folderId ?? "";
   if (!folderId) {
     return NextResponse.json({ ok: false, message: "Missing folderId" }, { status: 400 });
   }
@@ -103,3 +110,5 @@ export async function POST(request: Request) {
     }
   });
 }
+
+export { legacyAccountRouteRemoved as POST } from "@/app/api/_helpers/legacyAccountRouteRemoved";

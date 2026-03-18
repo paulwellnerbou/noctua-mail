@@ -14,9 +14,17 @@ import {
   resolveSpecialFolderAndMailbox,
 } from "../routeHelpers";
 
-export async function POST(request: Request) {
-  const payload = (await request.json()) as { accountId: string; messageId: string };
-  const context = await requireImapMessageMutationContext(request, payload);
+export async function handleDeleteMessageRequest(
+  request: Request,
+  options?: { accountId?: string | null; messageId?: string | null }
+) {
+  const payload = (await request.json().catch(() => null)) as
+    | { accountId?: string; messageId?: string }
+    | null;
+  const context = await requireImapMessageMutationContext(request, {
+    accountId: options?.accountId,
+    messageId: options?.messageId
+  });
   if (context instanceof NextResponse) return context;
   const { accountId, account, clientId, message } = context;
 
@@ -67,3 +75,5 @@ export async function POST(request: Request) {
     messageId: relocated?.nextId ?? message.id
   });
 }
+
+export { legacyAccountRouteRemoved as POST } from "@/app/api/_helpers/legacyAccountRouteRemoved";

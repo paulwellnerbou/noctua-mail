@@ -4,6 +4,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type React from "react";
 import { useSearchParams } from "next/navigation";
 import { Text } from "@radix-ui/themes";
+import {
+  buildAccountFoldersPath,
+  buildAccountMessageActionPath,
+  buildAccountMessageHtmlPath,
+  buildAccountMessagePath,
+  buildAccountMessageSourcePath
+} from "@/lib/accountApiPaths";
 import { normalizeAccountDateFormat } from "@/lib/dateFormatting";
 import type { Account, AccountDateFormat, Folder, Message } from "@/lib/data";
 import { formatMessagePageTitle } from "@/lib/appBranding";
@@ -73,11 +80,8 @@ export default function MessageWindowPage() {
     void (async () => {
       try {
         const [messageRes, foldersRes, accountsRes] = await Promise.all([
-          fetch(
-            `/api/message?accountId=${encodeURIComponent(accountId)}&messageId=${encodeURIComponent(messageId)}`,
-            { credentials: "include" }
-          ),
-          fetch("/api/folders", { credentials: "include" }),
+          fetch(buildAccountMessagePath(accountId, messageId), { credentials: "include" }),
+          fetch(buildAccountFoldersPath(accountId), { credentials: "include" }),
           fetch("/api/accounts", { credentials: "include" })
         ]);
         if (!active) return;
@@ -131,12 +135,9 @@ export default function MessageWindowPage() {
 
   const handleDownloadEml = useCallback(async (target: Message) => {
     try {
-      const res = await fetch(
-        `/api/source?accountId=${encodeURIComponent(target.accountId)}&messageId=${encodeURIComponent(
-          target.id
-        )}`,
-        { credentials: "include" }
-      );
+      const res = await fetch(buildAccountMessageSourcePath(target.accountId, target.id), {
+        credentials: "include"
+      });
       if (!res.ok) return;
       const data = (await res.json()) as { source?: string };
       if (!data?.source) return;
@@ -175,15 +176,11 @@ export default function MessageWindowPage() {
       setPendingMessageActions((prev) => new Set(prev).add(target.id));
       setActionError("");
       try {
-        const res = await fetch("/api/message/flags", {
+        const res = await fetch(buildAccountMessageActionPath(target.accountId, target.id, "flags"), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           credentials: "include",
-          body: JSON.stringify({
-            accountId: target.accountId,
-            messageId: target.id,
-            ...payload
-          })
+          body: JSON.stringify(payload)
         });
         if (!res.ok) {
           const body = (await res.json().catch(() => null)) as { message?: string } | null;
@@ -221,14 +218,9 @@ export default function MessageWindowPage() {
       setPendingMessageActions((prev) => new Set(prev).add(target.id));
       setActionError("");
       try {
-        const res = await fetch("/api/message/delete", {
+        const res = await fetch(buildAccountMessageActionPath(target.accountId, target.id, "delete"), {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
-          credentials: "include",
-          body: JSON.stringify({
-            accountId: target.accountId,
-            messageId: target.id
-          })
+          credentials: "include"
         });
         if (!res.ok) {
           const body = (await res.json().catch(() => null)) as { message?: string } | null;
@@ -258,11 +250,7 @@ export default function MessageWindowPage() {
   );
 
   const handleOpenHtmlInNewWindow = useCallback((target: Message) => {
-    const params = new URLSearchParams({
-      accountId: target.accountId,
-      messageId: target.id
-    });
-    openDetachedWindow(`/api/message/html?${params.toString()}`);
+    openDetachedWindow(buildAccountMessageHtmlPath(target.accountId, target.id));
   }, []);
 
   const readErrorMessage = useCallback(async (res: Response) => {
@@ -285,10 +273,9 @@ export default function MessageWindowPage() {
     if (existing) return existing;
     const promise = (async () => {
       try {
-        const res = await fetch(
-          `/api/source?accountId=${encodeURIComponent(accountId)}&messageId=${encodeURIComponent(targetMessageId)}`,
-          { credentials: "include" }
-        );
+        const res = await fetch(buildAccountMessageSourcePath(accountId, targetMessageId), {
+          credentials: "include"
+        });
         if (!res.ok) return null;
         const data = (await res.json()) as { source?: string };
         return data.source ?? "";
@@ -377,6 +364,7 @@ export default function MessageWindowPage() {
               threadContentById={{}}
               threadContentLoading={null}
               threadContentErrorById={{}}
+              composeDraftId={null}
               composeReplyMessageId={null}
               renderComposeInlineCard={null}
               messageCardProps={{

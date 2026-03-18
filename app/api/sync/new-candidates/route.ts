@@ -8,12 +8,19 @@ type NewSyncCandidatesPayload = {
   folderIds?: string[];
 };
 
-export async function POST(request: Request) {
+export async function handleNewSyncCandidatesRequest(
+  request: Request,
+  options?: { accountId?: string | null }
+) {
   const payload = (await request.json()) as NewSyncCandidatesPayload;
 
-  const accountContext = await requireAccountContext(request, payload?.accountId ?? "", {
-    missingAccountMessage: "Missing accountId"
-  });
+  const accountContext = await requireAccountContext(
+    request,
+    options?.accountId ?? "",
+    {
+      missingAccountMessage: "Missing accountId"
+    }
+  );
   if (accountContext instanceof NextResponse) return accountContext;
   const { accountId, account, clientId } = accountContext;
 
@@ -31,3 +38,5 @@ export async function POST(request: Request) {
   const decisions = await planImapNewSyncFolders(account, folderIds, clientId);
   return NextResponse.json({ ok: true, decisions });
 }
+
+export { legacyAccountRouteRemoved as POST } from "@/app/api/_helpers/legacyAccountRouteRemoved";

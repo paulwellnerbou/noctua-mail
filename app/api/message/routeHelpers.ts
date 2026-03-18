@@ -53,24 +53,24 @@ type AccountMessageContextWithImapOptions = Omit<
 export async function requireAccountAndMessageContext(
   request: Request,
   payload: {
-    accountId?: string;
-    messageId?: string;
+    accountId?: string | null;
+    messageId?: string | null;
   },
   options: AccountMessageContextWithImapOptions
 ): Promise<AccountMessageContextWithImapMetadata | NextResponse>;
 export async function requireAccountAndMessageContext(
   request: Request,
   payload: {
-    accountId?: string;
-    messageId?: string;
+    accountId?: string | null;
+    messageId?: string | null;
   },
   options?: AccountMessageContextOptions
 ): Promise<AccountMessageContext | NextResponse>;
 export async function requireAccountAndMessageContext(
   request: Request,
   payload: {
-    accountId?: string;
-    messageId?: string;
+    accountId?: string | null;
+    messageId?: string | null;
   },
   options?: AccountMessageContextOptions
 ): Promise<AccountMessageContext | NextResponse> {
@@ -120,8 +120,8 @@ export async function requireAccountAndMessageContext(
 export async function requireImapMessageMutationContext(
   request: Request,
   payload: {
-    accountId?: string;
-    messageId?: string;
+    accountId?: string | null;
+    messageId?: string | null;
   },
   options?: {
     missingFieldsMessage?: string;

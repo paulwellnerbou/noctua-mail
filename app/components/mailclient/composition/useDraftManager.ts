@@ -1,4 +1,8 @@
 import type React from "react";
+import {
+  buildAccountDraftDiscardPath,
+  buildAccountDraftSavePath
+} from "@/lib/accountApiPaths";
 import type { Message } from "@/lib/data";
 import type { ComposePayload } from "./composeContentBuilder";
 import { buildDraftSavePayload, computeDraftHash } from "./draftSaveUtils";
@@ -133,11 +137,10 @@ export function useDraftManager(params: UseDraftManagerParams) {
     }
     setDraftSaving(true);
     try {
-      const res = await apiFetch("/api/drafts/save", {
+      const res = await apiFetch(buildAccountDraftSavePath(activeAccountId), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          accountId: activeAccountId,
           draftId: composeDraftIdRef.current,
           ...payload
         })
@@ -228,13 +231,10 @@ export function useDraftManager(params: UseDraftManagerParams) {
       try {
         setDiscardingDraft(true);
         suppressDraftDeleteReconcile(composeDraftId);
-        const res = await apiFetch("/api/drafts/discard", {
+        const res = await apiFetch(buildAccountDraftDiscardPath(activeAccountId, composeDraftId), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            accountId: activeAccountId,
-            draftId: composeDraftId
-          })
+          body: JSON.stringify({})
         });
         if (!res.ok) {
           reportError(await readErrorMessage(res));

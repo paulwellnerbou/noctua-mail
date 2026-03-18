@@ -75,6 +75,7 @@ import {
   normalizeCalendarEventStatus
 } from "./calendarEventStatus";
 import { deriveInviteDeckEventBounds } from "./inviteDeckEventBounds";
+import { collectTopicSignalEntries, type TopicSignalSource } from "./topicSignals";
 import {
   mergeCalendarParticipation,
   normalizeCalendarParticipationStatus,
@@ -883,6 +884,23 @@ function initAccountSchema(db: any) {
       PRIMARY KEY (threadId, topicId)
     );
 
+    CREATE TABLE IF NOT EXISTS thread_signals (
+      accountId TEXT NOT NULL,
+      threadId TEXT NOT NULL,
+      signalType TEXT NOT NULL,
+      signalValue TEXT NOT NULL,
+      PRIMARY KEY (accountId, threadId, signalType, signalValue)
+    );
+
+    CREATE TABLE IF NOT EXISTS topic_learning_signals (
+      accountId TEXT NOT NULL,
+      topicId TEXT NOT NULL,
+      threadId TEXT NOT NULL,
+      signalType TEXT NOT NULL,
+      signalValue TEXT NOT NULL,
+      PRIMARY KEY (accountId, topicId, threadId, signalType, signalValue)
+    );
+
     CREATE TABLE IF NOT EXISTS calendar_reminders (
       id TEXT PRIMARY KEY,
       accountId TEXT NOT NULL,
@@ -945,6 +963,14 @@ function initAccountSchema(db: any) {
       ON thread_topics(threadId);
     CREATE INDEX IF NOT EXISTS idx_thread_topics_topic
       ON thread_topics(topicId);
+    CREATE INDEX IF NOT EXISTS idx_thread_signals_account_thread
+      ON thread_signals(accountId, threadId);
+    CREATE INDEX IF NOT EXISTS idx_thread_signals_account_signal
+      ON thread_signals(accountId, signalType, signalValue, threadId);
+    CREATE INDEX IF NOT EXISTS idx_topic_learning_signals_account_topic
+      ON topic_learning_signals(accountId, topicId, threadId);
+    CREATE INDEX IF NOT EXISTS idx_topic_learning_signals_account_signal
+      ON topic_learning_signals(accountId, signalType, signalValue, topicId, threadId);
 
     CREATE TABLE IF NOT EXISTS calendar_events (
       id TEXT PRIMARY KEY,
@@ -1060,6 +1086,234 @@ function initAccountSchema(db: any) {
   }
 }
 
+type ThreadSignalSourceRow = TopicSignalSource & {
+  threadId?: string | null;
+  toAddr?: string | null;
+  ccAddr?: string | null;
+};
+
+function normalizeThreadIds(threadIds?: Array<string | null | undefined>) {
+  return Array.from(new Set((threadIds ?? []).map((threadId) => (threadId ?? "").trim()).filter(Boolean)));
+}
+
+function insertThreadSignalsFromMessageRows(
+  db: any,
+  accountId: string,
+  rows: ThreadSignalSourceRow[]
+) {
+  const insertThreadSignal = db.prepare(
+    `INSERT OR REPLACE INTO thread_signals (accountId, threadId, signalType, signalValue)
+     VALUES (?, ?, ?, ?)`
+  );
+  let activeThreadId = "";
+  let activeRows: TopicSignalSource[] = [];
+  const flush = () => {
+    if (!activeThreadId || activeRows.length === 0) return;
+    collectTopicSignalEntries(activeRows).forEach((entry) => {
+      insertThreadSignal.run(accountId, activeThreadId, entry.type, entry.value);
+    });
+  };
+
+  rows.forEach((row) => {
+    const threadId = (row.threadId ?? "").trim();
+    if (!threadId) return;
+    if (threadId !== activeThreadId) {
+      flush();
+      activeThreadId = threadId;
+      activeRows = [];
+    }
+    activeRows.push({
+      fromEmail: row.fromEmail,
+      to: row.toAddr,
+      cc: row.ccAddr,
+      listId: row.listId,
+      subject: row.subject,
+      messageId: row.messageId
+    });
+  });
+  flush();
+}
+
+function rebuildThreadSignalsForThreadIds(db: any, accountId: string, threadIds: string[]) {
+  const uniqueThreadIds = normalizeThreadIds(threadIds);
+  if (uniqueThreadIds.length === 0) return;
+
+  const deleteBatchSize = 400;
+  for (let start = 0; start < uniqueThreadIds.length; start += deleteBatchSize) {
+    const chunk = uniqueThreadIds.slice(start, start + deleteBatchSize);
+    db.prepare(
+      `DELETE FROM thread_signals
+       WHERE accountId = ?
+         AND threadId IN (${chunk.map(() => "?").join(",")})`
+    ).run(accountId, ...chunk);
+  }
+
+  const selectedRows: ThreadSignalSourceRow[] = [];
+  const selectBatchSize = 400;
+  for (let start = 0; start < uniqueThreadIds.length; start += selectBatchSize) {
+    const chunk = uniqueThreadIds.slice(start, start + selectBatchSize);
+    const rows = db
+      .prepare(
+      `SELECT threadId, fromEmail, toAddr, ccAddr, listId, subject, messageId
+         FROM messages
+         WHERE accountId = ?
+           AND threadId IN (${chunk.map(() => "?").join(",")})
+         ORDER BY threadId ASC, dateValue ASC, id ASC`
+      )
+      .all(accountId, ...chunk) as ThreadSignalSourceRow[];
+    selectedRows.push(...rows);
+  }
+
+  insertThreadSignalsFromMessageRows(db, accountId, selectedRows);
+}
+
+function rebuildAllThreadSignalsForAccount(db: any, accountId: string) {
+  db.prepare(`DELETE FROM thread_signals WHERE accountId = ?`).run(accountId);
+  const rows = db
+    .prepare(
+      `SELECT threadId, fromEmail, toAddr, ccAddr, listId, subject, messageId
+       FROM messages
+       WHERE accountId = ?
+       ORDER BY threadId ASC, dateValue ASC, id ASC`
+    )
+    .all(accountId) as ThreadSignalSourceRow[];
+  insertThreadSignalsFromMessageRows(db, accountId, rows);
+}
+
+function ensureThreadSignalRuntimeData(db: any, accountId: string) {
+  const hasThreadSignals = db
+    .prepare(`SELECT 1 FROM thread_signals WHERE accountId = ? LIMIT 1`)
+    .get(accountId);
+  if (hasThreadSignals) return;
+  const hasMessages = db
+    .prepare(`SELECT 1 FROM messages WHERE accountId = ? LIMIT 1`)
+    .get(accountId);
+  if (!hasMessages) return;
+  rebuildAllThreadSignalsForAccount(db, accountId);
+}
+
+function normalizeTopicIds(topicIds?: Array<string | null | undefined>) {
+  return Array.from(new Set((topicIds ?? []).map((topicId) => (topicId ?? "").trim()).filter(Boolean)));
+}
+
+export function deleteTopicLearningSignals(
+  db: any,
+  accountId: string,
+  options?: {
+    threadIds?: string[];
+    topicIds?: string[];
+  }
+) {
+  const uniqueThreadIds = normalizeThreadIds(options?.threadIds);
+  const uniqueTopicIds = normalizeTopicIds(options?.topicIds);
+  if (uniqueThreadIds.length === 0 && uniqueTopicIds.length === 0) return;
+
+  const clauses = [`accountId = ?`];
+  const args: any[] = [accountId];
+  if (uniqueThreadIds.length > 0) {
+    clauses.push(`threadId IN (${uniqueThreadIds.map(() => "?").join(",")})`);
+    args.push(...uniqueThreadIds);
+  }
+  if (uniqueTopicIds.length > 0) {
+    clauses.push(`topicId IN (${uniqueTopicIds.map(() => "?").join(",")})`);
+    args.push(...uniqueTopicIds);
+  }
+
+  db.prepare(
+    `DELETE FROM topic_learning_signals
+     WHERE ${clauses.join(" AND ")}`
+  ).run(...args);
+}
+
+export function upsertTopicLearningSignalsForThreadIds(
+  db: any,
+  accountId: string,
+  threadIds: string[],
+  options?: {
+    topicIds?: string[];
+  }
+) {
+  const uniqueThreadIds = normalizeThreadIds(threadIds);
+  if (uniqueThreadIds.length === 0) return;
+  const uniqueTopicIds = normalizeTopicIds(options?.topicIds);
+  const insertLearningSignal = db.prepare(
+    `INSERT OR IGNORE INTO topic_learning_signals (accountId, topicId, threadId, signalType, signalValue)
+     VALUES (?, ?, ?, ?, ?)`
+  );
+
+  const selectBatchSize = 300;
+  const topicClause =
+    uniqueTopicIds.length > 0 ? `AND tt.topicId IN (${uniqueTopicIds.map(() => "?").join(",")})` : "";
+  for (let start = 0; start < uniqueThreadIds.length; start += selectBatchSize) {
+    const chunk = uniqueThreadIds.slice(start, start + selectBatchSize);
+    const rows = db
+      .prepare(
+        `SELECT tt.topicId, ts.threadId, ts.signalType, ts.signalValue
+         FROM thread_topics tt
+         JOIN thread_signals ts ON ts.accountId = tt.accountId AND ts.threadId = tt.threadId
+         WHERE tt.accountId = ?
+           AND tt.threadId IN (${chunk.map(() => "?").join(",")})
+           ${topicClause}`
+      )
+      .all(accountId, ...chunk, ...uniqueTopicIds) as Array<{
+      topicId?: string | null;
+      threadId?: string | null;
+      signalType?: string | null;
+      signalValue?: string | null;
+    }>;
+
+    rows.forEach((row) => {
+      const topicId = (row.topicId ?? "").trim();
+      const threadId = (row.threadId ?? "").trim();
+      const signalType = (row.signalType ?? "").trim();
+      const signalValue = (row.signalValue ?? "").trim();
+      if (!topicId || !threadId || !signalType || !signalValue) return;
+      insertLearningSignal.run(accountId, topicId, threadId, signalType, signalValue);
+    });
+  }
+}
+
+function ensureTopicLearningRuntimeData(db: any, accountId: string) {
+  const hasTopicLearningSignals = db
+    .prepare(`SELECT 1 FROM topic_learning_signals WHERE accountId = ? LIMIT 1`)
+    .get(accountId);
+  if (hasTopicLearningSignals) return;
+  const threadRows = db
+    .prepare(
+      `SELECT DISTINCT threadId
+       FROM thread_topics
+       WHERE accountId = ?`
+    )
+    .all(accountId) as Array<{ threadId?: string | null }>;
+  if (threadRows.length === 0) return;
+  upsertTopicLearningSignalsForThreadIds(
+    db,
+    accountId,
+    threadRows.map((row) => row.threadId ?? "")
+  );
+}
+
+function pruneThreadTopicsWithoutMessages(db: any, accountId: string, threadIds: string[]) {
+  const uniqueThreadIds = normalizeThreadIds(threadIds);
+  if (uniqueThreadIds.length === 0) return;
+
+  const deleteBatchSize = 400;
+  for (let start = 0; start < uniqueThreadIds.length; start += deleteBatchSize) {
+    const chunk = uniqueThreadIds.slice(start, start + deleteBatchSize);
+    db.prepare(
+      `DELETE FROM thread_topics
+       WHERE accountId = ?
+         AND threadId IN (${chunk.map(() => "?").join(",")})
+         AND NOT EXISTS (
+           SELECT 1
+           FROM messages m
+           WHERE m.accountId = thread_topics.accountId
+             AND m.threadId = thread_topics.threadId
+         )`
+    ).run(accountId, ...chunk);
+  }
+}
+
 async function getDb() {
   registerDbShutdownHooks();
   if (!masterDbInstance) {
@@ -1114,6 +1368,8 @@ async function getAccountDb(accountId: string) {
   ensureMessageCalendarEventRuntimeSchema(accountDb);
   ensureCalendarReminderRuntimeSchema(accountDb);
   await ensureCalendarEventRuntimeData(accountDb, accountId);
+  ensureThreadSignalRuntimeData(accountDb, accountId);
+  ensureTopicLearningRuntimeData(accountDb, accountId);
   scheduleAccountDbIdleClose(dbPath);
   return accountDb;
 }
@@ -1741,6 +1997,7 @@ export async function recomputeThreadIdsForAccount(accountId: string) {
     db.transaction(() => {
       updates.forEach((row) => update.run(row.threadId, row.parentId, row.id));
     })();
+    rebuildAllThreadSignalsForAccount(db, accountId);
   });
 }
 
@@ -5765,6 +6022,22 @@ export async function upsertMessages(
               .filter((id): id is string => Boolean(id))
           )
         : null;
+    const existingAccountThreadIds =
+      replaceExisting && !folderId
+        ? new Set(
+            (
+              db
+                .prepare(
+                  `SELECT DISTINCT threadId
+                   FROM messages
+                   WHERE accountId = ?`
+                )
+                .all(accountId) as Array<{ threadId: string | null }>
+            )
+              .map((row) => row.threadId)
+              .filter((id): id is string => Boolean(id))
+          )
+        : null;
     const manualCategoryStateByMessageId = new Map<string, CategoryManualState>();
     const rememberManualCategoryState = (rows: Array<{ id?: string | null; categoryManualState?: string | null }>) => {
       rows.forEach((row) => {
@@ -6127,12 +6400,25 @@ export async function upsertMessages(
         if (shouldRecomputeThreads && affected.length > 0) {
           await recomputeThreadsForAccountInternal(accountId, affected);
         }
+        rebuildThreadSignalsForThreadIds(db, accountId, affected);
+        upsertTopicLearningSignalsForThreadIds(db, accountId, affected);
+        pruneThreadTopicsWithoutMessages(db, accountId, affected);
         return { affectedThreadIds: affected, requiresFullRecompute };
       }
       requiresFullRecompute = true;
       if (shouldRecomputeThreads) {
         await recomputeThreadsForAccountInternal(accountId);
       }
+      rebuildAllThreadSignalsForAccount(db, accountId);
+      const learningThreadIds = [
+        ...(existingAccountThreadIds ?? new Set<string>()),
+        ...nextMessages.map((message) => message.threadId).filter(Boolean)
+      ];
+      upsertTopicLearningSignalsForThreadIds(db, accountId, learningThreadIds);
+      pruneThreadTopicsWithoutMessages(db, accountId, [
+        ...(existingAccountThreadIds ?? new Set<string>()),
+        ...nextMessages.map((message) => message.threadId).filter(Boolean)
+      ]);
     } else {
       const affected = Array.from(
         new Set([
@@ -6144,6 +6430,9 @@ export async function upsertMessages(
       if (shouldRecomputeThreads && affected.length > 0) {
         await recomputeThreadsForAccountInternal(accountId, affected);
       }
+      rebuildThreadSignalsForThreadIds(db, accountId, affected);
+      upsertTopicLearningSignalsForThreadIds(db, accountId, affected);
+      pruneThreadTopicsWithoutMessages(db, accountId, affected);
     }
     return { affectedThreadIds, requiresFullRecompute };
   });
@@ -6586,6 +6875,9 @@ export async function deleteMessageById(accountId: string, messageId: string) {
     db.prepare(`DELETE FROM messages WHERE accountId = ? AND id = ?`).run(accountId, messageId);
     if (row?.threadId) {
       await recomputeThreadsForAccountInternal(accountId, [row.threadId]);
+      rebuildThreadSignalsForThreadIds(db, accountId, [row.threadId]);
+      upsertTopicLearningSignalsForThreadIds(db, accountId, [row.threadId]);
+      pruneThreadTopicsWithoutMessages(db, accountId, [row.threadId]);
     }
   });
 }
@@ -6624,6 +6916,9 @@ export async function deleteMessagesByIds(accountId: string, messageIds: string[
     );
     if (threadIds.length > 0) {
       await recomputeThreadsForAccountInternal(accountId, threadIds);
+      rebuildThreadSignalsForThreadIds(db, accountId, threadIds);
+      upsertTopicLearningSignalsForThreadIds(db, accountId, threadIds);
+      pruneThreadTopicsWithoutMessages(db, accountId, threadIds);
     }
   });
 }
@@ -7083,6 +7378,9 @@ export async function deleteMessagesByFolderPrefix(accountId: string, folderPref
     );
     if (threadIds.length > 0) {
       await recomputeThreadsForAccountInternal(accountId, threadIds);
+      rebuildThreadSignalsForThreadIds(db, accountId, threadIds);
+      upsertTopicLearningSignalsForThreadIds(db, accountId, threadIds);
+      pruneThreadTopicsWithoutMessages(db, accountId, threadIds);
     }
   });
 }

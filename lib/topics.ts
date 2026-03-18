@@ -1,11 +1,26 @@
 import { randomUUID } from "crypto";
-import { getThreadIdsByMessageIds, withAccountDb } from "./db";
-import type { Topic, TopicColor } from "./data";
-import { TOPIC_COLORS } from "./data";
+import {
+  deleteTopicLearningSignals,
+  getThreadIdsByMessageIds,
+  upsertTopicLearningSignalsForThreadIds,
+  withAccountDb
+} from "./db";
+import type { Topic, TopicColor, TopicSuggestionSignal } from "./data";
+import { TOPIC_COLORS, TOPIC_SUGGESTION_SIGNALS } from "./data";
 import { withDbWriteRetry } from "./dbWriteRetry";
+import {
+  collectTopicSignalEntries,
+  type TopicSignalEntry,
+  type TopicSignalSource
+} from "./topicSignals";
 
-export type TopicSignalStat = { value: string; count: number };
-export type TopicStat = { topicId: string; threadCount: number; topSignals: TopicSignalStat[] };
+export type TopicSignalStat = { type: TopicSuggestionSignal; value: string; count: number };
+export type TopicStat = {
+  topicId: string;
+  threadCount: number;
+  messageCount: number;
+  topSignals: TopicSignalStat[];
+};
 export type TopicTransferTopic = Pick<
   Topic,
   "id" | "name" | "color" | "imapKeyword" | "createdAt" | "updatedAt"
@@ -15,11 +30,19 @@ export type TopicTransferThread = {
   topicIds: string[];
   messageIds: string[];
 };
+export type TopicTransferLearningSignal = {
+  threadId: string;
+  topicId: string;
+  signalType: TopicSuggestionSignal;
+  signalValue: string;
+  messageIds: string[];
+};
 export type TopicTransferData = {
   version: 1;
   exportedAt: number;
   topics: TopicTransferTopic[];
   threads: TopicTransferThread[];
+  learning?: TopicTransferLearningSignal[];
 };
 export type TopicTransferImportSummary = {
   topicCount: number;
@@ -29,20 +52,198 @@ export type TopicTransferImportSummary = {
   unresolvedThreadCount: number;
 };
 
-type MessageSignals = {
-  fromEmail?: string | null;
-  to?: string | null;
-  cc?: string | null;
-  listId?: string | null;
+type MessageSignals = TopicSignalSource & {
   /** threadId of the thread being evaluated — excluded from learning corpus */
   threadId?: string | null;
 };
+
+type TopicSuggestionSignals = {
+  senderEmails: string[];
+  senderDomains: string[];
+  recipientEmails: string[];
+  listIds: string[];
+  jiraProjectKeys: string[];
+  threadId?: string | null;
+};
+
+const TOPIC_SUGGESTION_WEIGHTS = {
+  senderEmail: 4,
+  listId: 4,
+  jiraProjectKey: 4,
+  recipient: 2,
+  senderDomain: 1
+} as const;
+
+function topicSuggestionSignalsFromEntries(
+  entries: TopicSignalEntry[],
+  threadId?: string | null
+): TopicSuggestionSignals {
+  const signals: TopicSuggestionSignals = {
+    senderEmails: [],
+    senderDomains: [],
+    recipientEmails: [],
+    listIds: [],
+    jiraProjectKeys: [],
+    threadId
+  };
+
+  entries.forEach((entry) => {
+    if (entry.type === "senderEmail") {
+      signals.senderEmails.push(entry.value);
+    } else if (entry.type === "senderDomain") {
+      signals.senderDomains.push(entry.value);
+    } else if (entry.type === "recipient") {
+      signals.recipientEmails.push(entry.value);
+    } else if (entry.type === "listId") {
+      signals.listIds.push(entry.value);
+    } else if (entry.type === "jiraProjectKey") {
+      signals.jiraProjectKeys.push(entry.value);
+    }
+  });
+
+  return signals;
+}
+
+function topicSuggestionSignalEntries(signals: TopicSuggestionSignals): TopicSignalEntry[] {
+  return [
+    ...signals.senderEmails.map((value) => ({ type: "senderEmail" as const, value })),
+    ...signals.senderDomains.map((value) => ({ type: "senderDomain" as const, value })),
+    ...signals.recipientEmails.map((value) => ({ type: "recipient" as const, value })),
+    ...signals.listIds.map((value) => ({ type: "listId" as const, value })),
+    ...signals.jiraProjectKeys.map((value) => ({ type: "jiraProjectKey" as const, value }))
+  ];
+}
+
+function normalizeTopicSuggestionSignals(
+  signals: MessageSignals,
+  options?: {
+    accountEmail?: string | null;
+  }
+): TopicSuggestionSignals {
+  return topicSuggestionSignalsFromEntries(
+    collectTopicSignalEntries([signals], {
+      excludeRecipientEmail: options?.accountEmail ?? null
+    }),
+    signals.threadId
+  );
+}
+
+async function getTopicSuggestionSignalsForThread(
+  accountId: string,
+  threadId: string,
+  options?: {
+    accountEmail?: string | null;
+  }
+): Promise<TopicSuggestionSignals> {
+  const accountEmail = options?.accountEmail?.toLowerCase().trim() || null;
+  return withAccountDb(accountId, (db) => {
+    const rows = db
+      .prepare(
+        `SELECT signalType, signalValue
+         FROM thread_signals
+         WHERE accountId = ? AND threadId = ?
+         ORDER BY signalType ASC, signalValue ASC`
+      )
+      .all(accountId, threadId) as Array<{
+      signalType?: string | null;
+      signalValue?: string | null;
+    }>;
+
+    const entries = rows
+      .flatMap((row) => {
+        const type = (row.signalType ?? "").trim() as TopicSuggestionSignal;
+        const value = (row.signalValue ?? "").trim();
+        if (!TOPIC_SUGGESTION_SIGNALS.includes(type) || !value) return [];
+        if (type === "recipient" && accountEmail && value.toLowerCase() === accountEmail) {
+          return [];
+        }
+        return [{ type, value }];
+      });
+
+    return topicSuggestionSignalsFromEntries(entries, threadId);
+  });
+}
+
+function getTopicSuggestionsForSignals(
+  db: any,
+  accountId: string,
+  signals: TopicSuggestionSignals
+): Topic[] {
+  const {
+    senderEmails,
+    senderDomains,
+    recipientEmails,
+    listIds,
+    jiraProjectKeys,
+    threadId
+  } = signals;
+
+  if (
+    senderEmails.length === 0 &&
+    senderDomains.length === 0 &&
+    recipientEmails.length === 0 &&
+    listIds.length === 0 &&
+    jiraProjectKeys.length === 0
+  ) {
+    return [];
+  }
+
+  const signalEntries = topicSuggestionSignalEntries(signals);
+  const conditions: string[] = [];
+  const conditionArgs: any[] = [];
+  signalEntries.forEach((entry) => {
+    conditions.push(`(tls.signalType = ? AND tls.signalValue = ?)`);
+    conditionArgs.push(entry.type, entry.value);
+  });
+
+  if (conditions.length === 0) return [];
+
+  const scoreCaseSql =
+    `CASE tls.signalType
+       WHEN 'senderEmail' THEN ${TOPIC_SUGGESTION_WEIGHTS.senderEmail}
+       WHEN 'listId' THEN ${TOPIC_SUGGESTION_WEIGHTS.listId}
+       WHEN 'jiraProjectKey' THEN ${TOPIC_SUGGESTION_WEIGHTS.jiraProjectKey}
+       WHEN 'recipient' THEN ${TOPIC_SUGGESTION_WEIGHTS.recipient}
+       WHEN 'senderDomain' THEN ${TOPIC_SUGGESTION_WEIGHTS.senderDomain}
+       ELSE 0
+     END`;
+  const queryArgs: any[] = [accountId, ...conditionArgs, ...(threadId ? [threadId] : []), accountId];
+
+  const rows = db
+    .prepare(
+      `SELECT t.*,
+              SUM(matches.threadScore) AS suggestionScore,
+              COUNT(*) AS matchCount
+       FROM topics t
+       JOIN (
+         SELECT tls.topicId,
+                tls.threadId,
+                SUM(${scoreCaseSql}) AS threadScore
+         FROM topic_learning_signals tls
+         WHERE tls.accountId = ?
+           AND (${conditions.join(" OR ")})
+           ${threadId ? "AND tls.threadId != ?" : ""}
+         GROUP BY tls.topicId, tls.threadId
+       ) matches ON matches.topicId = t.id
+       WHERE t.accountId = ?
+       GROUP BY t.id
+       ORDER BY suggestionScore DESC, matchCount DESC, t.name ASC`
+    )
+    .all(...queryArgs) as any[];
+
+  return rows.map((row) => ({
+    ...rowToTopic(row),
+    suggestionScore: row.suggestionScore as number,
+    matchCount: row.matchCount as number
+  }));
+}
 
 type NormalizedTopicTransferData = {
   version: 1;
   exportedAt: number;
   topics: TopicTransferTopic[];
   threads: TopicTransferThread[];
+  learning: TopicTransferLearningSignal[];
 };
 
 function slugify(name: string): string {
@@ -81,6 +282,12 @@ function normalizeTransferStringArray(value: unknown): string[] {
 
 function normalizeTransferTimestamp(value: unknown, fallback: number) {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+function normalizeTopicSuggestionSignal(value: unknown): TopicSuggestionSignal | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim() as TopicSuggestionSignal;
+  return TOPIC_SUGGESTION_SIGNALS.includes(trimmed) ? trimmed : null;
 }
 
 function normalizeTopicTransferData(input: unknown): NormalizedTopicTransferData {
@@ -153,6 +360,42 @@ function normalizeTopicTransferData(input: unknown): NormalizedTopicTransferData
     threadsById.set(threadId, existing);
   });
 
+  const learning: TopicTransferLearningSignal[] = [];
+  const rawLearning = raw.learning;
+  if (rawLearning !== undefined) {
+    if (!Array.isArray(rawLearning)) {
+      throw new Error("Invalid topics data file.");
+    }
+    const seenLearning = new Set<string>();
+    rawLearning.forEach((entry) => {
+      if (!entry || typeof entry !== "object") {
+        throw new Error("Invalid topics data file.");
+      }
+      const row = entry as Record<string, unknown>;
+      const threadId = typeof row.threadId === "string" ? row.threadId.trim() : "";
+      const topicId = typeof row.topicId === "string" ? row.topicId.trim() : "";
+      const signalType = normalizeTopicSuggestionSignal(row.signalType);
+      const signalValue = typeof row.signalValue === "string" ? row.signalValue.trim() : "";
+      if (!threadId || !topicId || !signalType || !signalValue) {
+        throw new Error("Invalid topics data file.");
+      }
+      if (!topicIds.has(topicId)) {
+        throw new Error(`Topics data references unknown topic: ${topicId}`);
+      }
+      const messageIds = normalizeTransferStringArray(row.messageIds);
+      const learningKey = `${threadId}\u0000${topicId}\u0000${signalType}\u0000${signalValue}`;
+      if (seenLearning.has(learningKey)) return;
+      seenLearning.add(learningKey);
+      learning.push({
+        threadId,
+        topicId,
+        signalType,
+        signalValue,
+        messageIds
+      });
+    });
+  }
+
   return {
     version: 1,
     exportedAt: normalizeTransferTimestamp(raw.exportedAt, now),
@@ -163,7 +406,8 @@ function normalizeTopicTransferData(input: unknown): NormalizedTopicTransferData
         topicIds: Array.from(value.topicIds).sort(),
         messageIds: Array.from(value.messageIds)
       }))
-      .sort((a, b) => a.threadId.localeCompare(b.threadId))
+      .sort((a, b) => a.threadId.localeCompare(b.threadId)),
+    learning
   };
 }
 
@@ -220,6 +464,19 @@ function resolveImportedThreadId(
     }
   }
   return { threadId: thread.threadId, resolved: false };
+}
+
+function rememberTopicLearningForThread(
+  db: any,
+  accountId: string,
+  threadId: string,
+  topicIds?: string[]
+) {
+  const normalizedThreadId = threadId.trim();
+  if (!normalizedThreadId) return;
+  upsertTopicLearningSignalsForThreadIds(db, accountId, [normalizedThreadId], {
+    topicIds
+  });
 }
 
 // Future: IMAP keyword sync
@@ -311,6 +568,7 @@ export async function updateTopic(
 
 export async function deleteTopic(accountId: string, topicId: string): Promise<boolean> {
   return withAccountDb(accountId, (db) => {
+    deleteTopicLearningSignals(db, accountId, { topicIds: [topicId] });
     db.prepare(`DELETE FROM thread_topics WHERE topicId = ? AND accountId = ?`).run(
       topicId,
       accountId
@@ -369,16 +627,35 @@ export async function setThreadTopics(
 ): Promise<Topic[]> {
   return withAccountDb(accountId, (db) => {
     const now = Date.now();
+    const normalizedThreadId = threadId.trim();
+    const nextTopicIds = Array.from(new Set(topicIds.map((topicId) => topicId.trim()).filter(Boolean)));
+    const previousTopicIds = (db
+      .prepare(
+        `SELECT topicId
+         FROM thread_topics
+         WHERE accountId = ? AND threadId = ?`
+      )
+      .all(accountId, normalizedThreadId) as Array<{ topicId?: string | null }>)
+      .map((row) => (row.topicId ?? "").trim())
+      .filter(Boolean);
+    const removedTopicIds = previousTopicIds.filter((topicId) => !nextTopicIds.includes(topicId));
+    if (removedTopicIds.length > 0) {
+      deleteTopicLearningSignals(db, accountId, {
+        threadIds: [normalizedThreadId],
+        topicIds: removedTopicIds
+      });
+    }
     db.prepare(`DELETE FROM thread_topics WHERE threadId = ? AND accountId = ?`).run(
-      threadId,
+      normalizedThreadId,
       accountId
     );
-    for (const topicId of topicIds) {
+    for (const topicId of nextTopicIds) {
       db.prepare(
         `INSERT OR IGNORE INTO thread_topics (threadId, topicId, accountId, assignedAt)
          VALUES (?, ?, ?, ?)`
-      ).run(threadId, topicId, accountId, now);
+      ).run(normalizedThreadId, topicId, accountId, now);
     }
+    rememberTopicLearningForThread(db, accountId, normalizedThreadId, nextTopicIds);
     const rows = db
       .prepare(
         `SELECT t.* FROM topics t
@@ -386,7 +663,7 @@ export async function setThreadTopics(
          WHERE tt.threadId = ? AND tt.accountId = ?
          ORDER BY t.name ASC`
       )
-      .all(threadId, accountId) as any[];
+      .all(normalizedThreadId, accountId) as any[];
     return rows.map(rowToTopic);
   });
 }
@@ -397,10 +674,13 @@ export async function addThreadTopic(
   topicId: string
 ): Promise<void> {
   await withAccountDb(accountId, (db) => {
+    const normalizedThreadId = threadId.trim();
+    const normalizedTopicId = topicId.trim();
     db.prepare(
       `INSERT OR IGNORE INTO thread_topics (threadId, topicId, accountId, assignedAt)
        VALUES (?, ?, ?, ?)`
-    ).run(threadId, topicId, accountId, Date.now());
+    ).run(normalizedThreadId, normalizedTopicId, accountId, Date.now());
+    rememberTopicLearningForThread(db, accountId, normalizedThreadId, [normalizedTopicId]);
   });
 }
 
@@ -410,9 +690,15 @@ export async function removeThreadTopic(
   topicId: string
 ): Promise<void> {
   await withAccountDb(accountId, (db) => {
+    const normalizedThreadId = threadId.trim();
+    const normalizedTopicId = topicId.trim();
+    deleteTopicLearningSignals(db, accountId, {
+      threadIds: [normalizedThreadId],
+      topicIds: [normalizedTopicId]
+    });
     db.prepare(
       `DELETE FROM thread_topics WHERE threadId = ? AND topicId = ? AND accountId = ?`
-    ).run(threadId, topicId, accountId);
+    ).run(normalizedThreadId, normalizedTopicId, accountId);
   });
 }
 
@@ -459,6 +745,20 @@ export async function exportTopicTransferData(accountId: string): Promise<TopicT
       threadsById.set(threadId, existing);
     });
 
+    const learningRows = db
+      .prepare(
+        `SELECT threadId, topicId, signalType, signalValue
+         FROM topic_learning_signals
+         WHERE accountId = ?
+         ORDER BY threadId ASC, topicId ASC, signalType ASC, signalValue ASC`
+      )
+      .all(accountId) as Array<{
+      threadId?: string | null;
+      topicId?: string | null;
+      signalType?: string | null;
+      signalValue?: string | null;
+    }>;
+
     return {
       version: 1,
       exportedAt: Date.now(),
@@ -467,7 +767,23 @@ export async function exportTopicTransferData(accountId: string): Promise<TopicT
         threadId,
         topicIds: Array.from(value.topicIds).sort(),
         messageIds: value.messageIds
-      }))
+      })),
+      learning: learningRows
+        .map((row) => {
+          const threadId = String(row.threadId ?? "").trim();
+          const topicId = String(row.topicId ?? "").trim();
+          const signalType = normalizeTopicSuggestionSignal(row.signalType);
+          const signalValue = String(row.signalValue ?? "").trim();
+          if (!threadId || !topicId || !signalType || !signalValue) return null;
+          return {
+            threadId,
+            topicId,
+            signalType,
+            signalValue,
+            messageIds: messageIdsByThread.get(threadId) ?? []
+          } satisfies TopicTransferLearningSignal;
+        })
+        .filter((entry): entry is TopicTransferLearningSignal => Boolean(entry))
     };
   });
 }
@@ -478,13 +794,17 @@ export async function importTopicTransferData(
 ): Promise<TopicTransferImportSummary> {
   const data = normalizeTopicTransferData(input);
   const threadLookupIds = Array.from(
-    new Set(data.threads.flatMap((thread) => [thread.threadId, ...thread.messageIds]))
+    new Set([
+      ...data.threads.flatMap((thread) => [thread.threadId, ...thread.messageIds]),
+      ...data.learning.flatMap((entry) => [entry.threadId, ...entry.messageIds])
+    ])
   );
   const threadIdsByMessageId = await getThreadIdsByMessageIds(accountId, threadLookupIds);
 
   return withDbWriteRetry("importTopicTransferData", async () =>
     withAccountDb(accountId, (db) => {
       const clearThreadTopics = db.prepare(`DELETE FROM thread_topics WHERE accountId = ?`);
+      const clearTopicLearningSignals = db.prepare(`DELETE FROM topic_learning_signals WHERE accountId = ?`);
       const clearTopics = db.prepare(`DELETE FROM topics WHERE accountId = ?`);
       const insertTopic = db.prepare(
         `INSERT INTO topics (id, accountId, name, color, imapKeyword, createdAt, updatedAt)
@@ -494,9 +814,14 @@ export async function importTopicTransferData(
         `INSERT OR IGNORE INTO thread_topics (threadId, topicId, accountId, assignedAt)
          VALUES (?, ?, ?, ?)`
       );
+      const insertTopicLearningSignal = db.prepare(
+        `INSERT OR IGNORE INTO topic_learning_signals (accountId, topicId, threadId, signalType, signalValue)
+         VALUES (?, ?, ?, ?, ?)`
+      );
 
       const applyImport = db.transaction(() => {
         clearThreadTopics.run(accountId);
+        clearTopicLearningSignals.run(accountId);
         clearTopics.run(accountId);
 
         data.topics.forEach((topic) => {
@@ -527,6 +852,29 @@ export async function importTopicTransferData(
           });
         });
 
+        if (data.learning.length > 0) {
+          data.learning.forEach((entry) => {
+            const resolvedThread = resolveImportedThreadId({
+              threadId: entry.threadId,
+              topicIds: [entry.topicId],
+              messageIds: entry.messageIds
+            }, threadIdsByMessageId);
+            insertTopicLearningSignal.run(
+              accountId,
+              entry.topicId,
+              resolvedThread.threadId,
+              entry.signalType,
+              entry.signalValue
+            );
+          });
+        } else {
+          const importedThreadIds = Array.from(new Set(data.threads.map((thread) => {
+            const resolvedThread = resolveImportedThreadId(thread, threadIdsByMessageId);
+            return resolvedThread.threadId;
+          })));
+          upsertTopicLearningSignalsForThreadIds(db, accountId, importedThreadIds);
+        }
+
         return {
           topicCount: data.topics.length,
           threadCount: data.threads.length,
@@ -542,53 +890,90 @@ export async function importTopicTransferData(
 }
 
 /**
- * Return per-topic learning statistics: thread count and top signal values.
+ * Return per-topic learning statistics: message/thread counts and top signal values.
  * Used to visualize how much the system has learned about each topic.
  */
-export async function getTopicStats(accountId: string): Promise<TopicStat[]> {
+export async function getTopicStats(
+  accountId: string,
+  options?: {
+    accountEmail?: string | null;
+  }
+): Promise<TopicStat[]> {
+  const accountEmail = options?.accountEmail?.toLowerCase().trim() || null;
   return withAccountDb(accountId, (db) => {
     const threadCounts = db
       .prepare(
         `SELECT topicId, COUNT(DISTINCT threadId) AS threadCount
-         FROM thread_topics WHERE accountId = ? GROUP BY topicId`
+         FROM topic_learning_signals
+         WHERE accountId = ?
+         GROUP BY topicId`
       )
       .all(accountId) as Array<{ topicId: string; threadCount: number }>;
 
     if (threadCounts.length === 0) return [];
 
-    // Top signals: prefer listId (most specific), fall back to sender domain.
-    const signalRows = db
+    const messageCountByTopic = new Map(
+      (db
       .prepare(
         `SELECT tt.topicId,
-                COALESCE(
-                  m.listId,
-                  CASE WHEN instr(m.fromEmail, '@') > 0
-                       THEN lower(substr(m.fromEmail, instr(m.fromEmail, '@') + 1))
-                       ELSE NULL END
-                ) AS signal,
-                COUNT(DISTINCT tt.threadId) AS cnt
+                COUNT(m.id) AS messageCount
          FROM thread_topics tt
-         JOIN messages m ON m.threadId = tt.threadId AND m.accountId = tt.accountId
+         JOIN messages m
+           ON m.accountId = tt.accountId
+          AND m.threadId = tt.threadId
          WHERE tt.accountId = ?
-           AND (m.listId IS NOT NULL OR m.fromEmail IS NOT NULL)
-         GROUP BY tt.topicId, signal
-         ORDER BY cnt DESC`
+         GROUP BY tt.topicId`
       )
-      .all(accountId) as Array<{ topicId: string; signal: string | null; cnt: number }>;
+      .all(accountId) as Array<{ topicId: string; messageCount: number }>)
+        .map((row) => [row.topicId, row.messageCount] as const)
+    );
 
-    // Group signals by topicId, keep top 5.
-    const signalsByTopic = new Map<string, TopicSignalStat[]>();
-    for (const row of signalRows) {
-      if (!row.signal) continue;
-      const list = signalsByTopic.get(row.topicId) ?? [];
-      if (list.length < 5) list.push({ value: row.signal, count: row.cnt });
-      signalsByTopic.set(row.topicId, list);
-    }
+    const rows = db
+      .prepare(
+        `SELECT tls.topicId,
+                tls.signalType,
+                tls.signalValue,
+                COUNT(DISTINCT tls.threadId) AS cnt
+         FROM topic_learning_signals tls
+         WHERE tls.accountId = ?
+           AND (
+             tls.signalType != 'recipient'
+             OR lower(tls.signalValue) != lower(COALESCE(?, ''))
+           )
+         GROUP BY tls.topicId, tls.signalType, tls.signalValue`
+      )
+      .all(accountId, accountEmail) as Array<{
+      topicId: string;
+      signalType?: string | null;
+      signalValue?: string | null;
+      cnt: number;
+    }>;
+
+    const signalTypeOrder = new Map<TopicSuggestionSignal, number>(
+      TOPIC_SUGGESTION_SIGNALS.map((type, idx) => [type, idx])
+    );
+    const countsByTopic = new Map<string, Map<string, TopicSignalStat>>();
+
+    rows.forEach((row) => {
+      const type = (row.signalType ?? "").trim() as TopicSuggestionSignal;
+      const value = (row.signalValue ?? "").trim();
+      if (!TOPIC_SUGGESTION_SIGNALS.includes(type) || !value) return;
+      const signalKey = `${type}\u0000${value}`;
+      const topicSignals = countsByTopic.get(row.topicId) ?? new Map<string, TopicSignalStat>();
+      topicSignals.set(signalKey, { type, value, count: row.cnt });
+      countsByTopic.set(row.topicId, topicSignals);
+    });
 
     return threadCounts.map((r) => ({
       topicId: r.topicId,
       threadCount: r.threadCount,
-      topSignals: signalsByTopic.get(r.topicId) ?? []
+      messageCount: messageCountByTopic.get(r.topicId) ?? 0,
+      topSignals: Array.from(countsByTopic.get(r.topicId)?.values() ?? []).sort((a, b) => {
+        if (b.count !== a.count) return b.count - a.count;
+        const typeDiff = (signalTypeOrder.get(a.type) ?? 999) - (signalTypeOrder.get(b.type) ?? 999);
+        if (typeDiff !== 0) return typeDiff;
+        return a.value.localeCompare(b.value);
+      })
     }));
   });
 }
@@ -598,7 +983,7 @@ export async function getTopicStats(accountId: string): Promise<TopicStat[]> {
  *
  * Derives suggestions purely from the thread_topics corpus — no manual rules.
  * For each signal present in the message (sender email, sender domain,
- * List-Id, recipient addresses), we look up topics that were previously
+ * List-Id, Jira project key, recipient addresses), we look up topics that were previously
  * assigned to threads sharing that signal, and rank them by how often they
  * appear across matching threads.
  *
@@ -606,73 +991,24 @@ export async function getTopicStats(accountId: string): Promise<TopicStat[]> {
  */
 export async function getTopicSuggestionsForMessage(
   accountId: string,
-  signals: MessageSignals
+  signals: MessageSignals,
+  options?: {
+    accountEmail?: string | null;
+  }
 ): Promise<Topic[]> {
-  const senderEmail = signals.fromEmail?.toLowerCase().trim() || null;
-  const senderDomain = senderEmail?.includes("@") ? senderEmail.split("@")[1] : null;
-  const listId = signals.listId?.trim() || null;
+  const normalizedSignals = normalizeTopicSuggestionSignals(signals, options);
+  return withAccountDb(accountId, (db) => getTopicSuggestionsForSignals(db, accountId, normalizedSignals));
+}
 
-  // Extract individual email addresses from to/cc fields (comma-separated).
-  const recipientEmails = [signals.to, signals.cc]
-    .filter(Boolean)
-    .flatMap((field) =>
-      (field as string)
-        .split(/,|;/)
-        .map((part) => {
-          const m = part.match(/[A-Z0-9._%+\-]+@[A-Z0-9.\-]+\.[A-Z]{2,}/i);
-          return m ? m[0].toLowerCase() : null;
-        })
-        .filter((e): e is string => Boolean(e))
-    );
-
-  if (!senderEmail && !listId && recipientEmails.length === 0) return [];
-
-  return withAccountDb(accountId, (db) => {
-    // Build a scored list: for each past assignment, check how many signals match.
-    // More matching signals → higher score. Topics already on this thread are excluded.
-    const conditions: string[] = [];
-    const conditionArgs: any[] = [];
-
-    if (senderEmail) {
-      conditions.push(`lower(m.fromEmail) = ?`);
-      conditionArgs.push(senderEmail);
-    }
-    if (senderDomain) {
-      conditions.push(`(m.fromEmail IS NOT NULL AND lower(m.fromEmail) LIKE ?)`);
-      conditionArgs.push(`%@${senderDomain}`);
-    }
-    if (listId) {
-      conditions.push(`m.listId = ?`);
-      conditionArgs.push(listId);
-    }
-    for (const email of recipientEmails) {
-      conditions.push(`(lower(m.toAddr) LIKE ? OR lower(COALESCE(m.ccAddr,'')) LIKE ?)`);
-      conditionArgs.push(`%${email}%`, `%${email}%`);
-    }
-
-    if (conditions.length === 0) return [];
-
-    const excludeClause = signals.threadId ? `AND tt.threadId != ?` : "";
-    const queryArgs: any[] = [
-      accountId,
-      ...conditionArgs,
-      ...(signals.threadId ? [signals.threadId] : [])
-    ];
-
-    const rows = db
-      .prepare(
-        `SELECT t.*, COUNT(DISTINCT tt.threadId) AS matchCount
-         FROM topics t
-         JOIN thread_topics tt ON tt.topicId = t.id AND tt.accountId = t.accountId
-         JOIN messages m ON m.threadId = tt.threadId AND m.accountId = tt.accountId
-         WHERE t.accountId = ?
-           AND (${conditions.join(" OR ")})
-           ${excludeClause}
-         GROUP BY t.id
-         ORDER BY matchCount DESC, t.name ASC`
-      )
-      .all(...queryArgs) as any[];
-
-    return rows.map((row) => ({ ...rowToTopic(row), matchCount: row.matchCount as number }));
-  });
+export async function getTopicSuggestionsForThread(
+  accountId: string,
+  threadId: string,
+  options?: {
+    accountEmail?: string | null;
+  }
+): Promise<Topic[]> {
+  const normalizedThreadId = threadId.trim();
+  if (!normalizedThreadId) return [];
+  const signals = await getTopicSuggestionSignalsForThread(accountId, normalizedThreadId, options);
+  return withAccountDb(accountId, (db) => getTopicSuggestionsForSignals(db, accountId, signals));
 }

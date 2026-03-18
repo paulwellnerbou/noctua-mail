@@ -1,4 +1,5 @@
 import { useMemo, useState, type CSSProperties } from "react";
+import { buildAccountSenderIconPath } from "@/lib/accountApiPaths";
 import { getSenderIconColors, getSenderIdentity } from "@/lib/senderIdentity";
 import styles from "./SenderIcon.module.css";
 
@@ -28,11 +29,10 @@ export default function SenderIcon({
   );
   const src = useMemo(() => {
     const search = new URLSearchParams({
-      accountId,
       from: from ?? ""
     });
     if (fromEmail) search.set("fromEmail", fromEmail);
-    return `/api/sender-icon?${search.toString()}`;
+    return buildAccountSenderIconPath(accountId, search);
   }, [accountId, from, fromEmail]);
 
   if (!enabled || !accountId) return null;

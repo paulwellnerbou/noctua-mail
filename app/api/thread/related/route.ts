@@ -3,7 +3,10 @@ import { listThreadMessages } from "@/lib/db";
 import { requireSessionAccountOr403, requireSessionOr401 } from "@/lib/auth";
 import { normalizeThreadDateSource } from "@/lib/threadDate";
 
-export async function POST(request: Request) {
+export async function handleListThreadRelatedRequest(
+  request: Request,
+  options?: { accountId?: string | null }
+) {
   const session = requireSessionOr401(request);
   if (session instanceof NextResponse) return session;
   const payload = (await request.json()) as {
@@ -13,7 +16,7 @@ export async function POST(request: Request) {
     groupBy?: string;
     threadDateSource?: string;
   };
-  const accountId = payload.accountId;
+  const accountId = options?.accountId ?? "";
   const threadIds = Array.isArray(payload.threadIds)
     ? payload.threadIds.map((value) => value.trim()).filter(Boolean)
     : [];
@@ -39,3 +42,5 @@ export async function POST(request: Request) {
   });
   return NextResponse.json({ items: data.items });
 }
+
+export { legacyAccountRouteRemoved as POST } from "@/app/api/_helpers/legacyAccountRouteRemoved";

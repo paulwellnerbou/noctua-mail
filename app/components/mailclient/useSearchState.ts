@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useMemo, useCallback, useEffect, useRef } from "react";
+import { buildAccountMessagesPath } from "@/lib/accountApiPaths";
 import type { Folder } from "@/lib/data";
 import {
   SEARCH_BADGE_ORDER,
@@ -205,7 +206,6 @@ export function useSearchState(options: UseSearchStateOptions) {
     const timer = window.setTimeout(() => {
       const fetchCount = async (badges: string, excludedFolderIdsKey: string) => {
         const params = new URLSearchParams({
-          accountId: activeAccountId,
           page: "1",
           pageSize: "1",
           groupBy: "date",
@@ -213,7 +213,7 @@ export function useSearchState(options: UseSearchStateOptions) {
           badges,
           currentSearchExcludedFolderIds: excludedFolderIdsKey
         });
-        const res = await apiFetch(`/api/messages?${params.toString()}`);
+        const res = await apiFetch(buildAccountMessagesPath(activeAccountId, params));
         if (!res.ok) throw new Error("Failed to fetch count");
         const data = (await res.json()) as { total: number };
         return data.total;

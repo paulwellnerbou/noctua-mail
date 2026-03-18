@@ -11,34 +11,38 @@ import { requireAccountContext } from "../../routeHelpers";
 import { findTrashFolder, resolveMessageTrashState } from "../trashUtils";
 
 type BulkDeletePayload = {
-  accountId: string;
-  messageIds: string[];
+  accountId?: string;
+  messageIds?: string[];
 };
 
-export async function POST(request: Request) {
-  const payload = (await request.json()) as BulkDeletePayload;
+export async function handleBulkDeleteMessagesRequest(
+  request: Request,
+  options?: { accountId?: string | null }
+) {
+  const payload = (await request.json().catch(() => null)) as BulkDeletePayload | null;
+  const accountId = options?.accountId ?? "";
 
   const normalizedMessageIds = Array.from(
     new Set((payload?.messageIds ?? []).map((id) => id.trim()).filter(Boolean))
   );
-  if (!payload?.accountId || normalizedMessageIds.length === 0) {
+  if (!accountId || normalizedMessageIds.length === 0) {
     return NextResponse.json(
       { ok: false, message: "Missing accountId or messageIds" },
       { status: 400 }
     );
   }
-  const accountContext = await requireAccountContext(request, payload.accountId);
+  const accountContext = await requireAccountContext(request, accountId);
   if (accountContext instanceof NextResponse) return accountContext;
   const { account, clientId } = accountContext;
 
-  const folders = await getFolders(payload.accountId);
-  const trashFolder = findTrashFolder(folders, payload.accountId);
+  const folders = await getFolders(accountId);
+  const trashFolder = findTrashFolder(folders, accountId);
   if (!trashFolder) {
     return NextResponse.json({ ok: false, message: "Trash folder not found" }, { status: 400 });
   }
 
   const messages = await Promise.all(
-    normalizedMessageIds.map((messageId) => getMessageById(payload.accountId, messageId))
+    normalizedMessageIds.map((messageId) => getMessageById(accountId, messageId))
   );
   const existingMessages = messages.filter((message): message is NonNullable<typeof message> =>
     Boolean(message)
@@ -55,7 +59,7 @@ export async function POST(request: Request) {
     const { currentMailbox, isInTrash } = resolveMessageTrashState(
       message,
       trashFolder,
-      payload.accountId
+      accountId
     );
     if (!isInTrash) {
       return NextResponse.json(
@@ -83,10 +87,10 @@ export async function POST(request: Request) {
   );
 
   const deletedIds = deleteTargets.map((item) => item.messageId);
-  const fileRefs = await listMessageFileRefsByMessageIds(payload.accountId, deletedIds);
-  await deleteMessagesByIds(payload.accountId, deletedIds);
+  const fileRefs = await listMessageFileRefsByMessageIds(accountId, deletedIds);
+  await deleteMessagesByIds(accountId, deletedIds);
   await Promise.all(
-    fileRefs.map((item) => deleteMessageFiles(payload.accountId, item.messageId, item.attachmentIds))
+    fileRefs.map((item) => deleteMessageFiles(accountId, item.messageId, item.attachmentIds))
   );
 
   return NextResponse.json({
@@ -96,3 +100,5 @@ export async function POST(request: Request) {
     deletedIds
   });
 }
+
+export { legacyAccountRouteRemoved as POST } from "@/app/api/_helpers/legacyAccountRouteRemoved";

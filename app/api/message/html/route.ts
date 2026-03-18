@@ -61,12 +61,18 @@ function htmlError(status: number, message: string) {
   );
 }
 
-export async function GET(request: Request) {
+export async function handleGetMessageHtmlRequest(
+  request: Request,
+  options?: {
+    accountId?: string | null;
+    messageId?: string | null;
+  }
+) {
   const session = requireSessionOr401(request);
   if (session instanceof NextResponse) return session;
   const { searchParams } = new URL(request.url);
-  const accountId = searchParams.get("accountId");
-  const messageId = searchParams.get("messageId");
+  const accountId = options?.accountId ?? "";
+  const messageId = options?.messageId ?? "";
 
   if (!accountId || !messageId) {
     return htmlError(400, "Missing accountId or messageId.");
@@ -92,3 +98,5 @@ export async function GET(request: Request) {
     }
   });
 }
+
+export { legacyAccountRouteRemoved as GET } from "@/app/api/_helpers/legacyAccountRouteRemoved";

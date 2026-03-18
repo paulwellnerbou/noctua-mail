@@ -16,9 +16,12 @@ function generateId() {
   return `cal-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 }
 
-export async function GET(request: Request) {
+export async function handleListCalendarEventsRequest(
+  request: Request,
+  options?: { accountId?: string | null }
+) {
   const { searchParams } = new URL(request.url);
-  const accountId = searchParams.get("accountId")?.trim() ?? "";
+  const accountId = options?.accountId ?? "";
   const eventUid = searchParams.get("eventUid")?.trim() ?? "";
   const startMs = toFiniteNumber(searchParams.get("startMs"));
   const endMs = toFiniteNumber(searchParams.get("endMs"));
@@ -45,11 +48,14 @@ export async function GET(request: Request) {
   }
 }
 
-export async function POST(request: Request) {
+export async function handleSaveCalendarEventRequest(
+  request: Request,
+  options?: { accountId?: string | null }
+) {
   const body = (await request.json().catch(() => null)) as Partial<CalendarEvent> & {
     accountId?: string;
   } | null;
-  const accountId = body?.accountId?.trim() ?? "";
+  const accountId = options?.accountId ?? "";
   if (!accountId) {
     return NextResponse.json({ ok: false, message: "Missing accountId" }, { status: 400 });
   }
@@ -114,12 +120,15 @@ export async function POST(request: Request) {
   }
 }
 
-export async function DELETE(request: Request) {
+export async function handleDeleteCalendarEventRequest(
+  request: Request,
+  options?: { accountId?: string | null }
+) {
   const body = (await request.json().catch(() => null)) as {
     accountId?: string;
     eventId?: string;
   } | null;
-  const accountId = body?.accountId?.trim() ?? "";
+  const accountId = options?.accountId ?? "";
   const eventId = body?.eventId?.trim() ?? "";
   if (!accountId || !eventId) {
     return NextResponse.json({ ok: false, message: "Missing accountId or eventId" }, { status: 400 });
@@ -139,3 +148,9 @@ export async function DELETE(request: Request) {
     return NextResponse.json({ ok: false, message: "Failed to delete event" }, { status: 500 });
   }
 }
+
+export {
+  legacyAccountRouteRemoved as GET,
+  legacyAccountRouteRemoved as POST,
+  legacyAccountRouteRemoved as DELETE
+} from "@/app/api/_helpers/legacyAccountRouteRemoved";

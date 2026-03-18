@@ -9,19 +9,19 @@ describe("appendUnreferencedInlineImages", () => {
         inline: true,
         contentType: "image/webp",
         filename: "giphy.webp",
-        url: "/api/attachment?accountId=a&messageId=m&attachmentId=1"
+        url: "/api/accounts/a/messages/m/attachments/1"
       }
     ]);
 
     expect(output).toContain('data-noctua-inline-images="1"');
     expect(output).toContain('data-noctua-inline-image="1"');
     expect(output).toContain('alt="giphy.webp"');
-    expect(output).toContain("attachmentId=1");
+    expect(output).toContain("/attachments/1");
     expect(output).toContain("</body>");
   });
 
   it("does not append when the inline image url is already referenced", () => {
-    const url = "/api/attachment?accountId=a&messageId=m&attachmentId=1";
+    const url = "/api/accounts/a/messages/m/attachments/1";
     const input = `<html><body><img src="${url}" alt="already present"></body></html>`;
     const output = appendUnreferencedInlineImages(input, [
       {

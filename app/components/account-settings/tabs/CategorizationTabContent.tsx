@@ -1,5 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Button, Card, Flex, Grid, Text } from "@radix-ui/themes";
+import {
+  buildAccountCategoriesDebugPath,
+  buildAccountCategoriesModelResetPath
+} from "@/lib/accountApiPaths";
 import type { CategoryLearningDebugSnapshot } from "@/lib/mail/categorization/debugTypes";
 
 type CategoryDebugResponse = {
@@ -82,7 +86,9 @@ export default function CategorizationTabContent({
     setLoading(true);
     setError("");
     try {
-      const res = await request(`/api/categories/debug?accountId=${encodeURIComponent(accountId)}&limit=20`);
+      const res = await request(
+        buildAccountCategoriesDebugPath(accountId, new URLSearchParams({ limit: "20" }))
+      );
       if (!res.ok) {
         setError(await readError(res));
         return;
@@ -109,10 +115,8 @@ export default function CategorizationTabContent({
     setResetting(true);
     setError("");
     try {
-      const res = await request("/api/categories/model/reset", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ accountId })
+      const res = await request(buildAccountCategoriesModelResetPath(accountId), {
+        method: "POST"
       });
       if (!res.ok) {
         setError(await readError(res));

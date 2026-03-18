@@ -46,10 +46,10 @@ export function useReminderNotifications({
   const [pendingCalendarReminders, setPendingCalendarReminders] = useState<CalendarReminder[]>([]);
   const [exceptionEntries, setExceptionEntries] = useState<ExceptionEntry[]>([]);
   const [inAppNotices, setInAppNotices] = useState<InAppNotice[]>([]);
+  const [requiredBuildVersion, setRequiredBuildVersion] = useState<string | null>(null);
 
   const swRegistrationRef = useRef<ServiceWorkerRegistration | null>(null);
   const currentBuildVersionRef = useRef(buildVersionLabel.trim());
-  const promptedBuildVersionRef = useRef("");
 
   const pushNotice = useCallback((input: NoticeInput) => {
     const { durationMs, ...notice } = input;
@@ -103,22 +103,17 @@ export function useReminderNotifications({
     (nextBuildVersion: string) => {
       const normalizedVersion = nextBuildVersion.trim();
       if (!normalizedVersion) return;
-      if (promptedBuildVersionRef.current === normalizedVersion) return;
-      promptedBuildVersionRef.current = normalizedVersion;
-      pushNotice({
-        type: "info",
-        title: "Update available",
-        description: `A newer build (${normalizedVersion}) is available.`,
-        actionLabel: "Refresh",
-        onAction: () => {
-          if (typeof window === "undefined") return;
-          window.location.reload();
-        },
-        durationMs: null
-      });
+      setRequiredBuildVersion((currentVersion) =>
+        currentVersion === normalizedVersion ? currentVersion : normalizedVersion
+      );
     },
-    [pushNotice]
+    []
   );
+
+  const refreshForBuildUpdate = useCallback(() => {
+    if (typeof window === "undefined") return;
+    window.location.reload();
+  }, []);
 
   const checkForBuildUpdate = useCallback(async () => {
     try {
@@ -440,6 +435,7 @@ export function useReminderNotifications({
     setExceptionEntries,
     inAppNotices,
     setInAppNotices,
+    requiredBuildVersion,
     // Refs
     swRegistrationRef,
     currentBuildVersionRef,
@@ -448,6 +444,7 @@ export function useReminderNotifications({
     dismissNotice,
     reportError,
     promptBuildRefreshNotice,
+    refreshForBuildUpdate,
     checkForBuildUpdate,
     ensureNotificationPermission,
     showNotification,

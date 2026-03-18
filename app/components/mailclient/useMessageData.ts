@@ -12,6 +12,12 @@ import {
 import { mergeLoadedMessageCount, resolveLoadedMessageCount } from "./utils/listCount";
 import { logListDebug, summarizeMessageForListDebug } from "./messagelist/listDebug";
 import type { SearchBadgesState } from "./useSearchState";
+import {
+  buildAccountMessagesPath,
+  buildAccountRelatedPath,
+  buildAccountSearchPath,
+  buildAccountThreadsPath
+} from "@/lib/accountApiPaths";
 import { INVITE_DECK_GROUP_BY } from "@/lib/messageGrouping";
 import type { ThreadDateSource } from "@/lib/threadDate";
 
@@ -153,12 +159,11 @@ export function useMessageData({
     });
   };
 
-  const buildQueryParams = (page: number) => {
+  const buildQueryUrl = (page: number) => {
     const trimmedQuery = query.trim();
     const pageSize =
       groupBy === INVITE_DECK_GROUP_BY ? 200 : searchScope === "all" ? 600 : 300;
     const params = new URLSearchParams({
-      accountId: activeAccountId,
       page: String(page),
       pageSize: String(pageSize),
       groupBy
@@ -181,19 +186,20 @@ export function useMessageData({
     if (searchScope === "all" && currentSearchExcludedFolderIds.length > 0) {
       params.set("excludeFolderIds", currentSearchExcludedFolderIds.join(","));
     }
-    let endpoint = trimmedQuery ? "/api/search" : "/api/messages";
+    let endpointBuilder = buildAccountMessagesPath;
     if (isRelatedSearch) {
-      endpoint = "/api/related";
+      endpointBuilder = buildAccountRelatedPath;
       params.set("relatedId", relatedQueryId);
     } else if (supportsThreads) {
-      endpoint = "/api/threads";
+      endpointBuilder = buildAccountThreadsPath;
     } else if (trimmedQuery) {
+      endpointBuilder = buildAccountSearchPath;
       params.set("q", trimmedQuery);
     }
-    if (trimmedQuery && endpoint === "/api/threads") {
+    if (trimmedQuery && endpointBuilder === buildAccountThreadsPath) {
       params.set("q", trimmedQuery);
     }
-    return { endpoint, params };
+    return endpointBuilder(activeAccountId, params);
   };
 
   // Paginated message load effect.
@@ -213,8 +219,7 @@ export function useMessageData({
       lastRequestRef.current = { key: requestKey, page: messagesPage };
       try {
         setLoadingMessages(true);
-        const { endpoint, params } = buildQueryParams(messagesPage);
-        const messagesRes = await apiFetch(`${endpoint}?${params.toString()}`);
+        const messagesRes = await apiFetch(buildQueryUrl(messagesPage));
         if (messagesRes.ok) {
           const data = (await messagesRes.json()) as {
             items: Message[];
@@ -310,9 +315,8 @@ export function useMessageData({
     }
     setRefreshingMessages(true);
     const requestMutationVersion = messageMutationVersionRef.current;
-    const { endpoint, params } = buildQueryParams(1);
     try {
-      const messageRes = await apiFetch(`${endpoint}?${params.toString()}`);
+      const messageRes = await apiFetch(buildQueryUrl(1));
       if (!messageRes.ok) {
         const message = await readErrorMessage(messageRes);
         reportError(message || "Failed to refresh mailbox data.");

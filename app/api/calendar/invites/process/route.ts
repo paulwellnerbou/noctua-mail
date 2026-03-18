@@ -4,7 +4,10 @@ import { appendMessageIdToError } from "@/app/api/message/errorFormatting";
 import { processCalendarInviteForMessage } from "@/lib/calendarInviteProcessor";
 import { getMessageById } from "@/lib/db";
 
-export async function POST(request: Request) {
+export async function handleProcessCalendarInviteRequest(
+  request: Request,
+  options?: { accountId?: string | null }
+) {
   const payload = (await request.json().catch(() => null)) as
     | {
         accountId?: string;
@@ -12,7 +15,7 @@ export async function POST(request: Request) {
         icsSource?: string;
       }
     | null;
-  const accountId = payload?.accountId?.trim() ?? "";
+  const accountId = options?.accountId ?? "";
   const messageId = payload?.messageId?.trim() ?? "";
   const icsSource = payload?.icsSource ?? "";
   const accountContext = await requireAccountContext(request, accountId, {
@@ -51,3 +54,5 @@ export async function POST(request: Request) {
   }
   return NextResponse.json({ ok: true, states: result.states });
 }
+
+export { legacyAccountRouteRemoved as POST } from "@/app/api/_helpers/legacyAccountRouteRemoved";

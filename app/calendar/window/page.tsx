@@ -6,6 +6,7 @@ import FullCalendar from "@fullcalendar/react";
 import { DropdownMenu, IconButton, Text } from "@radix-ui/themes";
 import { MoreVertical } from "lucide-react";
 import CalendarEventBrowser from "@/app/components/calendar/CalendarEventBrowser";
+import { buildAccountCalendarRecomputeRelationsPath } from "@/lib/accountApiPaths";
 import styles from "./page.module.css";
 
 function CalendarWindowContent() {
@@ -18,10 +19,9 @@ function CalendarWindowContent() {
     if (recomputingRelations) return;
     setRecomputingRelations(true);
     try {
-      const res = await fetch("/api/calendar/recompute-relations", {
+      const res = await fetch(buildAccountCalendarRecomputeRelationsPath(accountId), {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ accountId })
+        headers: { "Content-Type": "application/json" }
       });
       const data = await res.json();
       if (data.ok) {

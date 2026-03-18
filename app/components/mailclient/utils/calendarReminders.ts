@@ -1,4 +1,8 @@
 import type { CalendarReminder } from "@/lib/data";
+import {
+  buildAccountRemindersAutoCreatePath,
+  buildAccountRemindersPath
+} from "@/lib/accountApiPaths";
 import { normalizeReminderDateList, resolveNextReminderOccurrence } from "@/lib/reminderRecurrence";
 import { resolveCalendarTimeZoneId } from "@/lib/calendarTimezones";
 
@@ -581,8 +585,7 @@ function enqueueMutation(accountId: string, mutation: QueuedReminderMutation) {
 }
 
 async function fetchRemindersFromServer(accountId: string) {
-  const params = new URLSearchParams({ accountId });
-  const res = await fetch(`/api/reminders?${params.toString()}`, { cache: "no-store" });
+  const res = await fetch(buildAccountRemindersPath(accountId), { cache: "no-store" });
   if (!res.ok) {
     throw new Error(`Failed to load reminders (${res.status})`);
   }
@@ -608,11 +611,10 @@ async function syncQueuedReminderMutations(accountId: string) {
     const mutation = pending[0];
     try {
       if (mutation.kind === "upsert") {
-        const res = await fetch("/api/reminders", {
+        const res = await fetch(buildAccountRemindersPath(accountId), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            accountId,
             id: mutation.payload.id,
             messageId: mutation.payload.messageId,
             eventUid: mutation.payload.eventUid,
@@ -631,21 +633,19 @@ async function syncQueuedReminderMutations(accountId: string) {
         });
         if (!res.ok) throw new Error(`upsert failed (${res.status})`);
       } else if (mutation.kind === "delete_id") {
-        const res = await fetch("/api/reminders", {
+        const res = await fetch(buildAccountRemindersPath(accountId), {
           method: "DELETE",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            accountId,
             reminderId: mutation.payload.reminderId
           })
         });
         if (!res.ok) throw new Error(`delete by id failed (${res.status})`);
       } else {
-        const res = await fetch("/api/reminders", {
+        const res = await fetch(buildAccountRemindersPath(accountId), {
           method: "DELETE",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            accountId,
             eventUid: mutation.payload.eventUid,
             eventTitle: mutation.payload.eventTitle,
             eventStartAtMs: mutation.payload.eventStartAtMs
@@ -769,11 +769,10 @@ export async function autoCreateCalendarReminders(
   if (!accountIdValue) {
     throw new Error("Missing accountId");
   }
-  const res = await fetch("/api/reminders/auto-create", {
+  const res = await fetch(buildAccountRemindersAutoCreatePath(accountIdValue), {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
-      accountId: accountIdValue,
       leadMinutes: input.leadMinutes,
       leadLabel: input.leadLabel
     })
@@ -823,11 +822,10 @@ export async function clearCalendarReminders(accountId: string): Promise<number>
   writeReminderQueue(accountIdValue, []);
   dispatchReminderUpdateEvent();
   try {
-    const res = await fetch("/api/reminders", {
+    const res = await fetch(buildAccountRemindersPath(accountIdValue), {
       method: "DELETE",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        accountId: accountIdValue,
         clearAll: true
       })
     });

@@ -4,20 +4,25 @@ import { listImapFolders, renameImapFolder } from "@/lib/mail/imap";
 import { mailboxPathFromFolderId } from "@/lib/mailboxPaths";
 import { requireAccountContext } from "@/app/api/_helpers/accountContext";
 
-export async function POST(request: Request) {
+export async function handleRenameFolderRequest(
+  request: Request,
+  options?: { accountId?: string | null; folderId?: string | null }
+) {
   const payload = (await request.json()) as {
-    accountId: string;
-    folderId: string;
+    accountId?: string;
+    folderId?: string;
     name: string;
   };
-  if (!payload?.accountId || !payload?.folderId || !payload?.name) {
+  const accountId = options?.accountId ?? "";
+  const folderId = options?.folderId ?? "";
+  if (!accountId || !folderId || !payload?.name) {
     return NextResponse.json({ ok: false, message: "Missing accountId, folderId, or name" }, { status: 400 });
   }
-  const accountContext = await requireAccountContext(request, payload.accountId);
+  const accountContext = await requireAccountContext(request, accountId);
   if (accountContext instanceof NextResponse) return accountContext;
-  const { account, accountId, clientId } = accountContext;
+  const { account, clientId } = accountContext;
   const folders = await getFolders(accountId);
-  const folder = folders.find((item) => item.id === payload.folderId);
+  const folder = folders.find((item) => item.id === folderId);
   if (!folder) {
     return NextResponse.json({ ok: false, message: "Folder not found" }, { status: 404 });
   }
@@ -33,3 +38,5 @@ export async function POST(request: Request) {
   await saveFoldersForAccount(account.id, updated);
   return NextResponse.json({ ok: true, folders: updated });
 }
+
+export { legacyAccountRouteRemoved as POST } from "@/app/api/_helpers/legacyAccountRouteRemoved";

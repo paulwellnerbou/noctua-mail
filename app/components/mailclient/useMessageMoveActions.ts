@@ -2,6 +2,7 @@
 
 import type React from "react";
 import { useCallback } from "react";
+import { buildAccountMessagesActionPath } from "@/lib/accountApiPaths";
 import type { Message } from "@/lib/data";
 import type { SelectionStore } from "./messagelist/selectionStore";
 import type { ThreadMoveRequest } from "./utils/messageMove";
@@ -179,11 +180,10 @@ export function useMessageMoveActions({
         if (managePendingState) {
           setPendingMessageActions((prev) => new Set([...prev, ...uniqueIds]));
         }
-        const res = await apiFetch("/api/message/move", {
+        const res = await apiFetch(buildAccountMessagesActionPath(activeAccountId, "move"), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            accountId: activeAccountId,
             messageIds: uniqueIds,
             destinationFolderId,
             threadMove

@@ -2,11 +2,14 @@ import { NextResponse } from "next/server";
 import { listRelatedMessages } from "@/lib/db";
 import { requireSessionAccountOr403, requireSessionOr401 } from "@/lib/auth";
 
-export async function GET(request: Request) {
+export async function handleListRelatedMessagesRequest(
+  request: Request,
+  options?: { accountId?: string | null }
+) {
   const session = requireSessionOr401(request);
   if (session instanceof NextResponse) return session;
   const { searchParams } = new URL(request.url);
-  const accountId = searchParams.get("accountId");
+  const accountId = options?.accountId ?? "";
   const relatedId = searchParams.get("relatedId");
   if (!accountId || !relatedId) {
     return NextResponse.json(
@@ -46,3 +49,5 @@ export async function GET(request: Request) {
     relatedSubject: data.relatedSubject
   });
 }
+
+export { legacyAccountRouteRemoved as GET } from "@/app/api/_helpers/legacyAccountRouteRemoved";

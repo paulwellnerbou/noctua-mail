@@ -21,11 +21,10 @@ import { findSentFolder } from "@/lib/specialFolders";
 import { normalizeCalendarParticipationStatus } from "@/lib/calendarParticipation";
 import { toFiniteNumber } from "@/app/api/_helpers/numberParsing";
 
-export async function POST(
+export async function handleCalendarEventRespondRequest(
   request: Request,
-  { params }: { params: Promise<{ id: string }> }
+  options?: { accountId?: string | null; eventId?: string | null }
 ) {
-  const { id: eventId } = await params;
   const payload = (await request.json().catch(() => null)) as
     | {
         accountId?: string;
@@ -35,7 +34,8 @@ export async function POST(
         occurrenceStartAtMs?: number;
       }
     | null;
-  const accountId = payload?.accountId?.trim() ?? "";
+  const accountId = options?.accountId ?? "";
+  const eventId = options?.eventId ?? "";
   if (!accountId || !eventId) {
     return NextResponse.json({ ok: false, message: "Missing accountId or eventId" }, { status: 400 });
   }
@@ -156,3 +156,5 @@ export async function POST(
     );
   }
 }
+
+export { legacyAccountRouteRemoved as POST } from "@/app/api/_helpers/legacyAccountRouteRemoved";

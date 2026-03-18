@@ -5,9 +5,12 @@ import { TOPIC_COLORS } from "@/lib/data";
 import type { TopicColor } from "@/lib/data";
 
 
-export async function GET(request: Request) {
+export async function handleListTopicsRequest(
+  request: Request,
+  options?: { accountId?: string | null }
+) {
   const { searchParams } = new URL(request.url);
-  const accountId = searchParams.get("accountId") ?? "";
+  const accountId = options?.accountId ?? "";
   const context = await requireAccountContext(request, accountId);
   if (context instanceof NextResponse) return context;
 
@@ -15,14 +18,17 @@ export async function GET(request: Request) {
   return NextResponse.json({ ok: true, topics });
 }
 
-export async function POST(request: Request) {
+export async function handleCreateTopicRequest(
+  request: Request,
+  options?: { accountId?: string | null }
+) {
   const body = (await request.json().catch(() => null)) as {
     accountId?: string;
     name?: string;
     color?: string;
   } | null;
 
-  const accountId = body?.accountId?.trim() ?? "";
+  const accountId = options?.accountId ?? "";
   const context = await requireAccountContext(request, accountId);
   if (context instanceof NextResponse) return context;
 
@@ -39,3 +45,8 @@ export async function POST(request: Request) {
   const topic = await createTopic(accountId, name, color);
   return NextResponse.json({ ok: true, topic }, { status: 201 });
 }
+
+export {
+  legacyAccountRouteRemoved as GET,
+  legacyAccountRouteRemoved as POST
+} from "@/app/api/_helpers/legacyAccountRouteRemoved";

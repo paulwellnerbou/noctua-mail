@@ -5,6 +5,11 @@ import { AlarmClock, AlarmClockPlus, Clock, Mail, MapPin, Repeat, Trash2, User, 
 import { Badge, Button, Dialog, Flex, Select, Switch, Text } from "@radix-ui/themes";
 import { buildCalendarRecurrenceSummary, formatCalendarEventDate } from "@/lib/calendar";
 import type { CalendarInviteActionType } from "@/lib/calendarInviteProcessing";
+import {
+  buildAccountCalendarEventPath,
+  buildAccountCalendarEventRespondPath,
+  buildAccountCalendarParticipationPath
+} from "@/lib/accountApiPaths";
 import type {
   CalendarEvent,
   CalendarParticipationScope,
@@ -297,14 +302,11 @@ export default function EventDetailView({
     if (!accountId || !eventId || !canRespond) return;
     const loadParticipation = async () => {
       try {
-        const params = new URLSearchParams({
-          accountId,
-          eventId
-        });
+        const params = new URLSearchParams({ eventId });
         if (Number.isFinite(resolvedStartMs)) {
           params.set("occurrenceStartAtMs", String(resolvedStartMs));
         }
-        const res = await fetch(`/api/calendar/events/participation?${params.toString()}`, {
+        const res = await fetch(buildAccountCalendarParticipationPath(accountId, params), {
           cache: "no-store"
         });
         const payload = (await res.json().catch(() => null)) as
@@ -420,8 +422,8 @@ export default function EventDetailView({
     if (!accountId || !eventId) return;
     setDeletingEvent(true);
     try {
-      const params = new URLSearchParams({ accountId, soft: "true" });
-      const res = await fetch(`/api/calendar/events/${encodeURIComponent(eventId)}?${params.toString()}`, {
+      const params = new URLSearchParams({ soft: "true" });
+      const res = await fetch(buildAccountCalendarEventPath(accountId, eventId, params), {
         method: "DELETE"
       });
       if (!res.ok) {
@@ -444,11 +446,10 @@ export default function EventDetailView({
     }
     setSubmittingResponse(true);
     try {
-      const res = await fetch(`/api/calendar/events/${encodeURIComponent(eventId)}/respond`, {
+      const res = await fetch(buildAccountCalendarEventRespondPath(accountId, eventId), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          accountId,
           partstat: draftPartstat,
           scope: effectiveResponseScope,
           sendReply,

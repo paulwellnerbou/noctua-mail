@@ -8,15 +8,19 @@ type RecomputeJob = {
   error?: string;
 };
 
+type RecomputeHandlerOptions = {
+  accountId?: string;
+};
+
 export async function handleRecomputeStartRequest(
   request: Request,
   startJob: (accountId: string) => RecomputeJob,
-  failedDefaultMessage: string
+  failedDefaultMessage: string,
+  options?: RecomputeHandlerOptions
 ) {
   const auth = await requireSessionOr401(request);
   if (auth instanceof NextResponse) return auth;
-  const body = (await request.json().catch(() => null)) as { accountId?: string } | null;
-  const accountId = body?.accountId;
+  const accountId = options?.accountId?.trim() || "";
   if (!accountId) {
     return NextResponse.json({ ok: false, message: "Missing accountId" }, { status: 400 });
   }
@@ -34,7 +38,8 @@ export async function handleRecomputeStartRequest(
 
 export async function handleRecomputeStatusRequest(
   request: Request,
-  getJob: (jobId: string) => RecomputeJob | null
+  getJob: (jobId: string) => RecomputeJob | null,
+  options?: RecomputeHandlerOptions
 ) {
   const session = requireSessionOr401(request);
   if (session instanceof NextResponse) return session;
@@ -47,8 +52,15 @@ export async function handleRecomputeStatusRequest(
   if (!job) {
     return NextResponse.json({ ok: false, message: "Job not found" }, { status: 404 });
   }
-  const access = await requireSessionAccountOr403(session, job.accountId);
+  const routeAccountId = options?.accountId?.trim() || "";
+  if (!routeAccountId) {
+    return NextResponse.json({ ok: false, message: "Missing accountId" }, { status: 400 });
+  }
+  const access = await requireSessionAccountOr403(session, routeAccountId);
   if (access instanceof NextResponse) {
+    return NextResponse.json({ ok: false, message: "Job not found" }, { status: 404 });
+  }
+  if (job.accountId !== routeAccountId) {
     return NextResponse.json({ ok: false, message: "Job not found" }, { status: 404 });
   }
   return NextResponse.json({ ok: true, job });

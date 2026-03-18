@@ -5,7 +5,10 @@ import {
 import { requireAccountContext } from "@/app/api/_helpers/accountContext";
 import { toFiniteNumber } from "@/app/api/_helpers/numberParsing";
 
-export async function POST(request: Request) {
+export async function handleAutoCreateCalendarRemindersRequest(
+  request: Request,
+  options?: { accountId?: string | null }
+) {
   const payload = (await request.json().catch(() => null)) as
     | {
         accountId?: string;
@@ -13,7 +16,7 @@ export async function POST(request: Request) {
         leadLabel?: string;
       }
     | null;
-  const accountId = payload?.accountId?.trim() ?? "";
+  const accountId = options?.accountId ?? "";
   const accountContext = await requireAccountContext(request, accountId, {
     missingAccountMessage: "Missing accountId"
   });
@@ -39,3 +42,5 @@ export async function POST(request: Request) {
     ...result
   });
 }
+
+export { legacyAccountRouteRemoved as POST } from "@/app/api/_helpers/legacyAccountRouteRemoved";

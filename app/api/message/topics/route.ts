@@ -3,9 +3,12 @@ import { requireAccountContext } from "@/app/api/_helpers/accountContext";
 import { getTopicsForThreads, setThreadTopics, addThreadTopic, removeThreadTopic } from "@/lib/topics";
 
 // GET /api/message/topics?accountId=...&threadIds=id1,id2,...
-export async function GET(request: Request) {
+export async function handleListMessageTopicsRequest(
+  request: Request,
+  options?: { accountId?: string | null }
+) {
   const { searchParams } = new URL(request.url);
-  const accountId = searchParams.get("accountId") ?? "";
+  const accountId = options?.accountId ?? "";
   const context = await requireAccountContext(request, accountId);
   if (context instanceof NextResponse) return context;
 
@@ -24,7 +27,10 @@ export async function GET(request: Request) {
 }
 
 // POST /api/message/topics — set (replace all), add, or remove a topic from a thread
-export async function POST(request: Request) {
+export async function handleSaveMessageTopicsRequest(
+  request: Request,
+  options?: { accountId?: string | null }
+) {
   const body = (await request.json().catch(() => null)) as {
     accountId?: string;
     threadId?: string;
@@ -33,7 +39,7 @@ export async function POST(request: Request) {
     topicId?: string;
   } | null;
 
-  const accountId = body?.accountId?.trim() ?? "";
+  const accountId = options?.accountId ?? "";
   const context = await requireAccountContext(request, accountId);
   if (context instanceof NextResponse) return context;
 
@@ -66,3 +72,8 @@ export async function POST(request: Request) {
 
   return NextResponse.json({ ok: false, message: "Invalid action" }, { status: 400 });
 }
+
+export {
+  legacyAccountRouteRemoved as GET,
+  legacyAccountRouteRemoved as POST
+} from "@/app/api/_helpers/legacyAccountRouteRemoved";

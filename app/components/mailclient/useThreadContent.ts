@@ -1,6 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  buildAccountMessageActionPath,
+  buildAccountMessagePath,
+  buildAccountMessageSourcePath
+} from "@/lib/accountApiPaths";
 import type { Message } from "@/lib/data";
 import { applyFlagsToMessage } from "./utils/messageHelpers";
 import { THREAD_CACHE_LIMIT } from "./constants";
@@ -220,11 +225,10 @@ export function useThreadContent({
 
       if (canResync) {
         try {
-          const res = await apiFetch("/api/message/resync", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ accountId: message.accountId, messageId: message.id })
-          });
+          const res = await apiFetch(
+            buildAccountMessageActionPath(message.accountId, message.id, "resync"),
+            { method: "POST" }
+          );
           if (!res.ok) {
             if (!options?.silent) {
               reportError(await readErrorMessage(res));
@@ -241,7 +245,7 @@ export function useThreadContent({
 
       try {
         const detailRes = await apiFetch(
-          `/api/message?accountId=${encodeURIComponent(message.accountId)}&messageId=${encodeURIComponent(message.id)}`,
+          buildAccountMessagePath(message.accountId, message.id),
           { cache: "no-store" }
         );
         if (!detailRes.ok) return null;
@@ -259,7 +263,7 @@ export function useThreadContent({
             if (item.id !== hydrated.id) return item;
             return {
               ...hydrated,
-              // /api/message does not include list grouping metadata; preserve existing group key
+              // Message detail responses do not include list grouping metadata; preserve the existing group key
               // so the row remains in the same visible group after hydration.
               groupKey: item.groupKey ?? hydrated.groupKey
             };
@@ -286,7 +290,7 @@ export function useThreadContent({
       const promise = (async () => {
         const loadSource = async () => {
           const res = await apiFetch(
-            `/api/source?accountId=${encodeURIComponent(activeAccountId)}&messageId=${encodeURIComponent(messageId)}`
+            buildAccountMessageSourcePath(activeAccountId, messageId)
           );
           if (!res.ok) {
             const errorMessage = await readErrorMessage(res);

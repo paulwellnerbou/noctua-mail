@@ -4,9 +4,12 @@ import { syncCalendarEvents } from "@/lib/caldav/sync";
 
 const syncInProgress = new Map<string, boolean>();
 
-export async function POST(request: Request) {
+export async function handleCalendarSyncRequest(
+  request: Request,
+  options?: { accountId?: string | null }
+) {
   const body = (await request.json().catch(() => null)) as { accountId?: string } | null;
-  const accountId = body?.accountId?.trim() ?? "";
+  const accountId = options?.accountId ?? "";
   const accountContext = await requireAccountContext(request, accountId, {
     missingAccountMessage: "Missing accountId"
   });
@@ -28,9 +31,12 @@ export async function POST(request: Request) {
   }
 }
 
-export async function GET(request: Request) {
+export async function handleCalendarSyncStatusRequest(
+  request: Request,
+  options?: { accountId?: string | null }
+) {
   const { searchParams } = new URL(request.url);
-  const accountId = searchParams.get("accountId")?.trim() ?? "";
+  const accountId = options?.accountId ?? "";
   const accountContext = await requireAccountContext(request, accountId, {
     missingAccountMessage: "Missing accountId"
   });
@@ -41,3 +47,8 @@ export async function GET(request: Request) {
     syncing: syncInProgress.get(accountContext.accountId) ?? false
   });
 }
+
+export {
+  legacyAccountRouteRemoved as POST,
+  legacyAccountRouteRemoved as GET
+} from "@/app/api/_helpers/legacyAccountRouteRemoved";

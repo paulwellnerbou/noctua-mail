@@ -25,9 +25,12 @@ function formatAddress(addresses?: EnvelopeAddress[] | null) {
   return parts.filter(Boolean).join(", ");
 }
 
-export async function GET(request: Request) {
+export async function handleImapStreamRequest(
+  request: Request,
+  options?: { accountId?: string | null }
+) {
   const { searchParams } = new URL(request.url);
-  const accountIdParam = searchParams.get("accountId");
+  const accountIdParam = options?.accountId ?? "";
   const activeFolderId = searchParams.get("activeFolderId");
   const accountContext = await requireAccountContext(request, accountIdParam ?? "", {
     missingAccountMessage: "Missing accountId"
@@ -401,3 +404,5 @@ export async function GET(request: Request) {
     }
   });
 }
+
+export { legacyAccountRouteRemoved as GET } from "@/app/api/_helpers/legacyAccountRouteRemoved";

@@ -10,13 +10,25 @@ import { collectThreadReferenceIds, resolveThreadingForItems } from "@/lib/threa
 import { appendMessageIdToError } from "../errorFormatting";
 import { requireAccountAndMessageContext } from "../routeHelpers";
 
-export async function POST(request: Request) {
-  const payload = (await request.json()) as { accountId: string; messageId: string };
-  const context = await requireAccountAndMessageContext(request, payload, {
-    missingFieldsMessage: "Missing accountId/messageId",
-    missingMessageMessage:
-      "Message not found in local cache. If a sync is in progress, retry later."
-  });
+export async function handleResyncMessageRequest(
+  request: Request,
+  options?: { accountId?: string | null; messageId?: string | null }
+) {
+  const payload = (await request.json().catch(() => null)) as
+    | { accountId?: string; messageId?: string }
+    | null;
+  const context = await requireAccountAndMessageContext(
+    request,
+    {
+      accountId: options?.accountId,
+      messageId: options?.messageId
+    },
+    {
+      missingFieldsMessage: "Missing accountId/messageId",
+      missingMessageMessage:
+        "Message not found in local cache. If a sync is in progress, retry later."
+    }
+  );
   if (context instanceof NextResponse) return context;
   const { account, accountId, clientId, message: existing, messageId } = context;
 
@@ -65,3 +77,5 @@ export async function POST(request: Request) {
 
   return NextResponse.json({ ok: true });
 }
+
+export { legacyAccountRouteRemoved as POST } from "@/app/api/_helpers/legacyAccountRouteRemoved";

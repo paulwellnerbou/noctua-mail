@@ -1,4 +1,5 @@
 import type { Attachment, Message } from "@/lib/data";
+import { buildAccountAttachmentPath } from "@/lib/accountApiPaths";
 import { appendUnreferencedInlineImages } from "@/lib/html";
 import { saveAttachmentData, saveMessageSource } from "@/lib/storage";
 
@@ -7,9 +8,7 @@ type AttachmentWithContent = Attachment & {
 };
 
 function buildAttachmentUrl(accountId: string, messageId: string, attachmentId: string) {
-  return `/api/attachment?accountId=${encodeURIComponent(accountId)}&messageId=${encodeURIComponent(
-    messageId
-  )}&attachmentId=${encodeURIComponent(attachmentId)}`;
+  return buildAccountAttachmentPath(accountId, messageId, attachmentId);
 }
 
 function parseDataUrlAttachment(dataUrl: string) {

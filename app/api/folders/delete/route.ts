@@ -15,17 +15,24 @@ import { notifyFolderDeleted } from "@/lib/mail/imapStreamRegistry";
 import { findTrashFolder, mailboxPathFromFolderId } from "@/app/api/message/delete/trashUtils";
 import { requireAccountContext } from "@/app/api/_helpers/accountContext";
 
-export async function POST(request: Request) {
+export async function handleDeleteFolderRequest(
+  request: Request,
+  options?: { accountId?: string | null; folderId?: string | null }
+) {
   const startedAt = Date.now();
-  const payload = (await request.json()) as { accountId: string; folderId: string };
-  if (!payload?.accountId || !payload?.folderId) {
+  const payload = (await request.json().catch(() => null)) as
+    | { accountId?: string; folderId?: string }
+    | null;
+  const accountId = options?.accountId ?? "";
+  const folderId = options?.folderId ?? "";
+  if (!accountId || !folderId) {
     return NextResponse.json({ ok: false, message: "Missing accountId or folderId" }, { status: 400 });
   }
-  const accountContext = await requireAccountContext(request, payload.accountId);
+  const accountContext = await requireAccountContext(request, accountId);
   if (accountContext instanceof NextResponse) return accountContext;
-  const { account, accountId, clientId } = accountContext;
+  const { account, clientId } = accountContext;
   const folders = await getFolders(accountId);
-  const folder = folders.find((item) => item.id === payload.folderId);
+  const folder = folders.find((item) => item.id === folderId);
   if (!folder) {
     return NextResponse.json({ ok: false, message: "Folder not found" }, { status: 404 });
   }
@@ -107,3 +114,5 @@ export async function POST(request: Request) {
   console.info(`[folders] move finished in ${Date.now() - startedAt}ms`);
   return NextResponse.json({ ok: true, action: "moved", folders: updated });
 }
+
+export { legacyAccountRouteRemoved as POST } from "@/app/api/_helpers/legacyAccountRouteRemoved";

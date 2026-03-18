@@ -1,17 +1,16 @@
 import { NextResponse } from "next/server";
-import { requireSessionAccountOr403, requireSessionOr401 } from "@/lib/auth";
+import { requireAccountContext } from "@/app/api/_helpers/accountContext";
 import { getCategoryLearningDebugSnapshot } from "@/lib/db";
 
-export async function GET(request: Request) {
-  const session = requireSessionOr401(request);
-  if (session instanceof NextResponse) return session;
-
+export async function handleCategoryDebugRequest(
+  request: Request,
+  options?: { accountId?: string | null }
+) {
   const { searchParams } = new URL(request.url);
-  const accountId = searchParams.get("accountId")?.trim() ?? "";
-  if (!accountId) {
-    return NextResponse.json({ ok: false, message: "Missing accountId" }, { status: 400 });
-  }
-  const access = await requireSessionAccountOr403(session, accountId);
+  const accountId = options?.accountId ?? "";
+  const access = await requireAccountContext(request, accountId, {
+    missingAccountMessage: "Missing accountId"
+  });
   if (access instanceof NextResponse) return access;
   const limitRaw = searchParams.get("limit");
   const parsedLimit = limitRaw ? Number.parseInt(limitRaw, 10) : NaN;
@@ -25,3 +24,5 @@ export async function GET(request: Request) {
     return NextResponse.json({ ok: false, message }, { status: 500 });
   }
 }
+
+export { legacyAccountRouteRemoved as GET } from "@/app/api/_helpers/legacyAccountRouteRemoved";

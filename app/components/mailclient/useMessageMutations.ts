@@ -1,4 +1,5 @@
 import { useCallback } from "react";
+import { buildAccountMessageActionPath } from "@/lib/accountApiPaths";
 import type { Message } from "@/lib/data";
 import { applyFlagsToMessage, isFlaggedMessage, hasTodoFlag, hasDoneFlag, getUnsubscribeCapability } from "./utils/messageHelpers";
 import { getMessageSubjectForNotice, remapMessageReferenceIds } from "./utils/messageMutation";
@@ -102,14 +103,10 @@ export function useMessageMutations({
     messageId: string,
     payload: { value: boolean; flag?: SystemFlag; keyword?: string }
   ) => {
-    const res = await apiFetch("/api/message/flags", {
+    const res = await apiFetch(buildAccountMessageActionPath(activeAccountId, messageId, "flags"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        accountId: activeAccountId,
-        messageId,
-        ...payload
-      })
+      body: JSON.stringify(payload)
     });
     if (!res.ok) {
       reportError(await readErrorMessage(res));
@@ -212,10 +209,8 @@ export function useMessageMutations({
   const handleArchiveMessage = useCallback(async (message: Message) => {
     try {
       applyMoveReconcileSuppression([message]);
-      const res = await apiFetch("/api/message/archive", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ accountId: activeAccountId, messageId: message.id })
+      const res = await apiFetch(buildAccountMessageActionPath(activeAccountId, message.id, "archive"), {
+        method: "POST"
       });
       if (!res.ok) {
         reportError(await readErrorMessage(res));
@@ -274,13 +269,8 @@ export function useMessageMutations({
 
       setPendingMessageActions((prev) => new Set(prev).add(message.id));
       try {
-        const res = await apiFetch("/api/message/unsubscribe", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            accountId: activeAccountId,
-            messageId: message.id
-          })
+        const res = await apiFetch(buildAccountMessageActionPath(activeAccountId, message.id, "unsubscribe"), {
+          method: "POST"
         });
 
         if (!res.ok) {
@@ -324,10 +314,8 @@ export function useMessageMutations({
     setPendingMessageActions((prev) => new Set(prev).add(message.id));
     try {
       applyMoveReconcileSuppression([message]);
-      const res = await apiFetch("/api/message/spam", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ accountId: activeAccountId, messageId: message.id })
+      const res = await apiFetch(buildAccountMessageActionPath(activeAccountId, message.id, "spam"), {
+        method: "POST"
       });
       if (!res.ok) {
         reportError(await readErrorMessage(res));
@@ -373,10 +361,8 @@ export function useMessageMutations({
     setPendingMessageActions((prev) => new Set(prev).add(message.id));
     try {
       applyMoveReconcileSuppression([message]);
-      const res = await apiFetch("/api/message/not-spam", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ accountId: activeAccountId, messageId: message.id })
+      const res = await apiFetch(buildAccountMessageActionPath(activeAccountId, message.id, "not-spam"), {
+        method: "POST"
       });
       if (!res.ok) {
         reportError(await readErrorMessage(res));
@@ -477,14 +463,10 @@ export function useMessageMutations({
   ) => {
     setPendingMessageActions((prev) => new Set(prev).add(message.id));
     try {
-      const res = await apiFetch("/api/message/category", {
+      const res = await apiFetch(buildAccountMessageActionPath(activeAccountId, message.id, "category"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          accountId: activeAccountId,
-          messageId: message.id,
-          category
-        })
+        body: JSON.stringify({ category })
       });
       if (!res.ok) {
         reportError(await readErrorMessage(res));

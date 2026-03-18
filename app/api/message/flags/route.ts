@@ -33,18 +33,34 @@ export function buildFlagMutations(payload: {
   return mutations;
 }
 
-export async function POST(request: Request) {
-  const payload = (await request.json()) as {
-    accountId: string;
-    messageId: string;
-    flag?: keyof typeof flagMap;
-    keyword?: string;
-    value: boolean;
-  };
-  const context = await requireImapMessageMutationContext(request, payload);
+export async function handleFlagMutationRequest(
+  request: Request,
+  options?: { accountId?: string | null; messageId?: string | null }
+) {
+  const payload = (await request.json().catch(() => null)) as
+    | {
+        accountId?: string;
+        messageId?: string;
+        flag?: keyof typeof flagMap;
+        keyword?: string;
+        value?: boolean;
+      }
+    | null;
+  const value = payload?.value;
+  if (typeof value !== "boolean") {
+    return NextResponse.json({ ok: false, message: "Missing flag mutation value" }, { status: 400 });
+  }
+  const context = await requireImapMessageMutationContext(request, {
+    accountId: options?.accountId,
+    messageId: options?.messageId
+  });
   if (context instanceof NextResponse) return context;
   const { accountId, account, clientId, message, messageId } = context;
-  const mutations = buildFlagMutations(payload);
+  const mutations = buildFlagMutations({
+    flag: payload?.flag,
+    keyword: payload?.keyword,
+    value
+  });
   if (mutations.length === 0) {
     return NextResponse.json({ ok: false, message: "Unknown flag" }, { status: 400 });
   }
@@ -71,3 +87,5 @@ export async function POST(request: Request) {
 
   return NextResponse.json({ ok: true, flags: nextFlags });
 }
+
+export { legacyAccountRouteRemoved as POST } from "@/app/api/_helpers/legacyAccountRouteRemoved";

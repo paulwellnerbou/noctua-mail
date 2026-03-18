@@ -1,6 +1,9 @@
 import { describe, expect, it } from "bun:test";
 import type { Message } from "@/lib/data";
-import { reconcileSavedDraftMessages } from "./draftListState";
+import {
+  buildSavedDraftListMessage,
+  reconcileSavedDraftMessages
+} from "./draftListState";
 
 function makeMessage(overrides: Partial<Message>): Message {
   return {
@@ -96,5 +99,59 @@ describe("reconcileSavedDraftMessages", () => {
     });
 
     expect(result).toEqual([inbox, saved]);
+  });
+});
+
+describe("buildSavedDraftListMessage", () => {
+  it("preserves the existing received thread sort date for saved drafts", () => {
+    const inbox = makeMessage({
+      id: "message-inbox",
+      threadId: "thread-1",
+      dateValue: new Date("2024-04-01T12:00:00.000Z").getTime(),
+      threadSortDateValue: new Date("2024-04-01T12:00:00.000Z").getTime()
+    });
+    const savedDraft = makeMessage({
+      id: "draft-new",
+      threadId: "thread-1",
+      dateValue: new Date("2025-04-01T12:00:00.000Z").getTime(),
+      draft: true
+    });
+
+    const result = buildSavedDraftListMessage({
+      messages: [inbox],
+      savedDraft,
+      previousDraftId: null,
+      groupBy: "year",
+      threadDateSource: "latestReceivedDateValue"
+    });
+
+    expect(result.threadSortDateValue).toBe(inbox.threadSortDateValue);
+    expect(result.groupKey).toBe("2024");
+  });
+
+  it("keeps activity-based grouping when the active sort source is activity", () => {
+    const inbox = makeMessage({
+      id: "message-inbox",
+      threadId: "thread-1",
+      dateValue: new Date("2024-04-01T12:00:00.000Z").getTime(),
+      threadSortDateValue: new Date("2024-04-01T12:00:00.000Z").getTime()
+    });
+    const savedDraft = makeMessage({
+      id: "draft-new",
+      threadId: "thread-1",
+      dateValue: new Date("2025-04-01T12:00:00.000Z").getTime(),
+      draft: true
+    });
+
+    const result = buildSavedDraftListMessage({
+      messages: [inbox],
+      savedDraft,
+      previousDraftId: null,
+      groupBy: "year",
+      threadDateSource: "latestDateValue"
+    });
+
+    expect(result.threadSortDateValue).toBeUndefined();
+    expect(result.groupKey).toBe("2025");
   });
 });

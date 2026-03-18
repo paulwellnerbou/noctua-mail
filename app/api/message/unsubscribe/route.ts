@@ -43,15 +43,18 @@ function parseUnsubscribeHeaders(headerString: string): {
   return { listUnsubscribe, hasOneClick };
 }
 
-export async function POST(request: Request) {
+export async function handleUnsubscribeRequest(
+  request: Request,
+  options?: { accountId?: string | null; messageId?: string | null }
+) {
   const payload = (await request.json().catch(() => null)) as
     | { accountId?: string; messageId?: string }
     | null;
   const context = await requireAccountAndMessageContext(
     request,
     {
-      accountId: payload?.accountId?.trim(),
-      messageId: payload?.messageId?.trim()
+      accountId: options?.accountId,
+      messageId: options?.messageId
     },
     { missingFieldsMessage: "Missing accountId or messageId" }
   );
@@ -130,3 +133,5 @@ export async function POST(request: Request) {
     { status: 400 }
   );
 }
+
+export { legacyAccountRouteRemoved as POST } from "@/app/api/_helpers/legacyAccountRouteRemoved";

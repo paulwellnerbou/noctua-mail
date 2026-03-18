@@ -4,6 +4,7 @@ import { Text } from "@radix-ui/themes";
 import { hasHtmlContent } from "@/lib/ui/messageView";
 import ThreadMessageCard from "./ThreadMessageCard";
 import type { ThreadMessageCardProps } from "./ThreadMessageCard";
+import { getVisibleThreadMessages } from "./threadViewState";
 import styles from "./ThreadView.module.css";
 
 type ThreadViewProps = {
@@ -15,6 +16,7 @@ type ThreadViewProps = {
   threadContentLoading: string | null;
   threadContentErrorById: Record<string, string>;
   messageCardProps: Omit<ThreadMessageCardProps, "message">;
+  composeDraftId: string | null;
   composeReplyMessageId: string | null;
   renderComposeInlineCard: (() => React.ReactNode) | null;
 };
@@ -28,6 +30,7 @@ export default function ThreadView({
   threadContentLoading,
   threadContentErrorById,
   messageCardProps,
+  composeDraftId,
   composeReplyMessageId,
   renderComposeInlineCard
 }: ThreadViewProps) {
@@ -53,10 +56,15 @@ export default function ThreadView({
           const activeMessageBodyLoading = isThreadLoading && !hasMessageContent(activeMessageFromThread);
           const activeMessageBodyError =
             !isThreadLoading && Boolean(activeThreadError) && !hasMessageContent(activeMessageFromThread);
-          const visibleThread =
+          const baseThread =
             supportsThreads && isThreadLoading && !hasFullThread
               ? [activeMessageFromThread]
               : activeThread;
+          const visibleThread = getVisibleThreadMessages({
+            activeThread: baseThread,
+            showComposeInline,
+            composeDraftId
+          });
           const { threadViewMode, collapsedMessages } = messageCardProps;
           return (
             <>

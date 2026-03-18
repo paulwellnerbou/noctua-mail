@@ -5,6 +5,7 @@ import { requireSessionAccountOr403, requireSessionOr401 } from "@/lib/auth";
 
 type ListMessagesHandlerOptions = {
   defaultQuery?: string | null;
+  accountId?: string | null;
 };
 
 export async function handleListMessagesRequest(
@@ -14,7 +15,7 @@ export async function handleListMessagesRequest(
   const session = requireSessionOr401(request);
   if (session instanceof NextResponse) return session;
   const { searchParams } = new URL(request.url);
-  const accountId = searchParams.get("accountId");
+  const accountId = options?.accountId ?? "";
   const folderId = searchParams.get("folderId");
   const fieldsParam = searchParams.get("fields");
   const fields = fieldsParam ? fieldsParam.split(",").filter(Boolean) : undefined;

@@ -10,6 +10,10 @@ import type { EventClickArg, DatesSetArg, EventInput } from "@fullcalendar/core"
 import type { CalendarEvent } from "@/lib/data";
 import type { CalendarReminder } from "@/lib/data";
 import {
+  buildAccountCalendarEventsPath,
+  buildAccountRemindersPath
+} from "@/lib/accountApiPaths";
+import {
   expandCalendarEventForRange,
   filterCalendarReminderDuplicates
 } from "@/lib/calendarOccurrences";
@@ -95,13 +99,12 @@ export default function CalendarView({
       if (!accountId) return;
       try {
         const params = new URLSearchParams({
-          accountId,
           startMs: String(startMs),
           endMs: String(endMs)
         });
         const [eventsRes, remindersRes] = await Promise.all([
-          fetch(`/api/calendar/events?${params.toString()}`),
-          fetch(`/api/reminders?accountId=${encodeURIComponent(accountId)}`)
+          fetch(buildAccountCalendarEventsPath(accountId, params)),
+          fetch(buildAccountRemindersPath(accountId))
         ]);
 
         const eventsData = eventsRes.ok

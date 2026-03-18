@@ -165,17 +165,19 @@ export type Topic = {
   imapKeyword: string;
   createdAt: number;
   updatedAt: number;
+  suggestionScore?: number;
   matchCount?: number;
 };
 
 // Signals used to derive topic suggestions from past manual assignments.
 // No manual rules table — the app learns from what the user has tagged before.
-// See getTopicSuggestionsForMessage() in lib/topics.ts.
+// See getTopicSuggestionsForThread() in lib/topics.ts.
 export const TOPIC_SUGGESTION_SIGNALS = [
   "senderEmail",    // exact sender email address, e.g. "noreply@gitlab.com"
   "senderDomain",   // domain part of sender email, e.g. "gitlab.com"
   "recipient",      // email address appearing in To or CC
   "listId",         // List-Id header, e.g. "ndrde/code/unified-sophora/api"
+  "jiraProjectKey", // JIRA issue key prefix from the subject, e.g. "UNSAPIX" from "UNSAPIX-311"
 ] as const;
 
 export type TopicSuggestionSignal = (typeof TOPIC_SUGGESTION_SIGNALS)[number];

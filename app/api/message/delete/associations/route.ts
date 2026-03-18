@@ -19,9 +19,12 @@ function normalizeStringArray(values: unknown) {
   );
 }
 
-export async function POST(request: Request) {
+export async function handleDeleteAssociationsRequest(
+  request: Request,
+  options?: { accountId?: string | null }
+) {
   const payload = (await request.json().catch(() => null)) as DeleteAssociationPayload | null;
-  const accountId = payload?.accountId?.trim() ?? "";
+  const accountId = options?.accountId ?? "";
   if (!accountId) {
     return NextResponse.json({ ok: false, message: "Missing accountId" }, { status: 400 });
   }
@@ -48,3 +51,5 @@ export async function POST(request: Request) {
     );
   }
 }
+
+export { legacyAccountRouteRemoved as POST } from "@/app/api/_helpers/legacyAccountRouteRemoved";

@@ -3,12 +3,18 @@ import { getMessageById } from "@/lib/db";
 import { requireSessionAccountOr403, requireSessionOr401 } from "@/lib/auth";
 import { appendMessageIdToError } from "./errorFormatting";
 
-export async function GET(request: Request) {
+export async function handleGetMessageRequest(
+  request: Request,
+  options?: {
+    accountId?: string | null;
+    messageId?: string | null;
+  }
+) {
   const session = requireSessionOr401(request);
   if (session instanceof NextResponse) return session;
   const { searchParams } = new URL(request.url);
-  const accountId = searchParams.get("accountId");
-  const messageId = searchParams.get("messageId");
+  const accountId = options?.accountId ?? "";
+  const messageId = options?.messageId ?? "";
   if (!accountId || !messageId) {
     return NextResponse.json({ ok: false, message: "Missing accountId or messageId" }, { status: 400 });
   }
@@ -23,3 +29,5 @@ export async function GET(request: Request) {
   }
   return NextResponse.json({ ok: true, message });
 }
+
+export { legacyAccountRouteRemoved as GET } from "@/app/api/_helpers/legacyAccountRouteRemoved";

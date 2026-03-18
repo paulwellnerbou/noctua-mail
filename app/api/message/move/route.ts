@@ -11,7 +11,7 @@ import { findDraftsFolder, findSentFolder } from "@/lib/specialFolders";
 import { requireAccountContext } from "../routeHelpers";
 
 type MovePayload = {
-  accountId: string;
+  accountId?: string;
   messageIds?: string[];
   destinationFolderId: string;
   threadMove?: {
@@ -20,11 +20,16 @@ type MovePayload = {
   };
 };
 
-export async function POST(request: Request) {
-  const payload = (await request.json()) as MovePayload;
-  const { accountId, destinationFolderId, threadMove } = payload;
+export async function handleMoveMessagesRequest(
+  request: Request,
+  options?: { accountId?: string | null }
+) {
+  const payload = (await request.json().catch(() => null)) as MovePayload | null;
+  const accountId = options?.accountId ?? "";
+  const destinationFolderId = payload?.destinationFolderId?.trim() ?? "";
+  const threadMove = payload?.threadMove;
   const messageIds = Array.from(
-    new Set((payload.messageIds ?? []).map((id) => id.trim()).filter(Boolean))
+    new Set((payload?.messageIds ?? []).map((id) => id.trim()).filter(Boolean))
   );
   const normalizedThreadId = threadMove?.threadId?.trim() ?? "";
   const sourceFolderId = threadMove?.sourceFolderId?.trim() ?? "";
@@ -111,3 +116,5 @@ export async function POST(request: Request) {
     undoTargets
   });
 }
+
+export { legacyAccountRouteRemoved as POST } from "@/app/api/_helpers/legacyAccountRouteRemoved";

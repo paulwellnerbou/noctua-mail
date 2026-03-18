@@ -4,18 +4,22 @@ import { createImapFolder, listImapFolders } from "@/lib/mail/imap";
 import { mailboxPathFromFolderId } from "@/lib/mailboxPaths";
 import { requireAccountContext } from "@/app/api/_helpers/accountContext";
 
-export async function POST(request: Request) {
+export async function handleCreateFolderRequest(
+  request: Request,
+  options?: { accountId?: string | null }
+) {
   const payload = (await request.json()) as {
-    accountId: string;
+    accountId?: string;
     name: string;
     parentId?: string | null;
   };
-  if (!payload?.accountId || !payload?.name) {
+  const accountId = options?.accountId ?? "";
+  if (!accountId || !payload?.name) {
     return NextResponse.json({ ok: false, message: "Missing accountId or name" }, { status: 400 });
   }
-  const accountContext = await requireAccountContext(request, payload.accountId);
+  const accountContext = await requireAccountContext(request, accountId);
   if (accountContext instanceof NextResponse) return accountContext;
-  const { account, accountId, clientId } = accountContext;
+  const { account, clientId } = accountContext;
   const folders = await getFolders(accountId);
   const parent = payload.parentId
     ? folders.find((folder) => folder.id === payload.parentId)
@@ -29,3 +33,5 @@ export async function POST(request: Request) {
   await saveFoldersForAccount(account.id, updated);
   return NextResponse.json({ ok: true, folders: updated });
 }
+
+export { legacyAccountRouteRemoved as POST } from "@/app/api/_helpers/legacyAccountRouteRemoved";

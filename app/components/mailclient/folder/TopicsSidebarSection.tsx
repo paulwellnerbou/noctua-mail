@@ -1,3 +1,4 @@
+import { useMemo, type CSSProperties } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import type { Topic } from "@/lib/data";
 import { topicColorToCssVar } from "@/lib/data";
@@ -6,6 +7,7 @@ import topicStyles from "./TopicsSidebarSection.module.css";
 
 type TopicsSidebarSectionProps = {
   topics: Topic[];
+  topicMessageCountById?: ReadonlyMap<string, number>;
   activeTopicId: string | null;
   onTopicClick: (topicId: string) => void;
   collapsed?: boolean;
@@ -14,12 +16,24 @@ type TopicsSidebarSectionProps = {
 
 export default function TopicsSidebarSection({
   topics,
+  topicMessageCountById,
   activeTopicId,
   onTopicClick,
   collapsed = false,
   onToggleCollapsed
 }: TopicsSidebarSectionProps) {
-  if (topics.length === 0) return null;
+  const sidebarTopics = useMemo(() => {
+    const items = [...topics];
+    items.sort((a, b) => {
+      const countDiff =
+        (topicMessageCountById?.get(b.id) ?? 0) - (topicMessageCountById?.get(a.id) ?? 0);
+      if (countDiff !== 0) return countDiff;
+      return a.name.localeCompare(b.name);
+    });
+    return items;
+  }, [topicMessageCountById, topics]);
+
+  if (sidebarTopics.length === 0) return null;
 
   return (
     <div className={topicStyles.section}>
@@ -32,7 +46,7 @@ export default function TopicsSidebarSection({
         <span className={styles.panelTitle}>Topics</span>
         {collapsed ? <ChevronRight size={13} /> : <ChevronDown size={13} />}
       </button>
-      {!collapsed && topics.map((topic) => (
+      {!collapsed && sidebarTopics.map((topic) => (
         <button
           key={topic.id}
           type="button"
@@ -42,7 +56,7 @@ export default function TopicsSidebarSection({
         >
           <span
             className={topicStyles.colorDot}
-            style={{ "--dot-color": topicColorToCssVar(topic.color) } as React.CSSProperties}
+            style={{ "--dot-color": topicColorToCssVar(topic.color) } as CSSProperties}
           />
           <span className={styles.treeName}>
             <span className={styles.treeNameText}>{topic.name}</span>

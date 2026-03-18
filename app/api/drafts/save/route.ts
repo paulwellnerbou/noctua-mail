@@ -13,9 +13,12 @@ import { folderMailboxPath } from "@/lib/mailboxPaths";
 import { findDraftsFolder } from "@/lib/specialFolders";
 import { requireAccountContext } from "@/app/api/_helpers/accountContext";
 
-export async function POST(request: Request) {
+export async function handleSaveDraftRequest(
+  request: Request,
+  options?: { accountId?: string | null }
+) {
   const payload = (await request.json()) as {
-    accountId: string;
+    accountId?: string;
     draftId?: string | null;
     to: string;
     cc?: string;
@@ -37,9 +40,13 @@ export async function POST(request: Request) {
       dataUrl?: string;
     }>;
   };
-  const accountContext = await requireAccountContext(request, payload?.accountId ?? "", {
-    missingAccountMessage: "Missing accountId"
-  });
+  const accountContext = await requireAccountContext(
+    request,
+    options?.accountId ?? "",
+    {
+      missingAccountMessage: "Missing accountId"
+    }
+  );
   if (accountContext instanceof NextResponse) return accountContext;
   const { account, accountId, clientId } = accountContext;
   const folders = await getFolders(account.id);
@@ -105,3 +112,5 @@ export async function POST(request: Request) {
 
   return NextResponse.json({ ok: true, draftId: messageId, message: savedMessage });
 }
+
+export { legacyAccountRouteRemoved as POST } from "@/app/api/_helpers/legacyAccountRouteRemoved";

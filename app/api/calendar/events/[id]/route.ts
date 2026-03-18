@@ -8,13 +8,13 @@ import type { CalendarEvent } from "@/lib/data";
 import { toFiniteNumber, toPositiveNumberArray } from "@/app/api/_helpers/numberParsing";
 import { deleteCalendarEventAndRelatedData } from "@/lib/calendarEventDeletion";
 
-export async function GET(
+export async function handleGetCalendarEventRequest(
   request: Request,
-  { params }: { params: Promise<{ id: string }> }
+  options?: { accountId?: string | null; eventId?: string | null }
 ) {
   const { searchParams } = new URL(request.url);
-  const accountId = searchParams.get("accountId")?.trim() ?? "";
-  const { id: eventId } = await params;
+  const accountId = options?.accountId ?? "";
+  const eventId = options?.eventId ?? "";
   if (!accountId || !eventId) {
     return NextResponse.json({ ok: false, message: "Missing accountId or eventId" }, { status: 400 });
   }
@@ -34,15 +34,15 @@ export async function GET(
   }
 }
 
-export async function PUT(
+export async function handleUpdateCalendarEventRequest(
   request: Request,
-  { params }: { params: Promise<{ id: string }> }
+  options?: { accountId?: string | null; eventId?: string | null }
 ) {
-  const { id: eventId } = await params;
   const body = (await request.json().catch(() => null)) as Partial<CalendarEvent> & {
     accountId?: string;
   } | null;
-  const accountId = body?.accountId?.trim() ?? "";
+  const accountId = options?.accountId ?? "";
+  const eventId = options?.eventId ?? "";
   if (!accountId || !eventId) {
     return NextResponse.json({ ok: false, message: "Missing accountId or eventId" }, { status: 400 });
   }
@@ -106,13 +106,13 @@ export async function PUT(
   }
 }
 
-export async function DELETE(
+export async function handleDeleteCalendarEventByIdRequest(
   request: Request,
-  { params }: { params: Promise<{ id: string }> }
+  options?: { accountId?: string | null; eventId?: string | null }
 ) {
-  const { id: eventId } = await params;
   const { searchParams } = new URL(request.url);
-  const accountId = searchParams.get("accountId")?.trim() ?? "";
+  const accountId = options?.accountId ?? "";
+  const eventId = options?.eventId ?? "";
   const soft = searchParams.get("soft") === "true";
   if (!accountId || !eventId) {
     return NextResponse.json({ ok: false, message: "Missing accountId or eventId" }, { status: 400 });
@@ -136,3 +136,9 @@ export async function DELETE(
     return NextResponse.json({ ok: false, message: "Failed to delete event" }, { status: 500 });
   }
 }
+
+export {
+  legacyAccountRouteRemoved as GET,
+  legacyAccountRouteRemoved as PUT,
+  legacyAccountRouteRemoved as DELETE
+} from "@/app/api/_helpers/legacyAccountRouteRemoved";

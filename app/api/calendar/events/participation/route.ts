@@ -3,9 +3,12 @@ import { requireAccountContext } from "@/app/api/_helpers/accountContext";
 import { resolveCalendarParticipation } from "@/lib/db";
 import { toFiniteNumber } from "@/app/api/_helpers/numberParsing";
 
-export async function GET(request: Request) {
+export async function handleCalendarParticipationRequest(
+  request: Request,
+  options?: { accountId?: string | null }
+) {
   const { searchParams } = new URL(request.url);
-  const accountId = searchParams.get("accountId")?.trim() ?? "";
+  const accountId = options?.accountId ?? "";
   const eventId = searchParams.get("eventId")?.trim() ?? "";
   const occurrenceStartAtMs = toFiniteNumber(searchParams.get("occurrenceStartAtMs"));
   if (!accountId || !eventId) {
@@ -32,3 +35,5 @@ export async function GET(request: Request) {
     );
   }
 }
+
+export { legacyAccountRouteRemoved as GET } from "@/app/api/_helpers/legacyAccountRouteRemoved";

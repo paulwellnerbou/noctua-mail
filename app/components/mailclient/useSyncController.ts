@@ -2,6 +2,13 @@
 
 import type React from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  buildAccountApiPath,
+  buildAccountFolderConsistencyPath,
+  buildAccountImapPollPath,
+  buildAccountImapStreamPath,
+  buildAccountSyncNewCandidatesPath
+} from "@/lib/accountApiPaths";
 import type { Folder, Message } from "@/lib/data";
 import type { SyncJobProgress, SyncJobResult, SyncNotificationMessage } from "./types";
 import { applyFlagsToMessage } from "./utils/messageHelpers";
@@ -124,6 +131,7 @@ export function useSyncController({
   const categoryRecomputePollInFlightRef = useRef(false);
   const categoryRecomputeJobIdRef = useRef<string | null>(null);
   const autoRepairAttemptedFolderIdsRef = useRef<Set<string>>(new Set());
+  const hasCompletedInitialConsistencyCheckRef = useRef(false);
   const lastUidNextByFolderRef = useRef<Record<string, number>>({});
   const lastNotifiedUidRef = useRef<Record<string, number>>({});
   const notifiedKeysRef = useRef<Set<string>>(new Set());
@@ -174,6 +182,7 @@ export function useSyncController({
         lastNotifiedUidRef.current[activeAccountId] = value;
       }
     }
+    hasCompletedInitialConsistencyCheckRef.current = false;
     autoRepairAttemptedFolderIdsRef.current = new Set();
   }, [activeAccountId]);
 
@@ -202,7 +211,7 @@ export function useSyncController({
     };
   }, [stopRecomputePoll, stopCategoryRecomputePoll]);
 
-  const waitForSyncJob = async (jobId: string): Promise<SyncJobResult> => {
+  const waitForSyncJob = async (accountId: string, jobId: string): Promise<SyncJobResult> => {
     const startedAt = Date.now();
     const timeoutMs = 1000 * 60 * 60;
     const clearProgress = () => {
@@ -215,9 +224,10 @@ export function useSyncController({
     };
     try {
       while (Date.now() - startedAt < timeoutMs) {
-        const statusRes = await apiFetch(`/api/sync/status?jobId=${encodeURIComponent(jobId)}`, {
-          cache: "no-store"
-        });
+        const statusRes = await apiFetch(
+          buildAccountApiPath(accountId, `/sync/status?jobId=${encodeURIComponent(jobId)}`),
+          { cache: "no-store" }
+        );
         if (!statusRes.ok) {
           throw new Error(await readErrorMessage(statusRes));
         }
@@ -267,10 +277,11 @@ export function useSyncController({
     mode?: "full" | "recent" | "new";
     recategorizeFolder?: boolean;
   }): Promise<SyncJobResult> => {
-    const syncRes = await apiFetch("/api/sync", {
+    const { accountId, ...requestBody } = payload;
+    const syncRes = await apiFetch(buildAccountApiPath(accountId, "/sync"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload)
+      body: JSON.stringify(requestBody)
     });
     if (!syncRes.ok) {
       throw new Error(await readErrorMessage(syncRes));
@@ -279,16 +290,16 @@ export function useSyncController({
     if (!data.jobId) {
       throw new Error("Sync job did not return a job id.");
     }
-    return waitForSyncJob(data.jobId);
+    return waitForSyncJob(accountId, data.jobId);
   };
 
   const planNewSyncCandidates = async (
     folderIds: string[]
   ): Promise<NewSyncFolderDecision[]> => {
-    const response = await apiFetch("/api/sync/new-candidates", {
+    const response = await apiFetch(buildAccountSyncNewCandidatesPath(activeAccountId), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ accountId: activeAccountId, folderIds })
+      body: JSON.stringify({ folderIds })
     });
     if (!response.ok) {
       throw new Error(await readErrorMessage(response));
@@ -307,10 +318,10 @@ export function useSyncController({
   const checkFolderConsistency = useCallback(async (
     folderId: string
   ): Promise<FolderConsistencyResult> => {
-    const response = await apiFetch("/api/folders/consistency", {
+    const response = await apiFetch(buildAccountFolderConsistencyPath(activeAccountId, folderId), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ accountId: activeAccountId, folderId })
+      body: JSON.stringify({})
     });
     if (!response.ok) {
       throw new Error(await readErrorMessage(response));
@@ -555,6 +566,8 @@ export function useSyncController({
 
     let cancelled = false;
     autoRepairAttemptedFolderIdsRef.current.add(repairKey);
+    const isInitialConsistencyCheck = !hasCompletedInitialConsistencyCheckRef.current;
+    hasCompletedInitialConsistencyCheckRef.current = true;
 
     void (async () => {
       try {
@@ -562,6 +575,11 @@ export function useSyncController({
         if (cancelled || !result.needsRepair) return;
 
         const mode = result.recommendedMode === "full" ? "full" : "new";
+        // Keep startup lightweight: defer the first automatic full repair until
+        // the folder is revisited or manually synced later in the session.
+        if (mode === "full" && isInitialConsistencyCheck) {
+          return;
+        }
         await syncFolderWithBackgroundRef.current(
           activeFolderId,
           true,
@@ -600,13 +618,14 @@ export function useSyncController({
 
   const recomputeThreads = async () => {
     if (!activeAccountId) return;
+    const accountId = activeAccountId;
     stopRecomputePoll();
     setIsRecomputingThreads(true);
     try {
-      const res = await apiFetch("/api/threads/recompute", {
+      const res = await apiFetch(buildAccountApiPath(accountId, "/threads/recompute"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ accountId: activeAccountId })
+        body: JSON.stringify({})
       });
       if (!res.ok) {
         reportError(await readErrorMessage(res));
@@ -628,7 +647,7 @@ export function useSyncController({
         recomputePollInFlightRef.current = true;
         try {
           const statusRes = await apiFetch(
-            `/api/threads/recompute/status?jobId=${encodeURIComponent(jobId)}`
+            buildAccountApiPath(accountId, `/threads/recompute/status?jobId=${encodeURIComponent(jobId)}`)
           );
           if (!statusRes.ok) {
             reportError(await readErrorMessage(statusRes));
@@ -673,13 +692,14 @@ export function useSyncController({
 
   const recomputeCategories = async () => {
     if (!activeAccountId) return;
+    const accountId = activeAccountId;
     stopCategoryRecomputePoll();
     setIsRecomputingCategories(true);
     try {
-      const res = await apiFetch("/api/categories/recompute", {
+      const res = await apiFetch(buildAccountApiPath(accountId, "/categories/recompute"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ accountId: activeAccountId })
+        body: JSON.stringify({})
       });
       if (!res.ok) {
         reportError(await readErrorMessage(res));
@@ -701,7 +721,7 @@ export function useSyncController({
         categoryRecomputePollInFlightRef.current = true;
         try {
           const statusRes = await apiFetch(
-            `/api/categories/recompute/status?jobId=${encodeURIComponent(jobId)}`
+            buildAccountApiPath(accountId, `/categories/recompute/status?jobId=${encodeURIComponent(jobId)}`)
           );
           if (!statusRes.ok) {
             reportError(await readErrorMessage(statusRes));
@@ -917,14 +937,13 @@ export function useSyncController({
       try {
         const inboxFolderId = inboxFolderRef.current?.id;
         const params = new URLSearchParams({
-          accountId: activeAccountId,
           mailbox: inboxMailboxPath
         });
         const since = inboxFolderId ? lastUidNextByFolderRef.current[inboxFolderId] : undefined;
         if (typeof since === "number" && Number.isFinite(since)) {
           params.set("sinceUidNext", String(since));
         }
-        const res = await apiFetch(`/api/imap/poll?${params.toString()}`);
+        const res = await apiFetch(buildAccountImapPollPath(activeAccountId, params));
         if (!res.ok) {
           reportError(await readErrorMessage(res));
           return;
@@ -1011,11 +1030,11 @@ export function useSyncController({
         startPoll(streamPollInterval);
         return;
       }
-      const params = new URLSearchParams({ accountId: activeAccountId });
+      const params = new URLSearchParams();
       if (activeFolderId) {
         params.set("activeFolderId", activeFolderId);
       }
-      const source = new EventSource(`/api/imap/stream?${params.toString()}`);
+      const source = new EventSource(buildAccountImapStreamPath(activeAccountId, params));
       streamSourceRef.current = source;
 
       source.addEventListener("open", () => {

@@ -7,15 +7,18 @@ import type { TopicColor } from "@/lib/data";
 
 type Params = { params: Promise<{ id: string }> };
 
-export async function PUT(request: Request, { params }: Params) {
-  const { id: topicId } = await params;
+export async function handleUpdateTopicRequest(
+  request: Request,
+  options?: { accountId?: string | null; topicId?: string | null }
+) {
   const body = (await request.json().catch(() => null)) as {
     accountId?: string;
     name?: string;
     color?: string;
   } | null;
 
-  const accountId = body?.accountId?.trim() ?? "";
+  const accountId = options?.accountId ?? "";
+  const topicId = options?.topicId?.trim() ?? "";
   const context = await requireAccountContext(request, accountId);
   if (context instanceof NextResponse) return context;
 
@@ -35,10 +38,13 @@ export async function PUT(request: Request, { params }: Params) {
   return NextResponse.json({ ok: true, topic });
 }
 
-export async function DELETE(request: Request, { params }: Params) {
-  const { id: topicId } = await params;
+export async function handleDeleteTopicRequest(
+  request: Request,
+  options?: { accountId?: string | null; topicId?: string | null }
+) {
   const { searchParams } = new URL(request.url);
-  const accountId = searchParams.get("accountId") ?? "";
+  const accountId = options?.accountId ?? "";
+  const topicId = options?.topicId?.trim() ?? "";
   const context = await requireAccountContext(request, accountId);
   if (context instanceof NextResponse) return context;
 
@@ -48,3 +54,8 @@ export async function DELETE(request: Request, { params }: Params) {
   }
   return NextResponse.json({ ok: true });
 }
+
+export {
+  legacyAccountRouteRemoved as PUT,
+  legacyAccountRouteRemoved as DELETE
+} from "@/app/api/_helpers/legacyAccountRouteRemoved";

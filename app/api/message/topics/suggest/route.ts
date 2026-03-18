@@ -1,21 +1,35 @@
 import { NextResponse } from "next/server";
 import { requireAccountContext } from "@/app/api/_helpers/accountContext";
-import { getTopicSuggestionsForMessage } from "@/lib/topics";
+import { getTopicSuggestionsForThread } from "@/lib/topics";
 
-// GET /api/message/topics/suggest?accountId=...&threadId=...&fromEmail=...&listId=...&to=...&cc=...
-export async function GET(request: Request) {
+export const dynamic = "force-dynamic";
+
+// GET /api/message/topics/suggest?accountId=...&threadId=...
+export async function handleMessageTopicSuggestionsRequest(
+  request: Request,
+  options?: { accountId?: string | null }
+) {
   const { searchParams } = new URL(request.url);
-  const accountId = searchParams.get("accountId") ?? "";
+  const accountId = options?.accountId ?? "";
   const context = await requireAccountContext(request, accountId);
   if (context instanceof NextResponse) return context;
 
-  const suggestions = await getTopicSuggestionsForMessage(accountId, {
-    threadId: searchParams.get("threadId"),
-    fromEmail: searchParams.get("fromEmail"),
-    to: searchParams.get("to"),
-    cc: searchParams.get("cc"),
-    listId: searchParams.get("listId"),
-  });
+  const suggestions = await getTopicSuggestionsForThread(
+    accountId,
+    searchParams.get("threadId") ?? "",
+    {
+    accountEmail: context.account.email
+    }
+  );
 
-  return NextResponse.json({ ok: true, suggestions });
+  return NextResponse.json(
+    { ok: true, suggestions },
+    {
+      headers: {
+        "Cache-Control": "no-store, max-age=0"
+      }
+    }
+  );
 }
+
+export { legacyAccountRouteRemoved as GET } from "@/app/api/_helpers/legacyAccountRouteRemoved";

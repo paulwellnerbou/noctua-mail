@@ -1,21 +1,20 @@
 import { NextResponse } from "next/server";
-import { requireSessionAccountOr403, requireSessionOr401 } from "@/lib/auth";
+import { requireAccountContext } from "@/app/api/_helpers/accountContext";
 import { resetCategoryLinearModel } from "@/lib/db";
 
-export async function POST(request: Request) {
-  const session = requireSessionOr401(request);
-  if (session instanceof NextResponse) return session;
-
+export async function handleCategoryModelResetRequest(
+  request: Request,
+  options?: { accountId?: string | null }
+) {
   const payload = (await request.json().catch(() => null)) as
     | {
         accountId?: string;
       }
     | null;
-  const accountId = payload?.accountId?.trim() ?? "";
-  if (!accountId) {
-    return NextResponse.json({ ok: false, message: "Missing accountId" }, { status: 400 });
-  }
-  const access = await requireSessionAccountOr403(session, accountId);
+  const accountId = options?.accountId ?? "";
+  const access = await requireAccountContext(request, accountId, {
+    missingAccountMessage: "Missing accountId"
+  });
   if (access instanceof NextResponse) return access;
 
   try {
@@ -33,3 +32,5 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: false, message }, { status: 500 });
   }
 }
+
+export { legacyAccountRouteRemoved as POST } from "@/app/api/_helpers/legacyAccountRouteRemoved";

@@ -1,4 +1,5 @@
 import { useCallback } from "react";
+import { buildAccountAttachmentPath } from "@/lib/accountApiPaths";
 import type { Message, Attachment } from "@/lib/data";
 import { createComposeAttachment } from "@/lib/mail/composeAttachment";
 import { isMeaningfulNonInlineAttachment } from "@/lib/messageFlags";
@@ -83,9 +84,7 @@ export function useComposeHandlers({
     const results = await Promise.all(
       toFetch.map(async (att) => {
         try {
-          const res = await apiFetch(
-            `/api/attachment?accountId=${encodeURIComponent(message.accountId)}&messageId=${encodeURIComponent(message.id)}&attachmentId=${encodeURIComponent(att.id)}`
-          );
+          const res = await apiFetch(buildAccountAttachmentPath(message.accountId, message.id, att.id));
           if (!res.ok) return null;
           const blob = await res.blob();
           const dataUrl = await new Promise<string>((resolve, reject) => {
