@@ -51,6 +51,26 @@ export type TopicTransferImportSummary = {
   resolvedThreadCount: number;
   unresolvedThreadCount: number;
 };
+export type TopicSuggestionExplanationSignal = {
+  type: TopicSuggestionSignal;
+  value: string;
+  weight: number;
+};
+export type TopicSuggestionExplanationTopic = {
+  topic: Topic;
+  suggestionScore: number;
+  matchCount: number;
+  matchedSignals: TopicSuggestionExplanationSignal[];
+  matchedThreads: Array<{
+    threadId: string;
+    score: number;
+    signals: TopicSuggestionExplanationSignal[];
+  }>;
+};
+export type TopicSuggestionExplanation = {
+  signals: TopicSuggestionExplanationSignal[];
+  topics: TopicSuggestionExplanationTopic[];
+};
 
 type MessageSignals = TopicSignalSource & {
   /** threadId of the thread being evaluated — excluded from learning corpus */
@@ -66,6 +86,12 @@ type TopicSuggestionSignals = {
   threadId?: string | null;
 };
 
+type TopicThreadSignalRow = {
+  threadId?: string | null;
+  signalType?: string | null;
+  signalValue?: string | null;
+};
+
 const TOPIC_SUGGESTION_WEIGHTS = {
   senderEmail: 4,
   listId: 4,
@@ -73,6 +99,10 @@ const TOPIC_SUGGESTION_WEIGHTS = {
   recipient: 2,
   senderDomain: 1
 } as const;
+
+function getTopicSuggestionWeight(type: TopicSuggestionSignal) {
+  return TOPIC_SUGGESTION_WEIGHTS[type];
+}
 
 function topicSuggestionSignalsFromEntries(
   entries: TopicSignalEntry[],
@@ -128,6 +158,81 @@ function normalizeTopicSuggestionSignals(
   );
 }
 
+function topicSuggestionEntriesFromThreadSignalRows(
+  rows: Array<Pick<TopicThreadSignalRow, "signalType" | "signalValue">>,
+  options?: {
+    accountEmail?: string | null;
+  }
+): TopicSignalEntry[] {
+  const accountEmail = options?.accountEmail?.toLowerCase().trim() || null;
+  return rows.flatMap((row) => {
+    const type = (row.signalType ?? "").trim() as TopicSuggestionSignal;
+    const value = (row.signalValue ?? "").trim();
+    if (!TOPIC_SUGGESTION_SIGNALS.includes(type) || !value) return [];
+    if (type === "recipient" && accountEmail && value.toLowerCase() === accountEmail) {
+      return [];
+    }
+    return [{ type, value }];
+  });
+}
+
+function getTopicSuggestionSignalsForThreadsFromDb(
+  db: any,
+  accountId: string,
+  threadIds: string[],
+  options?: {
+    accountEmail?: string | null;
+  }
+): Map<string, TopicSuggestionSignals> {
+  const normalizedThreadIds = Array.from(
+    new Set(threadIds.map((threadId) => threadId.trim()).filter(Boolean))
+  );
+  const result = new Map<string, TopicSuggestionSignals>();
+  if (normalizedThreadIds.length === 0) return result;
+
+  normalizedThreadIds.forEach((threadId) => {
+    result.set(threadId, topicSuggestionSignalsFromEntries([], threadId));
+  });
+
+  const placeholders = normalizedThreadIds.map(() => "?").join(",");
+  const rows = db
+    .prepare(
+      `SELECT threadId, signalType, signalValue
+       FROM thread_signals
+       WHERE accountId = ? AND threadId IN (${placeholders})
+       ORDER BY threadId ASC, signalType ASC, signalValue ASC`
+    )
+    .all(accountId, ...normalizedThreadIds) as TopicThreadSignalRow[];
+
+  let activeThreadId = "";
+  let activeRows: TopicThreadSignalRow[] = [];
+
+  const flush = () => {
+    if (!activeThreadId) return;
+    result.set(
+      activeThreadId,
+      topicSuggestionSignalsFromEntries(
+        topicSuggestionEntriesFromThreadSignalRows(activeRows, options),
+        activeThreadId
+      )
+    );
+  };
+
+  rows.forEach((row) => {
+    const threadId = (row.threadId ?? "").trim();
+    if (!threadId) return;
+    if (threadId !== activeThreadId) {
+      flush();
+      activeThreadId = threadId;
+      activeRows = [];
+    }
+    activeRows.push(row);
+  });
+
+  flush();
+  return result;
+}
+
 async function getTopicSuggestionSignalsForThread(
   accountId: string,
   threadId: string,
@@ -135,32 +240,11 @@ async function getTopicSuggestionSignalsForThread(
     accountEmail?: string | null;
   }
 ): Promise<TopicSuggestionSignals> {
-  const accountEmail = options?.accountEmail?.toLowerCase().trim() || null;
   return withAccountDb(accountId, (db) => {
-    const rows = db
-      .prepare(
-        `SELECT signalType, signalValue
-         FROM thread_signals
-         WHERE accountId = ? AND threadId = ?
-         ORDER BY signalType ASC, signalValue ASC`
-      )
-      .all(accountId, threadId) as Array<{
-      signalType?: string | null;
-      signalValue?: string | null;
-    }>;
-
-    const entries = rows
-      .flatMap((row) => {
-        const type = (row.signalType ?? "").trim() as TopicSuggestionSignal;
-        const value = (row.signalValue ?? "").trim();
-        if (!TOPIC_SUGGESTION_SIGNALS.includes(type) || !value) return [];
-        if (type === "recipient" && accountEmail && value.toLowerCase() === accountEmail) {
-          return [];
-        }
-        return [{ type, value }];
-      });
-
-    return topicSuggestionSignalsFromEntries(entries, threadId);
+    return (
+      getTopicSuggestionSignalsForThreadsFromDb(db, accountId, [threadId], options).get(threadId) ??
+      topicSuggestionSignalsFromEntries([], threadId)
+    );
   });
 }
 
@@ -236,6 +320,152 @@ function getTopicSuggestionsForSignals(
     suggestionScore: row.suggestionScore as number,
     matchCount: row.matchCount as number
   }));
+}
+
+function getTopicSuggestionExplanationForSignals(
+  db: any,
+  accountId: string,
+  signals: TopicSuggestionSignals
+): TopicSuggestionExplanation {
+  const signalEntries = topicSuggestionSignalEntries(signals);
+  if (signalEntries.length === 0) {
+    return { signals: [], topics: [] };
+  }
+
+  const conditions: string[] = [];
+  const conditionArgs: any[] = [];
+  signalEntries.forEach((entry) => {
+    conditions.push(`(tls.signalType = ? AND tls.signalValue = ?)`);
+    conditionArgs.push(entry.type, entry.value);
+  });
+
+  if (conditions.length === 0) {
+    return { signals: [], topics: [] };
+  }
+
+  const queryArgs: any[] = [
+    accountId,
+    ...conditionArgs,
+    ...(signals.threadId ? [signals.threadId] : []),
+    accountId
+  ];
+  const rows = db
+    .prepare(
+      `SELECT t.*,
+              tls.topicId,
+              tls.threadId,
+              tls.signalType,
+              tls.signalValue
+       FROM topic_learning_signals tls
+       JOIN topics t
+         ON t.id = tls.topicId
+        AND t.accountId = tls.accountId
+       WHERE tls.accountId = ?
+         AND (${conditions.join(" OR ")})
+         ${signals.threadId ? "AND tls.threadId != ?" : ""}
+         AND t.accountId = ?
+       ORDER BY t.name ASC, tls.threadId ASC, tls.signalType ASC, tls.signalValue ASC`
+    )
+    .all(...queryArgs) as Array<{
+    topicId: string;
+    threadId: string;
+    signalType: TopicSuggestionSignal;
+    signalValue: string;
+  } & Record<string, any>>;
+
+  const currentSignals = signalEntries.map((entry) => ({
+    ...entry,
+    weight: getTopicSuggestionWeight(entry.type)
+  }));
+  const topicsById = new Map<
+    string,
+    {
+      topic: Topic;
+      matchedSignals: Map<string, TopicSuggestionExplanationSignal>;
+      matchedThreads: Map<
+        string,
+        {
+          threadId: string;
+          score: number;
+          signals: Map<string, TopicSuggestionExplanationSignal>;
+        }
+      >;
+    }
+  >();
+
+  rows.forEach((row) => {
+    const type = (row.signalType ?? "").trim() as TopicSuggestionSignal;
+    const value = (row.signalValue ?? "").trim();
+    const threadId = (row.threadId ?? "").trim();
+    if (!TOPIC_SUGGESTION_SIGNALS.includes(type) || !value || !threadId) return;
+    const weight = getTopicSuggestionWeight(type);
+    const signalKey = `${type}\u0000${value}`;
+    const topicState = topicsById.get(row.topicId) ?? {
+      topic: rowToTopic(row),
+      matchedSignals: new Map<string, TopicSuggestionExplanationSignal>(),
+      matchedThreads: new Map<
+        string,
+        {
+          threadId: string;
+          score: number;
+          signals: Map<string, TopicSuggestionExplanationSignal>;
+        }
+      >()
+    };
+    topicState.matchedSignals.set(signalKey, { type, value, weight });
+    const threadState = topicState.matchedThreads.get(threadId) ?? {
+      threadId,
+      score: 0,
+      signals: new Map<string, TopicSuggestionExplanationSignal>()
+    };
+    if (!threadState.signals.has(signalKey)) {
+      threadState.signals.set(signalKey, { type, value, weight });
+      threadState.score += weight;
+    }
+    topicState.matchedThreads.set(threadId, threadState);
+    topicsById.set(row.topicId, topicState);
+  });
+
+  const topics = Array.from(topicsById.values())
+    .map((topicState) => {
+      const matchedThreads = Array.from(topicState.matchedThreads.values())
+        .map((threadState) => ({
+          threadId: threadState.threadId,
+          score: threadState.score,
+          signals: Array.from(threadState.signals.values()).sort((a, b) => {
+            if (b.weight !== a.weight) return b.weight - a.weight;
+            if (a.type !== b.type) return a.type.localeCompare(b.type);
+            return a.value.localeCompare(b.value);
+          })
+        }))
+        .sort((a, b) => {
+          if (b.score !== a.score) return b.score - a.score;
+          return a.threadId.localeCompare(b.threadId);
+        });
+      const suggestionScore = matchedThreads.reduce((sum, threadState) => sum + threadState.score, 0);
+      return {
+        topic: {
+          ...topicState.topic,
+          suggestionScore,
+          matchCount: matchedThreads.length
+        },
+        suggestionScore,
+        matchCount: matchedThreads.length,
+        matchedSignals: Array.from(topicState.matchedSignals.values()).sort((a, b) => {
+          if (b.weight !== a.weight) return b.weight - a.weight;
+          if (a.type !== b.type) return a.type.localeCompare(b.type);
+          return a.value.localeCompare(b.value);
+        }),
+        matchedThreads
+      };
+    })
+    .sort((a, b) => {
+      if (b.suggestionScore !== a.suggestionScore) return b.suggestionScore - a.suggestionScore;
+      if (b.matchCount !== a.matchCount) return b.matchCount - a.matchCount;
+      return a.topic.name.localeCompare(b.topic.name);
+    });
+
+  return { signals: currentSignals, topics };
 }
 
 type NormalizedTopicTransferData = {
@@ -1011,4 +1241,53 @@ export async function getTopicSuggestionsForThread(
   if (!normalizedThreadId) return [];
   const signals = await getTopicSuggestionSignalsForThread(accountId, normalizedThreadId, options);
   return withAccountDb(accountId, (db) => getTopicSuggestionsForSignals(db, accountId, signals));
+}
+
+export async function getTopicSuggestionExplanationForThread(
+  accountId: string,
+  threadId: string,
+  options?: {
+    accountEmail?: string | null;
+  }
+): Promise<TopicSuggestionExplanation> {
+  const normalizedThreadId = threadId.trim();
+  if (!normalizedThreadId) return { signals: [], topics: [] };
+  const signals = await getTopicSuggestionSignalsForThread(accountId, normalizedThreadId, options);
+  return withAccountDb(accountId, (db) =>
+    getTopicSuggestionExplanationForSignals(db, accountId, signals)
+  );
+}
+
+export async function getTopicSuggestionsForThreads(
+  accountId: string,
+  threadIds: string[],
+  options?: {
+    accountEmail?: string | null;
+  }
+): Promise<Map<string, Topic[]>> {
+  const normalizedThreadIds = Array.from(
+    new Set(threadIds.map((threadId) => threadId.trim()).filter(Boolean))
+  );
+  if (normalizedThreadIds.length === 0) return new Map();
+
+  return withAccountDb(accountId, (db) => {
+    const signalsByThreadId = getTopicSuggestionSignalsForThreadsFromDb(
+      db,
+      accountId,
+      normalizedThreadIds,
+      options
+    );
+    const result = new Map<string, Topic[]>();
+
+    normalizedThreadIds.forEach((threadId) => {
+      const signals = signalsByThreadId.get(threadId);
+      if (!signals) return;
+      const suggestions = getTopicSuggestionsForSignals(db, accountId, signals);
+      if (suggestions.length > 0) {
+        result.set(threadId, suggestions);
+      }
+    });
+
+    return result;
+  });
 }

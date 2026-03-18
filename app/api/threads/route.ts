@@ -1,22 +1,17 @@
 import { NextResponse } from "next/server";
+import { requireAccountContext } from "@/app/api/_helpers/accountContext";
+import { enrichMessagesWithThreadTopics } from "@/app/api/_helpers/enrichMessagesWithThreadTopics";
 import { listThreads } from "@/lib/db";
-import { getTopicsForThreads } from "@/lib/topics";
-import { requireSessionAccountOr403, requireSessionOr401 } from "@/lib/auth";
 import { normalizeThreadDateSource } from "@/lib/threadDate";
 
 export async function handleListThreadsRequest(
   request: Request,
   options?: { accountId?: string | null }
 ) {
-  const session = requireSessionOr401(request);
-  if (session instanceof NextResponse) return session;
   const { searchParams } = new URL(request.url);
   const accountId = options?.accountId ?? "";
-  if (!accountId) {
-    return NextResponse.json({ ok: false, message: "Missing accountId" }, { status: 400 });
-  }
-  const access = await requireSessionAccountOr403(session, accountId);
-  if (access instanceof NextResponse) return access;
+  const context = await requireAccountContext(request, accountId);
+  if (context instanceof NextResponse) return context;
   const page = Number(searchParams.get("page") ?? "1") || 1;
   const pageSize = Number(searchParams.get("pageSize") ?? "300") || 300;
   const groupBy = searchParams.get("groupBy") ?? "date";
@@ -32,7 +27,7 @@ export async function handleListThreadsRequest(
   const query = searchParams.get("q");
 
   const data = await listThreads({
-    accountId,
+    accountId: context.accountId,
     folderId: folderId ?? undefined,
     page,
     pageSize,
@@ -44,11 +39,11 @@ export async function handleListThreadsRequest(
     attachmentsOnly,
     excludedFolderIds
   });
-  const threadIds = [...new Set(data.items.map((m) => m.threadId).filter(Boolean))];
-  const topicsMap = threadIds.length > 0 ? await getTopicsForThreads(accountId, threadIds) : new Map();
-  for (const item of data.items) {
-    if (item.threadId) item.topics = topicsMap.get(item.threadId) ?? [];
-  }
+  await enrichMessagesWithThreadTopics(data.items, {
+    accountId: context.accountId,
+    accountEmail: context.account.email,
+    includeSuggestions: true
+  });
 
   return NextResponse.json({
     items: data.items,

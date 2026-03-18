@@ -103,7 +103,7 @@
 
 .row:hover {
   border-color: var(--list-row-hover-border);
-  background: var(--list-row-hover-bg);
+  background: var(--topic-tint-selected, var(--list-row-hover-bg));
 }
 
 .rowExternalState:hover {

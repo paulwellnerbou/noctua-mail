@@ -133,6 +133,7 @@ export type Message = {
   groupKey?: string;
   threadSortDateValue?: number;
   topics?: Topic[];
+  topicSuggestions?: Topic[];
 };
 
 export const TOPIC_COLORS = [

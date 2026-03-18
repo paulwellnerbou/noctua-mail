@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
+import { requireAccountContext } from "@/app/api/_helpers/accountContext";
 import { getMessageById } from "@/lib/db";
-import { requireSessionAccountOr403, requireSessionOr401 } from "@/lib/auth";
+import { getTopicSuggestionsForThread, getTopicsForThread } from "@/lib/topics";
 import { appendMessageIdToError } from "./errorFormatting";
 
 export async function handleGetMessageRequest(
@@ -10,22 +11,32 @@ export async function handleGetMessageRequest(
     messageId?: string | null;
   }
 ) {
-  const session = requireSessionOr401(request);
-  if (session instanceof NextResponse) return session;
   const { searchParams } = new URL(request.url);
   const accountId = options?.accountId ?? "";
   const messageId = options?.messageId ?? "";
-  if (!accountId || !messageId) {
+  const context = await requireAccountContext(request, accountId, {
+    missingAccountMessage: "Missing accountId or messageId"
+  });
+  if (context instanceof NextResponse) return context;
+  if (!messageId) {
     return NextResponse.json({ ok: false, message: "Missing accountId or messageId" }, { status: 400 });
   }
-  const access = requireSessionAccountOr403(session, accountId);
-  if (access instanceof NextResponse) return access;
-  const message = await getMessageById(accountId, messageId);
+  const message = await getMessageById(context.accountId, messageId);
   if (!message) {
     return NextResponse.json(
       { ok: false, message: appendMessageIdToError("Message not found", messageId) },
       { status: 404 }
     );
+  }
+  if (message.threadId) {
+    message.topics = await getTopicsForThread(context.accountId, message.threadId);
+    if (message.topics.length === 0) {
+      message.topicSuggestions = await getTopicSuggestionsForThread(
+        context.accountId,
+        message.threadId,
+        { accountEmail: context.account.email }
+      );
+    }
   }
   return NextResponse.json({ ok: true, message });
 }

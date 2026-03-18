@@ -3,7 +3,16 @@ import { mkdtempSync, rmSync } from "fs";
 import { tmpdir } from "os";
 import path from "path";
 import type { Account, Folder, Message } from "./data";
-import { createTopic, getTopicStats, getTopicSuggestionsForMessage, getTopicSuggestionsForThread, getTopicsForThread, setThreadTopics } from "./topics";
+import {
+  createTopic,
+  getTopicSuggestionExplanationForThread,
+  getTopicStats,
+  getTopicSuggestionsForMessage,
+  getTopicSuggestionsForThread,
+  getTopicSuggestionsForThreads,
+  getTopicsForThread,
+  setThreadTopics
+} from "./topics";
 
 const previousDataDir = process.env.NOCTUA_DATA_DIR;
 const previousIdleMs = process.env.ACCOUNT_DB_IDLE_MS;
@@ -413,6 +422,154 @@ describe("topic suggestions", () => {
     expect(suggestions[0]?.matchCount).toBe(1);
     expect(suggestions[1]?.suggestionScore).toBe(7);
     expect(suggestions[1]?.matchCount).toBe(1);
+  });
+
+  test("explains why a thread topic suggestion was made", async () => {
+    const accountId = "acc-topic-suggestions-thread-explain";
+    const folder = buildFolder(accountId);
+    const { saveFoldersForAccount, upsertAccount, upsertMessages } = await dbModulePromise;
+
+    await upsertAccount(buildAccount(accountId));
+    await saveFoldersForAccount(accountId, [folder]);
+
+    await upsertMessages(
+      accountId,
+      folder.id,
+      [
+        buildMessage({
+          id: "msg-history",
+          accountId,
+          folderId: folder.id,
+          threadId: "thread-history",
+          messageId: "<history-explain@example.com>",
+          from: "GitLab <gitlab@mg.gitlab.com>",
+          fromEmail: "gitlab@mg.gitlab.com",
+          to: "owner@example.com",
+          listId: "linon/erwin/planning <40384606.planning.erwin.linon.gitlab.com>",
+          dateValue: Date.UTC(2026, 2, 18, 10, 0, 0)
+        }),
+        buildMessage({
+          id: "msg-target",
+          accountId,
+          folderId: folder.id,
+          threadId: "thread-target",
+          messageId: "<target-explain@example.com>",
+          from: "GitLab <gitlab@mg.gitlab.com>",
+          fromEmail: "gitlab@mg.gitlab.com",
+          to: "owner@example.com",
+          listId: "linon/erwin/planning <40384606.planning.erwin.linon.gitlab.com>",
+          dateValue: Date.UTC(2026, 2, 18, 10, 5, 0)
+        })
+      ],
+      true,
+      { recomputeThreads: false }
+    );
+
+    const topic = await createTopic(accountId, "Linon", "orange");
+    await setThreadTopics(accountId, "thread-history", [topic.id]);
+
+    const explanation = await getTopicSuggestionExplanationForThread(accountId, "thread-target", {
+      accountEmail: "owner@example.com"
+    });
+
+    expect(explanation.signals).toEqual(expect.arrayContaining([
+      { type: "senderEmail", value: "gitlab@mg.gitlab.com", weight: 4 },
+      { type: "senderDomain", value: "mg.gitlab.com", weight: 1 },
+      {
+        type: "listId",
+        value: "linon/erwin/planning <40384606.planning.erwin.linon.gitlab.com>",
+        weight: 4
+      }
+    ]));
+    expect(explanation.topics).toHaveLength(1);
+    expect(explanation.topics[0]?.topic.name).toBe("Linon");
+    expect(explanation.topics[0]?.suggestionScore).toBe(9);
+    expect(explanation.topics[0]?.matchCount).toBe(1);
+    expect(explanation.topics[0]?.matchedThreads).toEqual([
+      {
+        threadId: "thread-history",
+        score: 9,
+        signals: [
+          {
+            type: "listId",
+            value: "linon/erwin/planning <40384606.planning.erwin.linon.gitlab.com>",
+            weight: 4
+          },
+          { type: "senderEmail", value: "gitlab@mg.gitlab.com", weight: 4 },
+          { type: "senderDomain", value: "mg.gitlab.com", weight: 1 }
+        ]
+      }
+    ]);
+  });
+
+  test("batches thread suggestions and only returns matches for topic-less threads", async () => {
+    const accountId = "acc-topic-suggestions-thread-batch";
+    const folder = buildFolder(accountId);
+    const { saveFoldersForAccount, upsertAccount, upsertMessages } = await dbModulePromise;
+
+    await upsertAccount(buildAccount(accountId));
+    await saveFoldersForAccount(accountId, [folder]);
+
+    await upsertMessages(
+      accountId,
+      folder.id,
+      [
+        buildMessage({
+          id: "msg-history",
+          accountId,
+          folderId: folder.id,
+          threadId: "thread-history",
+          messageId: "<history-batch@example.com>",
+          from: "GitLab <gitlab@mg.gitlab.com>",
+          fromEmail: "gitlab@mg.gitlab.com",
+          to: "owner@example.com",
+          listId: "linon/erwin/planning <40384606.planning.erwin.linon.gitlab.com>",
+          dateValue: Date.UTC(2026, 2, 18, 10, 0, 0)
+        }),
+        buildMessage({
+          id: "msg-target-match",
+          accountId,
+          folderId: folder.id,
+          threadId: "thread-target-match",
+          messageId: "<target-match@example.com>",
+          from: "GitLab <gitlab@mg.gitlab.com>",
+          fromEmail: "gitlab@mg.gitlab.com",
+          to: "owner@example.com",
+          listId: "linon/erwin/planning <40384606.planning.erwin.linon.gitlab.com>",
+          dateValue: Date.UTC(2026, 2, 18, 10, 5, 0)
+        }),
+        buildMessage({
+          id: "msg-target-miss",
+          accountId,
+          folderId: folder.id,
+          threadId: "thread-target-miss",
+          messageId: "<target-miss@example.com>",
+          from: "Newsletter <newsletter@example.com>",
+          fromEmail: "newsletter@example.com",
+          to: "owner@example.com",
+          dateValue: Date.UTC(2026, 2, 18, 10, 10, 0)
+        })
+      ],
+      true,
+      { recomputeThreads: false }
+    );
+
+    const topic = await createTopic(accountId, "Linon", "orange");
+    await setThreadTopics(accountId, "thread-history", [topic.id]);
+
+    const suggestionsByThreadId = await getTopicSuggestionsForThreads(
+      accountId,
+      ["thread-target-match", "thread-target-miss"],
+      {
+        accountEmail: "owner@example.com"
+      }
+    );
+
+    expect(suggestionsByThreadId.get("thread-target-match")?.map((item) => item.name)).toEqual([
+      "Linon"
+    ]);
+    expect(suggestionsByThreadId.get("thread-target-match")?.[0]?.suggestionScore).toBe(9);
+    expect(suggestionsByThreadId.has("thread-target-miss")).toBe(false);
   });
 
   test("refreshes persisted thread signals when new messages add learning signals to an existing topic thread", async () => {

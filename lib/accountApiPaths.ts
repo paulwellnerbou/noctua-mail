@@ -50,6 +50,13 @@ export function buildAccountMessageTopicSuggestionsPath(
   return appendQuery(buildAccountApiPath(accountId, "/message-topics/suggest"), query);
 }
 
+export function buildAccountMessageTopicSuggestionExplainPath(
+  accountId: string,
+  query?: URLSearchParams | string | null
+) {
+  return appendQuery(buildAccountApiPath(accountId, "/message-topics/explain"), query);
+}
+
 export function buildAccountCategoriesDebugPath(
   accountId: string,
   query?: URLSearchParams | string | null

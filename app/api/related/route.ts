@@ -1,13 +1,12 @@
 import { NextResponse } from "next/server";
+import { requireAccountContext } from "@/app/api/_helpers/accountContext";
+import { enrichMessagesWithThreadTopics } from "@/app/api/_helpers/enrichMessagesWithThreadTopics";
 import { listRelatedMessages } from "@/lib/db";
-import { requireSessionAccountOr403, requireSessionOr401 } from "@/lib/auth";
 
 export async function handleListRelatedMessagesRequest(
   request: Request,
   options?: { accountId?: string | null }
 ) {
-  const session = requireSessionOr401(request);
-  if (session instanceof NextResponse) return session;
   const { searchParams } = new URL(request.url);
   const accountId = options?.accountId ?? "";
   const relatedId = searchParams.get("relatedId");
@@ -17,8 +16,10 @@ export async function handleListRelatedMessagesRequest(
       { status: 400 }
     );
   }
-  const access = await requireSessionAccountOr403(session, accountId);
-  if (access instanceof NextResponse) return access;
+  const context = await requireAccountContext(request, accountId, {
+    missingAccountMessage: "Missing accountId or relatedId"
+  });
+  if (context instanceof NextResponse) return context;
   const page = Math.max(1, Number(searchParams.get("page") ?? "1") || 1);
   const pageSize = Math.max(1, Math.min(1000, Number(searchParams.get("pageSize") ?? "300") || 300));
   const groupBy = searchParams.get("groupBy") ?? "date";
@@ -30,7 +31,7 @@ export async function handleListRelatedMessagesRequest(
   const attachmentsOnly = searchParams.get("attachments") === "1";
 
   const data = await listRelatedMessages({
-    accountId,
+    accountId: context.accountId,
     relatedId,
     page,
     pageSize,
@@ -38,6 +39,11 @@ export async function handleListRelatedMessagesRequest(
     badges,
     attachmentsOnly,
     excludedFolderIds
+  });
+  await enrichMessagesWithThreadTopics(data.items, {
+    accountId: context.accountId,
+    accountEmail: context.account.email,
+    includeSuggestions: true
   });
 
   return NextResponse.json({

@@ -38,7 +38,7 @@
 }
 
 .messageRowContainer:hover {
-  background: var(--list-row-hover-bg);
+  background: var(--topic-tint-selected, var(--list-row-hover-bg));
   border-color: var(--list-row-hover-border);
 }
 
