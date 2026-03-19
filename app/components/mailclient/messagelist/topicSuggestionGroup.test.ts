@@ -4,7 +4,9 @@ import {
   buildTopicSuggestionGroup,
   buildTopicSuggestionGroupKey,
   buildTopicSuggestionRankedMessages,
-  isTopicSuggestionGroupKey
+  isTopicSuggestionGroupKey,
+  pruneTopicSuggestionMessages,
+  shouldRenderTopicSuggestionGroup
 } from "./topicSuggestionGroup";
 
 function makeMessage(
@@ -82,5 +84,45 @@ describe("topicSuggestionGroup helpers", () => {
     expect(sortByThread.get("thread-strong")).toBeGreaterThan(
       sortByThread.get("thread-weak") ?? 0
     );
+  });
+
+  it("removes moved suggestion messages and drops suggestions for emptied threads", () => {
+    const result = pruneTopicSuggestionMessages({
+      messages: [
+        makeMessage("msg-1", "thread-1", 100),
+        makeMessage("msg-2", "thread-1", 90),
+        makeMessage("msg-3", "thread-2", 80)
+      ],
+      suggestions: [
+        { threadId: "thread-1", suggestionScore: 12 },
+        { threadId: "thread-2", suggestionScore: 9 }
+      ],
+      removedMessageIds: ["msg-1", "msg-2"]
+    });
+
+    expect(result.changed).toBe(true);
+    expect(result.messages.map((message) => message.id)).toEqual(["msg-3"]);
+    expect(result.suggestions).toEqual([
+      { threadId: "thread-2", suggestionScore: 9 }
+    ]);
+  });
+
+  it("hides the suggestion group once suggestions are loaded and empty", () => {
+    expect(
+      shouldRenderTopicSuggestionGroup({
+        enabled: true,
+        rankedMessages: [],
+        isLoading: false,
+        isLoaded: true
+      })
+    ).toBe(false);
+    expect(
+      shouldRenderTopicSuggestionGroup({
+        enabled: true,
+        rankedMessages: [],
+        isLoading: false,
+        isLoaded: false
+      })
+    ).toBe(true);
   });
 });

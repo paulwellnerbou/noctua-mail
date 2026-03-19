@@ -59,6 +59,61 @@ export function buildTopicSuggestionRankedMessages(
   return Array.from(deduped.values());
 }
 
+export function pruneTopicSuggestionMessages(params: {
+  messages: Message[];
+  suggestions: TopicThreadSuggestion[];
+  removedMessageIds: string[];
+}) {
+  const removedIdSet = new Set(
+    params.removedMessageIds
+      .map((id) => id.trim())
+      .filter(Boolean)
+  );
+  if (removedIdSet.size === 0) {
+    return {
+      messages: params.messages,
+      suggestions: params.suggestions,
+      changed: false
+    };
+  }
+
+  const nextMessages = params.messages.filter((message) => !removedIdSet.has(message.id));
+  if (nextMessages.length === params.messages.length) {
+    return {
+      messages: params.messages,
+      suggestions: params.suggestions,
+      changed: false
+    };
+  }
+
+  const remainingThreadIds = new Set(
+    nextMessages
+      .map((message) => String(message.threadId ?? "").trim())
+      .filter(Boolean)
+  );
+  const nextSuggestions = params.suggestions.filter((suggestion) =>
+    remainingThreadIds.has(suggestion.threadId.trim())
+  );
+
+  return {
+    messages: nextMessages,
+    suggestions: nextSuggestions,
+    changed:
+      nextMessages.length !== params.messages.length ||
+      nextSuggestions.length !== params.suggestions.length
+  };
+}
+
+export function shouldRenderTopicSuggestionGroup(params: {
+  enabled: boolean;
+  rankedMessages: Message[];
+  isLoading: boolean;
+  isLoaded: boolean;
+}) {
+  if (!params.enabled) return false;
+  return params.rankedMessages.length > 0 || params.isLoading || !params.isLoaded;
+}
+
 export function buildTopicSuggestionGroup(params: {
   topic: Topic | null;
   rankedMessages: Message[];

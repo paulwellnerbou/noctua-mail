@@ -148,7 +148,9 @@ import {
   buildTopicSuggestionGroupKey,
   buildTopicSuggestionRankedMessages,
   isTopicSuggestionGroupKey,
+  pruneTopicSuggestionMessages,
   readTopicSuggestionGroupCollapsed,
+  shouldRenderTopicSuggestionGroup,
   type TopicThreadSuggestion
 } from "./mailclient/messagelist/topicSuggestionGroup";
 import TopBar from "./mailclient/TopBar";
@@ -1270,9 +1272,25 @@ export default function MailClient({
       ),
     [activeTopicSuggestionMessages, activeTopicSuggestions]
   );
+  const shouldRenderActiveTopicSuggestionGroup = useMemo(
+    () =>
+      shouldRenderTopicSuggestionGroup({
+        enabled: showActiveTopicSuggestionGroup,
+        rankedMessages: activeTopicSuggestionRankedMessages,
+        isLoading: activeTopicSuggestionsLoading,
+        isLoaded: activeTopicSuggestionsLoadedKey === activeTopicSuggestionCacheKey
+      }),
+    [
+      activeTopicSuggestionCacheKey,
+      activeTopicSuggestionRankedMessages,
+      activeTopicSuggestionsLoadedKey,
+      activeTopicSuggestionsLoading,
+      showActiveTopicSuggestionGroup
+    ]
+  );
   const activeTopicSuggestionGroups = useMemo<MessageGroup[]>(
     () =>
-      showActiveTopicSuggestionGroup
+      shouldRenderActiveTopicSuggestionGroup
         ? buildTopicSuggestionGroup({
             topic: activeTopic,
             rankedMessages: activeTopicSuggestionRankedMessages
@@ -1281,7 +1299,7 @@ export default function MailClient({
     [
       activeTopic,
       activeTopicSuggestionRankedMessages,
-      showActiveTopicSuggestionGroup
+      shouldRenderActiveTopicSuggestionGroup
     ]
   );
   const listMessageById = useMemo(() => {
@@ -1949,6 +1967,20 @@ export default function MailClient({
       });
     }
   }, [activeTopicId, persistThreadTopics, refreshActiveTopicSuggestions, refreshMailboxData]);
+
+  const reconcileActiveTopicSuggestionRemovals = useCallback(
+    (messageIds: string[]) => {
+      const next = pruneTopicSuggestionMessages({
+        messages: activeTopicSuggestionMessages,
+        suggestions: activeTopicSuggestions,
+        removedMessageIds: messageIds
+      });
+      if (!next.changed) return;
+      setActiveTopicSuggestionMessages(next.messages);
+      setActiveTopicSuggestions(next.suggestions);
+    },
+    [activeTopicSuggestionMessages, activeTopicSuggestions]
+  );
 
   const includeThreadAcrossFoldersForList =
     includeThreadAcrossFolders &&
@@ -2835,7 +2867,10 @@ export default function MailClient({
     pushNotice,
     undoMoveOperation,
     noticeSuccessTimeout: NOTICE_TIMEOUTS.success,
-    onMoveComplete: evictMessageCaches,
+    onMoveComplete: (messageIds) => {
+      evictMessageCaches(messageIds);
+      reconcileActiveTopicSuggestionRemovals(messageIds);
+    },
     markMessagesMutated,
     applyDeleteReconcileSuppression
   });
@@ -2872,7 +2907,10 @@ export default function MailClient({
     confirmDelete,
     undoMoveOperation,
     noticeSuccessTimeout: NOTICE_TIMEOUTS.success,
-    onMessagesRemoved: evictMessageCaches,
+    onMessagesRemoved: (messageIds) => {
+      evictMessageCaches(messageIds);
+      reconcileActiveTopicSuggestionRemovals(messageIds);
+    },
     markMessagesMutated,
     markDeleteReconcileSuppression
   });
@@ -4973,6 +5011,13 @@ export default function MailClient({
                         )?.topicSuggestions ??
                         activeMessage.topicSuggestions ??
                         [];
+                  const visibleThreadSuggestions = threadSuggestions.filter(
+                    (topic) =>
+                      typeof topic?.id === "string" &&
+                      topic.id.trim().length > 0 &&
+                      typeof topic?.name === "string" &&
+                      topic.name.trim().length > 0
+                  );
                   const explanationThreadId = activeMessage.threadId ?? "";
                   return (
                     <Flex direction="column" gap="2" style={{ flex: 1, minWidth: 0 }}>
@@ -4997,12 +5042,12 @@ export default function MailClient({
                           ))}
                         </Flex>
                       )}
-                      {threadTopics.length === 0 && threadSuggestions.length > 0 && (
+                      {threadTopics.length === 0 && visibleThreadSuggestions.length > 0 && (
                         <Flex align="center" gap="2" wrap="wrap" justify="start" style={{ width: "100%" }}>
                           <Text size="1" color="gray">
                             Topic suggestion:
                           </Text>
-                          {threadSuggestions.map((topic) => {
+                          {visibleThreadSuggestions.map((topic) => {
                             const scoreLabel = formatTopicSuggestionScore(topic.suggestionScore);
                             return (
                               <Flex
