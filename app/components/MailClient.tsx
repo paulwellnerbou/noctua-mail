@@ -112,6 +112,7 @@ import {
   buildAccountMessageSourcePath,
   buildAccountMessagesPath,
   buildAccountSmtpSendPath,
+  buildAccountTopicSuggestionsPath,
   buildAccountTopicsPath
 } from "@/lib/accountApiPaths";
 import { openDetachedWindow } from "@/lib/ui/openDetachedWindow";
@@ -138,6 +139,8 @@ import ThreadView from "./mailclient/message/ThreadView";
 import TopicPickerDialog from "./mailclient/TopicPickerDialog";
 import TopicBadge from "./mailclient/TopicBadge";
 import TopicsSidebarSection from "./mailclient/folder/TopicsSidebarSection";
+import { applyActiveTopicSuggestion } from "./mailclient/topicSuggestionActions";
+import { parseSimpleTopicSearchMode } from "./mailclient/topicSearch";
 import TopBar from "./mailclient/TopBar";
 import BottomStatusBar from "./mailclient/status/BottomStatusBar";
 import CalendarSidebarPanel from "./calendar/CalendarSidebarPanel";
@@ -148,6 +151,9 @@ import type { Account, Folder, Message, Topic, TopicColor, User } from "@/lib/da
 import AccountSettingsModal, { type ManageTab } from "./AccountSettingsModal";
 import DeleteConfirmDialog from "./mailclient/message/DeleteConfirmDialog";
 import UnsubscribeConfirmDialog from "./mailclient/message/UnsubscribeConfirmDialog";
+import TopicSuggestionPanel, {
+  type TopicSuggestionPanelItem
+} from "./mailclient/messagelist/TopicSuggestionPanel";
 import {
   computeGroupMeta,
   isFlaggedMessage,
@@ -231,6 +237,11 @@ type TopicSuggestionExplanation = {
   }>;
 };
 
+type ActiveTopicSuggestionsResponse = {
+  ok?: boolean;
+  suggestions?: TopicSuggestionPanelItem[];
+};
+
 export default function MailClient({
   buildVersionLabel = ""
 }: MailClientProps) {
@@ -270,6 +281,10 @@ export default function MailClient({
     useState<TopicSuggestionExplanation | null>(null);
   const [topicSuggestionExplanationThreadId, setTopicSuggestionExplanationThreadId] = useState("");
   const [topicSidebarCollapsed, setTopicSidebarCollapsed] = useState(false);
+  const [activeTopicSuggestions, setActiveTopicSuggestions] = useState<TopicSuggestionPanelItem[]>([]);
+  const [activeTopicSuggestionsLoading, setActiveTopicSuggestionsLoading] = useState(false);
+  const [pendingTopicSuggestionThreadIds, setPendingTopicSuggestionThreadIds] =
+    useState<Set<string>>(new Set());
 
   const clientId = useMemo(() => {
     if (typeof window === "undefined") return "";
@@ -300,6 +315,12 @@ export default function MailClient({
     topicMessageCountById,
     refreshTopicStats
   } = useTopics({ activeAccountId, apiFetch });
+  const activeTopicSearchMode = useMemo(() => parseSimpleTopicSearchMode(query), [query]);
+  const activeTopicId = activeTopicSearchMode?.topicId ?? null;
+  const activeTopic = useMemo(
+    () => allTopics.find((topic) => topic.id === activeTopicId) ?? null,
+    [activeTopicId, allTopics]
+  );
 
   const readErrorMessage = useCallback(async (res: Response) => {
     if (res.status === 401) {
@@ -1594,20 +1615,110 @@ export default function MailClient({
     return data.topic;
   }, [activeAccountId, apiFetch]);
 
-  const handleSaveMessageTopics = useCallback(async (topicIds: string[]) => {
-    if (!topicPickerMessage) return;
+  const persistThreadTopics = useCallback(async (threadId: string, topicIds: string[]) => {
     const res = await apiFetch(buildAccountMessageTopicsPath(activeAccountId), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ threadId: topicPickerMessage.threadId, action: "set", topicIds })
+      body: JSON.stringify({ threadId, action: "set", topicIds })
     });
     const data = await res.json();
-    if (data.ok && Array.isArray(data.topics)) {
-      const threadId = topicPickerMessage.threadId;
-      setMessages((prev) => prev.map((msg) => msg.threadId === threadId ? { ...msg, topics: data.topics } : msg));
-      void refreshTopicStats(activeAccountId);
+    if (!data.ok || !Array.isArray(data.topics)) {
+      throw new Error(data.message ?? "Failed to update topics");
     }
-  }, [activeAccountId, apiFetch, refreshTopicStats, topicPickerMessage]);
+
+    const nextTopics = data.topics as Topic[];
+    setMessages((prev) => prev.map((msg) => msg.threadId === threadId ? {
+      ...msg,
+      topics: nextTopics,
+      topicSuggestions: []
+    } : msg));
+    setViewMessage((prev) => prev?.threadId === threadId ? {
+      ...prev,
+      topics: nextTopics,
+      topicSuggestions: []
+    } : prev);
+    const cachedThread = threadContentByIdRef.current[threadId];
+    if (cachedThread && cachedThread.length > 0) {
+      upsertThreadCache(
+        threadId,
+        cachedThread.map((item) => item.threadId === threadId ? {
+          ...item,
+          topics: nextTopics,
+          topicSuggestions: []
+        } : item)
+      );
+    }
+    void refreshTopicStats(activeAccountId);
+  }, [activeAccountId, apiFetch, refreshTopicStats, threadContentByIdRef, upsertThreadCache]);
+
+  const refreshActiveTopicSuggestions = useCallback(async (signal?: AbortSignal) => {
+    if (!activeAccountId || !activeTopicId) {
+      setActiveTopicSuggestions([]);
+      setActiveTopicSuggestionsLoading(false);
+      return;
+    }
+
+    setActiveTopicSuggestionsLoading(true);
+    try {
+      const params = new URLSearchParams({
+        limit: "5",
+        maxAgeDays: "180"
+      });
+      const res = await apiFetch(
+        buildAccountTopicSuggestionsPath(activeAccountId, activeTopicId, params),
+        {
+          cache: "no-store",
+          signal
+        }
+      );
+      if (!res.ok) {
+        if (!signal?.aborted) {
+          setActiveTopicSuggestions([]);
+        }
+        return;
+      }
+      const data = await res.json() as ActiveTopicSuggestionsResponse;
+      if (!signal?.aborted) {
+        setActiveTopicSuggestions(Array.isArray(data.suggestions) ? data.suggestions : []);
+      }
+    } catch {
+      if (!signal?.aborted) {
+        setActiveTopicSuggestions([]);
+      }
+    } finally {
+      if (!signal?.aborted) {
+        setActiveTopicSuggestionsLoading(false);
+      }
+    }
+  }, [activeAccountId, activeTopicId, apiFetch]);
+
+  const refreshActiveTopicModeResults = useCallback(async () => {
+    if (!activeTopicId) return;
+    await refreshMailboxData();
+    await refreshActiveTopicSuggestions();
+  }, [activeTopicId, refreshActiveTopicSuggestions, refreshMailboxData]);
+
+  useEffect(() => {
+    if (!activeAccountId || !activeTopicId) {
+      setActiveTopicSuggestions([]);
+      setActiveTopicSuggestionsLoading(false);
+      return;
+    }
+
+    const controller = new AbortController();
+    void refreshActiveTopicSuggestions(controller.signal);
+    return () => {
+      controller.abort();
+    };
+  }, [activeAccountId, activeTopicId, refreshActiveTopicSuggestions]);
+
+  const handleSaveMessageTopics = useCallback(async (topicIds: string[]) => {
+    if (!topicPickerMessage) return;
+    await persistThreadTopics(topicPickerMessage.threadId, topicIds);
+    if (activeTopicId) {
+      await refreshActiveTopicModeResults();
+    }
+  }, [activeTopicId, persistThreadTopics, refreshActiveTopicModeResults, topicPickerMessage]);
 
   const handleToggleTopic = useCallback(async (message: Message, topicId: string) => {
     const currentTopics = messageTopicsById.get(message.threadId) ?? [];
@@ -1615,38 +1726,38 @@ export default function MailClient({
     const newTopicIds = isAssigned
       ? currentTopics.filter((t) => t.id !== topicId).map((t) => t.id)
       : [...currentTopics.map((t) => t.id), topicId];
-    const res = await apiFetch(buildAccountMessageTopicsPath(activeAccountId), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ threadId: message.threadId, action: "set", topicIds: newTopicIds })
-    });
-    const data = await res.json();
-    if (data.ok && Array.isArray(data.topics)) {
-      const threadId = message.threadId;
-      setMessages((prev) => prev.map((msg) => msg.threadId === threadId ? {
-        ...msg,
-        topics: data.topics,
-        topicSuggestions: []
-      } : msg));
-      setViewMessage((prev) => prev?.threadId === threadId ? {
-        ...prev,
-        topics: data.topics,
-        topicSuggestions: []
-      } : prev);
-      const cachedThread = threadContentByIdRef.current[threadId];
-      if (cachedThread && cachedThread.length > 0) {
-        upsertThreadCache(
-          threadId,
-          cachedThread.map((item) => item.threadId === threadId ? {
-            ...item,
-            topics: data.topics,
-            topicSuggestions: []
-          } : item)
-        );
-      }
-      void refreshTopicStats(activeAccountId);
+    await persistThreadTopics(message.threadId, newTopicIds);
+    if (activeTopicId) {
+      await refreshActiveTopicModeResults();
     }
-  }, [activeAccountId, apiFetch, messageTopicsById, refreshTopicStats, threadContentByIdRef, upsertThreadCache]);
+  }, [activeTopicId, messageTopicsById, persistThreadTopics, refreshActiveTopicModeResults]);
+
+  const handleAddActiveTopicSuggestion = useCallback(async (item: TopicSuggestionPanelItem) => {
+    const threadId = item.message.threadId ?? item.message.id;
+    if (!activeTopicId || !threadId) return;
+
+    setPendingTopicSuggestionThreadIds((prev) => {
+      const next = new Set(prev);
+      next.add(threadId);
+      return next;
+    });
+
+    try {
+      await applyActiveTopicSuggestion({
+        threadId,
+        topicId: activeTopicId,
+        persistThreadTopics,
+        refreshMailboxData,
+        refreshSuggestions: () => refreshActiveTopicSuggestions()
+      });
+    } finally {
+      setPendingTopicSuggestionThreadIds((prev) => {
+        const next = new Set(prev);
+        next.delete(threadId);
+        return next;
+      });
+    }
+  }, [activeTopicId, persistThreadTopics, refreshActiveTopicSuggestions, refreshMailboxData]);
 
   const includeThreadAcrossFoldersForList =
     includeThreadAcrossFolders &&
@@ -4392,11 +4503,11 @@ export default function MailClient({
             <TopicsSidebarSection
               topics={allTopics}
               topicMessageCountById={topicMessageCountById}
-              activeTopicId={query.startsWith("topic:") ? query.slice("topic:".length) : null}
+              activeTopicId={activeTopicId}
               collapsed={topicSidebarCollapsed}
               onToggleCollapsed={() => setTopicSidebarCollapsed((v) => !v)}
               onTopicClick={(topicId) => {
-                const current = query.startsWith("topic:") ? query.slice("topic:".length) : null;
+                const current = activeTopicId;
                 if (current === topicId) {
                   setQuery("");
                 } else {
@@ -4530,6 +4641,15 @@ export default function MailClient({
                 </Flex>
               </Card>
             )}
+            <TopicSuggestionPanel
+              topic={activeTopic}
+              suggestions={activeTopicSuggestions}
+              isLoading={activeTopicSuggestionsLoading}
+              pendingThreadIds={pendingTopicSuggestionThreadIds}
+              dateFormat={accountDateFormat}
+              onOpenSuggestion={handleSelectMessage}
+              onAddSuggestion={handleAddActiveTopicSuggestion}
+            />
             {listLoading && sortedMessages.length === 0 && (
               <Card size="1" className={listMetaStyles.loadingCard}>
                 <Text size="1" color="gray">

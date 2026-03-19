@@ -5,7 +5,7 @@ import {
   upsertTopicLearningSignalsForThreadIds,
   withAccountDb
 } from "./db";
-import type { Topic, TopicColor, TopicSuggestionSignal } from "./data";
+import type { Message, Topic, TopicColor, TopicSuggestionSignal } from "./data";
 import { TOPIC_COLORS, TOPIC_SUGGESTION_SIGNALS } from "./data";
 import { withDbWriteRetry } from "./dbWriteRetry";
 import {
@@ -70,6 +70,10 @@ export type TopicSuggestionExplanationTopic = {
 export type TopicSuggestionExplanation = {
   signals: TopicSuggestionExplanationSignal[];
   topics: TopicSuggestionExplanationTopic[];
+};
+export type TopicMessageSuggestion = {
+  message: Message;
+  suggestionScore: number;
 };
 
 type MessageSignals = TopicSignalSource & {
@@ -1289,5 +1293,229 @@ export async function getTopicSuggestionsForThreads(
     });
 
     return result;
+  });
+}
+
+type TopicSuggestionCandidateRow = {
+  id: string;
+  accountId: string;
+  folderId: string;
+  mailboxPath?: string | null;
+  imapUid?: number | null;
+  threadId: string;
+  parentId?: string | null;
+  messageId?: string | null;
+  inReplyTo?: string | null;
+  subject: string;
+  fromAddr: string;
+  fromEmail?: string | null;
+  toAddr: string;
+  ccAddr?: string | null;
+  bccAddr?: string | null;
+  preview: string;
+  date: string;
+  dateValue: number;
+  priority?: string | null;
+  unread?: number | null;
+  flags?: string | null;
+  seen?: number | null;
+  answered?: number | null;
+  flagged?: number | null;
+  deleted?: number | null;
+  draft?: number | null;
+  recent?: number | null;
+  category?: string | null;
+  categoryScore?: number | null;
+  categorySignals?: string | null;
+  listUnsubscribe?: string | null;
+  listId?: string | null;
+};
+
+function rowToSuggestionMessage(row: TopicSuggestionCandidateRow): Message {
+  return {
+    id: row.id,
+    accountId: row.accountId,
+    folderId: row.folderId,
+    mailboxPath: row.mailboxPath ?? undefined,
+    imapUid: typeof row.imapUid === "number" ? row.imapUid : undefined,
+    threadId: row.threadId,
+    parentId: row.parentId ?? undefined,
+    messageId: row.messageId ?? undefined,
+    inReplyTo: row.inReplyTo ?? undefined,
+    subject: row.subject,
+    from: row.fromAddr,
+    fromEmail: row.fromEmail ?? undefined,
+    to: row.toAddr,
+    cc: row.ccAddr ?? undefined,
+    bcc: row.bccAddr ?? undefined,
+    preview: row.preview,
+    date: row.date,
+    dateValue: row.dateValue,
+    body: "",
+    priority: row.priority ?? undefined,
+    unread: Boolean(row.unread),
+    flags: row.flags ? (JSON.parse(row.flags) as string[]) : undefined,
+    seen: Boolean(row.seen),
+    answered: Boolean(row.answered),
+    flagged: Boolean(row.flagged),
+    deleted: Boolean(row.deleted),
+    draft: Boolean(row.draft),
+    recent: Boolean(row.recent),
+    category: row.category ?? undefined,
+    categoryScore: typeof row.categoryScore === "number" ? row.categoryScore : undefined,
+    categorySignals: row.categorySignals
+      ? (JSON.parse(row.categorySignals) as string[]).filter((value) => typeof value === "string")
+      : undefined,
+    listUnsubscribe: row.listUnsubscribe ?? undefined,
+    listId: row.listId ?? undefined
+  };
+}
+
+export async function getTopicMessageSuggestions(
+  accountId: string,
+  topicId: string,
+  options?: {
+    accountEmail?: string | null;
+    limit?: number;
+    maxAgeDays?: number;
+  }
+): Promise<TopicMessageSuggestion[]> {
+  const normalizedTopicId = topicId.trim();
+  if (!normalizedTopicId) return [];
+
+  const limit = Math.max(1, Math.min(50, Math.trunc(options?.limit ?? 5) || 5));
+  const maxAgeDays = Math.max(1, Math.min(3650, Math.trunc(options?.maxAgeDays ?? 180) || 180));
+  const cutoffMs = Date.now() - maxAgeDays * 24 * 60 * 60 * 1000;
+
+  return withAccountDb(accountId, (db) => {
+    const topicExists = db
+      .prepare(`SELECT 1 FROM topics WHERE id = ? AND accountId = ?`)
+      .get(normalizedTopicId, accountId) as { 1?: number } | undefined;
+    if (!topicExists) return [];
+
+    const inboxFolderRow = db
+      .prepare(
+        `SELECT id
+         FROM folders
+         WHERE accountId = ?
+           AND (
+             lower(COALESCE(specialUse, '')) = '\\inbox'
+             OR lower(name) = 'inbox'
+           )
+         ORDER BY
+           CASE WHEN lower(COALESCE(specialUse, '')) = '\\inbox' THEN 0 ELSE 1 END,
+           CASE WHEN lower(name) = 'inbox' THEN 0 ELSE 1 END,
+           id ASC
+         LIMIT 1`
+      )
+      .get(accountId) as { id?: string | null } | undefined;
+    const inboxFolderId = String(inboxFolderRow?.id ?? "").trim();
+    if (!inboxFolderId) return [];
+
+    const candidateRows = db
+      .prepare(
+        `SELECT
+           m.id,
+           m.accountId,
+           m.folderId,
+           m.mailboxPath,
+           m.imapUid,
+           m.threadId,
+           m.parentId,
+           m.messageId,
+           m.inReplyTo,
+           m.subject,
+           m.fromAddr,
+           m.fromEmail,
+           m.toAddr,
+           m.ccAddr,
+           m.bccAddr,
+           m.preview,
+           m.date,
+           m.dateValue,
+           m.priority,
+           m.unread,
+           m.flags,
+           m.seen,
+           m.answered,
+           m.flagged,
+           m.deleted,
+           m.draft,
+           m.recent,
+           m.category,
+           m.categoryScore,
+           m.categorySignals,
+           m.listUnsubscribe,
+           m.listId
+         FROM messages m
+         WHERE m.accountId = ?
+           AND m.folderId = ?
+           AND COALESCE(m.deleted, 0) = 0
+           AND m.dateValue >= ?
+           AND NOT EXISTS (
+             SELECT 1
+             FROM thread_topics tt
+             WHERE tt.accountId = m.accountId
+               AND tt.threadId = m.threadId
+           )
+           AND m.id = (
+             SELECT m2.id
+             FROM messages m2
+             WHERE m2.accountId = m.accountId
+               AND m2.threadId = m.threadId
+               AND m2.folderId = ?
+               AND COALESCE(m2.deleted, 0) = 0
+             ORDER BY m2.dateValue DESC, m2.id DESC
+             LIMIT 1
+           )
+         ORDER BY m.dateValue DESC, m.id DESC`
+      )
+      .all(accountId, inboxFolderId, cutoffMs, inboxFolderId) as TopicSuggestionCandidateRow[];
+
+    if (candidateRows.length === 0) return [];
+
+    const candidateRowsByThreadId = new Map<string, TopicSuggestionCandidateRow>();
+    candidateRows.forEach((row) => {
+      const threadId = String(row.threadId ?? "").trim();
+      if (!threadId || candidateRowsByThreadId.has(threadId)) return;
+      candidateRowsByThreadId.set(threadId, row);
+    });
+    const candidateThreadIds = Array.from(candidateRowsByThreadId.keys());
+    if (candidateThreadIds.length === 0) return [];
+
+    const signalsByThreadId = getTopicSuggestionSignalsForThreadsFromDb(
+      db,
+      accountId,
+      candidateThreadIds,
+      { accountEmail: options?.accountEmail }
+    );
+
+    const suggestions: TopicMessageSuggestion[] = [];
+    candidateThreadIds.forEach((threadId) => {
+      const signals = signalsByThreadId.get(threadId);
+      if (!signals) return;
+      const topicMatch = getTopicSuggestionsForSignals(db, accountId, signals).find(
+        (topic) => topic.id === normalizedTopicId
+      );
+      if (!topicMatch) return;
+      const row = candidateRowsByThreadId.get(threadId);
+      if (!row) return;
+      suggestions.push({
+        message: rowToSuggestionMessage(row),
+        suggestionScore: topicMatch.suggestionScore ?? 0
+      });
+    });
+
+    suggestions.sort((a, b) => {
+      if (b.suggestionScore !== a.suggestionScore) {
+        return b.suggestionScore - a.suggestionScore;
+      }
+      if (b.message.dateValue !== a.message.dateValue) {
+        return b.message.dateValue - a.message.dateValue;
+      }
+      return a.message.id.localeCompare(b.message.id);
+    });
+
+    return suggestions.slice(0, limit);
   });
 }

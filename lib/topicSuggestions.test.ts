@@ -5,6 +5,7 @@ import path from "path";
 import type { Account, Folder, Message } from "./data";
 import {
   createTopic,
+  getTopicMessageSuggestions,
   getTopicSuggestionExplanationForThread,
   getTopicStats,
   getTopicSuggestionsForMessage,
@@ -54,6 +55,17 @@ function buildFolder(accountId: string): Folder {
     count: 0,
     unreadCount: 0,
     specialUse: "\\Inbox"
+  };
+}
+
+function buildArchiveFolder(accountId: string): Folder {
+  return {
+    id: `${accountId}-archive`,
+    accountId,
+    name: "Archive",
+    count: 0,
+    unreadCount: 0,
+    specialUse: "\\Archive"
   };
 }
 
@@ -778,5 +790,150 @@ describe("topic suggestions", () => {
       { type: "jiraProjectKey", value: "UNSAPIX", count: 1 }
     ]));
     expect(stats[0]?.topSignals.some((signal) => signal.type === "recipient" && signal.value === "owner@example.com")).toBe(false);
+  });
+
+  test("returns only recent untagged Inbox candidates for the active topic, ordered by score then recency", async () => {
+    const accountId = "acc-topic-message-suggestions";
+    const inboxFolder = buildFolder(accountId);
+    const archiveFolder = buildArchiveFolder(accountId);
+    const { saveFoldersForAccount, upsertAccount, upsertMessages } = await dbModulePromise;
+
+    await upsertAccount(buildAccount(accountId));
+    await saveFoldersForAccount(accountId, [inboxFolder, archiveFolder]);
+
+    const now = Date.UTC(2026, 2, 18, 12, 0, 0);
+    const oldDate = now - 181 * 24 * 60 * 60 * 1000;
+
+    await upsertMessages(
+      accountId,
+      inboxFolder.id,
+      [
+        buildMessage({
+          id: "msg-history-active-1",
+          accountId,
+          folderId: inboxFolder.id,
+          threadId: "thread-history-active-1",
+          messageId: "<history-active-1@example.com>",
+          subject: "BUILD-101 Main build failed",
+          from: "CI Bot <ci@example.com>",
+          fromEmail: "ci@example.com",
+          to: "Build Team <build-team@example.com>",
+          listId: "lists.example.com/build-alerts",
+          dateValue: now - 10_000
+        }),
+        buildMessage({
+          id: "msg-history-active-2",
+          accountId,
+          folderId: inboxFolder.id,
+          threadId: "thread-history-active-2",
+          messageId: "<history-active-2@example.com>",
+          subject: "BUILD-102 Another build failed",
+          from: "CI Bot <ci@example.com>",
+          fromEmail: "ci@example.com",
+          to: "Build Team <build-team@example.com>",
+          listId: "lists.example.com/build-alerts",
+          dateValue: now - 9_000
+        }),
+        buildMessage({
+          id: "msg-history-other",
+          accountId,
+          folderId: inboxFolder.id,
+          threadId: "thread-history-other",
+          messageId: "<history-other@example.com>",
+          subject: "Billing receipt",
+          from: "Billing <billing@example.com>",
+          fromEmail: "billing@example.com",
+          to: "Finance <finance@example.com>",
+          dateValue: now - 8_000
+        }),
+        buildMessage({
+          id: "msg-candidate-strong",
+          accountId,
+          folderId: inboxFolder.id,
+          threadId: "thread-candidate-strong",
+          messageId: "<candidate-strong@example.com>",
+          subject: "BUILD-103 Main build failed",
+          from: "CI Bot <ci@example.com>",
+          fromEmail: "ci@example.com",
+          to: "Build Team <build-team@example.com>",
+          listId: "lists.example.com/build-alerts",
+          dateValue: now - 7_000
+        }),
+        buildMessage({
+          id: "msg-candidate-weak",
+          accountId,
+          folderId: inboxFolder.id,
+          threadId: "thread-candidate-weak",
+          messageId: "<candidate-weak@example.com>",
+          subject: "Build status update",
+          from: "CI Bot <ci@example.com>",
+          fromEmail: "ci@example.com",
+          to: "Other <other@example.com>",
+          dateValue: now - 1_000
+        }),
+        buildMessage({
+          id: "msg-candidate-old",
+          accountId,
+          folderId: inboxFolder.id,
+          threadId: "thread-candidate-old",
+          messageId: "<candidate-old@example.com>",
+          subject: "BUILD-090 Old build failed",
+          from: "CI Bot <ci@example.com>",
+          fromEmail: "ci@example.com",
+          to: "Build Team <build-team@example.com>",
+          listId: "lists.example.com/build-alerts",
+          dateValue: oldDate
+        }),
+        buildMessage({
+          id: "msg-candidate-assigned",
+          accountId,
+          folderId: inboxFolder.id,
+          threadId: "thread-candidate-assigned",
+          messageId: "<candidate-assigned@example.com>",
+          subject: "BUILD-104 Assigned already",
+          from: "CI Bot <ci@example.com>",
+          fromEmail: "ci@example.com",
+          to: "Build Team <build-team@example.com>",
+          listId: "lists.example.com/build-alerts",
+          dateValue: now - 500
+        }),
+        buildMessage({
+          id: "msg-candidate-archive",
+          accountId,
+          folderId: archiveFolder.id,
+          threadId: "thread-candidate-archive",
+          messageId: "<candidate-archive@example.com>",
+          subject: "BUILD-105 Archived build failed",
+          from: "CI Bot <ci@example.com>",
+          fromEmail: "ci@example.com",
+          to: "Build Team <build-team@example.com>",
+          listId: "lists.example.com/build-alerts",
+          dateValue: now - 250
+        })
+      ],
+      true,
+      { recomputeThreads: false }
+    );
+
+    const buildTopic = await createTopic(accountId, "Build Alerts", "blue");
+    const billingTopic = await createTopic(accountId, "Billing", "green");
+    await setThreadTopics(accountId, "thread-history-active-1", [buildTopic.id]);
+    await setThreadTopics(accountId, "thread-history-active-2", [buildTopic.id]);
+    await setThreadTopics(accountId, "thread-history-other", [billingTopic.id]);
+    await setThreadTopics(accountId, "thread-candidate-assigned", [billingTopic.id]);
+
+    const suggestions = await getTopicMessageSuggestions(accountId, buildTopic.id, {
+      accountEmail: "owner@example.com",
+      limit: 5,
+      maxAgeDays: 180
+    });
+
+    expect(suggestions.map((item) => item.message.threadId)).toEqual([
+      "thread-candidate-strong",
+      "thread-candidate-weak"
+    ]);
+    expect(suggestions.map((item) => item.suggestionScore)).toEqual([22, 10]);
+    expect(suggestions.every((item) => item.message.folderId === inboxFolder.id)).toBe(true);
+    expect(suggestions.every((item) => item.message.dateValue > oldDate)).toBe(true);
   });
 });

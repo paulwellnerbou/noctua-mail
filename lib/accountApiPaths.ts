@@ -25,6 +25,17 @@ export function buildAccountTopicPath(accountId: string, topicId: string) {
   return buildAccountApiPath(accountId, `/topics/${encodeURIComponent(topicId)}`);
 }
 
+export function buildAccountTopicSuggestionsPath(
+  accountId: string,
+  topicId: string,
+  query?: URLSearchParams | string | null
+) {
+  return appendQuery(
+    buildAccountApiPath(accountId, `/topics/${encodeURIComponent(topicId)}/suggestions`),
+    query
+  );
+}
+
 export function buildAccountTopicStatsPath(
   accountId: string,
   query?: URLSearchParams | string | null

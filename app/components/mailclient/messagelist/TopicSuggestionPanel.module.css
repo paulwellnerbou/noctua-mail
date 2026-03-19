@@ -1,0 +1,150 @@
+.panel {
+  margin-bottom: 8px;
+}
+
+.header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.headerCopy {
+  min-width: 0;
+}
+
+.eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.description {
+  margin-top: 2px;
+}
+
+.list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.row {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.openButton {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: 1px dashed var(--gray-6);
+  border-radius: 10px;
+  background: linear-gradient(180deg, var(--gray-2), var(--gray-1));
+  padding: 10px 12px;
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 120ms ease, background-color 120ms ease, transform 120ms ease;
+}
+
+.openButton:hover {
+  border-color: var(--gray-8);
+  background: linear-gradient(180deg, var(--gray-3), var(--gray-2));
+}
+
+.openButton:focus-visible {
+  outline: 2px solid var(--accent-8);
+  outline-offset: 2px;
+}
+
+.openButton:active {
+  transform: translateY(1px);
+}
+
+.line {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+
+.subject {
+  display: block;
+  min-width: 0;
+  color: var(--gray-12);
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.date {
+  flex: 0 0 auto;
+  color: var(--gray-10);
+  font-size: 12px;
+}
+
+.meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  margin-top: 4px;
+}
+
+.from {
+  min-width: 0;
+  color: var(--gray-11);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.score {
+  flex: 0 0 auto;
+  color: var(--gray-10);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.preview {
+  margin-top: 6px;
+  color: var(--gray-10);
+  font-size: 12px;
+  line-height: 1.4;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.addButton {
+  flex: 0 0 auto;
+  align-self: center;
+  min-width: 76px;
+}
+
+.loadingText {
+  display: block;
+}
+
+@media (max-width: 720px) {
+  .header,
+  .row,
+  .line {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .meta {
+    justify-content: space-between;
+  }
+
+  .addButton {
+    width: 100%;
+  }
+}
