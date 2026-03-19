@@ -20,6 +20,11 @@
   transition: background 0.12s ease, border-color 0.12s ease, box-shadow 0.12s ease;
 }
 
+.rowSuggestion {
+  border-style: dashed;
+  border-color: var(--gray-6);
+}
+
 .rowDivider::before {
   content: "";
   position: absolute;

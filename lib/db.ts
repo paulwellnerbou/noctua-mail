@@ -89,7 +89,7 @@ import {
 } from "./calendarEventUids";
 import { isSameMailboxMessageCopy } from "./messageCopies";
 import { getAttachmentContentBuffer } from "./mail/syncMessageSanitizer";
-import { getMessageSource } from "./storage";
+import { deleteMessageFiles, getMessageSource } from "./storage";
 import {
   CATEGORY_KEYS,
   createSeededLinearModel,
@@ -1099,7 +1099,10 @@ function normalizeThreadIds(threadIds?: Array<string | null | undefined>) {
 function insertThreadSignalsFromMessageRows(
   db: any,
   accountId: string,
-  rows: ThreadSignalSourceRow[]
+  rows: ThreadSignalSourceRow[],
+  options?: {
+    accountEmail?: string | null;
+  }
 ) {
   const insertThreadSignal = db.prepare(
     `INSERT OR REPLACE INTO thread_signals (accountId, threadId, signalType, signalValue)
@@ -1109,7 +1112,9 @@ function insertThreadSignalsFromMessageRows(
   let activeRows: TopicSignalSource[] = [];
   const flush = () => {
     if (!activeThreadId || activeRows.length === 0) return;
-    collectTopicSignalEntries(activeRows).forEach((entry) => {
+    collectTopicSignalEntries(activeRows, {
+      excludeAccountEmail: options?.accountEmail ?? null
+    }).forEach((entry) => {
       insertThreadSignal.run(accountId, activeThreadId, entry.type, entry.value);
     });
   };
@@ -1134,7 +1139,12 @@ function insertThreadSignalsFromMessageRows(
   flush();
 }
 
-function rebuildThreadSignalsForThreadIds(db: any, accountId: string, threadIds: string[]) {
+function rebuildThreadSignalsForThreadIdsInternal(
+  db: any,
+  accountId: string,
+  threadIds: string[],
+  accountEmail?: string | null
+) {
   const uniqueThreadIds = normalizeThreadIds(threadIds);
   if (uniqueThreadIds.length === 0) return;
 
@@ -1164,10 +1174,19 @@ function rebuildThreadSignalsForThreadIds(db: any, accountId: string, threadIds:
     selectedRows.push(...rows);
   }
 
-  insertThreadSignalsFromMessageRows(db, accountId, selectedRows);
+  insertThreadSignalsFromMessageRows(db, accountId, selectedRows, { accountEmail });
 }
 
-function rebuildAllThreadSignalsForAccount(db: any, accountId: string) {
+async function rebuildThreadSignalsForThreadIds(db: any, accountId: string, threadIds: string[]) {
+  const accountEmail = await getAccountEmail(accountId);
+  rebuildThreadSignalsForThreadIdsInternal(db, accountId, threadIds, accountEmail);
+}
+
+function rebuildAllThreadSignalsForAccountInternal(
+  db: any,
+  accountId: string,
+  accountEmail?: string | null
+) {
   db.prepare(`DELETE FROM thread_signals WHERE accountId = ?`).run(accountId);
   const rows = db
     .prepare(
@@ -1177,10 +1196,15 @@ function rebuildAllThreadSignalsForAccount(db: any, accountId: string) {
        ORDER BY threadId ASC, dateValue ASC, id ASC`
     )
     .all(accountId) as ThreadSignalSourceRow[];
-  insertThreadSignalsFromMessageRows(db, accountId, rows);
+  insertThreadSignalsFromMessageRows(db, accountId, rows, { accountEmail });
 }
 
-function ensureThreadSignalRuntimeData(db: any, accountId: string) {
+async function rebuildAllThreadSignalsForAccount(db: any, accountId: string) {
+  const accountEmail = await getAccountEmail(accountId);
+  rebuildAllThreadSignalsForAccountInternal(db, accountId, accountEmail);
+}
+
+async function ensureThreadSignalRuntimeData(db: any, accountId: string) {
   const hasThreadSignals = db
     .prepare(`SELECT 1 FROM thread_signals WHERE accountId = ? LIMIT 1`)
     .get(accountId);
@@ -1189,7 +1213,7 @@ function ensureThreadSignalRuntimeData(db: any, accountId: string) {
     .prepare(`SELECT 1 FROM messages WHERE accountId = ? LIMIT 1`)
     .get(accountId);
   if (!hasMessages) return;
-  rebuildAllThreadSignalsForAccount(db, accountId);
+  await rebuildAllThreadSignalsForAccount(db, accountId);
 }
 
 function normalizeTopicIds(topicIds?: Array<string | null | undefined>) {
@@ -1368,7 +1392,7 @@ async function getAccountDb(accountId: string) {
   ensureMessageCalendarEventRuntimeSchema(accountDb);
   ensureCalendarReminderRuntimeSchema(accountDb);
   await ensureCalendarEventRuntimeData(accountDb, accountId);
-  ensureThreadSignalRuntimeData(accountDb, accountId);
+  await ensureThreadSignalRuntimeData(accountDb, accountId);
   ensureTopicLearningRuntimeData(accountDb, accountId);
   scheduleAccountDbIdleClose(dbPath);
   return accountDb;
@@ -1895,9 +1919,30 @@ async function recomputeThreadsForAccountInternal(accountId: string, threadIds?:
 }
 
 export async function recomputeThreadsForAccount(accountId: string, threadIds?: string[]) {
-  return withDbWriteRetry("recomputeThreadsForAccount", () =>
-    recomputeThreadsForAccountInternal(accountId, threadIds)
-  );
+  return withDbWriteRetry("recomputeThreadsForAccount", async () => {
+    await recomputeThreadsForAccountInternal(accountId, threadIds);
+    const db = await getAccountDb(accountId);
+    if (threadIds && threadIds.length > 0) {
+      await rebuildThreadSignalsForThreadIds(db, accountId, threadIds);
+      deleteTopicLearningSignals(db, accountId, { threadIds });
+      upsertTopicLearningSignalsForThreadIds(db, accountId, threadIds);
+      return;
+    }
+    await rebuildAllThreadSignalsForAccount(db, accountId);
+    db.prepare(`DELETE FROM topic_learning_signals WHERE accountId = ?`).run(accountId);
+    const threadRows = db
+      .prepare(
+        `SELECT DISTINCT threadId
+         FROM thread_topics
+         WHERE accountId = ?`
+      )
+      .all(accountId) as Array<{ threadId?: string | null }>;
+    upsertTopicLearningSignalsForThreadIds(
+      db,
+      accountId,
+      threadRows.map((row) => row.threadId ?? "")
+    );
+  });
 }
 
 async function ensureThreadLatestReceivedDateValues(
@@ -1997,7 +2042,7 @@ export async function recomputeThreadIdsForAccount(accountId: string) {
     db.transaction(() => {
       updates.forEach((row) => update.run(row.threadId, row.parentId, row.id));
     })();
-    rebuildAllThreadSignalsForAccount(db, accountId);
+    await rebuildAllThreadSignalsForAccount(db, accountId);
   });
 }
 
@@ -6400,7 +6445,7 @@ export async function upsertMessages(
         if (shouldRecomputeThreads && affected.length > 0) {
           await recomputeThreadsForAccountInternal(accountId, affected);
         }
-        rebuildThreadSignalsForThreadIds(db, accountId, affected);
+        await rebuildThreadSignalsForThreadIds(db, accountId, affected);
         upsertTopicLearningSignalsForThreadIds(db, accountId, affected);
         pruneThreadTopicsWithoutMessages(db, accountId, affected);
         return { affectedThreadIds: affected, requiresFullRecompute };
@@ -6409,7 +6454,7 @@ export async function upsertMessages(
       if (shouldRecomputeThreads) {
         await recomputeThreadsForAccountInternal(accountId);
       }
-      rebuildAllThreadSignalsForAccount(db, accountId);
+      await rebuildAllThreadSignalsForAccount(db, accountId);
       const learningThreadIds = [
         ...(existingAccountThreadIds ?? new Set<string>()),
         ...nextMessages.map((message) => message.threadId).filter(Boolean)
@@ -6430,7 +6475,7 @@ export async function upsertMessages(
       if (shouldRecomputeThreads && affected.length > 0) {
         await recomputeThreadsForAccountInternal(accountId, affected);
       }
-      rebuildThreadSignalsForThreadIds(db, accountId, affected);
+      await rebuildThreadSignalsForThreadIds(db, accountId, affected);
       upsertTopicLearningSignalsForThreadIds(db, accountId, affected);
       pruneThreadTopicsWithoutMessages(db, accountId, affected);
     }
@@ -6665,6 +6710,66 @@ export async function listMessageFileRefsByMessageIds(accountId: string, message
   }));
 }
 
+export async function listFolderMessageUidRows(accountId: string, folderId: string) {
+  const normalizedFolderId = folderId.trim();
+  if (!normalizedFolderId) {
+    return [] as Array<{ id: string; folderId: string; mailboxPath?: string | null; imapUid: number }>;
+  }
+  const db = await getAccountDb(accountId);
+  return db
+    .prepare(
+      `SELECT id, folderId, mailboxPath, imapUid
+       FROM messages
+       WHERE accountId = ? AND folderId = ? AND imapUid IS NOT NULL
+       ORDER BY imapUid ASC`
+    )
+    .all(accountId, normalizedFolderId) as Array<{
+    id: string;
+    folderId: string;
+    mailboxPath?: string | null;
+    imapUid: number;
+  }>;
+}
+
+export async function deleteMessagesWithFilesByIds(accountId: string, messageIds: string[]) {
+  const uniqueIds = Array.from(new Set(messageIds.map((id) => id.trim()).filter(Boolean)));
+  if (uniqueIds.length === 0) return [] as string[];
+  const fileRefs = await listMessageFileRefsByMessageIds(accountId, uniqueIds);
+  await Promise.all(
+    fileRefs.map((item) => deleteMessageFiles(accountId, item.messageId, item.attachmentIds))
+  );
+  await deleteMessagesByIds(accountId, uniqueIds);
+  return uniqueIds;
+}
+
+export async function deleteMessageByFolderUid(
+  accountId: string,
+  folderId: string,
+  imapUid: number
+) {
+  const normalizedFolderId = folderId.trim();
+  if (!normalizedFolderId || !Number.isFinite(imapUid)) {
+    return null as { messageId: string; folderId: string; imapUid: number } | null;
+  }
+  const db = await getAccountDb(accountId);
+  const row = db
+    .prepare(
+      `SELECT id
+       FROM messages
+       WHERE accountId = ? AND folderId = ? AND imapUid = ?
+       LIMIT 1`
+    )
+    .get(accountId, normalizedFolderId, imapUid) as { id?: string | null } | undefined;
+  const messageId = row?.id?.trim();
+  if (!messageId) return null;
+  await deleteMessagesWithFilesByIds(accountId, [messageId]);
+  return {
+    messageId,
+    folderId: normalizedFolderId,
+    imapUid
+  };
+}
+
 export async function getLatestMessageDate(accountId: string, mailboxPath?: string) {
   const db = await getAccountDb(accountId);
   if (mailboxPath) {
@@ -6875,7 +6980,7 @@ export async function deleteMessageById(accountId: string, messageId: string) {
     db.prepare(`DELETE FROM messages WHERE accountId = ? AND id = ?`).run(accountId, messageId);
     if (row?.threadId) {
       await recomputeThreadsForAccountInternal(accountId, [row.threadId]);
-      rebuildThreadSignalsForThreadIds(db, accountId, [row.threadId]);
+      await rebuildThreadSignalsForThreadIds(db, accountId, [row.threadId]);
       upsertTopicLearningSignalsForThreadIds(db, accountId, [row.threadId]);
       pruneThreadTopicsWithoutMessages(db, accountId, [row.threadId]);
     }
@@ -6916,7 +7021,7 @@ export async function deleteMessagesByIds(accountId: string, messageIds: string[
     );
     if (threadIds.length > 0) {
       await recomputeThreadsForAccountInternal(accountId, threadIds);
-      rebuildThreadSignalsForThreadIds(db, accountId, threadIds);
+      await rebuildThreadSignalsForThreadIds(db, accountId, threadIds);
       upsertTopicLearningSignalsForThreadIds(db, accountId, threadIds);
       pruneThreadTopicsWithoutMessages(db, accountId, threadIds);
     }
@@ -7378,7 +7483,7 @@ export async function deleteMessagesByFolderPrefix(accountId: string, folderPref
     );
     if (threadIds.length > 0) {
       await recomputeThreadsForAccountInternal(accountId, threadIds);
-      rebuildThreadSignalsForThreadIds(db, accountId, threadIds);
+      await rebuildThreadSignalsForThreadIds(db, accountId, threadIds);
       upsertTopicLearningSignalsForThreadIds(db, accountId, threadIds);
       pruneThreadTopicsWithoutMessages(db, accountId, threadIds);
     }

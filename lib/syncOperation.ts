@@ -1,13 +1,16 @@
 import {
   deleteMessagesByIds,
+  deleteMessagesWithFilesByIds,
   getAccounts,
   getFolderIdsByMessageIds,
   listMessageFileRefs,
+  listFolderMessageUidRows,
   recomputeCategoriesForAccount,
   recomputeThreadsForAccount,
   getMessageIdsByMessageIds,
   getThreadIdsByMessageIds,
   saveFoldersForAccount,
+  saveMailboxState,
   upsertMessages
 } from "@/lib/db";
 import { processCalendarInviteForMessage } from "@/lib/calendarInviteProcessor";
@@ -15,15 +18,17 @@ import { getAttachmentContentBuffer, sanitizeSyncedMessage } from "@/lib/mail/sy
 import { isCalendarAttachment } from "@/lib/messageFlags";
 import { extractPrimaryEmail, normalizeEmailAddress } from "@/lib/senderIdentity";
 import { deleteMessageFiles } from "@/lib/storage";
-import { syncImapAccountBatched } from "@/lib/mail/imap";
+import { listImapMailboxUids, syncImapAccountBatched } from "@/lib/mail/imap";
 import { reconcileVerifiedCrossFolderMoves } from "@/lib/syncMoveReconciliation";
 import { collectThreadReferenceIds, resolveThreadingForItems } from "@/lib/threading";
+
+export type SyncMode = "full" | "recent" | "new" | "repair";
 
 export type SyncPayload = {
   accountId: string;
   folderId?: string;
   fullSync?: boolean;
-  mode?: "full" | "recent" | "new";
+  mode?: SyncMode;
   recategorizeFolder?: boolean;
   /** UID of the last successfully processed message from a previous attempt; sync resumes from the next UID. */
   resumeFromUid?: number;
@@ -57,7 +62,7 @@ export type SyncOperationProgress = {
   accountId: string;
   folderId?: string;
   mailboxPath: string;
-  mode: "full" | "recent" | "new";
+  mode: SyncMode;
   phase: SyncOperationProgressPhase;
   processed: number;
   batchNumber?: number;
@@ -75,6 +80,22 @@ export type SyncOperationProgress = {
 export type SyncOperationOptions = {
   onProgress?: (progress: SyncOperationProgress) => void;
 };
+
+export function diffLocalAndRemoteFolderUids(
+  localRows: Array<{ id: string; imapUid: number }>,
+  remoteUids: number[]
+) {
+  const remoteUidSet = new Set(remoteUids.filter((uid) => Number.isFinite(uid) && uid > 0));
+  const staleMessageIds = localRows
+    .filter((row) => !remoteUidSet.has(row.imapUid))
+    .map((row) => row.id);
+  const localUidSet = new Set(localRows.map((row) => row.imapUid));
+  const missingRemoteUids = remoteUids.filter((uid) => !localUidSet.has(uid));
+  return {
+    staleMessageIds,
+    missingRemoteUids
+  };
+}
 
 const GOOGLE_CALENDAR_SYNC_SENDER = "noreply-calendar-sync@google.com";
 
@@ -206,10 +227,100 @@ export async function runSyncOperationBatched(
     message: "Starting sync."
   });
 
+  if (syncMode === "repair") {
+    if (!payload.folderId || !mailboxPath) {
+      throw new Error("Repair sync requires a folderId.");
+    }
+
+    emitProgress({
+      phase: "fetching",
+      processed: 0,
+      message: "Reconciling folder changes."
+    });
+
+    const [remoteSnapshot, localRows] = await Promise.all([
+      listImapMailboxUids(account, mailboxPath, clientId),
+      listFolderMessageUidRows(account.id, payload.folderId)
+    ]);
+
+    const { staleMessageIds, missingRemoteUids } = diffLocalAndRemoteFolderUids(
+      localRows.map((row) => ({ id: row.id, imapUid: row.imapUid })),
+      remoteSnapshot.uids
+    );
+    const highestLocalUid =
+      localRows.length > 0 ? Math.max(...localRows.map((row) => row.imapUid)) : null;
+    const hasHistoricalRemoteGaps =
+      highestLocalUid !== null && missingRemoteUids.some((uid) => uid <= highestLocalUid);
+
+    if (staleMessageIds.length > 0) {
+      await deleteMessagesWithFilesByIds(account.id, staleMessageIds);
+    }
+
+    if (hasHistoricalRemoteGaps) {
+      return runSyncOperationBatched(
+        {
+          ...payload,
+          mode: "full",
+          fullSync: true,
+          resumeFromUid: undefined
+        },
+        clientId,
+        options
+      );
+    }
+
+    const persistRepairMailboxState = async () => {
+      await saveMailboxState({
+        accountId: account.id,
+        folderId: payload.folderId!,
+        mailboxPath,
+        uidValidity: remoteSnapshot.uidValidity,
+        highestModSeq: remoteSnapshot.highestModSeq,
+        highestUid: remoteSnapshot.highestUid,
+        supportsQresync: remoteSnapshot.supportsQresync
+      });
+    };
+
+    if (missingRemoteUids.length > 0) {
+      const nestedResult = await runSyncOperationBatched(
+        {
+          ...payload,
+          mode: "new",
+          fullSync: false,
+          resumeFromUid: undefined
+        },
+        clientId,
+        options
+      );
+      await persistRepairMailboxState();
+      return {
+        count: staleMessageIds.length + nestedResult.count,
+        newMessages: nestedResult.newMessages,
+        highestProcessedUid: nestedResult.highestProcessedUid
+      };
+    }
+
+    await saveFoldersForAccount(account.id, remoteSnapshot.folders);
+    await persistRepairMailboxState();
+    const result = {
+      count: staleMessageIds.length,
+      highestProcessedUid: remoteSnapshot.highestUid ?? undefined
+    };
+    emitProgress({
+      phase: "done",
+      processed: result.count,
+      estimatedTotal: localRows.length,
+      percent: 100,
+      highestProcessedUid: result.highestProcessedUid,
+      message: "Repair completed."
+    });
+    return result;
+  }
+
   // A fresh full sync (no resume) captures existing message IDs upfront so we
   // can reconcile orphans (messages deleted from the server) at the end.
   // Resumed syncs skip reconciliation because we only re-fetch a subset of UIDs.
-  const isFreshFullSync = Boolean(payload.fullSync) && !payload.resumeFromUid;
+  const isFreshFullSync = syncMode === "full" && !payload.resumeFromUid;
   const existingFileRefs = isFreshFullSync
     ? await listMessageFileRefs(account.id, payload.folderId ?? null)
     : [];

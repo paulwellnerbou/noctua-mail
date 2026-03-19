@@ -5,7 +5,7 @@ import path from "path";
 import type { Account, Folder, Message } from "./data";
 import {
   createTopic,
-  getTopicMessageSuggestions,
+  getTopicThreadSuggestions,
   getTopicSuggestionExplanationForThread,
   getTopicStats,
   getTopicSuggestionsForMessage,
@@ -248,6 +248,55 @@ describe("topic suggestions", () => {
       fromEmail: "newsletter@kajabi.example",
       to: "owner@example.com"
     }, {
+      accountEmail: "owner@example.com"
+    });
+
+    expect(suggestions).toEqual([]);
+  });
+
+  test("ignores the account owner's own email as a sender suggestion signal for threads", async () => {
+    const accountId = "acc-topic-suggestions-own-sender";
+    const folder = buildFolder(accountId);
+    const { saveFoldersForAccount, upsertAccount, upsertMessages } = await dbModulePromise;
+
+    await upsertAccount(buildAccount(accountId));
+    await saveFoldersForAccount(accountId, [folder]);
+
+    await upsertMessages(
+      accountId,
+      folder.id,
+      [
+        buildMessage({
+          id: "msg-history",
+          accountId,
+          folderId: folder.id,
+          threadId: "thread-history",
+          messageId: "<history-own-sender@example.com>",
+          from: "Owner <owner@example.com>",
+          fromEmail: "owner@example.com",
+          to: "school@example.com",
+          dateValue: Date.UTC(2026, 2, 18, 9, 0, 0)
+        }),
+        buildMessage({
+          id: "msg-target",
+          accountId,
+          folderId: folder.id,
+          threadId: "thread-target",
+          messageId: "<target-own-sender@example.com>",
+          from: "Owner <owner@example.com>",
+          fromEmail: "owner@example.com",
+          to: "newsletter@example.com",
+          dateValue: Date.UTC(2026, 2, 18, 9, 5, 0)
+        })
+      ],
+      true,
+      { recomputeThreads: false }
+    );
+
+    const topic = await createTopic(accountId, "School", "blue");
+    await setThreadTopics(accountId, "thread-history", [topic.id]);
+
+    const suggestions = await getTopicSuggestionsForThread(accountId, "thread-target", {
       accountEmail: "owner@example.com"
     });
 
@@ -792,7 +841,7 @@ describe("topic suggestions", () => {
     expect(stats[0]?.topSignals.some((signal) => signal.type === "recipient" && signal.value === "owner@example.com")).toBe(false);
   });
 
-  test("returns only recent untagged Inbox candidates for the active topic, ordered by score then recency", async () => {
+  test("returns only Inbox threads without topics for the active topic, ordered by score then recency", async () => {
     const accountId = "acc-topic-message-suggestions";
     const inboxFolder = buildFolder(accountId);
     const archiveFolder = buildArchiveFolder(accountId);
@@ -922,18 +971,17 @@ describe("topic suggestions", () => {
     await setThreadTopics(accountId, "thread-history-other", [billingTopic.id]);
     await setThreadTopics(accountId, "thread-candidate-assigned", [billingTopic.id]);
 
-    const suggestions = await getTopicMessageSuggestions(accountId, buildTopic.id, {
+    const suggestions = await getTopicThreadSuggestions(accountId, buildTopic.id, {
       accountEmail: "owner@example.com",
       limit: 5,
       maxAgeDays: 180
     });
 
-    expect(suggestions.map((item) => item.message.threadId)).toEqual([
+    expect(suggestions.map((item) => item.threadId)).toEqual([
       "thread-candidate-strong",
       "thread-candidate-weak"
     ]);
     expect(suggestions.map((item) => item.suggestionScore)).toEqual([22, 10]);
-    expect(suggestions.every((item) => item.message.folderId === inboxFolder.id)).toBe(true);
-    expect(suggestions.every((item) => item.message.dateValue > oldDate)).toBe(true);
+    expect(suggestions.every((item) => item.representativeMessageId?.startsWith("msg-candidate-"))).toBe(true);
   });
 });

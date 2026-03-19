@@ -17,6 +17,9 @@ export type MessageGroup = {
   label?: string;
   items: Message[];
   count?: number;
+  showCount?: boolean;
+  allowToggleWhenEmpty?: boolean;
+  variant?: "topic-suggestions";
 };
 
 export type MessageGroupMeta = {
@@ -29,6 +32,14 @@ export type ListGroupItem = {
   type: "group";
   key: string;
   group: MessageGroup;
+};
+
+export type ListSuggestionSectionItem = {
+  type: "suggestion-section";
+  key: string;
+  group: MessageGroup;
+  rows: ListRowItem[];
+  isCollapsed: boolean;
 };
 
 export type ListRowItem = {
@@ -56,7 +67,7 @@ export type ListRowItem = {
   ancestorStopsHere: boolean[];
 };
 
-export type ListItem = ListGroupItem | ListRowItem;
+export type ListItem = ListGroupItem | ListSuggestionSectionItem | ListRowItem;
 
 export type VisibleMessageEntry = {
   message: Message;
@@ -242,9 +253,8 @@ export function buildMessageListItems(params: BuildMessageListItemsParams): List
   const items: ListItem[] = [];
   const nestedState = collapsedNestedMessages ?? {};
 
-  groupedMessages.forEach((group) => {
-    items.push({ type: "group", key: group.key, group });
-    if (group.items.length === 0 || collapsedGroups[group.key]) return;
+  const buildRowsForGroup = (group: MessageGroup): ListRowItem[] => {
+    const rows: ListRowItem[] = [];
     let isFirstRow = true;
 
     if (supportsThreads) {
@@ -274,7 +284,7 @@ export function buildMessageListItems(params: BuildMessageListItemsParams): List
             ? getCollapsedThreadFromDisplay(fullFlat, userEmail, preferToDisplay)
             : null;
 
-        const rows =
+        const visibleRows =
           mode === "nested"
             ? buildVisibleThreadRows({
                 flat,
@@ -289,7 +299,7 @@ export function buildMessageListItems(params: BuildMessageListItemsParams): List
                 ancestorStopsHere: []
               }));
 
-        rows.forEach((row, index) => {
+        visibleRows.forEach((row, index) => {
           const { message, depth, isLastInDepth, hasChildren, isNestedCollapsed, ancestorStopsHere } =
             row;
           const folderIds =
@@ -313,7 +323,7 @@ export function buildMessageListItems(params: BuildMessageListItemsParams): List
                   preferToDisplay
                 );
 
-          items.push({
+          rows.push({
             type: "row",
             key: message.id,
             groupKey: group.key,
@@ -340,7 +350,7 @@ export function buildMessageListItems(params: BuildMessageListItemsParams): List
           if (isFirstRow) isFirstRow = false;
         });
       });
-      return;
+      return rows;
     }
 
     buildFlatEntries({
@@ -356,7 +366,7 @@ export function buildMessageListItems(params: BuildMessageListItemsParams): List
         false,
         preferToDisplay
       );
-      items.push({
+      rows.push({
         type: "row",
         key: message.id,
         groupKey: group.key,
@@ -382,6 +392,30 @@ export function buildMessageListItems(params: BuildMessageListItemsParams): List
       });
       if (isFirstRow) isFirstRow = false;
     });
+
+    return rows;
+  };
+
+  groupedMessages.forEach((group) => {
+    const isGroupCollapsed =
+      collapsedGroups[group.key] ?? (group.variant === "topic-suggestions");
+    if (group.variant === "topic-suggestions") {
+      items.push({
+        type: "suggestion-section",
+        key: `${group.key}:section`,
+        group,
+        rows:
+          group.items.length === 0 || isGroupCollapsed
+            ? []
+            : buildRowsForGroup(group),
+        isCollapsed: isGroupCollapsed
+      });
+      return;
+    }
+
+    items.push({ type: "group", key: group.key, group });
+    if (group.items.length === 0 || isGroupCollapsed) return;
+    items.push(...buildRowsForGroup(group));
   });
 
   return items;
@@ -405,7 +439,9 @@ export function buildVisibleMessagesForSelection(
 
   const list: VisibleMessageEntry[] = [];
   groupedMessages.forEach((group) => {
-    if (group.items.length === 0 || collapsedGroups[group.key]) return;
+    const isGroupCollapsed =
+      collapsedGroups[group.key] ?? (group.variant === "topic-suggestions");
+    if (group.items.length === 0 || isGroupCollapsed) return;
     if (supportsThreads) {
       const entries = buildThreadGroupEntries({
         group,

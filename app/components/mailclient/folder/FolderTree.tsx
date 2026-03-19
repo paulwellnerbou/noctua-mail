@@ -8,6 +8,7 @@ type FolderTreeProps = {
     folderTree: Map<string, Folder[]>;
     folderById: Map<string, Folder>;
     folderQuery: string;
+    searchScope: "folder" | "all";
     activeFolderId: string;
     collapsedFolders: Record<string, boolean>;
     syncingFolders: Set<string>;
@@ -41,6 +42,7 @@ export default function FolderTree({ state, actions }: FolderTreeProps) {
     folderTree,
     folderById,
     folderQuery,
+    searchScope,
     activeFolderId,
     collapsedFolders,
     syncingFolders,
@@ -83,6 +85,7 @@ export default function FolderTree({ state, actions }: FolderTreeProps) {
             folderTree,
             folderById,
             folderQueryText,
+            searchScope,
             activeFolderId,
             collapsedFolders,
             syncingFolders,

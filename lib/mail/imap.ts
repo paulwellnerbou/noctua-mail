@@ -482,6 +482,18 @@ export type ImapMailboxStatusSnapshot = {
   messages: number | null;
   unseen: number | null;
   uidValidity: string | null;
+  highestModSeq: string | null;
+};
+
+export type ImapMailboxUidSnapshot = {
+  mailboxPath: string;
+  uidNext: number | null;
+  uidValidity: string | null;
+  highestModSeq: string | null;
+  highestUid: number | null;
+  supportsQresync: boolean;
+  uids: number[];
+  folders: Folder[];
 };
 
 export async function getImapMailboxStatus(
@@ -494,16 +506,19 @@ export async function getImapMailboxStatus(
 
   try {
     await logImapOp("connect", { host: account.imap.host, ...logContext }, () => client.connect());
+    const statusQuery: Record<string, boolean> = {
+      uidNext: true,
+      messages: true,
+      unseen: true,
+      uidValidity: true
+    };
+    if (clientSupportsQresync(client)) {
+      statusQuery.highestModseq = true;
+    }
     const status = await logImapOp(
       "status",
       { mailbox: mailboxPath, ...logContext },
-      () =>
-        client.status(mailboxPath, {
-          uidNext: true,
-          messages: true,
-          unseen: true,
-          uidValidity: true
-        })
+      () => client.status(mailboxPath, statusQuery)
     );
     return {
       mailboxPath,
@@ -514,6 +529,74 @@ export async function getImapMailboxStatus(
         (status as { uidValidity?: unknown })?.uidValidity == null
           ? null
           : String((status as { uidValidity?: unknown }).uidValidity),
+      highestModSeq:
+        (status as { highestModseq?: unknown })?.highestModseq == null
+          ? null
+          : String((status as { highestModseq?: unknown }).highestModseq),
+    };
+  } finally {
+    try {
+      await logImapOp("logout", { ...logContext }, () => client.logout());
+    } catch {
+      // ignore logout errors
+    }
+  }
+}
+
+function clientSupportsQresync(client: ImapFlow) {
+  const caps: any =
+    (client as any).enabledCapabilities ||
+    (client as any).serverCapabilities ||
+    (client as any).capabilities ||
+    null;
+  if (!caps) return false;
+  if (caps instanceof Set) return caps.has("QRESYNC") || caps.has("qresync");
+  if (Array.isArray(caps)) return caps.includes("QRESYNC") || caps.includes("qresync");
+  return false;
+}
+
+export async function listImapMailboxUids(
+  account: Account,
+  mailboxPath: string,
+  clientId?: string
+): Promise<ImapMailboxUidSnapshot> {
+  const logContext = buildLogContext(account, clientId);
+  const client = buildImapClient(account, logContext);
+
+  try {
+    await logImapOp("connect", { host: account.imap.host, ...logContext }, () => client.connect());
+    const folderList = await logImapOp("list", { ...logContext }, () => client.list());
+    const folders: Folder[] = mapImapFolders(account, folderList);
+    const mailboxInfo = await logImapOp(
+      "mailboxOpen",
+      { mailbox: mailboxPath, readOnly: true, ...logContext },
+      () => client.mailboxOpen(mailboxPath, { readOnly: true })
+    );
+    const messageCount = toFiniteNumber((mailboxInfo as { exists?: unknown })?.exists) ?? 0;
+    const uids: number[] = [];
+    if (messageCount > 0) {
+      for await (const message of client.fetch("1:*", { uid: true })) {
+        if (typeof message.uid === "number" && Number.isFinite(message.uid)) {
+          uids.push(message.uid);
+        }
+      }
+    }
+    const highestUid = uids.length > 0 ? Math.max(...uids) : null;
+    return {
+      mailboxPath,
+      uidNext: toFiniteNumber((mailboxInfo as { uidNext?: unknown })?.uidNext) ?? null,
+      uidValidity:
+        (mailboxInfo as { uidValidity?: unknown })?.uidValidity == null
+          ? null
+          : String((mailboxInfo as { uidValidity?: unknown }).uidValidity),
+      highestModSeq:
+        (mailboxInfo as { highestModseq?: unknown })?.highestModseq == null
+          ? null
+          : String((mailboxInfo as { highestModseq?: unknown }).highestModseq),
+      highestUid,
+      supportsQresync: clientSupportsQresync(client),
+      uids,
+      folders
     };
   } finally {
     try {

@@ -80,7 +80,7 @@ type NewSyncFolderDecision = {
 type FolderConsistencyResult = {
   ok?: boolean;
   needsRepair?: boolean;
-  recommendedMode?: "none" | "new" | "full";
+  recommendedMode?: "none" | "new" | "repair" | "full";
   reasons?: string[];
 };
 
@@ -143,7 +143,7 @@ export function useSyncController({
   const syncAccountRef = useRef<
     (
       folderId?: string,
-      mode?: "new" | "full",
+      mode?: "new" | "repair" | "full",
       options?: { recategorizeFolder?: boolean }
     ) => Promise<void> | undefined
   >(undefined);
@@ -159,7 +159,7 @@ export function useSyncController({
       folderId: string,
       awaitDeep?: boolean,
       allowRefresh?: boolean,
-      mode?: "recent" | "new" | "full",
+      mode?: "recent" | "new" | "repair" | "full",
       allowDeep?: boolean,
       options?: { recategorizeFolder?: boolean }
     ) => Promise<unknown>
@@ -274,7 +274,7 @@ export function useSyncController({
     accountId: string;
     folderId?: string;
     fullSync?: boolean;
-    mode?: "full" | "recent" | "new";
+    mode?: "full" | "recent" | "new" | "repair";
     recategorizeFolder?: boolean;
   }): Promise<SyncJobResult> => {
     const { accountId, ...requestBody } = payload;
@@ -333,7 +333,7 @@ export function useSyncController({
     folderId: string,
     awaitDeep = false,
     allowRefresh = true,
-    mode: "recent" | "new" | "full" = "recent",
+    mode: "recent" | "new" | "repair" | "full" = "recent",
     allowDeep = true,
     options?: { recategorizeFolder?: boolean }
   ): Promise<SyncJobResult | null> => {
@@ -365,7 +365,7 @@ export function useSyncController({
       return null;
     }
 
-    const shouldRunDeepSync = allowDeep && mode !== "full";
+    const shouldRunDeepSync = allowDeep && mode !== "full" && mode !== "repair";
     if (!shouldRunDeepSync) {
       setSyncingFolders((prev) => {
         const next = new Set(prev);
@@ -439,7 +439,7 @@ export function useSyncController({
 
   const syncAccount = async (
     folderId?: string,
-    mode: "new" | "full" = "full",
+    mode: "new" | "repair" | "full" = "full",
     options?: { recategorizeFolder?: boolean }
   ) => {
     const selectionKey = currentKeyRef.current;
@@ -449,11 +449,11 @@ export function useSyncController({
         folderId,
         false,
         true,
-        mode === "new" ? "new" : mode === "full" ? "full" : "recent",
-        mode !== "new",
+        mode === "new" ? "new" : mode === "repair" ? "repair" : mode === "full" ? "full" : "recent",
+        mode !== "new" && mode !== "repair",
         { recategorizeFolder: Boolean(options?.recategorizeFolder) }
       );
-      if (mode !== "new") {
+      if (mode !== "new" && mode !== "repair") {
         await syncNewlyDetectedFolders(knownFolderIds, mode);
       }
       return;
@@ -489,6 +489,7 @@ export function useSyncController({
 
     setIsSyncing(true);
     void (async () => {
+      const accountWideMode: "new" | "full" = mode === "new" ? "new" : "full";
       const priorityFolderId = activeFolderId || inboxFolder?.id;
       const sortedFolders = priorityFolderId
         ? [
@@ -497,7 +498,7 @@ export function useSyncController({
           ]
         : accountFolders;
 
-      if (mode === "new") {
+      if (accountWideMode === "new") {
         const plannedFolders = accountFolders.map((folder) => folder.id);
         let foldersToSync = plannedFolders;
         try {
@@ -541,10 +542,10 @@ export function useSyncController({
           folder.id,
           true,
           false,
-          mode === "full" ? "full" : "recent"
+          accountWideMode === "full" ? "full" : "recent"
         );
       }
-      await syncNewlyDetectedFolders(knownFolderIds, mode);
+      await syncNewlyDetectedFolders(knownFolderIds, accountWideMode);
       if (currentKeyRef.current === selectionKey) {
         await refreshMailboxData();
       }
@@ -574,7 +575,12 @@ export function useSyncController({
         const result = await checkFolderConsistency(activeFolderId);
         if (cancelled || !result.needsRepair) return;
 
-        const mode = result.recommendedMode === "full" ? "full" : "new";
+        const mode =
+          result.recommendedMode === "full"
+            ? "full"
+            : result.recommendedMode === "repair"
+              ? "repair"
+              : "new";
         // Keep startup lightweight: defer the first automatic full repair until
         // the folder is revisited or manually synced later in the session.
         if (mode === "full" && isInitialConsistencyCheck) {
@@ -1012,7 +1018,10 @@ export function useSyncController({
       return true;
     };
 
-    const requestFolderReconcileSync = (folderId?: string) => {
+    const requestFolderReconcileSync = (
+      folderId?: string,
+      mode: "repair" | "full" = "repair"
+    ) => {
       if (!folderId) return;
       const now = Date.now();
       const lastRun = lastDeleteReconcileAtRef.current[folderId] ?? 0;
@@ -1020,7 +1029,7 @@ export function useSyncController({
       const { isSyncing: syncing, syncingFolders: syncingSet } = syncStateRef.current;
       if (syncing || syncingSet.has(folderId)) return;
       lastDeleteReconcileAtRef.current[folderId] = now;
-      void syncAccountRef.current?.(folderId, "full");
+      void syncAccountRef.current?.(folderId, mode);
     };
 
     const startStream = () => {
@@ -1126,14 +1135,6 @@ export function useSyncController({
             },
             { source: "stream-flags-update" }
           );
-          const hasDeletedFlag = (data.flags ?? []).some(
-            (flag) => flag.toLowerCase() === "\\deleted"
-          );
-          if (hasDeletedFlag) {
-            const fId = data.folderId ?? activeFolderId;
-            if (shouldSkipDeleteReconcile(fId, data.uid)) return;
-            requestFolderReconcileSync(fId);
-          }
         } catch {
           // ignore
         }
@@ -1143,15 +1144,26 @@ export function useSyncController({
           const data = JSON.parse((event as MessageEvent).data) as {
             folderId?: string;
             uid?: number;
+            reconciled?: boolean;
           };
           const fId = data.folderId ?? activeFolderId;
           if (data.uid && fId) {
             setMessages((prev) =>
               prev.filter((msg) => !(msg.folderId === fId && msg.imapUid === data.uid))
             );
+            setFolders((prev) =>
+              prev.map((folder) =>
+                folder.id === fId
+                  ? { ...folder, count: Math.max(0, (folder.count ?? 0) - 1) }
+                  : folder
+              )
+            );
+            if (data.reconciled !== false) {
+              return;
+            }
           }
           if (shouldSkipDeleteReconcile(fId, data.uid)) return;
-          requestFolderReconcileSync(fId);
+          requestFolderReconcileSync(fId, "repair");
         } catch {
           // ignore
         }

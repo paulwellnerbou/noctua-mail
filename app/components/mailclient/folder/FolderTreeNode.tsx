@@ -15,6 +15,7 @@ type FolderTreeNodeProps = {
     folderTree: Map<string, Folder[]>;
     folderById: Map<string, Folder>;
     folderQueryText: string;
+    searchScope: "folder" | "all";
     activeFolderId: string;
     collapsedFolders: Record<string, boolean>;
     syncingFolders: Set<string>;
@@ -57,6 +58,7 @@ export default function FolderTreeNode({
   const {
     folderTree,
     folderQueryText,
+    searchScope,
     activeFolderId,
     collapsedFolders,
     syncingFolders,
@@ -107,7 +109,7 @@ export default function FolderTreeNode({
     >
       <div
         className={`${styles.treeRow} ${
-          folder.id === activeFolderId ? styles.treeRowActive : ""
+          searchScope === "folder" && folder.id === activeFolderId ? styles.treeRowActive : ""
         } ${isDeleting ? styles.treeRowDisabled : ""}`}
         data-syncing={isSyncingFolder ? "true" : "false"}
         data-menu-open={isMenuOpen ? "true" : "false"}

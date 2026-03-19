@@ -9,6 +9,78 @@ type FolderConsistencyPayload = {
   folderId?: string;
 };
 
+export function determineFolderConsistency(params: {
+  remote: {
+    count: number | null;
+    uidNext: number | null;
+    uidValidity: string | null;
+    highestModSeq: string | null;
+  };
+  local: {
+    count: number;
+    highestUid: number | null;
+    uidValidity: string | null;
+    highestModSeq: string | null;
+    supportsQresync: boolean | null;
+  };
+}) {
+  const { remote, local } = params;
+  const remoteLastUid =
+    typeof remote.uidNext === "number" && Number.isFinite(remote.uidNext)
+      ? Math.max(0, remote.uidNext - 1)
+      : null;
+  const isQresyncUnchanged =
+    local.supportsQresync === true &&
+    Boolean(remote.highestModSeq) &&
+    Boolean(local.highestModSeq) &&
+    remote.highestModSeq === local.highestModSeq;
+
+  const reasons: string[] = [];
+  if (remote.uidValidity && local.uidValidity && remote.uidValidity !== local.uidValidity) {
+    reasons.push("uid-validity-mismatch");
+  }
+  if (!isQresyncUnchanged && typeof remote.count === "number" && remote.count !== local.count) {
+    reasons.push("count-mismatch");
+  }
+  if (local.count > 0 && local.highestUid === null) {
+    reasons.push("missing-local-highest-uid");
+  }
+  if (typeof remoteLastUid === "number") {
+    if (local.highestUid === null) {
+      if (remoteLastUid > 0) {
+        reasons.push("unsynced-folder");
+      }
+    } else if (local.highestUid > remoteLastUid) {
+      reasons.push("local-highest-uid-exceeds-remote");
+    } else if (remoteLastUid > local.highestUid) {
+      reasons.push("remote-has-newer-uids");
+    }
+  }
+
+  const needsRepair = reasons.length > 0;
+  const recommendedMode =
+    reasons.some((reason) =>
+      [
+        "uid-validity-mismatch",
+        "missing-local-highest-uid",
+        "unsynced-folder",
+        "local-highest-uid-exceeds-remote"
+      ].includes(reason)
+    )
+      ? "full"
+      : reasons.includes("count-mismatch")
+        ? "repair"
+        : reasons.includes("remote-has-newer-uids")
+          ? "new"
+          : "none";
+
+  return {
+    needsRepair,
+    recommendedMode,
+    reasons
+  };
+}
+
 export async function handleFolderConsistencyRequest(
   request: Request,
   options?: { accountId?: string | null; folderId?: string | null }
@@ -44,52 +116,21 @@ export async function handleFolderConsistencyRequest(
 
   const localCount = folder.count ?? 0;
   const remoteCount = remote.messages;
-  const remoteLastUid =
-    typeof remote.uidNext === "number" && Number.isFinite(remote.uidNext)
-      ? Math.max(0, remote.uidNext - 1)
-      : null;
-
-  const reasons: string[] = [];
-  if (
-    remote.uidValidity &&
-    mailboxState?.uidValidity &&
-    remote.uidValidity !== mailboxState.uidValidity
-  ) {
-    reasons.push("uid-validity-mismatch");
-  }
-  if (typeof remoteCount === "number" && remoteCount !== localCount) {
-    reasons.push("count-mismatch");
-  }
-  if (localCount > 0 && localHighestUid === null) {
-    reasons.push("missing-local-highest-uid");
-  }
-  if (typeof remoteLastUid === "number") {
-    if (localHighestUid === null) {
-      if (remoteLastUid > 0) {
-        reasons.push("unsynced-folder");
-      }
-    } else if (localHighestUid > remoteLastUid) {
-      reasons.push("local-highest-uid-exceeds-remote");
-    } else if (remoteLastUid > localHighestUid) {
-      reasons.push("remote-has-newer-uids");
+  const { needsRepair, recommendedMode, reasons } = determineFolderConsistency({
+    remote: {
+      count: remoteCount,
+      uidNext: remote.uidNext,
+      uidValidity: remote.uidValidity,
+      highestModSeq: remote.highestModSeq
+    },
+    local: {
+      count: localCount,
+      highestUid: localHighestUid,
+      uidValidity: mailboxState?.uidValidity ?? null,
+      highestModSeq: mailboxState?.highestModSeq ?? null,
+      supportsQresync: mailboxState?.supportsQresync ?? null
     }
-  }
-
-  const needsRepair = reasons.length > 0;
-  const recommendedMode =
-    reasons.some((reason) =>
-      [
-        "uid-validity-mismatch",
-        "count-mismatch",
-        "missing-local-highest-uid",
-        "unsynced-folder",
-        "local-highest-uid-exceeds-remote"
-      ].includes(reason)
-    )
-      ? "full"
-      : reasons.includes("remote-has-newer-uids")
-        ? "new"
-        : "none";
+  });
 
   return NextResponse.json({
     ok: true,
@@ -101,12 +142,15 @@ export async function handleFolderConsistencyRequest(
     local: {
       count: localCount,
       highestUid: localHighestUid,
-      uidValidity: mailboxState?.uidValidity ?? null
+      uidValidity: mailboxState?.uidValidity ?? null,
+      highestModSeq: mailboxState?.highestModSeq ?? null,
+      supportsQresync: mailboxState?.supportsQresync ?? null
     },
     remote: {
       count: remoteCount,
       uidNext: remote.uidNext,
-      uidValidity: remote.uidValidity
+      uidValidity: remote.uidValidity,
+      highestModSeq: remote.highestModSeq
     }
   });
 }

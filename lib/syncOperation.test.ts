@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  diffLocalAndRemoteFolderUids,
   isGoogleCalendarSyncMessage,
   resolveOrphanedMessageFileRefs,
   shouldAutoProcessCalendarInviteMessage
@@ -34,6 +35,22 @@ describe("resolveOrphanedMessageFileRefs", () => {
     });
 
     expect(orphaned).toEqual([{ messageId: "row-1", attachmentIds: [] }]);
+  });
+});
+
+describe("diffLocalAndRemoteFolderUids", () => {
+  test("identifies stale local rows and newly missing remote UIDs", () => {
+    const diff = diffLocalAndRemoteFolderUids(
+      [
+        { id: "msg-1", imapUid: 10 },
+        { id: "msg-2", imapUid: 11 },
+        { id: "msg-3", imapUid: 15 }
+      ],
+      [10, 12, 15, 16]
+    );
+
+    expect(diff.staleMessageIds).toEqual(["msg-2"]);
+    expect(diff.missingRemoteUids).toEqual([12, 16]);
   });
 });
 

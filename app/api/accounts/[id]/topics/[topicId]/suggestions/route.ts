@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getAccountIdFromParams, requireAccountContext, type AccountRouteParams } from "@/app/api/_helpers/accountContext";
-import { getTopicMessageSuggestions } from "@/lib/topics";
+import { getTopicThreadSuggestions } from "@/lib/topics";
 
 function normalizeTopicIdParam(value: string | string[] | undefined) {
   if (typeof value === "string") return value.trim();
@@ -26,7 +26,7 @@ export async function GET(request: Request, { params }: AccountRouteParams) {
   const { searchParams } = new URL(request.url);
   const limit = Number(searchParams.get("limit") ?? "5");
   const maxAgeDays = Number(searchParams.get("maxAgeDays") ?? "180");
-  const suggestions = await getTopicMessageSuggestions(context.accountId, topicId, {
+  const suggestions = await getTopicThreadSuggestions(context.accountId, topicId, {
     accountEmail: context.account.email,
     limit,
     maxAgeDays

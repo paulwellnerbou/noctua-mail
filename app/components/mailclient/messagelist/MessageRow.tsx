@@ -1,6 +1,6 @@
 import { memo, useEffect, useRef, useState } from "react";
 import type React from "react";
-import { CalendarDays, GitBranch, MoveRight, Paperclip, Search, Trash2 } from "lucide-react";
+import { CalendarDays, Check, GitBranch, MoveRight, Paperclip, Search, Trash2 } from "lucide-react";
 import { Badge, Checkbox, IconButton, Text } from "@radix-ui/themes";
 import { CaretRightIcon } from "@radix-ui/react-icons";
 import { badgeColors } from "@/lib/ui/badgeColors";
@@ -69,6 +69,10 @@ type MessageRowProps = {
   showCalendarInviteIcon: boolean;
   showNewBadge: boolean;
   showCompactDivider?: boolean;
+  isSuggestionRow?: boolean;
+  showAddSuggestionAction?: boolean;
+  isAddSuggestionPending?: boolean;
+  onAddSuggestion?: (event: React.MouseEvent) => void;
   categoryIcon?: string;
   threadCategories?: string[];
   threadHasFlagged?: boolean;
@@ -135,6 +139,10 @@ function MessageRow({
   showCalendarInviteIcon,
   showNewBadge,
   showCompactDivider,
+  isSuggestionRow = false,
+  showAddSuggestionAction = false,
+  isAddSuggestionPending = false,
+  onAddSuggestion,
   categoryIcon,
   threadCategories,
   threadHasFlagged,
@@ -159,6 +167,7 @@ function MessageRow({
     isCompactView ? styles.rowCompact : "",
     useExternalStateStyles ? styles.rowExternalState : "",
     !useExternalStateStyles && showCompactDivider ? styles.rowDivider : "",
+    !useExternalStateStyles && isSuggestionRow ? styles.rowSuggestion : "",
     !useExternalStateStyles && isThreadSibling ? styles.rowThreadSibling : "",
     !useExternalStateStyles && effectiveActive && !showCollapsedActive ? styles.rowActive : "",
     !useExternalStateStyles && effectiveSelected ? styles.rowSelected : "",
@@ -361,11 +370,43 @@ function MessageRow({
                 <Search size={14} />
               </IconButton>
               {messageMenu}
+              {showAddSuggestionAction && (
+                <IconButton
+                  size="1"
+                  variant="soft"
+                  color="green"
+                  title={isAddSuggestionPending ? "Adding topic…" : "Add to topic"}
+                  aria-label="Add to topic"
+                  disabled={isDisabled || isAddSuggestionPending}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onAddSuggestion?.(event);
+                  }}
+                >
+                  <Check size={14} />
+                </IconButton>
+              )}
             </>
           ) : (
             <>
               {!listIsNarrow && quickActions}
               {messageMenu}
+              {showAddSuggestionAction && (
+                <IconButton
+                  size="1"
+                  variant="soft"
+                  color="green"
+                  title={isAddSuggestionPending ? "Adding topic…" : "Add to topic"}
+                  aria-label="Add to topic"
+                  disabled={isDisabled || isAddSuggestionPending}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onAddSuggestion?.(event);
+                  }}
+                >
+                  <Check size={14} />
+                </IconButton>
+              )}
             </>
           )}
         </div>
@@ -502,6 +543,9 @@ const areEqual = (prev: MessageRowProps, next: MessageRowProps) =>
   prev.showCalendarInviteIcon === next.showCalendarInviteIcon &&
   prev.showNewBadge === next.showNewBadge &&
   prev.showCompactDivider === next.showCompactDivider &&
+  prev.isSuggestionRow === next.isSuggestionRow &&
+  prev.showAddSuggestionAction === next.showAddSuggestionAction &&
+  prev.isAddSuggestionPending === next.isAddSuggestionPending &&
   prev.checkboxState === next.checkboxState &&
   prev.deleteTitle === next.deleteTitle &&
   prev.folderBadgeKey === next.folderBadgeKey &&

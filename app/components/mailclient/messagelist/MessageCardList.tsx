@@ -22,6 +22,7 @@ import {
   isRowAnimatedFromNestedToggle
 } from "./listInteractions";
 import { getCollapsedThreadBadgeUnion } from "./threadBadgeUnion";
+import { isTopicSuggestionGroupKey } from "./topicSuggestionGroup";
 import styles from "./MessageCardList.module.css";
 import threadRowStyles from "./MessageThreadList.module.css";
 
@@ -43,6 +44,7 @@ export default function MessageCardList({
     selectionStore,
     draggingMessageIds,
     pendingMessageActions,
+    pendingSuggestedThreadIds,
     isCompactView,
     listIsNarrow,
     preferToDisplay,
@@ -66,7 +68,8 @@ export default function MessageCardList({
     selectCollapsedThread,
     handleDeleteMessage,
     toggleFlaggedFlag,
-    toggleTodoFlag
+    toggleTodoFlag,
+    handleAddSuggestedThread
   } = actions;
 
 
@@ -137,6 +140,9 @@ export default function MessageCardList({
         groupToggle: styles.groupToggle,
         groupTitleFlagged: styles.groupTitleFlagged,
         groupCaret: styles.groupCaret,
+        suggestionSection: styles.suggestionSection,
+        suggestionSectionRows: styles.suggestionSectionRows,
+        suggestionSectionRow: styles.suggestionSectionRow,
         rowEnter: styles.rowEnter
       }}
       isRowAnimated={({ item }) => {
@@ -166,6 +172,10 @@ export default function MessageCardList({
       }}
       renderRow={({ item, index }) => {
         const message = item.message;
+        const isSuggestionRow = isTopicSuggestionGroupKey(item.groupKey);
+        const showAddSuggestionAction =
+          isSuggestionRow && item.threadIndex === 0 && item.depth === 0;
+        const isAddSuggestionPending = pendingSuggestedThreadIds.has(item.threadGroupId);
         const isActive = message.id === activeMessageId;
         const isThreadSibling =
           activeThreadKey === item.threadGroupId &&
@@ -229,7 +239,8 @@ export default function MessageCardList({
           useCompactThreadContainer && isDragging ? threadRowStyles.rowDragging : "",
           useCompactThreadContainer && pendingMessageActions.has(message.id)
             ? threadRowStyles.rowDisabled
-            : ""
+            : "",
+          useCompactThreadContainer && isSuggestionRow ? styles.compactThreadRowSuggestion : ""
         ]
           .filter(Boolean)
           .join(" ");
@@ -292,6 +303,10 @@ export default function MessageCardList({
               showThreadIndicator={item.threadSize > 1 && item.threadIndex === 0}
               threadSize={item.threadSize}
               showCompactDivider={showCompactDivider}
+              isSuggestionRow={isSuggestionRow}
+              showAddSuggestionAction={showAddSuggestionAction}
+              isAddSuggestionPending={isAddSuggestionPending}
+              onAddSuggestion={() => handleAddSuggestedThread(item.threadGroupId)}
               onRowClick={(event) => {
                 handleCollapsedThreadRootClick({
                   event,

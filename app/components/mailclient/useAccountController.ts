@@ -35,7 +35,7 @@ export type UseAccountControllerParams = {
     accountId: string;
     folderId?: string;
     fullSync?: boolean;
-    mode?: "full" | "recent" | "new";
+    mode?: "full" | "recent" | "new" | "repair";
   }) => Promise<SyncJobResult>;
   // State setters owned by MailClient
   setAccounts: React.Dispatch<React.SetStateAction<Account[]>>;

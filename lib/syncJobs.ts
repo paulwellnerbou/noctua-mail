@@ -1,6 +1,11 @@
 import { randomUUID } from "crypto";
 import { parseSyncWorkerLine } from "@/lib/syncWorkerProtocol";
-import type { SyncOperationProgress, SyncOperationResult, SyncPayload } from "@/lib/syncOperation";
+import type {
+  SyncMode,
+  SyncOperationProgress,
+  SyncOperationResult,
+  SyncPayload
+} from "@/lib/syncOperation";
 
 type SyncJobStatus = "queued" | "running" | "done" | "failed";
 
@@ -62,17 +67,18 @@ if (!runtimeState.__noctuaSyncJobsBootstrapped) {
 
 const JOB_TTL_MS = 1000 * 60 * 30;
 
-const MODE_PRIORITY: Record<"new" | "recent" | "full", number> = {
+const MODE_PRIORITY: Record<SyncMode, number> = {
   new: 1,
   recent: 2,
-  full: 3
+  repair: 3,
+  full: 4
 };
 
 const scheduleCleanup = (jobId: string) => {
   setTimeout(() => jobs.delete(jobId), JOB_TTL_MS);
 };
 
-function getSyncMode(payload: SyncPayload): "full" | "recent" | "new" {
+function getSyncMode(payload: SyncPayload): SyncMode {
   return payload.mode ?? (payload.fullSync ? "full" : "recent");
 }
 

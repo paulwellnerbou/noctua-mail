@@ -158,6 +158,27 @@
   width: 100%;
 }
 
+.compactThreadRowSuggestion {
+  border-radius: var(--radius-sm);
+  border: 1px dashed var(--gray-6);
+}
+
+.suggestionSection {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+}
+
+.suggestionSectionRows {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.suggestionSectionRow {
+  min-height: 0;
+}
+
 .compactThreadRow > :last-child {
   flex: 1 1 auto;
   min-width: 0;

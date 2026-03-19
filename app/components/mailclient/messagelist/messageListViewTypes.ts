@@ -19,6 +19,8 @@ export type MessageListViewState = {
   activeFolderId: string;
   messageById: Map<string, Message>;
   messageTopicsById: Map<string, Topic[]>;
+  suggestedThreadIds: ReadonlySet<string>;
+  pendingSuggestedThreadIds: ReadonlySet<string>;
   sortDir: "asc" | "desc";
   listIsNarrow: boolean;
   preferToDisplay: boolean;
@@ -60,6 +62,7 @@ export type MessageListViewActions = {
     collapsedThreadMessages?: Message[],
     clickedBadge?: "todo" | "done"
   ) => void;
+  handleAddSuggestedThread: (threadId: string) => void;
 };
 
 export type MessageListViewHelpers = {

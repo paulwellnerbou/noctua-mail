@@ -1,6 +1,6 @@
 import type React from "react";
 import type { CSSProperties } from "react";
-import { CalendarDays, GitBranch, MoveRight, Paperclip, Trash2 } from "lucide-react";
+import { CalendarDays, Check, GitBranch, MoveRight, Paperclip, Trash2 } from "lucide-react";
 import { Badge, IconButton, Text } from "@radix-ui/themes";
 import { badgeColors } from "@/lib/ui/badgeColors";
 import type { Message } from "@/lib/data";
@@ -29,6 +29,7 @@ import {
   isRowAnimatedFromNestedToggle
 } from "./listInteractions";
 import { getCollapsedThreadBadgeUnion } from "./threadBadgeUnion";
+import { isTopicSuggestionGroupKey } from "./topicSuggestionGroup";
 import groupStyles from "./MessageCardList.module.css";
 import styles from "./MessageThreadList.module.css";
 
@@ -51,6 +52,7 @@ export default function MessageThreadList({
     selectionStore,
     draggingMessageIds,
     pendingMessageActions,
+    pendingSuggestedThreadIds,
     preferToDisplay,
     userEmail,
     dateFormat,
@@ -71,7 +73,8 @@ export default function MessageThreadList({
     selectCollapsedThread,
     handleDeleteMessage,
     toggleFlaggedFlag,
-    toggleTodoFlag
+    toggleTodoFlag,
+    handleAddSuggestedThread
   } = actions;
 
   const {
@@ -140,6 +143,9 @@ export default function MessageThreadList({
         groupToggle: groupStyles.groupToggle,
         groupTitleFlagged: groupStyles.groupTitleFlagged,
         groupCaret: groupStyles.groupCaret,
+        suggestionSection: groupStyles.suggestionSection,
+        suggestionSectionRows: groupStyles.suggestionSectionRows,
+        suggestionSectionRow: groupStyles.suggestionSectionRow,
         rowEnter: styles.rowEnter
       }}
       isRowAnimated={({ item }) => {
@@ -166,6 +172,10 @@ export default function MessageThreadList({
       }}
       renderRow={({ item, index }) => {
         const message = item.message;
+        const isSuggestionRow = isTopicSuggestionGroupKey(item.groupKey);
+        const showAddSuggestionAction =
+          isSuggestionRow && item.threadIndex === 0 && item.depth === 0;
+        const isAddSuggestionPending = pendingSuggestedThreadIds.has(item.threadGroupId);
         const dateDisplay = getMessageListDateDisplay(
           message.dateValue,
           message.date,
@@ -224,7 +234,8 @@ export default function MessageThreadList({
           !displaySeen ? styles.rowUnread : "",
           rowSelected ? styles.rowSelected : "",
           isDragging ? styles.rowDragging : "",
-          isDisabled ? styles.rowDisabled : ""
+          isDisabled ? styles.rowDisabled : "",
+          isSuggestionRow ? styles.rowSuggestion : ""
         ]
           .filter(Boolean)
           .join(" ");
@@ -429,6 +440,22 @@ export default function MessageThreadList({
                     <Trash2 size={14} />
                   </IconButton>
                   {renderMessageMenu(message, "table")}
+                  {showAddSuggestionAction && (
+                    <IconButton
+                      size="1"
+                      variant="soft"
+                      color="green"
+                      title={isAddSuggestionPending ? "Adding topic…" : "Add to topic"}
+                      aria-label="Add to topic"
+                      disabled={isDisabled || isAddSuggestionPending}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        handleAddSuggestedThread(item.threadGroupId);
+                      }}
+                    >
+                      <Check size={14} />
+                    </IconButton>
+                  )}
                 </div>
               </div>
             </div>

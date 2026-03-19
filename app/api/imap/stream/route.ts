@@ -1,6 +1,12 @@
 import { NextResponse } from "next/server";
 
-import { getFolders, getLatestMessageUid, getMailboxState, saveMailboxState } from "@/lib/db";
+import {
+  deleteMessageByFolderUid,
+  getFolders,
+  getLatestMessageUid,
+  getMailboxState,
+  saveMailboxState
+} from "@/lib/db";
 import { logImapOp } from "@/lib/mail/imapLogger";
 import { bindImapClientError, buildImapFlowOptions } from "@/lib/mail/imapClientOptions";
 import { registerStream } from "@/lib/mail/imapStreamRegistry";
@@ -289,9 +295,19 @@ export async function handleImapStreamRequest(
 
         client.on("exists", fetchNew);
         client.on("expunge", (info) => {
-          const payload: any = { folderId: folder.id };
-          if (info?.uid) payload.uid = info.uid;
-          send("message:removed", payload);
+          void (async () => {
+            const payload: any = { folderId: folder.id };
+            if (info?.uid) {
+              payload.uid = info.uid;
+              try {
+                const deleted = await deleteMessageByFolderUid(accountId, folder.id, info.uid);
+                payload.reconciled = deleted !== undefined;
+              } catch {
+                payload.reconciled = false;
+              }
+            }
+            send("message:removed", payload);
+          })();
         });
         client.on("flags", (info) => {
           const uid = info?.uid;

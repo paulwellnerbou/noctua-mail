@@ -54,7 +54,7 @@ export type SyncJobProgress = {
   accountId: string;
   folderId?: string;
   mailboxPath: string;
-  mode: "full" | "recent" | "new";
+  mode: "full" | "recent" | "new" | "repair";
   phase: SyncJobProgressPhase;
   processed: number;
   batchNumber?: number;

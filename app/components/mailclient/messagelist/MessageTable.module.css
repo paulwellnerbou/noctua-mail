@@ -38,6 +38,11 @@
   pointer-events: none;
 }
 
+.rowSuggestion {
+  border-style: dashed;
+  border-color: var(--gray-6);
+}
+
 .rowHeader {
   font-size: 11px;
   text-transform: uppercase;

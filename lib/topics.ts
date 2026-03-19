@@ -5,7 +5,7 @@ import {
   upsertTopicLearningSignalsForThreadIds,
   withAccountDb
 } from "./db";
-import type { Message, Topic, TopicColor, TopicSuggestionSignal } from "./data";
+import type { Topic, TopicColor, TopicSuggestionSignal } from "./data";
 import { TOPIC_COLORS, TOPIC_SUGGESTION_SIGNALS } from "./data";
 import { withDbWriteRetry } from "./dbWriteRetry";
 import {
@@ -71,8 +71,9 @@ export type TopicSuggestionExplanation = {
   signals: TopicSuggestionExplanationSignal[];
   topics: TopicSuggestionExplanationTopic[];
 };
-export type TopicMessageSuggestion = {
-  message: Message;
+export type TopicThreadSuggestion = {
+  threadId: string;
+  representativeMessageId?: string;
   suggestionScore: number;
 };
 
@@ -156,7 +157,7 @@ function normalizeTopicSuggestionSignals(
 ): TopicSuggestionSignals {
   return topicSuggestionSignalsFromEntries(
     collectTopicSignalEntries([signals], {
-      excludeRecipientEmail: options?.accountEmail ?? null
+      excludeAccountEmail: options?.accountEmail ?? null
     }),
     signals.threadId
   );
@@ -173,6 +174,9 @@ function topicSuggestionEntriesFromThreadSignalRows(
     const type = (row.signalType ?? "").trim() as TopicSuggestionSignal;
     const value = (row.signalValue ?? "").trim();
     if (!TOPIC_SUGGESTION_SIGNALS.includes(type) || !value) return [];
+    if (type === "senderEmail" && accountEmail && value.toLowerCase() === accountEmail) {
+      return [];
+    }
     if (type === "recipient" && accountEmail && value.toLowerCase() === accountEmail) {
       return [];
     }
@@ -1298,80 +1302,11 @@ export async function getTopicSuggestionsForThreads(
 
 type TopicSuggestionCandidateRow = {
   id: string;
-  accountId: string;
-  folderId: string;
-  mailboxPath?: string | null;
-  imapUid?: number | null;
   threadId: string;
-  parentId?: string | null;
-  messageId?: string | null;
-  inReplyTo?: string | null;
-  subject: string;
-  fromAddr: string;
-  fromEmail?: string | null;
-  toAddr: string;
-  ccAddr?: string | null;
-  bccAddr?: string | null;
-  preview: string;
-  date: string;
   dateValue: number;
-  priority?: string | null;
-  unread?: number | null;
-  flags?: string | null;
-  seen?: number | null;
-  answered?: number | null;
-  flagged?: number | null;
-  deleted?: number | null;
-  draft?: number | null;
-  recent?: number | null;
-  category?: string | null;
-  categoryScore?: number | null;
-  categorySignals?: string | null;
-  listUnsubscribe?: string | null;
-  listId?: string | null;
 };
 
-function rowToSuggestionMessage(row: TopicSuggestionCandidateRow): Message {
-  return {
-    id: row.id,
-    accountId: row.accountId,
-    folderId: row.folderId,
-    mailboxPath: row.mailboxPath ?? undefined,
-    imapUid: typeof row.imapUid === "number" ? row.imapUid : undefined,
-    threadId: row.threadId,
-    parentId: row.parentId ?? undefined,
-    messageId: row.messageId ?? undefined,
-    inReplyTo: row.inReplyTo ?? undefined,
-    subject: row.subject,
-    from: row.fromAddr,
-    fromEmail: row.fromEmail ?? undefined,
-    to: row.toAddr,
-    cc: row.ccAddr ?? undefined,
-    bcc: row.bccAddr ?? undefined,
-    preview: row.preview,
-    date: row.date,
-    dateValue: row.dateValue,
-    body: "",
-    priority: row.priority ?? undefined,
-    unread: Boolean(row.unread),
-    flags: row.flags ? (JSON.parse(row.flags) as string[]) : undefined,
-    seen: Boolean(row.seen),
-    answered: Boolean(row.answered),
-    flagged: Boolean(row.flagged),
-    deleted: Boolean(row.deleted),
-    draft: Boolean(row.draft),
-    recent: Boolean(row.recent),
-    category: row.category ?? undefined,
-    categoryScore: typeof row.categoryScore === "number" ? row.categoryScore : undefined,
-    categorySignals: row.categorySignals
-      ? (JSON.parse(row.categorySignals) as string[]).filter((value) => typeof value === "string")
-      : undefined,
-    listUnsubscribe: row.listUnsubscribe ?? undefined,
-    listId: row.listId ?? undefined
-  };
-}
-
-export async function getTopicMessageSuggestions(
+export async function getTopicThreadSuggestions(
   accountId: string,
   topicId: string,
   options?: {
@@ -1379,7 +1314,7 @@ export async function getTopicMessageSuggestions(
     limit?: number;
     maxAgeDays?: number;
   }
-): Promise<TopicMessageSuggestion[]> {
+): Promise<TopicThreadSuggestion[]> {
   const normalizedTopicId = topicId.trim();
   if (!normalizedTopicId) return [];
 
@@ -1416,37 +1351,8 @@ export async function getTopicMessageSuggestions(
       .prepare(
         `SELECT
            m.id,
-           m.accountId,
-           m.folderId,
-           m.mailboxPath,
-           m.imapUid,
            m.threadId,
-           m.parentId,
-           m.messageId,
-           m.inReplyTo,
-           m.subject,
-           m.fromAddr,
-           m.fromEmail,
-           m.toAddr,
-           m.ccAddr,
-           m.bccAddr,
-           m.preview,
-           m.date,
-           m.dateValue,
-           m.priority,
-           m.unread,
-           m.flags,
-           m.seen,
-           m.answered,
-           m.flagged,
-           m.deleted,
-           m.draft,
-           m.recent,
-           m.category,
-           m.categoryScore,
-           m.categorySignals,
-           m.listUnsubscribe,
-           m.listId
+           m.dateValue
          FROM messages m
          WHERE m.accountId = ?
            AND m.folderId = ?
@@ -1490,7 +1396,7 @@ export async function getTopicMessageSuggestions(
       { accountEmail: options?.accountEmail }
     );
 
-    const suggestions: TopicMessageSuggestion[] = [];
+    const suggestions: TopicThreadSuggestion[] = [];
     candidateThreadIds.forEach((threadId) => {
       const signals = signalsByThreadId.get(threadId);
       if (!signals) return;
@@ -1501,7 +1407,8 @@ export async function getTopicMessageSuggestions(
       const row = candidateRowsByThreadId.get(threadId);
       if (!row) return;
       suggestions.push({
-        message: rowToSuggestionMessage(row),
+        threadId,
+        representativeMessageId: row.id,
         suggestionScore: topicMatch.suggestionScore ?? 0
       });
     });
@@ -1510,10 +1417,12 @@ export async function getTopicMessageSuggestions(
       if (b.suggestionScore !== a.suggestionScore) {
         return b.suggestionScore - a.suggestionScore;
       }
-      if (b.message.dateValue !== a.message.dateValue) {
-        return b.message.dateValue - a.message.dateValue;
+      const aRow = candidateRowsByThreadId.get(a.threadId);
+      const bRow = candidateRowsByThreadId.get(b.threadId);
+      if ((bRow?.dateValue ?? 0) !== (aRow?.dateValue ?? 0)) {
+        return (bRow?.dateValue ?? 0) - (aRow?.dateValue ?? 0);
       }
-      return a.message.id.localeCompare(b.message.id);
+      return a.threadId.localeCompare(b.threadId);
     });
 
     return suggestions.slice(0, limit);

@@ -73,6 +73,7 @@ import {
   getThreadLatestDate,
   type ThreadNode
 } from "./mailclient/messagelist/threadTree";
+import type { MessageGroup } from "./mailclient/messagelist/listModel";
 import {
   AlertDialog,
   Badge,
@@ -141,6 +142,15 @@ import TopicBadge from "./mailclient/TopicBadge";
 import TopicsSidebarSection from "./mailclient/folder/TopicsSidebarSection";
 import { applyActiveTopicSuggestion } from "./mailclient/topicSuggestionActions";
 import { parseSimpleTopicSearchMode } from "./mailclient/topicSearch";
+import {
+  buildTopicSuggestionCollapsedStorageKey,
+  buildTopicSuggestionGroup,
+  buildTopicSuggestionGroupKey,
+  buildTopicSuggestionRankedMessages,
+  isTopicSuggestionGroupKey,
+  readTopicSuggestionGroupCollapsed,
+  type TopicThreadSuggestion
+} from "./mailclient/messagelist/topicSuggestionGroup";
 import TopBar from "./mailclient/TopBar";
 import BottomStatusBar from "./mailclient/status/BottomStatusBar";
 import CalendarSidebarPanel from "./calendar/CalendarSidebarPanel";
@@ -151,9 +161,6 @@ import type { Account, Folder, Message, Topic, TopicColor, User } from "@/lib/da
 import AccountSettingsModal, { type ManageTab } from "./AccountSettingsModal";
 import DeleteConfirmDialog from "./mailclient/message/DeleteConfirmDialog";
 import UnsubscribeConfirmDialog from "./mailclient/message/UnsubscribeConfirmDialog";
-import TopicSuggestionPanel, {
-  type TopicSuggestionPanelItem
-} from "./mailclient/messagelist/TopicSuggestionPanel";
 import {
   computeGroupMeta,
   isFlaggedMessage,
@@ -239,7 +246,7 @@ type TopicSuggestionExplanation = {
 
 type ActiveTopicSuggestionsResponse = {
   ok?: boolean;
-  suggestions?: TopicSuggestionPanelItem[];
+  suggestions?: TopicThreadSuggestion[];
 };
 
 export default function MailClient({
@@ -281,8 +288,10 @@ export default function MailClient({
     useState<TopicSuggestionExplanation | null>(null);
   const [topicSuggestionExplanationThreadId, setTopicSuggestionExplanationThreadId] = useState("");
   const [topicSidebarCollapsed, setTopicSidebarCollapsed] = useState(false);
-  const [activeTopicSuggestions, setActiveTopicSuggestions] = useState<TopicSuggestionPanelItem[]>([]);
+  const [activeTopicSuggestions, setActiveTopicSuggestions] = useState<TopicThreadSuggestion[]>([]);
+  const [activeTopicSuggestionMessages, setActiveTopicSuggestionMessages] = useState<Message[]>([]);
   const [activeTopicSuggestionsLoading, setActiveTopicSuggestionsLoading] = useState(false);
+  const [activeTopicSuggestionsLoadedKey, setActiveTopicSuggestionsLoadedKey] = useState("");
   const [pendingTopicSuggestionThreadIds, setPendingTopicSuggestionThreadIds] =
     useState<Set<string>>(new Set());
 
@@ -321,6 +330,13 @@ export default function MailClient({
     () => allTopics.find((topic) => topic.id === activeTopicId) ?? null,
     [activeTopicId, allTopics]
   );
+  const showActiveTopicSuggestionGroup = Boolean(activeTopicSearchMode && activeTopic);
+  const activeTopicSuggestionGroupKey = useMemo(
+    () => (activeTopic ? buildTopicSuggestionGroupKey(activeTopic.id) : ""),
+    [activeTopic]
+  );
+  const activeTopicSuggestionCacheKey =
+    activeAccountId && activeTopicId ? `${activeAccountId}:${activeTopicId}` : "";
 
   const readErrorMessage = useCallback(async (res: Response) => {
     if (res.status === 401) {
@@ -1246,6 +1262,40 @@ export default function MailClient({
     });
     return map;
   }, [messages, activeAccountId]);
+  const activeTopicSuggestionRankedMessages = useMemo(
+    () =>
+      buildTopicSuggestionRankedMessages(
+        activeTopicSuggestionMessages,
+        activeTopicSuggestions
+      ),
+    [activeTopicSuggestionMessages, activeTopicSuggestions]
+  );
+  const activeTopicSuggestionGroups = useMemo<MessageGroup[]>(
+    () =>
+      showActiveTopicSuggestionGroup
+        ? buildTopicSuggestionGroup({
+            topic: activeTopic,
+            rankedMessages: activeTopicSuggestionRankedMessages
+          })
+        : [],
+    [
+      activeTopic,
+      activeTopicSuggestionRankedMessages,
+      showActiveTopicSuggestionGroup
+    ]
+  );
+  const listMessageById = useMemo(() => {
+    const map = new Map(messageById);
+    activeTopicSuggestionRankedMessages.forEach((message) => {
+      if (message.accountId !== activeAccountId) return;
+      map.set(message.id, message);
+    });
+    return map;
+  }, [activeAccountId, activeTopicSuggestionRankedMessages, messageById]);
+  const suggestedThreadIds = useMemo(
+    () => new Set(activeTopicSuggestions.map((item) => item.threadId)),
+    [activeTopicSuggestions]
+  );
 
   // useThreadContent: manages thread content cache, source loading, and hydration
   const {
@@ -1651,10 +1701,19 @@ export default function MailClient({
     void refreshTopicStats(activeAccountId);
   }, [activeAccountId, apiFetch, refreshTopicStats, threadContentByIdRef, upsertThreadCache]);
 
-  const refreshActiveTopicSuggestions = useCallback(async (signal?: AbortSignal) => {
-    if (!activeAccountId || !activeTopicId) {
+  const refreshActiveTopicSuggestions = useCallback(async (options?: {
+    signal?: AbortSignal;
+    force?: boolean;
+  }) => {
+    const signal = options?.signal;
+    if (!activeAccountId || !activeTopicId || !activeTopicSuggestionCacheKey) {
       setActiveTopicSuggestions([]);
+      setActiveTopicSuggestionMessages([]);
+      setActiveTopicSuggestionsLoadedKey("");
       setActiveTopicSuggestionsLoading(false);
+      return;
+    }
+    if (!options?.force && activeTopicSuggestionsLoadedKey === activeTopicSuggestionCacheKey) {
       return;
     }
 
@@ -1664,53 +1723,186 @@ export default function MailClient({
         limit: "5",
         maxAgeDays: "180"
       });
-      const res = await apiFetch(
+      const suggestionRes = await apiFetch(
         buildAccountTopicSuggestionsPath(activeAccountId, activeTopicId, params),
         {
           cache: "no-store",
           signal
         }
       );
-      if (!res.ok) {
+      if (!suggestionRes.ok) {
         if (!signal?.aborted) {
           setActiveTopicSuggestions([]);
+          setActiveTopicSuggestionMessages([]);
         }
         return;
       }
-      const data = await res.json() as ActiveTopicSuggestionsResponse;
+      const suggestionData = (await suggestionRes.json()) as ActiveTopicSuggestionsResponse;
+      const suggestions = Array.isArray(suggestionData.suggestions)
+        ? suggestionData.suggestions
+            .map((item) => ({
+              threadId: item.threadId.trim(),
+              representativeMessageId: item.representativeMessageId?.trim() || undefined,
+              suggestionScore: Number(item.suggestionScore) || 0
+            }))
+            .filter((item) => item.threadId.length > 0)
+        : [];
+
+      if (suggestions.length === 0) {
+        if (!signal?.aborted) {
+          setActiveTopicSuggestions([]);
+          setActiveTopicSuggestionMessages([]);
+          setActiveTopicSuggestionsLoadedKey(activeTopicSuggestionCacheKey);
+        }
+        return;
+      }
+
+      const threadIds = Array.from(new Set(suggestions.map((item) => item.threadId)));
+      const threadIdSet = new Set(threadIds);
+      const threadRes = await apiFetch(buildAccountApiPath(activeAccountId, "/thread/related"), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          threadIds,
+          groupBy,
+          threadDateSource
+        }),
+        signal
+      });
+      if (!threadRes.ok) {
+        if (!signal?.aborted) {
+          setActiveTopicSuggestions([]);
+          setActiveTopicSuggestionMessages([]);
+        }
+        return;
+      }
+      const threadData = (await threadRes.json()) as { items?: Message[] };
+      const items = Array.isArray(threadData.items)
+        ? threadData.items.filter((item) => threadIdSet.has(item.threadId ?? ""))
+        : [];
       if (!signal?.aborted) {
-        setActiveTopicSuggestions(Array.isArray(data.suggestions) ? data.suggestions : []);
+        setActiveTopicSuggestions(suggestions);
+        setActiveTopicSuggestionMessages(items);
+        setActiveTopicSuggestionsLoadedKey(activeTopicSuggestionCacheKey);
       }
     } catch {
       if (!signal?.aborted) {
         setActiveTopicSuggestions([]);
+        setActiveTopicSuggestionMessages([]);
       }
     } finally {
       if (!signal?.aborted) {
         setActiveTopicSuggestionsLoading(false);
       }
     }
-  }, [activeAccountId, activeTopicId, apiFetch]);
+  }, [
+    activeAccountId,
+    activeTopicId,
+    activeTopicSuggestionCacheKey,
+    activeTopicSuggestionsLoadedKey,
+    apiFetch,
+    groupBy,
+    threadDateSource
+  ]);
 
   const refreshActiveTopicModeResults = useCallback(async () => {
     if (!activeTopicId) return;
     await refreshMailboxData();
-    await refreshActiveTopicSuggestions();
-  }, [activeTopicId, refreshActiveTopicSuggestions, refreshMailboxData]);
+    const isSuggestionGroupCollapsed = activeTopicSuggestionGroupKey
+      ? (collapsedGroups[activeTopicSuggestionGroupKey] ??
+        readTopicSuggestionGroupCollapsed(activeAccountId))
+      : true;
+    if (showActiveTopicSuggestionGroup && !isSuggestionGroupCollapsed) {
+      await refreshActiveTopicSuggestions({ force: true });
+      return;
+    }
+    setActiveTopicSuggestions([]);
+    setActiveTopicSuggestionMessages([]);
+    setActiveTopicSuggestionsLoadedKey("");
+  }, [
+    activeAccountId,
+    activeTopicId,
+    activeTopicSuggestionGroupKey,
+    collapsedGroups,
+    refreshActiveTopicSuggestions,
+    refreshMailboxData,
+    showActiveTopicSuggestionGroup
+  ]);
 
   useEffect(() => {
-    if (!activeAccountId || !activeTopicId) {
+    if (!activeAccountId || !showActiveTopicSuggestionGroup || !activeTopicSuggestionGroupKey) {
       setActiveTopicSuggestions([]);
+      setActiveTopicSuggestionMessages([]);
+      setActiveTopicSuggestionsLoadedKey("");
       setActiveTopicSuggestionsLoading(false);
+      return;
+    }
+    const storedCollapsed = readTopicSuggestionGroupCollapsed(activeAccountId);
+    setCollapsedGroups((prev) => {
+      const next = { ...prev };
+      let changed = false;
+      Object.keys(next).forEach((key) => {
+        if (isTopicSuggestionGroupKey(key) && key !== activeTopicSuggestionGroupKey) {
+          delete next[key];
+          changed = true;
+        }
+      });
+      if (!(activeTopicSuggestionGroupKey in next)) {
+        next[activeTopicSuggestionGroupKey] = storedCollapsed;
+        changed = true;
+      }
+      return changed ? next : prev;
+    });
+  }, [activeAccountId, activeTopicSuggestionGroupKey, showActiveTopicSuggestionGroup]);
+
+  useEffect(() => {
+    if (!activeAccountId || !showActiveTopicSuggestionGroup || !activeTopicSuggestionGroupKey) {
+      return;
+    }
+    const collapsed = collapsedGroups[activeTopicSuggestionGroupKey];
+    if (typeof collapsed !== "boolean" || typeof window === "undefined") {
+      return;
+    }
+    window.localStorage.setItem(
+      buildTopicSuggestionCollapsedStorageKey(activeAccountId),
+      collapsed ? "1" : "0"
+    );
+  }, [
+    activeAccountId,
+    activeTopicSuggestionGroupKey,
+    collapsedGroups,
+    showActiveTopicSuggestionGroup
+  ]);
+
+  useEffect(() => {
+    if (!activeAccountId || !showActiveTopicSuggestionGroup || !activeTopicSuggestionGroupKey) {
+      setActiveTopicSuggestions([]);
+      setActiveTopicSuggestionMessages([]);
+      setActiveTopicSuggestionsLoadedKey("");
+      setActiveTopicSuggestionsLoading(false);
+      return;
+    }
+    if (collapsedGroups[activeTopicSuggestionGroupKey] !== false) {
+      return;
+    }
+    if (activeTopicSuggestionsLoadedKey === activeTopicSuggestionCacheKey) {
       return;
     }
 
     const controller = new AbortController();
-    void refreshActiveTopicSuggestions(controller.signal);
+    void refreshActiveTopicSuggestions({ signal: controller.signal });
     return () => {
       controller.abort();
     };
-  }, [activeAccountId, activeTopicId, refreshActiveTopicSuggestions]);
+  }, [
+    activeAccountId,
+    activeTopicSuggestionCacheKey,
+    activeTopicSuggestionGroupKey,
+    activeTopicSuggestionsLoadedKey,
+    collapsedGroups,
+    refreshActiveTopicSuggestions,
+    showActiveTopicSuggestionGroup
+  ]);
 
   const handleSaveMessageTopics = useCallback(async (topicIds: string[]) => {
     if (!topicPickerMessage) return;
@@ -1732,8 +1924,7 @@ export default function MailClient({
     }
   }, [activeTopicId, messageTopicsById, persistThreadTopics, refreshActiveTopicModeResults]);
 
-  const handleAddActiveTopicSuggestion = useCallback(async (item: TopicSuggestionPanelItem) => {
-    const threadId = item.message.threadId ?? item.message.id;
+  const handleAddActiveTopicSuggestion = useCallback(async (threadId: string) => {
     if (!activeTopicId || !threadId) return;
 
     setPendingTopicSuggestionThreadIds((prev) => {
@@ -1748,7 +1939,7 @@ export default function MailClient({
         topicId: activeTopicId,
         persistThreadTopics,
         refreshMailboxData,
-        refreshSuggestions: () => refreshActiveTopicSuggestions()
+        refreshSuggestions: () => refreshActiveTopicSuggestions({ force: true })
       });
     } finally {
       setPendingTopicSuggestionThreadIds((prev) => {
@@ -1951,6 +2142,7 @@ export default function MailClient({
     computeGroupMeta,
     includeFlaggedGroup: !(searchScope === "folder" && isTrashFolder(activeFolderId)),
     includeDoneGroup: activeVirtualFolderId === "virtual:action-queue",
+    prependedGroups: activeTopicSuggestionGroups,
     collapsedGroups,
     collapsedThreads,
     includeThreadAcrossFolders,
@@ -3907,7 +4099,7 @@ export default function MailClient({
     renderSelectIndicators,
     renderUnreadDot,
     renderFolderBadges,
-    getGroupLabel
+    getGroupLabel: baseGetGroupLabel
   } = useMessageListHelpers({
     groupBy,
     activeAccountId,
@@ -3918,6 +4110,24 @@ export default function MailClient({
     setSearchScope,
     setActiveFolderId
   });
+  const getGroupLabel = useCallback((group: MessageGroup) => {
+    if (group.variant === "topic-suggestions" && activeTopic) {
+      return (
+        <Flex align="center" gap="2" wrap="wrap">
+          <Text as="span" size="1" color="gray">
+            Suggested for
+          </Text>
+          <TopicBadge topic={activeTopic} size="1" />
+          {activeTopicSuggestionsLoading && (
+            <Text as="span" size="1" color="gray">
+              Finding matches…
+            </Text>
+          )}
+        </Flex>
+      );
+    }
+    return baseGetGroupLabel(group);
+  }, [activeTopic, activeTopicSuggestionsLoading, baseGetGroupLabel]);
 
   useEffect(() => {
     if (!dragging) return;
@@ -4524,6 +4734,7 @@ export default function MailClient({
               folderTree,
               folderById,
               folderQuery,
+              searchScope,
               activeFolderId,
               collapsedFolders,
               syncingFolders,
@@ -4641,15 +4852,6 @@ export default function MailClient({
                 </Flex>
               </Card>
             )}
-            <TopicSuggestionPanel
-              topic={activeTopic}
-              suggestions={activeTopicSuggestions}
-              isLoading={activeTopicSuggestionsLoading}
-              pendingThreadIds={pendingTopicSuggestionThreadIds}
-              dateFormat={accountDateFormat}
-              onOpenSuggestion={handleSelectMessage}
-              onAddSuggestion={handleAddActiveTopicSuggestion}
-            />
             {listLoading && sortedMessages.length === 0 && (
               <Card size="1" className={listMetaStyles.loadingCard}>
                 <Text size="1" color="gray">
@@ -4671,8 +4873,10 @@ export default function MailClient({
                 includeThreadAcrossFolders,
                 searchScope,
                 activeFolderId,
-                messageById,
+                messageById: listMessageById,
                 messageTopicsById,
+                suggestedThreadIds,
+                pendingSuggestedThreadIds: pendingTopicSuggestionThreadIds,
                 sortDir,
                 listIsNarrow,
                 preferToDisplay,
@@ -4696,7 +4900,8 @@ export default function MailClient({
                 selectCollapsedThread,
                 handleDeleteMessage,
                 toggleFlaggedFlag,
-                toggleTodoFlag
+                toggleTodoFlag,
+                handleAddSuggestedThread: handleAddActiveTopicSuggestion
               }}
               helpers={{
                 buildThreadTree,

@@ -7,57 +7,67 @@ import type { MessageGroup } from "./listModel";
 type MessageGroupRowProps = {
   group: MessageGroup;
   isCollapsed: boolean;
-  top: number;
-  height: number;
-  virtualItemClassName: string;
+  top?: number;
+  height?: number;
+  virtualItemClassName?: string;
   groupTitleClassName: string;
   groupToggleClassName: string;
   groupCaretClassName: string;
   groupTitleFlaggedClassName?: string;
   getGroupLabel: (group: MessageGroup) => React.ReactNode;
   onOpenChange: (open: boolean) => void;
+  renderAsVirtualItem?: boolean;
 };
 
 export default function MessageGroupRow({
   group,
   isCollapsed,
-  top,
+  top = 0,
   height,
-  virtualItemClassName,
+  virtualItemClassName = "",
   groupTitleClassName,
   groupToggleClassName,
   groupCaretClassName,
   groupTitleFlaggedClassName,
   getGroupLabel,
-  onOpenChange
+  onOpenChange,
+  renderAsVirtualItem = true
 }: MessageGroupRowProps) {
   const isFlagged = group.key === "Flagged";
-  const count =
-    group.items.length === 0 ? 0 : group.count ?? group.items.length;
+  const count = group.count ?? group.items.length;
+  const showCount = group.showCount ?? true;
   const isEmpty = group.items.length === 0;
+  const canToggle = !isEmpty || group.allowToggleWhenEmpty === true;
+  const isTopicSuggestionGroup = group.variant === "topic-suggestions";
 
   return (
     <Collapsible.Root
-      className={virtualItemClassName}
-      style={{ transform: `translateY(${top}px)`, height }}
+      className={renderAsVirtualItem ? virtualItemClassName : undefined}
+      style={
+        renderAsVirtualItem
+          ? { transform: `translateY(${top}px)`, height }
+          : undefined
+      }
       open={!isCollapsed}
       onOpenChange={(open) => {
-        if (isEmpty) return;
+        if (!canToggle) return;
         onOpenChange(open);
       }}
     >
-      <Collapsible.Trigger asChild disabled={isEmpty}>
+      <Collapsible.Trigger asChild disabled={!canToggle}>
         <button
           type="button"
           className={`${groupTitleClassName} ${groupToggleClassName} ${
             isFlagged && groupTitleFlaggedClassName ? groupTitleFlaggedClassName : ""
           }`}
+          data-topic-suggestion-group={isTopicSuggestionGroup ? "true" : undefined}
         >
           <span className={groupCaretClassName}>
-            {isEmpty ? "" : <CaretRightIcon />}
+            {canToggle ? <CaretRightIcon /> : ""}
           </span>
           <Text as="span" size="1">
-            {getGroupLabel(group)} · {count}
+            {getGroupLabel(group)}
+            {showCount ? ` · ${count}` : ""}
           </Text>
         </button>
       </Collapsible.Trigger>

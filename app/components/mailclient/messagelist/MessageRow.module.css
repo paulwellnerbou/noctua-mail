@@ -46,6 +46,11 @@
   opacity: 0;
 }
 
+.rowSuggestion {
+  border-style: dashed;
+  border-color: var(--gray-6);
+}
+
 .rowThreadSibling {
   background: color-mix(in srgb, var(--gray-2) 60%, transparent);
   border-color: var(--gray-5);

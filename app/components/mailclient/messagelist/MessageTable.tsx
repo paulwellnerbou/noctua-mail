@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type React from "react";
 import type { CSSProperties } from "react";
-import { GitBranch, MoveRight, Search, Trash2 } from "lucide-react";
+import { Check, GitBranch, MoveRight, Search, Trash2 } from "lucide-react";
 import { Badge, Checkbox, IconButton, Text } from "@radix-ui/themes";
 import { CaretRightIcon } from "@radix-ui/react-icons";
 import { badgeColors } from "@/lib/ui/badgeColors";
@@ -26,6 +26,7 @@ import {
   isRowAnimatedFromGroupToggle,
   type ToggleAnimation
 } from "./listInteractions";
+import { isTopicSuggestionGroupKey } from "./topicSuggestionGroup";
 import groupStyles from "./MessageCardList.module.css";
 import styles from "./MessageTable.module.css";
 
@@ -43,6 +44,7 @@ export default function MessageTable({
     collapsedGroups,
     collapsedThreads,
     pendingMessageActions,
+    pendingSuggestedThreadIds,
     supportsThreads,
     includeThreadAcrossFolders,
     searchScope,
@@ -70,7 +72,8 @@ export default function MessageTable({
     toggleMessageSelection,
     selectRangeTo,
     selectCollapsedThread,
-    handleDeleteMessage
+    handleDeleteMessage,
+    handleAddSuggestedThread
   } = actions;
 
   const {
@@ -224,14 +227,17 @@ export default function MessageTable({
             setCollapsedState: setCollapsedGroups
           });
         }}
-        classNames={{
-          virtualItem: styles.virtualItem,
-          groupTitle: groupStyles.groupTitle,
-          groupToggle: groupStyles.groupToggle,
-          groupTitleFlagged: groupStyles.groupTitleFlagged,
-          groupCaret: groupStyles.groupCaret,
-          rowEnter: styles.rowEnter
-        }}
+      classNames={{
+        virtualItem: styles.virtualItem,
+        groupTitle: groupStyles.groupTitle,
+        groupToggle: groupStyles.groupToggle,
+        groupTitleFlagged: groupStyles.groupTitleFlagged,
+        groupCaret: groupStyles.groupCaret,
+        suggestionSection: groupStyles.suggestionSection,
+        suggestionSectionRows: groupStyles.suggestionSectionRows,
+        suggestionSectionRow: groupStyles.suggestionSectionRow,
+        rowEnter: styles.rowEnter
+      }}
         isRowAnimated={({ item }) =>
           isRowAnimatedFromGroupToggle({
             animationClock,
@@ -241,6 +247,10 @@ export default function MessageTable({
         }
         renderRow={({ item, index }) => {
           const message = item.message;
+          const isSuggestionRow = isTopicSuggestionGroupKey(item.groupKey);
+          const showAddSuggestionAction =
+            isSuggestionRow && item.threadIndex === 0 && item.depth === 0;
+          const isAddSuggestionPending = pendingSuggestedThreadIds.has(item.threadGroupId);
           const dateDisplay = getMessageListDateDisplay(
             message.dateValue,
             message.date,
@@ -290,7 +300,8 @@ export default function MessageTable({
             !displaySeen ? styles.rowUnread : "",
             effectiveSelected ? styles.rowSelected : "",
             isDragging ? styles.rowDragging : "",
-            isDisabled ? styles.rowDisabled : ""
+            isDisabled ? styles.rowDisabled : "",
+            isSuggestionRow ? styles.rowSuggestion : ""
           ]
             .filter(Boolean)
             .join(" ");
@@ -516,6 +527,22 @@ export default function MessageTable({
                     <Search size={14} />
                   </IconButton>
                   {renderMessageMenu(message, "table")}
+                  {showAddSuggestionAction && (
+                    <IconButton
+                      size="1"
+                      variant="soft"
+                      color="green"
+                      title={isAddSuggestionPending ? "Adding topic…" : "Add to topic"}
+                      aria-label="Add to topic"
+                      disabled={isDisabled || isAddSuggestionPending}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        handleAddSuggestedThread(item.threadGroupId);
+                      }}
+                    >
+                      <Check size={14} />
+                    </IconButton>
+                  )}
                 </div>
               </div>
           );

@@ -5,9 +5,11 @@ import {
   buildGroupedMessages,
   buildVisibleMessagesForSelection,
   type MessageGroupMeta,
+  type MessageGroup,
   type ThreadNode,
   type VisibleMessageEntry
 } from "./listModel";
+import { isTopicSuggestionGroupKey } from "./topicSuggestionGroup";
 
 type UseMessageListDerivedStateParams = {
   sortedMessages: Message[];
@@ -22,6 +24,7 @@ type UseMessageListDerivedStateParams = {
   computeGroupMeta: (items: Message[]) => MessageGroupMeta[];
   includeFlaggedGroup?: boolean;
   includeDoneGroup?: boolean;
+  prependedGroups?: MessageGroup[];
   collapsedGroups: Record<string, boolean>;
   collapsedThreads: Record<string, boolean>;
   includeThreadAcrossFolders: boolean;
@@ -46,6 +49,11 @@ export function mergeCollapsedGroupsWithMeta(
   const next: Record<string, boolean> = {};
   groupMeta.forEach((group) => {
     next[group.key] = prev[group.key] ?? false;
+  });
+  Object.keys(prev).forEach((key) => {
+    if (isTopicSuggestionGroupKey(key) && !(key in next)) {
+      next[key] = prev[key];
+    }
   });
   return next;
 }
@@ -77,6 +85,7 @@ export function useMessageListDerivedState({
   computeGroupMeta,
   includeFlaggedGroup = true,
   includeDoneGroup = false,
+  prependedGroups,
   collapsedGroups,
   collapsedThreads,
   includeThreadAcrossFolders,
@@ -146,10 +155,15 @@ export function useMessageListDerivedState({
     ]
   );
 
+  const combinedGroupedMessages = useMemo(
+    () => [...(prependedGroups ?? []), ...groupedMessages],
+    [groupedMessages, prependedGroups]
+  );
+
   const visibleMessages = useMemo(
     () =>
       buildVisibleMessagesForSelection({
-        groupedMessages,
+        groupedMessages: combinedGroupedMessages,
         collapsedGroups,
         collapsedThreads,
         supportsThreads,
@@ -167,9 +181,9 @@ export function useMessageListDerivedState({
       buildThreadTree,
       collapsedGroups,
       collapsedThreads,
+      combinedGroupedMessages,
       flattenThread,
       getThreadLatestDate,
-      groupedMessages,
       includeThreadAcrossFolders,
       preferToDisplay,
       searchScope,
@@ -192,17 +206,19 @@ export function useMessageListDerivedState({
   }, [visibleIndexById, visibleMessages]);
 
   const toggleAllGroups = useCallback(() => {
-    const anyOpen = groupedMessages.some((group) => !collapsedGroups[group.key]);
+    const anyOpen = combinedGroupedMessages.some(
+      (group) => !(collapsedGroups[group.key] ?? (group.variant === "topic-suggestions"))
+    );
     const next: Record<string, boolean> = {};
-    groupedMessages.forEach((group) => {
+    combinedGroupedMessages.forEach((group) => {
       next[group.key] = anyOpen;
     });
     setCollapsedGroups(next);
-  }, [collapsedGroups, groupedMessages, setCollapsedGroups]);
+  }, [collapsedGroups, combinedGroupedMessages, setCollapsedGroups]);
 
   return {
     threadScopeMessages,
-    groupedMessages,
+    groupedMessages: combinedGroupedMessages,
     visibleMessages,
     visibleIndexByIdRef,
     visibleMessagesRef,

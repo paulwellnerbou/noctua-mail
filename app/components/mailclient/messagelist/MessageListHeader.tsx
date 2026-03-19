@@ -3,11 +3,8 @@ import type React from "react";
 import { ChevronsDown, ChevronsUp, GitBranch, RefreshCw } from "lucide-react";
 import { IconButton, SegmentedControl, Select, Text } from "@radix-ui/themes";
 import type { ThreadDateSource } from "@/lib/threadDate";
+import type { MessageGroup } from "./listModel";
 import styles from "./MessageListHeader.module.css";
-
-type MessageGroup = {
-  key: string;
-};
 
 type MessageListHeaderProps = {
   state: {
@@ -233,12 +230,16 @@ export default function MessageListHeader({ state, actions }: MessageListHeaderP
             color="gray"
             onClick={handleToggleGroups}
             title={
-              groupedMessages.some((group) => !collapsedGroups[group.key])
+              groupedMessages.some(
+                (group) => !(collapsedGroups[group.key] ?? (group.variant === "topic-suggestions"))
+              )
                 ? "Collapse all groups"
                 : "Expand all groups"
             }
           >
-            {groupedMessages.some((group) => !collapsedGroups[group.key]) ? (
+            {groupedMessages.some(
+              (group) => !(collapsedGroups[group.key] ?? (group.variant === "topic-suggestions"))
+            ) ? (
               <ChevronsUp size={14} />
             ) : (
               <ChevronsDown size={14} />
