@@ -76,7 +76,14 @@ const MODE_PRIORITY: Record<SyncMode, number> = {
 };
 
 const scheduleCleanup = (jobId: string) => {
-  setTimeout(() => jobs.delete(jobId), JOB_TTL_MS);
+  setTimeout(() => {
+    const job = jobs.get(jobId);
+    if (job?.pid && isProcessAlive(job.pid)) {
+      try { process.kill(job.pid); } catch { /* already dead */ }
+      console.warn(`[sync] killed orphaned worker process ${job.pid} for job ${jobId}`);
+    }
+    jobs.delete(jobId);
+  }, JOB_TTL_MS);
 };
 
 function getSyncMode(payload: SyncPayload): SyncMode {

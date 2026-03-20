@@ -213,7 +213,8 @@ export async function runSyncOperationBatched(
   let totalCount = 0;
   let folders: any[] = [];
   const allProcessedIds = new Set<string>();
-  const allReferenceIds = new Set<string>();
+  const resolvedThreadIds = new Map<string, string>();
+  const resolvedParentIds = new Map<string, string>();
   const newNotificationMessages: SyncNotificationMessage[] = [];
   const calendarInviteImports: Array<{ messageId: string; icsSource: string; process: boolean }> =
     [];
@@ -348,18 +349,20 @@ export async function runSyncOperationBatched(
 
     if (batchMessages.length === 0) continue;
 
-    // Collect reference IDs from this batch
-    collectThreadReferenceIds(batchMessages).forEach((id) => allReferenceIds.add(id));
+    // Collect reference IDs from this batch — only query DB for refs not already resolved
+    const batchRefs = collectThreadReferenceIds(batchMessages);
+    const unresolvedRefs = batchRefs.filter(
+      (id) => !resolvedThreadIds.has(id) && !resolvedParentIds.has(id)
+    );
 
-    // Lookup external thread/parent IDs for references in this batch
-    const externalThreadIds = await getThreadIdsByMessageIds(
-      account.id,
-      Array.from(allReferenceIds)
-    );
-    const externalParentIds = await getMessageIdsByMessageIds(
-      account.id,
-      Array.from(allReferenceIds)
-    );
+    if (unresolvedRefs.length > 0) {
+      const newThreadIds = await getThreadIdsByMessageIds(account.id, unresolvedRefs);
+      const newParentIds = await getMessageIdsByMessageIds(account.id, unresolvedRefs);
+      newThreadIds.forEach((v, k) => resolvedThreadIds.set(k, v));
+      newParentIds.forEach((v, k) => resolvedParentIds.set(k, v));
+    }
+    const externalThreadIds = resolvedThreadIds;
+    const externalParentIds = resolvedParentIds;
 
     // Normalize threading for this batch
     const normalizedMessages = resolveThreadingForItems(batchMessages, {
