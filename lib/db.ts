@@ -1774,32 +1774,22 @@ async function getAccountEmail(accountId: string) {
 async function getFoldersForAccount(accountId: string) {
   const db = await getAccountDb(accountId);
   const rows = db.prepare(`SELECT * FROM folders WHERE accountId = ?`).all(accountId) as any[];
-  const counts = db
+  const messageCounts = db
     .prepare(
-      `SELECT folderId, COUNT(*) as count
-       FROM messages
-       WHERE accountId = ? AND unread = 1
-       GROUP BY folderId`
-    )
-    .all(accountId) as any[];
-  const totals = db
-    .prepare(
-      `SELECT folderId, COUNT(*) as count
+      `SELECT folderId,
+              COUNT(*) as total,
+              SUM(CASE WHEN unread = 1 THEN 1 ELSE 0 END) as unreadCount
        FROM messages
        WHERE accountId = ?
        GROUP BY folderId`
     )
-    .all(accountId) as any[];
+    .all(accountId) as Array<{ folderId: string; total: number; unreadCount: number }>;
   const countMap = new Map<string, number>();
-  counts.forEach((row) => {
-    if (row.folderId) {
-      countMap.set(row.folderId, row.count ?? 0);
-    }
-  });
   const totalMap = new Map<string, number>();
-  totals.forEach((row) => {
+  messageCounts.forEach((row) => {
     if (row.folderId) {
-      totalMap.set(row.folderId, row.count ?? 0);
+      totalMap.set(row.folderId, row.total ?? 0);
+      countMap.set(row.folderId, row.unreadCount ?? 0);
     }
   });
   return rows.map((row) => ({
