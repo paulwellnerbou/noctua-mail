@@ -6981,9 +6981,11 @@ export async function deleteMessageById(accountId: string, messageId: string) {
     const row = db
       .prepare(`SELECT threadId FROM messages WHERE accountId = ? AND id = ?`)
       .get(accountId, messageId) as { threadId?: string | null } | undefined;
-    db.prepare(`DELETE FROM attachments WHERE messageId = ?`).run(messageId);
-    db.prepare(`DELETE FROM message_fts WHERE messageId = ?`).run(messageId);
-    db.prepare(`DELETE FROM messages WHERE accountId = ? AND id = ?`).run(accountId, messageId);
+    db.transaction(() => {
+      db.prepare(`DELETE FROM attachments WHERE messageId = ?`).run(messageId);
+      db.prepare(`DELETE FROM message_fts WHERE messageId = ?`).run(messageId);
+      db.prepare(`DELETE FROM messages WHERE accountId = ? AND id = ?`).run(accountId, messageId);
+    })();
     if (row?.threadId) {
       await recomputeThreadsForAccountInternal(accountId, [row.threadId]);
       await rebuildThreadSignalsForThreadIds(db, accountId, [row.threadId]);
@@ -7007,24 +7009,26 @@ export async function deleteMessagesByIds(accountId: string, messageIds: string[
       )
       .all(accountId, ...uniqueIds) as Array<{ threadId: string }>;
     const threadIds = threadRows.map((row) => row.threadId).filter(Boolean);
-    db.prepare(
-      `DELETE FROM attachments
-       WHERE messageId IN (
-         SELECT id FROM messages
-         WHERE accountId = ? AND id IN (${placeholders})
-       )`
-    ).run(accountId, ...uniqueIds);
-    db.prepare(
-      `DELETE FROM message_fts
-       WHERE messageId IN (
-         SELECT id FROM messages
-         WHERE accountId = ? AND id IN (${placeholders})
-       )`
-    ).run(accountId, ...uniqueIds);
-    db.prepare(`DELETE FROM messages WHERE accountId = ? AND id IN (${placeholders})`).run(
-      accountId,
-      ...uniqueIds
-    );
+    db.transaction(() => {
+      db.prepare(
+        `DELETE FROM attachments
+         WHERE messageId IN (
+           SELECT id FROM messages
+           WHERE accountId = ? AND id IN (${placeholders})
+         )`
+      ).run(accountId, ...uniqueIds);
+      db.prepare(
+        `DELETE FROM message_fts
+         WHERE messageId IN (
+           SELECT id FROM messages
+           WHERE accountId = ? AND id IN (${placeholders})
+         )`
+      ).run(accountId, ...uniqueIds);
+      db.prepare(`DELETE FROM messages WHERE accountId = ? AND id IN (${placeholders})`).run(
+        accountId,
+        ...uniqueIds
+      );
+    })();
     if (threadIds.length > 0) {
       await recomputeThreadsForAccountInternal(accountId, threadIds);
       await rebuildThreadSignalsForThreadIds(db, accountId, threadIds);
@@ -7477,16 +7481,18 @@ export async function deleteMessagesByFolderPrefix(accountId: string, folderPref
       return;
     }
     const threadIds = threadRows.map((row) => row.threadId).filter(Boolean);
-    db.prepare(
-      `DELETE FROM attachments WHERE messageId IN (SELECT id FROM messages WHERE accountId = ? AND folderId LIKE ?)`
-    ).run(accountId, `${prefix}%`);
-    db.prepare(
-      `DELETE FROM message_fts WHERE messageId IN (SELECT id FROM messages WHERE accountId = ? AND folderId LIKE ?)`
-    ).run(accountId, `${prefix}%`);
-    db.prepare(`DELETE FROM messages WHERE accountId = ? AND folderId LIKE ?`).run(
-      accountId,
-      `${prefix}%`
-    );
+    db.transaction(() => {
+      db.prepare(
+        `DELETE FROM attachments WHERE messageId IN (SELECT id FROM messages WHERE accountId = ? AND folderId LIKE ?)`
+      ).run(accountId, `${prefix}%`);
+      db.prepare(
+        `DELETE FROM message_fts WHERE messageId IN (SELECT id FROM messages WHERE accountId = ? AND folderId LIKE ?)`
+      ).run(accountId, `${prefix}%`);
+      db.prepare(`DELETE FROM messages WHERE accountId = ? AND folderId LIKE ?`).run(
+        accountId,
+        `${prefix}%`
+      );
+    })();
     if (threadIds.length > 0) {
       await recomputeThreadsForAccountInternal(accountId, threadIds);
       await rebuildThreadSignalsForThreadIds(db, accountId, threadIds);
