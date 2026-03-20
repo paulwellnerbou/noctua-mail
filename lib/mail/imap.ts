@@ -1454,6 +1454,8 @@ export async function* syncImapAccountBatched(
     client.connect()
   );
 
+  try {
+
   const folderList = await logImapOp("list", { ...logContext }, () => client.list());
   const folders: Folder[] = mapImapFolders(account, folderList);
   const folderSpecialUseByPath = buildFolderSpecialUseByPath(folderList as Array<{
@@ -1541,7 +1543,6 @@ export async function* syncImapAccountBatched(
     if (newRange.skip) {
       const finalBatch = flushBatch(true);
       if (finalBatch) yield finalBatch;
-      await logImapOp("logout", { ...logContext }, () => client.logout());
       return;
     }
     const rangeLabel = describeNewModeFetchRange(newRange.startUid, newRange.uidNext);
@@ -1640,18 +1641,12 @@ export async function* syncImapAccountBatched(
       }
     }
 
-    try {
-      await logImapOp("logout", { ...logContext }, () => client.logout());
-    } catch {
-      // ignore logout errors — connection may have already been closed
-    }
     return;
   }
 
   if (typeof mailboxExists === "number" && mailboxExists <= 0) {
     const finalBatch = flushBatch(true);
     if (finalBatch) yield finalBatch;
-    await logImapOp("logout", { ...logContext }, () => client.logout());
     return;
   }
 
@@ -1709,10 +1704,12 @@ export async function* syncImapAccountBatched(
   const finalBatch = flushBatch(true);
   if (finalBatch) yield finalBatch;
 
-  try {
-    await logImapOp("logout", { ...logContext }, () => client.logout());
-  } catch {
-    // ignore logout errors — connection may have already been closed
+  } finally {
+    try {
+      await logImapOp("logout", { ...logContext }, () => client.logout());
+    } catch {
+      // ignore logout errors — connection may have already been closed
+    }
   }
 }
 

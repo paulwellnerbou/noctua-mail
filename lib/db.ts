@@ -1874,16 +1874,21 @@ async function recomputeThreadsForAccountInternal(accountId: string, threadIds?:
         unreadCount
       )
       SELECT
-        m.threadId as threadId,
-        m.accountId as accountId,
-        (SELECT id FROM messages m2 WHERE m2.accountId = m.accountId AND m2.threadId = m.threadId ORDER BY m2.dateValue ASC LIMIT 1) as rootMessageId,
-        (SELECT id FROM messages m3 WHERE m3.accountId = m.accountId AND m3.threadId = m.threadId ORDER BY m3.dateValue DESC LIMIT 1) as latestMessageId,
+        m.threadId,
+        m.accountId,
+        MIN(m.id) FILTER (WHERE m.rn_asc = 1) as rootMessageId,
+        MIN(m.id) FILTER (WHERE m.rn_desc = 1) as latestMessageId,
         MAX(m.dateValue) as latestDateValue,
         ${latestReceivedDateSql} as latestReceivedDateValue,
         COUNT(*) as messageCount,
         SUM(CASE WHEN m.unread = 1 THEN 1 ELSE 0 END) as unreadCount
-      FROM messages m
-      WHERE m.accountId = ? AND m.threadId IN (${placeholders})
+      FROM (
+        SELECT *,
+          ROW_NUMBER() OVER (PARTITION BY accountId, threadId ORDER BY dateValue ASC) as rn_asc,
+          ROW_NUMBER() OVER (PARTITION BY accountId, threadId ORDER BY dateValue DESC) as rn_desc
+        FROM messages
+        WHERE accountId = ? AND threadId IN (${placeholders})
+      ) m
       GROUP BY m.threadId, m.accountId
     `
     ).run(...latestReceivedDateArgs, accountId, ...unique);
@@ -1903,16 +1908,21 @@ async function recomputeThreadsForAccountInternal(accountId: string, threadIds?:
       unreadCount
     )
     SELECT
-      m.threadId as threadId,
-      m.accountId as accountId,
-      (SELECT id FROM messages m2 WHERE m2.accountId = m.accountId AND m2.threadId = m.threadId ORDER BY m2.dateValue ASC LIMIT 1) as rootMessageId,
-      (SELECT id FROM messages m3 WHERE m3.accountId = m.accountId AND m3.threadId = m.threadId ORDER BY m3.dateValue DESC LIMIT 1) as latestMessageId,
+      m.threadId,
+      m.accountId,
+      MIN(m.id) FILTER (WHERE m.rn_asc = 1) as rootMessageId,
+      MIN(m.id) FILTER (WHERE m.rn_desc = 1) as latestMessageId,
       MAX(m.dateValue) as latestDateValue,
       ${latestReceivedDateSql} as latestReceivedDateValue,
       COUNT(*) as messageCount,
       SUM(CASE WHEN m.unread = 1 THEN 1 ELSE 0 END) as unreadCount
-    FROM messages m
-    WHERE m.accountId = ?
+    FROM (
+      SELECT *,
+        ROW_NUMBER() OVER (PARTITION BY accountId, threadId ORDER BY dateValue ASC) as rn_asc,
+        ROW_NUMBER() OVER (PARTITION BY accountId, threadId ORDER BY dateValue DESC) as rn_desc
+      FROM messages
+      WHERE accountId = ?
+    ) m
     GROUP BY m.threadId, m.accountId
   `
   ).run(...latestReceivedDateArgs, accountId);
