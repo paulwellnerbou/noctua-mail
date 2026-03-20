@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import {
   deleteMessagesByIds,
   getFolders,
-  getMessageById,
+  getStoredMessagesByIds,
   listMessageFileRefsByMessageIds
 } from "@/lib/db";
 import { deleteImapMessages } from "@/lib/mail/imap";
@@ -41,12 +41,7 @@ export async function handleBulkDeleteMessagesRequest(
     return NextResponse.json({ ok: false, message: "Trash folder not found" }, { status: 400 });
   }
 
-  const messages = await Promise.all(
-    normalizedMessageIds.map((messageId) => getMessageById(accountId, messageId))
-  );
-  const existingMessages = messages.filter((message): message is NonNullable<typeof message> =>
-    Boolean(message)
-  );
+  const existingMessages = await getStoredMessagesByIds(accountId, normalizedMessageIds);
   if (existingMessages.length !== normalizedMessageIds.length) {
     return NextResponse.json(
       { ok: false, message: "One or more messages were not found" },
@@ -57,7 +52,7 @@ export async function handleBulkDeleteMessagesRequest(
   const deleteTargets: Array<{ mailboxPath: string; uid: number; messageId: string }> = [];
   for (const message of existingMessages) {
     const { currentMailbox, isInTrash } = resolveMessageTrashState(
-      message,
+      { folderId: message.folderId, mailboxPath: message.mailboxPath ?? undefined },
       trashFolder,
       accountId
     );
