@@ -21,15 +21,58 @@ type WorkerJobRegistryConfig = {
   runtimeMissingMessage?: string;
 };
 
+type WorkerJobRegistryState = {
+  jobs: Map<string, WorkerJobRecord>;
+};
+
+const runtimeState = globalThis as typeof globalThis & {
+  __noctuaWorkerJobRegistryState?: Map<string, WorkerJobRegistryState>;
+};
+
+if (!runtimeState.__noctuaWorkerJobRegistryState) {
+  runtimeState.__noctuaWorkerJobRegistryState = new Map();
+}
+
+function isProcessAlive(pid: number) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException | undefined)?.code;
+    if (code === "EPERM") return true;
+    return false;
+  }
+}
+
 export function createWorkerJobRegistry(config: WorkerJobRegistryConfig) {
-  const jobs = new Map<string, WorkerJobRecord>();
+  const registryKey = config.scriptPath;
+  const existingState = runtimeState.__noctuaWorkerJobRegistryState?.get(registryKey);
+  const state = existingState ?? {
+    jobs: new Map<string, WorkerJobRecord>()
+  };
+  runtimeState.__noctuaWorkerJobRegistryState?.set(registryKey, state);
+  const jobs = state.jobs;
   const jobTtlMs = config.jobTtlMs ?? 1000 * 60 * 30;
 
   const scheduleCleanup = (jobId: string) => {
     setTimeout(() => jobs.delete(jobId), jobTtlMs);
   };
 
-  const getJob = (jobId: string) => jobs.get(jobId) ?? null;
+  const getJob = (jobId: string) => {
+    const job = jobs.get(jobId) ?? null;
+    if (!job) return null;
+    if (
+      job.status === "running" &&
+      typeof job.pid === "number" &&
+      !isProcessAlive(job.pid)
+    ) {
+      job.status = "failed";
+      job.finishedAt = Date.now();
+      job.error = "Worker process is no longer running.";
+      scheduleCleanup(job.id);
+    }
+    return job;
+  };
 
   const startJob = (accountId: string) => {
     const id = randomUUID();

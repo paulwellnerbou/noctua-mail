@@ -591,7 +591,7 @@ export function useSyncController({
           true,
           true,
           mode,
-          mode === "new"
+          false
         );
       } catch (error) {
         if (!cancelled) {
