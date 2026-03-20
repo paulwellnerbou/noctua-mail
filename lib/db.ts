@@ -1429,7 +1429,7 @@ function mapAccountRow(row: any): Account {
     name: row.name,
     email: row.email,
     avatar: row.avatar,
-    settings: normalizeAccountSettings(row.settings ? (JSON.parse(row.settings) as any) : undefined),
+    settings: normalizeAccountSettings(safeParseJson(row.settings) ?? undefined),
     caldav,
     imap: {
       host: row.imapHost,
@@ -1809,7 +1809,7 @@ async function getFoldersForAccount(accountId: string) {
     accountId: row.accountId,
     count: totalMap.get(row.id) ?? row.count ?? 0,
     specialUse: row.specialUse ?? undefined,
-    flags: row.flags ? (JSON.parse(row.flags) as string[]) : undefined,
+    flags: safeParseJson<string[]>(row.flags),
     delimiter: row.delimiter ?? undefined,
     unreadCount: countMap.get(row.id) ?? 0
   })) as Folder[];
@@ -3601,15 +3601,21 @@ function parseReferences(value?: string | null) {
   return undefined;
 }
 
+/** Safe JSON.parse that returns fallback (default undefined) on malformed data instead of throwing. */
+function safeParseJson<T = unknown>(value: string | null | undefined, fallback?: T): T | undefined {
+  if (!value) return fallback;
+  try {
+    return JSON.parse(value) as T;
+  } catch {
+    return fallback;
+  }
+}
+
 function parseStringArray(value?: string | null) {
   if (!value) return undefined;
-  try {
-    const parsed = JSON.parse(value);
-    if (Array.isArray(parsed)) {
-      return parsed.map(String).filter(Boolean);
-    }
-  } catch {
-    return undefined;
+  const parsed = safeParseJson<unknown[]>(value);
+  if (Array.isArray(parsed)) {
+    return parsed.map(String).filter(Boolean);
   }
   return undefined;
 }
@@ -4850,7 +4856,7 @@ export async function listRelatedMessages(params: {
       hasInlineAttachments: Boolean(row.hasInlineAttachments),
       attachments: [],
       unread: Boolean(row.unread),
-      flags: row.flags ? (JSON.parse(row.flags) as string[]) : undefined,
+      flags: safeParseJson<string[]>(row.flags),
       seen: Boolean(row.seen),
       answered: Boolean(row.answered),
       flagged: Boolean(row.flagged),
@@ -5121,7 +5127,7 @@ export async function listMessages(params: {
       hasInlineAttachments: Boolean(row.hasInlineAttachments),
       attachments: [],
       unread: Boolean(row.unread),
-      flags: row.flags ? (JSON.parse(row.flags) as string[]) : undefined,
+      flags: safeParseJson<string[]>(row.flags),
       seen: Boolean(row.seen),
       answered: Boolean(row.answered),
       flagged: Boolean(row.flagged),
@@ -5600,7 +5606,7 @@ export async function listThreads(params: {
       hasInlineAttachments: Boolean(row.hasInlineAttachments),
       attachments: [],
       unread: Boolean(row.unread),
-      flags: row.flags ? (JSON.parse(row.flags) as string[]) : undefined,
+      flags: safeParseJson<string[]>(row.flags),
       seen: Boolean(row.seen),
       answered: Boolean(row.answered),
       flagged: Boolean(row.flagged),
@@ -5789,7 +5795,7 @@ export async function listThreadMessages(params: {
       hasSource: Boolean(row.hasSource),
       attachments: attachmentsByMessage.get(row.id) ?? [],
       unread: Boolean(row.unread),
-      flags: row.flags ? (JSON.parse(row.flags) as string[]) : undefined,
+      flags: safeParseJson<string[]>(row.flags),
       seen: Boolean(row.seen),
       answered: Boolean(row.answered),
       flagged: Boolean(row.flagged),
@@ -6565,7 +6571,7 @@ export async function getMessageById(accountId: string, messageId: string) {
       url: att.url ?? undefined
     })),
     unread: Boolean(row.unread),
-    flags: row.flags ? (JSON.parse(row.flags) as string[]) : undefined,
+    flags: safeParseJson<string[]>(row.flags),
     seen: Boolean(row.seen),
     answered: Boolean(row.answered),
     flagged: Boolean(row.flagged),
@@ -7758,8 +7764,8 @@ function rowToCalendarEvent(row: any): CalendarEvent {
     startTimezone: row.startTimezone ?? undefined,
     endTimezone: row.endTimezone ?? undefined,
     recurrenceRule: row.recurrenceRule ?? undefined,
-    recurrenceDates: row.recurrenceDates ? JSON.parse(row.recurrenceDates) : undefined,
-    excludedDates: row.excludedDates ? JSON.parse(row.excludedDates) : undefined,
+    recurrenceDates: safeParseJson<number[]>(row.recurrenceDates),
+    excludedDates: safeParseJson<number[]>(row.excludedDates),
     status: row.status ?? undefined,
     organizer: row.organizer ?? undefined,
     attendees: row.attendees ?? undefined,
@@ -7772,7 +7778,7 @@ function rowToCalendarEvent(row: any): CalendarEvent {
     rawIcs: row.rawIcs ?? undefined,
     sourceType: (row.sourceType as CalendarEventSourceType) ?? "local",
     messageId: row.messageId ?? undefined,
-    occurrenceMessageIds: row.occurrenceMessageIds ? JSON.parse(row.occurrenceMessageIds) : undefined,
+    occurrenceMessageIds: safeParseJson<Record<string, string>>(row.occurrenceMessageIds),
     createdAtMs: row.createdAtMs,
     updatedAtMs: row.updatedAtMs,
     deletedAtMs: row.deletedAtMs ?? undefined
