@@ -66,6 +66,7 @@ if (!runtimeState.__noctuaSyncJobsBootstrapped) {
 }
 
 const JOB_TTL_MS = 1000 * 60 * 30;
+const SYNC_WORKER_TIMEOUT_MS = 1000 * 60 * 10; // 10 minutes max per sync worker
 
 const MODE_PRIORITY: Record<SyncMode, number> = {
   new: 1,
@@ -390,11 +391,38 @@ function spawnSyncWorker(job: SyncJob, clientId?: string) {
         if (line.trim()) console.error(`[sync-worker] ${line}`);
       });
       try {
-        const [exitCode, stdoutText, stderrRaw] = await Promise.all([
-          child.exited,
+        let timeoutId: ReturnType<typeof setTimeout> | undefined;
+        const timeoutPromise = new Promise<"timeout">((resolve) => {
+          timeoutId = setTimeout(() => resolve("timeout"), SYNC_WORKER_TIMEOUT_MS);
+        });
+        const exitOrTimeout = await Promise.race([
+          child.exited.then((code: number) => ({ kind: "exited" as const, code })),
+          timeoutPromise.then(() => ({ kind: "timeout" as const }))
+        ]);
+        if (timeoutId !== undefined) clearTimeout(timeoutId);
+
+        if (exitOrTimeout.kind === "timeout") {
+          try { child.kill(); } catch { /* already dead */ }
+          const errorMessage = `Sync worker timed out after ${SYNC_WORKER_TIMEOUT_MS / 1000}s and was killed.`;
+          markJobFailed(job, errorMessage);
+          console.error(
+            `[sync] worker timeout ${JSON.stringify({
+              jobId: job.id,
+              accountId: job.payload.accountId,
+              folderId: job.payload.folderId,
+              mode: getSyncMode(job.payload),
+              pid: job.pid,
+              error: errorMessage
+            })}`
+          );
+          return;
+        }
+
+        const [stdoutText, stderrRaw] = await Promise.all([
           stdoutTextPromise,
           stderrTextPromise
         ]);
+        const exitCode = exitOrTimeout.code;
         if (job.status !== "running") {
           return;
         }
