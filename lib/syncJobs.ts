@@ -361,31 +361,35 @@ function spawnSyncWorker(job: SyncJob, clientId?: string) {
     void (async () => {
       let streamedResult: SyncOperationResult | null = null;
       const stdoutTextPromise = readPipedOutput(child.stdout, (line) => {
-        const parsed = parseSyncWorkerLine(line);
-        if (!parsed) return;
-        if (parsed.kind === "progress") {
-          job.progress = parsed.progress;
-          const percent =
-            parsed.progress.percent ??
-            calculatePercent(parsed.progress.processed, parsed.progress.estimatedTotal);
-          const percentLabel = typeof percent === "number" ? `${percent}%` : "unknown%";
-          console.info(`[sync] ${percentLabel} progress on ${JSON.stringify({
-            jobId: job.id,
-            accountId: parsed.progress.accountId,
-            folderId: parsed.progress.folderId,
-            mailboxPath: parsed.progress.mailboxPath,
-            mode: parsed.progress.mode,
-            phase: parsed.progress.phase,
-            processed: parsed.progress.processed,
-            estimatedTotal: parsed.progress.estimatedTotal,
-            percent,
-            retryAttempt: parsed.progress.retryAttempt,
-            maxRetries: parsed.progress.maxRetries,
-            message: parsed.progress.message
-          })}`);
-          return;
+        try {
+          const parsed = parseSyncWorkerLine(line);
+          if (!parsed) return;
+          if (parsed.kind === "progress") {
+            job.progress = parsed.progress;
+            const percent =
+              parsed.progress.percent ??
+              calculatePercent(parsed.progress.processed, parsed.progress.estimatedTotal);
+            const percentLabel = typeof percent === "number" ? `${percent}%` : "unknown%";
+            console.info(`[sync] ${percentLabel} progress on ${JSON.stringify({
+              jobId: job.id,
+              accountId: parsed.progress.accountId,
+              folderId: parsed.progress.folderId,
+              mailboxPath: parsed.progress.mailboxPath,
+              mode: parsed.progress.mode,
+              phase: parsed.progress.phase,
+              processed: parsed.progress.processed,
+              estimatedTotal: parsed.progress.estimatedTotal,
+              percent,
+              retryAttempt: parsed.progress.retryAttempt,
+              maxRetries: parsed.progress.maxRetries,
+              message: parsed.progress.message
+            })}`);
+            return;
+          }
+          streamedResult = parsed.result;
+        } catch (err) {
+          console.error(`[sync] failed to parse worker output: ${err}`);
         }
-        streamedResult = parsed.result;
       });
       const stderrTextPromise = readPipedOutput(child.stderr, (line) => {
         if (line.trim()) console.error(`[sync-worker] ${line}`);
@@ -471,7 +475,23 @@ function spawnSyncWorker(job: SyncJob, clientId?: string) {
         scheduleCleanup(job.id);
         handleCompletedRunningJob(job);
       }
-    })();
+    })().catch((error) => {
+      const errorMessage = error instanceof Error ? error.message : "Sync worker monitor crashed unexpectedly.";
+      if (job.status === "running") {
+        markJobFailed(job, errorMessage);
+      }
+      console.error(
+        `[sync] worker monitor crashed ${JSON.stringify({
+          jobId: job.id,
+          accountId: job.payload.accountId,
+          folderId: job.payload.folderId,
+          mode: getSyncMode(job.payload),
+          error: errorMessage
+        })}`
+      );
+      scheduleCleanup(job.id);
+      handleCompletedRunningJob(job);
+    });
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : "Failed to start sync worker";
     markJobFailed(job, errorMessage);
