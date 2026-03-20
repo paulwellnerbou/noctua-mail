@@ -85,7 +85,8 @@ for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
       process.exit(1);
     }
     const retryAttempt = attempt;
-    const delay = Math.min(RETRY_BASE_DELAY_MS * attempt, MAX_RETRY_DELAY_MS);
+    const baseDelay = Math.min(RETRY_BASE_DELAY_MS * attempt, MAX_RETRY_DELAY_MS);
+    const delay = Math.round(baseDelay * (0.5 + Math.random())); // jitter to avoid thundering herd
     const resumeNote =
       highestProcessedUid !== undefined ? `, will resume from UID ${highestProcessedUid + 1}` : "";
     console.error(

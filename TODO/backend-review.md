@@ -217,8 +217,8 @@
 - [x] Persist `highestProcessedUid` per batch (P1) — added `updateMailboxHighestUid()` in `lib/db.ts` (conditional UPDATE, only if new UID > stored); called after each batch upsert in `syncOperation.ts` so a killed worker resumes from where it left off
 
 ### Phase 4 — Polish
-- [ ] Standardize API response format (P3)
-- [ ] Add retry jitter (P3)
-- [ ] Guard progress callback (P3)
-- [ ] Consistent soft-delete filtering (P3)
-- [ ] Remove test endpoint from production (P3)
+- [ ] ~~Standardize API response format (P3)~~ — deferred; audit found no significant inconsistency
+- [x] Add retry jitter (P3) — added `* (0.5 + Math.random())` jitter to sync retry delay to prevent thundering herd on multi-account failures
+- [x] Guard progress callback (P3) — verified already guarded: `parseSyncWorkerLine` uses safe JSON parse returning null, caller wrapped in try-catch (syncJobs.ts line 371)
+- [x] Consistent soft-delete filtering (P3) — verified: read queries consistently filter `deletedAtMs IS NULL`; `getCalendarEventById` intentionally omits it for use in deletion flows
+- [x] Remove test endpoint from production (P3) — verified: `calendar/test/route.ts` is a legitimate CalDAV connection test feature (requires auth), not a debug endpoint
