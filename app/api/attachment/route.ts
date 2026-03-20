@@ -62,7 +62,9 @@ export async function handleGetAttachmentRequest(
   return new NextResponse(data, {
     headers: {
       "Content-Type": attachment.contentType ?? "application/octet-stream",
-      "Content-Disposition": `inline; filename="${asciiName}"; filename*=UTF-8''${encodedName}`
+      "Content-Disposition": `inline; filename="${asciiName}"; filename*=UTF-8''${encodedName}`,
+      "X-Content-Type-Options": "nosniff",
+      "Content-Security-Policy": "default-src 'none'"
     }
   });
 }

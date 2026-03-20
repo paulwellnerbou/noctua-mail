@@ -91,23 +91,28 @@ export async function handleSaveDraftRequest(
   }
 
   const uid = await appendImapMessage(account, draftsMailbox, raw, ["\\Draft", "\\Seen"], clientId);
+  if (!uid) {
+    return NextResponse.json(
+      { ok: false, message: "Failed to save draft to IMAP server" },
+      { status: 502 }
+    );
+  }
+
   let messageId: string | null = null;
   let savedMessage = null;
-  if (uid) {
-    const message = await syncImapMessage(account, draftsMailbox, uid, clientId);
-    if (message) {
-      const sanitized = await sanitizeSyncedMessage(message, account.id);
-      // Add compose format and quoted HTML edited flag to the message (local DB only, not stored in IMAP)
-      if (payload.composeFormat) {
-        sanitized.xComposeFormat = payload.composeFormat;
-      }
-      if (typeof payload.quotedHtmlEdited === "boolean") {
-        sanitized.quotedHtmlEdited = payload.quotedHtmlEdited;
-      }
-      await upsertMessages(account.id, null, [sanitized], false);
-      messageId = sanitized.id;
-      savedMessage = sanitized;
+  const message = await syncImapMessage(account, draftsMailbox, uid, clientId);
+  if (message) {
+    const sanitized = await sanitizeSyncedMessage(message, account.id);
+    // Add compose format and quoted HTML edited flag to the message (local DB only, not stored in IMAP)
+    if (payload.composeFormat) {
+      sanitized.xComposeFormat = payload.composeFormat;
     }
+    if (typeof payload.quotedHtmlEdited === "boolean") {
+      sanitized.quotedHtmlEdited = payload.quotedHtmlEdited;
+    }
+    await upsertMessages(account.id, null, [sanitized], false);
+    messageId = sanitized.id;
+    savedMessage = sanitized;
   }
 
   return NextResponse.json({ ok: true, draftId: messageId, message: savedMessage });

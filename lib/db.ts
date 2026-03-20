@@ -1757,6 +1757,29 @@ export async function saveInviteCodes(items: InviteCode[]) {
   });
 }
 
+/**
+ * Atomically claim one use of an invite code.
+ * Returns the updated invite row if successful, or null if the code is
+ * invalid, expired, or already at max uses.
+ */
+export async function claimInviteCode(code: string, userId: string): Promise<InviteCode | null> {
+  return withDbWriteRetry("claimInviteCode", async () => {
+    const db = await getDb();
+    const now = Date.now();
+    const result = db.prepare(
+      `UPDATE invite_codes
+       SET uses = uses + 1,
+           usedByUserId = COALESCE(usedByUserId, ?)
+       WHERE code = ?
+         AND (maxUses IS NULL OR uses < maxUses)
+         AND (expiresAt IS NULL OR expiresAt >= ?)`
+    ).run(userId, code, now);
+    if (result.changes === 0) return null;
+    const row = db.prepare(`SELECT * FROM invite_codes WHERE code = ?`).get(code) as any;
+    return row ? mapInviteRow(row) : null;
+  });
+}
+
 async function listAccountIdsFromMaster() {
   const db = await getDb();
   const rows = db.prepare(`SELECT id FROM accounts ORDER BY id ASC`).all() as Array<{ id: string }>;
@@ -2092,6 +2115,27 @@ export async function saveMailboxState(state: MailboxState) {
       state.highestUid ?? null,
       state.supportsQresync == null ? null : state.supportsQresync ? 1 : 0
     );
+  });
+}
+
+/**
+ * Lightweight update of just the highestUid column in mailbox_state.
+ * Used to persist sync progress after each batch so a killed worker can resume.
+ * Only updates if the row already exists and the new UID is higher than the stored one.
+ */
+export async function updateMailboxHighestUid(
+  accountId: string,
+  folderId: string,
+  highestUid: number
+) {
+  return withDbWriteRetry("updateMailboxHighestUid", async () => {
+    const db = await getAccountDb(accountId);
+    db.prepare(
+      `UPDATE mailbox_state
+       SET highestUid = ?
+       WHERE accountId = ? AND folderId = ?
+         AND (highestUid IS NULL OR highestUid < ?)`
+    ).run(highestUid, accountId, folderId, highestUid);
   });
 }
 

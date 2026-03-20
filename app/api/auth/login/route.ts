@@ -3,8 +3,20 @@ import { buildSessionPayload, setSessionCookie } from "@/lib/auth";
 import { getAccounts, getUserAccounts, getUsers, patchAccount } from "@/lib/db";
 import { verifyImapCredentials } from "@/lib/mail/imapAuth";
 import { shouldStorePasswordInDb } from "@/lib/secret";
+import { createRateLimiter, getRequestIp } from "@/lib/rateLimit";
+
+/** Rate-limit failed login attempts: 5 per minute per IP. */
+const loginLimiter = createRateLimiter({ windowMs: 60_000, max: 5 });
 
 export async function POST(request: Request) {
+  const ip = getRequestIp(request);
+  if (loginLimiter.isLimited(ip)) {
+    return NextResponse.json(
+      { ok: false, message: "Too many login attempts — try again later" },
+      { status: 429 }
+    );
+  }
+
   const clientId = request.headers.get("x-noctua-client") ?? undefined;
   const payload = (await request.json()) as { email: string; password: string };
   const email = payload.email?.trim().toLowerCase();

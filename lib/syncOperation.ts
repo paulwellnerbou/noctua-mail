@@ -11,6 +11,7 @@ import {
   getThreadIdsByMessageIds,
   saveFoldersForAccount,
   saveMailboxState,
+  updateMailboxHighestUid,
   upsertMessages
 } from "@/lib/db";
 import { processCalendarInviteForMessage } from "@/lib/calendarInviteProcessor";
@@ -414,6 +415,12 @@ export async function runSyncOperationBatched(
           highestProcessedUid = msg.imapUid;
         }
       }
+    }
+
+    // Persist highest UID to DB after each batch so a killed worker can resume.
+    // Only done when we have a folder context (per-folder sync).
+    if (highestProcessedUid !== undefined && payload.folderId) {
+      await updateMailboxHighestUid(account.id, payload.folderId, highestProcessedUid);
     }
 
     // Emit progress after the batch is committed so the retry loop can capture

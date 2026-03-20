@@ -84,9 +84,14 @@ export async function handleBulkDeleteMessagesRequest(
   const deletedIds = deleteTargets.map((item) => item.messageId);
   const fileRefs = await listMessageFileRefsByMessageIds(accountId, deletedIds);
   await deleteMessagesByIds(accountId, deletedIds);
-  await Promise.all(
+  const fileResults = await Promise.allSettled(
     fileRefs.map((item) => deleteMessageFiles(accountId, item.messageId, item.attachmentIds))
   );
+  for (const r of fileResults) {
+    if (r.status === "rejected") {
+      console.error("[bulk-delete] file cleanup failed:", r.reason);
+    }
+  }
 
   return NextResponse.json({
     ok: true,

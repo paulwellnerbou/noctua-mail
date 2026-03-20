@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
 import { buildSessionPayload, setSessionCookie } from "@/lib/auth";
 import {
+  claimInviteCode,
   getAccounts,
   getInviteCodes,
   getUserAccounts,
   getUsers,
   saveAccounts,
-  saveInviteCodes,
   saveUserAccounts,
   saveUsers
 } from "@/lib/db";
@@ -29,12 +29,8 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: false, message: "Invalid payload - IMAP password required" }, { status: 400 });
   }
 
-  const [invites, users, accounts, links] = await Promise.all([
-    getInviteCodes(),
-    getUsers(),
-    getAccounts(),
-    getUserAccounts()
-  ]);
+  // Pre-check invite code (non-atomic, just for fast rejection with clear error messages)
+  const invites = await getInviteCodes();
   const invite = invites.find((i) => i.code === code);
   if (!invite) {
     return NextResponse.json({ ok: false, message: "Invalid invite code" }, { status: 400 });
@@ -74,7 +70,20 @@ export async function POST(request: Request) {
   }
 
   const userId = randomUUID();
-  const assignedRole: "admin" | "user" = users.length === 0 ? "admin" : invite.role;
+
+  // Atomically claim the invite code (prevents double-use under concurrency)
+  const claimedInvite = await claimInviteCode(code, userId);
+  if (!claimedInvite) {
+    return NextResponse.json({ ok: false, message: "Invite code already used or expired" }, { status: 400 });
+  }
+
+  const [users, accounts, links] = await Promise.all([
+    getUsers(),
+    getAccounts(),
+    getUserAccounts()
+  ]);
+
+  const assignedRole: "admin" | "user" = users.length === 0 ? "admin" : claimedInvite.role;
   const user = {
     id: userId,
     email: account.email,
@@ -98,17 +107,11 @@ export async function POST(request: Request) {
     }
   ];
   const nextLinks = [...links, { userId, accountId }];
-  invite.uses += 1;
-  if (!invite.usedByUserId) {
-    invite.usedByUserId = userId;
-  }
-  const nextInvites = invites.map((i) => (i.code === invite.code ? invite : i));
 
   await Promise.all([
     saveUsers(nextUsers),
     saveAccounts(nextAccounts),
-    saveUserAccounts(nextLinks),
-    saveInviteCodes(nextInvites)
+    saveUserAccounts(nextLinks)
   ]);
 
   const session = buildSessionPayload({

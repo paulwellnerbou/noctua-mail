@@ -37,7 +37,9 @@ export async function handleGetSenderIconRequest(
     headers: {
       "Content-Type": result.contentType,
       "Cache-Control": "private, max-age=21600",
-      Vary: "Cookie"
+      Vary: "Cookie",
+      "X-Content-Type-Options": "nosniff",
+      "Content-Security-Policy": "default-src 'none'"
     }
   });
 }

@@ -1,8 +1,11 @@
 import { NextResponse } from "next/server";
 import net from "net";
 import tls from "tls";
+import { createRateLimiter, getRequestIp } from "@/lib/rateLimit";
 
 const TIMEOUT_MS = 3500;
+
+const probeLimiter = createRateLimiter({ windowMs: 60_000, max: 10 });
 
 async function probeImplicitTLS(host: string, port: number) {
   return new Promise<boolean>((resolve) => {
@@ -86,6 +89,15 @@ async function probeSmtpStartTLS(host: string, port: number) {
 }
 
 export async function POST(request: Request) {
+  const ip = getRequestIp(request);
+
+  if (probeLimiter.isLimited(ip)) {
+    return NextResponse.json(
+      { ok: false, message: "Too many requests — try again later" },
+      { status: 429 }
+    );
+  }
+
   const payload = (await request.json()) as {
     protocol: "imap" | "smtp";
     host: string;
