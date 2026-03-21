@@ -7,7 +7,9 @@ import {
   appendUnreferencedInlineImages,
   ensureHtmlDocumentTitle,
   escapeHtml,
+  replaceInlineImageSources,
   sanitizeHtmlForDisplay,
+  stripRedundantInlineImageFallbacks,
   stripConditionalComments
 } from "@/lib/html";
 
@@ -27,13 +29,9 @@ function postprocessHtml(
     if (attachment.url && attachment.dataUrl) {
       nextHtml = nextHtml.replaceAll(attachment.dataUrl, attachment.url);
     }
-    if (attachment.url && attachment.inline && attachment.cid) {
-      const cid = attachment.cid.replace(/[<>]/g, "");
-      nextHtml = nextHtml
-        .replaceAll(`cid:${cid}`, attachment.url)
-        .replaceAll(`cid:${attachment.cid}`, attachment.url);
-    }
   });
+  nextHtml = replaceInlineImageSources(nextHtml, attachments);
+  nextHtml = stripRedundantInlineImageFallbacks(nextHtml, attachments);
   nextHtml = appendUnreferencedInlineImages(nextHtml, attachments);
   return sanitizeHtmlForDisplay(stripConditionalComments(nextHtml)).replace(
     /data:(?!image\/)[^'")\s]+/gi,

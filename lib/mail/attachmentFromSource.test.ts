@@ -1,5 +1,8 @@
 import { describe, expect, it } from "bun:test";
-import { extractAttachmentBufferFromSource } from "@/lib/mail/attachmentFromSource";
+import {
+  extractAttachmentBufferFromSource,
+  mergeAttachmentMetadataFromParsedAttachments
+} from "@/lib/mail/attachmentFromSource";
 
 const SAMPLE_EML = `From: sender@example.com
 To: receiver@example.com
@@ -80,5 +83,33 @@ describe("extractAttachmentBufferFromSource", () => {
       cid: undefined
     });
     expect(buffer).toBeNull();
+  });
+
+  it("prefers source attachment cid metadata over mismatched imap cid metadata", () => {
+    const filename = "E-Mail_Banner-Hoer-auf-dich(1)_bce67f06-2eb9-4fb5-b7a8-2659410eb50d.jpg";
+    const cid = filename;
+    const merged = mergeAttachmentMetadataFromParsedAttachments(
+      [
+        {
+          id: "att-acc-123-1",
+          filename,
+          contentType: "image/jpeg",
+          size: 183229,
+          inline: true,
+          cid: "E-Mail_Banner-Hoer-auf-dich_bce67f06-2eb9-4fb5-b7a8-2659410eb50d.jpg"
+        }
+      ],
+      [
+        {
+          filename,
+          contentType: "image/jpeg",
+          contentId: `<${cid}>`,
+          content: Buffer.from("x")
+        }
+      ]
+    );
+
+    expect(merged[0]?.cid).toBe(cid);
+    expect(merged[0]?.filename).toBe(filename);
   });
 });

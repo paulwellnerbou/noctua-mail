@@ -1,5 +1,9 @@
 import { describe, expect, it } from "bun:test";
-import { appendUnreferencedInlineImages } from "./html";
+import {
+  appendUnreferencedInlineImages,
+  replaceInlineImageSources,
+  stripRedundantInlineImageFallbacks
+} from "./html";
 
 describe("appendUnreferencedInlineImages", () => {
   it("appends unreferenced inline raster images into the html body", () => {
@@ -33,6 +37,54 @@ describe("appendUnreferencedInlineImages", () => {
     ]);
 
     expect(output).toBe(input);
+  });
+
+  it("replaces cid image references using filename fallback when cid metadata is wrong", () => {
+    const url = "/api/accounts/a/messages/m/attachments/1";
+    const input =
+      '<html><body><img src="cid:E-Mail_Banner-Hoer-auf-dich(1)_bce67f06-2eb9-4fb5-b7a8-2659410eb50d.jpg"></body></html>';
+    const output = replaceInlineImageSources(input, [
+      {
+        inline: true,
+        contentType: "image/jpeg",
+        filename: "E-Mail_Banner-Hoer-auf-dich(1)_bce67f06-2eb9-4fb5-b7a8-2659410eb50d.jpg",
+        cid: "E-Mail_Banner-Hoer-auf-dich_bce67f06-2eb9-4fb5-b7a8-2659410eb50d.jpg",
+        url
+      }
+    ]);
+
+    expect(output).toContain(`src="${url}"`);
+  });
+
+  it("does not append when a matching cid reference is already present", () => {
+    const input =
+      '<html><body><img src="cid:E-Mail_Banner-Hoer-auf-dich(1)_bce67f06-2eb9-4fb5-b7a8-2659410eb50d.jpg"></body></html>';
+    const output = appendUnreferencedInlineImages(input, [
+      {
+        inline: true,
+        contentType: "image/jpeg",
+        filename: "E-Mail_Banner-Hoer-auf-dich(1)_bce67f06-2eb9-4fb5-b7a8-2659410eb50d.jpg",
+        cid: "E-Mail_Banner-Hoer-auf-dich_bce67f06-2eb9-4fb5-b7a8-2659410eb50d.jpg",
+        url: "/api/accounts/a/messages/m/attachments/1"
+      }
+    ]);
+
+    expect(output).toBe(input);
+  });
+
+  it("strips auto-appended fallback snippets when the same image is already present", () => {
+    const url = "/api/accounts/a/messages/m/attachments/1";
+    const input = `<html><body><img src="${url}" alt="primary"><div data-noctua-inline-images="1"><div data-noctua-inline-image="1" style="margin:12px 0;"><img src="${url}" alt="E-Mail_Banner-Hoer-auf-dich(1)_bce67f06-2eb9-4fb5-b7a8-2659410eb50d.jpg" loading="lazy" decoding="async" style="max-width:100%;height:auto;"></div></div></body></html>`;
+    const output = stripRedundantInlineImageFallbacks(input, [
+      {
+        inline: true,
+        contentType: "image/jpeg",
+        filename: "E-Mail_Banner-Hoer-auf-dich(1)_bce67f06-2eb9-4fb5-b7a8-2659410eb50d.jpg",
+        url
+      }
+    ]);
+
+    expect(output).toBe('<html><body><img src="/api/accounts/a/messages/m/attachments/1" alt="primary"></body></html>');
   });
 
   it("ignores non-inline, non-image, and svg attachments", () => {

@@ -31,6 +31,13 @@ const SYNC_PHASE_LABELS: Record<SyncJobProgress["phase"], string> = {
   retrying: "Retrying"
 };
 
+const SYNC_MODE_LABELS: Record<SyncJobProgress["mode"], string> = {
+  full: "Full sync",
+  recent: "Recent sync",
+  new: "New sync",
+  repair: "Repair sync"
+};
+
 function formatSyncPercent(percent?: number) {
   if (typeof percent !== "number" || !Number.isFinite(percent)) return "";
   const normalized = Math.max(0, Math.min(100, percent));
@@ -62,18 +69,19 @@ function formatRetryLabel(progress: SyncJobProgress) {
 }
 
 function formatSyncProgressSummary(progress: SyncJobProgress) {
+  const modeLabel = SYNC_MODE_LABELS[progress.mode] ?? "Sync";
   if (progress.phase === "retrying") {
-    return formatRetryLabel(progress);
+    return `${modeLabel} · ${formatRetryLabel(progress)}`;
   }
   const countLabel = formatSyncCount(progress);
   const percentLabel = formatSyncPercent(progress.percent);
   const metrics = [percentLabel, countLabel].filter(Boolean).join(" · ");
   const explicitMessage = progress.message?.trim();
   if (explicitMessage) {
-    return metrics ? `${explicitMessage} · ${metrics}` : explicitMessage;
+    return metrics ? `${modeLabel} · ${explicitMessage} · ${metrics}` : `${modeLabel} · ${explicitMessage}`;
   }
   const phaseLabel = SYNC_PHASE_LABELS[progress.phase] ?? "Running";
-  return metrics ? `${phaseLabel} · ${metrics}` : phaseLabel;
+  return metrics ? `${modeLabel} · ${phaseLabel} · ${metrics}` : `${modeLabel} · ${phaseLabel}`;
 }
 
 function resolveSyncScopeLabel(progress: SyncJobProgress, folderById: Map<string, Folder>) {
@@ -137,11 +145,14 @@ export default function ProcessStatusPopover({
   const latestSyncStatusValue = (() => {
     if (latestSyncProgress) {
       const scopeLabel = resolveSyncScopeLabel(latestSyncProgress, folderById);
+      const modeLabel = SYNC_MODE_LABELS[latestSyncProgress.mode] ?? "Sync";
       if (latestSyncProgress.phase === "retrying") {
-        return `${formatRetryLabel(latestSyncProgress)} ${scopeLabel}`;
+        return `${modeLabel}: ${formatRetryLabel(latestSyncProgress)} ${scopeLabel}`;
       }
       const percentLabel = formatSyncPercent(latestSyncProgress.percent);
-      return percentLabel ? `Syncing ${scopeLabel} (${percentLabel})` : `Syncing ${scopeLabel}...`;
+      return percentLabel
+        ? `Syncing ${scopeLabel} (${modeLabel}, ${percentLabel})`
+        : `Syncing ${scopeLabel} (${modeLabel})...`;
     }
     if (syncingFolderItems.length > 0) {
       const firstFolderName = syncingFolderItems[0]?.name;

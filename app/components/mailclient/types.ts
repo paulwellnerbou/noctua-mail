@@ -43,6 +43,14 @@ export type SyncTriggerOptions = {
   fullSyncReason?: string;
 };
 
+export type FullSyncConfirmState = {
+  accountId: string;
+  folderId?: string | null;
+  mode: SyncMode;
+  scopeLabel: string;
+  reason: string;
+};
+
 export type SyncJobResult = {
   count: number;
   newMessages?: SyncNotificationMessage[];

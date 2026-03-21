@@ -15,6 +15,11 @@ import * as Collapsible from "@radix-ui/react-collapsible";
 import { badgeColors, getFlagBadgeColor, getPriorityBadgeColor } from "@/lib/ui/badgeColors";
 import { getMessageDateDisplay } from "@/lib/dateFormatting";
 import type { AccountDateFormat, Message } from "@/lib/data";
+import {
+  appendUnreferencedInlineImages,
+  replaceInlineImageSources,
+  stripRedundantInlineImageFallbacks
+} from "@/lib/html";
 import badgeStyles from "./MessageBadge.module.css";
 import styles from "./ThreadMessageCard.module.css";
 import AttachmentsList from "../../AttachmentsList";
@@ -306,11 +311,18 @@ export default function ThreadMessageCard({
     </div>
   );
 
-  const renderHtmlPanel = () => (
-    <div>
-      <HtmlMessage html={message.htmlBody ?? ""} darkMode={darkMode} fontScale={fontScale} zoom={zoomValue} />
-    </div>
-  );
+  const renderHtmlPanel = () => {
+    const attachments = message.attachments ?? [];
+    let html = replaceInlineImageSources(message.htmlBody ?? "", attachments);
+    html = stripRedundantInlineImageFallbacks(html, attachments);
+    html = appendUnreferencedInlineImages(html, attachments);
+
+    return (
+      <div>
+        <HtmlMessage html={html} darkMode={darkMode} fontScale={fontScale} zoom={zoomValue} />
+      </div>
+    );
+  };
 
   const renderLoadContentPanel = () => (
     <div className={styles.bodyEmpty} role="status" aria-live="polite">

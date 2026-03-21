@@ -9,6 +9,7 @@ import {
 } from "@/lib/db";
 import { isCalendarAttachment, withCalendarInviteFlag } from "@/lib/messageFlags";
 import { parseIcsInvite } from "@/lib/calendar";
+import { mergeAttachmentMetadataFromParsedAttachments } from "@/lib/mail/attachmentFromSource";
 import {
   classifyCategoryFromMetadata,
   getCategorizationConfig,
@@ -879,10 +880,21 @@ async function parseImapMessage(
   const { seen, answered, flagged, deleted, draft, recent, unread } = deriveFlagState(flags);
   const envelope = message.envelope;
   const headers = parseHeaderMap(message.headers);
-  const {
+  let {
     attachments
   } = extractMessageStructureMetadata(account, message.uid, message.bodyStructure);
   const parsedSource = await parseMailForCategorization(message.source);
+  attachments = mergeAttachmentMetadataFromParsedAttachments(
+    attachments,
+    (parsedSource.attachments ?? []) as Array<{
+      filename?: string | null;
+      contentType?: string | null;
+      contentId?: string | null;
+      cid?: string | null;
+      content?: Buffer | Uint8Array | ArrayBuffer | null;
+      dataUrl?: string | null;
+    }>
+  );
   const calendarEventUids = collectCalendarEventUidsFromAttachments(
     parsedSource.attachments as CalendarAttachmentCandidate[]
   );
@@ -1100,8 +1112,10 @@ async function persistMailboxHighestUid(params: {
 }
 
 /**
- * Validates that mailbox_state.highestUid doesn't exceed the actual latest message UID.
- * Fixes any mismatches found to prevent sync gaps.
+ * Keeps mailbox_state.highestUid aligned with locally known progress without regressing
+ * it based on the currently remaining rows in the folder. Messages can be moved or
+ * deleted after sync, so MAX(imapUid) in the local folder rows is not a stable
+ * incremental-sync watermark.
  */
 async function validateAndFixMailboxHighestUid(
   account: Account,
@@ -1115,37 +1129,7 @@ async function validateAndFixMailboxHighestUid(
 
   const stateHighestUid = mailboxState?.highestUid ?? null;
 
-  // If state says we have messages but DB is empty, reset
-  if (stateHighestUid !== null && actualLatestUid === null) {
-    await saveMailboxState({
-      accountId: account.id,
-      folderId,
-      mailboxPath,
-      uidValidity: mailboxState?.uidValidity ?? null,
-      highestModSeq: mailboxState?.highestModSeq ?? null,
-      highestUid: null,
-      supportsQresync: mailboxState?.supportsQresync ?? null
-    });
-    const logger = getImapLogger();
-    if (logger !== false) {
-      logger.warn?.({
-        op: "fix-uid-mismatch-reset",
-        accountId: account.id,
-        folderId,
-        mailboxPath,
-        stateHighestUid,
-        actualLatestUid: null
-      });
-    }
-    return;
-  }
-
-  // If state has higher UID than actual messages, fix it
-  if (
-    stateHighestUid !== null &&
-    actualLatestUid !== null &&
-    stateHighestUid > actualLatestUid
-  ) {
+  if (stateHighestUid === null && actualLatestUid !== null) {
     await saveMailboxState({
       accountId: account.id,
       folderId,
@@ -1155,17 +1139,34 @@ async function validateAndFixMailboxHighestUid(
       highestUid: actualLatestUid,
       supportsQresync: mailboxState?.supportsQresync ?? null
     });
-
     const logger = getImapLogger();
     if (logger !== false) {
-      logger.warn?.({
-        op: "fix-uid-mismatch",
+      logger.info?.({
+        op: "backfill-highest-uid-from-local-db",
+        accountId: account.id,
+        folderId,
+        mailboxPath,
+        stateHighestUid: null,
+        actualLatestUid
+      });
+    }
+    return;
+  }
+
+  if (stateHighestUid !== null && (actualLatestUid === null || stateHighestUid > actualLatestUid)) {
+    const logger = getImapLogger();
+    if (logger !== false) {
+      logger.info?.({
+        op: "preserve-highest-uid-watermark",
         accountId: account.id,
         folderId,
         mailboxPath,
         stateHighestUid,
         actualLatestUid,
-        gap: stateHighestUid - actualLatestUid
+        gap:
+          actualLatestUid === null
+            ? null
+            : stateHighestUid - actualLatestUid
       });
     }
   }

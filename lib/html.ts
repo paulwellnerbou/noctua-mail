@@ -10,6 +10,7 @@ type InlineImageAttachment = {
   inline?: boolean;
   contentType?: string;
   filename?: string;
+  cid?: string;
   url?: string;
 };
 
@@ -137,6 +138,64 @@ function isRenderableInlineImageAttachment(attachment: InlineImageAttachment) {
   return !contentType.startsWith("image/svg+xml");
 }
 
+function normalizeInlineReferenceCandidate(value?: string | null) {
+  const trimmed = (value ?? "").trim();
+  if (!trimmed) return "";
+  return trimmed.replace(/^cid:/i, "").replace(/[<>]/g, "");
+}
+
+function getInlineReferenceCandidates(attachment: InlineImageAttachment) {
+  return Array.from(
+    new Set(
+      [attachment.cid, attachment.filename]
+        .map((value) => normalizeInlineReferenceCandidate(value))
+        .filter(Boolean)
+    )
+  );
+}
+
+function buildInlineImageSnippet(attachment: InlineImageAttachment) {
+  if (!isRenderableInlineImageAttachment(attachment) || !attachment.url) return null;
+  const escapedUrl = escapeHtml(attachment.url);
+  const alt = escapeHtml(attachment.filename?.trim() || "inline image");
+  return `<div data-noctua-inline-image="1" style="margin:12px 0;"><img src="${escapedUrl}" alt="${alt}" loading="lazy" decoding="async" style="max-width:100%;height:auto;"></div>`;
+}
+
+export function replaceInlineImageSources(
+  html: string,
+  attachments: InlineImageAttachment[]
+) {
+  if (!html || attachments.length === 0) return html;
+
+  let nextHtml = html;
+  attachments.forEach((attachment) => {
+    if (!attachment.inline || !attachment.url) return;
+    getInlineReferenceCandidates(attachment).forEach((candidate) => {
+      nextHtml = nextHtml.replaceAll(`cid:${candidate}`, attachment.url!);
+    });
+  });
+  return nextHtml;
+}
+
+export function stripRedundantInlineImageFallbacks(
+  html: string,
+  attachments: InlineImageAttachment[]
+) {
+  if (!html || attachments.length === 0) return html;
+
+  let nextHtml = html;
+  attachments.forEach((attachment) => {
+    const snippet = buildInlineImageSnippet(attachment);
+    if (!snippet || !nextHtml.includes(snippet) || !attachment.url) return;
+    const withoutSnippet = nextHtml.replace(snippet, "");
+    if (withoutSnippet.includes(attachment.url)) {
+      nextHtml = withoutSnippet;
+    }
+  });
+
+  return nextHtml.replace(/<div data-noctua-inline-images="1"><\/div>/g, "");
+}
+
 export function appendUnreferencedInlineImages(
   html: string,
   attachments: InlineImageAttachment[]
@@ -145,13 +204,14 @@ export function appendUnreferencedInlineImages(
 
   const snippets: string[] = [];
   attachments.forEach((attachment) => {
-    if (!isRenderableInlineImageAttachment(attachment) || !attachment.url) return;
+    const snippet = buildInlineImageSnippet(attachment);
+    if (!snippet || !attachment.url) return;
     const escapedUrl = escapeHtml(attachment.url);
     if (html.includes(attachment.url) || html.includes(escapedUrl)) return;
-    const alt = escapeHtml(attachment.filename?.trim() || "inline image");
-    snippets.push(
-      `<div data-noctua-inline-image="1" style="margin:12px 0;"><img src="${escapedUrl}" alt="${alt}" loading="lazy" decoding="async" style="max-width:100%;height:auto;"></div>`
-    );
+    if (getInlineReferenceCandidates(attachment).some((candidate) => html.includes(`cid:${candidate}`))) {
+      return;
+    }
+    snippets.push(snippet);
   });
 
   if (snippets.length === 0) return html;

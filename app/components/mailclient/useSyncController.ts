@@ -11,6 +11,7 @@ import {
 } from "@/lib/accountApiPaths";
 import type { Folder, Message } from "@/lib/data";
 import type {
+  FullSyncConfirmState,
   SyncJobProgress,
   SyncJobResult,
   SyncMode,
@@ -66,6 +67,7 @@ export type UseSyncControllerParams = {
     updater: (message: Message) => Message | null,
     options?: { source?: string }
   ) => void;
+  confirmFullSyncStart: (state: FullSyncConfirmState) => Promise<boolean>;
   inboxFolder: Folder | null;
   currentKeyRef: React.MutableRefObject<string>;
 };
@@ -138,6 +140,7 @@ export function useSyncController({
   setActiveFolderId,
   isNotificationSuppressedFolder,
   updateMessagesWithCurrentResultPrune,
+  confirmFullSyncStart,
   inboxFolder,
   currentKeyRef
 }: UseSyncControllerParams) {
@@ -301,7 +304,7 @@ export function useSyncController({
     }
   };
 
-  const confirmFullSyncStart = useCallback((payload: SyncJobRequest) => {
+  const requestFullSyncConfirmation = useCallback(async (payload: SyncJobRequest) => {
     const shouldConfirmFullSync =
       (payload.fullSync || payload.mode === "full") && !payload.skipFullSyncConfirm;
     if (!shouldConfirmFullSync) {
@@ -329,24 +332,18 @@ export function useSyncController({
       reason
     };
     console.warn("[noctua][sync] full sync requested", logPayload);
-    if (typeof window !== "undefined") {
-      const confirmed = window.confirm(
-        [
-          "Debug: a full sync is about to start.",
-          `Reason: ${reason}`,
-          `Account: ${payload.accountId}`,
-          `Scope: ${scopeLabel}`,
-          "",
-          "Press OK to continue with the full sync.",
-          "Press Cancel to block it so the current state can be inspected first."
-        ].join("\n")
-      );
-      if (!confirmed) {
-        console.warn("[noctua][sync] full sync cancelled", logPayload);
-        throw new FullSyncDebugCancelledError(reason);
-      }
+    const confirmed = await confirmFullSyncStart({
+      accountId: payload.accountId,
+      folderId: payload.folderId ?? null,
+      mode: "full",
+      scopeLabel,
+      reason
+    });
+    if (!confirmed) {
+      console.warn("[noctua][sync] full sync cancelled", logPayload);
+      throw new FullSyncDebugCancelledError(reason);
     }
-  }, [accountFolders]);
+  }, [accountFolders, confirmFullSyncStart]);
 
   const runSyncJob = async (payload: SyncJobRequest): Promise<SyncJobResult> => {
     const syncMode = payload.mode ?? (payload.fullSync ? "full" : "recent");
@@ -358,7 +355,7 @@ export function useSyncController({
       reason: payload.fullSyncReason?.trim() || null,
       recategorizeFolder: Boolean(payload.recategorizeFolder)
     });
-    confirmFullSyncStart(payload);
+    await requestFullSyncConfirmation(payload);
 
     const { accountId, fullSyncReason: _fullSyncReason, skipFullSyncConfirm: _skipFullSyncConfirm, ...requestBody } =
       payload;
@@ -576,7 +573,7 @@ export function useSyncController({
 
     if (mode === "full" && accountFolders.length > 0) {
       try {
-        confirmFullSyncStart({
+        await requestFullSyncConfirmation({
           accountId: activeAccountId,
           fullSync: true,
           mode: "full",

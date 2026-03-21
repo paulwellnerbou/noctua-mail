@@ -23,6 +23,10 @@ function normalizeCid(value?: string | null) {
   return normalizeText(value).replace(/[<>]/g, "");
 }
 
+function cleanCid(value?: string | null) {
+  return (value ?? "").trim().replace(/[<>]/g, "");
+}
+
 function resolveAttachmentIndex(attachmentId: string) {
   const match = attachmentId.match(/-(\d+)$/);
   if (!match?.[1]) return -1;
@@ -83,6 +87,36 @@ function pickParsedAttachment(
   }
 
   return null;
+}
+
+export function mergeAttachmentMetadataFromParsedAttachments<
+  T extends Pick<Attachment, "id" | "filename" | "contentType" | "cid">
+>(attachments: T[], parsedAttachments: ParsedAttachmentCandidate[]) {
+  if (attachments.length === 0 || parsedAttachments.length === 0) return attachments;
+
+  return attachments.map((attachment) => {
+    const candidate = pickParsedAttachment(parsedAttachments, attachment);
+    if (!candidate) return attachment;
+
+    const nextFilename = candidate.filename?.trim() || attachment.filename;
+    const nextContentType = candidate.contentType?.trim() || attachment.contentType;
+    const nextCid = cleanCid(candidate.contentId ?? candidate.cid) || attachment.cid;
+
+    if (
+      nextFilename === attachment.filename &&
+      nextContentType === attachment.contentType &&
+      nextCid === attachment.cid
+    ) {
+      return attachment;
+    }
+
+    return {
+      ...attachment,
+      filename: nextFilename,
+      contentType: nextContentType,
+      cid: nextCid
+    } as T;
+  });
 }
 
 export async function extractAttachmentBufferFromSource(

@@ -162,6 +162,7 @@ import { useMessageMutations } from "./mailclient/useMessageMutations";
 import type { Account, Folder, Message, Topic, TopicColor, User } from "@/lib/data";
 import AccountSettingsModal, { type ManageTab } from "./AccountSettingsModal";
 import DeleteConfirmDialog from "./mailclient/message/DeleteConfirmDialog";
+import FullSyncConfirmDialog from "./mailclient/message/FullSyncConfirmDialog";
 import UnsubscribeConfirmDialog from "./mailclient/message/UnsubscribeConfirmDialog";
 import {
   computeGroupMeta,
@@ -200,7 +201,11 @@ import {
   NOTICE_TIMEOUTS,
   THREAD_COLLAPSE_SETTLE_MS
 } from "./mailclient/constants";
-import type { DeleteConfirmAction, DeleteConfirmState } from "./mailclient/types";
+import type {
+  DeleteConfirmAction,
+  DeleteConfirmState,
+  FullSyncConfirmState
+} from "./mailclient/types";
 import { normalizeAccountDateFormat } from "@/lib/dateFormatting";
 type AuthMeResponse = {
   ok?: boolean;
@@ -462,6 +467,8 @@ export default function MailClient({
   const [pendingMessageActions, setPendingMessageActions] = useState<Set<string>>(new Set());
   const [deleteConfirm, setDeleteConfirm] = useState<DeleteConfirmState | null>(null);
   const deleteConfirmResolveRef = useRef<((action: DeleteConfirmAction) => void) | null>(null);
+  const [fullSyncConfirm, setFullSyncConfirm] = useState<FullSyncConfirmState | null>(null);
+  const fullSyncConfirmResolveRef = useRef<((confirmed: boolean) => void) | null>(null);
   const [unsubscribeConfirm, setUnsubscribeConfirm] = useState<{
     sender: string;
     listId?: string;
@@ -757,6 +764,14 @@ export default function MailClient({
     isNotificationSuppressedFolder: (folderId: string) =>
       checkIsNotificationSuppressedFolder(folderId, accountFolders),
     updateMessagesWithCurrentResultPrune: forwardMessageResultPruneUpdate,
+    confirmFullSyncStart: (state) =>
+      new Promise<boolean>((resolve) => {
+        if (fullSyncConfirmResolveRef.current) {
+          fullSyncConfirmResolveRef.current(false);
+        }
+        fullSyncConfirmResolveRef.current = resolve;
+        setFullSyncConfirm(state);
+      }),
     inboxFolder: inboxFolder ?? null,
     currentKeyRef
   });
@@ -2585,7 +2600,7 @@ export default function MailClient({
         }
         const sentFolder = findSentFolder();
         if (sentFolder) {
-          await syncFolderWithBackgroundRef.current?.(sentFolder.id, false, false, "recent");
+          await syncFolderWithBackgroundRef.current?.(sentFolder.id, false, false, "new", false);
         }
         await refreshFolders();
         if (sentFolder && activeFolderId === sentFolder.id && searchScope === "folder") {
@@ -2618,6 +2633,22 @@ export default function MailClient({
     setDeleteConfirm(null);
     resolve?.(action);
   }, []);
+
+  const resolveFullSyncConfirm = useCallback((confirmed: boolean) => {
+    const resolve = fullSyncConfirmResolveRef.current;
+    fullSyncConfirmResolveRef.current = null;
+    setFullSyncConfirm(null);
+    resolve?.(confirmed);
+  }, []);
+
+  const handleFullSyncConfirmOpenChange = useCallback(
+    (open: boolean) => {
+      if (!open) {
+        resolveFullSyncConfirm(false);
+      }
+    },
+    [resolveFullSyncConfirm]
+  );
 
   const confirmDelete = useCallback(
     (nextDeleteConfirm: DeleteConfirmState) =>
@@ -3547,7 +3578,8 @@ export default function MailClient({
     return () => window.clearInterval(timer);
   }, [authState, sessionTtlSeconds]);
 
-  // Initial sync on login (once per session per account)
+  // Initial sync on login (once per session per account). For existing accounts,
+  // sync only the active folder first so new mail appears before any broader repair work.
   useEffect(() => {
     if (!initialDataReady || !activeAccountId) return;
     if (initialFoldersLoadedAccountId !== activeAccountId) return;
@@ -3572,8 +3604,8 @@ export default function MailClient({
       ? syncAccountRef.current?.(undefined, "full", {
           fullSyncReason: "Initial startup sync fell back to full because no folders are loaded locally."
         })
-      : syncAccountRef.current?.(undefined, "new", {
-          fullSyncReason: "Initial startup sync for an existing account after page load."
+      : syncAccountRef.current?.(activeFolderId, "new", {
+          fullSyncReason: "Initial startup sync for the active folder after page load."
         });
     if (!syncPromise) {
       delete initialSyncStatusRef.current[accountId];
@@ -4777,6 +4809,11 @@ export default function MailClient({
         deleteConfirm={deleteConfirm}
         onOpenChange={handleDeleteDialogOpenChange}
         resolveDeleteConfirm={resolveDeleteConfirm}
+      />
+      <FullSyncConfirmDialog
+        confirmState={fullSyncConfirm}
+        onOpenChange={handleFullSyncConfirmOpenChange}
+        resolveConfirm={resolveFullSyncConfirm}
       />
 
       <UnsubscribeConfirmDialog

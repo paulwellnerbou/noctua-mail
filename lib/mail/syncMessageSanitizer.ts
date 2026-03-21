@@ -1,6 +1,10 @@
 import type { Attachment, Message } from "@/lib/data";
 import { buildAccountAttachmentPath } from "@/lib/accountApiPaths";
-import { appendUnreferencedInlineImages } from "@/lib/html";
+import {
+  appendUnreferencedInlineImages,
+  replaceInlineImageSources,
+  stripRedundantInlineImageFallbacks
+} from "@/lib/html";
 import { saveAttachmentData, saveMessageSource } from "@/lib/storage";
 
 type AttachmentWithContent = Attachment & {
@@ -55,9 +59,8 @@ export async function sanitizeSyncedMessage(message: Message, accountId: string)
       if (attachmentWithContent.dataUrl) {
         dataUrlReplacements.set(attachmentWithContent.dataUrl, url);
       }
-      if (attachment.inline && attachment.cid && htmlBody) {
-        const cid = attachment.cid.replace(/[<>]/g, "");
-        htmlBody = htmlBody.replaceAll(`cid:${cid}`, url).replaceAll(`cid:${attachment.cid}`, url);
+      if (attachment.inline && htmlBody) {
+        htmlBody = replaceInlineImageSources(htmlBody, [{ ...attachment, url }]);
       }
       const { dataUrl, content, ...rest } = attachmentWithContent;
       return { ...rest, url };
@@ -67,6 +70,7 @@ export async function sanitizeSyncedMessage(message: Message, accountId: string)
     dataUrlReplacements.forEach((url, dataUrl) => {
       htmlBody = htmlBody?.replaceAll(dataUrl, url);
     });
+    htmlBody = stripRedundantInlineImageFallbacks(htmlBody, attachments);
     htmlBody = appendUnreferencedInlineImages(htmlBody, attachments);
     htmlBody = htmlBody.replace(/data:(?!image\/)[^'")\s]+/gi, "about:blank");
   }
