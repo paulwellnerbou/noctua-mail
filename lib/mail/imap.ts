@@ -1053,6 +1053,11 @@ function logNewSyncDecision(params: {
   uidNext: number | null;
   skip: boolean;
   reason: NewSyncFolderDecision["reason"];
+  startUid?: number | null;
+  highestKnownUid?: number | null;
+  latestUid?: number | null;
+  mailboxStateHighestUid?: number | null;
+  uidValidity?: string | number | null;
 }) {
   const logger = getImapLogger();
   if (logger === false) return;
@@ -1062,7 +1067,12 @@ function logNewSyncDecision(params: {
     folder: params.folder,
     uidNext: params.uidNext,
     skip: params.skip,
-    reason: params.reason
+    reason: params.reason,
+    startUid: params.startUid ?? null,
+    highestKnownUid: params.highestKnownUid ?? null,
+    latestUid: params.latestUid ?? null,
+    mailboxStateHighestUid: params.mailboxStateHighestUid ?? null,
+    uidValidity: params.uidValidity ?? null
   });
 }
 
@@ -1250,7 +1260,20 @@ export async function planImapNewSyncFolders(
           folder: mailboxPath,
           uidNext: decision.uidNext,
           skip: decision.skip,
-          reason: decision.reason
+          reason: decision.reason,
+          startUid:
+            decision.reason === "baseline-unsynced-folder"
+              ? decision.uidNext
+              : highestKnownUid === null
+                ? 1
+                : highestKnownUid + 1,
+          highestKnownUid,
+          latestUid,
+          mailboxStateHighestUid: mailboxState?.highestUid ?? null,
+          uidValidity:
+            mailboxState?.uidValidity ??
+            ((status as { uidValidity?: unknown })?.uidValidity as string | number | null | undefined) ??
+            null
         });
         decisions.push(decision);
       } catch {
@@ -1288,6 +1311,8 @@ type NewModeRangeDecision = {
   skip: boolean;
   reason: NewSyncFolderDecision["reason"];
   highestKnownUid: number | null;
+  latestUid: number | null;
+  mailboxStateHighestUid: number | null;
 };
 
 type NewModeFetchedMessage = {
@@ -1377,6 +1402,10 @@ async function resolveNewModeRange(params: {
   }
   const highestKnownUid = knownUidCandidates.length > 0 ? Math.max(...knownUidCandidates) : null;
   const uidNext = params.mailboxUidNext ?? null;
+  const mailboxStateHighestUid =
+    typeof mailboxState?.highestUid === "number" && Number.isFinite(mailboxState.highestUid)
+      ? mailboxState.highestUid
+      : null;
 
   if (uidNext !== null && highestKnownUid === null) {
     const baselineHighestUid = Math.max(0, uidNext - 1);
@@ -1392,7 +1421,9 @@ async function resolveNewModeRange(params: {
       uidNext,
       skip: true,
       reason: "baseline-unsynced-folder",
-      highestKnownUid
+      highestKnownUid,
+      latestUid,
+      mailboxStateHighestUid
     } satisfies NewModeRangeDecision;
   }
 
@@ -1405,7 +1436,9 @@ async function resolveNewModeRange(params: {
       uidNext,
       skip: true,
       reason: "no-new-uids",
-      highestKnownUid
+      highestKnownUid,
+      latestUid,
+      mailboxStateHighestUid
     } satisfies NewModeRangeDecision;
   }
 
@@ -1414,7 +1447,9 @@ async function resolveNewModeRange(params: {
     uidNext,
     skip: false,
     reason: uidNext === null ? "missing-uid-next" : "has-new-uids",
-    highestKnownUid
+    highestKnownUid,
+    latestUid,
+    mailboxStateHighestUid
   } satisfies NewModeRangeDecision;
 }
 
@@ -1533,7 +1568,15 @@ export async function* syncImapAccountBatched(
       folder: mailboxToOpen,
       uidNext: newRange.uidNext,
       skip: newRange.skip,
-      reason: newRange.reason
+      reason: newRange.reason,
+      startUid: newRange.startUid,
+      highestKnownUid: newRange.highestKnownUid,
+      latestUid: newRange.latestUid,
+      mailboxStateHighestUid: newRange.mailboxStateHighestUid,
+      uidValidity:
+        mailboxUidValidity === undefined || mailboxUidValidity === null
+          ? null
+          : String(mailboxUidValidity)
     });
     if (typeof newRange.uidNext === "number") {
       estimatedTotal = Math.max(0, newRange.uidNext - newRange.startUid);

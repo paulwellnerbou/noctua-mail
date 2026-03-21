@@ -3,6 +3,7 @@ import {
   deleteMessagesWithFilesByIds,
   getAccounts,
   getFolderIdsByMessageIds,
+  listFullyProcessedCalendarInviteMessageIds,
   listMessageFileRefs,
   listFolderMessageUidRows,
   recomputeCategoriesForAccount,
@@ -99,6 +100,14 @@ export function diffLocalAndRemoteFolderUids(
 }
 
 const GOOGLE_CALENDAR_SYNC_SENDER = "noreply-calendar-sync@google.com";
+type CalendarInviteImport = {
+  messageId: string;
+  icsSource: string;
+  dateValue: number;
+  imapUid?: number;
+  process: boolean;
+  importOrder: number;
+};
 
 function extractMessageHeaderSection(source?: string | null) {
   if (!source) return "";
@@ -130,6 +139,29 @@ export function shouldAutoProcessCalendarInviteMessage(params: {
   source?: string | null;
 }) {
   return !isGoogleCalendarSyncMessage(params);
+}
+
+export function shouldAutoProcessCalendarInvitesForSyncMode(syncMode: SyncMode) {
+  return syncMode === "new" || syncMode === "recent";
+}
+
+export function sortCalendarInviteImportsForProcessing(invites: CalendarInviteImport[]) {
+  return invites.slice().sort((left, right) => {
+    const leftDate = Number.isFinite(left.dateValue) ? left.dateValue : Number.MAX_SAFE_INTEGER;
+    const rightDate = Number.isFinite(right.dateValue) ? right.dateValue : Number.MAX_SAFE_INTEGER;
+    if (leftDate !== rightDate) return leftDate - rightDate;
+    const leftUid =
+      typeof left.imapUid === "number" && Number.isFinite(left.imapUid)
+        ? left.imapUid
+        : Number.MAX_SAFE_INTEGER;
+    const rightUid =
+      typeof right.imapUid === "number" && Number.isFinite(right.imapUid)
+        ? right.imapUid
+        : Number.MAX_SAFE_INTEGER;
+    if (leftUid !== rightUid) return leftUid - rightUid;
+    if (left.messageId !== right.messageId) return left.messageId.localeCompare(right.messageId);
+    return left.importOrder - right.importOrder;
+  });
 }
 
 export function resolveOrphanedMessageFileRefs(params: {
@@ -217,8 +249,8 @@ export async function runSyncOperationBatched(
   const resolvedThreadIds = new Map<string, string>();
   const resolvedParentIds = new Map<string, string>();
   const newNotificationMessages: SyncNotificationMessage[] = [];
-  const calendarInviteImports: Array<{ messageId: string; icsSource: string; process: boolean }> =
-    [];
+  const calendarInviteImports: CalendarInviteImport[] = [];
+  let calendarInviteImportOrder = 0;
   let latestEstimatedTotal: number | undefined;
   // Highest IMAP UID successfully written to DB — updated after each batch upsert.
   let highestProcessedUid: number | undefined = payload.resumeFromUid;
@@ -259,6 +291,14 @@ export async function runSyncOperationBatched(
     }
 
     if (hasHistoricalRemoteGaps) {
+      console.warn("[noctua][sync] repair escalating to full sync", {
+        accountId: account.id,
+        folderId: payload.folderId,
+        mailboxPath,
+        reason: "Repair found historical remote UID gaps.",
+        highestLocalUid,
+        missingRemoteUidsSample: missingRemoteUids.slice(0, 20)
+      });
       return runSyncOperationBatched(
         {
           ...payload,
@@ -443,7 +483,7 @@ export async function runSyncOperationBatched(
 
       syncedMessages.forEach((message) => {
         const shouldProcessInvite =
-          syncMode === "new" &&
+          shouldAutoProcessCalendarInvitesForSyncMode(syncMode) &&
           shouldAutoProcessCalendarInviteMessage({
             from: message.from,
             fromEmail: message.fromEmail,
@@ -457,7 +497,10 @@ export async function runSyncOperationBatched(
           calendarInviteImports.push({
             messageId: message.id,
             icsSource,
-            process: shouldProcessInvite
+            dateValue: message.dateValue,
+            imapUid: typeof message.imapUid === "number" ? message.imapUid : undefined,
+            process: shouldProcessInvite,
+            importOrder: calendarInviteImportOrder++
           });
         });
       });
@@ -490,15 +533,25 @@ export async function runSyncOperationBatched(
     message: "Applying synchronized changes."
   });
 
-  for (const invite of calendarInviteImports) {
+  const autoProcessCalendarInvites = shouldAutoProcessCalendarInvitesForSyncMode(syncMode);
+  const fullyProcessedInviteMessageIds = autoProcessCalendarInvites
+    ? new Set(
+        await listFullyProcessedCalendarInviteMessageIds(
+          account.id,
+          calendarInviteImports.filter((invite) => invite.process).map((invite) => invite.messageId)
+        )
+      )
+    : new Set<string>();
+
+  for (const invite of sortCalendarInviteImportsForProcessing(calendarInviteImports)) {
     await processCalendarInviteForMessage({
       accountId: account.id,
       messageId: invite.messageId,
       icsSource: invite.icsSource,
-      process: invite.process,
+      process: invite.process && !fullyProcessedInviteMessageIds.has(invite.messageId),
       accountEmail: account.email,
-      reminderUserId: syncMode === "new" ? account.ownerUserId : undefined,
-      processedByUserId: syncMode === "new" ? account.ownerUserId : undefined
+      reminderUserId: autoProcessCalendarInvites ? account.ownerUserId : undefined,
+      processedByUserId: autoProcessCalendarInvites ? account.ownerUserId : undefined
     });
   }
 

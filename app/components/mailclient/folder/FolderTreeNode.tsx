@@ -5,6 +5,7 @@ import { Badge, DropdownMenu, IconButton } from "@radix-ui/themes";
 import { CaretRightIcon } from "@radix-ui/react-icons";
 import { badgeColors } from "@/lib/ui/badgeColors";
 import type { Folder } from "@/lib/data";
+import type { SyncTriggerOptions } from "../types";
 import styles from "./FolderTree.module.css";
 
 type FolderTreeNodeProps = {
@@ -37,7 +38,7 @@ type FolderTreeNodeProps = {
     syncAccount: (
       folderId?: string,
       mode?: "new" | "full",
-      options?: { recategorizeFolder?: boolean }
+      options?: SyncTriggerOptions
     ) => void;
     folderSpecialIcon: (folder: Folder) => React.ReactNode;
   };
@@ -213,7 +214,10 @@ export default function FolderTreeNode({
               <DropdownMenu.Item
                 disabled={isDeleting || isSyncingFolder}
                 onSelect={() => {
-                  syncAccount(folder.id, "full", { recategorizeFolder: true });
+                  syncAccount(folder.id, "full", {
+                    recategorizeFolder: true,
+                    fullSyncReason: "Manual full folder sync from the folder tree."
+                  });
                 }}
               >
                 Sync

@@ -10,7 +10,7 @@ import {
 } from "@/lib/accountApiPaths";
 import type { Account, Folder, Message, User } from "@/lib/data";
 import type { ManageTab } from "../AccountSettingsModal";
-import type { SyncJobResult } from "./types";
+import type { SyncJobResult, SyncMode } from "./types";
 
 type ApiFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
@@ -35,7 +35,8 @@ export type UseAccountControllerParams = {
     accountId: string;
     folderId?: string;
     fullSync?: boolean;
-    mode?: "full" | "recent" | "new" | "repair";
+    mode?: SyncMode;
+    fullSyncReason?: string;
   }) => Promise<SyncJobResult>;
   // State setters owned by MailClient
   setAccounts: React.Dispatch<React.SetStateAction<Account[]>>;
@@ -44,6 +45,7 @@ export type UseAccountControllerParams = {
   setAuthState: React.Dispatch<React.SetStateAction<"loading" | "ok" | "unauth">>;
   setCurrentUser: React.Dispatch<React.SetStateAction<User | null>>;
   setInitialDataReady: React.Dispatch<React.SetStateAction<boolean>>;
+  setInitialFoldersLoadedAccountId: React.Dispatch<React.SetStateAction<string | null>>;
   setSessionTtlSeconds: React.Dispatch<React.SetStateAction<number | null>>;
   setMessages: React.Dispatch<React.SetStateAction<Message[]>>;
   setMessagesPage: React.Dispatch<React.SetStateAction<number>>;
@@ -78,6 +80,7 @@ export function useAccountController({
   setAuthState,
   setCurrentUser,
   setInitialDataReady,
+  setInitialFoldersLoadedAccountId,
   setSessionTtlSeconds,
   setMessages,
   setMessagesPage,
@@ -99,6 +102,7 @@ export function useAccountController({
       const skipAuthCheck = options?.skipAuthCheck === true;
       let preferredAccountId = options?.preferredAccountId?.trim() ?? "";
       setInitialDataReady(false);
+      setInitialFoldersLoadedAccountId(null);
       try {
         if (!skipAuthCheck) {
           const me = await apiFetch("/api/auth/me", {
@@ -148,12 +152,14 @@ export function useAccountController({
             if (foldersRes.ok) {
               const nextFolders = (await foldersRes.json()) as Folder[];
               setFolders(nextFolders);
+              setInitialFoldersLoadedAccountId(resolvedAccountId);
               loadedFolders = true;
             } else {
               reportError(await readErrorMessage(foldersRes));
             }
           } else {
             setFolders([]);
+            setInitialFoldersLoadedAccountId("");
             loadedFolders = true;
           }
           loadedAccounts = true;
@@ -180,6 +186,7 @@ export function useAccountController({
       setCurrentUser,
       setFolders,
       setInitialDataReady,
+      setInitialFoldersLoadedAccountId,
       setSessionTtlSeconds
     ]
   );
@@ -272,7 +279,20 @@ export function useAccountController({
       if (isNew) {
         await switchAccount(newAccountId);
         await refreshFolders();
-        await runSyncJob({ accountId: newAccountId, fullSync: true, mode: "full" });
+        try {
+          await runSyncJob({
+            accountId: newAccountId,
+            fullSync: true,
+            mode: "full",
+            fullSyncReason: "Initial sync for a newly created account."
+          });
+        } catch (error) {
+          reportError(
+            error instanceof Error
+              ? error.message
+              : "Initial sync for the new account failed."
+          );
+        }
       }
     } else {
       reportError(await readErrorMessage(refreshed));

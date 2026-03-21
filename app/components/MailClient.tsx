@@ -212,6 +212,7 @@ type AuthMeResponse = {
 const LIST_DEBUG_SAMPLE_LIMIT = 12;
 const LOCAL_DELETE_RECONCILE_SUPPRESS_MS = 15_000;
 const RELATED_NOTICE_SUBJECT_MAX_CHARS = 96;
+const INITIAL_SYNC_SESSION_KEY_PREFIX = "noctua:initial-sync:";
 
 
 type CurrentResultDecision = { keep: true } | { keep: false; reason: string };
@@ -456,6 +457,7 @@ export default function MailClient({
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const isAdminUser = currentUser?.role === "admin";
   const [initialDataReady, setInitialDataReady] = useState(false);
+  const [initialFoldersLoadedAccountId, setInitialFoldersLoadedAccountId] = useState<string | null>(null);
   const [sessionTtlSeconds, setSessionTtlSeconds] = useState<number | null>(null);
   const [pendingMessageActions, setPendingMessageActions] = useState<Set<string>>(new Set());
   const [deleteConfirm, setDeleteConfirm] = useState<DeleteConfirmState | null>(null);
@@ -610,6 +612,30 @@ export default function MailClient({
     const match = trimmedQuery.match(/^related:(.+)$/i);
     return match?.[1]?.trim() ?? "";
   }, [trimmedQuery]);
+  const getInitialSyncSessionKey = useCallback(
+    (accountId: string) => `${INITIAL_SYNC_SESSION_KEY_PREFIX}${accountId}`,
+    []
+  );
+  const readInitialSyncSessionStatus = useCallback(
+    (accountId: string): "running" | "done" | null => {
+      if (typeof window === "undefined" || !accountId) return null;
+      const raw = window.sessionStorage.getItem(getInitialSyncSessionKey(accountId));
+      return raw === "running" || raw === "done" ? raw : null;
+    },
+    [getInitialSyncSessionKey]
+  );
+  const writeInitialSyncSessionStatus = useCallback(
+    (accountId: string, status: "running" | "done" | null) => {
+      if (typeof window === "undefined" || !accountId) return;
+      const key = getInitialSyncSessionKey(accountId);
+      if (status) {
+        window.sessionStorage.setItem(key, status);
+      } else {
+        window.sessionStorage.removeItem(key);
+      }
+    },
+    [getInitialSyncSessionKey]
+  );
   const isRelatedSearch = relatedQueryId.length > 0;
   const accountFolders = useMemo(
     () => folders.filter((folder) => folder.accountId === activeAccountId),
@@ -1380,6 +1406,7 @@ export default function MailClient({
     setAuthState,
     setCurrentUser,
     setInitialDataReady,
+    setInitialFoldersLoadedAccountId,
     setSessionTtlSeconds,
     setMessages,
     setMessagesPage,
@@ -3523,6 +3550,7 @@ export default function MailClient({
   // Initial sync on login (once per session per account)
   useEffect(() => {
     if (!initialDataReady || !activeAccountId) return;
+    if (initialFoldersLoadedAccountId !== activeAccountId) return;
 
     const hasAccountFolders = accountFolders.length > 0;
 
@@ -3533,27 +3561,44 @@ export default function MailClient({
     // skipped after sync completes and the user sees stale mail.
     if (hasAccountFolders && !activeFolderId) return;
 
-    const syncStatus = initialSyncStatusRef.current[activeAccountId];
+    const syncStatus =
+      initialSyncStatusRef.current[activeAccountId] ?? readInitialSyncSessionStatus(activeAccountId);
     if (syncStatus === "running" || syncStatus === "done") return;
 
     initialSyncStatusRef.current[activeAccountId] = "running";
+    writeInitialSyncSessionStatus(activeAccountId, "running");
     const accountId = activeAccountId;
     const syncPromise = !hasAccountFolders
-      ? syncAccountRef.current?.(undefined, "full")
-      : syncAccountRef.current?.(undefined, "new");
+      ? syncAccountRef.current?.(undefined, "full", {
+          fullSyncReason: "Initial startup sync fell back to full because no folders are loaded locally."
+        })
+      : syncAccountRef.current?.(undefined, "new", {
+          fullSyncReason: "Initial startup sync for an existing account after page load."
+        });
     if (!syncPromise) {
       delete initialSyncStatusRef.current[accountId];
+      writeInitialSyncSessionStatus(accountId, null);
       return;
     }
 
     void syncPromise
       .then(() => {
         initialSyncStatusRef.current[accountId] = "done";
+        writeInitialSyncSessionStatus(accountId, "done");
       })
       .catch(() => {
         delete initialSyncStatusRef.current[accountId];
+        writeInitialSyncSessionStatus(accountId, null);
       });
-  }, [activeAccountId, accountFolders.length, initialDataReady, activeFolderId]);
+  }, [
+    activeAccountId,
+    accountFolders.length,
+    initialDataReady,
+    initialFoldersLoadedAccountId,
+    activeFolderId,
+    readInitialSyncSessionStatus,
+    writeInitialSyncSessionStatus
+  ]);
 
   // CalDAV periodic sync
   useEffect(() => {
@@ -4478,6 +4523,10 @@ export default function MailClient({
   // check if raw messages exist in DB (threading issue → recompute) or not (missing → sync).
   useEffect(() => {
     if (searchScope !== "folder" || !activeFolderId || !activeAccountId) return;
+    // Wait for the first real list response for this key before deciding the folder
+    // is unexpectedly empty. On initial refresh there is a short window where the
+    // list is empty simply because page 1 has not hydrated yet.
+    if (totalMessages === null) return;
     if (listLoading || emptyListSyncing || isRecomputingThreads) return;
     if (filteredMessages.length > 0) return;
     if (autoRepairAttemptedFolderIdsRef.current.has(activeFolderId)) return;
@@ -4496,7 +4545,10 @@ export default function MailClient({
         if (typeof data?.total === "number" && data.total > 0) {
           await recomputeThreadsRef.current();
         } else {
-          await syncFolderWithBackgroundRef.current(folderId, false, true, "full");
+          await syncFolderWithBackgroundRef.current(folderId, false, true, "full", true, {
+            fullSyncReason:
+              "Auto-repair requested full sync because the folder list is empty and no raw messages were found in the DB."
+          });
         }
       } catch {
         // silently ignore auto-repair errors
@@ -4510,7 +4562,8 @@ export default function MailClient({
     listLoading,
     emptyListSyncing,
     isRecomputingThreads,
-    filteredMessages.length
+    filteredMessages.length,
+    totalMessages
   ]);
 
 
@@ -4620,6 +4673,18 @@ export default function MailClient({
           setHasMoreMessages(true);
           setTotalMessages(null);
           initialSyncStatusRef.current = {};
+          if (typeof window !== "undefined") {
+            const keysToRemove: string[] = [];
+            for (let i = 0; i < window.sessionStorage.length; i += 1) {
+              const key = window.sessionStorage.key(i);
+              if (key?.startsWith(INITIAL_SYNC_SESSION_KEY_PREFIX)) {
+                keysToRemove.push(key);
+              }
+            }
+            for (const key of keysToRemove) {
+              window.sessionStorage.removeItem(key);
+            }
+          }
           lastUidNextByFolderRef.current = {};
           try {
             const res = await apiFetch("/api/auth/me", {

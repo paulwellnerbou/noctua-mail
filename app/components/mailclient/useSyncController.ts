@@ -10,7 +10,13 @@ import {
   buildAccountSyncNewCandidatesPath
 } from "@/lib/accountApiPaths";
 import type { Folder, Message } from "@/lib/data";
-import type { SyncJobProgress, SyncJobResult, SyncNotificationMessage } from "./types";
+import type {
+  SyncJobProgress,
+  SyncJobResult,
+  SyncMode,
+  SyncNotificationMessage,
+  SyncTriggerOptions
+} from "./types";
 import { applyFlagsToMessage } from "./utils/messageHelpers";
 import { withCalendarInviteFlag } from "@/lib/messageFlags";
 import { extractEmails } from "./utils/clientHelpers";
@@ -84,6 +90,31 @@ type FolderConsistencyResult = {
   reasons?: string[];
 };
 
+type SyncJobRequest = {
+  accountId: string;
+  folderId?: string;
+  fullSync?: boolean;
+  mode?: SyncMode;
+  recategorizeFolder?: boolean;
+  fullSyncReason?: string;
+  skipFullSyncConfirm?: boolean;
+};
+
+type InternalSyncTriggerOptions = SyncTriggerOptions & {
+  skipFullSyncConfirm?: boolean;
+};
+
+class FullSyncDebugCancelledError extends Error {
+  constructor(reason: string) {
+    super(`Full sync cancelled before start. Reason: ${reason}`);
+    this.name = "FullSyncDebugCancelledError";
+  }
+}
+
+function isFullSyncDebugCancelledError(error: unknown): error is FullSyncDebugCancelledError {
+  return error instanceof Error && error.name === "FullSyncDebugCancelledError";
+}
+
 export function useSyncController({
   activeAccountId,
   activeFolderId,
@@ -144,7 +175,7 @@ export function useSyncController({
     (
       folderId?: string,
       mode?: "new" | "repair" | "full",
-      options?: { recategorizeFolder?: boolean }
+      options?: SyncTriggerOptions
     ) => Promise<void> | undefined
   >(undefined);
 
@@ -159,9 +190,9 @@ export function useSyncController({
       folderId: string,
       awaitDeep?: boolean,
       allowRefresh?: boolean,
-      mode?: "recent" | "new" | "repair" | "full",
+      mode?: SyncMode,
       allowDeep?: boolean,
-      options?: { recategorizeFolder?: boolean }
+      options?: InternalSyncTriggerOptions
     ) => Promise<unknown>
   >(async () => null);
 
@@ -270,14 +301,67 @@ export function useSyncController({
     }
   };
 
-  const runSyncJob = async (payload: {
-    accountId: string;
-    folderId?: string;
-    fullSync?: boolean;
-    mode?: "full" | "recent" | "new" | "repair";
-    recategorizeFolder?: boolean;
-  }): Promise<SyncJobResult> => {
-    const { accountId, ...requestBody } = payload;
+  const confirmFullSyncStart = useCallback((payload: SyncJobRequest) => {
+    const shouldConfirmFullSync =
+      (payload.fullSync || payload.mode === "full") && !payload.skipFullSyncConfirm;
+    if (!shouldConfirmFullSync) {
+      return;
+    }
+
+    const reason =
+      payload.fullSyncReason?.trim() ||
+      (payload.folderId
+        ? "Full folder sync requested without an explicit reason."
+        : "Full mailbox sync requested without an explicit reason.");
+    const folder = payload.folderId
+      ? accountFolders.find((item) => item.id === payload.folderId) ?? null
+      : null;
+    const scopeLabel = folder
+      ? `${folder.name} (${payload.folderId})`
+      : payload.folderId
+        ? payload.folderId
+        : "entire mailbox";
+    const logPayload = {
+      accountId: payload.accountId,
+      folderId: payload.folderId ?? null,
+      mode: payload.mode ?? null,
+      fullSync: true,
+      reason
+    };
+    console.warn("[noctua][sync] full sync requested", logPayload);
+    if (typeof window !== "undefined") {
+      const confirmed = window.confirm(
+        [
+          "Debug: a full sync is about to start.",
+          `Reason: ${reason}`,
+          `Account: ${payload.accountId}`,
+          `Scope: ${scopeLabel}`,
+          "",
+          "Press OK to continue with the full sync.",
+          "Press Cancel to block it so the current state can be inspected first."
+        ].join("\n")
+      );
+      if (!confirmed) {
+        console.warn("[noctua][sync] full sync cancelled", logPayload);
+        throw new FullSyncDebugCancelledError(reason);
+      }
+    }
+  }, [accountFolders]);
+
+  const runSyncJob = async (payload: SyncJobRequest): Promise<SyncJobResult> => {
+    const syncMode = payload.mode ?? (payload.fullSync ? "full" : "recent");
+    console.info("[noctua][sync] sync requested", {
+      accountId: payload.accountId,
+      folderId: payload.folderId ?? null,
+      mode: syncMode,
+      fullSync: Boolean(payload.fullSync || syncMode === "full"),
+      reason: payload.fullSyncReason?.trim() || null,
+      recategorizeFolder: Boolean(payload.recategorizeFolder)
+    });
+    confirmFullSyncStart(payload);
+
+    const { accountId, fullSyncReason: _fullSyncReason, skipFullSyncConfirm: _skipFullSyncConfirm, ...requestBody } =
+      payload;
     const syncRes = await apiFetch(buildAccountApiPath(accountId, "/sync"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -292,6 +376,22 @@ export function useSyncController({
     }
     return waitForSyncJob(accountId, data.jobId);
   };
+
+  const handleSyncLaunchError = useCallback(
+    (error: unknown, fallbackMessage: string) => {
+      if (isFullSyncDebugCancelledError(error)) {
+        pushNotice({
+          type: "warning",
+          title: "Full sync cancelled",
+          description: error.message,
+          durationMs: 10000
+        });
+        return;
+      }
+      reportError(error instanceof Error ? error.message : fallbackMessage);
+    },
+    [pushNotice, reportError]
+  );
 
   const planNewSyncCandidates = async (
     folderIds: string[]
@@ -333,9 +433,9 @@ export function useSyncController({
     folderId: string,
     awaitDeep = false,
     allowRefresh = true,
-    mode: "recent" | "new" | "repair" | "full" = "recent",
+    mode: SyncMode = "recent",
     allowDeep = true,
-    options?: { recategorizeFolder?: boolean }
+    options?: InternalSyncTriggerOptions
   ): Promise<SyncJobResult | null> => {
     const selectionKey = currentKeyRef.current;
     setSyncingFolders((prev) => new Set(prev).add(folderId));
@@ -345,7 +445,9 @@ export function useSyncController({
         accountId: activeAccountId,
         folderId,
         mode,
-        recategorizeFolder: Boolean(options?.recategorizeFolder)
+        recategorizeFolder: Boolean(options?.recategorizeFolder),
+        fullSyncReason: options?.fullSyncReason,
+        skipFullSyncConfirm: options?.skipFullSyncConfirm
       });
       if (allowRefresh && currentKeyRef.current === selectionKey) {
         setSyncCompletionVersion((v) => v + 1);
@@ -356,7 +458,7 @@ export function useSyncController({
         }
       }
     } catch (error) {
-      reportError(error instanceof Error ? error.message : "Sync failed due to a network error.");
+      handleSyncLaunchError(error, "Sync failed due to a network error.");
       setSyncingFolders((prev) => {
         const next = new Set(prev);
         next.delete(folderId);
@@ -381,7 +483,10 @@ export function useSyncController({
           accountId: activeAccountId,
           folderId,
           fullSync: true,
-          recategorizeFolder: Boolean(options?.recategorizeFolder)
+          recategorizeFolder: Boolean(options?.recategorizeFolder),
+          fullSyncReason:
+            options?.fullSyncReason?.trim() || `Background deep sync after ${mode} sync.`,
+          skipFullSyncConfirm: options?.skipFullSyncConfirm
         });
         if (allowRefresh && currentKeyRef.current === selectionKey) {
           setSyncCompletionVersion((v) => v + 1);
@@ -392,11 +497,7 @@ export function useSyncController({
           }
         }
       } catch (error) {
-        reportError(
-          error instanceof Error
-            ? error.message
-            : "Background sync failed due to a network error."
-        );
+        handleSyncLaunchError(error, "Background sync failed due to a network error.");
       } finally {
         setSyncingFolders((prev) => {
           const next = new Set(prev);
@@ -414,7 +515,8 @@ export function useSyncController({
 
   const syncNewlyDetectedFolders = async (
     knownFolderIds: Set<string>,
-    mode: "new" | "full"
+    mode: "new" | "full",
+    options?: InternalSyncTriggerOptions
   ) => {
     const nextFolders = await refreshFolders();
     const accountList = (nextFolders ?? accountFolders).filter(
@@ -430,7 +532,16 @@ export function useSyncController({
         true,
         false,
         mode === "new" ? "new" : "recent",
-        mode !== "new"
+        mode !== "new",
+        mode === "new"
+          ? undefined
+          : {
+              ...options,
+              fullSyncReason:
+                options?.fullSyncReason?.trim()
+                  ? `${options.fullSyncReason} Newly detected folder required deep sync.`
+                  : "Newly detected folder required deep sync during full mailbox sync."
+            }
       );
     }
     const refreshed = await refreshFolders();
@@ -440,10 +551,14 @@ export function useSyncController({
   const syncAccount = async (
     folderId?: string,
     mode: "new" | "repair" | "full" = "full",
-    options?: { recategorizeFolder?: boolean }
+    options?: SyncTriggerOptions
   ) => {
     const selectionKey = currentKeyRef.current;
     const knownFolderIds = new Set(accountFolders.map((folder) => folder.id));
+    const syncOptions: InternalSyncTriggerOptions = {
+      recategorizeFolder: Boolean(options?.recategorizeFolder),
+      fullSyncReason: options?.fullSyncReason
+    };
     if (folderId) {
       await syncFolderWithBackground(
         folderId,
@@ -451,19 +566,45 @@ export function useSyncController({
         true,
         mode === "new" ? "new" : mode === "repair" ? "repair" : mode === "full" ? "full" : "recent",
         mode !== "new" && mode !== "repair",
-        { recategorizeFolder: Boolean(options?.recategorizeFolder) }
+        syncOptions
       );
       if (mode !== "new" && mode !== "repair") {
-        await syncNewlyDetectedFolders(knownFolderIds, mode);
+        await syncNewlyDetectedFolders(knownFolderIds, mode, syncOptions);
       }
       return;
+    }
+
+    if (mode === "full" && accountFolders.length > 0) {
+      try {
+        confirmFullSyncStart({
+          accountId: activeAccountId,
+          fullSync: true,
+          mode: "full",
+          fullSyncReason:
+            syncOptions.fullSyncReason?.trim() || "Account-wide full sync requested.",
+          skipFullSyncConfirm: false
+        });
+      } catch (error) {
+        handleSyncLaunchError(error, "Sync failed due to a network error.");
+        return;
+      }
+      syncOptions.skipFullSyncConfirm = true;
     }
 
     if (accountFolders.length === 0) {
       setIsSyncing(true);
       try {
-        await runSyncJob({ accountId: activeAccountId, fullSync: true, mode: "full" });
-        const accountList = await syncNewlyDetectedFolders(knownFolderIds, "full");
+        await runSyncJob({
+          accountId: activeAccountId,
+          fullSync: true,
+          mode: "full",
+          fullSyncReason:
+            syncOptions.fullSyncReason?.trim() ||
+            "Account-wide full sync started because no local folders are available.",
+          skipFullSyncConfirm: syncOptions.skipFullSyncConfirm
+        });
+        syncOptions.skipFullSyncConfirm = true;
+        const accountList = await syncNewlyDetectedFolders(knownFolderIds, "full", syncOptions);
         const findInboxInList = (list: Folder[]) => {
           const bySpecial = list.find(
             (folder) => (folder.specialUse ?? "").toLowerCase() === "\\inbox"
@@ -480,7 +621,7 @@ export function useSyncController({
           await refreshMailboxData();
         }
       } catch (error) {
-        reportError(error instanceof Error ? error.message : "Sync failed due to a network error.");
+        handleSyncLaunchError(error, "Sync failed due to a network error.");
       } finally {
         setIsSyncing(false);
       }
@@ -542,10 +683,12 @@ export function useSyncController({
           folder.id,
           true,
           false,
-          accountWideMode === "full" ? "full" : "recent"
+          accountWideMode === "full" ? "full" : "recent",
+          true,
+          syncOptions
         );
       }
-      await syncNewlyDetectedFolders(knownFolderIds, accountWideMode);
+      await syncNewlyDetectedFolders(knownFolderIds, accountWideMode, syncOptions);
       if (currentKeyRef.current === selectionKey) {
         await refreshMailboxData();
       }
@@ -591,7 +734,15 @@ export function useSyncController({
           true,
           true,
           mode,
-          false
+          false,
+          mode === "full"
+            ? {
+                fullSyncReason:
+                  result.reasons?.length
+                    ? `Folder consistency check requested full sync: ${result.reasons.join(", ")}`
+                    : "Folder consistency check requested full sync without an explicit reason."
+              }
+            : undefined
         );
       } catch (error) {
         if (!cancelled) {
@@ -1029,7 +1180,13 @@ export function useSyncController({
       const { isSyncing: syncing, syncingFolders: syncingSet } = syncStateRef.current;
       if (syncing || syncingSet.has(folderId)) return;
       lastDeleteReconcileAtRef.current[folderId] = now;
-      void syncAccountRef.current?.(folderId, mode);
+      void syncAccountRef.current?.(
+        folderId,
+        mode,
+        mode === "full"
+          ? { fullSyncReason: "Stream reconcile fallback requested full sync." }
+          : undefined
+      );
     };
 
     const startStream = () => {

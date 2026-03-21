@@ -22,6 +22,7 @@ import { Badge, Button, DropdownMenu, IconButton, TextField } from "@radix-ui/th
 import { badgeColors } from "@/lib/ui/badgeColors";
 import { SEARCH_BADGE_OPTIONS, SEARCH_FIELD_OPTIONS } from "@/lib/ui/searchFilters";
 import type { Account, Folder } from "@/lib/data";
+import type { SyncTriggerOptions } from "./types";
 import EnvironmentLabel from "./EnvironmentLabel";
 import styles from "./TopBar.module.css";
 
@@ -89,7 +90,7 @@ type TopBarProps = {
     syncAccount: (
       folderId?: string,
       mode?: "new" | "full",
-      options?: { recategorizeFolder?: boolean }
+      options?: SyncTriggerOptions
     ) => void;
     logout: () => void;
   };

@@ -36,6 +36,13 @@ export type SyncNotificationMessage = {
   category?: string | null;
 };
 
+export type SyncMode = "full" | "recent" | "new" | "repair";
+
+export type SyncTriggerOptions = {
+  recategorizeFolder?: boolean;
+  fullSyncReason?: string;
+};
+
 export type SyncJobResult = {
   count: number;
   newMessages?: SyncNotificationMessage[];
@@ -54,7 +61,7 @@ export type SyncJobProgress = {
   accountId: string;
   folderId?: string;
   mailboxPath: string;
-  mode: "full" | "recent" | "new" | "repair";
+  mode: SyncMode;
   phase: SyncJobProgressPhase;
   processed: number;
   batchNumber?: number;

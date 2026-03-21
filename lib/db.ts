@@ -3827,6 +3827,49 @@ export async function clearMessageCalendarInviteStatesProcessedByEventUid(
   });
 }
 
+export async function listFullyProcessedCalendarInviteMessageIds(
+  accountId: string,
+  messageIds: string[]
+): Promise<string[]> {
+  const db = await getAccountDb(accountId);
+  ensureMessageCalendarEventOptionalColumns(db);
+  const normalizedMessageIds = Array.from(
+    new Set(
+      messageIds
+        .map((messageId) => String(messageId ?? "").trim())
+        .filter(Boolean)
+    )
+  );
+  if (normalizedMessageIds.length === 0) return [];
+
+  const QUERY_BATCH_SIZE = 400;
+  const processedMessageIds = new Set<string>();
+
+  for (let start = 0; start < normalizedMessageIds.length; start += QUERY_BATCH_SIZE) {
+    const chunk = normalizedMessageIds.slice(start, start + QUERY_BATCH_SIZE);
+    if (chunk.length === 0) continue;
+    const rows = db
+      .prepare(
+        `SELECT messageId
+         FROM message_calendar_events
+         WHERE accountId = ?
+           AND messageId IN (${chunk.map(() => "?").join(",")})
+         GROUP BY messageId
+         HAVING COUNT(*) > 0
+            AND SUM(CASE WHEN processedAtMs IS NULL THEN 1 ELSE 0 END) = 0`
+      )
+      .all(accountId, ...chunk) as Array<{ messageId?: string | null }>;
+    rows.forEach((row) => {
+      const messageId = String(row.messageId ?? "").trim();
+      if (messageId) {
+        processedMessageIds.add(messageId);
+      }
+    });
+  }
+
+  return Array.from(processedMessageIds);
+}
+
 export async function deleteMessageCalendarInviteStateByMessageAndEvent(
   accountId: string,
   messageId: string,

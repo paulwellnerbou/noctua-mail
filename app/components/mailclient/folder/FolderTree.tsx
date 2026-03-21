@@ -1,5 +1,6 @@
 import type React from "react";
 import type { Folder } from "@/lib/data";
+import type { SyncTriggerOptions } from "../types";
 import FolderTreeNode from "./FolderTreeNode";
 
 type FolderTreeProps = {
@@ -30,7 +31,7 @@ type FolderTreeProps = {
     syncAccount: (
       folderId?: string,
       mode?: "new" | "full",
-      options?: { recategorizeFolder?: boolean }
+      options?: SyncTriggerOptions
     ) => void;
     folderSpecialIcon: (folder: Folder) => React.ReactNode;
   };

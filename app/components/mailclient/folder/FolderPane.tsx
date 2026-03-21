@@ -2,6 +2,7 @@ import type React from "react";
 import { MoreVertical, X } from "lucide-react";
 import { Badge, DropdownMenu, IconButton, TextField } from "@radix-ui/themes";
 import { badgeColors } from "@/lib/ui/badgeColors";
+import type { SyncTriggerOptions } from "../types";
 import styles from "./FolderTree.module.css";
 type FolderPaneProps = {
   state: {
@@ -30,7 +31,7 @@ type FolderPaneProps = {
     syncAccount: (
       folderId?: string,
       mode?: "new" | "full",
-      options?: { recategorizeFolder?: boolean }
+      options?: SyncTriggerOptions
     ) => void;
     recomputeThreads: () => void;
     recomputeCategories: () => void;
@@ -112,7 +113,13 @@ export default function FolderPane({ state, actions, topSlot, children }: Folder
                   <DropdownMenu.Item onSelect={() => syncAccount(undefined, "new")}>
                     Sync New Messages
                   </DropdownMenu.Item>
-                  <DropdownMenu.Item onSelect={() => syncAccount(undefined, "full")}>
+                  <DropdownMenu.Item
+                    onSelect={() =>
+                      syncAccount(undefined, "full", {
+                        fullSyncReason: "Manual full mailbox sync from the folder pane."
+                      })
+                    }
+                  >
                     Full Mailbox Sync
                   </DropdownMenu.Item>
                   <DropdownMenu.Item

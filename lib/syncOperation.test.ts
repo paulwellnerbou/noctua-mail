@@ -3,7 +3,9 @@ import {
   diffLocalAndRemoteFolderUids,
   isGoogleCalendarSyncMessage,
   resolveOrphanedMessageFileRefs,
-  shouldAutoProcessCalendarInviteMessage
+  shouldAutoProcessCalendarInviteMessage,
+  shouldAutoProcessCalendarInvitesForSyncMode,
+  sortCalendarInviteImportsForProcessing
 } from "./syncOperation";
 
 describe("resolveOrphanedMessageFileRefs", () => {
@@ -113,5 +115,69 @@ describe("shouldAutoProcessCalendarInviteMessage", () => {
         source: "From: \"Google Calendar\" <calendar-notification@google.com>\r\n\r\nBody"
       })
     ).toBe(true);
+  });
+});
+
+describe("shouldAutoProcessCalendarInvitesForSyncMode", () => {
+  test("auto-processes invites during new and recent syncs only", () => {
+    expect(shouldAutoProcessCalendarInvitesForSyncMode("new")).toBe(true);
+    expect(shouldAutoProcessCalendarInvitesForSyncMode("recent")).toBe(true);
+    expect(shouldAutoProcessCalendarInvitesForSyncMode("full")).toBe(false);
+    expect(shouldAutoProcessCalendarInvitesForSyncMode("repair")).toBe(false);
+  });
+});
+
+describe("sortCalendarInviteImportsForProcessing", () => {
+  test("orders invite processing from oldest to newest", () => {
+    const sorted = sortCalendarInviteImportsForProcessing([
+      {
+        messageId: "msg-late",
+        icsSource: "late",
+        dateValue: 300,
+        imapUid: 9,
+        process: true,
+        importOrder: 2
+      },
+      {
+        messageId: "msg-early-b",
+        icsSource: "early-b",
+        dateValue: 100,
+        imapUid: 7,
+        process: true,
+        importOrder: 1
+      },
+      {
+        messageId: "msg-early-a",
+        icsSource: "early-a",
+        dateValue: 100,
+        imapUid: 5,
+        process: true,
+        importOrder: 0
+      },
+      {
+        messageId: "msg-same-message",
+        icsSource: "same-message-second-attachment",
+        dateValue: 300,
+        imapUid: 9,
+        process: true,
+        importOrder: 4
+      },
+      {
+        messageId: "msg-same-message",
+        icsSource: "same-message-first-attachment",
+        dateValue: 300,
+        imapUid: 9,
+        process: true,
+        importOrder: 3
+      }
+    ]);
+
+    expect(sorted.map((item) => item.icsSource)).toEqual([
+      "early-a",
+      "early-b",
+      "late",
+      "same-message-first-attachment",
+      "same-message-second-attachment"
+    ]);
   });
 });
