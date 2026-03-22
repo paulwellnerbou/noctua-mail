@@ -6824,6 +6824,67 @@ export async function listFolderMessageUidRows(accountId: string, folderId: stri
   }>;
 }
 
+export async function listFolderMessageUidAndFlagRows(accountId: string, folderId: string) {
+  const normalizedFolderId = folderId.trim();
+  if (!normalizedFolderId) {
+    return [] as Array<{ id: string; imapUid: number; flags: string | null }>;
+  }
+  const db = await getAccountDb(accountId);
+  return db
+    .prepare(
+      `SELECT id, imapUid, flags
+       FROM messages
+       WHERE accountId = ? AND folderId = ? AND imapUid IS NOT NULL
+       ORDER BY imapUid ASC`
+    )
+    .all(accountId, normalizedFolderId) as Array<{
+    id: string;
+    imapUid: number;
+    flags: string | null;
+  }>;
+}
+
+export async function bulkUpdateMessageFlags(
+  accountId: string,
+  updates: Array<{ id: string; flags: string[] }>
+) {
+  if (updates.length === 0) return;
+  return withDbWriteRetry("bulkUpdateMessageFlags", async () => {
+    const db = await getAccountDb(accountId);
+    const stmt = db.prepare(
+      `UPDATE messages
+       SET flags = ?,
+           seen = ?,
+           answered = ?,
+           flagged = ?,
+           deleted = ?,
+           draft = ?,
+           recent = ?,
+           unread = ?
+       WHERE accountId = ? AND id = ?`
+    );
+    const tx = db.transaction(() => {
+      for (const update of updates) {
+        const normalized = normalizeImapFlags(update.flags);
+        const system = deriveSystemFlagState(normalized);
+        stmt.run(
+          JSON.stringify(normalized),
+          system.seen,
+          system.answered,
+          system.flagged,
+          system.deleted,
+          system.draft,
+          system.recent,
+          system.unread,
+          accountId,
+          update.id
+        );
+      }
+    });
+    tx();
+  });
+}
+
 export async function deleteMessagesWithFilesByIds(accountId: string, messageIds: string[]) {
   const uniqueIds = Array.from(new Set(messageIds.map((id) => id.trim()).filter(Boolean)));
   if (uniqueIds.length === 0) return [] as string[];

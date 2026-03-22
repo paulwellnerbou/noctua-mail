@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 
-import { determineFolderConsistency } from "./route";
+import { determineFolderConsistency } from "@/lib/syncPolicy";
 
 describe("determineFolderConsistency", () => {
   test("prefers repair for count-only mismatch", () => {

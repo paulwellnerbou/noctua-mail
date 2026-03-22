@@ -1,11 +1,12 @@
 import {
+  bulkUpdateMessageFlags,
   deleteMessagesByIds,
   deleteMessagesWithFilesByIds,
   getAccounts,
   getFolderIdsByMessageIds,
   listFullyProcessedCalendarInviteMessageIds,
   listMessageFileRefs,
-  listFolderMessageUidRows,
+  listFolderMessageUidAndFlagRows,
   recomputeCategoriesForAccount,
   recomputeThreadsForAccount,
   getMessageIdsByMessageIds,
@@ -17,14 +18,15 @@ import {
 } from "@/lib/db";
 import { processCalendarInviteForMessage } from "@/lib/calendarInviteProcessor";
 import { getAttachmentContentBuffer, sanitizeSyncedMessage } from "@/lib/mail/syncMessageSanitizer";
-import { isCalendarAttachment } from "@/lib/messageFlags";
+import { isCalendarAttachment, CALENDAR_INVITE_FLAG } from "@/lib/messageFlags";
 import { extractPrimaryEmail, normalizeEmailAddress } from "@/lib/senderIdentity";
+import type { SyncMode } from "@/lib/syncPolicy";
 import { deleteMessageFiles } from "@/lib/storage";
-import { listImapMailboxUids, syncImapAccountBatched } from "@/lib/mail/imap";
+import { listImapMailboxUidsAndFlags, syncImapAccountBatched } from "@/lib/mail/imap";
+import { getPendingMoveSourceUids } from "@/lib/messageMoveJobs";
 import { reconcileVerifiedCrossFolderMoves } from "@/lib/syncMoveReconciliation";
 import { collectThreadReferenceIds, resolveThreadingForItems } from "@/lib/threading";
-
-export type SyncMode = "full" | "recent" | "new" | "repair";
+export type { SyncMode } from "@/lib/syncPolicy";
 
 export type SyncPayload = {
   accountId: string;
@@ -97,6 +99,61 @@ export function diffLocalAndRemoteFolderUids(
     staleMessageIds,
     missingRemoteUids
   };
+}
+
+// App-local flags that are added during message parsing and not stored on IMAP.
+// Exclude from flag comparison to avoid spurious updates.
+const APP_LOCAL_FLAGS = new Set([CALENDAR_INVITE_FLAG.toLowerCase()]);
+// Session-specific IMAP flag — always differs between sessions.
+const VOLATILE_FLAGS = new Set(["\\recent"]);
+
+function normalizeForFlagComparison(flags: string[]): string {
+  return flags
+    .map((f) => f.toLowerCase())
+    .filter((f) => !APP_LOCAL_FLAGS.has(f) && !VOLATILE_FLAGS.has(f))
+    .sort()
+    .join(",");
+}
+
+export function diffLocalAndRemoteWithFlags(
+  localRows: Array<{ id: string; imapUid: number; flags: string | null }>,
+  remoteEntries: Array<{ uid: number; flags: string[] }>
+) {
+  const remoteByUid = new Map(remoteEntries.map((e) => [e.uid, e]));
+  const localByUid = new Map(localRows.map((r) => [r.imapUid, r]));
+
+  const staleMessageIds = localRows
+    .filter((row) => !remoteByUid.has(row.imapUid))
+    .map((row) => row.id);
+
+  const missingRemoteUids = remoteEntries
+    .filter((e) => !localByUid.has(e.uid))
+    .map((e) => e.uid);
+
+  const flagUpdates: Array<{ id: string; flags: string[] }> = [];
+  for (const [uid, remote] of remoteByUid) {
+    const local = localByUid.get(uid);
+    if (!local) continue;
+    let localFlags: string[] = [];
+    if (local.flags) {
+      try {
+        const parsed = JSON.parse(local.flags);
+        if (Array.isArray(parsed)) localFlags = parsed;
+      } catch {
+        // Malformed flags JSON — treat as empty; the remote flags will overwrite.
+      }
+    }
+    const localNorm = normalizeForFlagComparison(localFlags);
+    const remoteNorm = normalizeForFlagComparison(remote.flags);
+    if (localNorm !== remoteNorm) {
+      // Merge remote IMAP flags with any app-local flags the local row has,
+      // so we don't lose app-specific flags like calendar-invite.
+      const appLocalFlags = localFlags.filter((f) => APP_LOCAL_FLAGS.has(f.toLowerCase()));
+      flagUpdates.push({ id: local.id, flags: [...remote.flags, ...appLocalFlags] });
+    }
+  }
+
+  return { staleMessageIds, missingRemoteUids, flagUpdates };
 }
 
 const GOOGLE_CALENDAR_SYNC_SENDER = "noreply-calendar-sync@google.com";
@@ -272,15 +329,22 @@ export async function runSyncOperationBatched(
       message: "Reconciling folder changes."
     });
 
+    // Fetch UIDs + flags (not just UIDs) so repair also detects flag changes.
     const [remoteSnapshot, localRows] = await Promise.all([
-      listImapMailboxUids(account, mailboxPath, clientId),
-      listFolderMessageUidRows(account.id, payload.folderId)
+      listImapMailboxUidsAndFlags(account, mailboxPath, "1:*", clientId),
+      listFolderMessageUidAndFlagRows(account.id, payload.folderId)
     ]);
 
-    const { staleMessageIds, missingRemoteUids } = diffLocalAndRemoteFolderUids(
-      localRows.map((row) => ({ id: row.id, imapUid: row.imapUid })),
-      remoteSnapshot.uids
-    );
+    const repairDiff = diffLocalAndRemoteWithFlags(localRows, remoteSnapshot.entries);
+
+    // Exclude UIDs queued for move out of this folder (same reason as two-phase sync).
+    const repairPendingMoveUids = getPendingMoveSourceUids(account.id, payload.folderId);
+    const missingRemoteUids =
+      repairPendingMoveUids.size > 0
+        ? repairDiff.missingRemoteUids.filter((uid) => !repairPendingMoveUids.has(uid))
+        : repairDiff.missingRemoteUids;
+    const { staleMessageIds, flagUpdates } = repairDiff;
+
     const highestLocalUid =
       localRows.length > 0 ? Math.max(...localRows.map((row) => row.imapUid)) : null;
     const hasHistoricalRemoteGaps =
@@ -288,6 +352,11 @@ export async function runSyncOperationBatched(
 
     if (staleMessageIds.length > 0) {
       await deleteMessagesWithFilesByIds(account.id, staleMessageIds);
+    }
+
+    // Update flags for existing messages where they differ.
+    if (flagUpdates.length > 0) {
+      await bulkUpdateMessageFlags(account.id, flagUpdates);
     }
 
     if (hasHistoricalRemoteGaps) {
@@ -336,7 +405,7 @@ export async function runSyncOperationBatched(
       );
       await persistRepairMailboxState();
       return {
-        count: staleMessageIds.length + nestedResult.count,
+        count: staleMessageIds.length + flagUpdates.length + nestedResult.count,
         newMessages: nestedResult.newMessages,
         highestProcessedUid: nestedResult.highestProcessedUid
       };
@@ -344,8 +413,9 @@ export async function runSyncOperationBatched(
 
     await saveFoldersForAccount(account.id, remoteSnapshot.folders);
     await persistRepairMailboxState();
+    const repairCount = staleMessageIds.length + flagUpdates.length;
     const result = {
-      count: staleMessageIds.length,
+      count: repairCount,
       highestProcessedUid: remoteSnapshot.highestUid ?? undefined
     };
     emitProgress({
@@ -354,10 +424,174 @@ export async function runSyncOperationBatched(
       estimatedTotal: localRows.length,
       percent: 100,
       highestProcessedUid: result.highestProcessedUid,
-      message: "Repair completed."
+      message: `Repair completed: ${staleMessageIds.length} removed, ${flagUpdates.length} flag updates.`
     });
     return result;
   }
+
+  // ---------------------------------------------------------------------------
+  // Two-phase sync for recent/full: lightweight UID+flag diff first, then
+  // only fetch full message source for genuinely new UIDs.
+  // This avoids re-downloading message bodies that are already stored locally.
+  // ---------------------------------------------------------------------------
+  const useTwoPhaseSync =
+    (syncMode === "recent" || (syncMode === "full" && !payload.resumeFromUid)) &&
+    payload.folderId &&
+    mailboxPath;
+
+  if (useTwoPhaseSync) {
+    const twoPhaseFolderId = payload.folderId!;
+    const twoPhaseMailboxPath = mailboxPath!;
+
+    emitProgress({
+      phase: "fetching",
+      processed: 0,
+      message: "Checking for changes (lightweight)."
+    });
+
+    const searchCriteria =
+      syncMode === "full"
+        ? "1:*"
+        : { since: new Date(Date.now() - 1000 * 60 * 60 * 24 * 30) };
+
+    const snapshot = await listImapMailboxUidsAndFlags(
+      account,
+      twoPhaseMailboxPath,
+      searchCriteria,
+      clientId
+    );
+    folders = snapshot.folders;
+
+    const localRows = await listFolderMessageUidAndFlagRows(account.id, twoPhaseFolderId);
+    const diff = diffLocalAndRemoteWithFlags(localRows, snapshot.entries);
+
+    // Exclude UIDs that are queued for move out of this folder. These messages
+    // are still on the IMAP server (the async IMAP move hasn't run yet) but no
+    // longer associated with this folder in the local DB. Without this filter,
+    // the sync would re-download them as "new" messages, causing them to
+    // briefly reappear in the message list after deletion/move.
+    const pendingMoveUids = getPendingMoveSourceUids(account.id, twoPhaseFolderId);
+    const missingRemoteUids =
+      pendingMoveUids.size > 0
+        ? diff.missingRemoteUids.filter((uid) => !pendingMoveUids.has(uid))
+        : diff.missingRemoteUids;
+    const { staleMessageIds, flagUpdates } = diff;
+
+    // For full sync, delete messages that no longer exist on the server.
+    // For recent sync, we can't distinguish "old" from "deleted" since we
+    // only see a 30-day window, so skip deletion.
+    if (syncMode === "full" && staleMessageIds.length > 0) {
+      await deleteMessagesWithFilesByIds(account.id, staleMessageIds);
+    }
+
+    // Update flags for existing messages where they differ.
+    if (flagUpdates.length > 0) {
+      await bulkUpdateMessageFlags(account.id, flagUpdates);
+    }
+
+    // Persist mailbox state so subsequent "new" mode resolves the correct range.
+    await saveMailboxState({
+      accountId: account.id,
+      folderId: twoPhaseFolderId,
+      mailboxPath: twoPhaseMailboxPath,
+      uidValidity: snapshot.uidValidity,
+      highestModSeq: snapshot.highestModSeq,
+      highestUid: snapshot.highestUid,
+      supportsQresync: snapshot.supportsQresync
+    });
+
+    // For recent mode, staleMessageIds is inflated (all local messages outside the
+    // 30-day window appear "stale") but nothing is actually deleted. Only count
+    // real work in progress.
+    const effectiveStaleCount = syncMode === "full" ? staleMessageIds.length : 0;
+    const phaseOneCount = effectiveStaleCount + flagUpdates.length;
+
+    emitProgress({
+      phase: "fetching",
+      processed: phaseOneCount,
+      message: `Lightweight check done: ${effectiveStaleCount} removed, ${flagUpdates.length} flag updates, ${missingRemoteUids.length} new.`
+    });
+
+    if (missingRemoteUids.length === 0) {
+      // No new messages — we're done.
+      await saveFoldersForAccount(account.id, folders);
+
+      if (payload.recategorizeFolder) {
+        await recomputeCategoriesForAccount(account.id, { folderId: twoPhaseFolderId });
+      }
+
+      const result: SyncOperationResult = {
+        count: phaseOneCount,
+        highestProcessedUid: snapshot.highestUid ?? undefined
+      };
+      emitProgress({
+        phase: "done",
+        processed: result.count,
+        percent: 100,
+        highestProcessedUid: result.highestProcessedUid,
+        message: "Sync completed (no new messages to download)."
+      });
+      return result;
+    }
+
+    // Phase 2: Fetch full source only for genuinely new messages via "new" mode.
+    // The "new" mode fetches from highestKnownUid+1, which covers all new UIDs
+    // since IMAP UIDs are monotonically increasing.
+    const highestLocalUid =
+      localRows.length > 0 ? Math.max(...localRows.map((row) => row.imapUid)) : null;
+    const hasSubHighestGaps =
+      highestLocalUid !== null && missingRemoteUids.some((uid) => uid <= highestLocalUid);
+
+    if (hasSubHighestGaps) {
+      // Rare edge case: missing UIDs below our highest known UID.
+      // Fall through to the legacy full-source fetch for correctness.
+      console.warn("[noctua][sync] two-phase found sub-highest gaps, falling through to legacy fetch", {
+        accountId: account.id,
+        folderId: twoPhaseFolderId,
+        highestLocalUid,
+        gapCount: missingRemoteUids.filter((uid) => uid <= highestLocalUid).length
+      });
+    } else {
+      const nestedResult = await runSyncOperationBatched(
+        {
+          ...payload,
+          mode: "new",
+          fullSync: false,
+          resumeFromUid: undefined
+        },
+        clientId,
+        options
+      );
+
+      await saveFoldersForAccount(account.id, folders);
+
+      if (syncMode === "full" && (phaseOneCount + nestedResult.count) > 0) {
+        await recomputeThreadsForAccount(account.id);
+      }
+      if (payload.recategorizeFolder) {
+        await recomputeCategoriesForAccount(account.id, { folderId: twoPhaseFolderId });
+      }
+
+      const result: SyncOperationResult = {
+        count: phaseOneCount + nestedResult.count,
+        newMessages: nestedResult.newMessages,
+        highestProcessedUid: nestedResult.highestProcessedUid ?? snapshot.highestUid ?? undefined
+      };
+      emitProgress({
+        phase: "done",
+        processed: result.count,
+        percent: 100,
+        highestProcessedUid: result.highestProcessedUid,
+        message: "Two-phase sync completed."
+      });
+      return result;
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Legacy full-source fetch path: used for resumed full syncs, and as fallback
+  // when two-phase detects sub-highest UID gaps.
+  // ---------------------------------------------------------------------------
 
   // A fresh full sync (no resume) captures existing message IDs upfront so we
   // can reconcile orphans (messages deleted from the server) at the end.

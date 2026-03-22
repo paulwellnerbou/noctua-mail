@@ -497,6 +497,17 @@ export type ImapMailboxUidSnapshot = {
   folders: Folder[];
 };
 
+export type ImapMailboxUidFlagSnapshot = {
+  mailboxPath: string;
+  uidNext: number | null;
+  uidValidity: string | null;
+  highestModSeq: string | null;
+  highestUid: number | null;
+  supportsQresync: boolean;
+  entries: Array<{ uid: number; flags: string[] }>;
+  folders: Folder[];
+};
+
 export async function getImapMailboxStatus(
   account: Account,
   mailboxPath: string,
@@ -597,6 +608,77 @@ export async function listImapMailboxUids(
       highestUid,
       supportsQresync: clientSupportsQresync(client),
       uids,
+      folders
+    };
+  } finally {
+    try {
+      await logImapOp("logout", { ...logContext }, () => client.logout());
+    } catch {
+      // ignore logout errors
+    }
+  }
+}
+
+/**
+ * Lightweight IMAP fetch that retrieves only UIDs and flags for a mailbox.
+ * Used by the two-phase sync approach: first fetch UIDs+flags to diff against
+ * local state, then only download full source for genuinely new messages.
+ */
+export async function listImapMailboxUidsAndFlags(
+  account: Account,
+  mailboxPath: string,
+  searchCriteria: string | Record<string, unknown>,
+  clientId?: string
+): Promise<ImapMailboxUidFlagSnapshot> {
+  const logContext = buildLogContext(account, clientId);
+  const client = buildImapClient(account, logContext);
+
+  try {
+    await logImapOp("connect", { host: account.imap.host, ...logContext }, () => client.connect());
+    const folderList = await logImapOp("list", { ...logContext }, () => client.list());
+    const folders: Folder[] = mapImapFolders(account, folderList);
+    const mailboxInfo = await logImapOp(
+      "mailboxOpen",
+      { mailbox: mailboxPath, readOnly: true, ...logContext },
+      () => client.mailboxOpen(mailboxPath, { readOnly: true })
+    );
+    const messageCount = toFiniteNumber((mailboxInfo as { exists?: unknown })?.exists) ?? 0;
+    const entries: Array<{ uid: number; flags: string[] }> = [];
+    if (messageCount > 0) {
+      for await (const message of client.fetch(searchCriteria, { uid: true, flags: true })) {
+        if (typeof message.uid === "number" && Number.isFinite(message.uid)) {
+          entries.push({
+            uid: message.uid,
+            flags: message.flags ? Array.from(message.flags) : []
+          });
+        }
+      }
+    }
+    // Derive highestUid from uidNext (authoritative) when available, falling
+    // back to the max fetched UID. This is important for partial snapshots
+    // (e.g. recent mode with a SINCE filter) where entries may be empty or
+    // only cover a subset — using max(entries.uid) alone would regress the
+    // watermark and break incremental sync planning.
+    const uidNext = toFiniteNumber((mailboxInfo as { uidNext?: unknown })?.uidNext) ?? null;
+    const maxEntryUid = entries.length > 0 ? Math.max(...entries.map((e) => e.uid)) : null;
+    const highestUid =
+      uidNext !== null && uidNext > 0
+        ? Math.max(uidNext - 1, maxEntryUid ?? 0)
+        : maxEntryUid;
+    return {
+      mailboxPath,
+      uidNext,
+      uidValidity:
+        (mailboxInfo as { uidValidity?: unknown })?.uidValidity == null
+          ? null
+          : String((mailboxInfo as { uidValidity?: unknown }).uidValidity),
+      highestModSeq:
+        (mailboxInfo as { highestModseq?: unknown })?.highestModseq == null
+          ? null
+          : String((mailboxInfo as { highestModseq?: unknown }).highestModseq),
+      highestUid,
+      supportsQresync: clientSupportsQresync(client),
+      entries,
       folders
     };
   } finally {

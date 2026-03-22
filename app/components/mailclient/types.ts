@@ -2,6 +2,9 @@
  * Type definitions for MailClient
  */
 import type { InAppNotice } from "./InAppNoticeStack";
+import type { SyncMode } from "@/lib/syncPolicy";
+
+export type { SyncMode } from "@/lib/syncPolicy";
 
 export type ExceptionEntry = {
   id: string;
@@ -36,11 +39,10 @@ export type SyncNotificationMessage = {
   category?: string | null;
 };
 
-export type SyncMode = "full" | "recent" | "new" | "repair";
-
 export type SyncTriggerOptions = {
   recategorizeFolder?: boolean;
   fullSyncReason?: string;
+  triggerId?: string;
 };
 
 export type FullSyncConfirmState = {
