@@ -134,9 +134,15 @@ export function diffLocalAndRemoteWithFlags(
   for (const [uid, remote] of remoteByUid) {
     const local = localByUid.get(uid);
     if (!local) continue;
-    const localFlags = (
-      local.flags ? (JSON.parse(local.flags) as string[]) : []
-    );
+    let localFlags: string[] = [];
+    if (local.flags) {
+      try {
+        const parsed = JSON.parse(local.flags);
+        if (Array.isArray(parsed)) localFlags = parsed;
+      } catch {
+        // Malformed flags JSON — treat as empty; the remote flags will overwrite.
+      }
+    }
     const localNorm = normalizeForFlagComparison(localFlags);
     const remoteNorm = normalizeForFlagComparison(remote.flags);
     if (localNorm !== remoteNorm) {
@@ -494,12 +500,16 @@ export async function runSyncOperationBatched(
       supportsQresync: snapshot.supportsQresync
     });
 
-    const phaseOneCount = staleMessageIds.length + flagUpdates.length;
+    // For recent mode, staleMessageIds is inflated (all local messages outside the
+    // 30-day window appear "stale") but nothing is actually deleted. Only count
+    // real work in progress.
+    const effectiveStaleCount = syncMode === "full" ? staleMessageIds.length : 0;
+    const phaseOneCount = effectiveStaleCount + flagUpdates.length;
 
     emitProgress({
       phase: "fetching",
       processed: phaseOneCount,
-      message: `Lightweight check done: ${staleMessageIds.length} removed, ${flagUpdates.length} flag updates, ${missingRemoteUids.length} new.`
+      message: `Lightweight check done: ${effectiveStaleCount} removed, ${flagUpdates.length} flag updates, ${missingRemoteUids.length} new.`
     });
 
     if (missingRemoteUids.length === 0) {

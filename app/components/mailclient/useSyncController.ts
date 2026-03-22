@@ -1187,9 +1187,11 @@ export function useSyncController({
       const { isSyncing: syncing, syncingFolders: syncingSet } = syncStateRef.current;
       if (syncing || syncingSet.has(decision.folderId)) return;
       lastDeleteReconcileAtRef.current[decision.folderId] = now;
+      const reconcileMode: "repair" | "full" =
+        decision.mode === "full" ? "full" : "repair";
       void syncAccountRef.current?.(
         decision.folderId,
-        decision.mode === "recent" ? "full" : decision.mode,
+        reconcileMode,
         {
           fullSyncReason: decision.reason,
           triggerId

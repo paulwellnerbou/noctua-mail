@@ -654,10 +654,20 @@ export async function listImapMailboxUidsAndFlags(
         }
       }
     }
-    const highestUid = entries.length > 0 ? Math.max(...entries.map((e) => e.uid)) : null;
+    // Derive highestUid from uidNext (authoritative) when available, falling
+    // back to the max fetched UID. This is important for partial snapshots
+    // (e.g. recent mode with a SINCE filter) where entries may be empty or
+    // only cover a subset — using max(entries.uid) alone would regress the
+    // watermark and break incremental sync planning.
+    const uidNext = toFiniteNumber((mailboxInfo as { uidNext?: unknown })?.uidNext) ?? null;
+    const maxEntryUid = entries.length > 0 ? Math.max(...entries.map((e) => e.uid)) : null;
+    const highestUid =
+      uidNext !== null && uidNext > 0
+        ? Math.max(uidNext - 1, maxEntryUid ?? 0)
+        : maxEntryUid;
     return {
       mailboxPath,
-      uidNext: toFiniteNumber((mailboxInfo as { uidNext?: unknown })?.uidNext) ?? null,
+      uidNext,
       uidValidity:
         (mailboxInfo as { uidValidity?: unknown })?.uidValidity == null
           ? null
