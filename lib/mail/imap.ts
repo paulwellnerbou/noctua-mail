@@ -1441,8 +1441,20 @@ function mapNewModeFetchedMessage(raw: any, fallbackUid: number): NewModeFetched
 async function* fetchNewModeMessages(
   client: ImapFlow,
   startUid: number,
-  uidNext: number | null
+  uidNext: number | null,
+  explicitUids?: number[]
 ): AsyncGenerator<NewModeFetchedMessage> {
+  const normalizedExplicitUids = Array.from(
+    new Set((explicitUids ?? []).filter((uid) => Number.isFinite(uid) && uid > 0))
+  ).sort((left, right) => left - right);
+  if (normalizedExplicitUids.length > 0) {
+    for (const uid of normalizedExplicitUids) {
+      const message = await client.fetchOne(String(uid), NEW_MODE_FETCH_QUERY, { uid: true });
+      if (!message) continue;
+      yield mapNewModeFetchedMessage(message, uid);
+    }
+    return;
+  }
   const mailboxExists = client.mailbox && client.mailbox.exists;
   if (typeof mailboxExists === "number" && mailboxExists <= 0) {
     return;
@@ -1563,7 +1575,7 @@ export async function* syncImapAccountBatched(
   mode: "full" | "recent" | "new" = "recent",
   clientId?: string,
   batchSize = 300,
-  options?: { resumeFromUid?: number }
+  options?: { resumeFromUid?: number; explicitUids?: number[] }
 ): AsyncGenerator<ImapSyncBatch> {
   const logContext = buildLogContext(account, clientId);
   const client = buildImapClient(account, logContext);
@@ -1640,45 +1652,72 @@ export async function* syncImapAccountBatched(
   yield progressBatch();
 
   if (mode === "new") {
+    const explicitUids = Array.from(
+      new Set((options?.explicitUids ?? []).filter((uid) => Number.isFinite(uid) && uid > 0))
+    ).sort((left, right) => left - right);
     const newRange = await resolveNewModeRange({
       account,
       mailboxPath: mailboxToOpen,
       mailboxUidNext,
       mailboxUidValidity
     });
-    logNewSyncDecision({
-      accountId: account.id,
-      folder: mailboxToOpen,
-      uidNext: newRange.uidNext,
-      skip: newRange.skip,
-      reason: newRange.reason,
-      startUid: newRange.startUid,
-      highestKnownUid: newRange.highestKnownUid,
-      latestUid: newRange.latestUid,
-      mailboxStateHighestUid: newRange.mailboxStateHighestUid,
-      uidValidity:
-        mailboxUidValidity === undefined || mailboxUidValidity === null
-          ? null
-          : String(mailboxUidValidity)
-    });
-    if (typeof newRange.uidNext === "number") {
-      estimatedTotal = Math.max(0, newRange.uidNext - newRange.startUid);
-    } else if (typeof mailboxExists === "number") {
-      estimatedTotal = Math.max(0, mailboxExists - newRange.startUid + 1);
-    }
-    if (newRange.skip) {
-      const finalBatch = flushBatch(true);
-      if (finalBatch) yield finalBatch;
-      return;
+    if (explicitUids.length > 0) {
+      const logger = getImapLogger();
+      if (logger !== false) {
+        logger.info?.({
+          op: "sync-new-explicit-uids",
+          account: account.id,
+          folder: mailboxToOpen,
+          uidCount: explicitUids.length,
+          uidSample: explicitUids.slice(0, 20),
+          highestKnownUid: newRange.highestKnownUid,
+          latestUid: newRange.latestUid,
+          mailboxStateHighestUid: newRange.mailboxStateHighestUid
+        });
+      }
+      estimatedTotal = explicitUids.length;
+    } else {
+      logNewSyncDecision({
+        accountId: account.id,
+        folder: mailboxToOpen,
+        uidNext: newRange.uidNext,
+        skip: newRange.skip,
+        reason: newRange.reason,
+        startUid: newRange.startUid,
+        highestKnownUid: newRange.highestKnownUid,
+        latestUid: newRange.latestUid,
+        mailboxStateHighestUid: newRange.mailboxStateHighestUid,
+        uidValidity:
+          mailboxUidValidity === undefined || mailboxUidValidity === null
+            ? null
+            : String(mailboxUidValidity)
+      });
+      if (typeof newRange.uidNext === "number") {
+        estimatedTotal = Math.max(0, newRange.uidNext - newRange.startUid);
+      } else if (typeof mailboxExists === "number") {
+        estimatedTotal = Math.max(0, mailboxExists - newRange.startUid + 1);
+      }
+      if (newRange.skip) {
+        const finalBatch = flushBatch(true);
+        if (finalBatch) yield finalBatch;
+        return;
+      }
     }
     const rangeLabel = describeNewModeFetchRange(newRange.startUid, newRange.uidNext);
     const fetchStrategy =
-      typeof newRange.uidNext === "number" && Number.isFinite(newRange.uidNext)
-        ? "fetch-one"
-        : "fetch-range";
+      explicitUids.length > 0
+        ? "fetch-explicit-uids"
+        : typeof newRange.uidNext === "number" && Number.isFinite(newRange.uidNext)
+          ? "fetch-one"
+          : "fetch-range";
     const start = Date.now();
 
-    for await (const message of fetchNewModeMessages(client, newRange.startUid, newRange.uidNext)) {
+    for await (const message of fetchNewModeMessages(
+      client,
+      newRange.startUid,
+      newRange.uidNext,
+      explicitUids
+    )) {
       const attachmentsWithContent = await resolveAttachmentsForNewMode(
         client,
         message.uid,
@@ -1742,7 +1781,7 @@ export async function* syncImapAccountBatched(
       logger.info?.({
         op: "fetch",
         mailbox: mailboxToOpen,
-        range: rangeLabel,
+        range: explicitUids.length > 0 ? explicitUids.slice(0, 20).join(",") : rangeLabel,
         strategy: fetchStrategy,
         count: totalProcessed,
         ms: Date.now() - start

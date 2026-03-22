@@ -34,3 +34,4 @@ This project uses bun:sqlite for database access, so bun is required for running
 - Do not change/implement anything I do not explicitly ask for. If the user asks a question, answer it — do not start implementing. Only write code when explicitly instructed to do so.
 - Always ask for clarification if you are unsure about something.
 - Always search for already existing code and patterns to reuse, strive to keep the codebase consistent and reduce duplication.
+- Never use real personal data in code, fixtures, screenshots, or tests. Use clearly synthetic placeholders such as `example.com`, `example.test`, or `example.invalid`.

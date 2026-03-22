@@ -154,7 +154,7 @@ describe("resolveInReplyToRef", () => {
     // Simulates the scenario where a Sent message has In-Reply-To pointing to
     // a message not loaded in the current view — the link must not be rendered.
     const message = makeMessage({
-      inReplyTo: "<4855a7bf-a4d1-44be-8c51-df05fde64c71@wellnerbou.de>"
+      inReplyTo: "<4855a7bf-a4d1-44be-8c51-df05fde64c71@example.test>"
     });
     expect(resolveInReplyToRef(message, makeMap())).toBeNull();
   });

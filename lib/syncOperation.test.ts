@@ -3,6 +3,7 @@ import {
   diffLocalAndRemoteFolderUids,
   diffLocalAndRemoteWithFlags,
   isGoogleCalendarSyncMessage,
+  partitionMissingRemoteUids,
   resolveOrphanedMessageFileRefs,
   shouldAutoProcessCalendarInviteMessage,
   shouldAutoProcessCalendarInvitesForSyncMode,
@@ -106,6 +107,28 @@ describe("diffLocalAndRemoteWithFlags", () => {
   });
 });
 
+describe("partitionMissingRemoteUids", () => {
+  test("splits historical and newer gaps around the highest local UID", () => {
+    const result = partitionMissingRemoteUids([1292, 1055, 1290, 1291, 1055], 1289);
+
+    expect(result).toEqual({
+      historicalMissingUids: [1055],
+      newerMissingUids: [1290, 1291, 1292],
+      backfillUids: [1055, 1290, 1291, 1292]
+    });
+  });
+
+  test("treats all remote gaps as backfill for folders without a local watermark", () => {
+    const result = partitionMissingRemoteUids([7, 3, 7, -1, 0], null);
+
+    expect(result).toEqual({
+      historicalMissingUids: [],
+      newerMissingUids: [3, 7],
+      backfillUids: [3, 7]
+    });
+  });
+});
+
 describe("isGoogleCalendarSyncMessage", () => {
   test("matches direct Google sync sender addresses", () => {
     expect(
@@ -118,11 +141,11 @@ describe("isGoogleCalendarSyncMessage", () => {
   test("matches Google sync sender from raw headers even when visible from is a participant", () => {
     expect(
       isGoogleCalendarSyncMessage({
-        from: "\"Fabian Rosenthal\" <frosenthal@cc.systems>",
+        from: "\"Example Participant\" <participant@example.test>",
         source: [
           "Return-Path: <noreply-calendar-sync@google.com>",
           "Sender: Google Calendar <noreply-calendar-sync@google.com>",
-          "From: \"Fabian Rosenthal\" <frosenthal@cc.systems>",
+          "From: \"Example Participant\" <participant@example.test>",
           "To: paul@example.test",
           "Subject: StandUp UnifiedAPI",
           "",
@@ -152,7 +175,7 @@ describe("shouldAutoProcessCalendarInviteMessage", () => {
   test("disables automatic processing for Google sync transport mail", () => {
     expect(
       shouldAutoProcessCalendarInviteMessage({
-        from: "\"Fabian Rosenthal\" <frosenthal@cc.systems>",
+        from: "\"Example Participant\" <participant@example.test>",
         source: "Sender: Google Calendar <noreply-calendar-sync@google.com>\r\n\r\nBody"
       })
     ).toBe(false);

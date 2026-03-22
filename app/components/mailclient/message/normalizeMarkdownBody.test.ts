@@ -19,8 +19,8 @@ describe("normalizeMarkdownBody", () => {
   });
 
   it("normalizes explicit links with nested autolink labels for mailto", () => {
-    expect(normalizeMarkdownBody("[<mailto:paul@wellnerbou.de>](mailto:paul@wellnerbou.de)")).toBe(
-      "<mailto:paul@wellnerbou.de>"
+    expect(normalizeMarkdownBody("[<mailto:person@example.test>](mailto:person@example.test)")).toBe(
+      "<mailto:person@example.test>"
     );
   });
 

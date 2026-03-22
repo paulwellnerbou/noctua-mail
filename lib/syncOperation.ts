@@ -36,6 +36,8 @@ export type SyncPayload = {
   recategorizeFolder?: boolean;
   /** UID of the last successfully processed message from a previous attempt; sync resumes from the next UID. */
   resumeFromUid?: number;
+  /** Explicit IMAP UIDs to fetch directly, used for targeted repair backfills. */
+  backfillUids?: number[];
 };
 
 export type SyncNotificationMessage = {
@@ -154,6 +156,29 @@ export function diffLocalAndRemoteWithFlags(
   }
 
   return { staleMessageIds, missingRemoteUids, flagUpdates };
+}
+
+export function partitionMissingRemoteUids(
+  missingRemoteUids: number[],
+  highestLocalUid: number | null
+) {
+  const normalized = Array.from(
+    new Set(missingRemoteUids.filter((uid) => Number.isFinite(uid) && uid > 0))
+  ).sort((left, right) => left - right);
+  if (highestLocalUid === null) {
+    return {
+      historicalMissingUids: [] as number[],
+      newerMissingUids: normalized,
+      backfillUids: normalized
+    };
+  }
+  const historicalMissingUids = normalized.filter((uid) => uid <= highestLocalUid);
+  const newerMissingUids = normalized.filter((uid) => uid > highestLocalUid);
+  return {
+    historicalMissingUids,
+    newerMissingUids,
+    backfillUids: normalized
+  };
 }
 
 const GOOGLE_CALENDAR_SYNC_SENDER = "noreply-calendar-sync@google.com";
@@ -347,8 +372,8 @@ export async function runSyncOperationBatched(
 
     const highestLocalUid =
       localRows.length > 0 ? Math.max(...localRows.map((row) => row.imapUid)) : null;
-    const hasHistoricalRemoteGaps =
-      highestLocalUid !== null && missingRemoteUids.some((uid) => uid <= highestLocalUid);
+    const { historicalMissingUids, newerMissingUids, backfillUids } =
+      partitionMissingRemoteUids(missingRemoteUids, highestLocalUid);
 
     if (staleMessageIds.length > 0) {
       await deleteMessagesWithFilesByIds(account.id, staleMessageIds);
@@ -359,25 +384,16 @@ export async function runSyncOperationBatched(
       await bulkUpdateMessageFlags(account.id, flagUpdates);
     }
 
-    if (hasHistoricalRemoteGaps) {
-      console.warn("[noctua][sync] repair escalating to full sync", {
+    if (historicalMissingUids.length > 0) {
+      console.info("[noctua][sync] repair backfilling historical UID gaps", {
         accountId: account.id,
         folderId: payload.folderId,
         mailboxPath,
-        reason: "Repair found historical remote UID gaps.",
         highestLocalUid,
-        missingRemoteUidsSample: missingRemoteUids.slice(0, 20)
+        historicalMissingUidsSample: historicalMissingUids.slice(0, 20),
+        newerMissingUidsSample: newerMissingUids.slice(0, 20),
+        backfillCount: backfillUids.length
       });
-      return runSyncOperationBatched(
-        {
-          ...payload,
-          mode: "full",
-          fullSync: true,
-          resumeFromUid: undefined
-        },
-        clientId,
-        options
-      );
     }
 
     const persistRepairMailboxState = async () => {
@@ -392,13 +408,14 @@ export async function runSyncOperationBatched(
       });
     };
 
-    if (missingRemoteUids.length > 0) {
+    if (backfillUids.length > 0) {
       const nestedResult = await runSyncOperationBatched(
         {
           ...payload,
           mode: "new",
           fullSync: false,
-          resumeFromUid: undefined
+          resumeFromUid: undefined,
+          backfillUids
         },
         clientId,
         options
@@ -424,7 +441,7 @@ export async function runSyncOperationBatched(
       estimatedTotal: localRows.length,
       percent: 100,
       highestProcessedUid: result.highestProcessedUid,
-      message: `Repair completed: ${staleMessageIds.length} removed, ${flagUpdates.length} flag updates.`
+      message: `Repair completed: ${staleMessageIds.length} removed, ${flagUpdates.length} flag updates, ${backfillUids.length} backfilled.`
     });
     return result;
   }
@@ -603,7 +620,8 @@ export async function runSyncOperationBatched(
 
   // Process each batch as it arrives from IMAP
   for await (const batch of syncImapAccountBatched(account, mailboxPath, syncMode, clientId, 300, {
-    resumeFromUid: payload.resumeFromUid
+    resumeFromUid: payload.resumeFromUid,
+    explicitUids: payload.backfillUids
   })) {
     folders = batch.folders; // Keep latest folder list
     const batchMessages = batch.messages;

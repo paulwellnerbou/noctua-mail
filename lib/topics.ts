@@ -8,6 +8,7 @@ import {
 import type { Topic, TopicColor, TopicSuggestionSignal } from "./data";
 import { TOPIC_COLORS, TOPIC_SUGGESTION_SIGNALS } from "./data";
 import { withDbWriteRetry } from "./dbWriteRetry";
+import { isFreeMailDomain } from "./senderIdentity";
 import {
   collectTopicSignalEntries,
   type TopicSignalEntry,
@@ -149,6 +150,36 @@ function topicSuggestionSignalEntries(signals: TopicSuggestionSignals): TopicSig
   ];
 }
 
+function shouldIgnoreTopicSuggestionSignal(
+  entry: Pick<TopicSignalEntry, "type" | "value">,
+  options?: {
+    accountEmail?: string | null;
+  }
+) {
+  const accountEmail = options?.accountEmail?.toLowerCase().trim() || null;
+  const value = entry.value.trim();
+  if (!value) return true;
+
+  if (entry.type === "senderEmail") {
+    const normalizedEmail = value.toLowerCase();
+    if (accountEmail && normalizedEmail === accountEmail) {
+      return true;
+    }
+    const domain = normalizedEmail.split("@")[1] ?? "";
+    return isFreeMailDomain(domain);
+  }
+
+  if (entry.type === "senderDomain") {
+    return isFreeMailDomain(value.toLowerCase());
+  }
+
+  if (entry.type === "recipient" && accountEmail && value.toLowerCase() === accountEmail) {
+    return true;
+  }
+
+  return false;
+}
+
 function normalizeTopicSuggestionSignals(
   signals: MessageSignals,
   options?: {
@@ -158,7 +189,7 @@ function normalizeTopicSuggestionSignals(
   return topicSuggestionSignalsFromEntries(
     collectTopicSignalEntries([signals], {
       excludeAccountEmail: options?.accountEmail ?? null
-    }),
+    }).filter((entry) => !shouldIgnoreTopicSuggestionSignal(entry, options)),
     signals.threadId
   );
 }
@@ -169,15 +200,11 @@ function topicSuggestionEntriesFromThreadSignalRows(
     accountEmail?: string | null;
   }
 ): TopicSignalEntry[] {
-  const accountEmail = options?.accountEmail?.toLowerCase().trim() || null;
   return rows.flatMap((row) => {
     const type = (row.signalType ?? "").trim() as TopicSuggestionSignal;
     const value = (row.signalValue ?? "").trim();
     if (!TOPIC_SUGGESTION_SIGNALS.includes(type) || !value) return [];
-    if (type === "senderEmail" && accountEmail && value.toLowerCase() === accountEmail) {
-      return [];
-    }
-    if (type === "recipient" && accountEmail && value.toLowerCase() === accountEmail) {
+    if (shouldIgnoreTopicSuggestionSignal({ type, value }, options)) {
       return [];
     }
     return [{ type, value }];

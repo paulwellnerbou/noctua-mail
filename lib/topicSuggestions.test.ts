@@ -416,6 +416,60 @@ describe("topic suggestions", () => {
     expect(suggestions[0]?.matchCount).toBe(1);
   });
 
+  test("ignores free-mail sender signals for topic suggestions", async () => {
+    const accountId = "acc-topic-suggestions-free-mail";
+    const folder = buildFolder(accountId);
+    const { saveFoldersForAccount, upsertAccount, upsertMessages } = await dbModulePromise;
+
+    await upsertAccount(buildAccount(accountId));
+    await saveFoldersForAccount(accountId, [folder]);
+
+    await upsertMessages(
+      accountId,
+      folder.id,
+      [
+        buildMessage({
+          id: "msg-history",
+          accountId,
+          folderId: folder.id,
+          threadId: "thread-history",
+          messageId: "<history-free-mail@example.com>",
+          from: "Sender <person@gmail.com>",
+          fromEmail: "person@gmail.com",
+          to: "owner@example.com",
+          dateValue: Date.UTC(2026, 2, 18, 10, 0, 0)
+        }),
+        buildMessage({
+          id: "msg-target",
+          accountId,
+          folderId: folder.id,
+          threadId: "thread-target",
+          messageId: "<target-free-mail@example.com>",
+          from: "Sender <person@gmail.com>",
+          fromEmail: "person@gmail.com",
+          to: "owner@example.com",
+          dateValue: Date.UTC(2026, 2, 18, 10, 5, 0)
+        })
+      ],
+      true,
+      { recomputeThreads: false }
+    );
+
+    const topic = await createTopic(accountId, "Helge", "orange");
+    await setThreadTopics(accountId, "thread-history", [topic.id]);
+
+    const suggestions = await getTopicSuggestionsForThread(accountId, "thread-target", {
+      accountEmail: "owner@example.com"
+    });
+    expect(suggestions).toEqual([]);
+
+    const explanation = await getTopicSuggestionExplanationForThread(accountId, "thread-target", {
+      accountEmail: "owner@example.com"
+    });
+    expect(explanation.signals).toEqual([]);
+    expect(explanation.topics).toEqual([]);
+  });
+
   test("derives Jira project keys from stored thread messages", async () => {
     const accountId = "acc-topic-suggestions-thread-jira";
     const folder = buildFolder(accountId);

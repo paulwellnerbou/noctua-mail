@@ -183,13 +183,13 @@ describe("computeComposeInitState — reply", () => {
       "reply",
       makeMessage({
         from: "me@example.com",
-        to: '"Lobe, Nadine" <n.lobe@sthree.com>, Carol <carol@example.com>'
+        to: '"Example, Nadine" <nadine@example.test>, Carol <carol@example.com>'
       }),
       false,
       opts,
       deps
     );
-    expect(fields.composeTo).toBe("Lobe, Nadine <n.lobe@sthree.com>");
+    expect(fields.composeTo).toBe("Example, Nadine <nadine@example.test>");
   });
 
   it("prefixes subject with Re:", () => {
@@ -312,14 +312,14 @@ describe("computeComposeInitState — replyAll", () => {
       "replyAll",
       makeMessage({
         from: "me@example.com",
-        to: '"Lobe, Nadine" <n.lobe@sthree.com>, Bob <bob@example.com>',
+        to: '"Example, Nadine" <nadine@example.test>, Bob <bob@example.com>',
         cc: '"Smith, Carol" <carol@example.com>'
       }),
       false,
       opts,
       deps
     );
-    expect(fields.composeTo).toContain("Lobe, Nadine <n.lobe@sthree.com>");
+    expect(fields.composeTo).toContain("Example, Nadine <nadine@example.test>");
     expect(fields.composeTo).toContain("Bob <bob@example.com>");
     expect(fields.composeCc).toBe("carol@example.com");
   });
