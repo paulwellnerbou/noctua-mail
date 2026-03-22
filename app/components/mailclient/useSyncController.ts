@@ -244,9 +244,14 @@ export function useSyncController({
     };
   }, [stopRecomputePoll, stopCategoryRecomputePoll]);
 
-  const waitForSyncJob = async (accountId: string, jobId: string): Promise<SyncJobResult> => {
+  const waitForSyncJob = async (
+    accountId: string,
+    jobId: string,
+    requestedMode?: string
+  ): Promise<SyncJobResult> => {
     const startedAt = Date.now();
     const timeoutMs = 1000 * 60 * 60;
+    let loggedEscalation = false;
     const clearProgress = () => {
       setSyncProgressByJobId((prev) => {
         if (!prev[jobId]) return prev;
@@ -275,6 +280,21 @@ export function useSyncController({
         };
         const progress = data.job?.progress;
         if (progress) {
+          if (
+            !loggedEscalation &&
+            requestedMode &&
+            progress.mode &&
+            progress.mode !== requestedMode
+          ) {
+            loggedEscalation = true;
+            console.warn("[noctua][sync] sync escalated", {
+              jobId,
+              accountId,
+              folderId: progress.folderId ?? null,
+              requestedMode,
+              escalatedTo: progress.mode
+            });
+          }
           const nextProgress: SyncJobProgress = {
             ...progress,
             jobId,
@@ -378,7 +398,7 @@ export function useSyncController({
     if (!data.jobId) {
       throw new Error("Sync job did not return a job id.");
     }
-    return waitForSyncJob(accountId, data.jobId);
+    return waitForSyncJob(accountId, data.jobId, syncMode);
   };
 
   const handleSyncLaunchError = useCallback(
@@ -669,6 +689,16 @@ export function useSyncController({
   };
   syncAccountRef.current = syncAccount;
 
+  // Clear the consistency-check guard when the user navigates to a different folder.
+  // This is a separate effect so that unrelated callback identity changes don't
+  // clear the guard and re-trigger consistency checks.
+  useEffect(() => {
+    return () => {
+      const repairKey = `${activeAccountId}:${activeFolderId}`;
+      autoRepairAttemptedFolderIdsRef.current.delete(repairKey);
+    };
+  }, [activeAccountId, activeFolderId]);
+
   useEffect(() => {
     if (authState !== "ok") return;
     if (searchScope !== "folder") return;
@@ -717,14 +747,15 @@ export function useSyncController({
               : "Folder consistency check failed due to a network error."
           );
         }
-      } finally {
-        autoRepairAttemptedFolderIdsRef.current.delete(repairKey);
       }
+      // Note: we intentionally do NOT delete the repairKey here. The guard
+      // persists until the user navigates to a different folder (handled by
+      // the separate cleanup effect above). This prevents the consistency
+      // check from re-triggering on every React re-render.
     })();
 
     return () => {
       cancelled = true;
-      autoRepairAttemptedFolderIdsRef.current.delete(repairKey);
     };
   }, [
     activeAccountId,
@@ -732,10 +763,8 @@ export function useSyncController({
     activeVirtualFolderId,
     authState,
     searchScope,
-    apiFetch,
     checkFolderConsistency,
     executeFolderSyncDecision,
-    readErrorMessage,
     reportError
   ]);
 
