@@ -6,7 +6,6 @@ import {
   getFolderIdsByMessageIds,
   listFullyProcessedCalendarInviteMessageIds,
   listMessageFileRefs,
-  listFolderMessageUidRows,
   listFolderMessageUidAndFlagRows,
   recomputeCategoriesForAccount,
   recomputeThreadsForAccount,
@@ -23,7 +22,7 @@ import { isCalendarAttachment, CALENDAR_INVITE_FLAG } from "@/lib/messageFlags";
 import { extractPrimaryEmail, normalizeEmailAddress } from "@/lib/senderIdentity";
 import type { SyncMode } from "@/lib/syncPolicy";
 import { deleteMessageFiles } from "@/lib/storage";
-import { listImapMailboxUids, listImapMailboxUidsAndFlags, syncImapAccountBatched } from "@/lib/mail/imap";
+import { listImapMailboxUidsAndFlags, syncImapAccountBatched } from "@/lib/mail/imap";
 import { reconcileVerifiedCrossFolderMoves } from "@/lib/syncMoveReconciliation";
 import { collectThreadReferenceIds, resolveThreadingForItems } from "@/lib/threading";
 export type { SyncMode } from "@/lib/syncPolicy";
@@ -323,14 +322,15 @@ export async function runSyncOperationBatched(
       message: "Reconciling folder changes."
     });
 
+    // Fetch UIDs + flags (not just UIDs) so repair also detects flag changes.
     const [remoteSnapshot, localRows] = await Promise.all([
-      listImapMailboxUids(account, mailboxPath, clientId),
-      listFolderMessageUidRows(account.id, payload.folderId)
+      listImapMailboxUidsAndFlags(account, mailboxPath, "1:*", clientId),
+      listFolderMessageUidAndFlagRows(account.id, payload.folderId)
     ]);
 
-    const { staleMessageIds, missingRemoteUids } = diffLocalAndRemoteFolderUids(
-      localRows.map((row) => ({ id: row.id, imapUid: row.imapUid })),
-      remoteSnapshot.uids
+    const { staleMessageIds, missingRemoteUids, flagUpdates } = diffLocalAndRemoteWithFlags(
+      localRows,
+      remoteSnapshot.entries
     );
     const highestLocalUid =
       localRows.length > 0 ? Math.max(...localRows.map((row) => row.imapUid)) : null;
@@ -339,6 +339,11 @@ export async function runSyncOperationBatched(
 
     if (staleMessageIds.length > 0) {
       await deleteMessagesWithFilesByIds(account.id, staleMessageIds);
+    }
+
+    // Update flags for existing messages where they differ.
+    if (flagUpdates.length > 0) {
+      await bulkUpdateMessageFlags(account.id, flagUpdates);
     }
 
     if (hasHistoricalRemoteGaps) {
@@ -387,7 +392,7 @@ export async function runSyncOperationBatched(
       );
       await persistRepairMailboxState();
       return {
-        count: staleMessageIds.length + nestedResult.count,
+        count: staleMessageIds.length + flagUpdates.length + nestedResult.count,
         newMessages: nestedResult.newMessages,
         highestProcessedUid: nestedResult.highestProcessedUid
       };
@@ -395,8 +400,9 @@ export async function runSyncOperationBatched(
 
     await saveFoldersForAccount(account.id, remoteSnapshot.folders);
     await persistRepairMailboxState();
+    const repairCount = staleMessageIds.length + flagUpdates.length;
     const result = {
-      count: staleMessageIds.length,
+      count: repairCount,
       highestProcessedUid: remoteSnapshot.highestUid ?? undefined
     };
     emitProgress({
@@ -405,7 +411,7 @@ export async function runSyncOperationBatched(
       estimatedTotal: localRows.length,
       percent: 100,
       highestProcessedUid: result.highestProcessedUid,
-      message: "Repair completed."
+      message: `Repair completed: ${staleMessageIds.length} removed, ${flagUpdates.length} flag updates.`
     });
     return result;
   }
