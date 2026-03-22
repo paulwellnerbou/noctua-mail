@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   diffLocalAndRemoteFolderUids,
+  diffLocalAndRemoteWithFlags,
   isGoogleCalendarSyncMessage,
   resolveOrphanedMessageFileRefs,
   shouldAutoProcessCalendarInviteMessage,
@@ -53,6 +54,55 @@ describe("diffLocalAndRemoteFolderUids", () => {
 
     expect(diff.staleMessageIds).toEqual(["msg-2"]);
     expect(diff.missingRemoteUids).toEqual([12, 16]);
+  });
+});
+
+describe("diffLocalAndRemoteWithFlags", () => {
+  test("identifies stale, missing, and flag changes", () => {
+    const diff = diffLocalAndRemoteWithFlags(
+      [
+        { id: "msg-1", imapUid: 10, flags: JSON.stringify(["\\Seen"]) },
+        { id: "msg-2", imapUid: 11, flags: JSON.stringify(["\\Seen"]) },
+        { id: "msg-3", imapUid: 15, flags: JSON.stringify([]) }
+      ],
+      [
+        { uid: 10, flags: ["\\Seen", "\\Flagged"] }, // flag changed
+        { uid: 15, flags: [] },                       // unchanged
+        { uid: 16, flags: ["\\Seen"] }                // new
+      ]
+    );
+
+    expect(diff.staleMessageIds).toEqual(["msg-2"]);
+    expect(diff.missingRemoteUids).toEqual([16]);
+    expect(diff.flagUpdates).toEqual([{ id: "msg-1", flags: ["\\Seen", "\\Flagged"] }]);
+  });
+
+  test("ignores \\Recent flag differences", () => {
+    const diff = diffLocalAndRemoteWithFlags(
+      [{ id: "msg-1", imapUid: 10, flags: JSON.stringify(["\\Seen"]) }],
+      [{ uid: 10, flags: ["\\Seen", "\\Recent"] }]
+    );
+
+    expect(diff.flagUpdates).toEqual([]);
+  });
+
+  test("preserves app-local flags when updating", () => {
+    const diff = diffLocalAndRemoteWithFlags(
+      [{ id: "msg-1", imapUid: 10, flags: JSON.stringify(["\\Seen", "calendar-invite"]) }],
+      [{ uid: 10, flags: ["\\Seen", "\\Flagged"] }]
+    );
+
+    expect(diff.flagUpdates).toHaveLength(1);
+    expect(diff.flagUpdates[0].flags).toEqual(["\\Seen", "\\Flagged", "calendar-invite"]);
+  });
+
+  test("handles null local flags", () => {
+    const diff = diffLocalAndRemoteWithFlags(
+      [{ id: "msg-1", imapUid: 10, flags: null }],
+      [{ uid: 10, flags: ["\\Seen"] }]
+    );
+
+    expect(diff.flagUpdates).toEqual([{ id: "msg-1", flags: ["\\Seen"] }]);
   });
 });
 

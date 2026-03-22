@@ -207,6 +207,11 @@ import type {
   FullSyncConfirmState
 } from "./mailclient/types";
 import { normalizeAccountDateFormat } from "@/lib/dateFormatting";
+import {
+  decidePostSendSentSync,
+  decideStartupSync
+} from "@/lib/syncPolicy";
+import { logSyncPolicyCall } from "@/lib/syncPolicyLogging";
 type AuthMeResponse = {
   ok?: boolean;
   user?: User | null;
@@ -2599,8 +2604,29 @@ export default function MailClient({
           updateKeywordFlag(composeReplyMessage, "$Forwarded", true);
         }
         const sentFolder = findSentFolder();
-        if (sentFolder) {
-          await syncFolderWithBackgroundRef.current?.(sentFolder.id, false, false, "new", false);
+        const sentSyncDecision = decidePostSendSentSync({
+          sentFolderId: sentFolder?.id ?? null
+        });
+        const sentSyncTriggerId = logSyncPolicyCall({
+          caller: "post-send-sent-refresh",
+          policy: "decidePostSendSentSync",
+          accountId: activeAccountId,
+          folderId: sentFolder?.id ?? null,
+          input: {
+            sentFolderId: sentFolder?.id ?? null
+          },
+          decision: sentSyncDecision
+        });
+        if (sentSyncDecision.kind === "folder") {
+          await syncFolderWithBackgroundRef.current?.(
+            sentSyncDecision.folderId,
+            false,
+            sentSyncDecision.mode,
+            {
+              fullSyncReason: sentSyncDecision.reason,
+              triggerId: sentSyncTriggerId
+            }
+          );
         }
         await refreshFolders();
         if (sentFolder && activeFolderId === sentFolder.id && searchScope === "folder") {
@@ -3600,13 +3626,38 @@ export default function MailClient({
     initialSyncStatusRef.current[activeAccountId] = "running";
     writeInitialSyncSessionStatus(activeAccountId, "running");
     const accountId = activeAccountId;
-    const syncPromise = !hasAccountFolders
-      ? syncAccountRef.current?.(undefined, "full", {
-          fullSyncReason: "Initial startup sync fell back to full because no folders are loaded locally."
-        })
-      : syncAccountRef.current?.(activeFolderId, "new", {
-          fullSyncReason: "Initial startup sync for the active folder after page load."
-        });
+    const startupDecision = decideStartupSync({
+      hasAccountFolders,
+      activeFolderId
+    });
+    const startupTriggerId = logSyncPolicyCall({
+      caller: "startup",
+      policy: "decideStartupSync",
+      accountId: activeAccountId,
+      folderId: activeFolderId || null,
+      input: {
+        hasAccountFolders,
+        activeFolderId
+      },
+      decision: startupDecision
+    });
+    if (startupDecision.kind === "skip") {
+      delete initialSyncStatusRef.current[accountId];
+      writeInitialSyncSessionStatus(accountId, null);
+      return;
+    }
+    const syncPromise =
+      startupDecision.kind === "account"
+        ? syncAccountRef.current?.(undefined, startupDecision.mode, {
+            fullSyncReason: startupDecision.reason,
+            triggerId: startupTriggerId
+          })
+        : startupDecision.mode === "new" || startupDecision.mode === "repair" || startupDecision.mode === "full"
+          ? syncAccountRef.current?.(startupDecision.folderId, startupDecision.mode, {
+              fullSyncReason: startupDecision.reason,
+              triggerId: startupTriggerId
+            })
+          : undefined;
     if (!syncPromise) {
       delete initialSyncStatusRef.current[accountId];
       writeInitialSyncSessionStatus(accountId, null);
@@ -4577,7 +4628,7 @@ export default function MailClient({
         if (typeof data?.total === "number" && data.total > 0) {
           await recomputeThreadsRef.current();
         } else {
-          await syncFolderWithBackgroundRef.current(folderId, false, true, "full", true, {
+          await syncFolderWithBackgroundRef.current(folderId, true, "full", {
             fullSyncReason:
               "Auto-repair requested full sync because the folder list is empty and no raw messages were found in the DB."
           });

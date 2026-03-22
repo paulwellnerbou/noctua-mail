@@ -10,11 +10,18 @@ import {
   buildAccountSyncNewCandidatesPath
 } from "@/lib/accountApiPaths";
 import type { Folder, Message } from "@/lib/data";
+import {
+  decideFolderConsistencySync,
+  decideStreamReconcileSync,
+  type FolderConsistencyResult,
+  type FolderSyncDecision,
+  type SyncMode
+} from "@/lib/syncPolicy";
+import { logSyncPolicyCall } from "@/lib/syncPolicyLogging";
 import type {
   FullSyncConfirmState,
   SyncJobProgress,
   SyncJobResult,
-  SyncMode,
   SyncNotificationMessage,
   SyncTriggerOptions
 } from "./types";
@@ -85,13 +92,6 @@ type NewSyncFolderDecision = {
     | "status-error";
 };
 
-type FolderConsistencyResult = {
-  ok?: boolean;
-  needsRepair?: boolean;
-  recommendedMode?: "none" | "new" | "repair" | "full";
-  reasons?: string[];
-};
-
 type SyncJobRequest = {
   accountId: string;
   folderId?: string;
@@ -99,6 +99,7 @@ type SyncJobRequest = {
   mode?: SyncMode;
   recategorizeFolder?: boolean;
   fullSyncReason?: string;
+  triggerId?: string;
   skipFullSyncConfirm?: boolean;
 };
 
@@ -191,12 +192,10 @@ export function useSyncController({
   const syncFolderWithBackgroundRef = useRef<
     (
       folderId: string,
-      awaitDeep?: boolean,
       allowRefresh?: boolean,
       mode?: SyncMode,
-      allowDeep?: boolean,
       options?: InternalSyncTriggerOptions
-    ) => Promise<unknown>
+    ) => Promise<SyncJobResult | null>
   >(async () => null);
 
   useEffect(() => {
@@ -325,6 +324,7 @@ export function useSyncController({
         ? payload.folderId
         : "entire mailbox";
     const logPayload = {
+      triggerId: payload.triggerId ?? null,
       accountId: payload.accountId,
       folderId: payload.folderId ?? null,
       mode: payload.mode ?? null,
@@ -348,6 +348,7 @@ export function useSyncController({
   const runSyncJob = async (payload: SyncJobRequest): Promise<SyncJobResult> => {
     const syncMode = payload.mode ?? (payload.fullSync ? "full" : "recent");
     console.info("[noctua][sync] sync requested", {
+      triggerId: payload.triggerId ?? null,
       accountId: payload.accountId,
       folderId: payload.folderId ?? null,
       mode: syncMode,
@@ -357,7 +358,13 @@ export function useSyncController({
     });
     await requestFullSyncConfirmation(payload);
 
-    const { accountId, fullSyncReason: _fullSyncReason, skipFullSyncConfirm: _skipFullSyncConfirm, ...requestBody } =
+    const {
+      accountId,
+      fullSyncReason: _fullSyncReason,
+      triggerId: _triggerId,
+      skipFullSyncConfirm: _skipFullSyncConfirm,
+      ...requestBody
+    } =
       payload;
     const syncRes = await apiFetch(buildAccountApiPath(accountId, "/sync"), {
       method: "POST",
@@ -414,7 +421,7 @@ export function useSyncController({
 
   const checkFolderConsistency = useCallback(async (
     folderId: string
-  ): Promise<FolderConsistencyResult> => {
+  ): Promise<FolderConsistencyResult & { ok?: boolean }> => {
     const response = await apiFetch(buildAccountFolderConsistencyPath(activeAccountId, folderId), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -423,27 +430,25 @@ export function useSyncController({
     if (!response.ok) {
       throw new Error(await readErrorMessage(response));
     }
-    return (await response.json()) as FolderConsistencyResult;
+    return (await response.json()) as FolderConsistencyResult & { ok?: boolean };
   }, [activeAccountId, apiFetch, readErrorMessage]);
 
   const syncFolderWithBackground = async (
     folderId: string,
-    awaitDeep = false,
     allowRefresh = true,
     mode: SyncMode = "recent",
-    allowDeep = true,
     options?: InternalSyncTriggerOptions
   ): Promise<SyncJobResult | null> => {
     const selectionKey = currentKeyRef.current;
     setSyncingFolders((prev) => new Set(prev).add(folderId));
-    let syncResult: SyncJobResult;
     try {
-      syncResult = await runSyncJob({
+      const syncResult = await runSyncJob({
         accountId: activeAccountId,
         folderId,
         mode,
         recategorizeFolder: Boolean(options?.recategorizeFolder),
         fullSyncReason: options?.fullSyncReason,
+        triggerId: options?.triggerId,
         skipFullSyncConfirm: options?.skipFullSyncConfirm
       });
       if (allowRefresh && currentKeyRef.current === selectionKey) {
@@ -454,61 +459,40 @@ export function useSyncController({
           await refreshMailboxData();
         }
       }
+      return syncResult;
     } catch (error) {
       handleSyncLaunchError(error, "Sync failed due to a network error.");
-      setSyncingFolders((prev) => {
-        const next = new Set(prev);
-        next.delete(folderId);
-        return next;
-      });
       return null;
-    }
-
-    const shouldRunDeepSync = allowDeep && mode !== "full" && mode !== "repair";
-    if (!shouldRunDeepSync) {
+    } finally {
       setSyncingFolders((prev) => {
         const next = new Set(prev);
         next.delete(folderId);
         return next;
       });
-      return syncResult;
     }
-
-    const deepSync = (async () => {
-      try {
-        await runSyncJob({
-          accountId: activeAccountId,
-          folderId,
-          fullSync: true,
-          recategorizeFolder: Boolean(options?.recategorizeFolder),
-          fullSyncReason:
-            options?.fullSyncReason?.trim() || `Background deep sync after ${mode} sync.`,
-          skipFullSyncConfirm: options?.skipFullSyncConfirm
-        });
-        if (allowRefresh && currentKeyRef.current === selectionKey) {
-          setSyncCompletionVersion((v) => v + 1);
-          if (searchScope === "folder" && activeFolderId === folderId) {
-            await refreshMailboxData();
-          } else if (activeVirtualFolderId) {
-            await refreshMailboxData();
-          }
-        }
-      } catch (error) {
-        handleSyncLaunchError(error, "Background sync failed due to a network error.");
-      } finally {
-        setSyncingFolders((prev) => {
-          const next = new Set(prev);
-          next.delete(folderId);
-          return next;
-        });
-      }
-    })();
-    if (awaitDeep) {
-      await deepSync;
-    }
-    return syncResult;
   };
   syncFolderWithBackgroundRef.current = syncFolderWithBackground;
+
+  const executeFolderSyncDecision = useCallback(
+    async (
+      decision: FolderSyncDecision,
+      options?: InternalSyncTriggerOptions
+    ): Promise<SyncJobResult | null> => {
+      if (decision.kind !== "folder") {
+        return null;
+      }
+      return syncFolderWithBackgroundRef.current(
+        decision.folderId,
+        true,
+        decision.mode,
+        {
+          ...options,
+          fullSyncReason: options?.fullSyncReason?.trim() || decision.reason
+        }
+      );
+    },
+    []
+  );
 
   const syncNewlyDetectedFolders = async (
     knownFolderIds: Set<string>,
@@ -526,19 +510,9 @@ export function useSyncController({
     for (const folder of newlyDetected) {
       await syncFolderWithBackground(
         folder.id,
-        true,
         false,
         mode === "new" ? "new" : "recent",
-        mode !== "new",
-        mode === "new"
-          ? undefined
-          : {
-              ...options,
-              fullSyncReason:
-                options?.fullSyncReason?.trim()
-                  ? `${options.fullSyncReason} Newly detected folder required deep sync.`
-                  : "Newly detected folder required deep sync during full mailbox sync."
-            }
+        options
       );
     }
     const refreshed = await refreshFolders();
@@ -554,19 +528,20 @@ export function useSyncController({
     const knownFolderIds = new Set(accountFolders.map((folder) => folder.id));
     const syncOptions: InternalSyncTriggerOptions = {
       recategorizeFolder: Boolean(options?.recategorizeFolder),
-      fullSyncReason: options?.fullSyncReason
+      fullSyncReason: options?.fullSyncReason,
+      triggerId: options?.triggerId
     };
     if (folderId) {
+      const folderMode: SyncMode =
+        mode === "new" || mode === "repair" || mode === "full" ? mode : "recent";
       await syncFolderWithBackground(
         folderId,
-        false,
         true,
-        mode === "new" ? "new" : mode === "repair" ? "repair" : mode === "full" ? "full" : "recent",
-        mode !== "new" && mode !== "repair",
+        folderMode,
         syncOptions
       );
-      if (mode !== "new" && mode !== "repair") {
-        await syncNewlyDetectedFolders(knownFolderIds, mode, syncOptions);
+      if (folderMode === "full") {
+        await syncNewlyDetectedFolders(knownFolderIds, "full", syncOptions);
       }
       return;
     }
@@ -579,6 +554,7 @@ export function useSyncController({
           mode: "full",
           fullSyncReason:
             syncOptions.fullSyncReason?.trim() || "Account-wide full sync requested.",
+          triggerId: syncOptions.triggerId,
           skipFullSyncConfirm: false
         });
       } catch (error) {
@@ -598,6 +574,7 @@ export function useSyncController({
           fullSyncReason:
             syncOptions.fullSyncReason?.trim() ||
             "Account-wide full sync started because no local folders are available.",
+          triggerId: syncOptions.triggerId,
           skipFullSyncConfirm: syncOptions.skipFullSyncConfirm
         });
         syncOptions.skipFullSyncConfirm = true;
@@ -662,7 +639,7 @@ export function useSyncController({
           }
           const refreshThis =
             searchScope === "folder" && activeFolderId === folder.id ? true : false;
-          await syncFolderWithBackground(folder.id, true, refreshThis, "new", false);
+          await syncFolderWithBackground(folder.id, refreshThis, "new");
         }
         await syncNewlyDetectedFolders(knownFolderIds, "new");
         if (
@@ -678,10 +655,8 @@ export function useSyncController({
       for (const folder of sortedFolders) {
         await syncFolderWithBackground(
           folder.id,
-          true,
           false,
           accountWideMode === "full" ? "full" : "recent",
-          true,
           syncOptions
         );
       }
@@ -713,34 +688,27 @@ export function useSyncController({
     void (async () => {
       try {
         const result = await checkFolderConsistency(activeFolderId);
-        if (cancelled || !result.needsRepair) return;
-
-        const mode =
-          result.recommendedMode === "full"
-            ? "full"
-            : result.recommendedMode === "repair"
-              ? "repair"
-              : "new";
-        // Keep startup lightweight: defer the first automatic full repair until
-        // the folder is revisited or manually synced later in the session.
-        if (mode === "full" && isInitialConsistencyCheck) {
+        if (cancelled) return;
+        const decision = decideFolderConsistencySync({
+          folderId: activeFolderId,
+          result,
+          isInitialCheck: isInitialConsistencyCheck
+        });
+        const triggerId = logSyncPolicyCall({
+          caller: "folder-consistency",
+          policy: "decideFolderConsistencySync",
+          accountId: activeAccountId,
+          folderId: activeFolderId,
+          input: {
+            result,
+            isInitialCheck: isInitialConsistencyCheck
+          },
+          decision
+        });
+        if (decision.kind !== "folder") {
           return;
         }
-        await syncFolderWithBackgroundRef.current(
-          activeFolderId,
-          true,
-          true,
-          mode,
-          false,
-          mode === "full"
-            ? {
-                fullSyncReason:
-                  result.reasons?.length
-                    ? `Folder consistency check requested full sync: ${result.reasons.join(", ")}`
-                    : "Folder consistency check requested full sync without an explicit reason."
-              }
-            : undefined
-        );
+        await executeFolderSyncDecision(decision, { triggerId });
       } catch (error) {
         if (!cancelled) {
           reportError(
@@ -766,6 +734,7 @@ export function useSyncController({
     searchScope,
     apiFetch,
     checkFolderConsistency,
+    executeFolderSyncDecision,
     readErrorMessage,
     reportError
   ]);
@@ -1076,7 +1045,7 @@ export function useSyncController({
 
       const syncedMessages: SyncNotificationMessage[] = [];
       for (const fId of foldersToSync) {
-        const result = await syncFolderWithBackground(fId, false, true, "new", false);
+        const result = await syncFolderWithBackground(fId, true, "new");
         if (!result?.newMessages?.length) continue;
         syncedMessages.push(...result.newMessages);
       }
@@ -1170,19 +1139,32 @@ export function useSyncController({
       folderId?: string,
       mode: "repair" | "full" = "repair"
     ) => {
-      if (!folderId) return;
+      const decision = decideStreamReconcileSync({ folderId, mode });
+      const triggerId = logSyncPolicyCall({
+        caller: "stream-reconcile",
+        policy: "decideStreamReconcileSync",
+        accountId: activeAccountId,
+        folderId: folderId ?? null,
+        input: {
+          folderId: folderId ?? null,
+          mode
+        },
+        decision
+      });
+      if (decision.kind !== "folder") return;
       const now = Date.now();
-      const lastRun = lastDeleteReconcileAtRef.current[folderId] ?? 0;
+      const lastRun = lastDeleteReconcileAtRef.current[decision.folderId] ?? 0;
       if (now - lastRun < 5000) return;
       const { isSyncing: syncing, syncingFolders: syncingSet } = syncStateRef.current;
-      if (syncing || syncingSet.has(folderId)) return;
-      lastDeleteReconcileAtRef.current[folderId] = now;
+      if (syncing || syncingSet.has(decision.folderId)) return;
+      lastDeleteReconcileAtRef.current[decision.folderId] = now;
       void syncAccountRef.current?.(
-        folderId,
-        mode,
-        mode === "full"
-          ? { fullSyncReason: "Stream reconcile fallback requested full sync." }
-          : undefined
+        decision.folderId,
+        decision.mode === "recent" ? "full" : decision.mode,
+        {
+          fullSyncReason: decision.reason,
+          triggerId
+        }
       );
     };
 
