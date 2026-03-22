@@ -15,6 +15,8 @@ export type QueuedMessageMove = {
 type AccountMoveState = {
   running: boolean;
   tasks: QueuedMessageMove[];
+  /** Task currently being processed (removed from tasks, not yet completed). */
+  inFlight: QueuedMessageMove | null;
 };
 
 type MessageMoveRuntimeState = {
@@ -36,7 +38,7 @@ const accountStates = runtimeState.__noctuaMessageMoveJobsState.accountStates;
 function getOrCreateAccountState(accountId: string) {
   const existing = accountStates.get(accountId);
   if (existing) return existing;
-  const created: AccountMoveState = { running: false, tasks: [] };
+  const created: AccountMoveState = { running: false, tasks: [], inFlight: null };
   accountStates.set(accountId, created);
   return created;
 }
@@ -66,9 +68,11 @@ async function processAccountQueue(accountId: string, state: AccountMoveState) {
     while (state.tasks.length > 0) {
       const task = state.tasks.shift();
       if (!task) continue;
+      state.inFlight = task;
       const accounts = await getAccounts();
       const account = accounts.find((item) => item.id === accountId);
       if (!account) {
+        state.inFlight = null;
         await rollbackMessageMove(task);
         continue;
       }
@@ -97,6 +101,8 @@ async function processAccountQueue(accountId: string, state: AccountMoveState) {
           error
         });
         await rollbackMessageMove(task);
+      } finally {
+        state.inFlight = null;
       }
     }
   } finally {
@@ -108,10 +114,10 @@ async function processAccountQueue(accountId: string, state: AccountMoveState) {
 }
 
 /**
- * Returns IMAP UIDs that are queued for move OUT of the given source folder.
- * Used by two-phase sync to avoid re-downloading messages that have been
- * staged for move but not yet IMAP-moved (the IMAP server still has them,
- * but the local DB no longer associates them with the source folder).
+ * Returns IMAP UIDs that are queued or currently in-flight for move OUT of the
+ * given source folder. Used by two-phase sync to avoid re-downloading messages
+ * that have been staged for move but not yet IMAP-moved (the IMAP server still
+ * has them, but the local DB no longer associates them with the source folder).
  */
 export function getPendingMoveSourceUids(
   accountId: string,
@@ -120,6 +126,10 @@ export function getPendingMoveSourceUids(
   const state = accountStates.get(accountId);
   if (!state) return new Set();
   const uids = new Set<number>();
+  // Include the currently-processing task (already shifted from the queue)
+  if (state.inFlight?.sourceFolderId === sourceFolderId) {
+    uids.add(state.inFlight.sourceUid);
+  }
   state.tasks.forEach((task) => {
     if (task.sourceFolderId === sourceFolderId) {
       uids.add(task.sourceUid);

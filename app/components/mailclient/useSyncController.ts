@@ -555,6 +555,8 @@ export function useSyncController({
       triggerId: options?.triggerId
     };
     if (folderId) {
+      // mode is typed as "new" | "full", so the "recent" fallback is unreachable
+      // defensive code — all call sites pass "new" or "full"
       const folderMode: SyncMode =
         mode === "new" || mode === "repair" || mode === "full" ? mode : "recent";
       await syncFolderWithBackground(
