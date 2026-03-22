@@ -528,6 +528,9 @@ export function useSyncController({
       return accountList;
     }
     for (const folder of newlyDetected) {
+      // Intentionally use "recent" even when the parent sync is "full":
+      // running a full sync on every newly discovered folder would be very
+      // expensive. A recent-window sync covers the common case adequately.
       await syncFolderWithBackground(
         folder.id,
         false,
