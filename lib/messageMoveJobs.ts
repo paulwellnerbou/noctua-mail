@@ -107,6 +107,27 @@ async function processAccountQueue(accountId: string, state: AccountMoveState) {
   }
 }
 
+/**
+ * Returns IMAP UIDs that are queued for move OUT of the given source folder.
+ * Used by two-phase sync to avoid re-downloading messages that have been
+ * staged for move but not yet IMAP-moved (the IMAP server still has them,
+ * but the local DB no longer associates them with the source folder).
+ */
+export function getPendingMoveSourceUids(
+  accountId: string,
+  sourceFolderId: string
+): Set<number> {
+  const state = accountStates.get(accountId);
+  if (!state) return new Set();
+  const uids = new Set<number>();
+  state.tasks.forEach((task) => {
+    if (task.sourceFolderId === sourceFolderId) {
+      uids.add(task.sourceUid);
+    }
+  });
+  return uids;
+}
+
 export function enqueueMessageMoveJobs(tasks: QueuedMessageMove[]) {
   if (tasks.length === 0) return;
   const byAccount = new Map<string, QueuedMessageMove[]>();

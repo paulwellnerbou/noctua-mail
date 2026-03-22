@@ -23,6 +23,7 @@ import { extractPrimaryEmail, normalizeEmailAddress } from "@/lib/senderIdentity
 import type { SyncMode } from "@/lib/syncPolicy";
 import { deleteMessageFiles } from "@/lib/storage";
 import { listImapMailboxUidsAndFlags, syncImapAccountBatched } from "@/lib/mail/imap";
+import { getPendingMoveSourceUids } from "@/lib/messageMoveJobs";
 import { reconcileVerifiedCrossFolderMoves } from "@/lib/syncMoveReconciliation";
 import { collectThreadReferenceIds, resolveThreadingForItems } from "@/lib/threading";
 export type { SyncMode } from "@/lib/syncPolicy";
@@ -328,10 +329,16 @@ export async function runSyncOperationBatched(
       listFolderMessageUidAndFlagRows(account.id, payload.folderId)
     ]);
 
-    const { staleMessageIds, missingRemoteUids, flagUpdates } = diffLocalAndRemoteWithFlags(
-      localRows,
-      remoteSnapshot.entries
-    );
+    const repairDiff = diffLocalAndRemoteWithFlags(localRows, remoteSnapshot.entries);
+
+    // Exclude UIDs queued for move out of this folder (same reason as two-phase sync).
+    const repairPendingMoveUids = getPendingMoveSourceUids(account.id, payload.folderId);
+    const missingRemoteUids =
+      repairPendingMoveUids.size > 0
+        ? repairDiff.missingRemoteUids.filter((uid) => !repairPendingMoveUids.has(uid))
+        : repairDiff.missingRemoteUids;
+    const { staleMessageIds, flagUpdates } = repairDiff;
+
     const highestLocalUid =
       localRows.length > 0 ? Math.max(...localRows.map((row) => row.imapUid)) : null;
     const hasHistoricalRemoteGaps =
@@ -450,10 +457,19 @@ export async function runSyncOperationBatched(
     folders = snapshot.folders;
 
     const localRows = await listFolderMessageUidAndFlagRows(account.id, twoPhaseFolderId);
-    const { staleMessageIds, missingRemoteUids, flagUpdates } = diffLocalAndRemoteWithFlags(
-      localRows,
-      snapshot.entries
-    );
+    const diff = diffLocalAndRemoteWithFlags(localRows, snapshot.entries);
+
+    // Exclude UIDs that are queued for move out of this folder. These messages
+    // are still on the IMAP server (the async IMAP move hasn't run yet) but no
+    // longer associated with this folder in the local DB. Without this filter,
+    // the sync would re-download them as "new" messages, causing them to
+    // briefly reappear in the message list after deletion/move.
+    const pendingMoveUids = getPendingMoveSourceUids(account.id, twoPhaseFolderId);
+    const missingRemoteUids =
+      pendingMoveUids.size > 0
+        ? diff.missingRemoteUids.filter((uid) => !pendingMoveUids.has(uid))
+        : diff.missingRemoteUids;
+    const { staleMessageIds, flagUpdates } = diff;
 
     // For full sync, delete messages that no longer exist on the server.
     // For recent sync, we can't distinguish "old" from "deleted" since we

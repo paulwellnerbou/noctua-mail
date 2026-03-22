@@ -164,8 +164,16 @@ export function buildGroupedMessages(params: {
         });
         return;
       }
+      // Pick the representative message for group assignment using threadSortDateValue
+      // (which respects the "Received" date setting and excludes sent messages) rather
+      // than raw dateValue. This prevents a just-sent reply/forward from temporarily
+      // moving the thread into the "Today" group when sorted by received date.
+      const getEffectiveSortDate = (m: Message) => {
+        const explicit = Number(m.threadSortDateValue);
+        return Number.isFinite(explicit) ? explicit : m.dateValue;
+      };
       const latest = flat.reduce((acc, item) =>
-        item.message.dateValue > acc.message.dateValue ? item : acc
+        getEffectiveSortDate(item.message) > getEffectiveSortDate(acc.message) ? item : acc
       );
       const groupKey = latest.message.groupKey ?? "Other";
       flat.forEach(({ message }) => {
