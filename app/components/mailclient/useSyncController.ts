@@ -19,6 +19,7 @@ import {
   type SyncMode
 } from "@/lib/syncPolicy";
 import { logSyncPolicyCall } from "@/lib/syncPolicyLogging";
+import { findInboxFolder } from "@/lib/specialFolders";
 import type {
   FullSyncConfirmState,
   SyncJobProgress,
@@ -27,6 +28,7 @@ import type {
   SyncTriggerOptions
 } from "./types";
 import { applyFlagsToMessage } from "./utils/messageHelpers";
+import { prioritizeFolderIds, prioritizeFolders } from "./utils/folderHelpers";
 import { withCalendarInviteFlag } from "@/lib/messageFlags";
 import { extractEmails } from "./utils/clientHelpers";
 import { SYNC_STATUS_POLL_INTERVAL_MS, SYNC_STATUS_RUNNING_POLL_INTERVAL_MS } from "./constants";
@@ -617,15 +619,7 @@ export function useSyncController({
         });
         syncOptions.skipFullSyncConfirm = true;
         const accountList = await syncNewlyDetectedFolders(knownFolderIds, "full", syncOptions);
-        const findInboxInList = (list: Folder[]) => {
-          const bySpecial = list.find(
-            (folder) => (folder.specialUse ?? "").toLowerCase() === "\\inbox"
-          );
-          if (bySpecial) return bySpecial;
-          const byName = list.find((folder) => folder.name.toLowerCase() === "inbox");
-          return byName ?? list[0];
-        };
-        const nextInbox = findInboxInList(accountList);
+        const nextInbox = findInboxFolder(accountList, activeAccountId) ?? accountList[0];
         if (nextInbox) {
           setActiveFolderId((prev: string) => prev || nextInbox.id);
         }
@@ -643,13 +637,12 @@ export function useSyncController({
     setIsSyncing(true);
     void (async () => {
       const accountWideMode: "new" | "full" = mode === "new" ? "new" : "full";
-      const priorityFolderId = activeFolderId || inboxFolder?.id;
-      const sortedFolders = priorityFolderId
-        ? [
-            ...accountFolders.filter((f) => f.id === priorityFolderId),
-            ...accountFolders.filter((f) => f.id !== priorityFolderId)
-          ]
-        : accountFolders;
+      const resolvedInboxFolderId =
+        inboxFolder?.id ?? findInboxFolder(accountFolders, activeAccountId)?.id;
+      const sortedFolders =
+        accountWideMode === "new"
+          ? prioritizeFolders(accountFolders, [resolvedInboxFolderId, activeFolderId])
+          : prioritizeFolders(accountFolders, [activeFolderId || resolvedInboxFolderId]);
 
       if (accountWideMode === "new") {
         const plannedFolders = accountFolders.map((folder) => folder.id);
@@ -1103,12 +1096,15 @@ export function useSyncController({
       );
       if (normalized.length === 0) return;
       const fallbackFolderId = inboxFolderRef.current?.id;
-      const foldersToSync = Array.from(
-        new Set(
-          normalized
-            .map((item) => item.folderId ?? fallbackFolderId)
-            .filter((id): id is string => Boolean(id))
-        )
+      const foldersToSync = prioritizeFolderIds(
+        Array.from(
+          new Set(
+            normalized
+              .map((item) => item.folderId ?? fallbackFolderId)
+              .filter((id): id is string => Boolean(id))
+          )
+        ),
+        [fallbackFolderId]
       );
       if (foldersToSync.length === 0) return;
 
