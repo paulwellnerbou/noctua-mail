@@ -803,7 +803,8 @@ export async function runSyncOperationBatched(
       process: invite.process && !fullyProcessedInviteMessageIds.has(invite.messageId),
       accountEmail: account.email,
       reminderUserId: autoProcessCalendarInvites ? account.ownerUserId : undefined,
-      processedByUserId: autoProcessCalendarInvites ? account.ownerUserId : undefined
+      processedByUserId: autoProcessCalendarInvites ? account.ownerUserId : undefined,
+      processedAutomatically: autoProcessCalendarInvites ? true : undefined
     });
   }
 

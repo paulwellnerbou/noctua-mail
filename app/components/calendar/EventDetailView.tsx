@@ -5,12 +5,14 @@ import { AlarmClock, AlarmClockPlus, Clock, Mail, MapPin, Repeat, Trash2, User, 
 import { Badge, Button, Dialog, Flex, Select, Switch, Text } from "@radix-ui/themes";
 import { buildCalendarRecurrenceSummary, formatCalendarEventDate } from "@/lib/calendar";
 import type { CalendarInviteActionType } from "@/lib/calendarInviteProcessing";
+import { formatAccountDateValue } from "@/lib/dateFormatting";
 import {
   buildAccountCalendarEventPath,
   buildAccountCalendarEventRespondPath,
   buildAccountCalendarParticipationPath
 } from "@/lib/accountApiPaths";
 import type {
+  AccountDateFormat,
   CalendarEvent,
   CalendarParticipationScope,
   CalendarParticipationStatus
@@ -62,12 +64,21 @@ export type EventDetailViewProps = {
   onOpenMessage?: (messageId: string) => void;
   onEventUpdated?: (event: CalendarEvent) => void;
   onEventDeleted?: () => void;
-  onInviteProcessed?: (eventUid: string) => void;
+  onInviteProcessed?: (
+    eventUid: string,
+    processedState?: {
+      processedAtMs?: number;
+      processedAutomatically?: boolean;
+    }
+  ) => void;
   responseOccurrenceLabel?: string;
   forceOccurrenceResponse?: boolean;
+  dateFormat?: AccountDateFormat;
   inviteProcessing?: {
     actionType: CalendarInviteActionType;
     processed: boolean;
+    processedAtMs?: number;
+    processedAutomatically?: boolean;
     processing?: boolean;
     onProcess?: () => void | Promise<void>;
   };
@@ -152,6 +163,20 @@ function getOccurrenceInviteActionLabel(actionType?: CalendarInviteActionType) {
   return "RSVP";
 }
 
+function getInviteActionLabel(actionType: CalendarInviteActionType) {
+  if (actionType === "cancellation") return "Cancellation";
+  if (actionType === "update") return "Update";
+  return "Invitation";
+}
+
+function getInviteProcessButtonLabel(processed?: boolean) {
+  return processed ? "Reprocess" : "Process";
+}
+
+function getInviteProcessButtonPendingLabel(processed?: boolean) {
+  return processed ? "Reprocessing…" : "Processing…";
+}
+
 export default function EventDetailView({
   accountId,
   eventUid,
@@ -184,6 +209,7 @@ export default function EventDetailView({
   onInviteProcessed,
   responseOccurrenceLabel = "This occurrence",
   forceOccurrenceResponse = false,
+  dateFormat,
   inviteProcessing
 }: EventDetailViewProps) {
   const resolvedStartMs = startMs ?? eventStartAtMs;
@@ -468,6 +494,10 @@ export default function EventDetailView({
               partstat?: CalendarParticipationStatus;
               scope?: CalendarParticipationScope;
             };
+            inviteProcessing?: {
+              processedAtMs?: number;
+              processedAutomatically?: boolean;
+            };
           }
         | null;
       if (!res.ok || payload?.ok !== true || !payload.event || !payload.participation) {
@@ -484,7 +514,17 @@ export default function EventDetailView({
       );
       onEventUpdated?.(payload.event);
       if (eventUid?.trim()) {
-        onInviteProcessed?.(eventUid.trim());
+        onInviteProcessed?.(eventUid.trim(), {
+          processedAtMs:
+            typeof payload.inviteProcessing?.processedAtMs === "number" &&
+            Number.isFinite(payload.inviteProcessing.processedAtMs)
+              ? payload.inviteProcessing.processedAtMs
+              : undefined,
+          processedAutomatically:
+            typeof payload.inviteProcessing?.processedAutomatically === "boolean"
+              ? payload.inviteProcessing.processedAutomatically
+              : undefined
+        });
       }
       setResponseDialogOpen(false);
       const savedLabel = formatCalendarParticipationLabel(payload.participation.partstat);
@@ -507,6 +547,23 @@ export default function EventDetailView({
   const currentParticipationColor = getParticipationColor(currentMyPartstat);
   const currentParticipationLabel = formatCalendarParticipationLabel(currentMyPartstat) || "Needs action";
   const replyActionLabel = getReplyActionLabel(draftPartstat);
+  const inviteStatusText = inviteProcessing
+    ? (() => {
+        const actionLabel = getInviteActionLabel(inviteProcessing.actionType);
+        if (!inviteProcessing.processed) {
+          return `${actionLabel} not processed`;
+        }
+        const processedModeLabel =
+          typeof inviteProcessing.processedAutomatically === "boolean"
+            ? ` ${inviteProcessing.processedAutomatically ? "automatically" : "manually"}`
+            : "";
+        const processedAtLabel =
+          typeof inviteProcessing.processedAtMs === "number"
+            ? formatAccountDateValue(inviteProcessing.processedAtMs, dateFormat)
+            : null;
+        return `${actionLabel} processed${processedModeLabel}${processedAtLabel ? ` on ${processedAtLabel}` : ""}`;
+      })()
+    : null;
 
   return (
     <article className={styles.event}>
@@ -515,14 +572,9 @@ export default function EventDetailView({
       {inviteProcessing && (
         <div className={styles.inviteStatusRow}>
           <Text size="1" color={inviteProcessing.processed ? "green" : "gray"}>
-            {inviteProcessing.actionType === "cancellation"
-              ? "Cancellation"
-              : inviteProcessing.actionType === "update"
-                ? "Update"
-                : "Invitation"}{" "}
-            {inviteProcessing.processed ? "processed" : "not processed"}
+            {inviteStatusText}
           </Text>
-          {!inviteProcessing.processed && inviteProcessing.onProcess && !hasOccurrenceCancellationAction && (
+          {inviteProcessing.onProcess && !hasOccurrenceCancellationAction && (
             <Button
               size="1"
               variant="soft"
@@ -530,7 +582,9 @@ export default function EventDetailView({
               disabled={inviteProcessing.processing}
               onClick={() => void inviteProcessing.onProcess?.()}
             >
-              {inviteProcessing.processing ? "Processing…" : "Process"}
+              {inviteProcessing.processing
+                ? getInviteProcessButtonPendingLabel(inviteProcessing.processed)
+                : getInviteProcessButtonLabel(inviteProcessing.processed)}
             </Button>
           )}
         </div>

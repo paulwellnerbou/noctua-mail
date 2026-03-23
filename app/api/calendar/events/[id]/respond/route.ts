@@ -136,16 +136,29 @@ export async function handleCalendarEventRespondRequest(
       Number.isFinite(occurrenceStartAtMs) ? occurrenceStartAtMs : undefined
     );
 
+    let inviteProcessing:
+      | {
+          processedAtMs: number;
+          processedAutomatically: false;
+        }
+      | undefined;
+
     if (event.messageId?.trim()) {
+      const processedAtMs = Date.now();
       await markMessageCalendarInviteStatesProcessed(
         accountId,
         event.messageId.trim(),
         [event.eventUid],
-        accountContext.session.userId
+        {
+          processedAtMs,
+          processedByUserId: accountContext.session.userId,
+          processedAutomatically: false
+        }
       );
+      inviteProcessing = { processedAtMs, processedAutomatically: false };
     }
 
-    return NextResponse.json({ ok: true, event: updatedEvent, participation });
+    return NextResponse.json({ ok: true, event: updatedEvent, participation, inviteProcessing });
   } catch (error) {
     return NextResponse.json(
       {

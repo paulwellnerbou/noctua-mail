@@ -73,6 +73,10 @@ import {
   getThreadLatestDate,
   type ThreadNode
 } from "./mailclient/messagelist/threadTree";
+import {
+  mergeMessageInviteStatePatches,
+  type InviteProcessingStatePatch
+} from "./mailclient/utils/calendarInviteState";
 import type { MessageGroup } from "./mailclient/messagelist/listModel";
 import {
   AlertDialog,
@@ -91,7 +95,7 @@ import MessageViewPane from "./mailclient/message/MessageViewPane";
 import MarkdownPanel from "./mailclient/message/MarkdownPanel";
 import MessageSourcePanel from "./mailclient/message/MessageSourcePanel";
 import { TODO_FLAG, DONE_FLAG, isMeaningfulNonInlineAttachment } from "@/lib/messageFlags";
-import { INVITE_DECK_GROUP_BY } from "@/lib/messageGrouping";
+import { EVENT_GROUP_BY, INVITE_DECK_GROUP_BY } from "@/lib/messageGrouping";
 import {
   DEFAULT_THREAD_DATE_SOURCE,
   type ThreadDateSource
@@ -443,7 +447,7 @@ export default function MailClient({
   }, [activeAccountId, apiFetch, reportError, readErrorMessage, setFolders]);
 
   const [groupBy, setGroupBy] = useState<
-    "none" | "date" | "week" | "sender" | "domain" | "year" | "folder"
+    "none" | "date" | "week" | "sender" | "domain" | "year" | "folder" | "event"
   >("date");
   const [threadDateSource, setThreadDateSource] =
     useState<ThreadDateSource>(DEFAULT_THREAD_DATE_SOURCE);
@@ -954,6 +958,7 @@ export default function MailClient({
     () => (activeVirtualFolder ? [...activeVirtualFolder.queryBadges] : selectedSearchBadges),
     [activeVirtualFolder, selectedSearchBadges]
   );
+  const isCalendarGroupByAvailable = effectiveSearchBadges.includes("calendar");
   const effectiveGroupBy = useMemo(
     () =>
       activeVirtualFolder?.id === "virtual:invite-deck" && groupBy === "date"
@@ -961,6 +966,10 @@ export default function MailClient({
         : groupBy,
     [activeVirtualFolder?.id, groupBy]
   );
+  useEffect(() => {
+    if (groupBy !== EVENT_GROUP_BY || isCalendarGroupByAvailable) return;
+    setGroupBy("date");
+  }, [groupBy, isCalendarGroupByAvailable]);
   const selectedSearchBadgeLabels = useMemo(
     () =>
       activeVirtualFolder
@@ -1379,6 +1388,7 @@ export default function MailClient({
     upsertThreadCache,
     clearThreadContentError,
     setThreadContentError,
+    updateThreadCacheWithMessage,
     evictMessagesFromThreadCache,
     evictThreadCache,
     resetThreadCache,
@@ -1397,6 +1407,55 @@ export default function MailClient({
     messageById,
     threadMessagesRef
   });
+
+  const handleInviteStateChange = useCallback(
+    (messageId: string, patches: InviteProcessingStatePatch[]) => {
+      const normalizedMessageId = messageId.trim();
+      if (!normalizedMessageId || patches.length === 0) return;
+      const applyPatches = (message: Message) => mergeMessageInviteStatePatches(message, patches);
+      updateMessagesRef.current(
+        (item) => (item.id === normalizedMessageId ? applyPatches(item) : item),
+        { source: "calendar-invite-state-change" }
+      );
+      setViewMessage((prev) =>
+        prev?.id === normalizedMessageId ? applyPatches(prev) : prev
+      );
+      setThreadRelatedMessages((prev) => {
+        let changed = false;
+        const next = prev.map((item) => {
+          if (item.id !== normalizedMessageId) return item;
+          const updated = applyPatches(item);
+          if (updated !== item) changed = true;
+          return updated;
+        });
+        return changed ? next : prev;
+      });
+      setActiveTopicSuggestionMessages((prev) => {
+        let changed = false;
+        const next = prev.map((item) => {
+          if (item.id !== normalizedMessageId) return item;
+          const updated = applyPatches(item);
+          if (updated !== item) changed = true;
+          return updated;
+        });
+        return changed ? next : prev;
+      });
+
+      const cachedMessage =
+        threadMessagesRef.current.find((item) => item.id === normalizedMessageId) ??
+        messageById.get(normalizedMessageId) ??
+        (viewMessage?.id === normalizedMessageId ? viewMessage : null);
+      if (!cachedMessage) return;
+      updateThreadCacheWithMessage(applyPatches(cachedMessage));
+    },
+    [
+      messageById,
+      setActiveTopicSuggestionMessages,
+      setThreadRelatedMessages,
+      updateThreadCacheWithMessage,
+      viewMessage
+    ]
+  );
 
   // useAccountController: manages account/folder CRUD and initial data load
   const {
@@ -4975,6 +5034,7 @@ export default function MailClient({
                 hasMoreMessages,
                 messageView,
                 groupBy,
+                eventGroupingAvailable: isCalendarGroupByAvailable,
                 threadDateSource,
                 threadsEnabled,
                 threadsAllowed,
@@ -5467,6 +5527,7 @@ export default function MailClient({
                       getPrimaryEmail,
                       extractEmails,
                       onFindRelatedByCalendarInviteUid: handleFindRelatedByCalendarInviteUid,
+                      onInviteStateChange: handleInviteStateChange,
                       readErrorMessage,
                       reportError,
                       dateFormat: accountDateFormat,

@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { CalendarDays } from "lucide-react";
-import type { Attachment, CalendarEvent, MessageCalendarInviteState } from "@/lib/data";
+import type {
+  AccountDateFormat,
+  Attachment,
+  CalendarEvent,
+  MessageCalendarInviteState
+} from "@/lib/data";
 import {
   parseIcsEvents,
   type CalendarEventPreview as CalendarEventPreviewType
@@ -18,9 +23,16 @@ import { isCalendarAttachment } from "@/lib/messageFlags";
 import { resolveNextReminderOccurrence } from "@/lib/reminderRecurrence";
 import { CALENDAR_REMINDERS_UPDATED_EVENT } from "../utils/calendarReminders";
 import { groupItemsByRelativeTime } from "../utils/relativeTimeGroups";
+import type { InviteProcessingStatePatch } from "../utils/calendarInviteState";
 import EventDetailView from "@/app/components/calendar/EventDetailView";
 import InviteAttachmentControls from "@/app/components/calendar/InviteAttachmentControls";
 import styles from "./CalendarEventPreview.module.css";
+
+type InviteProcessingOverride = {
+  processed: boolean;
+  processedAtMs?: number;
+  processedAutomatically?: boolean;
+};
 
 function readDataUrl(dataUrl: string) {
   const commaIndex = dataUrl.indexOf(",");
@@ -80,7 +92,9 @@ export default function CalendarEventPreview({
   accountId,
   sourceMessageRowId,
   inviteStates,
+  dateFormat,
   onFindRelatedByInviteUid,
+  onInviteStateChange,
   readErrorMessage,
   reportError
 }: {
@@ -88,7 +102,9 @@ export default function CalendarEventPreview({
   accountId: string;
   sourceMessageRowId?: string;
   inviteStates?: MessageCalendarInviteState[];
+  dateFormat?: AccountDateFormat;
   onFindRelatedByInviteUid?: (uid: string) => void;
+  onInviteStateChange?: (patches: InviteProcessingStatePatch[]) => void;
   readErrorMessage: (res: Response) => Promise<string>;
   reportError: (message: string) => void;
 }) {
@@ -106,7 +122,7 @@ export default function CalendarEventPreview({
 
   const [mountTime] = useState(Date.now);
   const [processingInviteUid, setProcessingInviteUid] = useState<string | null>(null);
-  const [inviteStateOverrides, setInviteStateOverrides] = useState<Record<string, boolean>>({});
+  const [inviteStateOverrides, setInviteStateOverrides] = useState<Record<string, InviteProcessingOverride>>({});
   const [storedEventsByUid, setStoredEventsByUid] = useState<Record<string, CalendarEvent>>({});
 
   // Trigger refresh when reminders change (so EventDetailView re-fetches)
@@ -250,15 +266,53 @@ export default function CalendarEventPreview({
           return;
         }
         const payload = (await res.json()) as {
-          states?: Array<{ eventUid?: string; processed?: boolean }>;
+          states?: Array<{
+            eventUid?: string;
+            processed?: boolean;
+            processedAtMs?: number;
+            processedAutomatically?: boolean;
+          }>;
         };
-        const nextOverrides: Record<string, boolean> = {};
+        const nextOverrides: Record<string, InviteProcessingOverride> = {};
         (payload.states ?? []).forEach((state) => {
           const uid = state.eventUid?.trim().toLowerCase();
           if (!uid) return;
-          nextOverrides[uid] = Boolean(state.processed);
+          nextOverrides[uid] = {
+            processed: Boolean(state.processed),
+            processedAtMs:
+              typeof state.processedAtMs === "number" && Number.isFinite(state.processedAtMs)
+                ? state.processedAtMs
+                : undefined,
+            processedAutomatically:
+              typeof state.processedAutomatically === "boolean"
+                ? state.processedAutomatically
+                : undefined
+          };
         });
+        const processedPatches = (payload.states ?? [])
+          .flatMap((state): InviteProcessingStatePatch[] => {
+            const uid = state.eventUid?.trim();
+            const normalizedUid = uid?.toLowerCase() ?? "";
+            if (!uid || !Boolean(state.processed)) return [];
+            const actionType =
+              inviteActionTypeByUid.get(normalizedUid) ?? inviteStateByUid.get(normalizedUid)?.actionType;
+            return [{
+              eventUid: uid,
+              actionType,
+              processedAtMs:
+                typeof state.processedAtMs === "number" && Number.isFinite(state.processedAtMs)
+                  ? state.processedAtMs
+                  : undefined,
+              processedAutomatically:
+                typeof state.processedAutomatically === "boolean"
+                  ? state.processedAutomatically
+                  : undefined
+            }];
+          });
         setInviteStateOverrides((prev) => ({ ...prev, ...nextOverrides }));
+        if (processedPatches.length > 0) {
+          onInviteStateChange?.(processedPatches);
+        }
         await refreshStoredEvents();
         window.dispatchEvent(new Event(CALENDAR_REMINDERS_UPDATED_EVENT));
       } catch (error) {
@@ -267,7 +321,17 @@ export default function CalendarEventPreview({
         setProcessingInviteUid(null);
       }
     },
-    [accountId, rawSource, readErrorMessage, refreshStoredEvents, reportError, sourceMessageRowId]
+    [
+      accountId,
+      inviteActionTypeByUid,
+      inviteStateByUid,
+      onInviteStateChange,
+      rawSource,
+      readErrorMessage,
+      refreshStoredEvents,
+      reportError,
+      sourceMessageRowId
+    ]
   );
 
   const loading = !hasCurrentResult;
@@ -353,25 +417,47 @@ export default function CalendarEventPreview({
                         const normalizedUid = updatedEvent.eventUid.trim().toLowerCase();
                         setStoredEventsByUid((prev) => ({ ...prev, [normalizedUid]: updatedEvent }));
                       }}
-                      onInviteProcessed={(processedEventUid) => {
+                      onInviteProcessed={(processedEventUid, processedState) => {
                         const normalizedUid = processedEventUid.trim().toLowerCase();
                         if (!normalizedUid) return;
-                        setInviteStateOverrides((prev) => ({ ...prev, [normalizedUid]: true }));
+                        const actionType =
+                          inviteActionType ?? inviteStateByUid.get(normalizedUid)?.actionType;
+                        setInviteStateOverrides((prev) => ({
+                          ...prev,
+                          [normalizedUid]: {
+                            processed: true,
+                            processedAtMs: processedState?.processedAtMs,
+                            processedAutomatically: processedState?.processedAutomatically
+                          }
+                        }));
+                        onInviteStateChange?.([
+                          {
+                            eventUid: processedEventUid,
+                            actionType,
+                            processedAtMs: processedState?.processedAtMs,
+                            processedAutomatically: processedState?.processedAutomatically
+                          }
+                        ]);
                       }}
                       responseOccurrenceLabel={forceOccurrenceResponse ? "This occurrence" : "Next occurrence"}
                       forceOccurrenceResponse={forceOccurrenceResponse}
                       inviteProcessing={(() => {
                         const eventUid = event.uid?.trim().toLowerCase() ?? "";
                         if (!eventUid) return undefined;
+                        const inviteState = inviteStateByUid.get(eventUid);
+                        const inviteStateOverride = inviteStateOverrides[eventUid];
                         return {
                           actionType: inviteActionType ?? "invitation",
-                          processed:
-                            inviteStateOverrides[eventUid] ??
-                            Boolean(inviteStateByUid.get(eventUid)?.processedAtMs),
+                          processed: inviteStateOverride?.processed ?? Boolean(inviteState?.processedAtMs),
+                          processedAtMs:
+                            inviteStateOverride?.processedAtMs ?? inviteState?.processedAtMs,
+                          processedAutomatically:
+                            inviteStateOverride?.processedAutomatically ?? inviteState?.processedAutomatically,
                           processing: processingInviteUid === eventUid || processingInviteUid === "__all__",
                           onProcess: () => handleProcessInvite(event.uid)
                         };
                       })()}
+                      dateFormat={dateFormat}
                     />
                   );
                 })}

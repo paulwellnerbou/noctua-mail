@@ -266,6 +266,7 @@ export type MessageCalendarInviteState = {
   actionType: CalendarInviteActionType;
   processedAtMs?: number;
   processedByUserId?: string;
+  processedAutomatically?: boolean;
 };
 
 export type User = {

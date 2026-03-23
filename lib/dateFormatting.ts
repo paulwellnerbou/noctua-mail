@@ -111,22 +111,35 @@ function formatDate(date: Date, format: AccountDateFormat, includeSeconds: boole
   return formatIntl(date, FORMAT_LOCALE_BY_PRESET[format], includeSeconds);
 }
 
+export function formatAccountDateValue(
+  dateValue: number,
+  preferredFormat?: AccountDateFormat,
+  includeSeconds = false
+) {
+  if (!Number.isFinite(dateValue)) {
+    return null;
+  }
+  const parsedDate = new Date(dateValue);
+  if (Number.isNaN(parsedDate.getTime())) {
+    return null;
+  }
+  const format = normalizeAccountDateFormat(preferredFormat);
+  return formatDate(parsedDate, format, includeSeconds);
+}
+
 export function getMessageDateDisplay(
   dateValue: number,
   fallbackDate: string,
   preferredFormat?: AccountDateFormat
 ): DateDisplay {
-  if (!Number.isFinite(dateValue)) {
+  const text = formatAccountDateValue(dateValue, preferredFormat, false);
+  const tooltip = formatAccountDateValue(dateValue, preferredFormat, true);
+  if (!text || !tooltip) {
     return { text: fallbackDate, tooltip: fallbackDate };
   }
-  const parsedDate = new Date(dateValue);
-  if (Number.isNaN(parsedDate.getTime())) {
-    return { text: fallbackDate, tooltip: fallbackDate };
-  }
-  const format = normalizeAccountDateFormat(preferredFormat);
   return {
-    text: formatDate(parsedDate, format, false),
-    tooltip: formatDate(parsedDate, format, true)
+    text,
+    tooltip
   };
 }
 

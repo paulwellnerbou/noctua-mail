@@ -35,6 +35,7 @@ import SenderIcon from "../SenderIcon";
 import InReplyToReferenceRow from "../InReplyToReferenceRow";
 import { hasNonInlineAttachments, getUnsubscribeCapability, resolveInReplyToRef } from "../utils/messageHelpers";
 import { getMessageFromDisplay } from "../messagelist/threadGroupUtils";
+import type { InviteProcessingStatePatch } from "../utils/calendarInviteState";
 
 type MessageTab = "html" | "text" | "markdown" | "source";
 
@@ -90,6 +91,7 @@ type ThreadMessageCardProps = {
   getPrimaryEmail: (value?: string) => string | null;
   extractEmails: (value?: string) => string[];
   onFindRelatedByCalendarInviteUid?: (uid: string) => void;
+  onInviteStateChange?: (messageId: string, patches: InviteProcessingStatePatch[]) => void;
   handleUnsubscribe: (message: Message) => void;
   readErrorMessage: (res: Response) => Promise<string>;
   reportError: (message: string) => void;
@@ -139,6 +141,7 @@ export default function ThreadMessageCard({
   getPrimaryEmail,
   extractEmails,
   onFindRelatedByCalendarInviteUid,
+  onInviteStateChange,
   handleUnsubscribe,
   readErrorMessage,
   reportError,
@@ -792,7 +795,9 @@ export default function ThreadMessageCard({
                   accountId={message.accountId}
                   sourceMessageRowId={message.id}
                   inviteStates={message.calendarInviteStates}
+                  dateFormat={dateFormat}
                   onFindRelatedByInviteUid={onFindRelatedByCalendarInviteUid}
+                  onInviteStateChange={(patches) => onInviteStateChange?.(message.id, patches)}
                   readErrorMessage={readErrorMessage}
                   reportError={reportError}
                 />

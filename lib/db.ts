@@ -52,6 +52,7 @@ import {
   buildInviteDeckGroupKeyFromBounds,
   buildTimeGroupKey,
   buildWeekGroupKey,
+  EVENT_GROUP_BY,
   INVITE_DECK_GROUP_BY,
   sortGroupsForGroupBy
 } from "./messageGrouping";
@@ -129,7 +130,8 @@ const MESSAGE_CALENDAR_EVENT_SCHEMA_SIGNATURE = [
   "eventLastEndAtMs",
   "inviteActionType",
   "processedAtMs",
-  "processedByUserId"
+  "processedByUserId",
+  "processedAutomatically"
 ].join("|");
 const THREAD_SCHEMA_SIGNATURE = ["latestReceivedDateValue"].join("|");
 const CALENDAR_EVENT_RUNTIME_SIGNATURE = [
@@ -273,6 +275,9 @@ function ensureMessageCalendarEventOptionalColumns(db: any) {
   }
   if (!messageCalendarColumns.has("processedByUserId")) {
     db.prepare(`ALTER TABLE message_calendar_events ADD COLUMN processedByUserId TEXT`).run();
+  }
+  if (!messageCalendarColumns.has("processedAutomatically")) {
+    db.prepare(`ALTER TABLE message_calendar_events ADD COLUMN processedAutomatically INTEGER`).run();
   }
   backfillMessageCalendarEventUidKeys(db);
   db.prepare(
@@ -825,6 +830,7 @@ function initAccountSchema(db: any) {
       inviteActionType TEXT,
       processedAtMs INTEGER,
       processedByUserId TEXT,
+      processedAutomatically INTEGER,
       PRIMARY KEY (accountId, messageId, eventUid),
       FOREIGN KEY(messageId) REFERENCES messages(id) ON DELETE CASCADE
     );
@@ -3320,6 +3326,138 @@ async function getInviteDeckGroupKeysByMessageId(
   return groupsByMessageId;
 }
 
+type EventGroupRow = {
+  messageId?: string | null;
+  groupKey?: string | null;
+  groupLabel?: string | null;
+};
+
+function normalizeEventGroupInfo(row: EventGroupRow) {
+  const messageId = String(row.messageId ?? "").trim();
+  if (!messageId) return null;
+  const groupKey = String(row.groupKey ?? "").trim() || "Other";
+  const groupLabel = String(row.groupLabel ?? "").trim() || groupKey;
+  return { messageId, groupKey, groupLabel };
+}
+
+async function getEventGroupInfoByMessageId(
+  db: any,
+  accountId: string,
+  messageIds: string[]
+) {
+  const uniqueMessageIds = Array.from(new Set(messageIds.map((value) => value.trim()).filter(Boolean)));
+  if (uniqueMessageIds.length === 0) {
+    return new Map<string, { key: string; label: string }>();
+  }
+  const rows = db
+    .prepare(
+      `
+      SELECT
+        m.id AS messageId,
+        COALESCE(
+          MIN(NULLIF(${buildCalendarEventUidMatchSql("mce")}, '')),
+          'Other'
+        ) AS groupKey,
+        COALESCE(
+          MIN(NULLIF(trim(COALESCE(ce.summary, '')), '')),
+          MIN(NULLIF(trim(COALESCE(m.subject, '')), '')),
+          MIN(NULLIF(trim(COALESCE(mce.eventUid, '')), '')),
+          MIN(NULLIF(${buildCalendarEventUidMatchSql("mce")}, '')),
+          'Other'
+        ) AS groupLabel
+      FROM messages m
+      LEFT JOIN message_calendar_events mce
+        ON mce.accountId = m.accountId
+       AND mce.messageId = m.id
+      LEFT JOIN calendar_events ce
+        ON ce.accountId = mce.accountId
+       AND ce.deletedAtMs IS NULL
+       AND lower(COALESCE(ce.eventUid, '')) = lower(COALESCE(mce.eventUid, ''))
+      WHERE m.accountId = ?
+        AND m.id IN (${uniqueMessageIds.map(() => "?").join(",")})
+      GROUP BY m.id
+      `
+    )
+    .all(accountId, ...uniqueMessageIds) as EventGroupRow[];
+  return new Map(
+    rows
+      .map(normalizeEventGroupInfo)
+      .filter((entry): entry is NonNullable<ReturnType<typeof normalizeEventGroupInfo>> => Boolean(entry))
+      .map((entry) => [entry.messageId, { key: entry.groupKey, label: entry.groupLabel }] as const)
+  );
+}
+
+async function getEventGroupCounts(params: {
+  db: any;
+  where: string;
+  args: any[];
+}) {
+  const { db, where, args } = params;
+  const rows = db
+    .prepare(
+      `
+      WITH message_event_groups AS (
+        SELECT
+          m.id AS messageId,
+          m.dateValue AS dateValue,
+          COALESCE(
+            MIN(NULLIF(${buildCalendarEventUidMatchSql("mce")}, '')),
+            'Other'
+          ) AS key,
+          COALESCE(
+            MIN(NULLIF(trim(COALESCE(ce.summary, '')), '')),
+            MIN(NULLIF(trim(COALESCE(m.subject, '')), '')),
+            MIN(NULLIF(trim(COALESCE(mce.eventUid, '')), '')),
+            MIN(NULLIF(${buildCalendarEventUidMatchSql("mce")}, '')),
+            'Other'
+          ) AS label
+        FROM messages m
+        LEFT JOIN message_calendar_events mce
+          ON mce.accountId = m.accountId
+         AND mce.messageId = m.id
+        LEFT JOIN calendar_events ce
+          ON ce.accountId = mce.accountId
+         AND ce.deletedAtMs IS NULL
+         AND lower(COALESCE(ce.eventUid, '')) = lower(COALESCE(mce.eventUid, ''))
+        WHERE ${where}
+        GROUP BY m.id
+      ),
+      ranked_event_groups AS (
+        SELECT
+          key,
+          label,
+          dateValue,
+          messageId,
+          ROW_NUMBER() OVER (
+            PARTITION BY key
+            ORDER BY dateValue DESC, messageId DESC
+          ) AS rowNumber,
+          COUNT(*) OVER (PARTITION BY key) AS count,
+          MAX(dateValue) OVER (PARTITION BY key) AS latestDateValue
+        FROM message_event_groups
+      )
+      SELECT
+        key,
+        label,
+        count,
+        latestDateValue
+      FROM ranked_event_groups
+      WHERE rowNumber = 1
+      ORDER BY latestDateValue DESC, count DESC, label ASC
+      `
+    )
+    .all(...args) as Array<{
+    key?: string | null;
+    label?: string | null;
+    count?: number | null;
+  }>;
+  return rows.map((row) => ({
+    key: String(row.key ?? "").trim() || "Other",
+    label: String(row.label ?? "").trim() || "Other",
+    count: Number(row.count ?? 0) || 0
+  }));
+}
+
 async function getInviteDeckGroupSummary(params: {
   db: any;
   accountId: string;
@@ -3679,6 +3817,7 @@ function mapMessageCalendarInviteStateRow(
     inviteActionType?: string | null;
     processedAtMs?: number | null;
     processedByUserId?: string | null;
+    processedAutomatically?: number | boolean | null;
   }
 ): MessageCalendarInviteState | null {
   const eventUid = normalizeCalendarEventUid(row.eventUid);
@@ -3694,8 +3833,73 @@ function mapMessageCalendarInviteStateRow(
     processedByUserId:
       typeof row.processedByUserId === "string" && row.processedByUserId.trim()
         ? row.processedByUserId.trim()
-        : undefined
+        : undefined,
+    processedAutomatically:
+      typeof row.processedAutomatically === "boolean"
+        ? row.processedAutomatically
+        : typeof row.processedAutomatically === "number"
+          ? row.processedAutomatically !== 0
+          : undefined
   };
+}
+
+async function getMessageCalendarInviteDataByMessageId(
+  db: any,
+  accountId: string,
+  messageIds: string[]
+) {
+  const uniqueMessageIds = Array.from(new Set(messageIds.map((value) => value.trim()).filter(Boolean)));
+  const dataByMessageId = new Map<
+    string,
+    { calendarEventUids: string[]; calendarInviteStates: MessageCalendarInviteState[] }
+  >();
+  if (uniqueMessageIds.length === 0) {
+    return dataByMessageId;
+  }
+  const QUERY_BATCH_SIZE = 400;
+  for (let start = 0; start < uniqueMessageIds.length; start += QUERY_BATCH_SIZE) {
+    const chunk = uniqueMessageIds.slice(start, start + QUERY_BATCH_SIZE);
+    const rows = db
+      .prepare(
+        `SELECT
+           messageId,
+           eventUid,
+           inviteActionType,
+           processedAtMs,
+           processedByUserId,
+           processedAutomatically
+         FROM message_calendar_events
+         WHERE accountId = ?
+           AND messageId IN (${chunk.map(() => "?").join(",")})
+         ORDER BY messageId ASC, eventUid ASC`
+      )
+      .all(accountId, ...chunk) as Array<{
+      messageId?: string | null;
+      eventUid?: string | null;
+      inviteActionType?: string | null;
+      processedAtMs?: number | null;
+      processedByUserId?: string | null;
+      processedAutomatically?: number | boolean | null;
+    }>;
+    rows.forEach((row) => {
+      const messageId = String(row.messageId ?? "").trim();
+      if (!messageId) return;
+      const existing = dataByMessageId.get(messageId) ?? {
+        calendarEventUids: [],
+        calendarInviteStates: []
+      };
+      const eventUid = normalizeCalendarEventUid(row.eventUid);
+      if (eventUid && !existing.calendarEventUids.includes(eventUid)) {
+        existing.calendarEventUids.push(eventUid);
+      }
+      const state = mapMessageCalendarInviteStateRow(row);
+      if (state) {
+        existing.calendarInviteStates.push(state);
+      }
+      dataByMessageId.set(messageId, existing);
+    });
+  }
+  return dataByMessageId;
 }
 
 export async function upsertMessageCalendarInviteStates(
@@ -3778,27 +3982,43 @@ export async function markMessageCalendarInviteStatesProcessed(
   accountId: string,
   messageId: string,
   eventUids: string[],
-  processedByUserId?: string | null
+  options?: {
+    processedAtMs?: number | null;
+    processedByUserId?: string | null;
+    processedAutomatically?: boolean | null;
+  }
 ) {
   return withDbWriteRetry("markMessageCalendarInviteStatesProcessed", async () => {
     const db = await getAccountDb(accountId);
     ensureMessageCalendarEventOptionalColumns(db);
     const normalizedEventUids = normalizeCalendarEventUids(eventUids);
     if (normalizedEventUids.length === 0) return 0;
-    const now = Date.now();
+    const processedAtMs =
+      typeof options?.processedAtMs === "number" &&
+      Number.isFinite(options.processedAtMs) &&
+      options.processedAtMs > 0
+        ? Math.round(options.processedAtMs)
+        : Date.now();
+    const processedByUserId =
+      typeof options?.processedByUserId === "string" && options.processedByUserId.trim()
+        ? options.processedByUserId.trim()
+        : null;
+    const processedAutomatically =
+      typeof options?.processedAutomatically === "boolean"
+        ? (options.processedAutomatically ? 1 : 0)
+        : null;
     const result = db
       .prepare(
         `UPDATE message_calendar_events
-         SET processedAtMs = ?, processedByUserId = ?
+         SET processedAtMs = ?, processedByUserId = ?, processedAutomatically = ?
          WHERE accountId = ?
            AND messageId = ?
            AND eventUid IN (${normalizedEventUids.map(() => "?").join(",")})`
       )
       .run(
-        now,
-        typeof processedByUserId === "string" && processedByUserId.trim()
-          ? processedByUserId.trim()
-          : null,
+        processedAtMs,
+        processedByUserId,
+        processedAutomatically,
         accountId,
         messageId,
         ...normalizedEventUids
@@ -3819,7 +4039,7 @@ export async function clearMessageCalendarInviteStatesProcessedByEventUid(
     const result = db
       .prepare(
         `UPDATE message_calendar_events
-         SET processedAtMs = NULL, processedByUserId = NULL
+         SET processedAtMs = NULL, processedByUserId = NULL, processedAutomatically = NULL
          WHERE accountId = ? AND lower(eventUid) = lower(?)`
       )
       .run(accountId, normalizedEventUid) as { changes?: number };
@@ -4216,12 +4436,12 @@ function getRelatedExcludedFolderIds(db: any, accountId: string) {
 }
 
 function groupsFromRows(
-  rows: Array<{ key: string; count: number }>,
+  rows: Array<{ key: string; count: number; label?: string }>,
   groupBy: string
 ): GroupMeta[] {
   return rows.map((row) => ({
     key: row.key,
-    label: buildGroupLabel(row.key, groupBy),
+    label: row.label ?? buildGroupLabel(row.key, groupBy),
     count: row.count
   }));
 }
@@ -4309,6 +4529,10 @@ async function getGroupCounts(params: {
   const attachmentsFilter = attachmentsOnly ?? badges?.includes("attachments");
   if (attachmentsFilter) {
     where += ` AND ${buildMeaningfulAttachmentExistsSql("m")}`;
+  }
+
+  if (groupBy === EVENT_GROUP_BY) {
+    return groupsFromRows(await getEventGroupCounts({ db, where, args }), groupBy);
   }
 
   if (groupBy === "date" || groupBy === INVITE_DECK_GROUP_BY) {
@@ -4902,6 +5126,14 @@ export async function listRelatedMessages(params: {
   const total = filtered.length;
   const start = Math.max(0, (page - 1) * pageSize);
   const pageRows = filtered.slice(start, start + pageSize).map((item) => item.row);
+  const eventGroupsByMessageId =
+    groupBy === EVENT_GROUP_BY
+      ? await getEventGroupInfoByMessageId(
+          db,
+          accountId,
+          filtered.map((item) => String(item.row.id ?? ""))
+        )
+      : new Map<string, { key: string; label: string }>();
   const inviteDeckGroupsByMessageId =
     groupBy === INVITE_DECK_GROUP_BY
       ? await getInviteDeckGroupKeysByMessageId(
@@ -4957,11 +5189,14 @@ export async function listRelatedMessages(params: {
       listId: row.listId ?? undefined
     };
     (message as any).groupKey =
-      inviteDeckGroupsByMessageId.get(message.id) ?? buildGroupKey(message, groupBy);
+      eventGroupsByMessageId.get(message.id)?.key ??
+      inviteDeckGroupsByMessageId.get(message.id) ??
+      buildGroupKey(message, groupBy);
     return message;
   });
 
   const groupCounts = new Map<string, number>();
+  const groupLabels = new Map<string, string>();
   filtered.forEach(({ row }) => {
     const message: Message = {
       id: row.id,
@@ -4977,18 +5212,36 @@ export async function listRelatedMessages(params: {
       dateValue: row.dateValue,
       body: ""
     } as Message;
-    const key = inviteDeckGroupsByMessageId.get(message.id) ?? buildGroupKey(message, groupBy);
+    const eventGroup = eventGroupsByMessageId.get(message.id);
+    const key = eventGroup?.key ?? inviteDeckGroupsByMessageId.get(message.id) ?? buildGroupKey(message, groupBy);
+    if (eventGroup?.label) {
+      groupLabels.set(key, eventGroup.label);
+    }
     groupCounts.set(key, (groupCounts.get(key) ?? 0) + 1);
   });
 
   const groupRows = Array.from(groupCounts.entries()).map(([key, count]) => ({
     key,
+    label: groupLabels.get(key) ?? key,
     count
   }));
   if (groupBy === "date" || groupBy === INVITE_DECK_GROUP_BY) {
     groupRows.splice(0, groupRows.length, ...sortGroupsForGroupBy(groupRows, groupBy));
   } else if (groupBy === "week" || groupBy === "year") {
     groupRows.sort((a, b) => String(b.key).localeCompare(String(a.key)));
+  } else if (groupBy === EVENT_GROUP_BY) {
+    const latestDateByGroup = new Map<string, number>();
+    filtered.forEach(({ row }) => {
+      const eventGroup = eventGroupsByMessageId.get(String(row.id ?? ""));
+      const key = eventGroup?.key ?? "Other";
+      const dateValue = Number(row.dateValue) || 0;
+      latestDateByGroup.set(key, Math.max(latestDateByGroup.get(key) ?? 0, dateValue));
+    });
+    groupRows.sort((a, b) => {
+      const dateDiff = (latestDateByGroup.get(b.key) ?? 0) - (latestDateByGroup.get(a.key) ?? 0);
+      if (dateDiff !== 0) return dateDiff;
+      return String(a.label).localeCompare(String(b.label));
+    });
   } else {
     groupRows.sort((a, b) => b.count - a.count);
   }
@@ -5179,6 +5432,14 @@ export async function listMessages(params: {
           args
         })
       : null;
+  const eventGroupsByMessageId =
+    groupBy === EVENT_GROUP_BY
+      ? await getEventGroupInfoByMessageId(
+          db,
+          accountId,
+          rows.map((row) => String(row.id ?? ""))
+        )
+      : new Map<string, { key: string; label: string }>();
   const inviteDeckGroupsByMessageId =
     inviteDeckSummary?.groupsByMessageId ?? new Map<string, string>();
 
@@ -5228,22 +5489,26 @@ export async function listMessages(params: {
       listId: row.listId ?? undefined
     };
     (message as any).groupKey =
-      inviteDeckGroupsByMessageId.get(message.id) ?? buildGroupKey(message, groupBy);
+      eventGroupsByMessageId.get(message.id)?.key ??
+      inviteDeckGroupsByMessageId.get(message.id) ??
+      buildGroupKey(message, groupBy);
     return message;
   });
 
   const groups =
     inviteDeckSummary?.groups ??
-    (await getGroupCounts({
-      accountId,
-      folderId,
-      query: query ?? undefined,
-      groupBy,
-      fields,
-      badges,
-      attachmentsOnly,
-      excludedFolderIds
-    }));
+    (groupBy === EVENT_GROUP_BY
+      ? groupsFromRows(await getEventGroupCounts({ db, where, args }), groupBy)
+      : await getGroupCounts({
+          accountId,
+          folderId,
+          query: query ?? undefined,
+          groupBy,
+          fields,
+          badges,
+          attachmentsOnly,
+          excludedFolderIds
+        }));
   const total =
     inviteDeckSummary?.total ??
     (await getTotalCount({
@@ -5652,6 +5917,14 @@ export async function listThreads(params: {
   const inviteDeckSummary = inviteDeckSummaryPromise
     ? await inviteDeckSummaryPromise
     : null;
+  const eventGroupsByMessageId =
+    groupBy === EVENT_GROUP_BY
+      ? await getEventGroupInfoByMessageId(
+          db,
+          accountId,
+          messagesRows.map((row) => String(row.id ?? ""))
+        )
+      : new Map<string, { key: string; label: string }>();
   const inviteDeckThreadGroupsByMessageId =
     groupBy === INVITE_DECK_GROUP_BY
       ? await getInviteDeckGroupKeysByMessageId(
@@ -5709,6 +5982,7 @@ export async function listThreads(params: {
     const threadDateValue = threadDateValueByThreadId.get(message.threadId);
     message.threadSortDateValue = threadDateValue ?? message.dateValue;
     (message as any).groupKey =
+      eventGroupsByMessageId.get(message.id)?.key ??
       inviteDeckThreadGroupsByMessageId.get(message.id) ??
       buildGroupKey(
         message,
@@ -5720,25 +5994,27 @@ export async function listThreads(params: {
 
   const groups =
     inviteDeckSummary?.groups ??
-    (await (isThreadDateSensitiveGroupBy(groupBy)
-      ? getThreadGroupCounts({
-          db,
-          accountId,
-          where,
-          args,
-          groupBy,
-          threadDateColumn
-        })
-      : getGroupCounts({
-          accountId,
-          folderId,
-          query: query ?? undefined,
-          groupBy,
-          fields,
-          badges,
-          attachmentsOnly,
-          excludedFolderIds
-        })));
+    (await (groupBy === EVENT_GROUP_BY
+      ? getEventGroupCounts({ db, where, args }).then((rows) => groupsFromRows(rows, groupBy))
+      : isThreadDateSensitiveGroupBy(groupBy)
+        ? getThreadGroupCounts({
+            db,
+            accountId,
+            where,
+            args,
+            groupBy,
+            threadDateColumn
+          })
+        : getGroupCounts({
+            accountId,
+            folderId,
+            query: query ?? undefined,
+            groupBy,
+            fields,
+            badges,
+            attachmentsOnly,
+            excludedFolderIds
+          })));
 
   const hasMore = offset + threadRows.length < threadTotal;
   return { items, groups, total: inviteDeckSummary?.total ?? total, hasMore, baseCount };
@@ -5832,10 +6108,19 @@ export async function listThreadMessages(params: {
           )
           .all(...ids) as any[])
       : [];
+  const calendarInviteDataByMessageId = await getMessageCalendarInviteDataByMessageId(
+    db,
+    accountId,
+    ids
+  );
   const inviteDeckThreadMessageGroupsByMessageId =
     groupBy === INVITE_DECK_GROUP_BY
       ? await getInviteDeckGroupKeysByMessageId(db, accountId, ids)
       : new Map<string, string>();
+  const eventGroupsByMessageId =
+    groupBy === EVENT_GROUP_BY
+      ? await getEventGroupInfoByMessageId(db, accountId, ids)
+      : new Map<string, { key: string; label: string }>();
 
   const attachmentsByMessage = new Map<string, Attachment[]>();
   attachmentRows.forEach((row) => {
@@ -5853,6 +6138,7 @@ export async function listThreadMessages(params: {
   });
 
   const items: Message[] = rows.map((row) => {
+    const calendarInviteData = calendarInviteDataByMessageId.get(row.id);
     const message: Message = {
       id: row.id,
       accountId: row.accountId,
@@ -5892,12 +6178,15 @@ export async function listThreadMessages(params: {
       category: row.category ?? undefined,
       categoryScore: typeof row.categoryScore === "number" ? row.categoryScore : undefined,
       categorySignals: parseStringArray(row.categorySignals),
+      calendarEventUids: calendarInviteData?.calendarEventUids ?? [],
+      calendarInviteStates: calendarInviteData?.calendarInviteStates ?? [],
       listUnsubscribe: row.listUnsubscribe ?? undefined,
       listId: row.listId ?? undefined
     };
     const threadDateValue = threadDateValueByThreadId.get(message.threadId);
     message.threadSortDateValue = threadDateValue ?? message.dateValue;
     (message as any).groupKey =
+      eventGroupsByMessageId.get(message.id)?.key ??
       inviteDeckThreadMessageGroupsByMessageId.get(message.id) ??
       buildGroupKey(
         message,
@@ -6090,7 +6379,8 @@ export async function upsertMessages(
          eventLastEndAtMs,
          inviteActionType,
          processedAtMs,
-         processedByUserId
+         processedByUserId,
+         processedAutomatically
        FROM message_calendar_events
        WHERE accountId = ? AND messageId = ?`
     );
@@ -6126,8 +6416,9 @@ export async function upsertMessages(
          eventLastEndAtMs,
          inviteActionType,
          processedAtMs,
-         processedByUserId
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+         processedByUserId,
+         processedAutomatically
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     );
 
     const insertMessage = db.prepare(`
@@ -6280,6 +6571,7 @@ export async function upsertMessages(
               inviteActionType?: string | null;
               processedAtMs?: number | null;
               processedByUserId?: string | null;
+              processedAutomatically?: number | boolean | null;
             }>
           )
             .map((row) => {
@@ -6314,7 +6606,13 @@ export async function upsertMessages(
                   processedByUserId:
                     typeof row.processedByUserId === "string" && row.processedByUserId.trim()
                       ? row.processedByUserId.trim()
-                      : null
+                      : null,
+                  processedAutomatically:
+                    typeof row.processedAutomatically === "boolean"
+                      ? row.processedAutomatically
+                      : typeof row.processedAutomatically === "number"
+                        ? row.processedAutomatically !== 0
+                        : null
                 }
               ] as const;
             })
@@ -6330,6 +6628,7 @@ export async function upsertMessages(
                   inviteActionType: string | null;
                   processedAtMs: number | null;
                   processedByUserId: string | null;
+                  processedAutomatically: boolean | null;
                 }
               ] => Boolean(entry)
             )
@@ -6451,7 +6750,10 @@ export async function upsertMessages(
             existing?.eventLastEndAtMs ?? null,
             existing?.inviteActionType ?? null,
             existing?.processedAtMs ?? null,
-            existing?.processedByUserId ?? null
+            existing?.processedByUserId ?? null,
+            typeof existing?.processedAutomatically === "boolean"
+              ? (existing.processedAutomatically ? 1 : 0)
+              : null
           );
         });
         (message.attachments ?? []).forEach((att) => {
@@ -6608,22 +6910,11 @@ export async function getMessageById(accountId: string, messageId: string) {
   const attachments = db
     .prepare(`SELECT * FROM attachments WHERE messageId = ?`)
     .all(row.id) as any[];
-  const calendarInviteRows = db
-    .prepare(
-      `SELECT eventUid, inviteActionType, processedAtMs, processedByUserId
-       FROM message_calendar_events
-       WHERE accountId = ? AND messageId = ?
-       ORDER BY eventUid ASC`
-    )
-    .all(accountId, row.id) as Array<{
-    eventUid?: string | null;
-    inviteActionType?: string | null;
-    processedAtMs?: number | null;
-    processedByUserId?: string | null;
-  }>;
-  const calendarInviteStates = calendarInviteRows
-    .map((item) => mapMessageCalendarInviteStateRow(item))
-    .filter((item): item is MessageCalendarInviteState => Boolean(item));
+  const calendarInviteData = (await getMessageCalendarInviteDataByMessageId(
+    db,
+    accountId,
+    [row.id]
+  )).get(row.id);
   return {
     id: row.id,
     accountId: row.accountId,
@@ -6668,8 +6959,8 @@ export async function getMessageById(accountId: string, messageId: string) {
     category: row.category ?? undefined,
     categoryScore: typeof row.categoryScore === "number" ? row.categoryScore : undefined,
     categorySignals: parseStringArray(row.categorySignals),
-    calendarEventUids: normalizeCalendarEventUids(calendarInviteRows.map((item) => item.eventUid)),
-    calendarInviteStates,
+    calendarEventUids: calendarInviteData?.calendarEventUids ?? [],
+    calendarInviteStates: calendarInviteData?.calendarInviteStates ?? [],
     listUnsubscribe: row.listUnsubscribe ?? undefined
   } as Message;
 }

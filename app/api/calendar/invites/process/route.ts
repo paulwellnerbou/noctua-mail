@@ -44,7 +44,8 @@ export async function handleProcessCalendarInviteRequest(
     process: true,
     accountEmail: accountContext.account.email,
     reminderUserId: accountContext.session.userId,
-    processedByUserId: accountContext.session.userId
+    processedByUserId: accountContext.session.userId,
+    processedAutomatically: false
   });
   if (result.states.length === 0) {
     return NextResponse.json(

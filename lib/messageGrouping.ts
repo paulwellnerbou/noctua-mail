@@ -4,6 +4,7 @@ import { resolveCurrentOrNextOccurrence } from "./reminderRecurrence";
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 export const INVITE_DECK_GROUP_BY = "invite-date";
+export const EVENT_GROUP_BY = "event";
 
 export const DATE_GROUP_ORDER = ["Today", "Yesterday", "This Week", "Older"] as const;
 export const INVITE_DECK_GROUP_ORDER = ["UPCOMING", "PAST"] as const;
@@ -77,6 +78,9 @@ export function buildMessageGroupKey(
 
   if (groupBy === "date" || groupBy === INVITE_DECK_GROUP_BY) {
     return buildTimeGroupKey(effectiveDateValue, groupBy);
+  }
+  if (groupBy === EVENT_GROUP_BY) {
+    return "Other";
   }
   if (groupBy === "week") {
     return buildWeekGroupKey(effectiveDateValue);

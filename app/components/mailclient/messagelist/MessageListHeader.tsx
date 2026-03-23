@@ -18,7 +18,8 @@ type MessageListHeaderProps = {
     loadingMessages: boolean;
     hasMoreMessages: boolean;
     messageView: "card" | "table" | "compact" | "threads";
-    groupBy: "none" | "date" | "week" | "sender" | "domain" | "year" | "folder";
+    groupBy: "none" | "date" | "week" | "sender" | "domain" | "year" | "folder" | "event";
+    eventGroupingAvailable: boolean;
     threadDateSource: ThreadDateSource;
     threadsEnabled: boolean;
     threadsAllowed: boolean;
@@ -29,7 +30,7 @@ type MessageListHeaderProps = {
     setMessagesPage: React.Dispatch<React.SetStateAction<number>>;
     setMessageView: React.Dispatch<React.SetStateAction<"card" | "table" | "compact" | "threads">>;
     setGroupBy: React.Dispatch<
-      React.SetStateAction<"none" | "date" | "week" | "sender" | "domain" | "year" | "folder">
+      React.SetStateAction<"none" | "date" | "week" | "sender" | "domain" | "year" | "folder" | "event">
     >;
     setThreadDateSource: React.Dispatch<React.SetStateAction<ThreadDateSource>>;
     setThreadsEnabled: React.Dispatch<React.SetStateAction<boolean>>;
@@ -50,6 +51,7 @@ export default function MessageListHeader({ state, actions }: MessageListHeaderP
     hasMoreMessages,
     messageView,
     groupBy,
+    eventGroupingAvailable,
     threadDateSource,
     threadsEnabled,
     threadsAllowed,
@@ -98,7 +100,7 @@ export default function MessageListHeader({ state, actions }: MessageListHeaderP
   };
 
   const handleGroupChange = (value: string) => {
-    const next = value as "none" | "date" | "week" | "sender" | "domain" | "year" | "folder";
+    const next = value as "none" | "date" | "week" | "sender" | "domain" | "year" | "folder" | "event";
     setLocalGroupBy(next);
     scheduleCommit(groupFrameRef, () => setGroupBy(next));
   };
@@ -197,6 +199,7 @@ export default function MessageListHeader({ state, actions }: MessageListHeaderP
               <Select.Item value="sender">Group: Sender</Select.Item>
               <Select.Item value="domain">Group: Sender Domain</Select.Item>
               <Select.Item value="year">Group: Year</Select.Item>
+              {eventGroupingAvailable && <Select.Item value="event">Group: Event</Select.Item>}
               {searchScope === "all" && <Select.Item value="folder">Group: Folder</Select.Item>}
               <Select.Item value="none">Group: None</Select.Item>
             </Select.Content>

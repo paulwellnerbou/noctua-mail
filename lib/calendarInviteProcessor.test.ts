@@ -107,14 +107,18 @@ describe("processCalendarInviteForMessage", () => {
       process: true,
       accountEmail: "paul@example.test",
       reminderUserId: "user-1",
-      processedByUserId: "user-1"
+      processedByUserId: "user-1",
+      processedAutomatically: false
     });
 
+    expect(typeof result.states[0]?.processedAtMs).toBe("number");
     expect(result.states).toEqual([
       {
         eventUid: "series-uid@example.test",
         actionType: "cancellation",
-        processed: true
+        processed: true,
+        processedAtMs: result.states[0]?.processedAtMs,
+        processedAutomatically: false
       }
     ]);
     expect(listCalendarInviteSourceMessagesByEventUid).toHaveBeenCalledWith(
@@ -136,7 +140,11 @@ describe("processCalendarInviteForMessage", () => {
       "acc-1",
       "msg-cancel",
       ["series-uid@example.test"],
-      "user-1"
+      {
+        processedAtMs: result.states[0]?.processedAtMs,
+        processedByUserId: "user-1",
+        processedAutomatically: false
+      }
     );
   });
 });

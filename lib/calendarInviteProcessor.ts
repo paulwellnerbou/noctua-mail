@@ -160,6 +160,7 @@ export type ProcessCalendarInviteForMessageParams = {
   accountEmail?: string | null;
   reminderUserId?: string | null;
   processedByUserId?: string | null;
+  processedAutomatically?: boolean | null;
 };
 
 export type ProcessCalendarInviteForMessageResult = {
@@ -167,6 +168,8 @@ export type ProcessCalendarInviteForMessageResult = {
     eventUid: string;
     actionType: CalendarInviteActionType;
     processed: boolean;
+    processedAtMs?: number;
+    processedAutomatically?: boolean;
   }>;
 };
 
@@ -177,7 +180,8 @@ export async function processCalendarInviteForMessage({
   process,
   accountEmail,
   reminderUserId,
-  processedByUserId
+  processedByUserId,
+  processedAutomatically
 }: ProcessCalendarInviteForMessageParams): Promise<ProcessCalendarInviteForMessageResult> {
   if (!icsSource.trim()) {
     return { states: [] };
@@ -208,6 +212,7 @@ export async function processCalendarInviteForMessage({
 
   const processedEventUids: string[] = [];
   const processedStateByUid = new Map<string, boolean>();
+  let processedAtMs: number | undefined;
 
   for (const group of groups) {
     let existingEvent = existingEventsByUid.get(group.eventUid) ?? null;
@@ -289,18 +294,30 @@ export async function processCalendarInviteForMessage({
   }
 
   if (processedEventUids.length > 0) {
+    processedAtMs = Date.now();
     await markMessageCalendarInviteStatesProcessed(
       accountId,
       messageId,
       processedEventUids,
-      processedByUserId ?? reminderUserId
+      {
+        processedAtMs,
+        processedByUserId: processedByUserId ?? reminderUserId,
+        processedAutomatically
+      }
     );
   }
 
   return {
-    states: inviteStates.map((state) => ({
-      ...state,
-      processed: processedStateByUid.get(state.eventUid) ?? false
-    }))
+    states: inviteStates.map((state) => {
+      const processed = processedStateByUid.get(state.eventUid) ?? false;
+      return {
+        ...state,
+        processed,
+        ...(processed && typeof processedAtMs === "number" ? { processedAtMs } : {}),
+        ...(processed && typeof processedAutomatically === "boolean"
+          ? { processedAutomatically }
+          : {})
+      };
+    })
   };
 }
