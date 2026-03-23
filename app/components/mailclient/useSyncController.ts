@@ -11,6 +11,7 @@ import {
 } from "@/lib/accountApiPaths";
 import type { Folder, Message } from "@/lib/data";
 import {
+  buildRemoteMailboxFingerprint,
   decideFolderConsistencySync,
   decideStreamReconcileSync,
   type FolderConsistencyResult,
@@ -107,6 +108,16 @@ type InternalSyncTriggerOptions = SyncTriggerOptions & {
   skipFullSyncConfirm?: boolean;
 };
 
+type FolderConsistencyResponse = FolderConsistencyResult & {
+  ok?: boolean;
+  remote?: {
+    count: number | null;
+    uidNext: number | null;
+    uidValidity: string | null;
+    highestModSeq: string | null;
+  };
+};
+
 class FullSyncDebugCancelledError extends Error {
   constructor(reason: string) {
     super(`Full sync cancelled before start. Reason: ${reason}`);
@@ -173,6 +184,7 @@ export function useSyncController({
   const localDeleteReconcileByFolderRef = useRef<Record<string, number>>({});
   const localDeleteReconcileByUidRef = useRef<Record<string, number>>({});
   const lastDeleteReconcileAtRef = useRef<Record<string, number>>({});
+  const lastConsistencyFingerprintByFolderRef = useRef<Record<string, string>>({});
 
   // Stable ref to syncAccount (populated after definition)
   const syncAccountRef = useRef<
@@ -217,6 +229,7 @@ export function useSyncController({
     }
     hasCompletedInitialConsistencyCheckRef.current = false;
     autoRepairAttemptedFolderIdsRef.current = new Set();
+    lastConsistencyFingerprintByFolderRef.current = {};
   }, [activeAccountId]);
 
   const stopRecomputePoll = useCallback(() => {
@@ -441,7 +454,7 @@ export function useSyncController({
 
   const checkFolderConsistency = useCallback(async (
     folderId: string
-  ): Promise<FolderConsistencyResult & { ok?: boolean }> => {
+  ): Promise<FolderConsistencyResponse> => {
     const response = await apiFetch(buildAccountFolderConsistencyPath(activeAccountId, folderId), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -450,7 +463,7 @@ export function useSyncController({
     if (!response.ok) {
       throw new Error(await readErrorMessage(response));
     }
-    return (await response.json()) as FolderConsistencyResult & { ok?: boolean };
+    return (await response.json()) as FolderConsistencyResponse;
   }, [activeAccountId, apiFetch, readErrorMessage]);
 
   const syncFolderWithBackground = async (
@@ -724,6 +737,22 @@ export function useSyncController({
       try {
         const result = await checkFolderConsistency(activeFolderId);
         if (cancelled) return;
+        const remoteFingerprint = buildRemoteMailboxFingerprint({
+          count: result.remote?.count ?? null,
+          uidNext: result.remote?.uidNext ?? null,
+          uidValidity: result.remote?.uidValidity ?? null,
+          highestModSeq: result.remote?.highestModSeq ?? null
+        });
+        const lastResolvedFingerprint =
+          lastConsistencyFingerprintByFolderRef.current[repairKey] ?? null;
+        if (lastResolvedFingerprint === remoteFingerprint) {
+          console.info("[noctua][sync-policy] skipping folder consistency sync for unchanged remote state", {
+            accountId: activeAccountId,
+            folderId: activeFolderId,
+            remoteFingerprint
+          });
+          return;
+        }
         const decision = decideFolderConsistencySync({
           folderId: activeFolderId,
           result,
@@ -741,9 +770,15 @@ export function useSyncController({
           decision
         });
         if (decision.kind !== "folder") {
+          if (!result.needsRepair) {
+            lastConsistencyFingerprintByFolderRef.current[repairKey] = remoteFingerprint;
+          }
           return;
         }
-        await executeFolderSyncDecision(decision, { triggerId });
+        const syncResult = await executeFolderSyncDecision(decision, { triggerId });
+        if (syncResult) {
+          lastConsistencyFingerprintByFolderRef.current[repairKey] = remoteFingerprint;
+        }
       } catch (error) {
         if (!cancelled) {
           reportError(

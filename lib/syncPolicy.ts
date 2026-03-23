@@ -30,6 +30,13 @@ export type FolderConsistencyParams = {
   };
 };
 
+export type RemoteMailboxFingerprintInput = {
+  count: number | null;
+  uidNext: number | null;
+  uidValidity: string | null;
+  highestModSeq: string | null;
+};
+
 export type FolderSyncDecision =
   | { kind: "skip"; reason: string }
   | {
@@ -43,6 +50,15 @@ export type FolderSyncDecision =
       mode: "new" | "full";
       reason: string;
     };
+
+export function buildRemoteMailboxFingerprint(remote: RemoteMailboxFingerprintInput) {
+  return JSON.stringify({
+    count: remote.count ?? null,
+    uidNext: remote.uidNext ?? null,
+    uidValidity: remote.uidValidity ?? null,
+    highestModSeq: remote.highestModSeq ?? null
+  });
+}
 
 
 export function determineFolderConsistency(params: FolderConsistencyParams): FolderConsistencyResult {

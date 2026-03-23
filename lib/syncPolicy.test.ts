@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import {
+  buildRemoteMailboxFingerprint,
   decideFolderConsistencySync,
   decidePostSendSentSync,
   decideStartupSync,
@@ -127,6 +128,42 @@ describe("determineFolderConsistency", () => {
       recommendedMode: "none",
       reasons: []
     });
+  });
+});
+
+describe("buildRemoteMailboxFingerprint", () => {
+  test("produces the same fingerprint for equivalent remote state", () => {
+    const left = buildRemoteMailboxFingerprint({
+      count: 42,
+      uidNext: 99,
+      uidValidity: "abc",
+      highestModSeq: null
+    });
+    const right = buildRemoteMailboxFingerprint({
+      count: 42,
+      uidNext: 99,
+      uidValidity: "abc",
+      highestModSeq: null
+    });
+
+    expect(left).toBe(right);
+  });
+
+  test("changes when remote mailbox state changes", () => {
+    const base = buildRemoteMailboxFingerprint({
+      count: 42,
+      uidNext: 99,
+      uidValidity: "abc",
+      highestModSeq: null
+    });
+    const changed = buildRemoteMailboxFingerprint({
+      count: 43,
+      uidNext: 99,
+      uidValidity: "abc",
+      highestModSeq: null
+    });
+
+    expect(changed).not.toBe(base);
   });
 });
 
