@@ -801,7 +801,7 @@ export default function ThreadMessageCard({
                   readErrorMessage={readErrorMessage}
                   reportError={reportError}
                 />
-                <AttachmentsList attachments={message.attachments ?? []} />
+                <AttachmentsList attachments={message.attachments ?? []} showDownloadAll />
               </div>
             </Collapsible.Content>
           </Collapsible.Root>

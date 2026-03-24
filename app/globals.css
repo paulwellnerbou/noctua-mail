@@ -553,6 +553,31 @@ a {
   font-size: 13px;
 }
 
+.attachments-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.attachments-download-all {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--muted);
+  border-radius: var(--radius-sm);
+  padding: 4px 8px;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.attachments-download-all:hover {
+  color: inherit;
+  background: var(--surface-1);
+}
+
 .attachment-list {
   display: flex;
   flex-direction: column;

@@ -1,5 +1,21 @@
 import { describe, expect, it } from "bun:test";
-import { canPreviewAttachment } from "./AttachmentsList";
+import type { Attachment } from "@/lib/data";
+import {
+  canPreviewAttachment,
+  getAttachmentDownloadHref,
+  getVisibleAttachments
+} from "./AttachmentsList";
+
+function makeAttachment(overrides?: Partial<Attachment>): Attachment {
+  return {
+    id: "a1",
+    filename: "invoice.pdf",
+    contentType: "application/pdf",
+    size: 2048,
+    inline: false,
+    ...overrides
+  };
+}
 
 describe("canPreviewAttachment", () => {
   it("treats octet-stream PDFs as previewable", () => {
@@ -8,5 +24,39 @@ describe("canPreviewAttachment", () => {
 
   it("does not treat non-PDF octet-stream files as previewable", () => {
     expect(canPreviewAttachment("application/octet-stream", "archive.zip")).toBe(false);
+  });
+});
+
+describe("getVisibleAttachments", () => {
+  it("hides inline images and calendar invites from the generic attachment list", () => {
+    const result = getVisibleAttachments([
+      makeAttachment({ id: "file" }),
+      makeAttachment({ id: "inline", inline: true, contentType: "image/png" }),
+      makeAttachment({ id: "invite", filename: "invite.ics", contentType: "text/calendar" })
+    ]);
+
+    expect(result.map((attachment) => attachment.id)).toEqual(["file"]);
+  });
+});
+
+describe("getAttachmentDownloadHref", () => {
+  it("adds an explicit download query parameter for attachment URLs", () => {
+    expect(
+      getAttachmentDownloadHref(makeAttachment({ url: "/api/accounts/a/messages/m/attachments/att-1" }))
+    ).toBe("/api/accounts/a/messages/m/attachments/att-1?download=1");
+  });
+
+  it("preserves existing query parameters and hash fragments", () => {
+    expect(
+      getAttachmentDownloadHref(
+        makeAttachment({ url: "/api/file?id=1#preview" })
+      )
+    ).toBe("/api/file?id=1&download=1#preview");
+  });
+
+  it("keeps data URLs unchanged", () => {
+    expect(
+      getAttachmentDownloadHref(makeAttachment({ dataUrl: "data:text/plain;base64,SGVsbG8=" }))
+    ).toBe("data:text/plain;base64,SGVsbG8=");
   });
 });

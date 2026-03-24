@@ -1,6 +1,7 @@
 import {
   Eye,
   X,
+  Download,
   FileText,
   FileImage,
   FileVideo,
@@ -30,6 +31,19 @@ const normalizeMimeType = (contentType?: string) => {
   return contentType?.split(";")[0]?.toLowerCase().trim() ?? "";
 };
 
+function appendQueryParam(url: string, key: string, value: string) {
+  const hashIndex = url.indexOf("#");
+  const hash = hashIndex >= 0 ? url.slice(hashIndex) : "";
+  const base = hashIndex >= 0 ? url.slice(0, hashIndex) : url;
+  const queryIndex = base.indexOf("?");
+  const path = queryIndex >= 0 ? base.slice(0, queryIndex) : base;
+  const query = queryIndex >= 0 ? base.slice(queryIndex + 1) : "";
+  const params = new URLSearchParams(query);
+  params.set(key, value);
+  const nextQuery = params.toString();
+  return `${path}${nextQuery ? `?${nextQuery}` : ""}${hash}`;
+}
+
 const isPdfAttachment = (contentType?: string, filename?: string) => {
   const lower = normalizeMimeType(contentType);
   const ext = getFileExtension(filename);
@@ -43,6 +57,32 @@ export const canPreviewAttachment = (contentType?: string, filename?: string) =>
   if (PREVIEW_MIME_TYPES.has(lower)) return true;
   return PREVIEW_MIME_PREFIXES.some((prefix) => lower.startsWith(prefix));
 };
+
+export function getVisibleAttachments(attachments: Attachment[]) {
+  return attachments.filter((attachment) => !attachment.inline && !isCalendarAttachment(attachment));
+}
+
+export function getAttachmentDownloadHref(attachment: Pick<Attachment, "url" | "dataUrl">) {
+  const href = attachment.url ?? attachment.dataUrl ?? null;
+  if (!href) return null;
+  if (href.startsWith("data:")) return href;
+  return appendQueryParam(href, "download", "1");
+}
+
+function triggerDownload(href: string, filename?: string) {
+  const anchor = document.createElement("a");
+  anchor.href = href;
+  if (filename) {
+    anchor.download = filename;
+  } else {
+    anchor.download = "";
+  }
+  anchor.rel = "noopener";
+  anchor.style.display = "none";
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+}
 
 const isImage = (contentType?: string) => {
   return contentType?.toLowerCase().startsWith("image/") ?? false;
@@ -90,24 +130,45 @@ const getFileIcon = (contentType?: string, filename?: string) => {
 
 export default function AttachmentsList({
   attachments,
-  onRemove
+  onRemove,
+  showDownloadAll = false
 }: {
   attachments: Attachment[];
   onRemove?: (id: string) => void;
+  showDownloadAll?: boolean;
 }) {
-  // Inline attachments are rendered in the message body; calendar invites are shown separately.
-  const visibleAttachments = attachments.filter(
-    (att) => !att.inline && !isCalendarAttachment(att)
+  const visibleAttachments = getVisibleAttachments(attachments);
+  const downloadableAttachments = visibleAttachments.filter(
+    (attachment) => Boolean(getAttachmentDownloadHref(attachment))
   );
 
   if (!visibleAttachments.length) return null;
   return (
     <div className="attachments">
-      <h4>Attachments</h4>
+      <div className="attachments-header">
+        <h4>Attachments</h4>
+        {showDownloadAll && downloadableAttachments.length > 1 && (
+          <button
+            type="button"
+            className="attachments-download-all"
+            onClick={() => {
+              downloadableAttachments.forEach((attachment) => {
+                const href = getAttachmentDownloadHref(attachment);
+                if (!href) return;
+                triggerDownload(href, attachment.filename);
+              });
+            }}
+          >
+            <Download size={12} />
+            <span>Download all</span>
+          </button>
+        )}
+      </div>
       <div className="attachment-list">
         {visibleAttachments.map((file) => {
           const FileIcon = getFileIcon(file.contentType, file.filename);
           const showImagePreview = isImage(file.contentType) && (file.url || file.dataUrl);
+          const downloadHref = getAttachmentDownloadHref(file);
           return (
             <div key={file.id} className="attachment-item">
               <div className="attachment-icon-wrapper">
@@ -120,10 +181,10 @@ export default function AttachmentsList({
               </div>
               <a
                 className="attachment-link"
-                href={file.url ?? file.dataUrl ?? "#"}
-                download
+                href={downloadHref ?? "#"}
+                download={file.filename || true}
                 onClick={(event) => {
-                  if (!file.url && !file.dataUrl) {
+                  if (!downloadHref) {
                     event.preventDefault();
                   }
                 }}

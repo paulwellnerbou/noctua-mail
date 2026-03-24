@@ -58,11 +58,13 @@ export async function handleGetAttachmentRequest(
   const rawName = attachment.filename ?? "attachment";
   const asciiName = rawName.replace(/[^\x20-\x7E]+/g, "_");
   const encodedName = encodeURIComponent(rawName);
+  const shouldDownload = searchParams.get("download") === "1";
+  const disposition = shouldDownload ? "attachment" : "inline";
 
   return new NextResponse(data, {
     headers: {
       "Content-Type": attachment.contentType ?? "application/octet-stream",
-      "Content-Disposition": `inline; filename="${asciiName}"; filename*=UTF-8''${encodedName}`,
+      "Content-Disposition": `${disposition}; filename="${asciiName}"; filename*=UTF-8''${encodedName}`,
       "X-Content-Type-Options": "nosniff",
       "Content-Security-Policy": "default-src 'none'"
     }
