@@ -1,7 +1,5 @@
-import { afterAll, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "fs";
-import { tmpdir } from "os";
-import path from "path";
+import { describe, expect, test } from "bun:test";
+import { dbModulePromise } from "./testDbHarness";
 import type { Account, Folder, Message } from "./data";
 import {
   createTopic,
@@ -14,15 +12,6 @@ import {
   getTopicsForThread,
   setThreadTopics
 } from "./topics";
-
-const previousDataDir = process.env.NOCTUA_DATA_DIR;
-const previousIdleMs = process.env.ACCOUNT_DB_IDLE_MS;
-const dataDir = mkdtempSync(path.join(tmpdir(), "mywebmail-topic-suggestions-"));
-
-process.env.NOCTUA_DATA_DIR = dataDir;
-process.env.ACCOUNT_DB_IDLE_MS = "0";
-
-const dbModulePromise = import("./db");
 
 function buildAccount(accountId: string): Account {
   return {
@@ -103,22 +92,6 @@ function buildMessage(params: {
 }
 
 describe("topic suggestions", () => {
-  afterAll(async () => {
-    const { closeAllDbConnections } = await dbModulePromise;
-    closeAllDbConnections();
-    if (previousDataDir === undefined) {
-      delete process.env.NOCTUA_DATA_DIR;
-    } else {
-      process.env.NOCTUA_DATA_DIR = previousDataDir;
-    }
-    if (previousIdleMs === undefined) {
-      delete process.env.ACCOUNT_DB_IDLE_MS;
-    } else {
-      process.env.ACCOUNT_DB_IDLE_MS = previousIdleMs;
-    }
-    rmSync(dataDir, { recursive: true, force: true });
-  });
-
   test("prefers a strong multi-signal match over a more common weak match", async () => {
     const accountId = "acc-topic-suggestions";
     const folder = buildFolder(accountId);

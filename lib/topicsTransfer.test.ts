@@ -1,7 +1,5 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "fs";
-import { tmpdir } from "os";
-import path from "path";
+import { beforeAll, describe, expect, test } from "bun:test";
+import { dbModulePromise } from "./testDbHarness";
 import type { Account, Folder, Message } from "./data";
 import {
   createTopic,
@@ -13,15 +11,6 @@ import {
   listTopics,
   setThreadTopics
 } from "./topics";
-
-const previousDataDir = process.env.NOCTUA_DATA_DIR;
-const previousIdleMs = process.env.ACCOUNT_DB_IDLE_MS;
-const dataDir = mkdtempSync(path.join(tmpdir(), "mywebmail-topics-transfer-"));
-
-process.env.NOCTUA_DATA_DIR = dataDir;
-process.env.ACCOUNT_DB_IDLE_MS = "0";
-
-const dbModulePromise = import("./db");
 
 function buildAccount(accountId: string): Account {
   return {
@@ -85,22 +74,6 @@ describe("topic transfer", () => {
   beforeAll(async () => {
     const { upsertAccount } = await dbModulePromise;
     await upsertAccount(buildAccount("acc-topics-transfer-bootstrap"));
-  });
-
-  afterAll(async () => {
-    const { closeAllDbConnections } = await dbModulePromise;
-    closeAllDbConnections();
-    if (previousDataDir === undefined) {
-      delete process.env.NOCTUA_DATA_DIR;
-    } else {
-      process.env.NOCTUA_DATA_DIR = previousDataDir;
-    }
-    if (previousIdleMs === undefined) {
-      delete process.env.ACCOUNT_DB_IDLE_MS;
-    } else {
-      process.env.ACCOUNT_DB_IDLE_MS = previousIdleMs;
-    }
-    rmSync(dataDir, { recursive: true, force: true });
   });
 
   test("imports topic assignments onto the local thread resolved by exported message ids", async () => {

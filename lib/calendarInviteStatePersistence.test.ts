@@ -1,17 +1,6 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "fs";
-import { tmpdir } from "os";
-import path from "path";
+import { beforeAll, describe, expect, test } from "bun:test";
 import type { Account, Folder, Message } from "./data";
-
-const previousDataDir = process.env.NOCTUA_DATA_DIR;
-const previousIdleMs = process.env.ACCOUNT_DB_IDLE_MS;
-const dataDir = mkdtempSync(path.join(tmpdir(), "mywebmail-calendar-invite-state-"));
-
-process.env.NOCTUA_DATA_DIR = dataDir;
-process.env.ACCOUNT_DB_IDLE_MS = "0";
-
-const dbModulePromise = import("./db");
+import { dbModulePromise } from "./testDbHarness";
 
 function buildAccount(accountId: string): Account {
   return {
@@ -82,22 +71,6 @@ describe("calendar invite state persistence", () => {
     await upsertAccount(buildAccount("acc-calendar-invite-state-bootstrap"));
   });
 
-  afterAll(async () => {
-    const { closeAllDbConnections } = await dbModulePromise;
-    closeAllDbConnections();
-    if (previousDataDir === undefined) {
-      delete process.env.NOCTUA_DATA_DIR;
-    } else {
-      process.env.NOCTUA_DATA_DIR = previousDataDir;
-    }
-    if (previousIdleMs === undefined) {
-      delete process.env.ACCOUNT_DB_IDLE_MS;
-    } else {
-      process.env.ACCOUNT_DB_IDLE_MS = previousIdleMs;
-    }
-    rmSync(dataDir, { recursive: true, force: true });
-  });
-
   test("listThreadMessages returns processed invite state from storage", async () => {
     const accountId = "acc-calendar-invite-state";
     const folder = buildFolder(accountId);
@@ -106,9 +79,8 @@ describe("calendar invite state persistence", () => {
       upsertAccount,
       saveFoldersForAccount,
       upsertMessages,
-      upsertMessageCalendarInviteStates,
-      markMessageCalendarInviteStatesProcessed,
-      listThreadMessages
+      listThreadMessages,
+      withAccountDb
     } = await dbModulePromise;
 
     await upsertAccount(buildAccount(accountId));
@@ -127,22 +99,29 @@ describe("calendar invite state persistence", () => {
       ],
       true
     );
-    await upsertMessageCalendarInviteStates(accountId, "invite-message-1", [
-      {
+    await withAccountDb(accountId, (db) => {
+      db.prepare(
+        `INSERT OR REPLACE INTO message_calendar_events (
+           accountId,
+           messageId,
+           eventUid,
+           eventUidKey,
+           inviteActionType,
+           processedAtMs,
+           processedByUserId,
+           processedAutomatically
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+      ).run(
+        accountId,
+        "invite-message-1",
         eventUid,
-        actionType: "update"
-      }
-    ]);
-    await markMessageCalendarInviteStatesProcessed(
-      accountId,
-      "invite-message-1",
-      [eventUid],
-      {
-        processedAtMs: 4242,
-        processedAutomatically: false,
-        processedByUserId: "user-1"
-      }
-    );
+        eventUid.toLowerCase(),
+        "update",
+        4242,
+        "user-1",
+        0
+      );
+    });
 
     const result = await listThreadMessages({
       accountId,

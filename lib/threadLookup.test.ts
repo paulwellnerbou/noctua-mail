@@ -1,17 +1,6 @@
-import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "fs";
-import { tmpdir } from "os";
-import path from "path";
+import { beforeAll, describe, expect, test } from "bun:test";
 import type { Account, Folder, Message } from "./data";
-
-const previousDataDir = process.env.NOCTUA_DATA_DIR;
-const previousIdleMs = process.env.ACCOUNT_DB_IDLE_MS;
-const dataDir = mkdtempSync(path.join(tmpdir(), "mywebmail-thread-lookup-"));
-
-process.env.NOCTUA_DATA_DIR = dataDir;
-process.env.ACCOUNT_DB_IDLE_MS = "0";
-
-const dbModulePromise = import("./db");
+import { dbModulePromise } from "./testDbHarness";
 
 function buildAccount(accountId: string): Account {
   return {
@@ -79,22 +68,6 @@ describe("thread header lookup", () => {
   beforeAll(async () => {
     const { upsertAccount } = await dbModulePromise;
     await upsertAccount(buildAccount("acc-thread-lookup-bootstrap"));
-  });
-
-  afterAll(async () => {
-    const { closeAllDbConnections } = await dbModulePromise;
-    closeAllDbConnections();
-    if (previousDataDir === undefined) {
-      delete process.env.NOCTUA_DATA_DIR;
-    } else {
-      process.env.NOCTUA_DATA_DIR = previousDataDir;
-    }
-    if (previousIdleMs === undefined) {
-      delete process.env.ACCOUNT_DB_IDLE_MS;
-    } else {
-      process.env.ACCOUNT_DB_IDLE_MS = previousIdleMs;
-    }
-    rmSync(dataDir, { recursive: true, force: true });
   });
 
   test("maps both referenced message ids and referenced thread ids to the canonical thread", async () => {

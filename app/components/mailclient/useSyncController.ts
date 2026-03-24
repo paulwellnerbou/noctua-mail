@@ -1110,7 +1110,9 @@ export function useSyncController({
 
       const syncedMessages: SyncNotificationMessage[] = [];
       for (const fId of foldersToSync) {
-        const result = await syncFolderWithBackground(fId, true, "new");
+        // The stream/poll effect is intentionally long-lived; use the ref-backed
+        // sync function so active-folder refreshes follow the latest list state.
+        const result = await syncFolderWithBackgroundRef.current(fId, true, "new");
         if (!result?.newMessages?.length) continue;
         syncedMessages.push(...result.newMessages);
       }

@@ -1282,34 +1282,6 @@ export default function MailClient({
     });
     return map;
   }, [messages, activeAccountId]);
-  const openResolvedMessage = useCallback(
-    (target: Message, source = "unknown") => {
-      console.info("[noctua][reminder-link] applying resolved message", {
-        source,
-        localMessageId: target.id,
-        folderId: target.folderId,
-        activeFolderId,
-        searchScope
-      });
-      setViewMessage(target);
-      const inCurrentFolder = filteredMessages.some((message) => message.id === target.id);
-      if (inCurrentFolder) {
-        selectionStore.setActiveId(target.id);
-        startTransition(() => setActiveMessageId(target.id));
-        pendingJumpLocalMessageIdRef.current = null;
-        return;
-      }
-      const canRefreshCurrentResults =
-        searchScope === "all" || !activeFolderId || activeFolderId === target.folderId;
-      if (!canRefreshCurrentResults) {
-        pendingJumpLocalMessageIdRef.current = null;
-        return;
-      }
-      pendingJumpLocalMessageIdRef.current = target.id;
-      void refreshMailboxDataRef.current();
-    },
-    [activeFolderId, filteredMessages, searchScope, selectionStore]
-  );
   const jumpToMessageId = (messageId: string, source = "unknown") => {
     const normalized = messageId.trim();
     const lower = normalized.toLowerCase();
@@ -1339,7 +1311,12 @@ export default function MailClient({
       localMessageId: target.id,
       folderId: target.folderId
     });
-    openResolvedMessage(target, source);
+    setViewMessage(target);
+    const inCurrentFolder = filteredMessages.some((m) => m.id === target.id);
+    if (inCurrentFolder) {
+      selectionStore.setActiveId(target.id);
+      startTransition(() => setActiveMessageId(target.id));
+    }
     return true;
   };
   const activeTopicSuggestionRankedMessages = useMemo(
@@ -3231,11 +3208,12 @@ export default function MailClient({
   const handleOpenCalendarMessage = (messageId: string) => {
     const msg = messageById.get(messageId) ?? null;
     if (msg) {
-      openResolvedMessage(msg, "calendar-message-open");
+      setViewMessage(msg);
+      setActiveMessageId(messageId);
       return;
     }
     void resolveMessageByExternalMessageId(messageId, activeAccountId).then((resolved) => {
-      if (resolved) openResolvedMessage(resolved, "calendar-message-open-resolve");
+      if (resolved) setViewMessage(resolved);
     });
   };
 
@@ -3639,7 +3617,7 @@ export default function MailClient({
     return () => {
       navigator.serviceWorker.removeEventListener("message", handleServiceWorkerMessage);
     };
-  }, [accounts, activeAccountId, clientId, messageByMessageId, openResolvedMessage, switchAccount]);
+  }, [accounts, activeAccountId, clientId, messageByMessageId, switchAccount]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -4083,7 +4061,13 @@ export default function MailClient({
     if (!pending) return;
     const target = messageById.get(pending);
     if (!target) return;
-    openResolvedMessage(target, "pending-local-jump-effect");
+    setViewMessage(target);
+    const inCurrentFolder = filteredMessages.some((m) => m.id === target.id);
+    if (inCurrentFolder) {
+      selectionStore.setActiveId(target.id);
+      startTransition(() => setActiveMessageId(target.id));
+    }
+    pendingJumpLocalMessageIdRef.current = null;
     if (typeof window !== "undefined") {
       const url = new URL(window.location.href);
       if (url.searchParams.get("openMessageId") === pending) {
@@ -4091,7 +4075,7 @@ export default function MailClient({
         window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
       }
     }
-  }, [messageById, openResolvedMessage]);
+  }, [messageById, selectionStore, filteredMessages]);
 
   useEffect(() => {
     const pending = pendingJumpMessageIdRef.current;
@@ -4124,14 +4108,14 @@ export default function MailClient({
     void (async () => {
       const resolved = await resolveMessageByExternalMessageIdRef.current?.(pending, activeAccountId);
       if (resolved) {
-        openResolvedMessage(resolved, "pending-jump-server-resolve");
+        setViewMessage(resolved);
         pendingJumpMessageIdRef.current = null;
         pendingJumpAccountIdRef.current = null;
         pendingJumpRefreshKeyRef.current = "";
         clearNotificationDeepLink(pending);
       }
     })();
-  }, [accounts, activeAccountId, authState, messageByMessageId, openResolvedMessage, switchAccount]);
+  }, [accounts, activeAccountId, authState, messageByMessageId, switchAccount]);
 
   // Collapse all messages in the active thread except the selected one
   useEffect(() => {
@@ -4480,7 +4464,7 @@ export default function MailClient({
           localMessageId: resolved.id,
           folderId: resolved.folderId
         });
-        openResolvedMessage(resolved, `${source}-server-resolve`);
+        setViewMessage(resolved);
         return;
       }
       console.warn("[noctua][reminder-link] message not found on server", {
