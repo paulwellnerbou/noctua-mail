@@ -48,6 +48,7 @@ export default function MessageCardList({
     isCompactView,
     listIsNarrow,
     preferToDisplay,
+    activeTopic,
     userEmail,
     dateFormat,
     messageTopicsById,
@@ -306,6 +307,7 @@ export default function MessageCardList({
               isSuggestionRow={isSuggestionRow}
               showAddSuggestionAction={showAddSuggestionAction}
               isAddSuggestionPending={isAddSuggestionPending}
+              addSuggestionTopicColor={showAddSuggestionAction ? activeTopic?.color : null}
               onAddSuggestion={() => handleAddSuggestedThread(item.threadGroupId)}
               onRowClick={(event) => {
                 handleCollapsedThreadRootClick({

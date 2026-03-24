@@ -24,6 +24,7 @@ export type MessageListViewState = {
   sortDir: "asc" | "desc";
   listIsNarrow: boolean;
   preferToDisplay: boolean;
+  activeTopic: Topic | null;
   userEmail?: string;
   dateFormat?: AccountDateFormat;
   topicColorRows?: boolean;

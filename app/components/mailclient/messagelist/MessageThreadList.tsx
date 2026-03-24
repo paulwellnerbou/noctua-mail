@@ -1,6 +1,6 @@
 import type React from "react";
 import type { CSSProperties } from "react";
-import { CalendarDays, Check, GitBranch, MoveRight, Paperclip, Trash2 } from "lucide-react";
+import { CalendarDays, GitBranch, MoveRight, Paperclip, Trash2 } from "lucide-react";
 import { Badge, IconButton, Text } from "@radix-ui/themes";
 import { badgeColors } from "@/lib/ui/badgeColors";
 import type { Message } from "@/lib/data";
@@ -30,6 +30,7 @@ import {
 } from "./listInteractions";
 import { getCollapsedThreadBadgeUnion } from "./threadBadgeUnion";
 import { isTopicSuggestionGroupKey } from "./topicSuggestionGroup";
+import TopicSuggestionAcceptButton from "./TopicSuggestionAcceptButton";
 import groupStyles from "./MessageCardList.module.css";
 import styles from "./MessageThreadList.module.css";
 
@@ -54,6 +55,7 @@ export default function MessageThreadList({
     pendingMessageActions,
     pendingSuggestedThreadIds,
     preferToDisplay,
+    activeTopic,
     userEmail,
     dateFormat,
     topicColorRows,
@@ -441,20 +443,15 @@ export default function MessageThreadList({
                   </IconButton>
                   {renderMessageMenu(message, "table")}
                   {showAddSuggestionAction && (
-                    <IconButton
-                      size="1"
-                      variant="soft"
-                      color="green"
-                      title={isAddSuggestionPending ? "Adding topic…" : "Add to topic"}
-                      aria-label="Add to topic"
-                      disabled={isDisabled || isAddSuggestionPending}
+                    <TopicSuggestionAcceptButton
+                      topicColor={activeTopic?.color}
+                      isPending={isAddSuggestionPending}
+                      disabled={isDisabled}
                       onClick={(event) => {
                         event.stopPropagation();
                         handleAddSuggestedThread(item.threadGroupId);
                       }}
-                    >
-                      <Check size={14} />
-                    </IconButton>
+                    />
                   )}
                 </div>
               </div>

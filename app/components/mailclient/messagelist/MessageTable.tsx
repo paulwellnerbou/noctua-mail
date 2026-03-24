@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import type React from "react";
 import type { CSSProperties } from "react";
-import { Check, GitBranch, MoveRight, Search, Trash2 } from "lucide-react";
+import { GitBranch, MoveRight, Search, Trash2 } from "lucide-react";
 import { Badge, Checkbox, IconButton, Text } from "@radix-ui/themes";
 import { CaretRightIcon } from "@radix-ui/react-icons";
 import { badgeColors } from "@/lib/ui/badgeColors";
@@ -27,6 +27,7 @@ import {
   type ToggleAnimation
 } from "./listInteractions";
 import { isTopicSuggestionGroupKey } from "./topicSuggestionGroup";
+import TopicSuggestionAcceptButton from "./TopicSuggestionAcceptButton";
 import groupStyles from "./MessageCardList.module.css";
 import styles from "./MessageTable.module.css";
 
@@ -53,6 +54,7 @@ export default function MessageTable({
     messageTopicsById,
     sortDir,
     preferToDisplay,
+    activeTopic,
     userEmail,
     dateFormat,
     topicColorRows,
@@ -528,20 +530,15 @@ export default function MessageTable({
                   </IconButton>
                   {renderMessageMenu(message, "table")}
                   {showAddSuggestionAction && (
-                    <IconButton
-                      size="1"
-                      variant="soft"
-                      color="green"
-                      title={isAddSuggestionPending ? "Adding topic…" : "Add to topic"}
-                      aria-label="Add to topic"
-                      disabled={isDisabled || isAddSuggestionPending}
+                    <TopicSuggestionAcceptButton
+                      topicColor={activeTopic?.color}
+                      isPending={isAddSuggestionPending}
+                      disabled={isDisabled}
                       onClick={(event) => {
                         event.stopPropagation();
                         handleAddSuggestedThread(item.threadGroupId);
                       }}
-                    >
-                      <Check size={14} />
-                    </IconButton>
+                    />
                   )}
                 </div>
               </div>

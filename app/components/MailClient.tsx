@@ -5131,6 +5131,7 @@ export default function MailClient({
                 sortDir,
                 listIsNarrow,
                 preferToDisplay,
+                activeTopic,
                 userEmail: currentAccount?.email,
                 dateFormat: accountDateFormat,
                 topicColorRows: currentAccount?.settings?.appearance?.topicColorRows ?? false,

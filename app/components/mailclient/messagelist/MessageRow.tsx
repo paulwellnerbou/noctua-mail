@@ -1,6 +1,6 @@
 import { memo, useEffect, useRef, useState } from "react";
 import type React from "react";
-import { CalendarDays, Check, GitBranch, MoveRight, Paperclip, Search, Trash2 } from "lucide-react";
+import { CalendarDays, GitBranch, MoveRight, Paperclip, Search, Trash2 } from "lucide-react";
 import { Badge, Checkbox, IconButton, Text } from "@radix-ui/themes";
 import { CaretRightIcon } from "@radix-ui/react-icons";
 import { badgeColors } from "@/lib/ui/badgeColors";
@@ -16,6 +16,7 @@ import TopicBadge from "../TopicBadge";
 import FlagBadge from "../message/FlagBadge";
 import MessageBadge from "../message/MessageBadge";
 import type { Topic } from "@/lib/data";
+import TopicSuggestionAcceptButton from "./TopicSuggestionAcceptButton";
 
 type MessageRowProps = {
   message: Message;
@@ -72,6 +73,7 @@ type MessageRowProps = {
   isSuggestionRow?: boolean;
   showAddSuggestionAction?: boolean;
   isAddSuggestionPending?: boolean;
+  addSuggestionTopicColor?: Topic["color"];
   onAddSuggestion?: (event: React.MouseEvent) => void;
   categoryIcon?: string;
   threadCategories?: string[];
@@ -142,6 +144,7 @@ function MessageRow({
   isSuggestionRow = false,
   showAddSuggestionAction = false,
   isAddSuggestionPending = false,
+  addSuggestionTopicColor,
   onAddSuggestion,
   categoryIcon,
   threadCategories,
@@ -371,20 +374,15 @@ function MessageRow({
               </IconButton>
               {messageMenu}
               {showAddSuggestionAction && (
-                <IconButton
-                  size="1"
-                  variant="soft"
-                  color="green"
-                  title={isAddSuggestionPending ? "Adding topic…" : "Add to topic"}
-                  aria-label="Add to topic"
-                  disabled={isDisabled || isAddSuggestionPending}
+                <TopicSuggestionAcceptButton
+                  topicColor={addSuggestionTopicColor}
+                  isPending={isAddSuggestionPending}
+                  disabled={isDisabled}
                   onClick={(event) => {
                     event.stopPropagation();
                     onAddSuggestion?.(event);
                   }}
-                >
-                  <Check size={14} />
-                </IconButton>
+                />
               )}
             </>
           ) : (
@@ -392,20 +390,15 @@ function MessageRow({
               {!listIsNarrow && quickActions}
               {messageMenu}
               {showAddSuggestionAction && (
-                <IconButton
-                  size="1"
-                  variant="soft"
-                  color="green"
-                  title={isAddSuggestionPending ? "Adding topic…" : "Add to topic"}
-                  aria-label="Add to topic"
-                  disabled={isDisabled || isAddSuggestionPending}
+                <TopicSuggestionAcceptButton
+                  topicColor={addSuggestionTopicColor}
+                  isPending={isAddSuggestionPending}
+                  disabled={isDisabled}
                   onClick={(event) => {
                     event.stopPropagation();
                     onAddSuggestion?.(event);
                   }}
-                >
-                  <Check size={14} />
-                </IconButton>
+                />
               )}
             </>
           )}
@@ -546,6 +539,7 @@ const areEqual = (prev: MessageRowProps, next: MessageRowProps) =>
   prev.isSuggestionRow === next.isSuggestionRow &&
   prev.showAddSuggestionAction === next.showAddSuggestionAction &&
   prev.isAddSuggestionPending === next.isAddSuggestionPending &&
+  prev.addSuggestionTopicColor === next.addSuggestionTopicColor &&
   prev.checkboxState === next.checkboxState &&
   prev.deleteTitle === next.deleteTitle &&
   prev.folderBadgeKey === next.folderBadgeKey &&
