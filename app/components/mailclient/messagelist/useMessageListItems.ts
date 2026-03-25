@@ -20,6 +20,7 @@ export function useMessageListItems({
   getThreadLatestDate,
   userEmail,
   preferToDisplay,
+  findRecipientAlias,
   mode,
   collapsedNestedMessages
 }: UseMessageListItemsParams): ListItem[] {
@@ -38,6 +39,7 @@ export function useMessageListItems({
         getThreadLatestDate,
         userEmail,
         preferToDisplay,
+        findRecipientAlias,
         mode,
         collapsedNestedMessages
       }),
@@ -54,6 +56,7 @@ export function useMessageListItems({
       getThreadLatestDate,
       userEmail,
       preferToDisplay,
+      findRecipientAlias,
       mode,
       collapsedNestedMessages
     ]

@@ -57,6 +57,7 @@ export default function MessageThreadList({
     preferToDisplay,
     activeTopic,
     userEmail,
+    findRecipientAlias,
     dateFormat,
     topicColorRows,
     senderIconsEnabled
@@ -123,6 +124,7 @@ export default function MessageThreadList({
     getThreadLatestDate,
     userEmail,
     preferToDisplay,
+    findRecipientAlias,
     mode: "nested",
     collapsedNestedMessages
   });

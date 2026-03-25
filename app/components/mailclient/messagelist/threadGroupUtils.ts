@@ -1,4 +1,4 @@
-import type { Message } from "@/lib/data";
+import type { Message, RecipientAlias } from "@/lib/data";
 import type { ThreadNode } from "./threadTree";
 
 type MessageGroup = {
@@ -21,6 +21,13 @@ type RecipientFields = {
   to?: string;
   cc?: string;
   bcc?: string;
+};
+
+type FindRecipientAlias = (value?: string | null) => RecipientAlias | null;
+type ParticipantEntry = {
+  text: string;
+  tooltip: string;
+  key: string;
 };
 
 const EMAIL_PATTERN = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i;
@@ -76,8 +83,25 @@ const recipientDisplayValue = (recipient: string) => {
   return email || recipient;
 };
 
-const extractRecipientsDisplay = (fields?: RecipientFields): string => {
+const getRecipientAlias = (
+  fields?: RecipientFields,
+  findRecipientAlias?: FindRecipientAlias
+) => {
+  if (!fields || !findRecipientAlias) return null;
+  const candidateValues = [fields.to, fields.cc, fields.bcc]
+    .map((value) => value?.trim())
+    .filter(Boolean);
+  if (candidateValues.length !== 1) return null;
+  return findRecipientAlias(candidateValues[0]) ?? null;
+};
+
+const extractRecipientsDisplay = (
+  fields?: RecipientFields,
+  findRecipientAlias?: FindRecipientAlias
+): string => {
   if (!fields) return "";
+  const alias = getRecipientAlias(fields, findRecipientAlias);
+  if (alias) return alias.name;
   const seen = new Set<string>();
   const displayValues: string[] = [];
   [fields.to, fields.cc, fields.bcc].forEach((value) => {
@@ -100,6 +124,49 @@ const recipientTooltip = (fields?: RecipientFields): string => {
     .join(", ");
 };
 
+const getRecipientParticipantEntries = (
+  fields?: RecipientFields,
+  userEmail?: string,
+  findRecipientAlias?: FindRecipientAlias
+): ParticipantEntry[] => {
+  if (!fields) return [];
+  const tooltip = recipientTooltip(fields);
+  if (!tooltip) return [];
+
+  const alias = getRecipientAlias(fields, findRecipientAlias);
+  if (alias) {
+    return [
+      {
+        text: alias.name,
+        tooltip,
+        key: `alias:${alias.id}`
+      }
+    ];
+  }
+
+  const normalizedUserEmail = userEmail?.trim().toLowerCase() ?? null;
+  const seen = new Set<string>();
+  const entries: ParticipantEntry[] = [];
+
+  [fields.to, fields.cc, fields.bcc].forEach((value) => {
+    splitRecipients(value).forEach((recipient) => {
+      const email = extractPrimaryEmail(recipient);
+      if (email && normalizedUserEmail && email === normalizedUserEmail) return;
+      const text = recipientDisplayValue(recipient);
+      const key = email ?? text.toLowerCase();
+      if (seen.has(key)) return;
+      seen.add(key);
+      entries.push({
+        text,
+        tooltip: recipient,
+        key
+      });
+    });
+  });
+
+  return entries;
+};
+
 const getOtherRecipientParticipant = (fields?: RecipientFields, userEmail?: string) => {
   const normalizedUserEmail = userEmail?.trim().toLowerCase() ?? null;
   for (const value of [fields?.to, fields?.cc, fields?.bcc]) {
@@ -120,7 +187,8 @@ export function getMessageFromDisplay(
   recipients?: RecipientFields,
   userEmail?: string,
   isInExpandedThread?: boolean,
-  forceRecipientDisplay?: boolean
+  forceRecipientDisplay?: boolean,
+  findRecipientAlias?: FindRecipientAlias
 ): FromDisplayInfo {
   const normalized = normalizeFromValue(fromValue);
   if (!normalized && !forceRecipientDisplay) return { text: "", tooltip: "" };
@@ -128,7 +196,7 @@ export function getMessageFromDisplay(
   const isFromUser = normalized ? isMessageFromUser(normalized, userEmail) : false;
 
   if (forceRecipientDisplay) {
-    const recipientsDisplay = extractRecipientsDisplay(recipients);
+    const recipientsDisplay = extractRecipientsDisplay(recipients, findRecipientAlias);
     return {
       text: recipientsDisplay || "(no recipients)",
       tooltip: recipientTooltip(recipients),
@@ -143,7 +211,7 @@ export function getMessageFromDisplay(
   // isInExpandedThread = false means it's a collapsed thread header (show "Me")
   // isInExpandedThread = true means it's an expanded thread or single message (show "To: ...")
   if (isFromUser && isInExpandedThread && recipients) {
-    const recipientsDisplay = extractRecipientsDisplay(recipients);
+    const recipientsDisplay = extractRecipientsDisplay(recipients, findRecipientAlias);
     return {
       text: recipientsDisplay || "(no recipients)",
       tooltip: recipientTooltip(recipients),
@@ -196,30 +264,61 @@ export function getCollapsedThreadIconParticipant(
 export function getCollapsedThreadFromDisplay(
   fullFlat: Array<{ message: Message; depth: number }>,
   userEmail?: string,
-  forceRecipientDisplay?: boolean
+  forceRecipientDisplay?: boolean,
+  findRecipientAlias?: FindRecipientAlias
 ): FromDisplayInfo {
   const seen = new Set<string>();
   const fromTexts: string[] = [];
   const fromTooltips: string[] = [];
+  const pushParticipant = (participant: ParticipantEntry) => {
+    if (seen.has(participant.key)) return;
+    seen.add(participant.key);
+    fromTexts.push(participant.text);
+    fromTooltips.push(participant.tooltip);
+  };
+
   fullFlat.forEach(({ message }) => {
     const normalized = normalizeFromValue(message.from ?? "");
     if (!normalized && !forceRecipientDisplay) return;
-    const entry = forceRecipientDisplay
-      ? getMessageFromDisplay(
-          normalized,
-          { to: message.to, cc: message.cc, bcc: message.bcc },
-          userEmail,
-          true,
-          true
-        )
-      : getMessageFromDisplay(normalized, undefined, userEmail, true, false);
-    const key = forceRecipientDisplay
-      ? entry.text.toLowerCase()
-      : extractPrimaryEmail(normalized) ?? entry.text.toLowerCase();
-    if (seen.has(key)) return;
-    seen.add(key);
-    fromTexts.push(entry.text);
-    fromTooltips.push(entry.tooltip);
+
+    if (forceRecipientDisplay) {
+      const entry = getMessageFromDisplay(
+        normalized,
+        { to: message.to, cc: message.cc, bcc: message.bcc },
+        userEmail,
+        true,
+        true,
+        findRecipientAlias
+      );
+      pushParticipant({
+        text: entry.text,
+        tooltip: entry.tooltip,
+        key: entry.text.toLowerCase()
+      });
+      return;
+    }
+
+    const senderEntry = getMessageFromDisplay(
+      normalized,
+      undefined,
+      userEmail,
+      true,
+      false,
+      findRecipientAlias
+    );
+    pushParticipant({
+      text: senderEntry.text,
+      tooltip: senderEntry.tooltip,
+      key: extractPrimaryEmail(normalized) ?? senderEntry.text.toLowerCase()
+    });
+
+    if (!senderEntry.isFromUser) return;
+
+    getRecipientParticipantEntries(
+      { to: message.to, cc: message.cc, bcc: message.bcc },
+      userEmail,
+      findRecipientAlias
+    ).forEach(pushParticipant);
   });
   if (!fromTexts.length) {
     return { text: "", tooltip: "" };

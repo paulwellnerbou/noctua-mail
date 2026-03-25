@@ -50,6 +50,7 @@ export default function MessageCardList({
     preferToDisplay,
     activeTopic,
     userEmail,
+    findRecipientAlias,
     dateFormat,
     messageTopicsById,
     topicColorRows,
@@ -120,6 +121,7 @@ export default function MessageCardList({
     getThreadLatestDate,
     userEmail,
     preferToDisplay,
+    findRecipientAlias,
     mode: isCompactView ? "nested" : "flat",
     collapsedNestedMessages
   });

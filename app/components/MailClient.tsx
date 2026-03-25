@@ -5304,6 +5304,7 @@ export default function MailClient({
                 preferToDisplay,
                 activeTopic,
                 userEmail: currentAccount?.email,
+                findRecipientAlias,
                 dateFormat: accountDateFormat,
                 topicColorRows: currentAccount?.settings?.appearance?.topicColorRows ?? false,
                 senderIconsEnabled: currentAccount?.settings?.appearance?.senderIcons ?? true

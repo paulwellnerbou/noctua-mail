@@ -1,4 +1,4 @@
-import type { Message } from "@/lib/data";
+import type { Message, RecipientAlias } from "@/lib/data";
 import { INVITE_DECK_GROUP_BY, sortGroupsForGroupBy } from "@/lib/messageGrouping";
 import {
   buildFlatEntries,
@@ -103,6 +103,7 @@ type SharedListParams = {
   getThreadLatestDate: (node: ThreadNode) => number;
   userEmail?: string;
   preferToDisplay: boolean;
+  findRecipientAlias?: (value?: string | null) => RecipientAlias | null;
 };
 
 export type BuildMessageListItemsParams = SharedListParams & {
@@ -254,6 +255,7 @@ export function buildMessageListItems(params: BuildMessageListItemsParams): List
     getThreadLatestDate,
     userEmail,
     preferToDisplay,
+    findRecipientAlias,
     mode,
     collapsedNestedMessages
   } = params;
@@ -289,7 +291,12 @@ export function buildMessageListItems(params: BuildMessageListItemsParams): List
         } = entry;
         const collapsedThreadFrom =
           isCollapsed && threadSize > 1
-            ? getCollapsedThreadFromDisplay(fullFlat, userEmail, preferToDisplay)
+            ? getCollapsedThreadFromDisplay(
+                fullFlat,
+                userEmail,
+                preferToDisplay,
+                findRecipientAlias
+              )
             : null;
 
         const visibleRows =
@@ -328,7 +335,8 @@ export function buildMessageListItems(params: BuildMessageListItemsParams): List
                   { to: message.to, cc: message.cc, bcc: message.bcc },
                   userEmail,
                   isInExpandedThread,
-                  preferToDisplay
+                  preferToDisplay,
+                  findRecipientAlias
                 );
 
           rows.push({
@@ -372,7 +380,8 @@ export function buildMessageListItems(params: BuildMessageListItemsParams): List
         { to: message.to, cc: message.cc, bcc: message.bcc },
         userEmail,
         false,
-        preferToDisplay
+        preferToDisplay,
+        findRecipientAlias
       );
       rows.push({
         type: "row",

@@ -3,7 +3,9 @@ import type { Message } from "@/lib/data";
 import { buildThreadTree, flattenThread, getThreadLatestDate } from "./threadTree";
 import {
   buildThreadGroupEntries,
-  getCollapsedThreadIconParticipant
+  getCollapsedThreadFromDisplay,
+  getCollapsedThreadIconParticipant,
+  getMessageFromDisplay
 } from "./threadGroupUtils";
 
 function makeMessage(
@@ -104,5 +106,123 @@ describe("getCollapsedThreadIconParticipant", () => {
       from: "Bob <bob@example.com>",
       fromEmail: "bob@example.com"
     });
+  });
+});
+
+describe("recipient alias display", () => {
+  const findRecipientAlias = (value?: string | null) => {
+    if (value?.trim() === "Bob <bob@example.com>, Carol <carol@example.com>") {
+      return {
+        id: "alias-1",
+        accountId: "acc-1",
+        name: "Friday Group",
+        recipients: value,
+        normalizedRecipients: value.toLowerCase(),
+        createdAt: 1,
+        updatedAt: 1
+      };
+    }
+    return null;
+  };
+
+  it("shows the alias name for sent-message recipient rows when one recipient field matches", () => {
+    const result = getMessageFromDisplay(
+      "Me <me@example.com>",
+      { to: "Bob <bob@example.com>, Carol <carol@example.com>" },
+      "me@example.com",
+      true,
+      false,
+      findRecipientAlias
+    );
+
+    expect(result.text).toBe("Friday Group");
+    expect(result.tooltip).toBe("Bob <bob@example.com>, Carol <carol@example.com>");
+  });
+
+  it("keeps the expanded recipient text when multiple recipient fields are populated", () => {
+    const result = getMessageFromDisplay(
+      "Me <me@example.com>",
+      {
+        to: "Bob <bob@example.com>, Carol <carol@example.com>",
+        cc: "Dave <dave@example.com>"
+      },
+      "me@example.com",
+      true,
+      false,
+      findRecipientAlias
+    );
+
+    expect(result.text).toBe("Bob, Carol, Dave");
+  });
+
+  it("uses alias names in collapsed recipient display when a thread message matches", () => {
+    const fullFlat = [
+      {
+        message: makeMessage("m1", "thread-a", 100, {
+          from: "Me <me@example.com>",
+          fromEmail: "me@example.com",
+          to: "Bob <bob@example.com>, Carol <carol@example.com>"
+        }),
+        depth: 0
+      }
+    ];
+
+    const result = getCollapsedThreadFromDisplay(fullFlat, "me@example.com", true, findRecipientAlias);
+
+    expect(result.text).toBe("Friday Group");
+    expect(result.tooltip).toBe("Bob <bob@example.com>, Carol <carol@example.com>");
+  });
+
+  it("adds sent-message recipients to collapsed thread participants", () => {
+    const fullFlat = [
+      {
+        message: makeMessage("m1", "thread-a", 100, {
+          from: "Me <me@example.com>",
+          fromEmail: "me@example.com",
+          to: "Bob <bob@example.com>, Carol <carol@example.com>"
+        }),
+        depth: 0
+      },
+      {
+        message: makeMessage("m2", "thread-a", 200, {
+          from: "Petra <petra@example.com>",
+          fromEmail: "petra@example.com",
+          to: "Me <me@example.com>"
+        }),
+        depth: 1
+      }
+    ];
+
+    const result = getCollapsedThreadFromDisplay(fullFlat, "me@example.com", false, findRecipientAlias);
+
+    expect(result.text).toBe("Me, Friday Group, Petra");
+    expect(result.tooltip).toBe(
+      "Me <me@example.com>, Bob <bob@example.com>, Carol <carol@example.com>, Petra <petra@example.com>"
+    );
+  });
+
+  it("dedupes collapsed sent-message recipients against later senders when no alias exists", () => {
+    const fullFlat = [
+      {
+        message: makeMessage("m1", "thread-a", 100, {
+          from: "Me <me@example.com>",
+          fromEmail: "me@example.com",
+          to: "Bob <bob@example.com>, Carol <carol@example.com>"
+        }),
+        depth: 0
+      },
+      {
+        message: makeMessage("m2", "thread-a", 200, {
+          from: "Bob <bob@example.com>",
+          fromEmail: "bob@example.com",
+          to: "Me <me@example.com>"
+        }),
+        depth: 1
+      }
+    ];
+
+    const result = getCollapsedThreadFromDisplay(fullFlat, "me@example.com");
+
+    expect(result.text).toBe("Me, Bob, Carol");
   });
 });

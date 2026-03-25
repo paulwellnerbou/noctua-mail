@@ -1,5 +1,5 @@
 import type React from "react";
-import type { AccountDateFormat, Message, Topic } from "@/lib/data";
+import type { AccountDateFormat, Message, RecipientAlias, Topic } from "@/lib/data";
 import type { MessageGroup, ThreadNode, VisibleMessageEntry } from "./listModel";
 import type { SelectionStore } from "./selectionStore";
 
@@ -26,6 +26,7 @@ export type MessageListViewState = {
   preferToDisplay: boolean;
   activeTopic: Topic | null;
   userEmail?: string;
+  findRecipientAlias?: (value?: string | null) => RecipientAlias | null;
   dateFormat?: AccountDateFormat;
   topicColorRows?: boolean;
   senderIconsEnabled?: boolean;

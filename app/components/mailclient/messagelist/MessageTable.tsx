@@ -57,6 +57,7 @@ export default function MessageTable({
     preferToDisplay,
     activeTopic,
     userEmail,
+    findRecipientAlias,
     dateFormat,
     topicColorRows,
     senderIconsEnabled
@@ -151,6 +152,7 @@ export default function MessageTable({
     getThreadLatestDate,
     userEmail,
     preferToDisplay,
+    findRecipientAlias,
     mode: "flat"
   });
 
