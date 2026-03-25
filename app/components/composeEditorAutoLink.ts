@@ -1,4 +1,11 @@
-import type { LinkMatcher, LinkMatcherResult } from "@lexical/link";
+import type { LinkMatcher } from "@lexical/link";
+
+export type ComposeAutoLinkMatch = {
+  index: number;
+  length: number;
+  text: string;
+  url: string;
+};
 
 const HTTP_URL_PATTERN = /https?:\/\/[^\s<]+/i;
 const MAILTO_URL_PATTERN = /mailto:[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i;
@@ -32,8 +39,8 @@ export const composeAutoLinkMatchers: LinkMatcher[] = [
   createMatcher(EMAIL_PATTERN, (text) => `mailto:${text}`)
 ];
 
-export function findComposeAutoLinkMatch(text: string): LinkMatcherResult | null {
-  let bestMatch: LinkMatcherResult | null = null;
+export function findComposeAutoLinkMatch(text: string): ComposeAutoLinkMatch | null {
+  let bestMatch: ComposeAutoLinkMatch | null = null;
 
   for (const matcher of composeAutoLinkMatchers) {
     const match = matcher(text);
@@ -50,8 +57,8 @@ export function findComposeAutoLinkMatch(text: string): LinkMatcherResult | null
   return bestMatch;
 }
 
-export function collectComposeAutoLinkMatches(text: string): LinkMatcherResult[] {
-  const matches: LinkMatcherResult[] = [];
+export function collectComposeAutoLinkMatches(text: string): ComposeAutoLinkMatch[] {
+  const matches: ComposeAutoLinkMatch[] = [];
   let cursor = 0;
 
   while (cursor < text.length) {
