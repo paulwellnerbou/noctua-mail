@@ -3919,6 +3919,7 @@ export default function MailClient({
 
   useEffect(() => {
     const loadThreadRelated = async () => {
+      const requestKey = currentKeyRef.current;
       const debugBase = {
         activeAccountId,
         activeFolderId,
@@ -4000,6 +4001,9 @@ export default function MailClient({
             ...debugBase,
             status: res.status
           });
+          if (currentKeyRef.current !== requestKey) {
+            return;
+          }
           setThreadRelatedMessages([]);
           return;
         }
@@ -4013,12 +4017,18 @@ export default function MailClient({
           returnedCount: items.length,
           filteredCount: filtered.length
         });
+        if (currentKeyRef.current !== requestKey) {
+          return;
+        }
         setThreadRelatedMessages(filtered);
       } catch (error) {
         logListDebug("warn", "thread-related:list-effect:exception", {
           ...debugBase,
           error: error instanceof Error ? error.message : String(error)
         });
+        if (currentKeyRef.current !== requestKey) {
+          return;
+        }
         setThreadRelatedMessages([]);
       }
     };
