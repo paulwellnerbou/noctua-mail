@@ -10,6 +10,7 @@ import SenderIcon from "../SenderIcon";
 import TopicBadge from "../TopicBadge";
 import badgeStyles from "../message/MessageBadge.module.css";
 import { getMessageListDateDisplay } from "./messageDateDisplay";
+import { selectAllVisibleMessages } from "./listSelection";
 import { useSelectionSnapshot } from "./selectionStore";
 import MessageListRenderer from "./MessageListRenderer";
 import type { MessageTableProps } from "./messageListViewTypes";
@@ -94,6 +95,7 @@ export default function MessageTable({
   const { ids: selectedMessageIds, activeId: activeMessageId } =
     useSelectionSnapshot(selectionStore);
   const activeMessage = activeMessageId ? messageById.get(activeMessageId) ?? null : null;
+  const threadScopeMessages = groupedMessages.flatMap((group) => group.items);
 
   const [optimisticRow, setOptimisticRow] = useState<{
     id: string;
@@ -169,8 +171,13 @@ export default function MessageTable({
               if (allIds.every((id) => selectedMessageIds.has(id))) {
                 selectionStore.clearSelection();
               } else {
-                selectionStore.setSelection(new Set(allIds));
-                setLastSelectedIdRef(allIds[allIds.length - 1] ?? null);
+                selectAllVisibleMessages({
+                  visibleMessages,
+                  collapsedThreads,
+                  threadScopeMessages,
+                  selectionStore,
+                  setLastSelectedId: setLastSelectedIdRef
+                });
               }
             }}
           />
@@ -314,6 +321,7 @@ export default function MessageTable({
           return (
             <div
               className={rowClassName}
+              data-message-list-row="true"
               style={topicTintVar}
               role="button"
               tabIndex={0}

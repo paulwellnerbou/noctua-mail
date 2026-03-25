@@ -33,15 +33,43 @@ export function selectRangeToMessage(params: {
   const end = indexMap.get(messageId)!;
   const [lo, hi] = start < end ? [start, end] : [end, start];
   const visibleIds = visibleMessages.slice(lo, hi + 1).map((item) => item.message.id);
-  const expandedIds =
-    getCollapsedRootThreadMessageIds({
-      selectedIds: visibleIds,
-      visibleMessages,
-      collapsedThreads,
-      threadScopeMessages
-    }) ?? visibleIds;
+  const expandedIds = expandVisibleSelectionIds({
+    selectedIds: visibleIds,
+    visibleMessages,
+    collapsedThreads,
+    threadScopeMessages
+  });
   selectionStore.setSelection(new Set(expandedIds));
   setLastSelectedId(messageId);
+}
+
+export function selectAllVisibleMessages(params: {
+  visibleMessages: VisibleMessageEntry[];
+  collapsedThreads: Record<string, boolean>;
+  threadScopeMessages: Message[];
+  selectionStore: SelectionStore;
+  setLastSelectedId: (id: string | null) => void;
+}) {
+  const {
+    visibleMessages,
+    collapsedThreads,
+    threadScopeMessages,
+    selectionStore,
+    setLastSelectedId
+  } = params;
+  const visibleIds = visibleMessages.map((item) => item.message.id);
+  if (visibleIds.length === 0) {
+    setLastSelectedId(null);
+    return;
+  }
+  const expandedIds = expandVisibleSelectionIds({
+    selectedIds: visibleIds,
+    visibleMessages,
+    collapsedThreads,
+    threadScopeMessages
+  });
+  selectionStore.setSelection(new Set(expandedIds));
+  setLastSelectedId(visibleIds[visibleIds.length - 1] ?? null);
 }
 
 export function clearListSelection(params: {
@@ -119,6 +147,23 @@ export function getCollapsedRootThreadMessageIds(params: {
 
   if (!hasCollapsedRootSelection) return null;
   return Array.from(expandedIds);
+}
+
+function expandVisibleSelectionIds(params: {
+  selectedIds: string[];
+  visibleMessages: VisibleMessageEntry[];
+  collapsedThreads: Record<string, boolean>;
+  threadScopeMessages: Message[];
+}) {
+  const { selectedIds, visibleMessages, collapsedThreads, threadScopeMessages } = params;
+  return (
+    getCollapsedRootThreadMessageIds({
+      selectedIds,
+      visibleMessages,
+      collapsedThreads,
+      threadScopeMessages
+    }) ?? selectedIds
+  );
 }
 
 function getLatestThreadMessage(flat: ThreadFlatEntry[]) {

@@ -8,7 +8,11 @@ import {
   getThreadRowSelectionMeta,
   handleRowCheckboxChange
 } from "./listInteractions";
-import { selectRangeToMessage, resolveCollapsedThreadSelectionTarget } from "./listSelection";
+import {
+  resolveCollapsedThreadSelectionTarget,
+  selectAllVisibleMessages,
+  selectRangeToMessage
+} from "./listSelection";
 import { createSelectionStore } from "./selectionStore";
 
 function makeMessage(
@@ -210,6 +214,35 @@ describe("list selection behavior", () => {
       messageId: "b1",
       lastSelectedId,
       indexMap,
+      visibleMessages,
+      collapsedThreads: { "thread-a": true, "thread-mid": true, "thread-b": true },
+      threadScopeMessages: [a1, a2, mid, b1, b2],
+      selectionStore: store,
+      setLastSelectedId: (id) => {
+        lastSelectedId = id;
+      }
+    });
+
+    expect(Array.from(store.getIds()).sort()).toEqual(["a1", "a2", "b1", "b2", "mid"]);
+    expect(lastSelectedId).toBe("b1");
+  });
+
+  it("selects all visible messages the same as a first-to-last range selection", () => {
+    const a1 = makeMessage("a1", 1000, { threadId: "thread-a" });
+    const a2 = makeMessage("a2", 1100, { threadId: "thread-a", parentId: "a1" });
+    const mid = makeMessage("mid", 2000, { threadId: "thread-mid" });
+    const b1 = makeMessage("b1", 3000, { threadId: "thread-b" });
+    const b2 = makeMessage("b2", 3100, { threadId: "thread-b", parentId: "b1" });
+    const store = createSelectionStore(null);
+    let lastSelectedId: string | null = null;
+
+    const visibleMessages: VisibleMessageEntry[] = [
+      { message: a1, depth: 0, threadId: "thread-a" },
+      { message: mid, depth: 0, threadId: "thread-mid" },
+      { message: b1, depth: 0, threadId: "thread-b" }
+    ];
+
+    selectAllVisibleMessages({
       visibleMessages,
       collapsedThreads: { "thread-a": true, "thread-mid": true, "thread-b": true },
       threadScopeMessages: [a1, a2, mid, b1, b2],

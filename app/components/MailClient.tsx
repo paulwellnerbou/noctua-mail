@@ -65,6 +65,7 @@ import {
   summarizeMessageForListDebug
 } from "./mailclient/messagelist/listDebug";
 import { getCollapsedRootThreadMessageIds } from "./mailclient/messagelist/listInteractions";
+import { selectAllVisibleMessages } from "./mailclient/messagelist/listSelection";
 import { useMessageListHelpers } from "./mailclient/messagelist/useMessageListHelpers";
 import { useMessageListSelectionController } from "./mailclient/messagelist/useMessageListSelectionController";
 import {
@@ -3332,6 +3333,9 @@ export default function MailClient({
       if (target.isContentEditable) return true;
       return Boolean(target.closest("input, textarea, select"));
     };
+    const isMessageListShortcutTarget = (target: EventTarget | null) =>
+      target instanceof HTMLElement &&
+      Boolean(target.closest('[data-message-list-row="true"]'));
     const resolveMessageById = (id: string) =>
       threadScopeMessages.find((item) => item.id === id) ??
       messages.find((item) => item.id === id);
@@ -3379,13 +3383,32 @@ export default function MailClient({
       const rawKey = typeof event.key === "string" ? event.key : "";
       const key = rawKey.toLowerCase();
       const isDeleteKey = rawKey === "Delete" || rawKey === "Backspace";
+      const isSelectAllKey =
+        key === "a" &&
+        !event.shiftKey &&
+        !event.altKey &&
+        (event.metaKey || event.ctrlKey);
       const isMarkReadKey = key === "r" && !event.metaKey && !event.ctrlKey && !event.altKey;
       const isMarkUnreadKey = key === "u" && !event.metaKey && !event.ctrlKey && !event.altKey;
       const isFlagKey = key === "f" && !event.metaKey && !event.ctrlKey && !event.altKey;
       const isTodoKey = key === "t" && !event.metaKey && !event.ctrlKey && !event.altKey;
       const isActionShortcut = isMarkReadKey || isMarkUnreadKey || isFlagKey || isTodoKey;
-      if (!isDeleteKey && !isActionShortcut) return;
+      if (!isDeleteKey && !isActionShortcut && !isSelectAllKey) return;
       if (isTypingTarget(event.target)) return;
+      if (isSelectAllKey) {
+        if (!isMessageListShortcutTarget(event.target)) return;
+        event.preventDefault();
+        selectAllVisibleMessages({
+          visibleMessages,
+          collapsedThreads,
+          threadScopeMessages,
+          selectionStore,
+          setLastSelectedId: (id) => {
+            lastSelectedIdRef.current = id;
+          }
+        });
+        return;
+      }
       const selected = selectionStore.getIds();
       const ids =
         selected.size > 0

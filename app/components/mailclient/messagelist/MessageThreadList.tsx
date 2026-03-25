@@ -265,6 +265,7 @@ export default function MessageThreadList({
             />
             <div
               className={styles.row}
+              data-message-list-row="true"
               role="button"
               tabIndex={0}
               draggable

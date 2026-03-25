@@ -1,13 +1,13 @@
 import type React from "react";
 import type { AccountDateFormat, Message, Topic } from "@/lib/data";
-import type { MessageGroup, ThreadNode } from "./listModel";
+import type { MessageGroup, ThreadNode, VisibleMessageEntry } from "./listModel";
 import type { SelectionStore } from "./selectionStore";
 
 export type SortKey = "date" | "from" | "subject";
 
 export type MessageListViewState = {
   groupedMessages: MessageGroup[];
-  visibleMessages: Array<{ message: Message }>;
+  visibleMessages: VisibleMessageEntry[];
   selectionStore: SelectionStore;
   draggingMessageIds: Set<string>;
   collapsedGroups: Record<string, boolean>;
