@@ -1,6 +1,7 @@
 import { randomUUID } from "crypto";
 import { listRecipientSuggestions, withAccountDb } from "./db";
 import type { RecipientAlias, RecipientSuggestion } from "./data";
+import { withDbWriteRetry } from "./dbWriteRetry";
 import { normalizeRecipientListForComparison } from "./recipientLists";
 
 type RecipientAliasRow = {
@@ -11,6 +12,31 @@ type RecipientAliasRow = {
   normalizedRecipients?: string | null;
   createdAt?: number | null;
   updatedAt?: number | null;
+};
+
+export type RecipientAliasTransferAlias = Pick<
+  RecipientAlias,
+  "id" | "name" | "recipients" | "createdAt" | "updatedAt"
+>;
+
+export type RecipientAliasTransferData = {
+  version: 1;
+  exportedAt: number;
+  aliases: RecipientAliasTransferAlias[];
+};
+
+export type RecipientAliasTransferImportSummary = {
+  aliasCount: number;
+};
+
+type NormalizedRecipientAliasTransferData = {
+  version: 1;
+  exportedAt: number;
+  aliases: Array<
+    RecipientAliasTransferAlias & {
+      normalizedRecipients: string;
+    }
+  >;
 };
 
 export class RecipientAliasConflictError extends Error {
@@ -64,6 +90,70 @@ function buildRecipientAliasSuggestion(alias: RecipientAlias): RecipientSuggesti
   };
 }
 
+function normalizeTransferTimestamp(value: unknown, fallback: number) {
+  return typeof value === "number" && Number.isFinite(value) ? value : fallback;
+}
+
+function normalizeRecipientAliasTransferData(input: unknown): NormalizedRecipientAliasTransferData {
+  if (!input || typeof input !== "object") {
+    throw new Error("Invalid recipient aliases data file.");
+  }
+
+  const raw = input as Record<string, unknown>;
+  if (raw.version !== 1) {
+    throw new Error("Unsupported recipient aliases data version.");
+  }
+
+  if (!Array.isArray(raw.aliases)) {
+    throw new Error("Invalid recipient aliases data file.");
+  }
+
+  const now = Date.now();
+  const seenIds = new Set<string>();
+  const seenNames = new Set<string>();
+  const aliases: NormalizedRecipientAliasTransferData["aliases"] = [];
+
+  raw.aliases.forEach((entry) => {
+    if (!entry || typeof entry !== "object") {
+      throw new Error("Invalid recipient aliases data file.");
+    }
+
+    const row = entry as Record<string, unknown>;
+    const id = typeof row.id === "string" ? row.id.trim() : "";
+    const name = normalizeAliasName(typeof row.name === "string" ? row.name : "");
+    const recipients = typeof row.recipients === "string" ? row.recipients.trim() : "";
+
+    if (!id || !name || !recipients) {
+      throw new Error("Invalid recipient aliases data file.");
+    }
+    if (seenIds.has(id)) {
+      throw new Error(`Duplicate recipient alias ID in recipient aliases data: ${id}`);
+    }
+
+    const normalizedName = name.toLowerCase();
+    if (seenNames.has(normalizedName)) {
+      throw new Error(`Duplicate recipient alias name in recipient aliases data: ${name}`);
+    }
+
+    seenIds.add(id);
+    seenNames.add(normalizedName);
+    aliases.push({
+      id,
+      name,
+      recipients,
+      normalizedRecipients: normalizeRecipientListForComparison(recipients),
+      createdAt: normalizeTransferTimestamp(row.createdAt, now),
+      updatedAt: normalizeTransferTimestamp(row.updatedAt, now)
+    });
+  });
+
+  return {
+    version: 1,
+    exportedAt: normalizeTransferTimestamp(raw.exportedAt, now),
+    aliases
+  };
+}
+
 export async function listRecipientAliases(accountId: string): Promise<RecipientAlias[]> {
   return withAccountDb(accountId, (db) => {
     const rows = db
@@ -76,6 +166,70 @@ export async function listRecipientAliases(accountId: string): Promise<Recipient
       .all(accountId) as RecipientAliasRow[];
     return rows.map(rowToRecipientAlias);
   });
+}
+
+export async function exportRecipientAliasTransferData(
+  accountId: string
+): Promise<RecipientAliasTransferData> {
+  const aliases = await listRecipientAliases(accountId);
+  return {
+    version: 1,
+    exportedAt: Date.now(),
+    aliases: aliases.map((alias) => ({
+      id: alias.id,
+      name: alias.name,
+      recipients: alias.recipients,
+      createdAt: alias.createdAt,
+      updatedAt: alias.updatedAt
+    }))
+  };
+}
+
+export async function importRecipientAliasTransferData(
+  accountId: string,
+  input: unknown
+): Promise<RecipientAliasTransferImportSummary> {
+  const data = normalizeRecipientAliasTransferData(input);
+
+  return withDbWriteRetry("importRecipientAliasTransferData", async () =>
+    withAccountDb(accountId, (db) => {
+      const clearRecipientAliases = db.prepare(`DELETE FROM recipient_aliases WHERE accountId = ?`);
+      const insertRecipientAlias = db.prepare(
+        `INSERT INTO recipient_aliases
+         (id, accountId, name, recipients, normalizedRecipients, createdAt, updatedAt)
+         VALUES (?, ?, ?, ?, ?, ?, ?)`
+      );
+
+      const applyImport = db.transaction(() => {
+        clearRecipientAliases.run(accountId);
+
+        data.aliases.forEach((alias) => {
+          insertRecipientAlias.run(
+            alias.id,
+            accountId,
+            alias.name,
+            alias.recipients,
+            alias.normalizedRecipients,
+            alias.createdAt,
+            alias.updatedAt
+          );
+        });
+
+        return {
+          aliasCount: data.aliases.length
+        };
+      });
+
+      try {
+        return applyImport() as RecipientAliasTransferImportSummary;
+      } catch (error) {
+        if (isUniqueConstraintError(error)) {
+          throw new Error("Recipient aliases data contains duplicate aliases.");
+        }
+        throw error;
+      }
+    })
+  );
 }
 
 export async function getRecipientAliasById(

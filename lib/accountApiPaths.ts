@@ -206,6 +206,10 @@ export function buildAccountRecipientAliasesPath(
   return appendQuery(buildAccountApiPath(accountId, "/recipient-aliases"), query);
 }
 
+export function buildAccountRecipientAliasTransferPath(accountId: string) {
+  return buildAccountApiPath(accountId, "/recipient-aliases/transfer");
+}
+
 export function buildAccountRecipientAliasPath(accountId: string, aliasId: string) {
   return buildAccountApiPath(
     accountId,

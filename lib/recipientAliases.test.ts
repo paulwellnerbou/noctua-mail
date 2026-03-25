@@ -5,6 +5,8 @@ import {
   RecipientAliasConflictError,
   createRecipientAlias,
   deleteRecipientAlias,
+  exportRecipientAliasTransferData,
+  importRecipientAliasTransferData,
   listRecipientAliases,
   listRecipientAutocompleteSuggestions,
   updateRecipientAlias
@@ -176,5 +178,75 @@ describe("recipient aliases", () => {
     const byRecipient = await listRecipientAutocompleteSuggestions(accountId, 10, "bob@example.test");
     expect(byRecipient).toHaveLength(1);
     expect(byRecipient[0]).toMatchObject({ kind: "alias", label: "Ukulelen-AG" });
+  });
+
+  test("exports aliases and imports them by replacing the target account aliases", async () => {
+    const sourceAccountId = "acc-recipient-alias-transfer-source";
+    const targetAccountId = "acc-recipient-alias-transfer-target";
+    const { upsertAccount } = await dbModulePromise;
+    await upsertAccount(buildAccount(sourceAccountId));
+    await upsertAccount(buildAccount(targetAccountId));
+
+    const first = await createRecipientAlias(
+      sourceAccountId,
+      "Dev Team",
+      "Alice <alice@example.test>, Bob <bob@example.test>"
+    );
+    const second = await createRecipientAlias(
+      sourceAccountId,
+      "Design Team",
+      "Carol <carol@example.test>"
+    );
+    await createRecipientAlias(targetAccountId, "Old Alias", "old@example.test");
+
+    const exported = await exportRecipientAliasTransferData(sourceAccountId);
+    expect(exported.version).toBe(1);
+    expect(exported.aliases.map((alias) => alias.name)).toEqual(["Design Team", "Dev Team"]);
+
+    const summary = await importRecipientAliasTransferData(targetAccountId, exported);
+    expect(summary).toEqual({ aliasCount: 2 });
+
+    const imported = await listRecipientAliases(targetAccountId);
+    expect(imported).toEqual([
+      {
+        ...second,
+        accountId: targetAccountId,
+        normalizedRecipients: "carol <carol@example.test>"
+      },
+      {
+        ...first,
+        accountId: targetAccountId,
+        normalizedRecipients: "alice <alice@example.test>, bob <bob@example.test>"
+      }
+    ]);
+  });
+
+  test("rejects imported alias files with duplicate alias names", async () => {
+    const accountId = "acc-recipient-alias-transfer-invalid";
+    const { upsertAccount } = await dbModulePromise;
+    await upsertAccount(buildAccount(accountId));
+
+    await expect(
+      importRecipientAliasTransferData(accountId, {
+        version: 1,
+        exportedAt: Date.UTC(2026, 2, 25, 9, 0, 0),
+        aliases: [
+          {
+            id: "alias-1",
+            name: "Mailing List",
+            recipients: "alpha@example.test",
+            createdAt: Date.UTC(2026, 2, 25, 9, 0, 0),
+            updatedAt: Date.UTC(2026, 2, 25, 9, 0, 0)
+          },
+          {
+            id: "alias-2",
+            name: "mailing list",
+            recipients: "beta@example.test",
+            createdAt: Date.UTC(2026, 2, 25, 9, 1, 0),
+            updatedAt: Date.UTC(2026, 2, 25, 9, 1, 0)
+          }
+        ]
+      })
+    ).rejects.toThrow("Duplicate recipient alias name in recipient aliases data: mailing list");
   });
 });

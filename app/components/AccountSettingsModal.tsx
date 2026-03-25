@@ -48,6 +48,7 @@ type Props = {
   readErrorMessage?: (res: Response) => Promise<string>;
   onTopicsChanged?: (topics: Topic[]) => void;
   recipientAliases?: RecipientAlias[];
+  onRecipientAliasesChanged?: (aliases: RecipientAlias[]) => void;
   onCreateRecipientAlias?: (name: string, recipients: string) => Promise<RecipientAlias>;
   onUpdateRecipientAlias?: (
     aliasId: string,
@@ -72,6 +73,7 @@ export default function AccountSettingsModal({
   readErrorMessage,
   onTopicsChanged,
   recipientAliases = [],
+  onRecipientAliasesChanged,
   onCreateRecipientAlias,
   onUpdateRecipientAlias,
   onDeleteRecipientAlias
@@ -326,8 +328,10 @@ export default function AccountSettingsModal({
               style={{ flex: "1 1 auto", minHeight: 0, overflow: "auto", padding: "var(--space-2)" }}
             >
               <RecipientAliasesTabContent
+                accountId={localAccount.id}
                 isExistingAccount={isExistingAccount}
                 aliases={recipientAliases}
+                apiFetch={apiFetch}
                 onCreateAlias={onCreateRecipientAlias ?? (async () => {
                   throw new Error("Recipient alias creation is unavailable.");
                 })}
@@ -337,6 +341,7 @@ export default function AccountSettingsModal({
                 onDeleteAlias={onDeleteRecipientAlias ?? (async () => {
                   throw new Error("Recipient alias deletion is unavailable.");
                 })}
+                onAliasesChanged={onRecipientAliasesChanged}
                 onClose={onClose}
               />
             </Tabs.Content>

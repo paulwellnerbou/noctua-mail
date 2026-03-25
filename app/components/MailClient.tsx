@@ -5761,6 +5761,7 @@ export default function MailClient({
             }
           }}
           recipientAliases={recipientAliases}
+          onRecipientAliasesChanged={setRecipientAliases}
           onCreateRecipientAlias={createRecipientAliasForAccount}
           onUpdateRecipientAlias={updateRecipientAliasForAccount}
           onDeleteRecipientAlias={deleteRecipientAliasForAccount}
