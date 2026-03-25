@@ -1,7 +1,13 @@
 /**
  * Shared helpers for message mutation operations (move, delete, etc.)
  */
-import type { Message } from "@/lib/data";
+import type { Folder, Message } from "@/lib/data";
+
+export type FolderTransferCountInput = {
+  fromFolderId: string;
+  toFolderId: string;
+  unread: boolean;
+};
 
 type CrossFolderThreadPruneOptions = {
   searchScope: "folder" | "all";
@@ -18,6 +24,46 @@ export function getMessageSubjectForNotice(message?: Message | null): string {
 
 export function getMessageThreadKey(message: Pick<Message, "threadId" | "messageId" | "id">) {
   return message.threadId ?? message.messageId ?? message.id;
+}
+
+export function applyFolderTransferCounts(
+  folders: Folder[],
+  transfers: FolderTransferCountInput[]
+) {
+  if (folders.length === 0 || transfers.length === 0) return folders;
+  const deltas = new Map<string, { count: number; unreadCount: number }>();
+  transfers.forEach((transfer) => {
+    if (!transfer.fromFolderId || !transfer.toFolderId || transfer.fromFolderId === transfer.toFolderId) {
+      return;
+    }
+    const sourceDelta = deltas.get(transfer.fromFolderId) ?? { count: 0, unreadCount: 0 };
+    sourceDelta.count -= 1;
+    if (transfer.unread) {
+      sourceDelta.unreadCount -= 1;
+    }
+    deltas.set(transfer.fromFolderId, sourceDelta);
+
+    const destinationDelta = deltas.get(transfer.toFolderId) ?? { count: 0, unreadCount: 0 };
+    destinationDelta.count += 1;
+    if (transfer.unread) {
+      destinationDelta.unreadCount += 1;
+    }
+    deltas.set(transfer.toFolderId, destinationDelta);
+  });
+  if (deltas.size === 0) return folders;
+
+  let changed = false;
+  const nextFolders = folders.map((folder) => {
+    const delta = deltas.get(folder.id);
+    if (!delta) return folder;
+    changed = true;
+    return {
+      ...folder,
+      count: Math.max(0, (folder.count ?? 0) + delta.count),
+      unreadCount: Math.max(0, (folder.unreadCount ?? 0) + delta.unreadCount)
+    };
+  });
+  return changed ? nextFolders : folders;
 }
 
 export function pruneDetachedCrossFolderThreadMessages(

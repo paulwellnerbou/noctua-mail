@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   diffLocalAndRemoteFolderUids,
   diffLocalAndRemoteWithFlags,
+  filterMissingRemoteUidsForPendingMoves,
   isGoogleCalendarSyncMessage,
   partitionMissingRemoteUids,
   resolveOrphanedMessageFileRefs,
@@ -104,6 +105,24 @@ describe("diffLocalAndRemoteWithFlags", () => {
     );
 
     expect(diff.flagUpdates).toEqual([{ id: "msg-1", flags: ["\\Seen"] }]);
+  });
+});
+
+describe("filterMissingRemoteUidsForPendingMoves", () => {
+  test("excludes pending move source UIDs from sync backfill", () => {
+    const filtered = filterMissingRemoteUidsForPendingMoves([10, 11, 12], new Set([11]));
+
+    expect(filtered).toEqual([10, 12]);
+  });
+
+  test("returns the original UID list when there are no pending moves", () => {
+    const missingRemoteUids = [20, 21];
+    const filtered = filterMissingRemoteUidsForPendingMoves(
+      missingRemoteUids,
+      new Set()
+    );
+
+    expect(filtered).toBe(missingRemoteUids);
   });
 });
 

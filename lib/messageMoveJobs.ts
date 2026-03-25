@@ -1,5 +1,5 @@
 import { getAccounts, updateMessageFolder } from "@/lib/db";
-import { moveImapMessage } from "@/lib/mail/imap";
+import { moveImapMessages } from "@/lib/mail/imap";
 
 export type QueuedMessageMove = {
   accountId: string;
@@ -15,8 +15,8 @@ export type QueuedMessageMove = {
 type AccountMoveState = {
   running: boolean;
   tasks: QueuedMessageMove[];
-  /** Task currently being processed (removed from tasks, not yet completed). */
-  inFlight: QueuedMessageMove | null;
+  inFlight: QueuedMessageMove[];
+  runningPromise: Promise<void> | null;
 };
 
 type MessageMoveRuntimeState = {
@@ -34,13 +34,40 @@ if (!runtimeState.__noctuaMessageMoveJobsState) {
 }
 
 const accountStates = runtimeState.__noctuaMessageMoveJobsState.accountStates;
+const MOVE_BATCH_SIZE = 200;
 
 function getOrCreateAccountState(accountId: string) {
   const existing = accountStates.get(accountId);
   if (existing) return existing;
-  const created: AccountMoveState = { running: false, tasks: [], inFlight: null };
+  const created: AccountMoveState = {
+    running: false,
+    tasks: [],
+    inFlight: [],
+    runningPromise: null
+  };
   accountStates.set(accountId, created);
   return created;
+}
+
+function getTaskPairKey(task: QueuedMessageMove) {
+  return `${task.sourceMailboxPath}\u0000${task.destinationMailboxPath}`;
+}
+
+function takeNextTaskBatch(state: AccountMoveState) {
+  const head = state.tasks.shift();
+  if (!head) return [] as QueuedMessageMove[];
+  const pairKey = getTaskPairKey(head);
+  const batch = [head];
+  for (let index = 0; index < state.tasks.length && batch.length < MOVE_BATCH_SIZE; ) {
+    const candidate = state.tasks[index];
+    if (getTaskPairKey(candidate) !== pairKey) {
+      index += 1;
+      continue;
+    }
+    batch.push(candidate);
+    state.tasks.splice(index, 1);
+  }
+  return batch;
 }
 
 async function rollbackMessageMove(task: QueuedMessageMove) {
@@ -61,81 +88,69 @@ async function rollbackMessageMove(task: QueuedMessageMove) {
   }
 }
 
+async function rollbackMessageMoveBatch(tasks: QueuedMessageMove[]) {
+  await Promise.all(tasks.map((task) => rollbackMessageMove(task)));
+}
+
 async function processAccountQueue(accountId: string, state: AccountMoveState) {
   if (state.running) return;
   state.running = true;
   try {
     while (state.tasks.length > 0) {
-      const task = state.tasks.shift();
-      if (!task) continue;
-      state.inFlight = task;
+      const batch = takeNextTaskBatch(state);
+      if (batch.length === 0) continue;
+      state.inFlight = batch;
+
       const accounts = await getAccounts();
       const account = accounts.find((item) => item.id === accountId);
       if (!account) {
-        state.inFlight = null;
-        await rollbackMessageMove(task);
+        state.inFlight = [];
+        await rollbackMessageMoveBatch(batch);
         continue;
       }
+
       try {
-        const destinationUid = await moveImapMessage(
+        const uidMap = await moveImapMessages(
           account,
-          task.sourceMailboxPath,
-          task.sourceUid,
-          task.destinationMailboxPath,
-          task.clientId
+          batch[0]!.sourceMailboxPath,
+          batch.map((task) => task.sourceUid),
+          batch[0]!.destinationMailboxPath,
+          batch[0]!.clientId
         );
-        await updateMessageFolder(
-          task.accountId,
-          task.messageId,
-          task.destinationFolderId,
-          task.destinationMailboxPath,
-          destinationUid ?? null
+        await Promise.all(
+          batch.map((task) =>
+            updateMessageFolder(
+              task.accountId,
+              task.messageId,
+              task.destinationFolderId,
+              task.destinationMailboxPath,
+              uidMap.get(task.sourceUid) ?? null
+            )
+          )
         );
       } catch (error) {
-        console.warn("[move-jobs] failed to move IMAP message", {
-          accountId: task.accountId,
-          messageId: task.messageId,
-          sourceMailboxPath: task.sourceMailboxPath,
-          sourceUid: task.sourceUid,
-          destinationMailboxPath: task.destinationMailboxPath,
+        console.warn("[move-jobs] failed to move IMAP message batch", {
+          accountId,
+          messageIds: batch.map((task) => task.messageId),
+          sourceMailboxPath: batch[0]?.sourceMailboxPath,
+          sourceUidSample: batch.slice(0, 20).map((task) => task.sourceUid),
+          destinationMailboxPath: batch[0]?.destinationMailboxPath,
           error
         });
-        await rollbackMessageMove(task);
+        await rollbackMessageMoveBatch(batch);
       } finally {
-        state.inFlight = null;
+        state.inFlight = [];
       }
     }
   } finally {
     state.running = false;
+    state.runningPromise = null;
     if (state.tasks.length === 0) {
       accountStates.delete(accountId);
+      return;
     }
+    state.runningPromise = processAccountQueue(accountId, state);
   }
-}
-
-/**
- * Returns IMAP UIDs that are queued or currently in-flight for move OUT of the
- * given source folder. Used by two-phase sync to avoid re-downloading messages
- * that have been staged for move but not yet IMAP-moved (the IMAP server still
- * has them, but the local DB no longer associates them with the source folder).
- */
-export function getPendingMoveSourceUids(
-  accountId: string,
-  sourceFolderId: string
-): Set<number> {
-  const state = accountStates.get(accountId);
-  if (!state) return new Set();
-  const uids = new Set<number>();
-  // Include the currently-processing task (already shifted from the queue)
-  if (state.inFlight?.sourceFolderId === sourceFolderId) {
-    uids.add(state.inFlight.sourceUid);
-  }
-  state.tasks.forEach((task) => {
-    if (task.sourceFolderId === sourceFolderId) {
-      uids.add(task.sourceUid);
-    }
-  });
-  return uids;
 }
 
 export function enqueueMessageMoveJobs(tasks: QueuedMessageMove[]) {
@@ -149,6 +164,7 @@ export function enqueueMessageMoveJobs(tasks: QueuedMessageMove[]) {
       byAccount.set(task.accountId, [task]);
     }
   });
+
   byAccount.forEach((accountTasks, accountId) => {
     const state = getOrCreateAccountState(accountId);
     accountTasks.forEach((task) => {
@@ -159,6 +175,12 @@ export function enqueueMessageMoveJobs(tasks: QueuedMessageMove[]) {
         state.tasks.push(task);
       }
     });
-    void processAccountQueue(accountId, state);
+    if (!state.runningPromise) {
+      state.runningPromise = processAccountQueue(accountId, state);
+    }
   });
+}
+
+export async function waitForMessageMoveJobsIdle(accountId: string) {
+  await accountStates.get(accountId)?.runningPromise;
 }

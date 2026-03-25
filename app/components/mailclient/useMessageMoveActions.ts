@@ -3,10 +3,11 @@
 import type React from "react";
 import { useCallback } from "react";
 import { buildAccountMessagesActionPath } from "@/lib/accountApiPaths";
-import type { Message } from "@/lib/data";
+import type { Folder, Message } from "@/lib/data";
 import type { SelectionStore } from "./messagelist/selectionStore";
 import type { ThreadMoveRequest } from "./utils/messageMove";
 import {
+  applyFolderTransferCounts,
   getMessageSubjectForNotice,
   pruneDetachedCrossFolderThreadMessages,
   remapMessageReferenceIds
@@ -68,6 +69,7 @@ type UseMessageMoveActionsOptions = {
   selectionStore: SelectionStore;
   folderById: Map<string, { name: string }>;
   lastSelectedIdRef: React.MutableRefObject<string | null>;
+  setFolders: React.Dispatch<React.SetStateAction<Folder[]>>;
   setMessages: React.Dispatch<React.SetStateAction<Message[]>>;
   shouldKeepMessageInResults?: (message: Message) => boolean;
   setPendingMessageActions: React.Dispatch<React.SetStateAction<Set<string>>>;
@@ -124,6 +126,7 @@ export function useMessageMoveActions({
   selectionStore,
   folderById,
   lastSelectedIdRef,
+  setFolders,
   setMessages,
   shouldKeepMessageInResults,
   setPendingMessageActions,
@@ -234,6 +237,16 @@ export function useMessageMoveActions({
         const mappedUndoTargets =
           responseUndoTargets.length > 0 ? responseUndoTargets : fallbackUndoTargets;
         markMessagesMutated?.();
+        setFolders((prev) =>
+          applyFolderTransferCounts(
+            prev,
+            sourceTargets.map((message) => ({
+              fromFolderId: message.folderId,
+              toFolderId: data.destinationFolderId,
+              unread: Boolean(message.unread ?? !message.seen)
+            }))
+          )
+        );
         setMessages((prev) => {
           let changed = false;
           const nextById = new Map<string, Message>();
@@ -389,6 +402,7 @@ export function useMessageMoveActions({
       shouldKeepMessageInResults,
       setActiveMessageId,
       setViewMessage,
+      setFolders,
       setMessages,
       setPendingMessageActions,
       undoMoveOperation,

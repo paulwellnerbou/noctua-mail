@@ -105,7 +105,7 @@ describe("list selection behavior", () => {
     expect(target.id).toBe("m2");
   });
 
-  it("uses visible rows for range selection and includes nested rows when expanded", () => {
+  it("uses visible rows for range selection, expanding collapsed roots and including expanded rows", () => {
     const m1 = makeMessage("m1", 1000);
     const m2 = makeMessage("m2", 2000);
     const m3 = makeMessage("m3", 3000);
@@ -124,13 +124,15 @@ describe("list selection behavior", () => {
       lastSelectedId,
       indexMap: collapsedIndexMap,
       visibleMessages: collapsedVisible,
+      collapsedThreads: { "thread-1": true, "thread-2": true },
+      threadScopeMessages: [m1, m2, m3, m4],
       selectionStore: store,
       setLastSelectedId: (id) => {
         lastSelectedId = id;
       }
     });
 
-    expect(Array.from(store.getIds()).sort()).toEqual(["m1", "m4"]);
+    expect(Array.from(store.getIds()).sort()).toEqual(["m1", "m2", "m3", "m4"]);
     expect(lastSelectedId).toBe("m4");
 
     const expandedVisible: VisibleMessageEntry[] = [
@@ -147,6 +149,8 @@ describe("list selection behavior", () => {
       lastSelectedId,
       indexMap: expandedIndexMap,
       visibleMessages: expandedVisible,
+      collapsedThreads: { "thread-1": false, "thread-2": true },
+      threadScopeMessages: [m1, m2, m3, m4],
       selectionStore: store,
       setLastSelectedId: (id) => {
         lastSelectedId = id;
@@ -154,6 +158,69 @@ describe("list selection behavior", () => {
     });
 
     expect(Array.from(store.getIds()).sort()).toEqual(["m1", "m2", "m3", "m4"]);
+  });
+
+  it("expands a collapsed thread anchor to the full thread during shift range selection", () => {
+    const root = makeMessage("root", 1000, { threadId: "thread-1" });
+    const child = makeMessage("child", 2000, { threadId: "thread-1", parentId: "root" });
+    const later = makeMessage("later", 3000, { threadId: "thread-2" });
+    const store = createSelectionStore(null);
+    let lastSelectedId: string | null = "root";
+
+    const visibleMessages: VisibleMessageEntry[] = [
+      { message: root, depth: 0, threadId: "thread-1" },
+      { message: later, depth: 0, threadId: "thread-2" }
+    ];
+    const indexMap = new Map(visibleMessages.map((item, index) => [item.message.id, index]));
+
+    selectRangeToMessage({
+      messageId: "later",
+      lastSelectedId,
+      indexMap,
+      visibleMessages,
+      collapsedThreads: { "thread-1": true, "thread-2": true },
+      threadScopeMessages: [root, child, later],
+      selectionStore: store,
+      setLastSelectedId: (id) => {
+        lastSelectedId = id;
+      }
+    });
+
+    expect(Array.from(store.getIds()).sort()).toEqual(["child", "later", "root"]);
+    expect(lastSelectedId).toBe("later");
+  });
+
+  it("expands every collapsed thread root inside a visible range selection", () => {
+    const a1 = makeMessage("a1", 1000, { threadId: "thread-a" });
+    const a2 = makeMessage("a2", 1100, { threadId: "thread-a", parentId: "a1" });
+    const mid = makeMessage("mid", 2000, { threadId: "thread-mid" });
+    const b1 = makeMessage("b1", 3000, { threadId: "thread-b" });
+    const b2 = makeMessage("b2", 3100, { threadId: "thread-b", parentId: "b1" });
+    const store = createSelectionStore(null);
+    let lastSelectedId: string | null = "a1";
+
+    const visibleMessages: VisibleMessageEntry[] = [
+      { message: a1, depth: 0, threadId: "thread-a" },
+      { message: mid, depth: 0, threadId: "thread-mid" },
+      { message: b1, depth: 0, threadId: "thread-b" }
+    ];
+    const indexMap = new Map(visibleMessages.map((item, index) => [item.message.id, index]));
+
+    selectRangeToMessage({
+      messageId: "b1",
+      lastSelectedId,
+      indexMap,
+      visibleMessages,
+      collapsedThreads: { "thread-a": true, "thread-mid": true, "thread-b": true },
+      threadScopeMessages: [a1, a2, mid, b1, b2],
+      selectionStore: store,
+      setLastSelectedId: (id) => {
+        lastSelectedId = id;
+      }
+    });
+
+    expect(Array.from(store.getIds()).sort()).toEqual(["a1", "a2", "b1", "b2", "mid"]);
+    expect(lastSelectedId).toBe("b1");
   });
 });
 

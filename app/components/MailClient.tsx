@@ -194,6 +194,7 @@ import {
   type MoveTargetRequest
 } from "./mailclient/utils/messageMove";
 import {
+  applyFolderTransferCounts,
   getMessageSubjectForNotice,
   pruneDetachedCrossFolderThreadMessages,
   remapMessageReferenceIds
@@ -1099,6 +1100,22 @@ export default function MailClient({
           return;
         }
       }
+      setFolders((prev) =>
+        applyFolderTransferCounts(
+          prev,
+          targets.flatMap((target) => {
+            const message = messageById.get(target.messageId);
+            if (!message) return [];
+            return [
+              {
+                fromFolderId: message.folderId,
+                toFolderId: target.restoreFolderId,
+                unread: Boolean(message.unread ?? !message.seen)
+              }
+            ];
+          })
+        )
+      );
       evictMessageCaches(targets.map((target) => target.messageId));
       await refreshFolders();
       if (accountId === activeAccountId) {
@@ -2333,6 +2350,8 @@ export default function MailClient({
     lastSelectedIdRef,
     visibleIndexByIdRef,
     visibleMessagesRef,
+    collapsedThreads,
+    threadScopeMessages,
     activeMessageId,
     setActiveMessageId,
     messageById,
@@ -2999,6 +3018,7 @@ export default function MailClient({
     selectionStore,
     folderById,
     lastSelectedIdRef,
+    setFolders,
     setMessages,
     shouldKeepMessageInResults: shouldKeepMessageInCurrentResults,
     setPendingMessageActions,

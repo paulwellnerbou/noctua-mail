@@ -18,6 +18,8 @@ type UseMessageListSelectionControllerParams = {
   lastSelectedIdRef: React.MutableRefObject<string | null>;
   visibleIndexByIdRef: React.MutableRefObject<Map<string, number>>;
   visibleMessagesRef: React.MutableRefObject<VisibleMessageEntry[]>;
+  collapsedThreads: Record<string, boolean>;
+  threadScopeMessages: Message[];
   activeMessageId: string;
   setActiveMessageId: React.Dispatch<React.SetStateAction<string>>;
   messageById: Map<string, Message>;
@@ -30,6 +32,8 @@ export function useMessageListSelectionController({
   lastSelectedIdRef,
   visibleIndexByIdRef,
   visibleMessagesRef,
+  collapsedThreads,
+  threadScopeMessages,
   activeMessageId,
   setActiveMessageId,
   messageById,
@@ -50,13 +54,23 @@ export function useMessageListSelectionController({
         lastSelectedId: lastSelectedIdRef.current,
         indexMap: visibleIndexByIdRef.current,
         visibleMessages: visibleMessagesRef.current,
+        collapsedThreads,
+        threadScopeMessages,
         selectionStore,
         setLastSelectedId: (id) => {
           setLastSelectedIdRef(id);
         }
       });
     },
-    [lastSelectedIdRef, selectionStore, setLastSelectedIdRef, visibleIndexByIdRef, visibleMessagesRef]
+    [
+      collapsedThreads,
+      lastSelectedIdRef,
+      selectionStore,
+      setLastSelectedIdRef,
+      threadScopeMessages,
+      visibleIndexByIdRef,
+      visibleMessagesRef
+    ]
   );
 
   const clearSelection = useCallback(() => {
@@ -153,7 +167,7 @@ export function useMessageListSelectionController({
         options
       });
       selectionStore.setSelection(new Set([effectiveTarget.id]), effectiveTarget.id);
-      setLastSelectedIdRef(effectiveTarget.id);
+      setLastSelectedIdRef(target.id);
       handleSelectMessage(effectiveTarget, { preserveSelection: true });
     },
     [handleSelectMessage, isFlaggedMessage, selectionStore, setLastSelectedIdRef]

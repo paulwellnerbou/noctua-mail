@@ -4,6 +4,7 @@ import type { ListRowItem, VisibleMessageEntry } from "./listModel";
 import { getThreadSelectionState } from "./listModel";
 import { logListDebug, summarizeMessageForListDebug } from "./listDebug";
 import type { SelectionStore } from "./selectionStore";
+import { getCollapsedRootThreadMessageIds as getCollapsedRootThreadMessageIdsFromSelection } from "./listSelection";
 import {
   getDisplaySeenForThreadRow,
   getThreadMessagesForThreadRow,
@@ -210,48 +211,7 @@ export function getCollapsedRootThreadMessageIds(params: {
   collapsedThreads: Record<string, boolean>;
   threadScopeMessages: Message[];
 }) {
-  const { selectedIds, visibleMessages, collapsedThreads, threadScopeMessages } = params;
-  if (selectedIds.length === 0) return null;
-
-  const visibleThreadIdByMessageId = new Map<string, string>();
-  const collapsedVisibleThreadIds = new Set<string>();
-  visibleMessages.forEach((item) => {
-    visibleThreadIdByMessageId.set(item.message.id, item.threadId);
-    if (item.depth !== 0) return;
-    const isThreadCollapsed = collapsedThreads[item.threadId] ?? true;
-    if (!isThreadCollapsed) return;
-    collapsedVisibleThreadIds.add(item.threadId);
-  });
-
-  const threadIdByMessageId = new Map<string, string>();
-  const messageIdsByThreadId = new Map<string, string[]>();
-  threadScopeMessages.forEach((message) => {
-    const threadId = message.threadId ?? message.messageId ?? message.id;
-    threadIdByMessageId.set(message.id, threadId);
-    const list = messageIdsByThreadId.get(threadId);
-    if (list) {
-      list.push(message.id);
-    } else {
-      messageIdsByThreadId.set(threadId, [message.id]);
-    }
-  });
-
-  const expandedIds = new Set(selectedIds);
-  let hasCollapsedRootSelection = false;
-
-  selectedIds.forEach((selectedId) => {
-    const threadId =
-      visibleThreadIdByMessageId.get(selectedId) ?? threadIdByMessageId.get(selectedId);
-    if (!threadId) return;
-    if (!collapsedVisibleThreadIds.has(threadId)) return;
-    const threadMessageIds = messageIdsByThreadId.get(threadId) ?? [];
-    if (threadMessageIds.length <= 1) return;
-    hasCollapsedRootSelection = true;
-    threadMessageIds.forEach((id) => expandedIds.add(id));
-  });
-
-  if (!hasCollapsedRootSelection) return null;
-  return Array.from(expandedIds);
+  return getCollapsedRootThreadMessageIdsFromSelection(params);
 }
 
 export function getThreadRowSelectionMeta(params: {

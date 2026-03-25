@@ -60,6 +60,7 @@ export default function MessageCardList({
   const {
     setCollapsedGroups,
     setCollapsedThreads,
+    setLastSelectedIdRef,
     handleMessageDragStart,
     handleMessageDragEnd,
     handleRowClick,
@@ -348,7 +349,8 @@ export default function MessageCardList({
                   isThreadSelectionAllSelected,
                   selectionStore,
                   selectRangeTo,
-                  toggleMessageSelection
+                  toggleMessageSelection,
+                  setLastSelectedIdRef
                 });
               }}
               checkboxState={checkboxState}

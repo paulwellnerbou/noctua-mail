@@ -7,6 +7,7 @@ import {
   listFullyProcessedCalendarInviteMessageIds,
   listMessageFileRefs,
   listFolderMessageUidAndFlagRows,
+  getPendingMoveSourceUids,
   recomputeCategoriesForAccount,
   recomputeThreadsForAccount,
   getMessageIdsByMessageIds,
@@ -23,7 +24,6 @@ import { extractPrimaryEmail, normalizeEmailAddress } from "@/lib/senderIdentity
 import type { SyncMode } from "@/lib/syncPolicy";
 import { deleteMessageFiles } from "@/lib/storage";
 import { listImapMailboxUidsAndFlags, syncImapAccountBatched } from "@/lib/mail/imap";
-import { getPendingMoveSourceUids } from "@/lib/messageMoveJobs";
 import { reconcileVerifiedCrossFolderMoves } from "@/lib/syncMoveReconciliation";
 import { collectThreadReferenceIds, resolveThreadingForItems } from "@/lib/threading";
 export type { SyncMode } from "@/lib/syncPolicy";
@@ -156,6 +156,14 @@ export function diffLocalAndRemoteWithFlags(
   }
 
   return { staleMessageIds, missingRemoteUids, flagUpdates };
+}
+
+export function filterMissingRemoteUidsForPendingMoves(
+  missingRemoteUids: number[],
+  pendingMoveSourceUids: Set<number>
+) {
+  if (pendingMoveSourceUids.size === 0) return missingRemoteUids;
+  return missingRemoteUids.filter((uid) => !pendingMoveSourceUids.has(uid));
 }
 
 export function partitionMissingRemoteUids(
@@ -363,11 +371,11 @@ export async function runSyncOperationBatched(
     const repairDiff = diffLocalAndRemoteWithFlags(localRows, remoteSnapshot.entries);
 
     // Exclude UIDs queued for move out of this folder (same reason as two-phase sync).
-    const repairPendingMoveUids = getPendingMoveSourceUids(account.id, payload.folderId);
-    const missingRemoteUids =
-      repairPendingMoveUids.size > 0
-        ? repairDiff.missingRemoteUids.filter((uid) => !repairPendingMoveUids.has(uid))
-        : repairDiff.missingRemoteUids;
+    const repairPendingMoveUids = await getPendingMoveSourceUids(account.id, payload.folderId);
+    const missingRemoteUids = filterMissingRemoteUidsForPendingMoves(
+      repairDiff.missingRemoteUids,
+      repairPendingMoveUids
+    );
     const { staleMessageIds, flagUpdates } = repairDiff;
 
     const highestLocalUid =
@@ -487,11 +495,11 @@ export async function runSyncOperationBatched(
     // longer associated with this folder in the local DB. Without this filter,
     // the sync would re-download them as "new" messages, causing them to
     // briefly reappear in the message list after deletion/move.
-    const pendingMoveUids = getPendingMoveSourceUids(account.id, twoPhaseFolderId);
-    const missingRemoteUids =
-      pendingMoveUids.size > 0
-        ? diff.missingRemoteUids.filter((uid) => !pendingMoveUids.has(uid))
-        : diff.missingRemoteUids;
+    const pendingMoveUids = await getPendingMoveSourceUids(account.id, twoPhaseFolderId);
+    const missingRemoteUids = filterMissingRemoteUidsForPendingMoves(
+      diff.missingRemoteUids,
+      pendingMoveUids
+    );
     const { staleMessageIds, flagUpdates } = diff;
 
     // For full sync, delete messages that no longer exist on the server.

@@ -786,6 +786,10 @@ function initAccountSchema(db: any) {
       bccAddr TEXT,
       mailboxPath TEXT,
       imapUid INTEGER,
+      pendingMoveSourceFolderId TEXT,
+      pendingMoveSourceMailboxPath TEXT,
+      pendingMoveSourceUid INTEGER,
+      pendingMoveStartedAt INTEGER,
       preview TEXT NOT NULL,
       date TEXT NOT NULL,
       dateValue INTEGER NOT NULL,
@@ -1063,6 +1067,24 @@ function initAccountSchema(db: any) {
   if (!messageColumns.has("quotedHtmlEdited")) {
     db.prepare(`ALTER TABLE messages ADD COLUMN quotedHtmlEdited INTEGER DEFAULT 0`).run();
   }
+  if (!messageColumns.has("pendingMoveSourceFolderId")) {
+    db.prepare(`ALTER TABLE messages ADD COLUMN pendingMoveSourceFolderId TEXT`).run();
+  }
+  if (!messageColumns.has("pendingMoveSourceMailboxPath")) {
+    db.prepare(`ALTER TABLE messages ADD COLUMN pendingMoveSourceMailboxPath TEXT`).run();
+  }
+  if (!messageColumns.has("pendingMoveSourceUid")) {
+    db.prepare(`ALTER TABLE messages ADD COLUMN pendingMoveSourceUid INTEGER`).run();
+  }
+  if (!messageColumns.has("pendingMoveStartedAt")) {
+    db.prepare(`ALTER TABLE messages ADD COLUMN pendingMoveStartedAt INTEGER`).run();
+  }
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_messages_account_pending_move_source
+      ON messages(accountId, pendingMoveSourceFolderId, pendingMoveSourceUid);
+    CREATE INDEX IF NOT EXISTS idx_messages_account_pending_move_destination
+      ON messages(accountId, folderId, pendingMoveSourceFolderId);
+  `);
   ensureThreadOptionalColumns(db);
   ensureMessageCalendarEventOptionalColumns(db);
 
@@ -7245,6 +7267,49 @@ export async function getLatestMessageUid(accountId: string, mailboxPath?: strin
   return typeof row?.maxUid === "number" ? row.maxUid : null;
 }
 
+export async function getPendingMoveSourceUids(accountId: string, sourceFolderId: string) {
+  const normalizedSourceFolderId = sourceFolderId.trim();
+  if (!normalizedSourceFolderId) return new Set<number>();
+  const db = await getAccountDb(accountId);
+  const rows = db
+    .prepare(
+      `SELECT pendingMoveSourceUid
+       FROM messages
+       WHERE accountId = ?
+         AND pendingMoveSourceFolderId = ?
+         AND pendingMoveSourceUid IS NOT NULL`
+    )
+    .all(accountId, normalizedSourceFolderId) as Array<{
+    pendingMoveSourceUid?: number | null;
+  }>;
+  return new Set(
+    rows
+      .map((row) => row.pendingMoveSourceUid)
+      .filter((uid): uid is number => typeof uid === "number" && Number.isFinite(uid))
+  );
+}
+
+export async function hasPendingMovesForFolder(accountId: string, folderId: string) {
+  const normalizedFolderId = folderId.trim();
+  if (!normalizedFolderId) return false;
+  const db = await getAccountDb(accountId);
+  const row = db
+    .prepare(
+      `SELECT 1
+       FROM messages
+       WHERE accountId = ?
+         AND (
+           pendingMoveSourceFolderId = ?
+           OR (folderId = ? AND pendingMoveSourceFolderId IS NOT NULL)
+         )
+       LIMIT 1`
+    )
+    .get(accountId, normalizedFolderId, normalizedFolderId) as
+    | { 1?: number }
+    | undefined;
+  return Boolean(row);
+}
+
 export async function updateMessageFolder(
   accountId: string,
   messageId: string,
@@ -7257,7 +7322,13 @@ export async function updateMessageFolder(
     if (imapUid === null) {
       db.prepare(
         `UPDATE messages
-         SET folderId = ?, mailboxPath = ?, imapUid = NULL
+         SET folderId = ?,
+             mailboxPath = ?,
+             imapUid = NULL,
+             pendingMoveSourceFolderId = NULL,
+             pendingMoveSourceMailboxPath = NULL,
+             pendingMoveSourceUid = NULL,
+             pendingMoveStartedAt = NULL
          WHERE accountId = ? AND id = ?`
       ).run(folderId, mailboxPath, accountId, messageId);
       return;
@@ -7265,13 +7336,26 @@ export async function updateMessageFolder(
     if (typeof imapUid === "number" && Number.isFinite(imapUid)) {
       db.prepare(
         `UPDATE messages
-         SET folderId = ?, mailboxPath = ?, imapUid = ?
+         SET folderId = ?,
+             mailboxPath = ?,
+             imapUid = ?,
+             pendingMoveSourceFolderId = NULL,
+             pendingMoveSourceMailboxPath = NULL,
+             pendingMoveSourceUid = NULL,
+             pendingMoveStartedAt = NULL
          WHERE accountId = ? AND id = ?`
       ).run(folderId, mailboxPath, imapUid, accountId, messageId);
       return;
     }
     db.prepare(
-      `UPDATE messages SET folderId = ?, mailboxPath = ? WHERE accountId = ? AND id = ?`
+      `UPDATE messages
+       SET folderId = ?,
+           mailboxPath = ?,
+           pendingMoveSourceFolderId = NULL,
+           pendingMoveSourceMailboxPath = NULL,
+           pendingMoveSourceUid = NULL,
+           pendingMoveStartedAt = NULL
+       WHERE accountId = ? AND id = ?`
     ).run(folderId, mailboxPath, accountId, messageId);
   });
 }
@@ -7296,9 +7380,10 @@ export async function stageMessageMoves(params: {
   if (uniqueIds.length === 0) return [] as StagedMessageMove[];
   return withDbWriteRetry("stageMessageMoves", async () => {
     const db = await getAccountDb(accountId);
+    const pendingMoveStartedAt = Date.now();
     const rows = db
       .prepare(
-        `SELECT id, folderId, mailboxPath, imapUid
+        `SELECT id, folderId, mailboxPath, imapUid, pendingMoveSourceFolderId
          FROM messages
          WHERE accountId = ? AND id IN (${uniqueIds.map(() => "?").join(",")})`
       )
@@ -7307,10 +7392,17 @@ export async function stageMessageMoves(params: {
       folderId: string;
       mailboxPath?: string | null;
       imapUid?: number | null;
+      pendingMoveSourceFolderId?: string | null;
     }>;
     const updateMessage = db.prepare(
       `UPDATE messages
-       SET folderId = ?, mailboxPath = ?, imapUid = NULL
+       SET folderId = ?,
+           mailboxPath = ?,
+           imapUid = NULL,
+           pendingMoveSourceFolderId = ?,
+           pendingMoveSourceMailboxPath = ?,
+           pendingMoveSourceUid = ?,
+           pendingMoveStartedAt = ?
        WHERE accountId = ? AND id = ?`
     );
     const staged: StagedMessageMove[] = [];
@@ -7330,7 +7422,19 @@ export async function stageMessageMoves(params: {
         ) {
           return;
         }
-        updateMessage.run(destinationFolderId, destinationMailboxPath, accountId, row.id);
+        if (row.pendingMoveSourceFolderId) {
+          return;
+        }
+        updateMessage.run(
+          destinationFolderId,
+          destinationMailboxPath,
+          row.folderId,
+          row.mailboxPath,
+          row.imapUid,
+          pendingMoveStartedAt,
+          accountId,
+          row.id
+        );
         staged.push({
           messageId: row.id,
           sourceFolderId: row.folderId,
@@ -7382,13 +7486,25 @@ export async function relocateMovedMessage(params: {
     if (destinationUid === null) {
       db.prepare(
         `UPDATE messages
-         SET folderId = ?, mailboxPath = ?, imapUid = NULL
+         SET folderId = ?,
+             mailboxPath = ?,
+             imapUid = NULL,
+             pendingMoveSourceFolderId = NULL,
+             pendingMoveSourceMailboxPath = NULL,
+             pendingMoveSourceUid = NULL,
+             pendingMoveStartedAt = NULL
          WHERE accountId = ? AND id = ?`
       ).run(destinationFolderId, destinationMailboxPath, accountId, normalizedPreviousId);
     } else if (typeof destinationUid === "number" && Number.isFinite(destinationUid)) {
       db.prepare(
         `UPDATE messages
-         SET folderId = ?, mailboxPath = ?, imapUid = ?
+         SET folderId = ?,
+             mailboxPath = ?,
+             imapUid = ?,
+             pendingMoveSourceFolderId = NULL,
+             pendingMoveSourceMailboxPath = NULL,
+             pendingMoveSourceUid = NULL,
+             pendingMoveStartedAt = NULL
          WHERE accountId = ? AND id = ?`
       ).run(
         destinationFolderId,
@@ -7400,7 +7516,12 @@ export async function relocateMovedMessage(params: {
     } else {
       db.prepare(
         `UPDATE messages
-         SET folderId = ?, mailboxPath = ?
+         SET folderId = ?,
+             mailboxPath = ?,
+             pendingMoveSourceFolderId = NULL,
+             pendingMoveSourceMailboxPath = NULL,
+             pendingMoveSourceUid = NULL,
+             pendingMoveStartedAt = NULL
          WHERE accountId = ? AND id = ?`
       ).run(destinationFolderId, destinationMailboxPath, accountId, normalizedPreviousId);
     }

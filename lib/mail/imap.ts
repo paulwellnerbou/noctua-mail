@@ -2041,13 +2041,19 @@ export async function appendImapMessage(
   }
 }
 
-export async function moveImapMessage(
+export async function moveImapMessages(
   account: Account,
   mailboxPath: string,
-  uid: number,
+  uids: number[],
   destination: string,
   clientId?: string
-): Promise<number | null> {
+): Promise<Map<number, number | null>> {
+  const normalizedUids = Array.from(
+    new Set(uids.filter((uid) => Number.isFinite(uid) && uid > 0))
+  );
+  if (normalizedUids.length === 0) {
+    return new Map<number, number | null>();
+  }
   const logContext = buildLogContext(account, clientId);
   const client = buildImapClient(account, logContext);
 
@@ -2060,14 +2066,25 @@ export async function moveImapMessage(
     );
     const result = await logImapOp(
       "messageMove",
-      { mailbox: mailboxPath, uid, destination, ...logContext },
-      () => client.messageMove(uid, destination, { uid: true })
+      {
+        mailbox: mailboxPath,
+        uidCount: normalizedUids.length,
+        uidSample: normalizedUids.slice(0, 20),
+        destination,
+        ...logContext
+      },
+      () => client.messageMove(normalizedUids, destination, { uid: true })
     );
-    const destinationUid =
+    const destinationUidMap =
       result && typeof result === "object" && result.uidMap instanceof Map
-        ? result.uidMap.get(uid)
-        : undefined;
-    return typeof destinationUid === "number" ? destinationUid : null;
+        ? result.uidMap
+        : null;
+    return new Map(
+      normalizedUids.map((uid) => {
+        const destinationUid = destinationUidMap?.get(uid);
+        return [uid, typeof destinationUid === "number" ? destinationUid : null] as const;
+      })
+    );
   } finally {
     try {
       await logImapOp("logout", { ...logContext }, () => client.logout());
@@ -2075,6 +2092,17 @@ export async function moveImapMessage(
       // ignore logout errors
     }
   }
+}
+
+export async function moveImapMessage(
+  account: Account,
+  mailboxPath: string,
+  uid: number,
+  destination: string,
+  clientId?: string
+): Promise<number | null> {
+  const result = await moveImapMessages(account, mailboxPath, [uid], destination, clientId);
+  return result.get(uid) ?? null;
 }
 
 type ImapDeleteTarget = {

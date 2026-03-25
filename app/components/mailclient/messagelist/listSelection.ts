@@ -9,6 +9,8 @@ export function selectRangeToMessage(params: {
   lastSelectedId: string | null;
   indexMap: Map<string, number>;
   visibleMessages: VisibleMessageEntry[];
+  collapsedThreads: Record<string, boolean>;
+  threadScopeMessages: Message[];
   selectionStore: SelectionStore;
   setLastSelectedId: (id: string) => void;
 }) {
@@ -17,6 +19,8 @@ export function selectRangeToMessage(params: {
     lastSelectedId,
     indexMap,
     visibleMessages,
+    collapsedThreads,
+    threadScopeMessages,
     selectionStore,
     setLastSelectedId
   } = params;
@@ -28,8 +32,15 @@ export function selectRangeToMessage(params: {
   const start = indexMap.get(lastSelectedId)!;
   const end = indexMap.get(messageId)!;
   const [lo, hi] = start < end ? [start, end] : [end, start];
-  const ids = visibleMessages.slice(lo, hi + 1).map((item) => item.message.id);
-  selectionStore.setSelection(new Set(ids));
+  const visibleIds = visibleMessages.slice(lo, hi + 1).map((item) => item.message.id);
+  const expandedIds =
+    getCollapsedRootThreadMessageIds({
+      selectedIds: visibleIds,
+      visibleMessages,
+      collapsedThreads,
+      threadScopeMessages
+    }) ?? visibleIds;
+  selectionStore.setSelection(new Set(expandedIds));
   setLastSelectedId(messageId);
 }
 
@@ -58,6 +69,56 @@ export function toggleListMessageSelection(params: {
   } = params;
   selectionStore.toggle(messageId, replace, setActive);
   setLastSelectedId(messageId);
+}
+
+export function getCollapsedRootThreadMessageIds(params: {
+  selectedIds: string[];
+  visibleMessages: VisibleMessageEntry[];
+  collapsedThreads: Record<string, boolean>;
+  threadScopeMessages: Message[];
+}) {
+  const { selectedIds, visibleMessages, collapsedThreads, threadScopeMessages } = params;
+  if (selectedIds.length === 0) return null;
+
+  const visibleThreadIdByMessageId = new Map<string, string>();
+  const collapsedVisibleThreadIds = new Set<string>();
+  visibleMessages.forEach((item) => {
+    visibleThreadIdByMessageId.set(item.message.id, item.threadId);
+    if (item.depth !== 0) return;
+    const isThreadCollapsed = collapsedThreads[item.threadId] ?? true;
+    if (!isThreadCollapsed) return;
+    collapsedVisibleThreadIds.add(item.threadId);
+  });
+
+  const threadIdByMessageId = new Map<string, string>();
+  const messageIdsByThreadId = new Map<string, string[]>();
+  threadScopeMessages.forEach((message) => {
+    const threadId = message.threadId ?? message.messageId ?? message.id;
+    threadIdByMessageId.set(message.id, threadId);
+    const list = messageIdsByThreadId.get(threadId);
+    if (list) {
+      list.push(message.id);
+    } else {
+      messageIdsByThreadId.set(threadId, [message.id]);
+    }
+  });
+
+  const expandedIds = new Set(selectedIds);
+  let hasCollapsedRootSelection = false;
+
+  selectedIds.forEach((selectedId) => {
+    const threadId =
+      visibleThreadIdByMessageId.get(selectedId) ?? threadIdByMessageId.get(selectedId);
+    if (!threadId) return;
+    if (!collapsedVisibleThreadIds.has(threadId)) return;
+    const threadMessageIds = messageIdsByThreadId.get(threadId) ?? [];
+    if (threadMessageIds.length <= 1) return;
+    hasCollapsedRootSelection = true;
+    threadMessageIds.forEach((id) => expandedIds.add(id));
+  });
+
+  if (!hasCollapsedRootSelection) return null;
+  return Array.from(expandedIds);
 }
 
 function getLatestThreadMessage(flat: ThreadFlatEntry[]) {

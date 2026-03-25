@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { getFolders, getLatestMessageUid, getMailboxState } from "@/lib/db";
+import { getFolders, getLatestMessageUid, getMailboxState, hasPendingMovesForFolder } from "@/lib/db";
 import { getImapMailboxStatus } from "@/lib/mail/imap";
 import { mailboxPathFromFolderId } from "@/lib/mailboxPaths";
 import { determineFolderConsistency } from "@/lib/syncPolicy";
@@ -38,13 +38,39 @@ export async function handleFolderConsistencyRequest(
   }
 
   const mailboxPath = mailboxPathFromFolderId(folderId, accountId);
+  const currentLocalHighestUid = await getLatestMessageUid(accountId, mailboxPath);
+  const currentMailboxState = await getMailboxState(accountId, folderId);
+  const localCount = folder.count ?? 0;
+  const hasPendingMoves = await hasPendingMovesForFolder(accountId, folderId);
+  if (hasPendingMoves) {
+    return NextResponse.json({
+      ok: true,
+      folderId,
+      mailboxPath,
+      needsRepair: false,
+      recommendedMode: "none",
+      reasons: [],
+      local: {
+        count: localCount,
+        highestUid: currentLocalHighestUid,
+        uidValidity: currentMailboxState?.uidValidity ?? null,
+        highestModSeq: currentMailboxState?.highestModSeq ?? null,
+        supportsQresync: currentMailboxState?.supportsQresync ?? null
+      },
+      remote: {
+        count: null,
+        uidNext: null,
+        uidValidity: null,
+        highestModSeq: null
+      }
+    });
+  }
+
   const [remote, localHighestUid, mailboxState] = await Promise.all([
     getImapMailboxStatus(account, mailboxPath, clientId),
-    getLatestMessageUid(accountId, mailboxPath),
-    getMailboxState(accountId, folderId)
+    Promise.resolve(currentLocalHighestUid),
+    Promise.resolve(currentMailboxState)
   ]);
-
-  const localCount = folder.count ?? 0;
   const remoteCount = remote.messages;
   const policyInput = {
     remote: {
