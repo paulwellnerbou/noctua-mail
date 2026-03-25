@@ -886,6 +886,16 @@ function initAccountSchema(db: any) {
       updatedAt INTEGER NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS recipient_aliases (
+      id TEXT PRIMARY KEY,
+      accountId TEXT NOT NULL,
+      name TEXT NOT NULL,
+      recipients TEXT NOT NULL,
+      normalizedRecipients TEXT NOT NULL,
+      createdAt INTEGER NOT NULL,
+      updatedAt INTEGER NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS thread_topics (
       threadId TEXT NOT NULL,
       topicId TEXT NOT NULL,
@@ -969,6 +979,12 @@ function initAccountSchema(db: any) {
       ON category_feedback_events(accountId, createdAt DESC);
     CREATE INDEX IF NOT EXISTS idx_topics_account
       ON topics(accountId);
+    CREATE INDEX IF NOT EXISTS idx_recipient_aliases_account
+      ON recipient_aliases(accountId);
+    CREATE INDEX IF NOT EXISTS idx_recipient_aliases_account_normalized_recipients
+      ON recipient_aliases(accountId, normalizedRecipients);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_recipient_aliases_account_name
+      ON recipient_aliases(accountId, lower(name));
     CREATE INDEX IF NOT EXISTS idx_thread_topics_thread
       ON thread_topics(threadId);
     CREATE INDEX IF NOT EXISTS idx_thread_topics_topic

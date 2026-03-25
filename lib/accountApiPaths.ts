@@ -199,6 +199,20 @@ export function buildAccountComposeRecipientsPath(
   return appendQuery(buildAccountApiPath(accountId, "/compose/recipients"), query);
 }
 
+export function buildAccountRecipientAliasesPath(
+  accountId: string,
+  query?: URLSearchParams | string | null
+) {
+  return appendQuery(buildAccountApiPath(accountId, "/recipient-aliases"), query);
+}
+
+export function buildAccountRecipientAliasPath(accountId: string, aliasId: string) {
+  return buildAccountApiPath(
+    accountId,
+    `/recipient-aliases/${encodeURIComponent(aliasId)}`
+  );
+}
+
 export function buildAccountFoldersPath(accountId: string, query?: URLSearchParams | string | null) {
   return appendQuery(buildAccountApiPath(accountId, "/folders"), query);
 }

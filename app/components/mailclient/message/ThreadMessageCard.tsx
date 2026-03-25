@@ -14,12 +14,13 @@ import { CaretRightIcon } from "@radix-ui/react-icons";
 import * as Collapsible from "@radix-ui/react-collapsible";
 import { badgeColors, getFlagBadgeColor, getPriorityBadgeColor } from "@/lib/ui/badgeColors";
 import { getMessageDateDisplay } from "@/lib/dateFormatting";
-import type { AccountDateFormat, Message } from "@/lib/data";
+import type { AccountDateFormat, Message, RecipientAlias } from "@/lib/data";
 import {
   appendUnreferencedInlineImages,
   replaceInlineImageSources,
   stripRedundantInlineImageFallbacks
 } from "@/lib/html";
+import { countRecipientEntries } from "@/lib/recipientLists";
 import badgeStyles from "./MessageBadge.module.css";
 import styles from "./ThreadMessageCard.module.css";
 import AttachmentsList from "../../AttachmentsList";
@@ -90,6 +91,12 @@ type ThreadMessageCardProps = {
   messageByMessageId: Map<string, Message>;
   getPrimaryEmail: (value?: string) => string | null;
   extractEmails: (value?: string) => string[];
+  findRecipientAlias: (value?: string | null) => RecipientAlias | null;
+  onOpenRecipientAlias: (
+    fieldLabel: "To" | "Cc",
+    recipients: string,
+    alias?: RecipientAlias | null
+  ) => void;
   onFindRelatedByCalendarInviteUid?: (uid: string) => void;
   onInviteStateChange?: (messageId: string, patches: InviteProcessingStatePatch[]) => void;
   handleUnsubscribe: (message: Message) => void;
@@ -140,6 +147,8 @@ export default function ThreadMessageCard({
   messageByMessageId,
   getPrimaryEmail,
   extractEmails,
+  findRecipientAlias,
+  onOpenRecipientAlias,
   onFindRelatedByCalendarInviteUid,
   onInviteStateChange,
   handleUnsubscribe,
@@ -158,7 +167,15 @@ export default function ThreadMessageCard({
     { label: "To" as const, value: toValue, hideWhenEmpty: false },
     { label: "Cc" as const, value: ccValue, hideWhenEmpty: true },
     { label: "Bcc" as const, value: bccValue, hideWhenEmpty: true }
-  ];
+  ].map((field) => {
+    const alias = field.label === "Bcc" ? null : findRecipientAlias(field.value);
+    const recipientCount = field.label === "Bcc" ? 0 : countRecipientEntries(field.value);
+    return {
+      ...field,
+      alias,
+      showAliasAction: field.label !== "Bcc" && recipientCount > 1
+    };
+  });
   const priorityColor = getPriorityBadgeColor(message.priority);
   const isCollapsed = Boolean(collapsedMessages[message.id]);
   const hasHtml = hasHtmlContent(message.htmlBody);
@@ -753,6 +770,13 @@ export default function ThreadMessageCard({
                   label={field.label}
                   value={field.value}
                   copyValue={extractEmails(field.value).join(", ")}
+                  aliasName={field.alias?.name ?? null}
+                  showAliasAction={field.showAliasAction}
+                  onAliasAction={
+                    field.showAliasAction && field.label !== "Bcc"
+                      ? () => onOpenRecipientAlias(field.label, field.value, field.alias)
+                      : undefined
+                  }
                   hideWhenEmpty={field.hideWhenEmpty}
                   expandable
                 />

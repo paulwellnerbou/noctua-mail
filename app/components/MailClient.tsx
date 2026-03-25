@@ -106,6 +106,8 @@ import {
   buildAccountApiPath,
   buildAccountCalendarRecomputeRelationsPath,
   buildAccountCalendarSyncPath,
+  buildAccountRecipientAliasPath,
+  buildAccountRecipientAliasesPath,
   buildAccountComposeRecipientsPath,
   buildAccountDraftDiscardPath,
   buildAccountFoldersPath,
@@ -139,10 +141,12 @@ import { useMessageData } from "./mailclient/useMessageData";
 import { useThreadContent } from "./mailclient/useThreadContent";
 import { useSyncController } from "./mailclient/useSyncController";
 import { useTopics } from "./mailclient/useTopics";
+import { useRecipientAliases } from "./mailclient/useRecipientAliases";
 import { useAccountController } from "./mailclient/useAccountController";
 import ThreadJsonModal from "./mailclient/message/ThreadJsonModal";
 import ThreadView from "./mailclient/message/ThreadView";
 import TopicPickerDialog from "./mailclient/TopicPickerDialog";
+import RecipientAliasDialog from "./mailclient/RecipientAliasDialog";
 import TopicBadge from "./mailclient/TopicBadge";
 import TopicsSidebarSection from "./mailclient/folder/TopicsSidebarSection";
 import { applyActiveTopicSuggestion } from "./mailclient/topicSuggestionActions";
@@ -164,7 +168,16 @@ import CalendarSidebarPanel from "./calendar/CalendarSidebarPanel";
 import { useMessageDeleteActions } from "./mailclient/useMessageDeleteActions";
 import { useMessageMoveActions, type UndoMoveTarget } from "./mailclient/useMessageMoveActions";
 import { useMessageMutations } from "./mailclient/useMessageMutations";
-import type { Account, Folder, Message, Topic, TopicColor, User } from "@/lib/data";
+import type {
+  Account,
+  Folder,
+  Message,
+  RecipientAlias,
+  RecipientSuggestion,
+  Topic,
+  TopicColor,
+  User
+} from "@/lib/data";
 import AccountSettingsModal, { type ManageTab } from "./AccountSettingsModal";
 import DeleteConfirmDialog from "./mailclient/message/DeleteConfirmDialog";
 import FullSyncConfirmDialog from "./mailclient/message/FullSyncConfirmDialog";
@@ -214,6 +227,11 @@ import type {
 } from "./mailclient/types";
 import { normalizeAccountDateFormat } from "@/lib/dateFormatting";
 import {
+  getRecipientInputToken,
+  normalizeRecipientListForComparison,
+  replaceLastRecipientToken
+} from "@/lib/recipientLists";
+import {
   decidePostSendSentSync,
   decideStartupSync
 } from "@/lib/syncPolicy";
@@ -246,6 +264,12 @@ type MailClientProps = {
 type MoveToDialogState = {
   message: Message;
   request: MoveTargetRequest;
+};
+
+type RecipientAliasDialogState = {
+  fieldLabel: "To" | "Cc";
+  recipients: string;
+  aliasId?: string | null;
 };
 
 type TopicSuggestionExplanation = {
@@ -313,6 +337,8 @@ export default function MailClient({
   const [activeTopicSuggestionsLoadedKey, setActiveTopicSuggestionsLoadedKey] = useState("");
   const [pendingTopicSuggestionThreadIds, setPendingTopicSuggestionThreadIds] =
     useState<Set<string>>(new Set());
+  const [recipientAliasDialogState, setRecipientAliasDialogState] =
+    useState<RecipientAliasDialogState | null>(null);
 
   const clientId = useMemo(() => {
     if (typeof window === "undefined") return "";
@@ -343,6 +369,10 @@ export default function MailClient({
     topicMessageCountById,
     refreshTopicStats
   } = useTopics({ activeAccountId, apiFetch });
+  const {
+    recipientAliases,
+    setRecipientAliases
+  } = useRecipientAliases({ activeAccountId, apiFetch });
   const activeTopicSearchMode = useMemo(() => parseSimpleTopicSearchMode(query), [query]);
   const activeTopicId = activeTopicSearchMode?.topicId ?? null;
   const activeTopic = useMemo(
@@ -1540,22 +1570,93 @@ export default function MailClient({
     const name = (account.name ?? "").trim();
     return name ? `${name} <${account.email}>` : account.email;
   };
-  const getComposeToken = (value: string) => {
-    const parts = value.split(/[;,]/);
-    return parts[parts.length - 1]?.trim() ?? "";
-  };
+  const recipientAliasByNormalizedRecipients = useMemo(
+    () =>
+      new Map(
+        recipientAliases.map((alias) => [
+          alias.normalizedRecipients,
+          alias
+        ] as const)
+      ),
+    [recipientAliases]
+  );
+  const getComposeToken = (value: string) => getRecipientInputToken(value);
   const applyRecipientSelection = (
     value: string,
-    suggestion: string,
+    suggestion: RecipientSuggestion,
     setValue: (next: string) => void
   ) => {
-    const parts = value.split(/[;,]/);
-    parts[parts.length - 1] = ` ${suggestion}`.trim();
-    const joined = parts.map((part) => part.trim()).filter(Boolean).join(", ");
-    const nextValue = joined ? `${joined}, ` : `${suggestion}, `;
+    const nextValue = replaceLastRecipientToken(value, suggestion.insertValue);
     setValue(nextValue);
     return nextValue;
   };
+  const clearRecipientSuggestionCache = useCallback(
+    (accountId: string) => {
+      delete recipientCacheRef.current[accountId];
+    },
+    [recipientCacheRef]
+  );
+  const createRecipientAliasForAccount = useCallback(
+    async (name: string, recipients: string) => {
+      if (!activeAccountId) {
+        throw new Error("Missing account");
+      }
+      const response = await apiFetch(buildAccountRecipientAliasesPath(activeAccountId), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, recipients })
+      });
+      const data = (await response.json()) as { ok?: boolean; alias?: RecipientAlias; message?: string };
+      if (!response.ok || !data.ok || !data.alias) {
+        throw new Error(data.message ?? "Failed to create recipient alias");
+      }
+      const next = [...recipientAliases, data.alias].sort((a, b) => a.name.localeCompare(b.name));
+      setRecipientAliases(next);
+      clearRecipientSuggestionCache(activeAccountId);
+      return data.alias;
+    },
+    [activeAccountId, apiFetch, clearRecipientSuggestionCache, recipientAliases, setRecipientAliases]
+  );
+  const updateRecipientAliasForAccount = useCallback(
+    async (aliasId: string, name: string, recipients: string) => {
+      if (!activeAccountId) {
+        throw new Error("Missing account");
+      }
+      const response = await apiFetch(buildAccountRecipientAliasPath(activeAccountId, aliasId), {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, recipients })
+      });
+      const data = (await response.json()) as { ok?: boolean; alias?: RecipientAlias; message?: string };
+      if (!response.ok || !data.ok || !data.alias) {
+        throw new Error(data.message ?? "Failed to update recipient alias");
+      }
+      const next = recipientAliases
+        .map((alias) => (alias.id === aliasId ? data.alias! : alias))
+        .sort((a, b) => a.name.localeCompare(b.name));
+      setRecipientAliases(next);
+      clearRecipientSuggestionCache(activeAccountId);
+      return data.alias;
+    },
+    [activeAccountId, apiFetch, clearRecipientSuggestionCache, recipientAliases, setRecipientAliases]
+  );
+  const deleteRecipientAliasForAccount = useCallback(
+    async (aliasId: string) => {
+      if (!activeAccountId) {
+        throw new Error("Missing account");
+      }
+      const response = await apiFetch(buildAccountRecipientAliasPath(activeAccountId, aliasId), {
+        method: "DELETE"
+      });
+      const data = (await response.json().catch(() => null)) as { ok?: boolean; message?: string } | null;
+      if (!response.ok || !data?.ok) {
+        throw new Error(data?.message ?? "Failed to delete recipient alias");
+      }
+      setRecipientAliases((current) => current.filter((alias) => alias.id !== aliasId));
+      clearRecipientSuggestionCache(activeAccountId);
+    },
+    [activeAccountId, apiFetch, clearRecipientSuggestionCache, setRecipientAliases]
+  );
   const loadRecipientOptions = useCallback(
     async (query: string, signal: AbortSignal) => {
       if (!activeAccountId) return [];
@@ -1572,7 +1673,7 @@ export default function MailClient({
       }
       const res = await apiFetch(buildAccountComposeRecipientsPath(activeAccountId, params), { signal });
       if (!res.ok) return [];
-      const data = (await res.json()) as { recipients?: string[] };
+      const data = (await res.json()) as { recipients?: RecipientSuggestion[] };
       const list = data.recipients ?? [];
       if (!trimmedQuery && list.length) {
         recipientCacheRef.current[activeAccountId] = list;
@@ -1580,6 +1681,23 @@ export default function MailClient({
       return list;
     },
     [activeAccountId, apiFetch, recipientCacheRef]
+  );
+  const findRecipientAlias = useCallback(
+    (value?: string | null) => {
+      const normalized = normalizeRecipientListForComparison(value);
+      return normalized ? recipientAliasByNormalizedRecipients.get(normalized) ?? null : null;
+    },
+    [recipientAliasByNormalizedRecipients]
+  );
+  const openRecipientAliasDialog = useCallback(
+    (fieldLabel: "To" | "Cc", recipients: string, alias?: RecipientAlias | null) => {
+      setRecipientAliasDialogState({
+        fieldLabel,
+        recipients,
+        aliasId: alias?.id ?? null
+      });
+    },
+    []
   );
 
   const {
@@ -5570,6 +5688,8 @@ export default function MailClient({
                       messageByMessageId: enhancedMessageByMessageId,
                       getPrimaryEmail,
                       extractEmails,
+                      findRecipientAlias,
+                      onOpenRecipientAlias: openRecipientAliasDialog,
                       onFindRelatedByCalendarInviteUid: handleFindRelatedByCalendarInviteUid,
                       onInviteStateChange: handleInviteStateChange,
                       readErrorMessage,
@@ -5629,8 +5749,32 @@ export default function MailClient({
               void refreshTopicStats(activeAccountId);
             }
           }}
+          recipientAliases={recipientAliases}
+          onCreateRecipientAlias={createRecipientAliasForAccount}
+          onUpdateRecipientAlias={updateRecipientAliasForAccount}
+          onDeleteRecipientAlias={deleteRecipientAliasForAccount}
         />
       )}
+
+      <RecipientAliasDialog
+        open={recipientAliasDialogState !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setRecipientAliasDialogState(null);
+          }
+        }}
+        aliases={recipientAliases}
+        resetKey={
+          recipientAliasDialogState
+            ? `${recipientAliasDialogState.aliasId ?? "new"}:${recipientAliasDialogState.recipients}`
+            : "closed"
+        }
+        initialAliasId={recipientAliasDialogState?.aliasId ?? null}
+        initialRecipients={recipientAliasDialogState?.recipients ?? ""}
+        onCreateAlias={createRecipientAliasForAccount}
+        onUpdateAlias={updateRecipientAliasForAccount}
+        onDeleteAlias={deleteRecipientAliasForAccount}
+      />
 
       <ComposeModal
         open={showComposeModal}

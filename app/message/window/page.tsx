@@ -479,6 +479,11 @@ export default function MessageWindowPage() {
                 ),
                 getPrimaryEmail,
                 extractEmails,
+                findRecipientAlias: () => null,
+                onOpenRecipientAlias: noop as (
+                  fieldLabel: "To" | "Cc",
+                  recipients: string
+                ) => void,
                 dateFormat
               }}
             />

@@ -1,7 +1,7 @@
 import type React from "react";
 import { X } from "lucide-react";
 import { MinusIcon, RowsIcon } from "@radix-ui/react-icons";
-import type { Message } from "@/lib/data";
+import type { Message, RecipientSuggestion } from "@/lib/data";
 import ComposeFields from "./ComposeFields";
 import ComposeActions from "./ComposeActions";
 import { Heading, IconButton, Text } from "@radix-ui/themes";
@@ -59,11 +59,11 @@ type ComposeModalProps = {
     handleSaveDraft: () => void;
     applyRecipientSelection: (
       current: string,
-      selection: string,
+      selection: RecipientSuggestion,
       setter: React.Dispatch<React.SetStateAction<string>>,
       focusAfter?: "to" | "cc" | "bcc" | null
     ) => string;
-    loadRecipientOptions: (query: string, signal: AbortSignal) => Promise<string[]>;
+    loadRecipientOptions: (query: string, signal: AbortSignal) => Promise<RecipientSuggestion[]>;
     markComposeDirty: () => void;
     popInCompose: () => void;
     minimizeCompose: () => void;

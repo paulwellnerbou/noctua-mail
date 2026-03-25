@@ -30,6 +30,7 @@ type AccountSettingsSaveTab =
   | "categorization"
   | "calendar"
   | "topics"
+  | "recipient-aliases"
   | "admin";
 
 function normalizeComparableSettings(settings?: AccountSettings) {
@@ -96,6 +97,7 @@ function getTabSaveSnapshot(account: Account, tab: AccountSettingsSaveTab, isAdm
         }
       };
     case "categorization":
+    case "recipient-aliases":
     case "admin":
       return null;
   }

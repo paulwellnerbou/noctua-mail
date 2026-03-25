@@ -2,7 +2,7 @@ import type React from "react";
 import { ArrowUpRight } from "lucide-react";
 import { Badge, Card, IconButton } from "@radix-ui/themes";
 import { badgeColors } from "@/lib/ui/badgeColors";
-import type { Message } from "@/lib/data";
+import type { Message, RecipientSuggestion } from "@/lib/data";
 import ComposeFields from "./ComposeFields";
 import ComposeActions from "./ComposeActions";
 import threadStyles from "../message/ThreadMessageCard.module.css";
@@ -49,11 +49,11 @@ type ComposeInlineCardProps = {
     handleSaveDraft: () => void;
     applyRecipientSelection: (
       current: string,
-      selection: string,
+      selection: RecipientSuggestion,
       setter: React.Dispatch<React.SetStateAction<string>>,
       focusAfter?: "to" | "cc" | "bcc" | null
     ) => string;
-    loadRecipientOptions: (query: string, signal: AbortSignal) => Promise<string[]>;
+    loadRecipientOptions: (query: string, signal: AbortSignal) => Promise<RecipientSuggestion[]>;
     markComposeDirty: () => void;
     jumpToMessage: (messageId: string) => void;
   };

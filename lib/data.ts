@@ -170,6 +170,31 @@ export type Topic = {
   matchCount?: number;
 };
 
+export type RecipientAlias = {
+  id: string;
+  accountId: string;
+  name: string;
+  recipients: string;
+  normalizedRecipients: string;
+  createdAt: number;
+  updatedAt: number;
+};
+
+export type RecipientSuggestion =
+  | {
+      kind: "alias";
+      id: string;
+      name: string;
+      label: string;
+      insertValue: string;
+      recipients: string;
+    }
+  | {
+      kind: "recipient";
+      label: string;
+      insertValue: string;
+    };
+
 // Signals used to derive topic suggestions from past manual assignments.
 // No manual rules table — the app learns from what the user has tagged before.
 // See getTopicSuggestionsForThread() in lib/topics.ts.

@@ -30,6 +30,7 @@ import { LexicalComposer } from "@lexical/react/LexicalComposer";
 import { RichTextPlugin } from "@lexical/react/LexicalRichTextPlugin";
 import { ContentEditable } from "@lexical/react/LexicalContentEditable";
 import { HistoryPlugin } from "@lexical/react/LexicalHistoryPlugin";
+import { AutoLinkPlugin } from "@lexical/react/LexicalAutoLinkPlugin";
 import { OnChangePlugin } from "@lexical/react/LexicalOnChangePlugin";
 import { ListPlugin } from "@lexical/react/LexicalListPlugin";
 import { LinkPlugin } from "@lexical/react/LexicalLinkPlugin";
@@ -83,6 +84,7 @@ import {
   ExtendedTableRowNode
 } from "./lexical/ExtendedTableNodes";
 import { CenterNode } from "./lexical/CenterNode";
+import { composeAutoLinkMatchers } from "./composeEditorAutoLink";
 
 type ComposeEditorProps = {
   initialHtml?: string;
@@ -706,6 +708,7 @@ export default function ComposeEditor({
         <HistoryPlugin />
         <ListPlugin />
         <LinkPlugin />
+        <AutoLinkPlugin matchers={composeAutoLinkMatchers} />
         <TablePlugin hasHorizontalScroll />
         <MarkdownShortcutPlugin transformers={TRANSFORMERS} />
         <OnChangePlugin

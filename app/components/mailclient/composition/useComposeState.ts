@@ -1,5 +1,5 @@
 import { useRef, useState } from "react";
-import type { Attachment, Message } from "@/lib/data";
+import type { Attachment, Message, RecipientSuggestion } from "@/lib/data";
 import type {
   ComposeMode,
   ComposeQuotedParts,
@@ -46,7 +46,7 @@ export function useComposeState() {
   const [composeDragActive, setComposeDragActive] = useState(false);
   const [composeEditorReset, setComposeEditorReset] = useState(0);
   const [composeQuotedParts, setComposeQuotedParts] = useState<ComposeQuotedParts | null>(null);
-  const recipientCacheRef = useRef<Record<string, string[]>>({});
+  const recipientCacheRef = useRef<Record<string, RecipientSuggestion[]>>({});
   const [composeSize, setComposeSize] = useState<ComposeSize>({
     width: 980,
     height: null

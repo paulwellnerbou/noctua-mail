@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { X } from "lucide-react";
 import { Dialog, Flex, IconButton, Tabs } from "@radix-ui/themes";
-import type { Account, AccountSettings, Topic } from "@/lib/data";
+import type { Account, AccountSettings, RecipientAlias, Topic } from "@/lib/data";
 import { hasSavableAccountSettingsChanges } from "@/lib/accountSettings";
 import AccountTabContent from "@/app/components/account-settings/tabs/AccountTabContent";
 import SignaturesTabContent from "@/app/components/account-settings/tabs/SignaturesTabContent";
@@ -10,8 +10,17 @@ import CategorizationTabContent from "@/app/components/account-settings/tabs/Cat
 import AdminTabContent from "@/app/components/account-settings/tabs/AdminTabContent";
 import CalendarTabContent from "@/app/components/account-settings/tabs/CalendarTabContent";
 import TopicsTabContent from "@/app/components/account-settings/tabs/TopicsTabContent";
+import RecipientAliasesTabContent from "@/app/components/account-settings/tabs/RecipientAliasesTabContent";
 
-export type ManageTab = "account" | "signatures" | "preferences" | "categorization" | "calendar" | "topics" | "admin";
+export type ManageTab =
+  | "account"
+  | "signatures"
+  | "preferences"
+  | "categorization"
+  | "calendar"
+  | "topics"
+  | "recipient-aliases"
+  | "admin";
 
 function deriveImapSecurity(imap: Account["imap"]): "tls" | "starttls" | "none" {
   if (imap.secure) return "tls";
@@ -38,6 +47,14 @@ type Props = {
   apiFetch?: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
   readErrorMessage?: (res: Response) => Promise<string>;
   onTopicsChanged?: (topics: Topic[]) => void;
+  recipientAliases?: RecipientAlias[];
+  onCreateRecipientAlias?: (name: string, recipients: string) => Promise<RecipientAlias>;
+  onUpdateRecipientAlias?: (
+    aliasId: string,
+    name: string,
+    recipients: string
+  ) => Promise<RecipientAlias>;
+  onDeleteRecipientAlias?: (aliasId: string) => Promise<void>;
 };
 
 export default function AccountSettingsModal({
@@ -53,7 +70,11 @@ export default function AccountSettingsModal({
   onNotifySuccess,
   apiFetch,
   readErrorMessage,
-  onTopicsChanged
+  onTopicsChanged,
+  recipientAliases = [],
+  onCreateRecipientAlias,
+  onUpdateRecipientAlias,
+  onDeleteRecipientAlias
 }: Props) {
   const [localAccount, setLocalAccount] = useState<Account>(initialAccount);
   const [imapSecurity, setImapSecurity] = useState<"tls" | "starttls" | "none">(() =>
@@ -201,6 +222,9 @@ export default function AccountSettingsModal({
               <Tabs.Trigger value="topics" disabled={!isExistingAccount}>
                 Topics
               </Tabs.Trigger>
+              <Tabs.Trigger value="recipient-aliases" disabled={!isExistingAccount}>
+                Recipient Aliases
+              </Tabs.Trigger>
               {isAdminUser && (
                 <Tabs.Trigger value="admin" disabled={!isExistingAccount}>
                   Admin
@@ -294,6 +318,26 @@ export default function AccountSettingsModal({
                 onClose={onClose}
                 onSave={handleSave}
                 canSave={canSaveTopicsTab}
+              />
+            </Tabs.Content>
+
+            <Tabs.Content
+              value="recipient-aliases"
+              style={{ flex: "1 1 auto", minHeight: 0, overflow: "auto", padding: "var(--space-2)" }}
+            >
+              <RecipientAliasesTabContent
+                isExistingAccount={isExistingAccount}
+                aliases={recipientAliases}
+                onCreateAlias={onCreateRecipientAlias ?? (async () => {
+                  throw new Error("Recipient alias creation is unavailable.");
+                })}
+                onUpdateAlias={onUpdateRecipientAlias ?? (async () => {
+                  throw new Error("Recipient alias update is unavailable.");
+                })}
+                onDeleteAlias={onDeleteRecipientAlias ?? (async () => {
+                  throw new Error("Recipient alias deletion is unavailable.");
+                })}
+                onClose={onClose}
               />
             </Tabs.Content>
 

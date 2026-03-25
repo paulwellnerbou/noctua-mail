@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { listRecipientSuggestions } from "@/lib/db";
 import { requireSessionAccountOr403, requireSessionOr401 } from "@/lib/auth";
+import { listRecipientAutocompleteSuggestions } from "@/lib/recipientAliases";
 
 export async function handleListRecipientSuggestionsRequest(
   request: Request,
@@ -18,7 +18,7 @@ export async function handleListRecipientSuggestionsRequest(
   const query = searchParams.get("q");
   const limitParam = searchParams.get("limit");
   const limit = limitParam ? Number(limitParam) : 200;
-  const results = await listRecipientSuggestions(
+  const results = await listRecipientAutocompleteSuggestions(
     accountId,
     Number.isNaN(limit) ? 200 : limit,
     query

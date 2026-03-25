@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Check, Copy } from "lucide-react";
+import { Check, Copy, List } from "lucide-react";
 import { IconButton } from "@radix-ui/themes";
 import styles from "./ThreadMessageCard.module.css";
 
@@ -7,6 +7,9 @@ type MessageRecipientMetaFieldProps = {
   label: "From" | "To" | "Cc" | "Bcc";
   value?: string;
   copyValue?: string;
+  aliasName?: string | null;
+  showAliasAction?: boolean;
+  onAliasAction?: () => void;
   variant?: "line" | "segment";
   className?: string;
   hideWhenEmpty?: boolean;
@@ -18,6 +21,9 @@ export default function MessageRecipientMetaField({
   label,
   value,
   copyValue,
+  aliasName = null,
+  showAliasAction = false,
+  onAliasAction,
   variant = "line",
   className,
   hideWhenEmpty = false,
@@ -75,7 +81,7 @@ export default function MessageRecipientMetaField({
       window.cancelAnimationFrame(frameId);
       observer.disconnect();
     };
-  }, [hasCopy, shouldMeasureOverflow, text]);
+  }, [aliasName, hasCopy, shouldMeasureOverflow, showAliasAction, text]);
 
   if (hideWhenEmpty && !text.trim()) return null;
 
@@ -107,6 +113,7 @@ export default function MessageRecipientMetaField({
         .filter(Boolean)
         .join(" ")}
     >
+      {aliasName && <span className={styles.aliasPrefix}>{`${aliasName}: `}</span>}
       {text}
       {hasCopy && (
         <IconButton
@@ -132,6 +139,19 @@ export default function MessageRecipientMetaField({
               }`}
             />
           </span>
+        </IconButton>
+      )}
+      {showAliasAction && (
+        <IconButton
+          size="1"
+          variant="ghost"
+          color="gray"
+          className={styles.toCopy}
+          title={aliasName ? "Manage recipient alias" : "Create recipient alias"}
+          aria-label={aliasName ? "Manage recipient alias" : "Create recipient alias"}
+          onClick={onAliasAction}
+        >
+          <List size={12} />
         </IconButton>
       )}
     </span>

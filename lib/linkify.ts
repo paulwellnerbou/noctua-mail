@@ -9,14 +9,22 @@ function isUrlCharacter(value: string) {
   return urlCharacterPattern.test(value);
 }
 
-function isSoftUrlBreak(text: string, index: number) {
-  if (text[index] !== "\n" && text[index] !== "\r") return false;
-  if (index === 0 || !isUrlCharacter(text[index - 1] ?? "")) return false;
-  let nextIndex = index;
-  while (text[nextIndex] === "\n" || text[nextIndex] === "\r") {
-    nextIndex += 1;
+function getSingleLineBreakEnd(text: string, index: number) {
+  if (text[index] === "\r") {
+    return text[index + 1] === "\n" ? index + 2 : index + 1;
   }
-  return isUrlCharacter(text[nextIndex] ?? "");
+  if (text[index] === "\n") {
+    return index + 1;
+  }
+  return null;
+}
+
+function isSoftUrlBreak(text: string, index: number) {
+  const lineBreakEnd = getSingleLineBreakEnd(text, index);
+  if (lineBreakEnd === null) return false;
+  if (index === 0 || !isUrlCharacter(text[index - 1] ?? "")) return false;
+  if (text[lineBreakEnd] === "\n" || text[lineBreakEnd] === "\r") return false;
+  return isUrlCharacter(text[lineBreakEnd] ?? "");
 }
 
 function readUrl(text: string, start: number) {
@@ -31,9 +39,7 @@ function readUrl(text: string, start: number) {
       continue;
     }
     if (isSoftUrlBreak(text, index)) {
-      while (text[index] === "\n" || text[index] === "\r") {
-        index += 1;
-      }
+      index = getSingleLineBreakEnd(text, index) ?? index;
       continue;
     }
     break;

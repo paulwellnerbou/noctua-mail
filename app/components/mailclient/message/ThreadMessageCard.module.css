@@ -204,6 +204,11 @@
   display: inline-flex;
 }
 
+.aliasPrefix {
+  color: var(--gray-11);
+  font-weight: 600;
+}
+
 .copyIconSwap {
   position: relative;
   width: 12px;

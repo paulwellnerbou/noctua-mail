@@ -26,6 +26,19 @@ describe("linkifyHtmlTextNodes", () => {
 
     expect(linkifyHtmlTextNodes(html)).toBe(html);
   });
+
+  it("does not absorb text after blank lines into the link", () => {
+    const html =
+      "<span>Learn more about Meet at: https://support.google.com/a/users/answer/9282720\n\nPlease do not edit this section.</span>";
+
+    const result = linkifyHtmlTextNodes(html);
+
+    expect(result).toContain(
+      '<a href="https://support.google.com/a/users/answer/9282720" target="_blank" rel="noreferrer noopener">https://support.google.com/a/users/answer/9282720</a>'
+    );
+    expect(result).toContain("</a>\n\nPlease do not edit this section.");
+    expect(result).not.toContain("9282720Please");
+  });
 });
 
 describe("stripConditionalComments", () => {

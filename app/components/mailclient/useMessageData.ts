@@ -314,6 +314,7 @@ export function useMessageData({
       return false;
     }
     setRefreshingMessages(true);
+    const requestKey = messagesKey;
     const requestMutationVersion = messageMutationVersionRef.current;
     try {
       const messageRes = await apiFetch(buildQueryUrl(1));
@@ -344,6 +345,9 @@ export function useMessageData({
             .slice(0, LIST_DEBUG_SAMPLE_LIMIT)
             .map((item) => summarizeMessageForListDebug(item))
         });
+      }
+      if (currentKeyRef.current !== requestKey) {
+        return false;
       }
       if (messageMutationVersionRef.current !== requestMutationVersion) {
         return false;

@@ -1,7 +1,7 @@
 import { startTransition, useEffect, useState } from "react";
 import type React from "react";
 import { Button, Text, TextField } from "@radix-ui/themes";
-import type { Message } from "@/lib/data";
+import type { Message, RecipientSuggestion } from "@/lib/data";
 import InReplyToReferenceRow from "../InReplyToReferenceRow";
 import styles from "./Compose.module.css";
 
@@ -26,11 +26,11 @@ type ComposeFieldsProps = {
   setComposeShowBcc: React.Dispatch<React.SetStateAction<boolean>>;
   applyRecipientSelection: (
     current: string,
-    selection: string,
+    selection: RecipientSuggestion,
     setter: React.Dispatch<React.SetStateAction<string>>,
     focusAfter?: RecipientFocus
   ) => string;
-  loadRecipientOptions: (query: string, signal: AbortSignal) => Promise<string[]>;
+  loadRecipientOptions: (query: string, signal: AbortSignal) => Promise<RecipientSuggestion[]>;
   getComposeToken: (value: string) => string;
   markComposeDirty: () => void;
 };
@@ -41,7 +41,7 @@ type RecipientFieldProps = {
   focusKey: Exclude<RecipientFocus, null>;
   value: string;
   placeholder: string;
-  recipientOptions: string[];
+  recipientOptions: RecipientSuggestion[];
   recipientActiveIndex: number;
   recipientLoading: boolean;
   recipientFocus: RecipientFocus;
@@ -49,7 +49,7 @@ type RecipientFieldProps = {
   setRecipientFocus: React.Dispatch<React.SetStateAction<RecipientFocus>>;
   setRecipientActiveIndex: React.Dispatch<React.SetStateAction<number>>;
   onChangeValue: (next: string) => void;
-  onPickRecipient: (current: string, selection: string) => void;
+  onPickRecipient: (current: string, selection: RecipientSuggestion) => void;
   getComposeToken: (value: string) => string;
   showToggle?: boolean;
   toggleLabel?: string;
@@ -141,7 +141,7 @@ function RecipientField({
             <div className={styles.composeSuggestions}>
               {recipientOptions.map((option, index) => (
                 <button
-                  key={`${option}-${index}`}
+                  key={`${option.kind}-${option.insertValue}-${index}`}
                   type="button"
                   className={`${styles.composeSuggestion} ${
                     index === recipientActiveIndex ? styles.composeSuggestionActive : ""
@@ -152,7 +152,10 @@ function RecipientField({
                     onPickRecipient(value, option);
                   }}
                 >
-                  {option}
+                  <span>{option.label}</span>
+                  {option.kind === "alias" && (
+                    <span className={styles.composeSuggestionMuted}>{option.recipients}</span>
+                  )}
                 </button>
               ))}
               {recipientLoading && (
@@ -206,7 +209,7 @@ export default function ComposeFields({
   const [localTo, setLocalTo] = useState(composeTo);
   const [localCc, setLocalCc] = useState(composeCc);
   const [localBcc, setLocalBcc] = useState(composeBcc);
-  const [recipientOptions, setRecipientOptions] = useState<string[]>([]);
+  const [recipientOptions, setRecipientOptions] = useState<RecipientSuggestion[]>([]);
   const [recipientQuery, setRecipientQuery] = useState("");
   const [recipientLoading, setRecipientLoading] = useState(false);
   const [recipientFocus, setRecipientFocus] = useState<RecipientFocus>(null);
@@ -280,7 +283,7 @@ export default function ComposeFields({
 
   const pickRecipient = (
     current: string,
-    selection: string,
+    selection: RecipientSuggestion,
     setter: React.Dispatch<React.SetStateAction<string>>,
     setLocal: React.Dispatch<React.SetStateAction<string>>,
     focusKey: Exclude<RecipientFocus, null>
