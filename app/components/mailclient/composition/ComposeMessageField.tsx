@@ -394,7 +394,29 @@ export default function ComposeMessageField({
             onChange={(nextMd) => {
               composeDirtyRef.current = true;
               composeLastEditedRef.current = "markdown";
-              setComposeMarkdown(nextMd);
+
+              const now = Date.now();
+              const timeSinceLastUpdate = now - composeBodyLastUpdateRef.current;
+
+              const updateState = () => {
+                setComposeMarkdown(nextMd);
+                composeBodyLastUpdateRef.current = now;
+              };
+
+              if (timeSinceLastUpdate >= 10000) {
+                if (composeBodyDebounceRef.current) {
+                  clearTimeout(composeBodyDebounceRef.current);
+                  composeBodyDebounceRef.current = null;
+                }
+                updateState();
+              } else {
+                if (composeBodyDebounceRef.current) {
+                  clearTimeout(composeBodyDebounceRef.current);
+                }
+                composeBodyDebounceRef.current = setTimeout(() => {
+                  updateState();
+                }, 2000);
+              }
             }}
           />
         </div>

@@ -1,6 +1,7 @@
 import type { Account, Message } from "@/lib/data";
 import { updateMessageFlags } from "@/lib/db";
 import { updateImapFlags } from "@/lib/mail/imap";
+import { preserveLocalOnlyMessageFlags } from "@/lib/messageFlags";
 
 export const MESSAGE_FLAG_MAP: Record<string, string> = {
   seen: "\\Seen",
@@ -65,12 +66,13 @@ export async function applyFlagMutationsToMessage(params: {
   }
 
   const existing = params.message.flags ?? [];
-  const nextFlags = mutations.reduce((currentFlags, mutation) => {
+  const mutated = mutations.reduce((currentFlags, mutation) => {
     if (mutation.value) {
       return Array.from(new Set([...currentFlags, mutation.flag]));
     }
     return currentFlags.filter((flag) => flag.toLowerCase() !== mutation.flag.toLowerCase());
   }, existing);
+  const nextFlags = preserveLocalOnlyMessageFlags(mutated, existing);
 
   await updateMessageFlags(params.accountId, params.messageId, nextFlags);
   return nextFlags;

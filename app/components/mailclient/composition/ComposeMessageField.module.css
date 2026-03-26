@@ -33,3 +33,9 @@
   min-height: var(--compose-editor-min-height);
   width: 100%;
 }
+
+.composeWritingMarkdown > * {
+  height: 100%;
+  min-height: var(--compose-editor-min-height);
+  width: 100%;
+}

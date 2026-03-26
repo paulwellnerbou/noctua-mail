@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
-import { getAccountIdFromParams, type AccountRouteParams } from "@/app/api/_helpers/accountContext";
-import { requireAccountContext } from "@/app/api/_helpers/accountContext";
+import { getAccountIdFromParams, requireAccountContext, type AccountRouteParams } from "@/app/api/_helpers/accountContext";
 import { deleteMcpToken } from "@/lib/db";
 
 type Params = AccountRouteParams & {

@@ -95,7 +95,7 @@ function normalizeSyncPayload(payload: SyncPayload): SyncPayload {
   const recategorizeFolder =
     Boolean(payload.recategorizeFolder) && typeof payload.folderId === "string" && payload.folderId.length > 0;
   const backfillUids = Array.isArray(payload.backfillUids)
-    ? Array.from(new Set(payload.backfillUids.filter((uid) => Number.isFinite(uid) && uid > 0)))
+    ? Array.from(new Set(payload.backfillUids.filter((uid) => Number.isFinite(uid) && uid > 0))).sort((a, b) => a - b)
     : undefined;
   return {
     accountId: payload.accountId,

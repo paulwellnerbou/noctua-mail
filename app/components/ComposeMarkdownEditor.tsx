@@ -28,6 +28,11 @@ export default function ComposeMarkdownEditor({
   const [colorMode, setColorMode] = useState<"light" | "dark">("light");
   const [editorHeight, setEditorHeight] = useState(DEFAULT_EDITOR_HEIGHT);
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const [localValue, setLocalValue] = useState(value);
+
+  useEffect(() => {
+    setLocalValue(value);
+  }, [value]);
 
   // Detect dark mode from Radix theme
   useEffect(() => {
@@ -81,8 +86,12 @@ export default function ComposeMarkdownEditor({
   return (
     <div ref={containerRef} className={styles.container} data-color-mode={colorMode}>
       <MDEditor
-        value={value}
-        onChange={(val) => onChange(val || "")}
+        value={localValue}
+        onChange={(val) => {
+          const nextVal = val || "";
+          setLocalValue(nextVal);
+          onChange(nextVal);
+        }}
         preview="live"
         height={editorHeight}
         visibleDragbar={false}
