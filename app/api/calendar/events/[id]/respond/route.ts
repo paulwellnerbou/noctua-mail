@@ -45,6 +45,14 @@ export function resolveCalendarReplySourceMessageRowId(params: {
   return event.messageId?.trim() || undefined;
 }
 
+export function resolveCalendarReplyThreadHeaders(sourceMessage?: {
+  messageId?: string;
+  inReplyTo?: string;
+  references?: string[];
+} | null) {
+  return sourceMessage?.messageId?.trim() ? buildReplyThreadHeaders(sourceMessage) : {};
+}
+
 export async function handleCalendarEventRespondRequest(
   request: Request,
   options?: { accountId?: string | null; eventId?: string | null }
@@ -111,8 +119,7 @@ export async function handleCalendarEventRespondRequest(
         }
       );
       attendeeEmail = reply.attendeeEmail;
-      const threadHeaders =
-        sourceMessage?.messageId?.trim() ? buildReplyThreadHeaders(sourceMessage) : {};
+      const threadHeaders = resolveCalendarReplyThreadHeaders(sourceMessage);
       const result = await sendSmtpMessage(accountContext.account, {
         to: reply.to,
         subject: reply.subject,
