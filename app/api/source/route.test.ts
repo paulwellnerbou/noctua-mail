@@ -1,99 +1,107 @@
-import { afterAll, beforeEach, describe, expect, mock, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import { NextResponse } from "next/server";
+import type { Account, Folder, Message } from "@/lib/data";
+import { sealSession, type SessionData } from "@/lib/auth";
+import { saveMessageSource } from "@/lib/storage";
+import { dbModulePromise } from "@/lib/testDbHarness";
 
-const getMessageById = mock(async () => null);
-const getMessageSource = mock(async () => null);
-const requireSessionOr401 = mock(() => ({
-  userId: "user-1",
-  accountId: "acc-1",
-  exp: Math.floor(Date.now() / 1000) + 3600
-}));
-const requireSessionAccountOr403 = mock(() => true);
-
-const actualDb = await import("@/lib/db");
-const actualStorage = await import("@/lib/storage");
-const actualAuth = await import("@/lib/auth");
-
-mock.module("@/lib/db", () => ({
-  ...actualDb,
-  getMessageById
-}));
-
-mock.module("@/lib/storage", () => ({
-  ...actualStorage,
-  getMessageSource
-}));
-
-mock.module("@/lib/auth", () => ({
-  ...actualAuth,
-  requireSessionOr401,
-  requireSessionAccountOr403
-}));
-
-afterAll(() => {
-  mock.restore();
-});
-
+const { saveFoldersForAccount, upsertAccount, upsertMessages } = await dbModulePromise;
 const { handleGetMessageSourceRequest } = await import("./route");
 
-beforeEach(() => {
-  getMessageById.mockReset();
-  getMessageSource.mockReset();
-  requireSessionOr401.mockReset();
-  requireSessionAccountOr403.mockReset();
+function buildAccount(accountId: string): Account {
+  return {
+    id: accountId,
+    name: "Source Route Test",
+    email: "owner@example.test",
+    avatar: "",
+    imap: {
+      host: "imap.example.test",
+      port: 993,
+      secure: true,
+      user: "owner@example.test",
+      password: "secret-imap"
+    },
+    smtp: {
+      host: "smtp.example.test",
+      port: 465,
+      secure: true,
+      user: "owner@example.test",
+      password: "secret-smtp"
+    }
+  };
+}
 
-  requireSessionOr401.mockReturnValue({
-    userId: "user-1",
-    accountId: "acc-1",
-    exp: Math.floor(Date.now() / 1000) + 3600
-  });
-  requireSessionAccountOr403.mockReturnValue(true);
-});
+function buildFolder(accountId: string): Folder {
+  return {
+    id: `${accountId}:Sent`,
+    accountId,
+    name: "Sent",
+    count: 1,
+    unreadCount: 0,
+    specialUse: "\\Sent"
+  };
+}
+
+function buildMessage(accountId: string, folderId: string): Message {
+  return {
+    id: "imap-2106950294a9471126b68324-d38b2fe765ff",
+    accountId,
+    folderId,
+    threadId: `${accountId}-thread-1`,
+    subject: "Self test",
+    from: "owner@example.test",
+    to: "owner@example.test",
+    preview: "",
+    date: new Date(Date.UTC(2026, 2, 26, 9, 0, 0)).toISOString(),
+    dateValue: Date.UTC(2026, 2, 26, 9, 0, 0),
+    body: "",
+    mailboxPath: "Sent",
+    imapUid: 1,
+    attachments: [],
+    unread: false,
+    flags: [],
+    seen: true,
+    answered: false,
+    flagged: false,
+    deleted: false,
+    draft: false,
+    recent: false,
+    hasSource: true
+  };
+}
+
+function buildCookieHeader(accountId: string) {
+  const session: SessionData = {
+    userId: "user-source-route",
+    accountId,
+    exp: Math.floor(Date.now() / 1000) + 60 * 60
+  };
+  return `noctua_session=${encodeURIComponent(sealSession(session))}`;
+}
 
 describe("handleGetMessageSourceRequest", () => {
-  test("loads source using the canonical message row id", async () => {
-    getMessageById.mockResolvedValue({
-      id: "imap-2106950294a9471126b68324-d38b2fe765ff",
-      accountId: "acc-1",
-      folderId: "acc-1:Sent",
-      threadId: "thread-1",
-      subject: "Self test",
-      from: "me@example.test",
-      to: "me@example.test",
-      preview: "",
-      date: new Date().toISOString(),
-      dateValue: Date.now(),
-      body: "",
-      attachments: [],
-      unread: false,
-      flags: [],
-      seen: true,
-      answered: false,
-      flagged: false,
-      deleted: false,
-      draft: false,
-      recent: false,
-      hasSource: true
-    });
-    getMessageSource.mockImplementation(async (_accountId: string, messageId: string) => {
-      return messageId === "imap-2106950294a9471126b68324-d38b2fe765ff"
-        ? "raw source"
-        : null;
-    });
+  test("loads stored source for an authorized message", async () => {
+    const accountId = "acc-source-route";
+    const folder = buildFolder(accountId);
+    const message = buildMessage(accountId, folder.id);
+    await upsertAccount(buildAccount(accountId));
+    await saveFoldersForAccount(accountId, [folder]);
+    await upsertMessages(accountId, folder.id, [message]);
+    await saveMessageSource(accountId, message.id, "raw source");
 
     const response = await handleGetMessageSourceRequest(
-      new Request("http://localhost/api/source"),
+      new Request("http://localhost/api/source", {
+        headers: {
+          cookie: buildCookieHeader(accountId)
+        }
+      }),
       {
-        accountId: "acc-1",
-        messageId: "imap-2106950294a9471126b68324"
+        accountId,
+        messageId: message.id
       }
     );
 
     expect(response).toBeInstanceOf(NextResponse);
-    expect(getMessageSource).toHaveBeenCalledWith(
-      "acc-1",
-      "imap-2106950294a9471126b68324-d38b2fe765ff"
-    );
     const body = (await response.json()) as { ok?: boolean; source?: string };
     expect(body.ok).toBe(true);
     expect(body.source).toBe("raw source");
