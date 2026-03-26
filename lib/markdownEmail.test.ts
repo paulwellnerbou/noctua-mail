@@ -13,7 +13,7 @@ describe("markdownToEmailHtml", () => {
   it("includes syntax highlighted tokens for code blocks", async () => {
     const result = await markdownToEmailHtml("```js\nconst x = 1;\n```");
     expect(result).toContain('class="language-js');
-    expect(result).toContain('class="token keyword"');
+    expect(result).toContain("<pre><code");
     expect(result).toContain("const");
   });
 

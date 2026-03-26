@@ -206,6 +206,21 @@ export function buildAccountRecipientAliasesPath(
   return appendQuery(buildAccountApiPath(accountId, "/recipient-aliases"), query);
 }
 
+export function buildAccountMcpTokensPath(
+  accountId: string,
+  query?: URLSearchParams | string | null
+) {
+  return appendQuery(buildAccountApiPath(accountId, "/mcp-tokens"), query);
+}
+
+export function buildAccountMcpTokenPath(accountId: string, tokenId: string) {
+  return buildAccountApiPath(accountId, `/mcp-tokens/${encodeURIComponent(tokenId)}`);
+}
+
+export function buildAccountReloginPath(accountId: string) {
+  return buildAccountApiPath(accountId, "/relogin");
+}
+
 export function buildAccountRecipientAliasTransferPath(accountId: string) {
   return buildAccountApiPath(accountId, "/recipient-aliases/transfer");
 }

@@ -170,8 +170,181 @@ describe("topic suggestions", () => {
     expect(suggestions.map((topic) => topic.name)).toEqual(["Unified-API", "PlanR"]);
     expect(suggestions[0]?.suggestionScore).toBe(11);
     expect(suggestions[0]?.matchCount).toBe(1);
-    expect(suggestions[1]?.suggestionScore).toBe(3);
+    expect(suggestions[1]?.suggestionScore).toBe(1);
     expect(suggestions[1]?.matchCount).toBe(3);
+  });
+
+  test("prefers an exact list-id match over more common shared sender history", async () => {
+    const accountId = "acc-topic-suggestions-gitlab-list-id";
+    const folder = buildFolder(accountId);
+    const { saveFoldersForAccount, upsertAccount, upsertMessages } = await dbModulePromise;
+
+    await upsertAccount(buildAccount(accountId));
+    await saveFoldersForAccount(accountId, [folder]);
+
+    await upsertMessages(
+      accountId,
+      folder.id,
+      [
+        buildMessage({
+          id: "msg-project-a-1",
+          accountId,
+          folderId: folder.id,
+          threadId: "thread-project-a-1",
+          messageId: "<project-a-1@example.com>",
+          from: "GitLab <gitlab@mg.gitlab.com>",
+          fromEmail: "gitlab@mg.gitlab.com",
+          to: "owner@example.com",
+          listId: "group/project-a <project-a.gitlab.example>",
+          dateValue: Date.UTC(2026, 2, 18, 8, 20, 0)
+        }),
+        buildMessage({
+          id: "msg-project-a-2",
+          accountId,
+          folderId: folder.id,
+          threadId: "thread-project-a-2",
+          messageId: "<project-a-2@example.com>",
+          from: "GitLab <gitlab@mg.gitlab.com>",
+          fromEmail: "gitlab@mg.gitlab.com",
+          to: "owner@example.com",
+          listId: "group/project-a <project-a.gitlab.example>",
+          dateValue: Date.UTC(2026, 2, 18, 8, 25, 0)
+        }),
+        buildMessage({
+          id: "msg-project-a-3",
+          accountId,
+          folderId: folder.id,
+          threadId: "thread-project-a-3",
+          messageId: "<project-a-3@example.com>",
+          from: "GitLab <gitlab@mg.gitlab.com>",
+          fromEmail: "gitlab@mg.gitlab.com",
+          to: "owner@example.com",
+          listId: "group/project-a <project-a.gitlab.example>",
+          dateValue: Date.UTC(2026, 2, 18, 8, 30, 0)
+        }),
+        buildMessage({
+          id: "msg-project-b-history",
+          accountId,
+          folderId: folder.id,
+          threadId: "thread-project-b-history",
+          messageId: "<project-b-history@example.com>",
+          from: "GitLab <gitlab@mg.gitlab.com>",
+          fromEmail: "gitlab@mg.gitlab.com",
+          to: "owner@example.com",
+          listId: "group/project-b <project-b.gitlab.example>",
+          dateValue: Date.UTC(2026, 2, 18, 8, 35, 0)
+        }),
+        buildMessage({
+          id: "msg-project-b-target",
+          accountId,
+          folderId: folder.id,
+          threadId: "thread-project-b-target",
+          messageId: "<project-b-target@example.com>",
+          from: "GitLab <gitlab@mg.gitlab.com>",
+          fromEmail: "gitlab@mg.gitlab.com",
+          to: "owner@example.com",
+          listId: "group/project-b <project-b.gitlab.example>",
+          dateValue: Date.UTC(2026, 2, 18, 8, 40, 0)
+        })
+      ],
+      true,
+      { recomputeThreads: false }
+    );
+
+    const topicA = await createTopic(accountId, "Topic A", "blue");
+    const topicB = await createTopic(accountId, "Topic B", "green");
+    await setThreadTopics(accountId, "thread-project-a-1", [topicA.id]);
+    await setThreadTopics(accountId, "thread-project-a-2", [topicA.id]);
+    await setThreadTopics(accountId, "thread-project-a-3", [topicA.id]);
+    await setThreadTopics(accountId, "thread-project-b-history", [topicB.id]);
+
+    const suggestions = await getTopicSuggestionsForThread(accountId, "thread-project-b-target", {
+      accountEmail: "owner@example.com"
+    });
+
+    expect(suggestions.map((topic) => topic.name)).toEqual(["Topic B", "Topic A"]);
+    expect(suggestions[0]?.suggestionScore).toBe(9);
+    expect(suggestions[0]?.matchCount).toBe(1);
+    expect(suggestions[1]?.suggestionScore).toBe(5);
+    expect(suggestions[1]?.matchCount).toBe(3);
+  });
+
+  test("uses match count as a tiebreak when best-thread scores are equal", async () => {
+    const accountId = "acc-topic-suggestions-best-score-tie";
+    const folder = buildFolder(accountId);
+    const { saveFoldersForAccount, upsertAccount, upsertMessages } = await dbModulePromise;
+
+    await upsertAccount(buildAccount(accountId));
+    await saveFoldersForAccount(accountId, [folder]);
+
+    await upsertMessages(
+      accountId,
+      folder.id,
+      [
+        buildMessage({
+          id: "msg-alpha-history",
+          accountId,
+          folderId: folder.id,
+          threadId: "thread-alpha-history",
+          messageId: "<alpha-history@example.com>",
+          from: "Alerts <alerts@example.com>",
+          fromEmail: "alerts@example.com",
+          to: "owner@example.com",
+          dateValue: Date.UTC(2026, 2, 18, 8, 45, 0)
+        }),
+        buildMessage({
+          id: "msg-beta-history-1",
+          accountId,
+          folderId: folder.id,
+          threadId: "thread-beta-history-1",
+          messageId: "<beta-history-1@example.com>",
+          from: "Alerts <alerts@example.com>",
+          fromEmail: "alerts@example.com",
+          to: "owner@example.com",
+          dateValue: Date.UTC(2026, 2, 18, 8, 50, 0)
+        }),
+        buildMessage({
+          id: "msg-beta-history-2",
+          accountId,
+          folderId: folder.id,
+          threadId: "thread-beta-history-2",
+          messageId: "<beta-history-2@example.com>",
+          from: "Alerts <alerts@example.com>",
+          fromEmail: "alerts@example.com",
+          to: "owner@example.com",
+          dateValue: Date.UTC(2026, 2, 18, 8, 55, 0)
+        }),
+        buildMessage({
+          id: "msg-target-tie",
+          accountId,
+          folderId: folder.id,
+          threadId: "thread-target-tie",
+          messageId: "<target-tie@example.com>",
+          from: "Alerts <alerts@example.com>",
+          fromEmail: "alerts@example.com",
+          to: "owner@example.com",
+          dateValue: Date.UTC(2026, 2, 18, 9, 0, 0)
+        })
+      ],
+      true,
+      { recomputeThreads: false }
+    );
+
+    const alpha = await createTopic(accountId, "Alpha", "blue");
+    const beta = await createTopic(accountId, "Beta", "red");
+    await setThreadTopics(accountId, "thread-alpha-history", [alpha.id]);
+    await setThreadTopics(accountId, "thread-beta-history-1", [beta.id]);
+    await setThreadTopics(accountId, "thread-beta-history-2", [beta.id]);
+
+    const suggestions = await getTopicSuggestionsForThread(accountId, "thread-target-tie", {
+      accountEmail: "owner@example.com"
+    });
+
+    expect(suggestions.map((topic) => topic.name)).toEqual(["Beta", "Alpha"]);
+    expect(suggestions[0]?.suggestionScore).toBe(5);
+    expect(suggestions[0]?.matchCount).toBe(2);
+    expect(suggestions[1]?.suggestionScore).toBe(5);
+    expect(suggestions[1]?.matchCount).toBe(1);
   });
 
   test("ignores the account owner's own email as a recipient suggestion signal", async () => {
@@ -585,6 +758,96 @@ describe("topic suggestions", () => {
           },
           { type: "senderEmail", value: "gitlab@mg.gitlab.com", weight: 4 },
           { type: "senderDomain", value: "mg.gitlab.com", weight: 1 }
+        ]
+      }
+    ]);
+  });
+
+  test("reports the best matching thread score in explanations while keeping all matches", async () => {
+    const accountId = "acc-topic-suggestions-thread-explain-best-match";
+    const folder = buildFolder(accountId);
+    const { saveFoldersForAccount, upsertAccount, upsertMessages } = await dbModulePromise;
+
+    await upsertAccount(buildAccount(accountId));
+    await saveFoldersForAccount(accountId, [folder]);
+
+    await upsertMessages(
+      accountId,
+      folder.id,
+      [
+        buildMessage({
+          id: "msg-history-strong",
+          accountId,
+          folderId: folder.id,
+          threadId: "thread-history-strong",
+          messageId: "<history-strong@example.com>",
+          from: "Alerts <alerts@example.com>",
+          fromEmail: "alerts@example.com",
+          to: "Platform Team <team@example.com>",
+          listId: "lists.example.com/unified-api",
+          dateValue: Date.UTC(2026, 2, 18, 10, 10, 0)
+        }),
+        buildMessage({
+          id: "msg-history-weak",
+          accountId,
+          folderId: folder.id,
+          threadId: "thread-history-weak",
+          messageId: "<history-weak@example.com>",
+          from: "Alerts <alerts@example.com>",
+          fromEmail: "alerts@example.com",
+          to: "owner@example.com",
+          dateValue: Date.UTC(2026, 2, 18, 10, 15, 0)
+        }),
+        buildMessage({
+          id: "msg-target-best-match",
+          accountId,
+          folderId: folder.id,
+          threadId: "thread-target-best-match",
+          messageId: "<target-best-match@example.com>",
+          from: "Alerts <alerts@example.com>",
+          fromEmail: "alerts@example.com",
+          to: "Platform Team <team@example.com>",
+          listId: "lists.example.com/unified-api",
+          dateValue: Date.UTC(2026, 2, 18, 10, 20, 0)
+        })
+      ],
+      true,
+      { recomputeThreads: false }
+    );
+
+    const topic = await createTopic(accountId, "Unified-API", "violet");
+    await setThreadTopics(accountId, "thread-history-strong", [topic.id]);
+    await setThreadTopics(accountId, "thread-history-weak", [topic.id]);
+
+    const explanation = await getTopicSuggestionExplanationForThread(
+      accountId,
+      "thread-target-best-match",
+      {
+        accountEmail: "owner@example.com"
+      }
+    );
+
+    expect(explanation.topics).toHaveLength(1);
+    expect(explanation.topics[0]?.topic.name).toBe("Unified-API");
+    expect(explanation.topics[0]?.suggestionScore).toBe(11);
+    expect(explanation.topics[0]?.matchCount).toBe(2);
+    expect(explanation.topics[0]?.matchedThreads).toEqual([
+      {
+        threadId: "thread-history-strong",
+        score: 11,
+        signals: [
+          { type: "listId", value: "lists.example.com/unified-api", weight: 4 },
+          { type: "senderEmail", value: "alerts@example.com", weight: 4 },
+          { type: "recipient", value: "team@example.com", weight: 2 },
+          { type: "senderDomain", value: "example.com", weight: 1 }
+        ]
+      },
+      {
+        threadId: "thread-history-weak",
+        score: 5,
+        signals: [
+          { type: "senderEmail", value: "alerts@example.com", weight: 4 },
+          { type: "senderDomain", value: "example.com", weight: 1 }
         ]
       }
     ]);
@@ -1008,7 +1271,7 @@ describe("topic suggestions", () => {
       "thread-candidate-strong",
       "thread-candidate-weak"
     ]);
-    expect(suggestions.map((item) => item.suggestionScore)).toEqual([22, 10]);
+    expect(suggestions.map((item) => item.suggestionScore)).toEqual([11, 5]);
     expect(suggestions.every((item) => item.representativeMessageId?.startsWith("msg-candidate-"))).toBe(true);
   });
 });

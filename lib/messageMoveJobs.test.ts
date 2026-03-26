@@ -1,16 +1,15 @@
 import { afterAll, beforeEach, describe, expect, mock, test } from "bun:test";
 import type { Account } from "@/lib/data";
 
-const getAccounts = mock(async () => []);
 const updateMessageFolder = mock(async () => undefined);
 const moveImapMessages = mock(async () => new Map<number, number | null>());
 
 const actualDb = await import("./db");
 const actualImap = await import("./mail/imap");
+const { upsertAccount } = actualDb;
 
 mock.module("@/lib/db", () => ({
   ...actualDb,
-  getAccounts,
   updateMessageFolder
 }));
 
@@ -50,15 +49,14 @@ const account: Account = {
 };
 
 beforeEach(async () => {
-  getAccounts.mockReset();
   updateMessageFolder.mockReset();
   moveImapMessages.mockReset();
+  await upsertAccount(account);
   await waitForMessageMoveJobsIdle(account.id);
 });
 
 describe("message move jobs", () => {
   test("batches moves by source and destination mailbox", async () => {
-    getAccounts.mockResolvedValue([account]);
     moveImapMessages.mockResolvedValue(
       new Map([
         [10, 110],
@@ -101,7 +99,18 @@ describe("message move jobs", () => {
 
     expect(moveImapMessages).toHaveBeenCalledTimes(1);
     expect(moveImapMessages).toHaveBeenCalledWith(
-      account,
+      expect.objectContaining({
+        id: account.id,
+        email: account.email,
+        imap: expect.objectContaining({
+          host: account.imap.host,
+          user: account.imap.user
+        }),
+        smtp: expect.objectContaining({
+          host: account.smtp.host,
+          user: account.smtp.user
+        })
+      }),
       "Source",
       [10, 11, 12],
       "Target",
@@ -119,7 +128,6 @@ describe("message move jobs", () => {
   });
 
   test("splits large batches into chunks of 200 messages", async () => {
-    getAccounts.mockResolvedValue([account]);
     moveImapMessages.mockImplementation(async (_account, _source, uids) => {
       return new Map(uids.map((uid) => [uid, uid + 1000] as const));
     });
@@ -145,7 +153,6 @@ describe("message move jobs", () => {
   });
 
   test("rolls back a failed batch to the source folder", async () => {
-    getAccounts.mockResolvedValue([account]);
     moveImapMessages.mockRejectedValue(new Error("move failed"));
 
     enqueueMessageMoveJobs([

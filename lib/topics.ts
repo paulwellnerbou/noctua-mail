@@ -331,7 +331,7 @@ function getTopicSuggestionsForSignals(
   const rows = db
     .prepare(
       `SELECT t.*,
-              SUM(matches.threadScore) AS suggestionScore,
+              MAX(matches.threadScore) AS suggestionScore,
               COUNT(*) AS matchCount
        FROM topics t
        JOIN (
@@ -477,7 +477,7 @@ function getTopicSuggestionExplanationForSignals(
           if (b.score !== a.score) return b.score - a.score;
           return a.threadId.localeCompare(b.threadId);
         });
-      const suggestionScore = matchedThreads.reduce((sum, threadState) => sum + threadState.score, 0);
+      const suggestionScore = matchedThreads[0]?.score ?? 0;
       return {
         topic: {
           ...topicState.topic,

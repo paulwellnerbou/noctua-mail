@@ -16,12 +16,39 @@
   border-bottom: 1px solid var(--border);
 }
 
+/* Clean slate for the container to avoid double padding */
 .container :global(.w-md-editor-text) {
-  height: 100%;
+  padding: 0 !important;
+  margin: 0 !important;
 }
 
-.container :global(.w-md-editor-text),
+/* Force identical boundaries on the two overlap layers */
+.container :global(.w-md-editor-text-pre),
+.container :global(.w-md-editor-text-input) {
+  padding: 16px !important;
+  margin: 0 !important;
+  border: none !important;
+  box-sizing: border-box !important;
+  word-wrap: break-word !important;
+  word-break: break-word !important;
+  white-space: pre-wrap !important;
+  tab-size: 2 !important;
+}
+
+/* Force pixel-perfect font synchronization across ALL inner syntax highlight spans and the textarea */
+.container :global(.w-md-editor-text-pre) *,
 .container :global(.w-md-editor-text-pre),
 .container :global(.w-md-editor-text-input) {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace !important;
+  font-size: 14px !important;
+  line-height: 22px !important;
+  letter-spacing: normal !important;
 }
+
+/* MARKDOWN DEBUGGING: Uncomment to visualize alignment: the textarea text will turn semi-transparent red */
+/*
+.container :global(.w-md-editor-text-input) {
+  -webkit-text-fill-color: rgba(255, 0, 0, 0.4) !important;
+  color: rgba(255, 0, 0, 0.4) !important;
+}
+*/

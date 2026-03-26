@@ -15,7 +15,8 @@ export const SEARCH_BADGE_OPTIONS = [
   ["attachments", "Attachments"],
   ["newsletter", "📰 Newsletters"],
   ["notification", "🔔 Notifications"],
-  ["transactional", "🧾 Transactional"]
+  ["transactional", "🧾 Transactional"],
+  ["ai-modified", "AI Modified"]
 ] as const;
 
 type SearchFieldKey = (typeof SEARCH_FIELD_OPTIONS)[number][0];

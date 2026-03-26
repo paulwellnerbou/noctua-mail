@@ -12,6 +12,24 @@ type UseComposeHandlersProps = {
   apiFetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 };
 
+function readBlobAsDataUrl(blob: Blob) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(blob);
+  });
+}
+
+export function restoreInlineAttachmentDataUrls(html: string, attachments: Attachment[]) {
+  let nextHtml = html;
+  attachments.forEach((attachment) => {
+    if (!attachment.inline || !attachment.url || !attachment.dataUrl) return;
+    nextHtml = nextHtml.split(attachment.url).join(attachment.dataUrl);
+  });
+  return nextHtml;
+}
+
 export function useComposeHandlers({
   composeDirtyRef,
   composeDragDepthRef,
@@ -19,6 +37,33 @@ export function useComposeHandlers({
   setComposeAttachments,
   apiFetch
 }: UseComposeHandlersProps) {
+  const hydrateComposeAttachments = useCallback(async (
+    message: Message,
+    options?: { filter?: (attachment: Attachment) => boolean }
+  ) => {
+    const toFetch = (message.attachments ?? []).filter(
+      options?.filter ?? (() => true)
+    );
+    if (!toFetch.length) return [];
+
+    const results = await Promise.all(
+      toFetch.map(async (attachment) => {
+        try {
+          const res = await apiFetch(
+            buildAccountAttachmentPath(message.accountId, message.id, attachment.id)
+          );
+          if (!res.ok) return null;
+          const dataUrl = await readBlobAsDataUrl(await res.blob());
+          return { ...attachment, dataUrl };
+        } catch {
+          return null;
+        }
+      })
+    );
+
+    return results.filter((attachment): attachment is NonNullable<typeof attachment> => attachment !== null);
+  }, [apiFetch]);
+
   const addComposeFiles = async (files: File[], inline = false, dataUrlOverride?: string) => {
     if (files.length === 0) return;
     const attachments = await Promise.all(
@@ -78,31 +123,11 @@ export function useComposeHandlers({
   };
 
   const loadForwardAttachments = async (message: Message, setAttachments: typeof setComposeAttachments) => {
-    const toFetch = (message.attachments ?? []).filter(isMeaningfulNonInlineAttachment);
-    if (!toFetch.length) return;
-
-    const results = await Promise.all(
-      toFetch.map(async (att) => {
-        try {
-          const res = await apiFetch(buildAccountAttachmentPath(message.accountId, message.id, att.id));
-          if (!res.ok) return null;
-          const blob = await res.blob();
-          const dataUrl = await new Promise<string>((resolve, reject) => {
-            const reader = new FileReader();
-            reader.onload = () => resolve(String(reader.result));
-            reader.onerror = () => reject(reader.error);
-            reader.readAsDataURL(blob);
-          });
-          return { ...att, dataUrl };
-        } catch {
-          return null;
-        }
-      })
-    );
-
-    const valid = results.filter((att): att is NonNullable<typeof att> => att !== null);
-    if (valid.length > 0) {
-      setAttachments(valid);
+    const attachments = await hydrateComposeAttachments(message, {
+      filter: isMeaningfulNonInlineAttachment
+    });
+    if (attachments.length > 0) {
+      setAttachments(attachments);
     }
   };
 
@@ -115,6 +140,7 @@ export function useComposeHandlers({
     handleComposeDragOver,
     handleComposeDrop,
     handleComposeAttachmentPick,
+    hydrateComposeAttachments,
     loadForwardAttachments
   };
 }

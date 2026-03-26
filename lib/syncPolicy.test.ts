@@ -264,12 +264,12 @@ describe("decideFolderConsistencySync", () => {
 });
 
 describe("ancillary sync decisions", () => {
-  test("refreshes Sent with a shallow recent sync after send", () => {
+  test("refreshes Sent with a new-message sync after send", () => {
     expect(decidePostSendSentSync({ sentFolderId: "sent-1" })).toEqual({
       kind: "folder",
       folderId: "sent-1",
-      mode: "recent",
-      reason: "Refresh Sent after sending mail without triggering deep sync."
+      mode: "new",
+      reason: "Refresh Sent after sending mail by fetching newly appended messages."
     });
   });
 

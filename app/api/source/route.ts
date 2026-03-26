@@ -31,7 +31,7 @@ export async function handleGetMessageSourceRequest(
     );
   }
 
-  const storedSource = await getMessageSource(accountId, messageId);
+  const storedSource = await getMessageSource(accountId, message.id);
   const fallbackSource = message.source ?? null;
   const source = storedSource ?? fallbackSource;
   if (!source) {

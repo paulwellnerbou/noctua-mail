@@ -147,6 +147,9 @@ export default function ComposeMessageField({
       if (result) {
         setComposeHtml(result.html);
         setComposeHtmlText(result.htmlText);
+        // Force the Lexical editor to seed from the converted HTML instead of
+        // preserving its previous internal state.
+        setComposeEditorReset((prev) => prev + 1);
         if (lastEdited === "text") setComposeBody(currentBody);
       }
       setComposeTab("html");
@@ -391,7 +394,29 @@ export default function ComposeMessageField({
             onChange={(nextMd) => {
               composeDirtyRef.current = true;
               composeLastEditedRef.current = "markdown";
-              setComposeMarkdown(nextMd);
+
+              const now = Date.now();
+              const timeSinceLastUpdate = now - composeBodyLastUpdateRef.current;
+
+              const updateState = () => {
+                setComposeMarkdown(nextMd);
+                composeBodyLastUpdateRef.current = now;
+              };
+
+              if (timeSinceLastUpdate >= 10000) {
+                if (composeBodyDebounceRef.current) {
+                  clearTimeout(composeBodyDebounceRef.current);
+                  composeBodyDebounceRef.current = null;
+                }
+                updateState();
+              } else {
+                if (composeBodyDebounceRef.current) {
+                  clearTimeout(composeBodyDebounceRef.current);
+                }
+                composeBodyDebounceRef.current = setTimeout(() => {
+                  updateState();
+                }, 2000);
+              }
             }}
           />
         </div>

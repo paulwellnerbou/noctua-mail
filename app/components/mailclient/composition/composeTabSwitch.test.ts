@@ -1,4 +1,5 @@
 import { describe, expect, it } from "bun:test";
+import { stripHtmlToText } from "@/lib/html";
 import {
   computeBodyOnSwitchToText,
   computeHtmlOnSwitchToHtml,
@@ -93,6 +94,23 @@ describe("computeBodyOnSwitchToText – from HTML", () => {
       stripDeps
     );
     expect(result).toContain("My reply");
+  });
+
+  it("decodes html entities in quoted header content", () => {
+    const result = computeBodyOnSwitchToText(
+      textParams({
+        composeQuotedParts: {
+          styles: "",
+          headerHtml:
+            "<p>On 2026-03-25 10:22, &quot;Paul Wellner Bou&quot; &lt;paul@example.com&gt; wrote:</p>",
+          bodyHtml: "<p>Hallo</p>"
+        }
+      }),
+      { stripHtml: stripHtmlToText }
+    );
+    expect(result).toContain('On 2026-03-25 10:22, "Paul Wellner Bou" <paul@example.com> wrote:');
+    expect(result).not.toContain("&quot;");
+    expect(result).not.toContain("&lt;");
   });
 
   it("uses composeQuotedHtml when composeQuotedParts is null", () => {

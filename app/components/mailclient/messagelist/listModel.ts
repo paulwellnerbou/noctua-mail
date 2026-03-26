@@ -226,12 +226,19 @@ export function buildGroupedMessages(params: {
     mergedMeta.push({ key: "Done", label: "Done", count: doneCount });
   }
 
-  return mergedMeta.map((group) => ({
-    key: group.key,
-    label: group.label,
-    count: group.count,
-    items: groups.get(group.key) ?? []
-  }));
+  return mergedMeta.reduce<MessageGroup[]>((acc, group) => {
+    const items = groups.get(group.key) ?? [];
+    if (items.length === 0) {
+      return acc;
+    }
+    acc.push({
+      key: group.key,
+      label: group.label,
+      count: group.count,
+      items
+    });
+    return acc;
+  }, []);
 }
 
 function sortGroupMetaForGroupBy(groups: MessageGroupMeta[], groupBy: string) {

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { getLatestMessageUid } from "@/lib/db";
+import { getImapHttpError } from "@/lib/mail/imapError";
 import { getImapLogger, logImapOp } from "@/lib/mail/imapLogger";
 import { bindImapClientError, buildImapFlowOptions } from "@/lib/mail/imapClientOptions";
 import { requireAccountContext } from "@/app/api/_helpers/accountContext";
@@ -109,6 +110,19 @@ export async function handleImapPollRequest(
 
     return NextResponse.json({ ok: true, uidNext, messages });
   } catch (error) {
+    const imapHttpError = getImapHttpError(error);
+    if (imapHttpError) {
+      return NextResponse.json(
+        {
+          ok: false,
+          message: imapHttpError.message,
+          code: imapHttpError.code,
+          reauthRequired: imapHttpError.reauthRequired,
+          accountId
+        },
+        { status: imapHttpError.status }
+      );
+    }
     return NextResponse.json(
       { ok: false, message: (error as Error).message ?? "Poll failed" },
       { status: 500 }

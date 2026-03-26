@@ -13,8 +13,10 @@ function makeInput(overrides: Partial<SendPayloadInput> = {}): SendPayloadInput 
     composeBcc: "",
     composeSubject: "Hello",
     text: "Hi there",
+    markdown: undefined,
     html: undefined,
     attachments: [],
+    composeFormat: "text",
     composeReplyHeaders: null,
     composeReplyMessage: null,
     accountFromValue: "Alice <alice@example.com>",
@@ -40,6 +42,15 @@ describe("buildSendPayload — basic fields", () => {
   it("passes through html when provided", () => {
     const payload = buildSendPayload("new", makeInput({ html: "<p>Hi</p>" }));
     expect(payload.html).toBe("<p>Hi</p>");
+  });
+
+  it("passes through markdown compose data for server-side html rendering", () => {
+    const payload = buildSendPayload(
+      "new",
+      makeInput({ markdown: "# Hello", composeFormat: "markdown" })
+    );
+    expect(payload.markdown).toBe("# Hello");
+    expect(payload.composeFormat).toBe("markdown");
   });
 
   it("passes undefined html when not provided", () => {

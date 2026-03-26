@@ -3,6 +3,7 @@ import { requireAccountContext } from "@/app/api/_helpers/accountContext";
 import {
   deleteCalendarParticipationOverrideForOccurrence,
   getCalendarEventById,
+  getMessageById,
   getFolders,
   markMessageCalendarInviteStatesProcessed,
   resolveCalendarParticipation,
@@ -19,7 +20,38 @@ import { appendImapMessage } from "@/lib/mail/imap";
 import { folderMailboxPath } from "@/lib/mailboxPaths";
 import { findSentFolder } from "@/lib/specialFolders";
 import { normalizeCalendarParticipationStatus } from "@/lib/calendarParticipation";
+import { buildReplyThreadHeaders } from "@/lib/replyThreadHeaders";
 import { toFiniteNumber } from "@/app/api/_helpers/numberParsing";
+
+export function resolveCalendarReplySourceMessageRowId(params: {
+  event: {
+    messageId?: string;
+    occurrenceMessageIds?: Record<string, string>;
+  };
+  scope: CalendarParticipationScope;
+  occurrenceStartAtMs?: number;
+}) {
+  const { event, scope, occurrenceStartAtMs } = params;
+  if (
+    scope === "occurrence" &&
+    Number.isFinite(occurrenceStartAtMs) &&
+    event.occurrenceMessageIds
+  ) {
+    const occurrenceMessageId = event.occurrenceMessageIds[String(occurrenceStartAtMs)]?.trim();
+    if (occurrenceMessageId) {
+      return occurrenceMessageId;
+    }
+  }
+  return event.messageId?.trim() || undefined;
+}
+
+export function resolveCalendarReplyThreadHeaders(sourceMessage?: {
+  messageId?: string;
+  inReplyTo?: string;
+  references?: string[];
+} | null) {
+  return sourceMessage?.messageId?.trim() ? buildReplyThreadHeaders(sourceMessage) : {};
+}
 
 export async function handleCalendarEventRespondRequest(
   request: Request,
@@ -68,6 +100,14 @@ export async function handleCalendarEventRespondRequest(
         : "series";
 
     if (sendReply) {
+      const sourceMessageRowId = resolveCalendarReplySourceMessageRowId({
+        event,
+        scope: effectiveScope,
+        occurrenceStartAtMs: effectiveScope === "occurrence" ? occurrenceStartAtMs : undefined
+      });
+      const sourceMessage = sourceMessageRowId
+        ? await getMessageById(accountId, sourceMessageRowId)
+        : null;
       const reply = buildCalendarReplyPayload(
         accountContext.account,
         event,
@@ -79,10 +119,13 @@ export async function handleCalendarEventRespondRequest(
         }
       );
       attendeeEmail = reply.attendeeEmail;
+      const threadHeaders = resolveCalendarReplyThreadHeaders(sourceMessage);
       const result = await sendSmtpMessage(accountContext.account, {
         to: reply.to,
         subject: reply.subject,
         text: reply.text,
+        inReplyTo: threadHeaders.inReplyTo,
+        references: threadHeaders.references,
         attachments: [
           {
             filename: "invite-reply.ics",

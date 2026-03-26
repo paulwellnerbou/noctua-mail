@@ -26,6 +26,7 @@ import type {
   Message,
   Topic,
   TopicColor,
+  McpTokenMetadata,
   User
 } from "./data";
 import { normalizeAccountSettings } from "./accountSettings";
@@ -37,11 +38,13 @@ import {
   CALENDAR_MIME_HINTS,
   CRYPTO_SIGNATURE_FILENAME_EXTENSIONS,
   CRYPTO_SIGNATURE_MIME_HINTS,
+  AI_MODIFIED_FLAG,
   isCalendarAttachment,
   MIN_VISIBLE_ATTACHMENT_SIZE_BYTES,
   TODO_FLAG,
   DONE_FLAG,
-  normalizeImapFlags
+  normalizeImapFlags,
+  preserveLocalOnlyMessageFlags
 } from "./messageFlags";
 import { withDbWriteRetry } from "./dbWriteRetry";
 import { createHash, randomUUID } from "crypto";
@@ -62,7 +65,7 @@ import {
   normalizeThreadDateSource,
   type ThreadDateSource
 } from "./threadDate";
-import { resolveThreadingForItems } from "./threading";
+import { collectThreadReferenceIds, resolveThreadingForItems } from "./threading";
 import { normalizeReminderDateList, resolveNextReminderOccurrence } from "./reminderRecurrence";
 import { resolveCalendarTimeZoneId } from "./calendarTimezones";
 import { collectCalendarReminderMutationsFromCalendarInvite } from "./calendarReminderMutations";
@@ -621,6 +624,31 @@ function mapUserRow(row: any): User {
   };
 }
 
+type StoredMcpTokenRow = {
+  id?: string | null;
+  accountId?: string | null;
+  createdByUserId?: string | null;
+  label?: string | null;
+  tokenHash?: string | null;
+  tokenSuffix?: string | null;
+  createdAt?: number | null;
+  expiresAt?: number | null;
+  lastUsedAt?: number | null;
+};
+
+function mapMcpTokenRow(row: StoredMcpTokenRow): McpTokenMetadata {
+  return {
+    id: String(row.id ?? ""),
+    accountId: String(row.accountId ?? ""),
+    createdByUserId: String(row.createdByUserId ?? ""),
+    label: String(row.label ?? ""),
+    tokenSuffix: String(row.tokenSuffix ?? ""),
+    createdAt: Number(row.createdAt ?? 0),
+    expiresAt: row.expiresAt == null ? null : Number(row.expiresAt),
+    lastUsedAt: row.lastUsedAt == null ? null : Number(row.lastUsedAt)
+  };
+}
+
 function createAdminInvite(db: any): InviteCode {
   const adminInvite: InviteCode = {
     code: randomUUID(),
@@ -710,7 +738,24 @@ function initMasterSchema(db: any) {
       createdAt INTEGER NOT NULL,
       usedByUserId TEXT
     );
+
+    CREATE TABLE IF NOT EXISTS mcp_tokens (
+      id TEXT PRIMARY KEY,
+      accountId TEXT NOT NULL,
+      createdByUserId TEXT NOT NULL,
+      label TEXT NOT NULL,
+      tokenHash TEXT NOT NULL UNIQUE,
+      tokenSuffix TEXT NOT NULL,
+      createdAt INTEGER NOT NULL,
+      expiresAt INTEGER,
+      lastUsedAt INTEGER
+    );
   `);
+
+  db.prepare(
+    `CREATE INDEX IF NOT EXISTS idx_mcp_tokens_account_created
+     ON mcp_tokens(accountId, createdAt DESC)`
+  ).run();
 
   const inviteColumns = new Set(
     (db.prepare(`PRAGMA table_info(invite_codes)`).all() as Array<{ name?: string }>).map((row) =>
@@ -1648,6 +1693,7 @@ export async function deleteAccountControlPlane(accountId: string) {
 
     db.transaction(() => {
       db.prepare(`DELETE FROM user_accounts WHERE accountId = ?`).run(accountId);
+      db.prepare(`DELETE FROM mcp_tokens WHERE accountId = ?`).run(accountId);
       db.prepare(`DELETE FROM accounts WHERE id = ?`).run(accountId);
     })();
 
@@ -1725,6 +1771,96 @@ export async function addUserAccountLink(userId: string, accountId: string) {
       userId,
       accountId
     );
+  });
+}
+
+export type StoredMcpTokenRecord = McpTokenMetadata & {
+  tokenHash: string;
+};
+
+export async function listMcpTokens(accountId: string) {
+  const db = await getDb();
+  const rows = db
+    .prepare(
+      `SELECT id, accountId, createdByUserId, label, tokenSuffix, createdAt, expiresAt, lastUsedAt
+       FROM mcp_tokens
+       WHERE accountId = ?
+       ORDER BY createdAt DESC, id ASC`
+    )
+    .all(accountId) as StoredMcpTokenRow[];
+  return rows.map(mapMcpTokenRow);
+}
+
+export async function getMcpTokenByHash(tokenHash: string): Promise<StoredMcpTokenRecord | null> {
+  const db = await getDb();
+  const row = db
+    .prepare(
+      `SELECT id, accountId, createdByUserId, label, tokenHash, tokenSuffix, createdAt, expiresAt, lastUsedAt
+       FROM mcp_tokens
+       WHERE tokenHash = ?
+       LIMIT 1`
+    )
+    .get(tokenHash) as StoredMcpTokenRow | undefined;
+  if (!row) return null;
+  return {
+    ...mapMcpTokenRow(row),
+    tokenHash: String(row.tokenHash ?? "")
+  };
+}
+
+export async function insertMcpToken(params: {
+  id: string;
+  accountId: string;
+  createdByUserId: string;
+  label: string;
+  tokenHash: string;
+  tokenSuffix: string;
+  createdAt: number;
+  expiresAt: number | null;
+}) {
+  return withDbWriteRetry("insertMcpToken", async () => {
+    const db = await getDb();
+    db.prepare(
+      `INSERT INTO mcp_tokens
+       (id, accountId, createdByUserId, label, tokenHash, tokenSuffix, createdAt, expiresAt, lastUsedAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)`
+    ).run(
+      params.id,
+      params.accountId,
+      params.createdByUserId,
+      params.label,
+      params.tokenHash,
+      params.tokenSuffix,
+      params.createdAt,
+      params.expiresAt
+    );
+    return {
+      id: params.id,
+      accountId: params.accountId,
+      createdByUserId: params.createdByUserId,
+      label: params.label,
+      tokenSuffix: params.tokenSuffix,
+      createdAt: params.createdAt,
+      expiresAt: params.expiresAt,
+      lastUsedAt: null
+    } satisfies McpTokenMetadata;
+  });
+}
+
+export async function deleteMcpToken(accountId: string, tokenId: string) {
+  return withDbWriteRetry("deleteMcpToken", async () => {
+    const db = await getDb();
+    const result = db
+      .prepare(`DELETE FROM mcp_tokens WHERE accountId = ? AND id = ?`)
+      .run(accountId, tokenId) as { changes?: number };
+    return Number(result?.changes ?? 0) > 0;
+  });
+}
+
+export async function touchMcpTokenLastUsed(tokenId: string, lastUsedAt = Date.now()) {
+  return withDbWriteRetry("touchMcpTokenLastUsed", async () => {
+    const db = await getDb();
+    db.prepare(`UPDATE mcp_tokens SET lastUsedAt = ? WHERE id = ?`).run(lastUsedAt, tokenId);
   });
 }
 
@@ -4341,6 +4477,7 @@ function applyBadgeFilters(where: string, args: any[], badges?: string[] | null)
   const normalized = (badges ?? []).map((badge) => badge.toLowerCase());
   const todoFlagPattern = `%"${TODO_FLAG.toLowerCase()}"%`;
   const doneFlagPattern = `%"${DONE_FLAG.toLowerCase()}"%`;
+  const aiModifiedFlagPattern = `%"${AI_MODIFIED_FLAG.toLowerCase()}"%`;
   if (normalized.includes("unread")) {
     where += " AND m.unread = 1";
   }
@@ -4357,6 +4494,10 @@ function applyBadgeFilters(where: string, args: any[], badges?: string[] | null)
   if (normalized.includes("done")) {
     where += " AND m.flags IS NOT NULL AND lower(m.flags) LIKE ?";
     args.push(doneFlagPattern);
+  }
+  if (normalized.includes("ai-modified")) {
+    where += " AND m.flags IS NOT NULL AND lower(m.flags) LIKE ?";
+    args.push(aiModifiedFlagPattern);
   }
   if (normalized.includes("attention")) {
     // Action Queue: flagged OR todo OR done
@@ -5897,11 +6038,14 @@ export async function listThreads(params: {
 
   const threadMessageArgs: any[] = [accountId];
   let threadMessageWhere = applyVisibleMessageFilters("m.accountId = ?");
-  threadMessageWhere = applyExcludedFolderFilters(
-    threadMessageWhere,
-    threadMessageArgs,
-    excludedFolderIds
-  );
+  const shouldExpandTopicMatchedThreads = topicTerms.length > 0;
+  if (!shouldExpandTopicMatchedThreads) {
+    threadMessageWhere = applyExcludedFolderFilters(
+      threadMessageWhere,
+      threadMessageArgs,
+      excludedFolderIds
+    );
+  }
 
   const messagesRows =
     threadIds.length > 0
@@ -6307,6 +6451,39 @@ export async function getMessageIdsByMessageIds(accountId: string, messageIds: s
   return map;
 }
 
+type ThreadingResolvableItem = {
+  id: string;
+  dateValue: number;
+  messageId?: string | null;
+  inReplyTo?: string | null;
+  references?: readonly string[] | null;
+  threadId?: string | null;
+};
+
+export async function resolveThreadingForAccountMessages<T extends ThreadingResolvableItem>(
+  accountId: string,
+  messages: readonly T[]
+) {
+  if (messages.length === 0) {
+    return [] as Array<T & { threadId: string; parentId?: string }>;
+  }
+
+  const referenceIds = collectThreadReferenceIds(messages);
+  const [externalThreadIds, externalParentIds] = await Promise.all([
+    referenceIds.length > 0
+      ? getThreadIdsByMessageIds(accountId, referenceIds)
+      : Promise.resolve(new Map<string, string>()),
+    referenceIds.length > 0
+      ? getMessageIdsByMessageIds(accountId, referenceIds)
+      : Promise.resolve(new Map<string, string>())
+  ]);
+
+  return resolveThreadingForItems(messages, {
+    externalThreadIds,
+    externalParentIds
+  });
+}
+
 export async function getFolderIdsByMessageIds(accountId: string, messageIds: string[]) {
   if (messageIds.length === 0) return new Map<string, string>();
   const db = await getAccountDb(accountId);
@@ -6424,7 +6601,7 @@ export async function upsertMessages(
     );
     const deleteMessageById = db.prepare(`DELETE FROM messages WHERE accountId = ? AND id = ?`);
     const findMessageById = db.prepare(
-      `SELECT id, folderId, mailboxPath, imapUid
+      `SELECT id, folderId, mailboxPath, imapUid, flags
        FROM messages
        WHERE accountId = ? AND id = ?`
     );
@@ -6562,7 +6739,13 @@ export async function upsertMessages(
       batch.forEach((message) => {
         let rowId = message.id;
         const existingById = findMessageById.get(accountId, rowId) as
-          | { id: string; folderId?: string | null; mailboxPath?: string | null; imapUid?: number | null }
+          | {
+              id: string;
+              folderId?: string | null;
+              mailboxPath?: string | null;
+              imapUid?: number | null;
+              flags?: string | null;
+            }
           | undefined;
         if (existingById && !isSameMailboxMessageCopy(existingById, message)) {
           rowId = buildMessageCollisionVariantId(
@@ -6672,8 +6855,11 @@ export async function upsertMessages(
             )
         );
         deleteCalendarEventsForMessage.run(accountId, rowId);
-        const normalizedFlags = normalizeImapFlags(message.flags);
         const hasRawFlags = Array.isArray(message.flags);
+        const existingFlags = safeParseJson<string[]>(existingById?.flags);
+        const normalizedFlags = hasRawFlags
+          ? preserveLocalOnlyMessageFlags(message.flags, existingFlags)
+          : normalizeImapFlags(message.flags);
         const normalizedSystemFlags = deriveSystemFlagState(normalizedFlags);
         const seen = hasRawFlags ? Boolean(normalizedSystemFlags.seen) : Boolean(message.seen);
         const answered = hasRawFlags

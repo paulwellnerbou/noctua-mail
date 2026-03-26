@@ -30,6 +30,7 @@ type BottomStatusBarProps = {
   exceptionEntries: ExceptionEntry[];
   onClearExceptions: () => void;
   formatRelativeTime: (timestamp?: number | null) => string;
+  onReloginAccount?: (entry: ExceptionEntry) => void;
   onOpenCalendarSidebar: () => void;
   onOpenCalendarMessage?: (messageId: string) => void;
   onFindRelatedCalendarInviteUid?: (uid: string) => void;
@@ -54,6 +55,7 @@ export default function BottomStatusBar({
   exceptionEntries,
   onClearExceptions,
   formatRelativeTime,
+  onReloginAccount,
   onOpenCalendarSidebar,
   onOpenCalendarMessage,
   onFindRelatedCalendarInviteUid,
@@ -172,6 +174,7 @@ export default function BottomStatusBar({
         exceptionEntries={exceptionEntries}
         onClearExceptions={onClearExceptions}
         formatRelativeTime={formatRelativeTime}
+        onRelogin={onReloginAccount}
       />
       <ReminderStatusPopover
         open={reminderPanelOpen}

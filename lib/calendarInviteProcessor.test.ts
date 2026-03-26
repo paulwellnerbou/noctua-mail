@@ -1,5 +1,6 @@
 import { afterAll, describe, expect, mock, test } from "bun:test";
 import type { CalendarEvent } from "@/lib/data";
+import { saveMessageSource } from "@/lib/storage";
 
 const getCalendarEventByUid = mock(() => Promise.resolve(null));
 const listCalendarInviteSourceMessagesByEventUid = mock(() => Promise.resolve([]));
@@ -24,7 +25,6 @@ const rescheduleCalendarRemindersByEventUid = mock(() => Promise.resolve(0));
 const ensureCalendarReminder = mock(() => Promise.resolve(null));
 const cancelCalendarEventByUid = mock(() => Promise.resolve());
 const cancelCalendarRemindersByEventUid = mock(() => Promise.resolve());
-const getMessageSource = mock(() => Promise.resolve(null));
 
 const actualDb = await import("./db");
 mock.module("@/lib/db", () => ({
@@ -38,12 +38,6 @@ mock.module("@/lib/db", () => ({
   ensureCalendarReminder,
   cancelCalendarEventByUid,
   cancelCalendarRemindersByEventUid
-}));
-
-const actualStorage = await import("./storage");
-mock.module("@/lib/storage", () => ({
-  ...actualStorage,
-  getMessageSource
 }));
 
 afterAll(() => {
@@ -67,7 +61,6 @@ describe("processCalendarInviteForMessage", () => {
     ensureCalendarReminder.mockClear();
     cancelCalendarEventByUid.mockClear();
     cancelCalendarRemindersByEventUid.mockClear();
-    getMessageSource.mockClear();
 
     const baseRequestIcs = makeIcs([
       "METHOD:REQUEST",
@@ -96,9 +89,7 @@ describe("processCalendarInviteForMessage", () => {
     listCalendarInviteSourceMessagesByEventUid.mockResolvedValue([
       { messageId: "msg-base", dateValue: 1 }
     ]);
-    getMessageSource.mockImplementation(async (_accountId: string, messageId: string) =>
-      messageId === "msg-base" ? baseRequestIcs : null
-    );
+    await saveMessageSource("acc-1", "msg-base", baseRequestIcs);
 
     const result = await processCalendarInviteForMessage({
       accountId: "acc-1",

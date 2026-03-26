@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
-import type { Attachment, Message } from "@/lib/data";
-import { shouldShowAttachmentIcon, resolveInReplyToRef } from "./messageHelpers";
+import type { Attachment, Message, Topic } from "@/lib/data";
+import { hasAssignedTopics, shouldShowAttachmentIcon, resolveInReplyToRef } from "./messageHelpers";
 
 function makeMessage(overrides?: Partial<Message>): Message {
   return {
@@ -26,6 +26,19 @@ function makeAttachment(overrides?: Partial<Attachment>): Attachment {
     contentType: "application/pdf",
     size: 2048,
     inline: false,
+    ...overrides
+  };
+}
+
+function makeTopic(overrides?: Partial<Topic>): Topic {
+  return {
+    id: "topic-1",
+    accountId: "acc",
+    name: "Topic 1",
+    color: "gray",
+    imapKeyword: "topic-1",
+    createdAt: 0,
+    updatedAt: 0,
     ...overrides
   };
 }
@@ -89,6 +102,21 @@ describe("shouldShowAttachmentIcon", () => {
       ]
     });
     expect(shouldShowAttachmentIcon(message)).toBe(false);
+  });
+});
+
+describe("hasAssignedTopics", () => {
+  it("returns false for undefined or empty topic arrays", () => {
+    expect(hasAssignedTopics()).toBe(false);
+    expect(hasAssignedTopics([])).toBe(false);
+  });
+
+  it("returns false when topic ids are blank", () => {
+    expect(hasAssignedTopics([makeTopic({ id: "   " })])).toBe(false);
+  });
+
+  it("returns true when at least one topic has a real id", () => {
+    expect(hasAssignedTopics([makeTopic()])).toBe(true);
   });
 });
 

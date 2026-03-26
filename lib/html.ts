@@ -1,3 +1,4 @@
+import { decodeHTMLStrict } from "entities";
 import { splitTextWithUrls } from "./linkify";
 
 type QuotedHtmlParts = {
@@ -37,6 +38,108 @@ export function sanitizeHtmlForDisplay(input: string) {
     .replace(/\s(href|src)\s*=\s*["']\s*javascript:[^"']*["']/gi, "");
 }
 
+export function extractVisibleHtmlText(html: string) {
+  return html
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<head[\s\S]*?<\/head>/gi, " ")
+    .replace(/<!--[\s\S]*?-->/g, " ")
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/(p|div|section|article|header|footer|blockquote|pre|table|tr|li|ul|ol|h[1-6])>/gi, "\n")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&(nbsp|#160|#xa0);/gi, " ")
+    .replace(/[\u00a0\u200b-\u200d\u2060\ufeff\ufffc]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function splitConcatenatedHtmlDocuments(input: string) {
+  const trimmed = input.trim();
+  const startMatch = trimmed.match(/^(?:<!doctype html>\s*)?<html[\s>]/i);
+  if (!startMatch) return [input];
+
+  const segments: string[] = [];
+  let cursor = 0;
+  const boundaryRe = /<\/html>\s*(?:<br\s*\/?>\s*)*(?=(?:<!doctype html>\s*)?<html[\s>])/gi;
+  let boundary: RegExpExecArray | null;
+  while ((boundary = boundaryRe.exec(trimmed))) {
+    const end = boundary.index + boundary[0].length;
+    segments.push(trimmed.slice(cursor, end));
+    cursor = end;
+  }
+
+  if (segments.length === 0) return [input];
+  segments.push(trimmed.slice(cursor));
+  return segments.filter(Boolean);
+}
+
+function scoreHtmlDocument(html: string) {
+  const visibleText = extractVisibleHtmlText(html);
+  return {
+    html,
+    visibleTextLength: visibleText.length,
+    hasMeaningfulText: /[\p{L}\p{N}]/u.test(visibleText),
+    hasRenderableMedia: /<(img|table|svg|video|iframe|canvas|object|embed)\b/i.test(html),
+    htmlLength: html.length
+  };
+}
+
+export function selectPreferredHtmlDocument(input: string) {
+  const trimmed = input.trim();
+  if (!trimmed) return trimmed;
+
+  const candidates = splitConcatenatedHtmlDocuments(trimmed)
+    .map((candidate) => candidate.trim())
+    .filter(Boolean);
+  if (candidates.length <= 1) return trimmed;
+
+  const scored = candidates
+    .map(scoreHtmlDocument)
+    .sort((left, right) => {
+      if (left.hasMeaningfulText !== right.hasMeaningfulText) {
+        return left.hasMeaningfulText ? -1 : 1;
+      }
+      if (left.visibleTextLength !== right.visibleTextLength) {
+        return right.visibleTextLength - left.visibleTextLength;
+      }
+      if (left.hasRenderableMedia !== right.hasRenderableMedia) {
+        return left.hasRenderableMedia ? -1 : 1;
+      }
+      return right.htmlLength - left.htmlLength;
+    });
+
+  return scored[0]?.html ?? trimmed;
+}
+
+export function extractBodyContent(input: string) {
+  const normalized = selectPreferredHtmlDocument(input);
+  if (!/<body[\s>]/i.test(normalized)) {
+    return {
+      body: normalized,
+      styles: normalized.match(/<style[^>]*>[\s\S]*?<\/style>/gi) ?? [],
+      bodyAttrs: { className: "", style: "", id: "" }
+    };
+  }
+
+  const styles = normalized.match(/<style[^>]*>[\s\S]*?<\/style>/gi) ?? [];
+  const bodyMatch = normalized.match(/<body([^>]*)>([\s\S]*?)<\/body>/i);
+  const attrs = bodyMatch?.[1] ?? "";
+  const classMatch = attrs.match(/class=["']([^"']+)["']/i);
+  const styleMatch = attrs.match(/style=["']([^"']+)["']/i);
+  const idMatch = attrs.match(/id=["']([^"']+)["']/i);
+  const body = (bodyMatch?.[2] ?? normalized).replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "");
+
+  return {
+    body,
+    styles,
+    bodyAttrs: {
+      className: classMatch?.[1] ?? "",
+      style: styleMatch?.[1] ?? "",
+      id: idMatch?.[1] ?? ""
+    }
+  };
+}
+
 export function escapeHtml(value: string) {
   return value
     .replace(/&/g, "&amp;")
@@ -44,6 +147,35 @@ export function escapeHtml(value: string) {
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;")
     .replace(/'/g, "&#39;");
+}
+
+export function decodeHtmlEntities(value: string) {
+  if (!value || !value.includes("&")) return value;
+  return decodeHTMLStrict(value);
+}
+
+export function stripHtmlToText(value: string): string {
+  return decodeHtmlEntities(
+    value
+      .replace(/<style[\s\S]*?<\/style>/gi, " ")
+      .replace(/<script[\s\S]*?<\/script>/gi, " ")
+      .replace(/<a\s+[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi, (_, href, text) => {
+        const decodedHref = decodeHtmlEntities(String(href || "")).trim();
+        const label = stripHtmlToText(String(text || "")).trim();
+        if (!label) return decodedHref;
+        return label === decodedHref ? label : `${label} (${decodedHref})`;
+      })
+      .replace(/<(br|hr)\s*\/?>/gi, "\n")
+      .replace(/<\/(p|div|section|article|header|footer|blockquote|pre|table|tr|h[1-6])>/gi, "\n")
+      .replace(/<li[^>]*>/gi, "\n- ")
+      .replace(/<\/li>/gi, "\n")
+      .replace(/<[^>]+>/g, " ")
+  )
+    .replace(/\r\n/g, "\n")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .replace(/[ \t]{2,}/g, " ")
+    .trim();
 }
 
 export function ensureHtmlDocumentTitle(html: string, title: string) {

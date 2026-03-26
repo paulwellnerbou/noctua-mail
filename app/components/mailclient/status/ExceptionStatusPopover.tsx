@@ -2,9 +2,13 @@
 
 import { useMemo, useState } from "react";
 import { X } from "lucide-react";
-import { Box, Flex, IconButton, Popover, Text } from "@radix-ui/themes";
+import { Box, Button, Flex, IconButton, Popover, Text } from "@radix-ui/themes";
 import RawTextPanel from "../message/RawTextPanel";
-import { getExceptionDetail, getExceptionSummary } from "../utils/clientHelpers";
+import {
+  getExceptionDetail,
+  getExceptionSummary,
+  shouldOfferExceptionRelogin
+} from "../utils/clientHelpers";
 import type { ExceptionEntry } from "../types";
 import {
   BottomStatusTriggerButton,
@@ -17,6 +21,8 @@ type ExceptionStatusPopoverProps = {
   exceptionEntries: ExceptionEntry[];
   onClearExceptions: () => void;
   formatRelativeTime: (timestamp?: number | null) => string;
+  reloginLabel?: string;
+  onRelogin?: (entry: ExceptionEntry) => void;
 };
 
 export default function ExceptionStatusPopover({
@@ -24,7 +30,9 @@ export default function ExceptionStatusPopover({
   onOpenChange,
   exceptionEntries,
   onClearExceptions,
-  formatRelativeTime
+  formatRelativeTime,
+  reloginLabel = "Re-login",
+  onRelogin
 }: ExceptionStatusPopoverProps) {
   const [selectedExceptionId, setSelectedExceptionId] = useState<string | null>(null);
   const latestException = exceptionEntries[0] ?? null;
@@ -38,6 +46,9 @@ export default function ExceptionStatusPopover({
   const selectedExceptionDetail = selectedException
     ? getExceptionDetail(selectedException.message)
     : null;
+  const selectedExceptionCanRelogin = selectedException
+    ? shouldOfferExceptionRelogin(selectedException.message)
+    : false;
   const exceptionStatusValue = latestException ? getExceptionSummary(latestException.message) || "Error" : "None";
   const exceptionStatusTone: BottomStatusTone = latestException ? "error" : "muted";
 
@@ -117,6 +128,13 @@ export default function ExceptionStatusPopover({
                     copyLabel="Copy error"
                     constrainHeight={false}
                   />
+                  {selectedExceptionCanRelogin && onRelogin ? (
+                    <Flex justify="end">
+                      <Button size="1" variant="soft" onClick={() => onRelogin(selectedException)}>
+                        {reloginLabel}
+                      </Button>
+                    </Flex>
+                  ) : null}
                 </>
               ) : null}
             </>

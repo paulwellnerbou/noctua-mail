@@ -1,12 +1,10 @@
 import { NextResponse } from "next/server";
 import {
-  getMessageIdsByMessageIds,
-  getThreadIdsByMessageIds,
+  resolveThreadingForAccountMessages,
   upsertMessages
 } from "@/lib/db";
 import { syncImapMessage } from "@/lib/mail/imap";
 import { sanitizeSyncedMessage } from "@/lib/mail/syncMessageSanitizer";
-import { collectThreadReferenceIds, resolveThreadingForItems } from "@/lib/threading";
 import { appendMessageIdToError } from "../errorFormatting";
 import { requireAccountAndMessageContext } from "../routeHelpers";
 
@@ -52,19 +50,7 @@ export async function handleResyncMessageRequest(
     );
   }
 
-  const referenceIds = collectThreadReferenceIds([message]);
-  const externalThreadIds =
-    referenceIds.length > 0
-      ? await getThreadIdsByMessageIds(account.id, referenceIds)
-      : new Map<string, string>();
-  const externalParentIds =
-    referenceIds.length > 0
-      ? await getMessageIdsByMessageIds(account.id, referenceIds)
-      : new Map<string, string>();
-  const [resolved] = resolveThreadingForItems([message], {
-    externalThreadIds,
-    externalParentIds
-  });
+  const [resolved] = await resolveThreadingForAccountMessages(account.id, [message]);
   const sanitized = await sanitizeSyncedMessage(
     {
       ...message,

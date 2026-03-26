@@ -12,8 +12,10 @@ export type SendPayloadInput = {
   composeBcc: string;
   composeSubject: string;
   text: string;
+  markdown: string | undefined;
   html: string | undefined;
   attachments: Attachment[];
+  composeFormat: "text" | "html" | "markdown";
   composeReplyHeaders: ComposeReplyHeaders | null;
   composeReplyMessage: Message | null;
   /** Result of `getAccountFromValue(currentAccount)` — "Name <email>" or just "email". */
@@ -26,8 +28,10 @@ export type SmtpPayload = {
   bcc: string;
   subject: string;
   text: string;
+  markdown: string | undefined;
   html: string | undefined;
   attachments: Attachment[];
+  composeFormat: "text" | "html" | "markdown";
   inReplyTo: string | undefined;
   references: string[] | undefined;
   /** Empty string means omit the Reply-To header. */
@@ -46,8 +50,10 @@ export function buildSendPayload(mode: ComposeMode, input: SendPayloadInput): Sm
     composeBcc,
     composeSubject,
     text,
+    markdown,
     html,
     attachments,
+    composeFormat,
     composeReplyHeaders,
     composeReplyMessage,
     accountFromValue
@@ -84,8 +90,10 @@ export function buildSendPayload(mode: ComposeMode, input: SendPayloadInput): Sm
     bcc: composeBcc,
     subject: composeSubject,
     text,
+    markdown,
     html,
     attachments,
+    composeFormat,
     inReplyTo: shouldThread ? replyHeaders.inReplyTo : undefined,
     references: shouldThread ? replyHeaders.references : undefined,
     replyTo: normalizedReplyTo,

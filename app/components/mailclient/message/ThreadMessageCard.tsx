@@ -13,6 +13,7 @@ import { Badge, Button, Card, IconButton, Tabs } from "@radix-ui/themes";
 import { CaretRightIcon } from "@radix-ui/react-icons";
 import * as Collapsible from "@radix-ui/react-collapsible";
 import { badgeColors, getFlagBadgeColor, getPriorityBadgeColor } from "@/lib/ui/badgeColors";
+import { hasMeaningfulHtmlText } from "@/lib/ui/messageView";
 import { getMessageDateDisplay } from "@/lib/dateFormatting";
 import type { AccountDateFormat, Message, RecipientAlias } from "@/lib/data";
 import {
@@ -180,6 +181,7 @@ export default function ThreadMessageCard({
   const isCollapsed = Boolean(collapsedMessages[message.id]);
   const hasHtml = hasHtmlContent(message.htmlBody);
   const hasText = Boolean(message.body && message.body !== "");
+  const preferTextTab = hasHtml && hasText && !hasMeaningfulHtmlText(message.htmlBody);
   const hasSource = Boolean(message.hasSource);
   const isContentMissing = !hasHtml && !hasText;
   const contentLoading = bodyLoading || Boolean(messageContentLoading[message.id]);
@@ -398,7 +400,7 @@ export default function ThreadMessageCard({
     ];
     const currentTab = pickTabValue(
       tabs.map((tab) => tab.value),
-      "html"
+      preferTextTab ? "text" : "html"
     );
     const panel =
       currentTab === "html"
@@ -566,6 +568,8 @@ export default function ThreadMessageCard({
                   return <MessageBadge key="done" kind="done" onClick={() => toggleTodoFlag(message)} />;
                 if (badge.kind === "calendar")
                   return <MessageBadge key="calendar" kind="calendar" />;
+                if (badge.kind === "ai-modified")
+                  return <MessageBadge key="ai-modified" kind="ai-modified" />;
                 return null;
               })}
               {showAttachmentIcon && <Paperclip size={11} />}
@@ -650,6 +654,12 @@ export default function ThreadMessageCard({
                       <MessageBadge
                         key={`${badge.kind}-${badge.label}`}
                         kind="calendar"
+                        showLabel
+                      />
+                    ) : badge.kind === "ai-modified" ? (
+                      <MessageBadge
+                        key={`${badge.kind}-${badge.label}`}
+                        kind="ai-modified"
                         showLabel
                       />
                     ) : badge.kind.startsWith("category-") ? (

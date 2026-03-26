@@ -200,8 +200,8 @@ export function decidePostSendSentSync(params: {
   return {
     kind: "folder",
     folderId: params.sentFolderId,
-    mode: "recent",
-    reason: "Refresh Sent after sending mail without triggering deep sync."
+    mode: "new",
+    reason: "Refresh Sent after sending mail by fetching newly appended messages."
   };
 }
 

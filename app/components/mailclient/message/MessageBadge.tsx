@@ -1,10 +1,10 @@
 import type React from "react";
-import { CalendarDays, Flag, Square, SquareCheckBig } from "lucide-react";
+import { CalendarDays, Flag, Sparkles, Square, SquareCheckBig } from "lucide-react";
 import { Badge } from "@radix-ui/themes";
 import { getFlagBadgeColor } from "@/lib/ui/badgeColors";
 import styles from "./MessageBadge.module.css";
 
-export type MessageBadgeKind = "flagged" | "todo" | "done" | "calendar";
+export type MessageBadgeKind = "flagged" | "todo" | "done" | "calendar" | "ai-modified";
 
 export type MessageBadgeProps = {
   kind: MessageBadgeKind;
@@ -19,7 +19,8 @@ const badgeConfig: Record<
   flagged: { icon: Flag, label: "Flagged", title: "Unflag message" },
   todo: { icon: Square, label: "To-Do", title: "Mark as Done" },
   done: { icon: SquareCheckBig, label: "Done", title: "Mark as To-Do" },
-  calendar: { icon: CalendarDays, label: "Calendar Invite", title: "Calendar Invite" }
+  calendar: { icon: CalendarDays, label: "Calendar Invite", title: "Calendar Invite" },
+  "ai-modified": { icon: Sparkles, label: "AI Modified", title: "Modified over MCP" }
 };
 
 export default function MessageBadge({ kind, showLabel = false, onClick }: MessageBadgeProps) {
