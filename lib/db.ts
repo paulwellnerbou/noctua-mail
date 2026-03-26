@@ -65,7 +65,7 @@ import {
   normalizeThreadDateSource,
   type ThreadDateSource
 } from "./threadDate";
-import { resolveThreadingForItems } from "./threading";
+import { collectThreadReferenceIds, resolveThreadingForItems } from "./threading";
 import { normalizeReminderDateList, resolveNextReminderOccurrence } from "./reminderRecurrence";
 import { resolveCalendarTimeZoneId } from "./calendarTimezones";
 import { collectCalendarReminderMutationsFromCalendarInvite } from "./calendarReminderMutations";
@@ -6449,6 +6449,39 @@ export async function getMessageIdsByMessageIds(accountId: string, messageIds: s
     }
   });
   return map;
+}
+
+type ThreadingResolvableItem = {
+  id: string;
+  dateValue: number;
+  messageId?: string | null;
+  inReplyTo?: string | null;
+  references?: readonly string[] | null;
+  threadId?: string | null;
+};
+
+export async function resolveThreadingForAccountMessages<T extends ThreadingResolvableItem>(
+  accountId: string,
+  messages: readonly T[]
+) {
+  if (messages.length === 0) {
+    return [] as Array<T & { threadId: string; parentId?: string }>;
+  }
+
+  const referenceIds = collectThreadReferenceIds(messages);
+  const [externalThreadIds, externalParentIds] = await Promise.all([
+    referenceIds.length > 0
+      ? getThreadIdsByMessageIds(accountId, referenceIds)
+      : Promise.resolve(new Map<string, string>()),
+    referenceIds.length > 0
+      ? getMessageIdsByMessageIds(accountId, referenceIds)
+      : Promise.resolve(new Map<string, string>())
+  ]);
+
+  return resolveThreadingForItems(messages, {
+    externalThreadIds,
+    externalParentIds
+  });
 }
 
 export async function getFolderIdsByMessageIds(accountId: string, messageIds: string[]) {

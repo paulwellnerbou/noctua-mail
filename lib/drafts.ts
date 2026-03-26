@@ -1,11 +1,18 @@
 import type { Account, Message } from "@/lib/data";
-import { deleteMessageById, getFolders, getMessageById, upsertMessages } from "@/lib/db";
+import {
+  deleteMessageById,
+  getFolders,
+  getMessageById,
+  resolveThreadingForAccountMessages,
+  upsertMessages
+} from "@/lib/db";
 import { appendImapMessage, deleteImapMessage, syncImapMessage } from "@/lib/mail/imap";
 import { parseComposeAttachments, resolveComposeHtml } from "@/lib/mail/composePayload";
 import { buildRawMessage } from "@/lib/mail/smtp";
 import { sanitizeSyncedMessage } from "@/lib/mail/syncMessageSanitizer";
 import { folderMailboxPath } from "@/lib/mailboxPaths";
 import { splitRecipientEntries } from "@/lib/recipientLists";
+import { buildReplyThreadHeaders } from "@/lib/replyThreadHeaders";
 import { findDraftsFolder } from "@/lib/specialFolders";
 
 export type DraftAttachmentInput = {
@@ -82,17 +89,6 @@ function prefixSubject(prefix: string, subject?: string | null) {
     : `${prefix}: ${cleaned}`;
 }
 
-function uniqueReferences(message: Message) {
-  const values = [
-    ...(message.references ?? []),
-    ...(message.inReplyTo ? [message.inReplyTo] : []),
-    ...(message.messageId ? [message.messageId] : [])
-  ]
-    .map((value) => value.trim())
-    .filter(Boolean);
-  return values.length > 0 ? Array.from(new Set(values)) : undefined;
-}
-
 function getReplyRecipient(account: Account, message: Message) {
   const accountEmail = normalizeEmail(account.email);
   const sentByCurrentUser = extractEmails(message.from).some(
@@ -145,8 +141,7 @@ export async function buildDraftInputForMode(
     throw new DraftSaveError(404, "Message not found");
   }
 
-  const inReplyTo = referenceMessage.messageId?.trim() || undefined;
-  const references = uniqueReferences(referenceMessage);
+  const { inReplyTo, references } = buildReplyThreadHeaders(referenceMessage);
 
   return {
     to:
@@ -227,7 +222,8 @@ export async function saveDraftForAccount(params: {
   let savedMessage: Message | null = null;
   const message = await syncImapMessage(account, draftsMailbox, uid, clientId);
   if (message) {
-    const sanitized = await sanitizeSyncedMessage(message, account.id);
+    const [resolvedMessage] = await resolveThreadingForAccountMessages(accountId, [message]);
+    const sanitized = await sanitizeSyncedMessage(resolvedMessage ?? message, account.id);
     if (payload.composeFormat) {
       sanitized.xComposeFormat = payload.composeFormat;
     }
