@@ -32,7 +32,8 @@ export const DEFAULT_SEARCH_BADGES: SearchBadgesState = {
   attachments: false,
   newsletter: false,
   notification: false,
-  transactional: false
+  transactional: false,
+  "ai-modified": false
 };
 
 export type VirtualFolderDefinition = {

@@ -71,6 +71,43 @@ export function getExceptionDetail(message: string): string | null {
   return detail || null;
 }
 
+const ACCOUNT_API_PATH_RE = /\/api\/accounts\/([^/?\s]+)/i;
+const RELOGIN_EXCEPTION_PATTERNS = [
+  /\bno password configured\b/i,
+  /\binvalid imap credentials\b/i,
+  /\bauth(?:entication)? failed\b/i,
+  /\blogin failed\b/i,
+  /\blogin required\b/i,
+  /\bcredentials?\b/i
+];
+
+export function getExceptionAccountId(message: string): string | null {
+  const match = message.match(ACCOUNT_API_PATH_RE);
+  const accountId = match?.[1]?.trim();
+  if (!accountId) return null;
+  try {
+    return decodeURIComponent(accountId);
+  } catch {
+    return accountId;
+  }
+}
+
+export function shouldOfferExceptionRelogin(message: string): boolean {
+  if (RELOGIN_EXCEPTION_PATTERNS.some((pattern) => pattern.test(message))) {
+    return true;
+  }
+  const normalized = message.toLowerCase();
+  const accountPath = getExceptionAccountId(message);
+  if (!accountPath) return false;
+  return (
+    normalized.includes("/imap/") ||
+    normalized.includes("/sync") ||
+    normalized.includes("/folders") ||
+    normalized.includes("command failed") ||
+    normalized.includes("request failed (500)")
+  );
+}
+
 export function extractEmails(value?: string): string[] {
   if (!value) return [];
   const matches = value.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi);

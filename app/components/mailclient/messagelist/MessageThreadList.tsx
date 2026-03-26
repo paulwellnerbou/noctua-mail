@@ -11,7 +11,12 @@ import CategoryBadge from "../CategoryBadge";
 import FlagBadge from "../message/FlagBadge";
 import MessageBadge from "../message/MessageBadge";
 import TopicBadge from "../TopicBadge";
-import { shouldShowAttachmentIcon, hasTodoFlag, hasDoneFlag } from "../utils/messageHelpers";
+import {
+  hasAiModifiedFlag,
+  shouldShowAttachmentIcon,
+  hasTodoFlag,
+  hasDoneFlag
+} from "../utils/messageHelpers";
 import { getMessageListDateDisplay } from "./messageDateDisplay";
 import { useSelectionSnapshot } from "./selectionStore";
 import ThreadMarkers from "./ThreadMarkers";
@@ -222,6 +227,7 @@ export default function MessageThreadList({
           threadHasFlagged: false,
           threadHasTodo: false,
           threadHasDone: false,
+          threadHasAiModified: false,
           threadHasAttachments: false,
           threadHasCalendar: false
         };
@@ -413,6 +419,9 @@ export default function MessageThreadList({
                         )
                       }
                     />
+                  )}
+                  {(threadBadgeUnion.threadHasAiModified || hasAiModifiedFlag(message)) && (
+                    <MessageBadge kind="ai-modified" />
                   )}
                   {messageTopicsById?.get(message.threadId)?.map((topic) => (
                     <TopicBadge key={topic.id} topic={topic} size="1" />

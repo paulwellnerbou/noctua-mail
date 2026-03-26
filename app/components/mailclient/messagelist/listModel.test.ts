@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import type { Message } from "@/lib/data";
-import { buildMessageListItems, type MessageGroup } from "./listModel";
+import { buildGroupedMessages, buildMessageListItems, type MessageGroup } from "./listModel";
 
 function makeMessage(id: string, threadId: string, dateValue: number): Message {
   return {
@@ -19,6 +19,34 @@ function makeMessage(id: string, threadId: string, dateValue: number): Message {
 }
 
 describe("buildMessageListItems", () => {
+  it("does not emit empty groups when metadata still contains a stale bucket", () => {
+    const groups = buildGroupedMessages({
+      listScopeMessages: [
+        {
+          ...makeMessage("m1", "thread-1", 1000),
+          groupKey: "Older"
+        }
+      ],
+      supportsThreads: false,
+      groupMeta: [
+        { key: "This Week", label: "This Week", count: 1 },
+        { key: "Older", label: "Older", count: 1 }
+      ],
+      groupBy: "date",
+      buildThreadTree: () => [],
+      flattenThread: () => [],
+      isFlaggedMessage: () => false,
+      computeGroupMeta: () => []
+    });
+
+    expect(groups).toEqual([
+      expect.objectContaining({
+        key: "Older",
+        items: [expect.objectContaining({ id: "m1" })]
+      })
+    ]);
+  });
+
   it("emits topic suggestions as a dedicated section item instead of group plus sibling rows", () => {
     const suggestionGroup: MessageGroup = {
       key: "topic-suggestions:topic-build",

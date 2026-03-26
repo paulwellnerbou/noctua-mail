@@ -11,6 +11,7 @@ import AdminTabContent from "@/app/components/account-settings/tabs/AdminTabCont
 import CalendarTabContent from "@/app/components/account-settings/tabs/CalendarTabContent";
 import TopicsTabContent from "@/app/components/account-settings/tabs/TopicsTabContent";
 import RecipientAliasesTabContent from "@/app/components/account-settings/tabs/RecipientAliasesTabContent";
+import McpTabContent from "@/app/components/account-settings/tabs/McpTabContent";
 
 export type ManageTab =
   | "account"
@@ -19,6 +20,7 @@ export type ManageTab =
   | "categorization"
   | "calendar"
   | "topics"
+  | "mcp"
   | "recipient-aliases"
   | "admin";
 
@@ -218,14 +220,17 @@ export default function AccountSettingsModal({
               <Tabs.Trigger value="categorization" disabled={!isExistingAccount}>
                 Categorization
               </Tabs.Trigger>
-              <Tabs.Trigger value="calendar" disabled={!isExistingAccount}>
-                Calendar
-              </Tabs.Trigger>
               <Tabs.Trigger value="topics" disabled={!isExistingAccount}>
                 Topics
               </Tabs.Trigger>
+              <Tabs.Trigger value="calendar" disabled={!isExistingAccount}>
+                Calendar
+              </Tabs.Trigger>
               <Tabs.Trigger value="recipient-aliases" disabled={!isExistingAccount}>
                 Recipient Aliases
+              </Tabs.Trigger>
+              <Tabs.Trigger value="mcp" disabled={!isExistingAccount}>
+                MCP
               </Tabs.Trigger>
               {isAdminUser && (
                 <Tabs.Trigger value="admin" disabled={!isExistingAccount}>
@@ -320,6 +325,19 @@ export default function AccountSettingsModal({
                 onClose={onClose}
                 onSave={handleSave}
                 canSave={canSaveTopicsTab}
+              />
+            </Tabs.Content>
+
+            <Tabs.Content
+              value="mcp"
+              style={{ flex: "1 1 auto", minHeight: 0, overflow: "auto" }}
+            >
+              <McpTabContent
+                accountId={localAccount.id}
+                isActive={manageTab === "mcp"}
+                isExistingAccount={isExistingAccount}
+                apiFetch={apiFetch}
+                onClose={onClose}
               />
             </Tabs.Content>
 

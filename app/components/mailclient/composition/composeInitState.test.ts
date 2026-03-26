@@ -404,6 +404,31 @@ describe("computeComposeInitState — edit", () => {
     expect(fields.initialDraftHash).not.toBeNull();
   });
 
+  it("includes attachment metadata in the initial draft hash", () => {
+    const fields = computeComposeInitState(
+      "edit",
+      makeMessage({
+        attachments: [
+          {
+            id: "att-1",
+            filename: "contract.pdf",
+            contentType: "application/pdf",
+            size: 42,
+            inline: false
+          }
+        ]
+      }),
+      false,
+      opts,
+      deps
+    );
+
+    expect(fields.initialDraftHash).not.toBeNull();
+    expect(JSON.parse(fields.initialDraftHash!)).toMatchObject({
+      attachments: "contract.pdf:42:0:"
+    });
+  });
+
   it("does not set initialDraftHash when asNew is true", () => {
     const fields = computeComposeInitState("edit", makeMessage(), true, opts, deps);
     expect(fields.initialDraftHash).toBeNull();

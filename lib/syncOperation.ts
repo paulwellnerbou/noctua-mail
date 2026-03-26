@@ -189,6 +189,23 @@ export function partitionMissingRemoteUids(
   };
 }
 
+export function planTwoPhaseNewBackfill(
+  missingRemoteUids: number[],
+  highestLocalUid: number | null
+) {
+  const { historicalMissingUids, newerMissingUids, backfillUids } =
+    partitionMissingRemoteUids(missingRemoteUids, highestLocalUid);
+  const requiresExplicitBackfill =
+    highestLocalUid === null || historicalMissingUids.length > 0;
+
+  return {
+    historicalMissingUids,
+    newerMissingUids,
+    backfillUids: requiresExplicitBackfill ? backfillUids : [],
+    requiresExplicitBackfill
+  };
+}
+
 const GOOGLE_CALENDAR_SYNC_SENDER = "noreply-calendar-sync@google.com";
 type CalendarInviteImport = {
   messageId: string;
@@ -559,63 +576,66 @@ export async function runSyncOperationBatched(
       return result;
     }
 
-    // Phase 2: Fetch full source only for genuinely new messages via "new" mode.
-    // The "new" mode fetches from highestKnownUid+1, which covers all new UIDs
-    // since IMAP UIDs are monotonically increasing.
+    // Phase 2: Fetch full source only for genuinely missing messages via "new"
+    // mode. When the local folder has no watermark yet, or there are UID gaps
+    // below the current watermark, switch to explicit UID backfill so nested
+    // "new" mode does not baseline and skip the missing rows.
     const highestLocalUid =
       localRows.length > 0 ? Math.max(...localRows.map((row) => row.imapUid)) : null;
-    const hasSubHighestGaps =
-      highestLocalUid !== null && missingRemoteUids.some((uid) => uid <= highestLocalUid);
+    const {
+      historicalMissingUids,
+      backfillUids,
+      requiresExplicitBackfill
+    } = planTwoPhaseNewBackfill(missingRemoteUids, highestLocalUid);
 
-    if (hasSubHighestGaps) {
-      // Rare edge case: missing UIDs below our highest known UID.
-      // Fall through to the legacy full-source fetch for correctness.
-      console.warn("[noctua][sync] two-phase found sub-highest gaps, falling through to legacy fetch", {
+    if (requiresExplicitBackfill) {
+      console.info("[noctua][sync] two-phase using targeted UID backfill", {
         accountId: account.id,
         folderId: twoPhaseFolderId,
         highestLocalUid,
-        gapCount: missingRemoteUids.filter((uid) => uid <= highestLocalUid).length
+        backfillCount: backfillUids.length,
+        historicalGapCount: historicalMissingUids.length
       });
-    } else {
-      const nestedResult = await runSyncOperationBatched(
-        {
-          ...payload,
-          mode: "new",
-          fullSync: false,
-          resumeFromUid: undefined
-        },
-        clientId,
-        options
-      );
-
-      await saveFoldersForAccount(account.id, folders);
-
-      if (syncMode === "full" && (phaseOneCount + nestedResult.count) > 0) {
-        await recomputeThreadsForAccount(account.id);
-      }
-      if (payload.recategorizeFolder) {
-        await recomputeCategoriesForAccount(account.id, { folderId: twoPhaseFolderId });
-      }
-
-      const result: SyncOperationResult = {
-        count: phaseOneCount + nestedResult.count,
-        newMessages: nestedResult.newMessages,
-        highestProcessedUid: nestedResult.highestProcessedUid ?? snapshot.highestUid ?? undefined
-      };
-      emitProgress({
-        phase: "done",
-        processed: result.count,
-        percent: 100,
-        highestProcessedUid: result.highestProcessedUid,
-        message: "Two-phase sync completed."
-      });
-      return result;
     }
+
+    const nestedResult = await runSyncOperationBatched(
+      {
+        ...payload,
+        mode: "new",
+        fullSync: false,
+        resumeFromUid: undefined,
+        backfillUids: requiresExplicitBackfill ? backfillUids : undefined
+      },
+      clientId,
+      options
+    );
+
+    await saveFoldersForAccount(account.id, folders);
+
+    if (syncMode === "full" && (phaseOneCount + nestedResult.count) > 0) {
+      await recomputeThreadsForAccount(account.id);
+    }
+    if (payload.recategorizeFolder) {
+      await recomputeCategoriesForAccount(account.id, { folderId: twoPhaseFolderId });
+    }
+
+    const result: SyncOperationResult = {
+      count: phaseOneCount + nestedResult.count,
+      newMessages: nestedResult.newMessages,
+      highestProcessedUid: nestedResult.highestProcessedUid ?? snapshot.highestUid ?? undefined
+    };
+    emitProgress({
+      phase: "done",
+      processed: result.count,
+      percent: 100,
+      highestProcessedUid: result.highestProcessedUid,
+      message: "Two-phase sync completed."
+    });
+    return result;
   }
 
   // ---------------------------------------------------------------------------
-  // Legacy full-source fetch path: used for resumed full syncs, and as fallback
-  // when two-phase detects sub-highest UID gaps.
+  // Legacy full-source fetch path: used for resumed full syncs.
   // ---------------------------------------------------------------------------
 
   // A fresh full sync (no resume) captures existing message IDs upfront so we

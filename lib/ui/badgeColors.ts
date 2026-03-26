@@ -27,6 +27,7 @@ const flagColorMap: Record<string, BadgeColor> = {
   new: "blue",
   forwarded: "blue",
   calendar: "indigo",
+  "ai-modified": "cyan",
   recent: "blue",
   todo: "orange",
   done: "green",

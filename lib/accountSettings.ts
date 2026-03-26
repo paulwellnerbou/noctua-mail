@@ -30,6 +30,7 @@ type AccountSettingsSaveTab =
   | "categorization"
   | "calendar"
   | "topics"
+  | "mcp"
   | "recipient-aliases"
   | "admin";
 
@@ -97,6 +98,7 @@ function getTabSaveSnapshot(account: Account, tab: AccountSettingsSaveTab, isAdm
         }
       };
     case "categorization":
+    case "mcp":
     case "recipient-aliases":
     case "admin":
       return null;

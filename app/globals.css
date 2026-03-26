@@ -1147,6 +1147,27 @@ a {
   gap: 6px;
 }
 
+.topic-suggestion-explanation-popover {
+  width: 760px;
+  max-width: min(92vw, 760px);
+  max-height: min(var(--radix-popover-content-available-height), calc(100dvh - 24px), 640px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.topic-suggestion-explanation-layout {
+  flex: 1;
+  min-height: 0;
+}
+
+.topic-suggestion-explanation-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
 .process-list {
   margin-top: 2px;
   display: flex;

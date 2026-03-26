@@ -30,7 +30,10 @@ export async function handleSyncStartRequest(
     fullSync: body?.fullSync,
     mode: body?.mode,
     recategorizeFolder: body?.recategorizeFolder,
-    resumeFromUid: body?.resumeFromUid
+    resumeFromUid: body?.resumeFromUid,
+    backfillUids: Array.isArray(body?.backfillUids)
+      ? body.backfillUids.filter((uid): uid is number => Number.isFinite(uid) && uid > 0)
+      : undefined
   };
 
   const job = startSyncJob(payload, clientId);

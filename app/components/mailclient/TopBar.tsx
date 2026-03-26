@@ -13,6 +13,7 @@ import {
   Moon,
   RefreshCw,
   Settings,
+  Sparkles,
   Square,
   Sun,
   Trash2,
@@ -44,6 +45,7 @@ type SearchBadges = {
   newsletter: boolean;
   notification: boolean;
   transactional: boolean;
+  "ai-modified": boolean;
 };
 
 type ComposeMode = "new" | "reply" | "replyAll" | "forward" | "edit" | "editAsNew";
@@ -174,7 +176,7 @@ export default function TopBar({
   })();
   const menuCheckboxLabel = (
     checked: boolean,
-    label: string,
+    label: React.ReactNode,
     options?: { indented?: boolean }
   ) => (
     <span
@@ -193,6 +195,12 @@ export default function TopBar({
         {checked ? <CircleDot size={14} /> : <Circle size={14} />}
       </span>
       {label}
+    </span>
+  );
+  const aiModifiedBadgeLabel = (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: "0.45rem" }}>
+      <Sparkles size={14} />
+      AI Modified
     </span>
   );
 
@@ -350,7 +358,7 @@ export default function TopBar({
               </Button>
             </DropdownMenu.Trigger>
             <DropdownMenu.Content className={styles.searchMenuContent}>
-              {SEARCH_BADGE_OPTIONS.filter(([key]) => !["newsletter", "notification", "transactional"].includes(key)).map(([key, label]) => (
+              {SEARCH_BADGE_OPTIONS.filter(([key]) => !["newsletter", "notification", "transactional", "ai-modified"].includes(key)).map(([key, label]) => (
                 <DropdownMenu.CheckboxItem
                   key={key}
                   checked={searchBadges[key]}
@@ -386,6 +394,21 @@ export default function TopBar({
                   </DropdownMenu.Item>
                 );
               })}
+              <DropdownMenu.Separator />
+              <DropdownMenu.Label>AI</DropdownMenu.Label>
+              <DropdownMenu.Separator />
+              <DropdownMenu.CheckboxItem
+                checked={searchBadges["ai-modified"]}
+                onSelect={(event) => event.preventDefault()}
+                onCheckedChange={(checked) =>
+                  setSearchBadges((prev) => ({
+                    ...prev,
+                    "ai-modified": checked === true
+                  }))
+                }
+              >
+                {menuCheckboxLabel(searchBadges["ai-modified"], aiModifiedBadgeLabel)}
+              </DropdownMenu.CheckboxItem>
             </DropdownMenu.Content>
           </DropdownMenu.Root>
         </div>

@@ -147,6 +147,9 @@ export default function ComposeMessageField({
       if (result) {
         setComposeHtml(result.html);
         setComposeHtmlText(result.htmlText);
+        // Force the Lexical editor to seed from the converted HTML instead of
+        // preserving its previous internal state.
+        setComposeEditorReset((prev) => prev + 1);
         if (lastEdited === "text") setComposeBody(currentBody);
       }
       setComposeTab("html");

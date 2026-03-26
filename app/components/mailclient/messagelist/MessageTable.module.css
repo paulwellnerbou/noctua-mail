@@ -267,12 +267,12 @@
 }
 
 .threadSibling {
-  background: color-mix(in srgb, var(--gray-2) 60%, transparent);
+  background: var(--topic-tint, color-mix(in srgb, var(--gray-2) 60%, transparent));
   border-color: var(--gray-5);
 }
 
 .threadSibling.rowSelected {
-  background: var(--list-row-selected-bg);
+  background: var(--topic-tint-selected, var(--list-row-selected-bg));
   border-color: var(--list-row-selected-border);
 }
 

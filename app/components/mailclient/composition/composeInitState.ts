@@ -9,6 +9,7 @@ import { splitRecipientEntries } from "@/lib/recipientLists";
 import { hasHtmlContent } from "@/lib/ui/messageView";
 import { extractEmails } from "../utils/clientHelpers";
 import { buildTextReplyBody } from "./composeContentBuilder";
+import { computeDraftHash } from "./draftSaveUtils";
 import type { ComposeMode, ComposeQuotedParts, ComposeReplyHeaders, ComposeTab } from "./composeTypes";
 
 // ---------------------------------------------------------------------------
@@ -370,13 +371,14 @@ export function computeComposeInitState(
   const composeDraftId = mode === "edit" && !asNew ? message.id : null;
 
   const initialDraftHash = !asNew
-    ? JSON.stringify({
+    ? computeDraftHash({
         to: message.to ?? "",
         cc: message.cc ?? "",
         bcc: message.bcc ?? "",
         subject: message.subject ?? "",
         text: message.body ?? "",
-        html: nextHtml
+        html: nextHtml,
+        attachments: message.attachments ?? []
       })
     : null;
 

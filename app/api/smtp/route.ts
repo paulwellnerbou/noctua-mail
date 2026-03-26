@@ -88,15 +88,21 @@ export async function handleSendSmtpRequest(
   const folders = await getFolders(account.id);
   const sentFolder = findSentFolder(folders, account.id);
   const sentMailbox = sentFolder ? folderMailboxPath(sentFolder, account.id) : null;
+  let appendedUid: number | null = null;
   if (sentMailbox) {
     try {
-      await appendImapMessage(account, sentMailbox, result.raw, ["\\Seen"], clientId);
+      appendedUid = await appendImapMessage(account, sentMailbox, result.raw, ["\\Seen"], clientId);
     } catch {
       // ignore append failures
     }
   }
 
-  return NextResponse.json({ ok: true });
+  return NextResponse.json({
+    ok: true,
+    sentFolderId: sentFolder?.id ?? null,
+    sentMessageUid: appendedUid,
+    messageId
+  });
 }
 
 export { legacyAccountRouteRemoved as POST } from "@/app/api/_helpers/legacyAccountRouteRemoved";

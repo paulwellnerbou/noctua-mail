@@ -101,12 +101,14 @@ type SyncJobRequest = {
   fullSync?: boolean;
   mode?: SyncMode;
   recategorizeFolder?: boolean;
+  backfillUids?: number[];
   fullSyncReason?: string;
   triggerId?: string;
   skipFullSyncConfirm?: boolean;
 };
 
 type InternalSyncTriggerOptions = SyncTriggerOptions & {
+  backfillUids?: number[];
   skipFullSyncConfirm?: boolean;
 };
 
@@ -389,7 +391,8 @@ export function useSyncController({
       mode: syncMode,
       fullSync: Boolean(payload.fullSync || syncMode === "full"),
       reason: payload.fullSyncReason?.trim() || null,
-      recategorizeFolder: Boolean(payload.recategorizeFolder)
+      recategorizeFolder: Boolean(payload.recategorizeFolder),
+      backfillUidCount: payload.backfillUids?.length ?? 0
     });
     await requestFullSyncConfirmation(payload);
 
@@ -482,6 +485,7 @@ export function useSyncController({
         folderId,
         mode,
         recategorizeFolder: Boolean(options?.recategorizeFolder),
+        backfillUids: options?.backfillUids,
         fullSyncReason: options?.fullSyncReason,
         triggerId: options?.triggerId,
         skipFullSyncConfirm: options?.skipFullSyncConfirm

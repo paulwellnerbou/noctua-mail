@@ -94,23 +94,30 @@ function normalizeSyncPayload(payload: SyncPayload): SyncPayload {
   const mode = getSyncMode(payload);
   const recategorizeFolder =
     Boolean(payload.recategorizeFolder) && typeof payload.folderId === "string" && payload.folderId.length > 0;
+  const backfillUids = Array.isArray(payload.backfillUids)
+    ? Array.from(new Set(payload.backfillUids.filter((uid) => Number.isFinite(uid) && uid > 0)))
+    : undefined;
   return {
     accountId: payload.accountId,
     folderId: payload.folderId,
     mode,
     fullSync: mode === "full",
-    recategorizeFolder
+    recategorizeFolder,
+    backfillUids
   };
 }
 
 function isSameSyncIntent(a: SyncPayload, b: SyncPayload) {
   const left = normalizeSyncPayload(a);
   const right = normalizeSyncPayload(b);
+  const leftBackfill = (left.backfillUids ?? []).join(",");
+  const rightBackfill = (right.backfillUids ?? []).join(",");
   return (
     left.accountId === right.accountId &&
     (left.folderId ?? "") === (right.folderId ?? "") &&
     left.mode === right.mode &&
-    Boolean(left.recategorizeFolder) === Boolean(right.recategorizeFolder)
+    Boolean(left.recategorizeFolder) === Boolean(right.recategorizeFolder) &&
+    leftBackfill === rightBackfill
   );
 }
 
@@ -126,6 +133,15 @@ function coalesceSyncPayload(existing: SyncPayload, incoming: SyncPayload): Sync
     normalizedExisting.folderId === normalizedIncoming.folderId
       ? normalizedExisting.folderId
       : undefined;
+  const backfillUids =
+    folderId && mode === "new"
+      ? Array.from(
+          new Set([
+            ...(normalizedExisting.backfillUids ?? []),
+            ...(normalizedIncoming.backfillUids ?? [])
+          ])
+        ).sort((left, right) => left - right)
+      : undefined;
 
   return {
     accountId: normalizedExisting.accountId,
@@ -134,7 +150,8 @@ function coalesceSyncPayload(existing: SyncPayload, incoming: SyncPayload): Sync
     fullSync: mode === "full",
     recategorizeFolder:
       Boolean(normalizedExisting.recategorizeFolder || normalizedIncoming.recategorizeFolder) &&
-      Boolean(folderId)
+      Boolean(folderId),
+    backfillUids: backfillUids && backfillUids.length > 0 ? backfillUids : undefined
   };
 }
 

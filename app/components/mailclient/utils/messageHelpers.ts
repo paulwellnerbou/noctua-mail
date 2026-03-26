@@ -1,12 +1,13 @@
 /**
  * Pure utility functions for message operations
  */
-import type { Message, Folder } from "@/lib/data";
+import type { Message, Folder, Topic } from "@/lib/data";
 import type { MessageGroupMeta } from "../messagelist/listModel";
 import {
   hasMessageFlag,
   hasTodoFlag as hasTodoFlagFromFlags,
   hasDoneFlag as hasDoneFlagFromFlags,
+  hasAiModifiedFlag as hasAiModifiedFlagFromFlags,
   CALENDAR_INVITE_FLAG,
   isMeaningfulNonInlineAttachment
 } from "@/lib/messageFlags";
@@ -67,6 +68,10 @@ export function hasDoneFlag(message: Message) {
   return hasDoneFlagFromFlags(message.flags);
 }
 
+export function hasAiModifiedFlag(message: Message) {
+  return hasAiModifiedFlagFromFlags(message.flags);
+}
+
 export function hasCalendarFlag(message: Message) {
   return hasMessageFlag(message.flags, CALENDAR_INVITE_FLAG);
 }
@@ -81,6 +86,11 @@ export function hasNonInlineAttachments(message: Message) {
 
 export function shouldShowAttachmentIcon(message: Message) {
   return hasNonInlineAttachments(message);
+}
+
+export function hasAssignedTopics(topics?: Topic[] | null) {
+  if (!Array.isArray(topics) || topics.length === 0) return false;
+  return topics.some((topic) => typeof topic?.id === "string" && topic.id.trim().length > 0);
 }
 
 export type UnsubscribeCapability = "one-click" | "browser" | "mailto" | null;

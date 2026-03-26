@@ -3,9 +3,11 @@ import type { Attachment } from "@/lib/data";
 export const CALENDAR_INVITE_FLAG = "calendar-invite";
 export const TODO_FLAG = "$Todo";
 export const DONE_FLAG = "$Done";
+export const AI_MODIFIED_FLAG = "$NoctuaAI";
 export const NONJUNK_KEYWORD = "NONJUNK";
 export const RECENT_IMAP_FLAG = "\\recent";
 const LEGACY_CUSTOM_FLAGGED_KEYWORD = "pinned";
+const LOCAL_ONLY_FLAGS = [CALENDAR_INVITE_FLAG, AI_MODIFIED_FLAG];
 
 export const CALENDAR_MIME_HINTS = [
   "text/calendar",
@@ -139,6 +141,10 @@ export function hasDoneFlag(flags: string[] | null | undefined) {
   return hasMessageFlag(flags, DONE_FLAG);
 }
 
+export function hasAiModifiedFlag(flags: string[] | null | undefined) {
+  return hasMessageFlag(flags, AI_MODIFIED_FLAG);
+}
+
 export function normalizeImapFlags(flags: string[] | null | undefined) {
   const seen = new Set<string>();
   const normalized: string[] = [];
@@ -153,6 +159,28 @@ export function normalizeImapFlags(flags: string[] | null | undefined) {
     normalized.push(mapped);
   }
   return normalized;
+}
+
+export function isLocalOnlyMessageFlag(flag: string) {
+  const normalizedFlag = flag.trim().toLowerCase();
+  return LOCAL_ONLY_FLAGS.some((value) => value.toLowerCase() === normalizedFlag);
+}
+
+export function appendMessageFlags(
+  flags: string[] | null | undefined,
+  additions: string[] | null | undefined
+) {
+  return normalizeImapFlags([...(flags ?? []), ...(additions ?? [])]);
+}
+
+export function preserveLocalOnlyMessageFlags(
+  nextFlags: string[] | null | undefined,
+  existingFlags: string[] | null | undefined
+) {
+  const localOnlyFlags = normalizeImapFlags(existingFlags).filter((flag) =>
+    isLocalOnlyMessageFlag(flag)
+  );
+  return appendMessageFlags(nextFlags, localOnlyFlags);
 }
 
 export function detectCalendarInvite(input: CalendarInviteDetectionInput) {

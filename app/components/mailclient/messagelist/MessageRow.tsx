@@ -6,7 +6,7 @@ import { CaretRightIcon } from "@radix-ui/react-icons";
 import { badgeColors } from "@/lib/ui/badgeColors";
 import type { AccountDateFormat, Message } from "@/lib/data";
 import SenderIcon from "../SenderIcon";
-import { hasTodoFlag, hasDoneFlag } from "../utils/messageHelpers";
+import { hasAiModifiedFlag, hasTodoFlag, hasDoneFlag } from "../utils/messageHelpers";
 import badgeStyles from "../message/MessageBadge.module.css";
 import commonStyles from "./MessageListCommon.module.css";
 import { getMessageListDateDisplay } from "./messageDateDisplay";
@@ -80,6 +80,7 @@ type MessageRowProps = {
   threadHasFlagged?: boolean;
   threadHasTodo?: boolean;
   threadHasDone?: boolean;
+  threadHasAiModified?: boolean;
   threadHasAttachments?: boolean;
   threadHasCalendar?: boolean;
   messageTopics?: Topic[];
@@ -151,6 +152,7 @@ function MessageRow({
   threadHasFlagged,
   threadHasTodo,
   threadHasDone,
+  threadHasAiModified,
   threadHasAttachments,
   threadHasCalendar,
   messageTopics,
@@ -500,6 +502,9 @@ function MessageRow({
             {(threadHasDone ?? hasDoneFlag(message)) && (
               <MessageBadge kind="done" onClick={() => toggleTodoFlag(message, collapsedThreadMessages, "done")} />
             )}
+            {(threadHasAiModified ?? hasAiModifiedFlag(message)) && (
+              <MessageBadge kind="ai-modified" />
+            )}
           </div>
         )}
       </div>
@@ -548,6 +553,7 @@ const areEqual = (prev: MessageRowProps, next: MessageRowProps) =>
   prev.threadHasFlagged === next.threadHasFlagged &&
   prev.threadHasTodo === next.threadHasTodo &&
   prev.threadHasDone === next.threadHasDone &&
+  prev.threadHasAiModified === next.threadHasAiModified &&
   prev.messageTopics === next.messageTopics &&
   prev.senderIconsEnabled === next.senderIconsEnabled;
 

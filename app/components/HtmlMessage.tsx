@@ -1,5 +1,7 @@
+"use client";
+
 import { memo, useEffect, useRef } from "react";
-import { sanitizeHtmlForDisplay, stripConditionalComments } from "@/lib/html";
+import { extractBodyContent, sanitizeHtmlForDisplay, selectPreferredHtmlDocument, stripConditionalComments } from "@/lib/html";
 import { useMessageLinkPreview } from "@/app/components/mailclient/message/MessageLinkPreviewContext";
 import {
   acquireEmailFonts,
@@ -39,35 +41,6 @@ function prefixSelectors(css: string, prefix: string) {
       .join(", ");
     return `${brace}\n${next}{`;
   });
-}
-
-function extractBodyContent(input: string) {
-  if (!/<body[\s>]/i.test(input)) {
-    return {
-      body: input,
-      styles: input.match(/<style[^>]*>[\s\S]*?<\/style>/gi) ?? [],
-      bodyAttrs: { className: "", style: "", id: "" }
-    };
-  }
-  const styles = input.match(/<style[^>]*>[\s\S]*?<\/style>/gi) ?? [];
-  const bodyTagMatch = input.match(/<body([^>]*)>/i);
-  const attrs = bodyTagMatch?.[1] ?? "";
-  const classMatch = attrs.match(/class=["']([^"']+)["']/i);
-  const styleMatch = attrs.match(/style=["']([^"']+)["']/i);
-  const idMatch = attrs.match(/id=["']([^"']+)["']/i);
-  const body = input
-    .replace(/[\s\S]*<body[^>]*>/i, "")
-    .replace(/<\/body>[\s\S]*/i, "")
-    .replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "");
-  return {
-    body,
-    styles,
-    bodyAttrs: {
-      className: classMatch?.[1] ?? "",
-      style: styleMatch?.[1] ?? "",
-      id: idMatch?.[1] ?? ""
-    }
-  };
 }
 
 function rewriteBodySelectors(css: string) {
@@ -168,7 +141,7 @@ function HtmlMessage({
     if (!hostRef.current) return;
     const root = hostRef.current.shadowRoot ?? hostRef.current.attachShadow({ mode: "open" });
     const rawHtml = html || "";
-    const cleanedHtml = stripConditionalComments(rawHtml);
+    const cleanedHtml = selectPreferredHtmlDocument(stripConditionalComments(rawHtml));
     const hasExplicitColor = /(^|[^-])color\s*:/i.test(cleanedHtml);
     const stylesheetLinks = extractStylesheetLinks(cleanedHtml);
     const fontStylesheetUrls = Array.from(

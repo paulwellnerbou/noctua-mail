@@ -4,6 +4,7 @@ import {
   diffLocalAndRemoteWithFlags,
   filterMissingRemoteUidsForPendingMoves,
   isGoogleCalendarSyncMessage,
+  planTwoPhaseNewBackfill,
   partitionMissingRemoteUids,
   resolveOrphanedMessageFileRefs,
   shouldAutoProcessCalendarInviteMessage,
@@ -144,6 +145,35 @@ describe("partitionMissingRemoteUids", () => {
       historicalMissingUids: [],
       newerMissingUids: [3, 7],
       backfillUids: [3, 7]
+    });
+  });
+});
+
+describe("planTwoPhaseNewBackfill", () => {
+  test("forces explicit backfill for unsynced folders", () => {
+    expect(planTwoPhaseNewBackfill([7, 3, 7], null)).toEqual({
+      historicalMissingUids: [],
+      newerMissingUids: [3, 7],
+      backfillUids: [3, 7],
+      requiresExplicitBackfill: true
+    });
+  });
+
+  test("skips explicit backfill for pure newer tails on synced folders", () => {
+    expect(planTwoPhaseNewBackfill([11, 12, 13], 10)).toEqual({
+      historicalMissingUids: [],
+      newerMissingUids: [11, 12, 13],
+      backfillUids: [],
+      requiresExplicitBackfill: false
+    });
+  });
+
+  test("forces explicit backfill when gaps exist below the local watermark", () => {
+    expect(planTwoPhaseNewBackfill([9, 11, 12], 10)).toEqual({
+      historicalMissingUids: [9],
+      newerMissingUids: [11, 12],
+      backfillUids: [9, 11, 12],
+      requiresExplicitBackfill: true
     });
   });
 });

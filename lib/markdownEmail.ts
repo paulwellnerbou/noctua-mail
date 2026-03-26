@@ -1,6 +1,6 @@
 import { readFileSync } from "fs";
 import { join } from "path";
-import { createElement } from "react";
+import { markdownToHtml } from "./markdownConvert";
 
 const MARKDOWN_PREVIEW_CSS_PATH = join(
   process.cwd(),
@@ -19,18 +19,9 @@ function getMarkdownPreviewCss() {
   return markdownPreviewCss;
 }
 
-async function renderMarkdownPreviewHtml(markdown: string) {
-  const [{ default: MarkdownPreview }, { renderToStaticMarkup }] = await Promise.all([
-    import("@uiw/react-markdown-preview"),
-    import("react-dom/server")
-  ]);
-  return renderToStaticMarkup(
-    createElement(MarkdownPreview, {
-      source: markdown,
-      disableCopy: true,
-      wrapperElement: { "data-color-mode": "light" }
-    })
-  );
+function renderMarkdownPreviewHtml(markdown: string) {
+  const html = markdownToHtml(markdown);
+  return `<div class="wmde-markdown wmde-markdown-color" data-color-mode="light">${html}</div>`;
 }
 
 /**
@@ -39,7 +30,7 @@ async function renderMarkdownPreviewHtml(markdown: string) {
  */
 export async function markdownToEmailHtml(markdown: string): Promise<string> {
   if (!markdown.trim()) return "";
-  const previewHtml = await renderMarkdownPreviewHtml(markdown);
+  const previewHtml = renderMarkdownPreviewHtml(markdown);
   const css = getMarkdownPreviewCss();
   return `<style data-noctua-markdown-preview="true">${css}</style>${previewHtml}`;
 }

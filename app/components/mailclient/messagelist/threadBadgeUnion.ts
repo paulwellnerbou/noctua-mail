@@ -1,5 +1,11 @@
 import type { Message } from "@/lib/data";
-import { CALENDAR_INVITE_FLAG, hasMessageFlag, hasTodoFlag, hasDoneFlag } from "@/lib/messageFlags";
+import {
+  CALENDAR_INVITE_FLAG,
+  hasAiModifiedFlag,
+  hasMessageFlag,
+  hasTodoFlag,
+  hasDoneFlag
+} from "@/lib/messageFlags";
 import { shouldShowAttachmentIcon } from "../utils/messageHelpers";
 
 export type ThreadBadgeUnion = {
@@ -7,6 +13,7 @@ export type ThreadBadgeUnion = {
   threadHasFlagged: boolean;
   threadHasTodo: boolean;
   threadHasDone: boolean;
+  threadHasAiModified: boolean;
   threadHasAttachments: boolean;
   threadHasCalendar: boolean;
 };
@@ -24,6 +31,7 @@ export function getCollapsedThreadBadgeUnion(params: {
   let hasFlagged = false;
   let hasTodo = false;
   let hasDone = false;
+  let hasAiModified = false;
   let hasAttachments = false;
   let hasCalendar = false;
 
@@ -32,6 +40,7 @@ export function getCollapsedThreadBadgeUnion(params: {
     if (message.flagged) hasFlagged = true;
     if (hasTodoFlag(message.flags)) hasTodo = true;
     if (hasDoneFlag(message.flags)) hasDone = true;
+    if (hasAiModifiedFlag(message.flags)) hasAiModified = true;
     if (shouldShowAttachmentIcon(message)) hasAttachments = true;
     if (hasMessageFlag(message.flags, CALENDAR_INVITE_FLAG)) hasCalendar = true;
   });
@@ -41,6 +50,7 @@ export function getCollapsedThreadBadgeUnion(params: {
     threadHasFlagged: hasFlagged,
     threadHasTodo: hasTodo,
     threadHasDone: hasDone,
+    threadHasAiModified: hasAiModified,
     threadHasAttachments: hasAttachments,
     threadHasCalendar: hasCalendar
   };

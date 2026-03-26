@@ -1,9 +1,32 @@
 import { describe, expect, it } from "bun:test";
 import {
+  extractBodyContent,
+  extractVisibleHtmlText,
+  decodeHtmlEntities,
   ensureHtmlDocumentTitle,
   linkifyHtmlTextNodes,
+  selectPreferredHtmlDocument,
+  stripHtmlToText,
   stripConditionalComments
 } from "./html";
+
+describe("decodeHtmlEntities", () => {
+  it("decodes named and angle-bracket entities", () => {
+    expect(
+      decodeHtmlEntities("&quot;Paul Wellner Bou&quot; &lt;paul@example.com&gt;")
+    ).toBe('"Paul Wellner Bou" <paul@example.com>');
+  });
+});
+
+describe("stripHtmlToText", () => {
+  it("decodes html entities after stripping tags", () => {
+    expect(
+      stripHtmlToText(
+        "<p>On 2026-03-25 10:22, &quot;Paul Wellner Bou&quot; &lt;paul@example.com&gt; wrote:</p>"
+      )
+    ).toBe('On 2026-03-25 10:22, "Paul Wellner Bou" <paul@example.com> wrote:');
+  });
+});
 
 describe("linkifyHtmlTextNodes", () => {
   it("linkifies plain urls inside html text nodes", () => {
@@ -86,6 +109,62 @@ describe("stripConditionalComments", () => {
     expect(stripConditionalComments(html)).toBe(
       '<div class="outer"><img class="tracking" src="https://example.com/pixel.png"><div class="hero">hero</div><div class="footer">footer</div></div>'
     );
+  });
+});
+
+describe("selectPreferredHtmlDocument", () => {
+  it("prefers the html document with meaningful visible text", () => {
+    const meaningful = [
+      "<html><head><title>real</title></head><body>",
+      "<div>Liebe Elternbeiräte, hier steht der eigentliche Inhalt.</div>",
+      "</body></html>"
+    ].join("");
+    const empty = [
+      "<html><head><title>empty</title></head><body>",
+      '<div><blockquote type="cite"><div></div></blockquote></div><br>',
+      "</body></html>"
+    ].join("");
+
+    const selected = selectPreferredHtmlDocument(`${meaningful}${empty}`);
+
+    expect(selected).toContain("Liebe Elternbeiräte");
+    expect(extractVisibleHtmlText(selected)).toContain("Liebe Elternbeiräte");
+  });
+
+  it("does not split a single html document that contains literal html markup in its content", () => {
+    const html = [
+      "<!doctype html>",
+      "<html><body>",
+      "<div>Header</div>",
+      "<p><html><head></head><body><a href=\"https://example.com\">literal snippet</a></body></html></p>",
+      "<div>Footer</div>",
+      "</body></html>"
+    ].join("");
+
+    const selected = selectPreferredHtmlDocument(html);
+
+    expect(selected).toBe(html);
+    expect(extractVisibleHtmlText(selected)).toContain("Header");
+    expect(extractVisibleHtmlText(selected)).toContain("Footer");
+  });
+});
+
+describe("extractBodyContent", () => {
+  it("extracts the body from the preferred html document in concatenated html", () => {
+    const meaningful = [
+      '<html><head><style>.x{color:red}</style></head><body class="mail-body" style="font-size:14px">',
+      "<div>Visible body</div>",
+      "</body></html>"
+    ].join("");
+    const empty = "<html><body><div><br></div></body></html>";
+
+    const result = extractBodyContent(`${meaningful}${empty}`);
+
+    expect(result.body).toContain("Visible body");
+    expect(result.body).not.toContain("<div><br></div>");
+    expect(result.bodyAttrs.className).toBe("mail-body");
+    expect(result.bodyAttrs.style).toBe("font-size:14px");
+    expect(result.styles).toEqual(["<style>.x{color:red}</style>"]);
   });
 });
 

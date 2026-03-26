@@ -44,7 +44,10 @@ import { useComposeViewEffects } from "./mailclient/composition/useComposeViewEf
 import { buildSendPayload } from "./mailclient/composition/buildSendPayload";
 import { useComposeDraftAutoSave } from "./mailclient/composition/useComposeDraftAutoSave";
 import { useDraftManager } from "./mailclient/composition/useDraftManager";
-import { useComposeHandlers } from "./mailclient/composition/useComposeHandlers";
+import {
+  restoreInlineAttachmentDataUrls,
+  useComposeHandlers
+} from "./mailclient/composition/useComposeHandlers";
 import { useMessageDragDrop } from "./mailclient/useMessageDragDrop";
 import {
   renderQuickActions as renderQuickActionsHelper,
@@ -102,6 +105,7 @@ import {
   type ThreadDateSource
 } from "@/lib/threadDate";
 import { createComposeAttachment } from "@/lib/mail/composeAttachment";
+import { stripHtmlToText } from "@/lib/html";
 import {
   buildAccountApiPath,
   buildAccountCalendarRecomputeRelationsPath,
@@ -147,6 +151,7 @@ import ThreadJsonModal from "./mailclient/message/ThreadJsonModal";
 import ThreadView from "./mailclient/message/ThreadView";
 import TopicPickerDialog from "./mailclient/TopicPickerDialog";
 import RecipientAliasDialog from "./mailclient/RecipientAliasDialog";
+import AccountReloginDialog from "./mailclient/AccountReloginDialog";
 import TopicBadge from "./mailclient/TopicBadge";
 import TopicsSidebarSection from "./mailclient/folder/TopicsSidebarSection";
 import { applyActiveTopicSuggestion } from "./mailclient/topicSuggestionActions";
@@ -187,7 +192,9 @@ import {
   isFlaggedMessage,
   getThreadMessages,
   applyFlagsToMessage,
+  hasAssignedTopics,
   isMessageFlagged,
+  hasAiModifiedFlag,
   hasTodoFlag,
   hasDoneFlag,
   hasCalendarFlag,
@@ -202,7 +209,11 @@ import {
   isSentFolder as checkIsSentFolder,
   isNotificationSuppressedFolder as checkIsNotificationSuppressedFolder
 } from "./mailclient/utils/folderHelpers";
-import { extractEmails } from "./mailclient/utils/clientHelpers";
+import {
+  extractEmails,
+  getExceptionAccountId,
+  shouldOfferExceptionRelogin
+} from "./mailclient/utils/clientHelpers";
 import {
   resolveMoveTargetRequest,
   type MoveTargetRequest
@@ -221,6 +232,7 @@ import {
   THREAD_COLLAPSE_SETTLE_MS
 } from "./mailclient/constants";
 import type {
+  ExceptionEntry,
   DeleteConfirmAction,
   DeleteConfirmState,
   FullSyncConfirmState
@@ -306,6 +318,8 @@ export default function MailClient({
   const [manageOpen, setManageOpen] = useState(false);
   const [manageTab, setManageTab] = useState<ManageTab>("account");
   const [editingAccount, setEditingAccount] = useState<Account | null>(null);
+  const [reloginAccountId, setReloginAccountId] = useState("");
+  const [reloginDescription, setReloginDescription] = useState("");
   const [leftWidth, setLeftWidth] = useState(270);
   const [listWidth, setListWidth] = useState(840);
   const [dragging, setDragging] = useState<"left" | "list" | null>(null);
@@ -388,9 +402,6 @@ export default function MailClient({
     activeAccountId && activeTopicId ? `${activeAccountId}:${activeTopicId}` : "";
 
   const readErrorMessage = useCallback(async (res: Response) => {
-    if (res.status === 401) {
-      setAuthState("unauth");
-    }
     const responsePath = (() => {
       if (!res.url) return null;
       try {
@@ -420,7 +431,31 @@ export default function MailClient({
         error?: string;
         stack?: string;
         details?: string;
+        code?: string;
+        accountId?: string;
+        reauthRequired?: boolean;
       };
+      const resolvedAccountId =
+        data?.accountId?.trim() || getExceptionAccountId(responsePath ?? "") || "";
+      const primaryMessage =
+        [data?.message, data?.error, data?.details].find(
+          (value) => value && typeof value === "string" && value.trim()
+        ) ?? "";
+      if (res.status === 401) {
+        if (data?.reauthRequired && resolvedAccountId) {
+          setReloginAccountId(resolvedAccountId);
+          setReloginDescription("");
+        } else {
+          const normalizedPrimary = primaryMessage.trim().toLowerCase();
+          const looksLikeSessionUnauthorized =
+            responsePath?.startsWith("/api/auth/") ||
+            normalizedPrimary === "unauthorized" ||
+            (!primaryMessage.trim() && !data?.reauthRequired);
+          if (looksLikeSessionUnauthorized) {
+            setAuthState("unauth");
+          }
+        }
+      }
       const parts = [data?.message, data?.error, data?.details, data?.stack].filter(
         (value) => value && typeof value === "string"
       ) as string[];
@@ -1709,6 +1744,7 @@ export default function MailClient({
     handleComposeDragOver,
     handleComposeDrop,
     handleComposeAttachmentPick,
+    hydrateComposeAttachments,
     loadForwardAttachments
   } = useComposeHandlers({
     composeDirtyRef,
@@ -1739,25 +1775,7 @@ export default function MailClient({
     return name.toLowerCase().includes("draft");
   };
 
-  const stripHtml = (value: string): string =>
-    value
-      .replace(/<style[\s\S]*?<\/style>/gi, " ")
-      .replace(/<script[\s\S]*?<\/script>/gi, " ")
-      .replace(/<a\s+[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi, (_, href, text) => {
-        const label = stripHtml(text || "").trim();
-        if (!label) return href;
-        return label === href ? label : `${label} (${href})`;
-      })
-      .replace(/<(br|hr)\s*\/?>/gi, "\n")
-      .replace(/<\/(p|div|section|article|header|footer|blockquote|pre|table|tr|h[1-6])>/gi, "\n")
-      .replace(/<li[^>]*>/gi, "\n- ")
-      .replace(/<\/li>/gi, "\n")
-      .replace(/<[^>]+>/g, " ")
-      .replace(/\r\n/g, "\n")
-      .replace(/[ \t]+\n/g, "\n")
-      .replace(/\n{3,}/g, "\n\n")
-      .replace(/[ \t]{2,}/g, " ")
-      .trim();
+  const stripHtml = stripHtmlToText;
 
   const normalizeHtmlDerivedText = (value: string): string =>
     value
@@ -1765,6 +1783,59 @@ export default function MailClient({
       .replace(/(^|\\n)--/g, "$1--");
 
   const currentAccount = accounts.find((account) => account.id === activeAccountId) ?? null;
+  const reloginAccount = accounts.find((account) => account.id === reloginAccountId) ?? null;
+  const handleOpenReloginFromException = useCallback(
+    (entry: ExceptionEntry) => {
+      const targetAccountId = getExceptionAccountId(entry.message) ?? activeAccountId;
+      const targetAccount =
+        accounts.find((account) => account.id === targetAccountId) ??
+        accounts.find((account) => account.id === activeAccountId) ??
+        null;
+      if (!targetAccount) {
+        reportError("Unable to determine which account needs new IMAP credentials.");
+        return;
+      }
+      setReloginDescription("");
+      setReloginAccountId(targetAccount.id);
+    },
+    [accounts, activeAccountId, reportError]
+  );
+  const handleReloginSuccess = useCallback(
+    async (updatedAccount: Account) => {
+      setAccounts((prev) =>
+        prev.map((account) =>
+          account.id === updatedAccount.id
+            ? {
+                ...account,
+                imap: {
+                  ...account.imap,
+                  user: updatedAccount.imap.user
+                }
+              }
+            : account
+        )
+      );
+      setExceptionEntries((prev) =>
+        prev.filter((entry) => {
+          if (!shouldOfferExceptionRelogin(entry.message)) return true;
+          const entryAccountId = getExceptionAccountId(entry.message);
+          if (entryAccountId) return entryAccountId !== updatedAccount.id;
+          return updatedAccount.id !== activeAccountId;
+        })
+      );
+      pushNotice({
+        type: "success",
+        title: "Account reconnected",
+        description: `Updated IMAP credentials for ${updatedAccount.email}.`
+      });
+      if (updatedAccount.id === activeAccountId) {
+        void syncAccount(activeFolderId || undefined, "new", {
+          triggerId: `relogin:${updatedAccount.id}:${Date.now()}`
+        });
+      }
+    },
+    [activeAccountId, activeFolderId, pushNotice, setAccounts, setExceptionEntries, syncAccount]
+  );
   const calendarFirstDay: 0 | 1 = currentAccount?.settings?.calendar?.weekStartsOn === "sunday" ? 0 : 1;
   const accountSignatures = currentAccount?.settings?.signatures ?? [];
   const defaultSignatureId = currentAccount?.settings?.defaultSignatureId ?? "";
@@ -1807,7 +1878,21 @@ export default function MailClient({
       return;
     }
 
-    const afterOpen = (msg: Message) => {
+    const afterOpen = async (msg: Message) => {
+      if (mode === "edit" && (msg.attachments?.length ?? 0) > 0) {
+        const attachments = await hydrateComposeAttachments(msg);
+        const hydratedMessage =
+          attachments.length > 0 && msg.htmlBody
+            ? {
+                ...msg,
+                htmlBody: restoreInlineAttachmentDataUrls(msg.htmlBody, attachments)
+              }
+            : msg;
+        openComposeInternal(mode, hydratedMessage, asNew);
+        setComposeAttachments(attachments);
+        return;
+      }
+
       openComposeInternal(mode, msg, asNew);
       if (mode === "forward") {
         void loadForwardAttachments(msg, setComposeAttachments);
@@ -1818,13 +1903,13 @@ export default function MailClient({
     const hasText = Boolean((resolved.body ?? "").trim());
     const hasHtml = hasHtmlContent(resolved.htmlBody);
     if (hasText || hasHtml) {
-      afterOpen(resolved);
+      void afterOpen(resolved);
       return;
     }
 
     void (async () => {
       const hydrated = await ensureMessageContent(resolved, { manual: true });
-      afterOpen(hydrated ?? resolved);
+      await afterOpen(hydrated ?? resolved);
     })();
   };
 
@@ -1851,26 +1936,40 @@ export default function MailClient({
     setMessageTopicsById(next);
   }, [messages]);
 
+  const getAssignedThreadTopics = useCallback((message: Message) => {
+    const threadTopics = message.threadId ? messageTopicsById.get(message.threadId) : undefined;
+    if (hasAssignedTopics(threadTopics)) {
+      return threadTopics ?? [];
+    }
+    return message.topics ?? [];
+  }, [messageTopicsById]);
+
   const handleAssignTopics = useCallback((message: Message) => {
     setTopicPickerMessage(message);
     setTopicSuggestions([]);
     setTopicPickerOpen(true);
+    if (hasAssignedTopics(getAssignedThreadTopics(message))) {
+      return;
+    }
     const params = new URLSearchParams();
     if (message.threadId) params.set("threadId", message.threadId);
     apiFetch(buildAccountMessageTopicSuggestionsPath(activeAccountId, params), { cache: "no-store" })
       .then((r) => r.json())
       .then((data) => { if (data.ok) setTopicSuggestions(data.suggestions ?? []); })
       .catch(() => {});
-  }, [activeAccountId, apiFetch]);
+  }, [activeAccountId, apiFetch, getAssignedThreadTopics]);
 
   const handleFetchSuggestions = useCallback(async (message: Message): Promise<Topic[]> => {
+    if (hasAssignedTopics(getAssignedThreadTopics(message))) {
+      return [];
+    }
     const params = new URLSearchParams();
     if (message.threadId) params.set("threadId", message.threadId);
     const data = await apiFetch(buildAccountMessageTopicSuggestionsPath(activeAccountId, params), { cache: "no-store" })
       .then((r) => r.json())
       .catch(() => ({}));
     return data.ok ? (data.suggestions ?? []) : [];
-  }, [activeAccountId, apiFetch]);
+  }, [activeAccountId, apiFetch, getAssignedThreadTopics]);
 
   const handleLoadTopicSuggestionExplanation = useCallback(async (threadId: string) => {
     const normalizedThreadId = threadId.trim();
@@ -2745,15 +2844,17 @@ export default function MailClient({
     }
     setSendingMail(true);
     try {
-      const { text, html, attachments } = buildComposePayload();
+      const { text, html, markdown, attachments, composeFormat } = buildComposePayload();
       const smtpPayload = buildSendPayload(composeMode, {
         composeTo,
         composeCc,
         composeBcc,
         composeSubject,
         text,
+        markdown,
         html,
         attachments,
+        composeFormat,
         composeReplyHeaders,
         composeReplyMessage,
         accountFromValue: getAccountFromValue(currentAccount)
@@ -2764,6 +2865,14 @@ export default function MailClient({
         body: JSON.stringify(smtpPayload)
       });
       if (res.ok) {
+        const sendResult = (await res.json().catch(() => null)) as
+          | {
+              ok?: boolean;
+              sentFolderId?: string | null;
+              sentMessageUid?: number | null;
+              messageId?: string | null;
+            }
+          | null;
         if (composeReplyMessage) {
           const threadId =
             composeReplyMessage.threadId ??
@@ -2800,7 +2909,8 @@ export default function MailClient({
         if (composeMode === "forward" && composeReplyMessage) {
           updateKeywordFlag(composeReplyMessage, "$Forwarded", true);
         }
-        const sentFolder = findSentFolder();
+        const sentFolder =
+          accountFolders.find((folder) => folder.id === sendResult?.sentFolderId) ?? findSentFolder();
         const sentSyncDecision = decidePostSendSentSync({
           sentFolderId: sentFolder?.id ?? null
         });
@@ -2815,11 +2925,16 @@ export default function MailClient({
           decision: sentSyncDecision
         });
         if (sentSyncDecision.kind === "folder") {
+          const sentMessageUid =
+            typeof sendResult?.sentMessageUid === "number" && Number.isFinite(sendResult.sentMessageUid)
+              ? sendResult.sentMessageUid
+              : null;
           await syncFolderWithBackgroundRef.current?.(
             sentSyncDecision.folderId,
             false,
-            sentSyncDecision.mode,
+            sentMessageUid !== null ? "new" : sentSyncDecision.mode,
             {
+              backfillUids: sentMessageUid !== null ? [sentMessageUid] : undefined,
               fullSyncReason: sentSyncDecision.reason,
               triggerId: sentSyncTriggerId
             }
@@ -2975,6 +3090,9 @@ export default function MailClient({
         }
         if (badge === "attachments" && !hasNonInlineAttachments(message)) {
           return { keep: false, reason: "badge-attachments" };
+        }
+        if (badge === "ai-modified" && !hasAiModifiedFlag(message)) {
+          return { keep: false, reason: "badge-ai-modified" };
         }
         if (badge === "newsletter" && message.category !== "newsletter") {
           return { keep: false, reason: `badge-newsletter:${message.category ?? "none"}` };
@@ -5474,82 +5592,87 @@ export default function MailClient({
                                 <QuestionMarkCircledIcon width={14} height={14} />
                               </IconButton>
                             </Popover.Trigger>
-                            <Popover.Content size="1" style={{ width: 760, maxWidth: "min(92vw, 760px)" }}>
-                              <Flex direction="column" gap="3">
+                            <Popover.Content size="1" className="topic-suggestion-explanation-popover">
+                              <Flex direction="column" gap="3" className="topic-suggestion-explanation-layout">
                                 <Text size="2" weight="medium">
                                   Why this suggestion?
                                 </Text>
-                                {topicSuggestionExplanationLoading ? (
-                                  <Text size="1" color="gray">
-                                    Loading explanation…
-                                  </Text>
-                                ) : topicSuggestionExplanationError ? (
-                                  <Text size="1" color="red">
-                                    {topicSuggestionExplanationError}
-                                  </Text>
-                                ) : topicSuggestionExplanation ? (
-                                  <>
-                                    <Flex direction="column" gap="1">
-                                      <Text size="1" color="gray">
-                                        Numbers in parentheses are signal weights, not mail counts.
-                                      </Text>
-                                      <Text size="1" color="gray">
-                                        Per matching historical thread:
-                                        {" "}
-                                        <code>thread score = sum(signal weights)</code>
-                                      </Text>
-                                      <Text size="1" color="gray">
-                                        Per topic:
-                                        {" "}
-                                        <code>suggestion score = sum(thread scores)</code>,
-                                        {" "}
-                                        <code>match count = number of matching historical threads</code>
-                                      </Text>
-                                    </Flex>
-                                    <Flex direction="column" gap="1">
-                                      <Text size="1" weight="medium">
-                                        Current thread signals
-                                      </Text>
-                                      {topicSuggestionExplanation.signals.length > 0 ? (
-                                        topicSuggestionExplanation.signals.map((signal) => (
-                                          <Text key={`${signal.type}-${signal.value}`} size="1" color="gray">
-                                            {formatTopicSuggestionSignal(signal)}
-                                          </Text>
-                                        ))
-                                      ) : (
+                                <Flex direction="column" gap="3" className="topic-suggestion-explanation-body">
+                                  {topicSuggestionExplanationLoading ? (
+                                    <Text size="1" color="gray">
+                                      Loading explanation…
+                                    </Text>
+                                  ) : topicSuggestionExplanationError ? (
+                                    <Text size="1" color="red">
+                                      {topicSuggestionExplanationError}
+                                    </Text>
+                                  ) : topicSuggestionExplanation ? (
+                                    <>
+                                      <Flex direction="column" gap="1">
                                         <Text size="1" color="gray">
-                                          No learned signals available.
+                                          Numbers in parentheses are signal weights, not mail counts.
                                         </Text>
-                                      )}
-                                    </Flex>
-                                    <Flex direction="column" gap="3">
-                                      {topicSuggestionExplanation.topics.map((entry) => (
-                                        <Flex key={entry.topic.id} direction="column" gap="1">
-                                          <Text size="1" weight="medium">
-                                            {entry.topic.name}: score {entry.suggestionScore}, matches {entry.matchCount}
-                                          </Text>
+                                        <Text size="1" color="gray">
+                                          Per matching historical thread:
+                                          {" "}
+                                          <code>thread score = sum(signal weights)</code>
+                                        </Text>
+                                        <Text size="1" color="gray">
+                                          Per topic:
+                                          {" "}
+                                          <code>suggestion score = sum(thread scores)</code>,
+                                          {" "}
+                                          <code>match count = number of matching historical threads</code>
+                                        </Text>
+                                      </Flex>
+                                      <Flex direction="column" gap="1">
+                                        <Text size="1" weight="medium">
+                                          Current thread signals
+                                        </Text>
+                                        {topicSuggestionExplanation.signals.length > 0 ? (
+                                          topicSuggestionExplanation.signals.map((signal) => (
+                                            <Text key={`${signal.type}-${signal.value}`} size="1" color="gray">
+                                              {formatTopicSuggestionSignal(signal)}
+                                            </Text>
+                                          ))
+                                        ) : (
                                           <Text size="1" color="gray">
-                                            Formula: {entry.matchedThreads.map((thread) => thread.score).join(" + ")} = {entry.suggestionScore}
+                                            No learned signals available.
                                           </Text>
-                                          {entry.matchedThreads.map((thread) => (
-                                            <Flex key={`${entry.topic.id}-${thread.threadId}`} direction="column" gap="1">
-                                              <Text size="1" color="gray">
-                                                {thread.threadId}: {formatTopicSuggestionFormula(thread.signals)} = {thread.score}
-                                              </Text>
-                                              <Text size="1" color="gray">
-                                                Signals: {thread.signals.map((signal) => formatTopicSuggestionSignal(signal)).join(", ")}
-                                              </Text>
-                                            </Flex>
-                                          ))}
-                                        </Flex>
-                                      ))}
-                                    </Flex>
-                                  </>
-                                ) : (
-                                  <Text size="1" color="gray">
-                                    No explanation available.
-                                  </Text>
-                                )}
+                                        )}
+                                      </Flex>
+                                      <Flex direction="column" gap="3">
+                                        {topicSuggestionExplanation.topics.map((entry) => (
+                                          <Flex key={entry.topic.id} direction="column" gap="1">
+                                            <Text size="1" weight="medium">
+                                              {entry.topic.name}: score {entry.suggestionScore}, matches {entry.matchCount}
+                                            </Text>
+                                            <Text size="1" color="gray">
+                                              Best matching thread decides the score; extra matches only break ties.
+                                              {entry.matchedThreads[0]
+                                                ? ` Winner: ${entry.matchedThreads[0].threadId} (${entry.matchedThreads[0].score})`
+                                                : ""}
+                                            </Text>
+                                            {entry.matchedThreads.map((thread) => (
+                                              <Flex key={`${entry.topic.id}-${thread.threadId}`} direction="column" gap="1">
+                                                <Text size="1" color="gray">
+                                                  {thread.threadId}: {formatTopicSuggestionFormula(thread.signals)} = {thread.score}
+                                                </Text>
+                                                <Text size="1" color="gray">
+                                                  Signals: {thread.signals.map((signal) => formatTopicSuggestionSignal(signal)).join(", ")}
+                                                </Text>
+                                              </Flex>
+                                            ))}
+                                          </Flex>
+                                        ))}
+                                      </Flex>
+                                    </>
+                                  ) : (
+                                    <Text size="1" color="gray">
+                                      No explanation available.
+                                    </Text>
+                                  )}
+                                </Flex>
                               </Flex>
                             </Popover.Content>
                           </Popover.Root>
@@ -5768,6 +5891,21 @@ export default function MailClient({
         />
       )}
 
+      <AccountReloginDialog
+        open={Boolean(reloginAccount)}
+        account={reloginAccount}
+        description={reloginDescription || undefined}
+        apiFetch={apiFetch}
+        readErrorMessage={readErrorMessage}
+        onOpenChange={(open) => {
+          if (!open) {
+            setReloginAccountId("");
+            setReloginDescription("");
+          }
+        }}
+        onSuccess={handleReloginSuccess}
+      />
+
       <RecipientAliasDialog
         open={recipientAliasDialogState !== null}
         onOpenChange={(open) => {
@@ -5900,6 +6038,7 @@ export default function MailClient({
           setExceptionEntries([]);
         }}
         formatRelativeTime={formatRelativeTime}
+        onReloginAccount={handleOpenReloginFromException}
         onOpenCalendarSidebar={() => setCalendarSidebarOpen(true)}
         onOpenCalendarMessage={handleOpenCalendarMessage}
         onFindRelatedCalendarInviteUid={handleFindRelatedByCalendarInviteUid}

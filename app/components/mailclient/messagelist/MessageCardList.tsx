@@ -426,6 +426,7 @@ export default function MessageCardList({
               threadHasFlagged={threadBadgeUnion?.threadHasFlagged}
               threadHasTodo={threadBadgeUnion?.threadHasTodo}
               threadHasDone={threadBadgeUnion?.threadHasDone}
+              threadHasAiModified={threadBadgeUnion?.threadHasAiModified}
               threadHasAttachments={threadBadgeUnion?.threadHasAttachments}
               threadHasCalendar={threadBadgeUnion?.threadHasCalendar}
               messageTopics={messageTopicsById?.get(message.threadId)}

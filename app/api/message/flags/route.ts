@@ -1,37 +1,6 @@
 import { NextResponse } from "next/server";
-import { updateMessageFlags } from "@/lib/db";
-import { updateImapFlags } from "@/lib/mail/imap";
+import { applyFlagMutationsToMessage, MESSAGE_FLAG_MAP } from "@/lib/messageFlagMutation";
 import { requireImapMessageMutationContext } from "../routeHelpers";
-
-const flagMap: Record<string, string> = {
-  seen: "\\Seen",
-  answered: "\\Answered",
-  flagged: "\\Flagged",
-  deleted: "\\Deleted",
-  draft: "\\Draft"
-};
-
-type FlagMutation = {
-  flag: string;
-  value: boolean;
-};
-
-export function buildFlagMutations(payload: {
-  flag?: keyof typeof flagMap;
-  keyword?: string;
-  value: boolean;
-}): FlagMutation[] {
-  const keyword = payload.keyword?.trim();
-  if (keyword) return [{ flag: keyword, value: payload.value }];
-  if (!payload.flag) return [];
-
-  const mutations: FlagMutation[] = [{ flag: flagMap[payload.flag], value: payload.value }];
-  // Replying implies the message is also read.
-  if (payload.flag === "answered" && payload.value) {
-    mutations.push({ flag: flagMap.seen, value: true });
-  }
-  return mutations;
-}
 
 export async function handleFlagMutationRequest(
   request: Request,
@@ -41,7 +10,7 @@ export async function handleFlagMutationRequest(
     | {
         accountId?: string;
         messageId?: string;
-        flag?: keyof typeof flagMap;
+        flag?: keyof typeof MESSAGE_FLAG_MAP;
         keyword?: string;
         value?: boolean;
       }
@@ -56,36 +25,25 @@ export async function handleFlagMutationRequest(
   });
   if (context instanceof NextResponse) return context;
   const { accountId, account, clientId, message, messageId } = context;
-  const mutations = buildFlagMutations({
-    flag: payload?.flag,
-    keyword: payload?.keyword,
-    value
-  });
-  if (mutations.length === 0) {
-    return NextResponse.json({ ok: false, message: "Unknown flag" }, { status: 400 });
-  }
-
-  for (const mutation of mutations) {
-    await updateImapFlags(
+  try {
+    const nextFlags = await applyFlagMutationsToMessage({
+      accountId,
       account,
-      message.mailboxPath,
-      message.imapUid,
-      mutation.flag,
-      mutation.value,
+      messageId,
+      message,
+      flag: payload?.flag,
+      keyword: payload?.keyword,
+      value,
       clientId
+    });
+    return NextResponse.json({ ok: true, flags: nextFlags });
+  } catch (error) {
+    return NextResponse.json(
+      { ok: false, message: error instanceof Error ? error.message : "Unknown flag" },
+      { status: 400 }
     );
   }
-
-  const existing = message.flags ?? [];
-  const nextFlags = mutations.reduce((currentFlags, mutation) => {
-    if (mutation.value) {
-      return Array.from(new Set([...currentFlags, mutation.flag]));
-    }
-    return currentFlags.filter((flag) => flag.toLowerCase() !== mutation.flag.toLowerCase());
-  }, existing);
-  await updateMessageFlags(accountId, messageId, nextFlags);
-
-  return NextResponse.json({ ok: true, flags: nextFlags });
 }
 
 export { legacyAccountRouteRemoved as POST } from "@/app/api/_helpers/legacyAccountRouteRemoved";
+export { buildFlagMutations } from "@/lib/messageFlagMutation";

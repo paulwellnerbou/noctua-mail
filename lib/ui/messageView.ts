@@ -1,21 +1,29 @@
 import type { Message } from "@/lib/data";
-import { CALENDAR_INVITE_FLAG, TODO_FLAG, DONE_FLAG } from "@/lib/messageFlags";
+import {
+  AI_MODIFIED_FLAG,
+  CALENDAR_INVITE_FLAG,
+  TODO_FLAG,
+  DONE_FLAG
+} from "@/lib/messageFlags";
+import { extractVisibleHtmlText, selectPreferredHtmlDocument } from "@/lib/html";
 
 export type ImapFlagBadge = { label: string; kind: string };
 
 export function hasHtmlContent(html?: string) {
   if (!html) return false;
-  const trimmed = html.trim();
+  const trimmed = selectPreferredHtmlDocument(html);
   if (!trimmed || trimmed === "0") return false;
   if (/<(img|table|svg|video|iframe|canvas|object|embed)\b/i.test(trimmed)) return true;
-  const textOnly = trimmed
-    .replace(/<style[\s\S]*?<\/style>/gi, " ")
-    .replace(/<script[\s\S]*?<\/script>/gi, " ")
-    .replace(/<[^>]+>/g, " ")
-    .replace(/&nbsp;/gi, " ")
-    .replace(/\s+/g, " ")
-    .trim();
+  const textOnly = extractVisibleHtmlText(trimmed);
   return textOnly.length > 0;
+}
+
+export function hasMeaningfulHtmlText(html?: string) {
+  if (!html) return false;
+  const trimmed = selectPreferredHtmlDocument(html);
+  if (!trimmed || trimmed === "0") return false;
+  const textOnly = extractVisibleHtmlText(trimmed);
+  return /[\p{L}\p{N}]/u.test(textOnly);
 }
 
 export function getImapFlagBadges(message: Message): ImapFlagBadge[] {
@@ -47,11 +55,14 @@ export function getImapFlagBadges(message: Message): ImapFlagBadge[] {
       const isCalendarInvite = lower === CALENDAR_INVITE_FLAG;
       const isTodo = lower === TODO_FLAG.toLowerCase();
       const isDone = lower === DONE_FLAG.toLowerCase();
+      const isAiModified = lower === AI_MODIFIED_FLAG.toLowerCase();
       if (lower === "\\recent" && (message.seen || message.draft)) return null;
       const label = isForwarded
         ? "Forwarded"
         : isCalendarInvite
           ? "Calendar Invite"
+          : isAiModified
+            ? "AI Modified"
           : isTodo
             ? "To-Do"
             : isDone
@@ -70,6 +81,7 @@ export function getImapFlagBadges(message: Message): ImapFlagBadge[] {
       if (lower === "\\recent") kind = "new";
       if (isForwarded) kind = "forwarded";
       if (isCalendarInvite) kind = "calendar";
+      if (isAiModified) kind = "ai-modified";
       if (isTodo) kind = "todo";
       if (isDone) kind = "done";
       return { label, kind };

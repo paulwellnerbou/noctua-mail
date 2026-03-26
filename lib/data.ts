@@ -180,6 +180,22 @@ export type RecipientAlias = {
   updatedAt: number;
 };
 
+export type McpTokenMetadata = {
+  id: string;
+  accountId: string;
+  createdByUserId: string;
+  label: string;
+  tokenSuffix: string;
+  createdAt: number;
+  expiresAt: number | null;
+  lastUsedAt: number | null;
+};
+
+export type McpTokenCreatePayload = {
+  label: string;
+  expiresAt: number | null;
+};
+
 export type RecipientSuggestion =
   | {
       kind: "alias";
