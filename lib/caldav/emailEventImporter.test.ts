@@ -183,12 +183,35 @@ describe("importEmailCalendarEvents", () => {
     expect(fields.allDay).toBe(true);
   });
 
+  test("imports vendor ICS with standalone VEVENT TZID using that timezone", async () => {
+    upsertCalendarEventByUid.mockClear();
+
+    const ics = makeIcs([
+      "METHOD:REQUEST",
+      "BEGIN:VEVENT",
+      "UID:standalone-tzid@example.test",
+      "SUMMARY:Werkstatttermin",
+      "DTSTART:20260330T073000",
+      "DTEND:20260330T073000",
+      "TZID:Europe/Berlin",
+      "END:VEVENT"
+    ]);
+
+    await importEmailCalendarEvents("acc-1", "msg-8", ics);
+
+    const [, fields] = upsertCalendarEventByUid.mock.calls[0];
+    expect(fields.startAtMs).toBe(Date.UTC(2026, 2, 30, 5, 30, 0));
+    expect(fields.endAtMs).toBe(Date.UTC(2026, 2, 30, 5, 30, 0));
+    expect(fields.startTimezone).toBe("Europe/Berlin");
+    expect(fields.endTimezone).toBe("Europe/Berlin");
+  });
+
   test("silently ignores empty ICS source", async () => {
     upsertCalendarEventByUid.mockClear();
     cancelCalendarEventByUid.mockClear();
 
-    await importEmailCalendarEvents("acc-1", "msg-8", "");
-    await importEmailCalendarEvents("acc-1", "msg-9", "   ");
+    await importEmailCalendarEvents("acc-1", "msg-9", "");
+    await importEmailCalendarEvents("acc-1", "msg-10", "   ");
 
     expect(upsertCalendarEventByUid).not.toHaveBeenCalled();
     expect(cancelCalendarEventByUid).not.toHaveBeenCalled();

@@ -48,6 +48,11 @@ type ParsedLine = {
   params: Record<string, string>;
 };
 
+type PendingCalendarDateValue = {
+  value: string;
+  tzid?: string;
+};
+
 type CalendarEventDateFormatInput = {
   allDay?: boolean;
   timeZone?: string;
@@ -256,6 +261,16 @@ export function parseIcsInvite(source: string): ParsedCalendarInvite {
   const events: CalendarEventPreview[] = [];
   let method: string | undefined;
   let current: CalendarEventPreview | null = null;
+  let pendingDates:
+    | {
+        defaultTimezone?: string;
+        start?: PendingCalendarDateValue;
+        end?: PendingCalendarDateValue;
+        recurrenceId?: PendingCalendarDateValue;
+        recurrenceDates: PendingCalendarDateValue[];
+        excludedDates: PendingCalendarDateValue[];
+      }
+    | null = null;
 
   lines.forEach((line) => {
     const parsed = parseContentLine(line);
@@ -269,13 +284,69 @@ export function parseIcsInvite(source: string): ParsedCalendarInvite {
     }
     if (parsed.name === "BEGIN" && parsed.value.toUpperCase() === "VEVENT") {
       current = { allDay: false };
+      pendingDates = {
+        recurrenceDates: [],
+        excludedDates: []
+      };
       return;
     }
     if (parsed.name === "END" && parsed.value.toUpperCase() === "VEVENT") {
       if (current) {
-        events.push(current);
+        const event = current;
+        const fallbackTimezone = pendingDates?.defaultTimezone;
+        if (pendingDates?.start) {
+          const parsedDate = parseCalendarDate(
+            pendingDates.start.value,
+            pendingDates.start.tzid ?? fallbackTimezone
+          );
+          event.start = parsedDate.date;
+          event.startTimezone = parsedDate.tzid;
+          event.allDay = parsedDate.allDay;
+        }
+        if (pendingDates?.end) {
+          const parsedDate = parseCalendarDate(
+            pendingDates.end.value,
+            pendingDates.end.tzid ?? fallbackTimezone
+          );
+          event.end = parsedDate.date;
+          event.endTimezone = parsedDate.tzid;
+        }
+        if (pendingDates?.recurrenceId) {
+          const parsedDate = parseCalendarDate(
+            pendingDates.recurrenceId.value,
+            pendingDates.recurrenceId.tzid ?? fallbackTimezone
+          );
+          event.recurrenceId = parsedDate.date;
+          event.recurrenceIdTimezone = parsedDate.tzid;
+        }
+        if (pendingDates && pendingDates.excludedDates.length > 0) {
+          const dates = pendingDates.excludedDates
+            .flatMap((entry) =>
+              parseMultiDateValues(
+                entry.value,
+                entry.tzid ?? event.startTimezone ?? fallbackTimezone
+              )
+            );
+          if (dates.length > 0) {
+            event.excludedDates = dates;
+          }
+        }
+        if (pendingDates && pendingDates.recurrenceDates.length > 0) {
+          const dates = pendingDates.recurrenceDates
+            .flatMap((entry) =>
+              parseMultiDateValues(
+                entry.value,
+                entry.tzid ?? event.startTimezone ?? fallbackTimezone
+              )
+            );
+          if (dates.length > 0) {
+            event.recurrenceDates = dates;
+          }
+        }
+        events.push(event);
       }
       current = null;
+      pendingDates = null;
       return;
     }
     if (!current) return;
@@ -297,34 +368,40 @@ export function parseIcsInvite(source: string): ParsedCalendarInvite {
     if (parsed.name === "ATTENDEE") {
       current.attendeeDetails = [...(current.attendeeDetails ?? []), parseAttendee(value, parsed.params)];
     }
+    if (parsed.name === "TZID") {
+      const defaultTimezone = resolveCalendarTimeZoneId(value) ?? value.trim();
+      pendingDates!.defaultTimezone = defaultTimezone || undefined;
+    }
     if (parsed.name === "RRULE") current.recurrenceRule = value.toUpperCase();
     if (parsed.name === "EXDATE") {
-      const dates = parseMultiDateValues(parsed.value, parsed.params.TZID ?? current.startTimezone);
-      if (dates.length > 0) {
-        current.excludedDates = [...(current.excludedDates ?? []), ...dates];
-      }
+      pendingDates!.excludedDates.push({
+        value: parsed.value,
+        tzid: parsed.params.TZID
+      });
     }
     if (parsed.name === "RDATE") {
-      const dates = parseMultiDateValues(parsed.value, parsed.params.TZID ?? current.startTimezone);
-      if (dates.length > 0) {
-        current.recurrenceDates = [...(current.recurrenceDates ?? []), ...dates];
-      }
+      pendingDates!.recurrenceDates.push({
+        value: parsed.value,
+        tzid: parsed.params.TZID
+      });
     }
     if (parsed.name === "RECURRENCE-ID") {
-      const parsedDate = parseCalendarDate(parsed.value, parsed.params.TZID);
-      current.recurrenceId = parsedDate.date;
-      current.recurrenceIdTimezone = parsedDate.tzid;
+      pendingDates!.recurrenceId = {
+        value: parsed.value,
+        tzid: parsed.params.TZID
+      };
     }
     if (parsed.name === "DTSTART") {
-      const parsedDate = parseCalendarDate(parsed.value, parsed.params.TZID);
-      current.start = parsedDate.date;
-      current.startTimezone = parsedDate.tzid;
-      current.allDay = parsedDate.allDay;
+      pendingDates!.start = {
+        value: parsed.value,
+        tzid: parsed.params.TZID
+      };
     }
     if (parsed.name === "DTEND") {
-      const parsedDate = parseCalendarDate(parsed.value, parsed.params.TZID);
-      current.end = parsedDate.date;
-      current.endTimezone = parsedDate.tzid;
+      pendingDates!.end = {
+        value: parsed.value,
+        tzid: parsed.params.TZID
+      };
     }
   });
 
