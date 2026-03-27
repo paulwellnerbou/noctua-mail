@@ -432,7 +432,7 @@ describe("/api/mcp", () => {
       rawToken
     );
     const toolsBody = (await toolsResponse.json()) as {
-      result?: { tools?: Array<{ name: string }> };
+      result?: { tools?: Array<{ name: string; outputSchema?: { properties?: Record<string, unknown> } }> };
     };
     expect(toolsBody.result?.tools?.map((tool) => tool.name)).toEqual(
       expect.arrayContaining([
@@ -451,6 +451,12 @@ describe("/api/mcp", () => {
         "clear_message_todo"
       ])
     );
+    expect(
+      toolsBody.result?.tools?.find((tool) => tool.name === "list_folders")?.outputSchema?.properties
+    ).toMatchObject({
+      ok: expect.any(Object),
+      folders: expect.any(Object)
+    });
 
     const foldersResponse = await postMcp(
       {
@@ -465,11 +471,16 @@ describe("/api/mcp", () => {
       rawToken
     );
     const foldersBody = (await foldersResponse.json()) as {
-      result?: { structuredContent?: { folders?: Array<{ id: string }> } };
+      result?: {
+        content?: Array<{ type?: string; text?: string }>;
+        structuredContent?: { folders?: Array<{ id: string; name: string }> };
+      };
     };
     expect(foldersBody.result?.structuredContent?.folders?.map((item) => item.id)).toEqual(
       expect.arrayContaining([folder.id, `${accountId}:Drafts`])
     );
+    expect(foldersBody.result?.content?.[0]?.text).toContain(`id=${folder.id}`);
+    expect(foldersBody.result?.content?.[0]?.text).toContain(`name=${JSON.stringify(folder.name)}`);
 
     const topicsResponse = await postMcp(
       {

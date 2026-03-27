@@ -1,7 +1,8 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { Badge, Button, Card, Flex, Select, Text, TextField } from "@radix-ui/themes";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Check, Copy } from "lucide-react";
+import { Badge, Button, Card, Flex, IconButton, Select, Text, TextField } from "@radix-ui/themes";
 import {
   buildAccountMcpTokenPath,
   buildAccountMcpTokensPath
@@ -86,8 +87,9 @@ export default function McpTabContent({
   const [loading, setLoading] = useState(false);
   const [creating, setCreating] = useState(false);
   const [deletingId, setDeletingId] = useState("");
-  const [copyNotice, setCopyNotice] = useState("");
+  const [copiedValue, setCopiedValue] = useState<string | null>(null);
   const [error, setError] = useState("");
+  const copyResetTimerRef = useRef<number | null>(null);
   const serverUrl = useMemo(() => {
     if (typeof window === "undefined") return "/api/mcp";
     return `${window.location.origin}/api/mcp`;
@@ -126,15 +128,29 @@ export default function McpTabContent({
     }
   }, [isActive, isExistingAccount, loadTokens]);
 
-  const handleCopy = useCallback(async (value: string, notice: string) => {
-    if (!value) return;
+  useEffect(() => {
+    return () => {
+      if (copyResetTimerRef.current !== null) {
+        window.clearTimeout(copyResetTimerRef.current);
+      }
+    };
+  }, []);
+
+  const handleCopy = useCallback(async (value: string) => {
+    const normalized = value.trim();
+    if (!normalized) return;
     try {
-      await navigator.clipboard.writeText(value);
-      setCopyNotice(notice);
-      window.setTimeout(() => setCopyNotice(""), 2000);
+      await navigator.clipboard.writeText(normalized);
+      setCopiedValue(normalized);
+      if (copyResetTimerRef.current !== null) {
+        window.clearTimeout(copyResetTimerRef.current);
+      }
+      copyResetTimerRef.current = window.setTimeout(() => {
+        setCopiedValue((current) => (current === normalized ? null : current));
+        copyResetTimerRef.current = null;
+      }, 1200);
     } catch {
-      setCopyNotice("Clipboard access failed.");
-      window.setTimeout(() => setCopyNotice(""), 2000);
+      // ignore
     }
   }, []);
 
@@ -213,15 +229,16 @@ export default function McpTabContent({
               <Text size="2" style={{ fontFamily: "var(--default-mono-font-family)" }}>
                 {serverUrl}
               </Text>
-              <Button size="1" variant="soft" onClick={() => void handleCopy(serverUrl, "Server URL copied.")}>
-                Copy URL
-              </Button>
+              <IconButton
+                size="1"
+                variant="soft"
+                onClick={() => void handleCopy(serverUrl)}
+                aria-label={copiedValue === serverUrl ? "Copied server URL" : "Copy server URL"}
+                title={copiedValue === serverUrl ? "Copied server URL" : "Copy server URL"}
+              >
+                {copiedValue === serverUrl ? <Check size={14} /> : <Copy size={14} />}
+              </IconButton>
             </Flex>
-            {copyNotice && (
-              <Text size="1" color={copyNotice.includes("failed") ? "red" : "green"}>
-                {copyNotice}
-              </Text>
-            )}
           </Flex>
         </Card>
 
@@ -287,9 +304,15 @@ export default function McpTabContent({
                     {createdSecret}
                   </Text>
                   <Flex>
-                    <Button size="1" variant="soft" onClick={() => void handleCopy(createdSecret, "Token copied.")}>
-                      Copy token
-                    </Button>
+                    <IconButton
+                      size="1"
+                      variant="soft"
+                      onClick={() => void handleCopy(createdSecret)}
+                      aria-label={copiedValue === createdSecret ? "Copied token" : "Copy token"}
+                      title={copiedValue === createdSecret ? "Copied token" : "Copy token"}
+                    >
+                      {copiedValue === createdSecret ? <Check size={14} /> : <Copy size={14} />}
+                    </IconButton>
                   </Flex>
                 </Flex>
               </Card>

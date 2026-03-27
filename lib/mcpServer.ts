@@ -12,7 +12,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import { enrichMessagesWithThreadTopics } from "@/app/api/_helpers/enrichMessagesWithThreadTopics";
-import type { Account, Message, McpTokenMetadata } from "@/lib/data";
+import type { Account, Folder, Message, McpTokenMetadata } from "@/lib/data";
 import {
   getFolders,
   getMessageById,
@@ -142,6 +142,23 @@ const TOPIC_MUTATION_SCHEMA = {
   topics: z.array(z.string()).min(1)
 };
 
+const FOLDER_SCHEMA = {
+  id: z.string(),
+  name: z.string(),
+  count: z.number(),
+  parentId: z.string().nullable().optional(),
+  accountId: z.string(),
+  specialUse: z.string().optional(),
+  flags: z.array(z.string()).optional(),
+  delimiter: z.string().optional(),
+  unreadCount: z.number().optional()
+};
+
+const LIST_FOLDERS_OUTPUT_SCHEMA = {
+  ok: z.boolean(),
+  folders: z.array(z.object(FOLDER_SCHEMA))
+};
+
 function normalizeStringList(values?: string[] | null) {
   return Array.from(
     new Set((values ?? []).map((value) => value.trim()).filter(Boolean))
@@ -178,6 +195,26 @@ function buildToolResult(summary: string, structuredContent: Record<string, unkn
     content: [{ type: "text" as const, text: summary }],
     structuredContent
   };
+}
+
+function formatFolderListContent(folders: Folder[]) {
+  if (folders.length === 0) {
+    return "Returned 0 folders.";
+  }
+
+  const lines = folders.map((folder) => {
+    const parts = [
+      `id=${folder.id}`,
+      `name=${JSON.stringify(folder.name)}`
+    ];
+    if (folder.specialUse) parts.push(`specialUse=${folder.specialUse}`);
+    if (folder.parentId) parts.push(`parentId=${folder.parentId}`);
+    if (typeof folder.unreadCount === "number") parts.push(`unread=${folder.unreadCount}`);
+    parts.push(`count=${folder.count}`);
+    return `- ${parts.join(" ")}`;
+  });
+
+  return [`Returned ${folders.length} folders:`, ...lines].join("\n");
 }
 
 function makeJsonRpcError(id: RequestId | null, code: number, message: string) {
@@ -672,12 +709,15 @@ export async function executeMcpHttpRequest(params: {
     }
   );
 
-  server.tool(
+  server.registerTool(
     "list_folders",
-    "List folders for the authenticated account.",
+    {
+      description: "List folders for the authenticated account.",
+      outputSchema: LIST_FOLDERS_OUTPUT_SCHEMA
+    },
     async () => {
       const folders = await getFolders(context.accountId);
-      return buildToolResult(`Returned ${folders.length} folders.`, {
+      return buildToolResult(formatFolderListContent(folders), {
         ok: true,
         folders
       });
