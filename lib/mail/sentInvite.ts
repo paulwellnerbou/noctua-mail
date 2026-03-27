@@ -159,7 +159,7 @@ function buildInviteIcs(params: {
     lines.push(`LOCATION:${escapeIcsText(invite.location.trim())}`);
   }
   if (invite.recurrenceRule?.trim()) {
-    lines.push(`RRULE:${invite.recurrenceRule.trim()}`);
+    lines.push(`RRULE:${invite.recurrenceRule.trim().replace(/[\r\n]/g, "")}`);
   }
   lines.push(`ORGANIZER;CN=${escapeIcsText(account.name?.trim() || account.email)}:mailto:${account.email}`);
   attendees.forEach((attendee) => {
