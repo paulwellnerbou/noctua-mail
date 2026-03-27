@@ -35,11 +35,20 @@ export function msToDateTimeLocal(ms: number): string {
 
 export function msToDateLocal(ms: number): string {
   const date = new Date(ms);
-  return `${date.getFullYear()}-${padDatePart(date.getMonth() + 1)}-${padDatePart(date.getDate())}`;
+  // Use UTC components so all-day dates (treated as UTC elsewhere) do not shift across timezones.
+  return `${date.getUTCFullYear()}-${padDatePart(date.getUTCMonth() + 1)}-${padDatePart(date.getUTCDate())}`;
 }
 
 export function inviteInputToMs(value: string, allDay: boolean): number {
-  return new Date(allDay ? `${value}T00:00:00` : value).getTime();
+  if (allDay) {
+    // Expect value in "YYYY-MM-DD" format for all-day events and interpret as UTC midnight.
+    const [yearStr, monthStr, dayStr] = value.split("-");
+    const year = Number(yearStr);
+    const month = Number(monthStr);
+    const day = Number(dayStr);
+    return Date.UTC(year, month - 1, day);
+  }
+  return new Date(value).getTime();
 }
 
 export function toggleAllDayInputValue(
