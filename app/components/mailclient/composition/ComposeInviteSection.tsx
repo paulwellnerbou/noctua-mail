@@ -1,7 +1,6 @@
 import { CalendarDays } from "lucide-react";
 import { Badge, Button, Flex, Text } from "@radix-ui/themes";
 import type { ComposeInviteDraft } from "@/lib/composeInvite";
-import { createDefaultComposeInviteDraft } from "@/lib/composeInvite";
 import CalendarEventScheduleFields from "@/app/components/calendar/CalendarEventScheduleFields";
 import styles from "./Compose.module.css";
 
@@ -47,17 +46,7 @@ export default function ComposeInviteSection({
           color={enabled ? "indigo" : "gray"}
           disabled={disabled}
           onClick={() => {
-            if (enabled) {
-              onEnableChange(false);
-              return;
-            }
-            const nextDraft = createDefaultComposeInviteDraft();
-            onLocationChange(nextDraft.location ?? "");
-            onStartChange(nextDraft.start);
-            onEndChange(nextDraft.end);
-            onAllDayChange(nextDraft.allDay);
-            onRecurrenceRuleChange(nextDraft.recurrenceRule ?? "");
-            onEnableChange(true);
+            onEnableChange(!enabled);
           }}
         >
           {enabled ? "Remove invite" : "Create invite"}

@@ -25,7 +25,7 @@ function formatIcsDate(ms: number, allDay: boolean, timezone?: string): string {
   return `${y}${mo}${dy}T${h}${mi}${s}Z`;
 }
 
-function escapeIcsText(value: string): string {
+export function escapeIcsText(value: string): string {
   return value
     .replace(/\\/g, "\\\\")
     .replace(/;/g, "\\;")
@@ -33,7 +33,7 @@ function escapeIcsText(value: string): string {
     .replace(/\n/g, "\\n");
 }
 
-function foldLine(line: string): string {
+export function foldLine(line: string): string {
   if (line.length <= 75) return line;
   const chunks: string[] = [];
   chunks.push(line.slice(0, 75));

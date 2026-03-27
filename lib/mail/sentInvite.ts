@@ -3,6 +3,7 @@ import type { Account, CalendarEvent, CalendarParticipationStatus } from "@/lib/
 import type { ComposeInvitePayload } from "@/lib/composeInvite";
 import { splitRecipientEntries } from "@/lib/recipientLists";
 import { buildCalendarIcsFilename } from "@/lib/calendarIcs";
+import { escapeIcsText, foldLine } from "@/lib/caldav/icsSerializer";
 
 type InviteAttendee = {
   email: string;
@@ -44,23 +45,6 @@ function parseRecipientEntry(entry: string) {
   const emailMatch = trimmed.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i);
   if (!emailMatch) return null;
   return { email: emailMatch[0], name: undefined };
-}
-
-function escapeIcsText(value: string) {
-  return value
-    .replace(/\\/g, "\\\\")
-    .replace(/;/g, "\\;")
-    .replace(/,/g, "\\,")
-    .replace(/\n/g, "\\n");
-}
-
-function foldLine(line: string): string {
-  if (line.length <= 75) return line;
-  const chunks = [line.slice(0, 75)];
-  for (let index = 75; index < line.length; index += 74) {
-    chunks.push(` ${line.slice(index, index + 74)}`);
-  }
-  return chunks.join("\r\n");
 }
 
 function formatUtcDateTime(date: Date) {

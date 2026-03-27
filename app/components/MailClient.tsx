@@ -1923,6 +1923,7 @@ export default function MailClient({
 
     const hydrateDraftComposeMetadata = async (msg: Message) => {
       if (!isDraftMessage(msg)) return msg;
+      if (msg.draftInvite) return msg;
       const source = msg.source ?? (msg.hasSource
         ? await apiFetch(buildAccountMessageSourcePath(msg.accountId, msg.id))
             .then(async (response) => {

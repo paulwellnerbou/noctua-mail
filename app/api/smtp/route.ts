@@ -9,6 +9,7 @@ import { sendSmtpMessage } from "@/lib/mail/smtp";
 import { folderMailboxPath } from "@/lib/mailboxPaths";
 import { findSentFolder } from "@/lib/specialFolders";
 import { requireAccountContext } from "@/app/api/_helpers/accountContext";
+import { toFiniteNumber } from "@/app/api/_helpers/numberParsing";
 import { upsertCalendarEvent } from "@/lib/db";
 
 function buildMessageId(address: string) {
@@ -68,6 +69,24 @@ export async function handleSendSmtpRequest(
       { ok: false, message: "Event invitations require at least one To or Cc recipient." },
       { status: 400 }
     );
+  }
+  if (payload.invite) {
+    const startAtMs = toFiniteNumber(payload.invite.startAtMs);
+    if (!Number.isFinite(startAtMs)) {
+      return NextResponse.json(
+        { ok: false, message: "Invalid invite: startAtMs must be a valid number." },
+        { status: 400 }
+      );
+    }
+    if (payload.invite.endAtMs !== undefined) {
+      const endAtMs = toFiniteNumber(payload.invite.endAtMs);
+      if (!Number.isFinite(endAtMs) || endAtMs < startAtMs) {
+        return NextResponse.json(
+          { ok: false, message: "Invalid invite: endAtMs must be a valid time not before startAtMs." },
+          { status: 400 }
+        );
+      }
+    }
   }
 
   const attachments = parseComposeAttachments(payload.attachments);
