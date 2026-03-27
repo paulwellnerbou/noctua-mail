@@ -267,6 +267,7 @@ const LIST_DEBUG_SAMPLE_LIMIT = 12;
 const LOCAL_DELETE_RECONCILE_SUPPRESS_MS = 15_000;
 const RELATED_NOTICE_SUBJECT_MAX_CHARS = 96;
 const INITIAL_SYNC_SESSION_KEY_PREFIX = "noctua:initial-sync:";
+const FULL_SYNC_CONFIRM_DIALOG_ENABLED = false;
 
 
 type CurrentResultDecision = { keep: true } | { keep: false; reason: string };
@@ -863,13 +864,15 @@ export default function MailClient({
       checkIsNotificationSuppressedFolder(folderId, accountFolders),
     updateMessagesWithCurrentResultPrune: forwardMessageResultPruneUpdate,
     confirmFullSyncStart: (state) =>
-      new Promise<boolean>((resolve) => {
-        if (fullSyncConfirmResolveRef.current) {
-          fullSyncConfirmResolveRef.current(false);
-        }
-        fullSyncConfirmResolveRef.current = resolve;
-        setFullSyncConfirm(state);
-      }),
+      FULL_SYNC_CONFIRM_DIALOG_ENABLED
+        ? new Promise<boolean>((resolve) => {
+            if (fullSyncConfirmResolveRef.current) {
+              fullSyncConfirmResolveRef.current(false);
+            }
+            fullSyncConfirmResolveRef.current = resolve;
+            setFullSyncConfirm(state);
+          })
+        : Promise.resolve(true),
     inboxFolder: inboxFolder ?? null,
     currentKeyRef
   });
