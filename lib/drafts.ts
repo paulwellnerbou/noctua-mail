@@ -1,4 +1,6 @@
 import type { Account, Message } from "@/lib/data";
+import type { ComposeInviteDraft } from "@/lib/composeInvite";
+import { COMPOSE_INVITE_HEADER, encodeComposeInviteHeader } from "@/lib/composeInviteMetadata";
 import {
   deleteMessageById,
   getFolders,
@@ -37,6 +39,7 @@ export type SaveDraftInput = {
   inReplyTo?: string;
   references?: string[];
   xForwardedMessageId?: string;
+  invite?: ComposeInviteDraft;
   attachments?: DraftAttachmentInput[];
 };
 
@@ -54,6 +57,7 @@ export type CreateDraftMessageInput = {
   html?: string;
   composeFormat?: string;
   quotedHtmlEdited?: boolean;
+  invite?: ComposeInviteDraft;
   attachments?: DraftAttachmentInput[];
 };
 
@@ -128,6 +132,7 @@ export async function buildDraftInputForMode(
       composeFormat:
         input.composeFormat ?? (input.html ? "html" : input.markdown ? "markdown" : "text"),
       quotedHtmlEdited: input.quotedHtmlEdited,
+      invite: input.invite,
       attachments: input.attachments
     };
   }
@@ -163,6 +168,7 @@ export async function buildDraftInputForMode(
     inReplyTo,
     references,
     xForwardedMessageId: mode === "forward" ? inReplyTo : undefined,
+    invite: input.invite,
     attachments: input.attachments
   };
 }
@@ -200,6 +206,9 @@ export async function saveDraftForAccount(params: {
     inReplyTo: payload.inReplyTo,
     references: payload.references,
     xForwardedMessageId: payload.xForwardedMessageId,
+    headers: payload.invite
+      ? { [COMPOSE_INVITE_HEADER]: encodeComposeInviteHeader(payload.invite) }
+      : undefined,
     ...(attachments.length > 0 ? { attachments } : {})
   });
 
@@ -230,6 +239,7 @@ export async function saveDraftForAccount(params: {
     if (typeof payload.quotedHtmlEdited === "boolean") {
       sanitized.quotedHtmlEdited = payload.quotedHtmlEdited;
     }
+    sanitized.draftInvite = payload.invite ?? null;
     await upsertMessages(account.id, null, [sanitized], false);
     draftId = sanitized.id;
     savedMessage = sanitized;

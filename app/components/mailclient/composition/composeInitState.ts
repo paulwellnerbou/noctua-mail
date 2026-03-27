@@ -1,4 +1,5 @@
 import type { AccountDateFormat, Message } from "@/lib/data";
+import { createDefaultComposeInviteDraft } from "@/lib/composeInvite";
 import { formatMessageDate } from "@/lib/dateFormatting";
 import {
   assembleQuotedHtml,
@@ -79,6 +80,12 @@ export type ComposeInitFields = {
   composeShowBcc: boolean;
   composeSubject: string;
   composeBody: string;
+  composeIncludeInvite: boolean;
+  composeInviteLocation: string;
+  composeInviteStart: string;
+  composeInviteEnd: string;
+  composeInviteAllDay: boolean;
+  composeInviteRecurrenceRule: string;
   composeHtml: string;
   composeHtmlText: string;
   composeMarkdown: string;
@@ -105,6 +112,12 @@ const BLANK: ComposeInitFields = {
   composeShowBcc: false,
   composeSubject: "",
   composeBody: "",
+  composeIncludeInvite: false,
+  composeInviteLocation: "",
+  composeInviteStart: "",
+  composeInviteEnd: "",
+  composeInviteAllDay: false,
+  composeInviteRecurrenceRule: "",
   composeHtml: "",
   composeHtmlText: "",
   composeMarkdown: "",
@@ -369,6 +382,8 @@ export function computeComposeInitState(
   }
 
   const composeDraftId = mode === "edit" && !asNew ? message.id : null;
+  const draftInvite = message.draftInvite ?? null;
+  const defaultInvite = draftInvite ? null : createDefaultComposeInviteDraft();
 
   const initialDraftHash = !asNew
     ? computeDraftHash({
@@ -389,6 +404,12 @@ export function computeComposeInitState(
     composeShowBcc: Boolean(message.cc || message.bcc),
     composeSubject: message.subject ?? "",
     composeBody: normalizeHtmlDerivedText(message.body ?? ""),
+    composeIncludeInvite: Boolean(draftInvite),
+    composeInviteLocation: draftInvite?.location ?? "",
+    composeInviteStart: draftInvite?.start ?? defaultInvite?.start ?? "",
+    composeInviteEnd: draftInvite?.end ?? defaultInvite?.end ?? "",
+    composeInviteAllDay: draftInvite?.allDay ?? false,
+    composeInviteRecurrenceRule: draftInvite?.recurrenceRule ?? "",
     composeHtml,
     composeHtmlText,
     composeMarkdown: "",

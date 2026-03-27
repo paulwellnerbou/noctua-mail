@@ -3,6 +3,7 @@ import * as Collapsible from "@radix-ui/react-collapsible";
 import { CaretRightIcon, ChevronDownIcon } from "@radix-ui/react-icons";
 import { Button, DropdownMenu, Tabs } from "@radix-ui/themes";
 import { Paperclip } from "lucide-react";
+import type { ComposeInviteDraft } from "@/lib/composeInvite";
 import type { Attachment } from "@/lib/data";
 import { assembleQuotedHtml } from "@/lib/html";
 import {
@@ -18,6 +19,7 @@ import HtmlMessage from "../../HtmlMessage";
 import threadStyles from "../message/ThreadMessageCard.module.css";
 import composeStyles from "./Compose.module.css";
 import styles from "./ComposeMessageField.module.css";
+import ComposeInviteSection from "./ComposeInviteSection";
 
 type ComposeTab = "text" | "html" | "markdown";
 type ComposeMode = "new" | "reply" | "replyAll" | "forward" | "edit" | "editAsNew";
@@ -42,6 +44,7 @@ type ComposeMessageFieldProps = {
   composeHtml: string;
   composeHtmlText: string;
   composeMarkdown: string;
+  composeInvite: ComposeInviteDraft | null;
   composeIncludeOriginal: boolean;
   composeQuoteHtml: boolean;
   composeQuotedHtml: string;
@@ -66,6 +69,12 @@ type ComposeMessageFieldProps = {
   setComposeHtml: React.Dispatch<React.SetStateAction<string>>;
   setComposeHtmlText: React.Dispatch<React.SetStateAction<string>>;
   setComposeMarkdown: React.Dispatch<React.SetStateAction<string>>;
+  setComposeInviteEnabled: (enabled: boolean) => void;
+  setComposeInviteLocation: React.Dispatch<React.SetStateAction<string>>;
+  setComposeInviteStart: React.Dispatch<React.SetStateAction<string>>;
+  setComposeInviteEnd: React.Dispatch<React.SetStateAction<string>>;
+  setComposeInviteAllDay: React.Dispatch<React.SetStateAction<boolean>>;
+  setComposeInviteRecurrenceRule: React.Dispatch<React.SetStateAction<string>>;
   setComposeTab: React.Dispatch<React.SetStateAction<ComposeTab>>;
   setComposeEditorReset: React.Dispatch<React.SetStateAction<number>>;
   setComposeIncludeOriginal: React.Dispatch<React.SetStateAction<boolean>>;
@@ -91,6 +100,7 @@ export default function ComposeMessageField({
   composeHtml,
   composeHtmlText,
   composeMarkdown,
+  composeInvite,
   composeIncludeOriginal,
   composeQuoteHtml,
   composeQuotedHtml,
@@ -115,6 +125,12 @@ export default function ComposeMessageField({
   setComposeHtml,
   setComposeHtmlText,
   setComposeMarkdown,
+  setComposeInviteEnabled,
+  setComposeInviteLocation,
+  setComposeInviteStart,
+  setComposeInviteEnd,
+  setComposeInviteAllDay,
+  setComposeInviteRecurrenceRule,
   setComposeTab,
   setComposeEditorReset,
   setComposeIncludeOriginal,
@@ -259,6 +275,15 @@ export default function ComposeMessageField({
 
   return (
     <div className={composeStyles.composeMessageField}>
+      <ComposeInviteSection
+        inviteDraft={composeInvite}
+        onEnableChange={setComposeInviteEnabled}
+        onLocationChange={setComposeInviteLocation}
+        onStartChange={setComposeInviteStart}
+        onEndChange={setComposeInviteEnd}
+        onAllDayChange={setComposeInviteAllDay}
+        onRecurrenceRuleChange={setComposeInviteRecurrenceRule}
+      />
       <div className={composeStyles.composeTabsRow}>
         <div className={composeStyles.composeTabs}>
           <Tabs.Root value={composeTab} onValueChange={(value) => switchComposeTab(value as ComposeTab)}>

@@ -1,50 +1,23 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Button, Checkbox, Dialog, Flex, Grid, Select, Text, TextArea, TextField } from "@radix-ui/themes";
+import { Button, Dialog, Flex, Text, TextArea, TextField } from "@radix-ui/themes";
 import { Trash2 } from "lucide-react";
 import {
   buildAccountCalendarEventPath,
   buildAccountCalendarEventsPath
 } from "@/lib/accountApiPaths";
 import type { CalendarEvent } from "@/lib/data";
+import {
+  inviteInputToMs,
+  msToDateLocal,
+  msToDateTimeLocal,
+  recurrenceOptionToRRule,
+  rruleToOption,
+  type RecurrenceOption
+} from "@/lib/composeInvite";
 import DialogTitleBar from "@/app/components/mailclient/message/DialogTitleBar";
-
-type RecurrenceOption = "none" | "daily" | "weekly" | "monthly" | "yearly";
-
-const RECURRENCE_OPTIONS: { value: RecurrenceOption; label: string; rrule: string }[] = [
-  { value: "none", label: "Does not repeat", rrule: "" },
-  { value: "daily", label: "Daily", rrule: "FREQ=DAILY" },
-  { value: "weekly", label: "Weekly", rrule: "FREQ=WEEKLY" },
-  { value: "monthly", label: "Monthly", rrule: "FREQ=MONTHLY" },
-  { value: "yearly", label: "Yearly", rrule: "FREQ=YEARLY" }
-];
-
-function msToDateTimeLocal(ms: number): string {
-  const d = new Date(ms);
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
-
-function msToDateLocal(ms: number): string {
-  const d = new Date(ms);
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-}
-
-function dateTimeLocalToMs(value: string): number {
-  return new Date(value).getTime();
-}
-
-function rruleToOption(rule?: string): RecurrenceOption {
-  if (!rule) return "none";
-  const upper = rule.toUpperCase();
-  if (upper.includes("DAILY")) return "daily";
-  if (upper.includes("WEEKLY")) return "weekly";
-  if (upper.includes("MONTHLY")) return "monthly";
-  if (upper.includes("YEARLY")) return "yearly";
-  return "none";
-}
+import CalendarEventScheduleFields from "./CalendarEventScheduleFields";
 
 type Props = {
   open: boolean;
@@ -110,9 +83,9 @@ export default function EventDialog({
       setError("Title is required.");
       return;
     }
-    const startMs = startValue ? dateTimeLocalToMs(allDay ? startValue + "T00:00:00" : startValue) : Date.now();
-    const endMs = endValue ? dateTimeLocalToMs(allDay ? endValue + "T00:00:00" : endValue) : undefined;
-    const rrule = RECURRENCE_OPTIONS.find((o) => o.value === recurrence)?.rrule || undefined;
+    const startMs = startValue ? inviteInputToMs(startValue, allDay) : Date.now();
+    const endMs = endValue ? inviteInputToMs(endValue, allDay) : undefined;
+    const rrule = recurrenceOptionToRRule(recurrence) || undefined;
 
     setSaving(true);
     setError("");
@@ -193,66 +166,19 @@ export default function EventDialog({
             />
           </Flex>
 
-          <Grid columns="2" gap="2">
-            <Flex direction="column" gap="1">
-              <Text size="1" color="gray">Start</Text>
-              <TextField.Root
-                type={allDay ? "date" : "datetime-local"}
-                value={startValue}
-                onChange={(e) => setStartValue(e.target.value)}
-              />
-            </Flex>
-            <Flex direction="column" gap="1">
-              <Text size="1" color="gray">End</Text>
-              <TextField.Root
-                type={allDay ? "date" : "datetime-local"}
-                value={endValue}
-                onChange={(e) => setEndValue(e.target.value)}
-              />
-            </Flex>
-          </Grid>
-
-          <Flex align="center" gap="2">
-            <Checkbox
-              checked={allDay}
-              onCheckedChange={(v) => {
-                const next = Boolean(v);
-                setAllDay(next);
-                if (startValue) {
-                  setStartValue(next
-                    ? startValue.split("T")[0]
-                    : startValue.includes("T") ? startValue : startValue + "T09:00");
-                }
-                if (endValue) {
-                  setEndValue(next
-                    ? endValue.split("T")[0]
-                    : endValue.includes("T") ? endValue : endValue + "T10:00");
-                }
-              }}
-            />
-            <Text size="2">All day</Text>
-          </Flex>
-
-          <Flex direction="column" gap="1">
-            <Text size="1" color="gray">Repeat</Text>
-            <Select.Root value={recurrence} onValueChange={(v) => setRecurrence(v as RecurrenceOption)}>
-              <Select.Trigger style={{ width: "100%" }} />
-              <Select.Content position="popper">
-                {RECURRENCE_OPTIONS.map((opt) => (
-                  <Select.Item key={opt.value} value={opt.value}>{opt.label}</Select.Item>
-                ))}
-              </Select.Content>
-            </Select.Root>
-          </Flex>
-
-          <Flex direction="column" gap="1">
-            <Text size="1" color="gray">Location</Text>
-            <TextField.Root
-              placeholder="Location (optional)"
-              value={location}
-              onChange={(e) => setLocation(e.target.value)}
-            />
-          </Flex>
+          <CalendarEventScheduleFields
+            startValue={startValue}
+            endValue={endValue}
+            allDay={allDay}
+            recurrenceRule={recurrenceOptionToRRule(recurrence)}
+            location={location}
+            disabled={saving || deleting}
+            onStartValueChange={setStartValue}
+            onEndValueChange={setEndValue}
+            onAllDayChange={setAllDay}
+            onRecurrenceRuleChange={(value) => setRecurrence(rruleToOption(value))}
+            onLocationChange={setLocation}
+          />
 
           <Flex direction="column" gap="1">
             <Text size="1" color="gray">Description</Text>
@@ -267,7 +193,10 @@ export default function EventDialog({
           {error && <Text size="1" color="red">{error}</Text>}
 
           <Flex justify="between" align="center" gap="2" wrap="wrap">
-            {isEditing && (event?.sourceType === "local" || event?.sourceType === "caldav") ? (
+            {isEditing &&
+            (event?.sourceType === "local" ||
+              event?.sourceType === "caldav" ||
+              event?.sourceType === "sent-invite") ? (
               <Button
                 size="2"
                 variant="soft"

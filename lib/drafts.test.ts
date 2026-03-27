@@ -1,5 +1,7 @@
 import { afterAll, beforeEach, describe, expect, mock, test } from "bun:test";
+import type { ComposeInviteDraft } from "@/lib/composeInvite";
 import type { Account, Folder, Message } from "@/lib/data";
+import { COMPOSE_INVITE_HEADER, decodeComposeInviteHeader } from "@/lib/composeInviteMetadata";
 import { dbModulePromise } from "@/lib/testDbHarness";
 
 type BuiltDraftMail = {
@@ -12,6 +14,7 @@ type BuiltDraftMail = {
   inReplyTo?: string;
   references?: string[];
   xForwardedMessageId?: string;
+  headers?: Record<string, string>;
 };
 
 let lastBuiltDraftMail: BuiltDraftMail | null = null;
@@ -208,5 +211,39 @@ describe("saveDraftForAccount", () => {
     expect(stored?.threadId).toBe(original.threadId);
     expect(stored?.parentId).toBe(original.id);
     expect(stored?.xForwardedMessageId).toBe(original.messageId);
+  });
+
+  test("persists invite draft metadata in the raw draft headers and returned message", async () => {
+    const accountId = `acc-drafts-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const account = buildAccount(accountId);
+    const drafts = buildDraftsFolder(accountId);
+    const invite: ComposeInviteDraft = {
+      location: "Home office",
+      start: "2026-03-26T09:00",
+      end: "2026-03-26T10:00",
+      allDay: false,
+      recurrenceRule: "FREQ=WEEKLY"
+    };
+
+    await upsertAccount(account);
+    await saveFoldersForAccount(accountId, [drafts]);
+
+    const result = await saveDraftForAccount({
+      account,
+      accountId,
+      clientId: "draft-test-client",
+      payload: {
+        to: "owner@example.test",
+        subject: "Invite draft",
+        text: "Body",
+        invite
+      }
+    });
+
+    expect(lastBuiltDraftMail?.headers?.[COMPOSE_INVITE_HEADER]).toBeTruthy();
+    expect(decodeComposeInviteHeader(lastBuiltDraftMail?.headers?.[COMPOSE_INVITE_HEADER])).toEqual(
+      invite
+    );
+    expect(result.message?.draftInvite).toEqual(invite);
   });
 });

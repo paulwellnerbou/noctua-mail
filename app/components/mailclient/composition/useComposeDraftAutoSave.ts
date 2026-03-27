@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import type { ComposeInviteDraft } from "@/lib/composeInvite";
 import type { Attachment } from "@/lib/data";
 import type { ComposePayload } from "./composeContentBuilder";
 import { buildDraftSavePayload, computeDraftHash, hasDraftContent } from "./draftSaveUtils";
@@ -11,6 +12,7 @@ export type UseComposeDraftAutoSaveParams = {
   composeCc: string;
   composeBcc: string;
   composeSubject: string;
+  composeInvite?: ComposeInviteDraft | null;
   composeBody: string;
   composeHtml: string;
   composeHtmlText: string;
@@ -40,6 +42,7 @@ export function useComposeDraftAutoSave({
   composeCc,
   composeBcc,
   composeSubject,
+  composeInvite,
   composeBody,
   composeHtml,
   composeHtmlText,
@@ -84,7 +87,8 @@ export function useComposeDraftAutoSave({
       bcc: composeBcc,
       subject: composeSubject,
       text,
-      html
+      html,
+      invite: composeInvite
     });
     if (!hasContent) return;
     const hash = computeDraftHash({
@@ -94,7 +98,8 @@ export function useComposeDraftAutoSave({
       subject: composeSubject,
       text,
       html,
-      attachments
+      attachments,
+      invite: composeInvite
     });
     currentDraftHashRef.current = hash;
     if (composeBaselineHashRef.current === null) {
@@ -123,7 +128,8 @@ export function useComposeDraftAutoSave({
             bcc: composeBcc,
             subject: composeSubject,
             composeQuotedHtmlEdited,
-            composeReplyHeaders
+            composeReplyHeaders,
+            invite: composeInvite
           },
           composePayload,
           { preserveUndefinedHtml: true }
@@ -143,6 +149,7 @@ export function useComposeDraftAutoSave({
     composeCc,
     composeBcc,
     composeSubject,
+    composeInvite,
     composeBody,
     composeHtml,
     composeHtmlText,

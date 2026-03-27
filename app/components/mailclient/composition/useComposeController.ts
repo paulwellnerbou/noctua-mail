@@ -163,6 +163,12 @@ export function useComposeController({
     compose.setComposeShowBcc(fields.composeShowBcc);
     compose.setComposeSubject(fields.composeSubject);
     compose.setComposeBody(fields.composeBody);
+    compose.setComposeIncludeInvite(fields.composeIncludeInvite);
+    compose.setComposeInviteLocation(fields.composeInviteLocation);
+    compose.setComposeInviteStart(fields.composeInviteStart);
+    compose.setComposeInviteEnd(fields.composeInviteEnd);
+    compose.setComposeInviteAllDay(fields.composeInviteAllDay);
+    compose.setComposeInviteRecurrenceRule(fields.composeInviteRecurrenceRule);
     compose.setComposeHtml(fields.composeHtml);
     compose.setComposeHtmlText(fields.composeHtmlText);
     compose.setComposeMarkdown(fields.composeMarkdown);

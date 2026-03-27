@@ -90,6 +90,25 @@ describe("deleteCalendarEventAndRelatedData", () => {
     expect(clearMessageCalendarInviteStatesProcessedByEventUid).not.toHaveBeenCalled();
   });
 
+  test("hard deletes sent invite events without touching inbound invite state", async () => {
+    getCalendarEventById.mockResolvedValue(
+      buildEvent({
+        sourceType: "sent-invite",
+        rawIcs: "BEGIN:VCALENDAR\r\nMETHOD:REQUEST\r\nEND:VCALENDAR"
+      })
+    );
+
+    const result = await deleteCalendarEventAndRelatedData({
+      accountId: "acc-1",
+      eventId: "cal-1"
+    });
+
+    expect(result.deleted).toBe(true);
+    expect(deleteCalendarEvent).toHaveBeenCalledWith("acc-1", "cal-1");
+    expect(cancelCalendarRemindersByEventUid).toHaveBeenCalledWith("acc-1", "event-1@example.test");
+    expect(clearMessageCalendarInviteStatesProcessedByEventUid).not.toHaveBeenCalled();
+  });
+
   test("returns without side effects when the event does not exist", async () => {
     getCalendarEventById.mockResolvedValue(null);
 

@@ -7,6 +7,7 @@ import {
   uniqueEmails,
   uniqueRecipients
 } from "./composeInitState";
+import type { ComposeInviteDraft } from "@/lib/composeInvite";
 import type { Message } from "@/lib/data";
 
 // ---------------------------------------------------------------------------
@@ -427,6 +428,29 @@ describe("computeComposeInitState — edit", () => {
     expect(JSON.parse(fields.initialDraftHash!)).toMatchObject({
       attachments: "contract.pdf:42:0:"
     });
+  });
+
+  it("restores saved draft invite fields", () => {
+    const draftInvite: ComposeInviteDraft = {
+      location: "Desk",
+      start: "2026-03-26T09:00",
+      end: "2026-03-26T10:00",
+      allDay: false,
+      recurrenceRule: "FREQ=DAILY"
+    };
+    const fields = computeComposeInitState(
+      "edit",
+      makeMessage({ draftInvite, subject: "Ignored subject fallback" }),
+      false,
+      opts,
+      deps
+    );
+    expect(fields.composeIncludeInvite).toBe(true);
+    expect(fields.composeInviteLocation).toBe("Desk");
+    expect(fields.composeInviteStart).toBe("2026-03-26T09:00");
+    expect(fields.composeInviteEnd).toBe("2026-03-26T10:00");
+    expect(fields.composeInviteAllDay).toBe(false);
+    expect(fields.composeInviteRecurrenceRule).toBe("FREQ=DAILY");
   });
 
   it("does not set initialDraftHash when asNew is true", () => {

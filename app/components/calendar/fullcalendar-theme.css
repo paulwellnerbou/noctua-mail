@@ -102,6 +102,11 @@
   --fc-event-border-color: var(--blue-9, #0072d6);
 }
 
+.fc .fc-event.fc-event-sent-invite {
+  --fc-event-bg-color: var(--indigo-9, #4f46e5);
+  --fc-event-border-color: var(--indigo-9, #4f46e5);
+}
+
 .fc .fc-event.fc-event-reminder {
   --fc-event-bg-color: var(--gray-8, #6b7280);
   --fc-event-border-color: var(--gray-9, #4b5563);

@@ -135,7 +135,15 @@ function formatTriggerDate(date: Date) {
 const SOURCE_COLORS: Record<string, "blue" | "green" | "indigo"> = {
   local: "blue",
   caldav: "green",
-  email: "indigo"
+  email: "indigo",
+  "sent-invite": "indigo"
+};
+
+const SOURCE_LABELS: Record<string, string> = {
+  local: "local",
+  caldav: "caldav",
+  email: "email",
+  "sent-invite": "sent invite"
 };
 
 function getParticipationColor(
@@ -674,7 +682,7 @@ export default function EventDetailView({
           )}
           {sourceType && (
             <Badge size="1" color={SOURCE_COLORS[sourceType] ?? "gray"} variant="soft">
-              {sourceType}
+              {SOURCE_LABELS[sourceType] ?? sourceType}
             </Badge>
           )}
         </div>
