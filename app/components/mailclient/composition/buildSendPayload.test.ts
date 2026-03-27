@@ -16,6 +16,7 @@ function makeInput(overrides: Partial<SendPayloadInput> = {}): SendPayloadInput 
     markdown: undefined,
     html: undefined,
     attachments: [],
+    invite: undefined,
     composeFormat: "text",
     composeReplyHeaders: null,
     composeReplyMessage: null,
@@ -42,6 +43,26 @@ describe("buildSendPayload — basic fields", () => {
   it("passes through html when provided", () => {
     const payload = buildSendPayload("new", makeInput({ html: "<p>Hi</p>" }));
     expect(payload.html).toBe("<p>Hi</p>");
+  });
+
+  it("passes through invite payload when provided", () => {
+    const payload = buildSendPayload(
+      "new",
+      makeInput({
+        invite: {
+          startAtMs: Date.UTC(2026, 2, 26, 10, 0, 0),
+          endAtMs: Date.UTC(2026, 2, 26, 11, 0, 0),
+          allDay: false,
+          recurrenceRule: "FREQ=WEEKLY"
+        }
+      })
+    );
+    expect(payload.invite).toEqual({
+      startAtMs: Date.UTC(2026, 2, 26, 10, 0, 0),
+      endAtMs: Date.UTC(2026, 2, 26, 11, 0, 0),
+      allDay: false,
+      recurrenceRule: "FREQ=WEEKLY"
+    });
   });
 
   it("passes through markdown compose data for server-side html rendering", () => {

@@ -1,4 +1,6 @@
+import { useRef } from "react";
 import type React from "react";
+import type { ComposeInviteDraft } from "@/lib/composeInvite";
 import {
   buildAccountDraftDiscardPath,
   buildAccountDraftSavePath
@@ -25,6 +27,7 @@ export type UseDraftManagerParams = {
   composeCc: string;
   composeBcc: string;
   composeSubject: string;
+  composeInvite?: ComposeInviteDraft | null;
   composeQuotedHtmlEdited: boolean;
   composeReplyHeaders: ComposeReplyHeaders | null;
   composeDraftId: string | null;
@@ -86,6 +89,7 @@ export function useDraftManager(params: UseDraftManagerParams) {
     composeCc,
     composeBcc,
     composeSubject,
+    composeInvite,
     composeQuotedHtmlEdited,
     composeReplyHeaders,
     composeDraftId,
@@ -123,9 +127,20 @@ export function useDraftManager(params: UseDraftManagerParams) {
     readErrorMessage,
     buildComposePayload
   } = params;
+  const activeAccountIdRef = useRef(activeAccountId);
+  const accountScopeVersionRef = useRef(0);
+  if (activeAccountIdRef.current !== activeAccountId) {
+    activeAccountIdRef.current = activeAccountId;
+    accountScopeVersionRef.current += 1;
+  }
 
   const saveDraftNow = async (payload: DraftSavePayload, hash: string) => {
     if (!activeAccountId) return;
+    const requestAccountId = activeAccountId;
+    const requestScopeVersion = accountScopeVersionRef.current;
+    const isCurrentRequest = () =>
+      activeAccountIdRef.current === requestAccountId &&
+      accountScopeVersionRef.current === requestScopeVersion;
     suppressDraftDeleteReconcile(composeDraftIdRef.current);
     if (composeTab === "text" && composeTextRef.current) {
       const element = composeTextRef.current;
@@ -145,15 +160,18 @@ export function useDraftManager(params: UseDraftManagerParams) {
           ...payload
         })
       });
+      if (!isCurrentRequest()) return;
       if (!res.ok) {
         const message = await readErrorMessage(res);
+        if (!isCurrentRequest()) return;
         reportError(message);
         setDraftSaveError(message || "Draft save failed.");
         return;
       }
       const previousDraftId = composeDraftIdRef.current;
       const data = (await res.json()) as { draftId?: string | null; message?: Message | null };
-      const savedDraft = data?.message ?? null;
+      if (!isCurrentRequest()) return;
+      const savedDraft = data?.message ? { ...data.message, draftInvite: payload.invite ?? null } : null;
       if (data?.draftId) {
         if (previousDraftId && previousDraftId !== data.draftId) {
           if (!savedDraft) {
@@ -182,9 +200,11 @@ export function useDraftManager(params: UseDraftManagerParams) {
         await refreshMailboxData();
       }
     } catch {
+      if (!isCurrentRequest()) return;
       reportError("Failed to save draft.");
       setDraftSaveError("Draft save failed.");
     } finally {
+      if (!isCurrentRequest()) return;
       setDraftSaving(false);
       if (composeTab === "text" && composeTextRef.current && composeSelectionRef.current) {
         const element = composeTextRef.current;
@@ -272,7 +292,8 @@ export function useDraftManager(params: UseDraftManagerParams) {
       subject: composeSubject,
       text: composePayload.text,
       html: composePayload.html,
-      attachments: composePayload.attachments
+      attachments: composePayload.attachments,
+      invite: composeInvite
     });
     const payload: DraftSavePayload = buildDraftSavePayload(
       {
@@ -281,7 +302,8 @@ export function useDraftManager(params: UseDraftManagerParams) {
         bcc: composeBcc,
         subject: composeSubject,
         composeQuotedHtmlEdited,
-        composeReplyHeaders
+        composeReplyHeaders,
+        invite: composeInvite
       },
       composePayload
     );

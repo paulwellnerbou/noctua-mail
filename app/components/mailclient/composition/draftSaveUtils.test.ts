@@ -39,7 +39,8 @@ describe("draftSaveUtils", () => {
       subject: "Subject",
       text: "Body",
       html: "<p>Body</p>",
-      attachments: "a.txt:10:0:|logo.png:25:1:img-1"
+      attachments: "a.txt:10:0:|logo.png:25:1:img-1",
+      invite: null
     });
   });
 
@@ -75,6 +76,21 @@ describe("draftSaveUtils", () => {
         subject: "Hello",
         text: "",
         html: undefined
+      })
+    ).toBe(true);
+    expect(
+      hasDraftContent({
+        to: "",
+        cc: "",
+        bcc: "",
+        subject: "",
+        text: "",
+        html: undefined,
+        invite: {
+          start: "2026-03-27T09:00",
+          end: "2026-03-27T10:00",
+          allDay: false
+        }
       })
     ).toBe(true);
   });

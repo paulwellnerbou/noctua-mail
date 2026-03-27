@@ -25,6 +25,12 @@ export function useComposeState() {
   const [composeBody, setComposeBody] = useState("");
   const composeBodyDebounceRef = useRef<NodeJS.Timeout | null>(null);
   const composeBodyLastUpdateRef = useRef<number>(0);
+  const [composeIncludeInvite, setComposeIncludeInvite] = useState(false);
+  const [composeInviteLocation, setComposeInviteLocation] = useState("");
+  const [composeInviteStart, setComposeInviteStart] = useState("");
+  const [composeInviteEnd, setComposeInviteEnd] = useState("");
+  const [composeInviteAllDay, setComposeInviteAllDay] = useState(false);
+  const [composeInviteRecurrenceRule, setComposeInviteRecurrenceRule] = useState("");
   const [composeHtml, setComposeHtml] = useState("");
   const [composeHtmlText, setComposeHtmlText] = useState("");
   const [composeMarkdown, setComposeMarkdown] = useState("");
@@ -96,6 +102,18 @@ export function useComposeState() {
     setComposeBody,
     composeBodyDebounceRef,
     composeBodyLastUpdateRef,
+    composeIncludeInvite,
+    setComposeIncludeInvite,
+    composeInviteLocation,
+    setComposeInviteLocation,
+    composeInviteStart,
+    setComposeInviteStart,
+    composeInviteEnd,
+    setComposeInviteEnd,
+    composeInviteAllDay,
+    setComposeInviteAllDay,
+    composeInviteRecurrenceRule,
+    setComposeInviteRecurrenceRule,
     composeHtml,
     setComposeHtml,
     composeHtmlText,

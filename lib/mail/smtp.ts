@@ -18,6 +18,7 @@ type MailPayload = {
   references?: string[];
   replyTo?: string;
   xForwardedMessageId?: string;
+  headers?: Record<string, string>;
   attachments?: Array<{
     filename: string;
     contentType: string;
@@ -58,7 +59,8 @@ function buildMailOptions(account: Account, mail: MailPayload) {
     headers: {
       "User-Agent": MAILER_ID,
       "X-Mailer": MAILER_ID,
-      ...(mail.xForwardedMessageId ? { "X-Forwarded-Message-Id": mail.xForwardedMessageId } : {})
+      ...(mail.xForwardedMessageId ? { "X-Forwarded-Message-Id": mail.xForwardedMessageId } : {}),
+      ...(mail.headers ?? {})
     }
   };
 }

@@ -1,6 +1,6 @@
 import type { Attachment, Message } from "@/lib/data";
 import { shouldThreadComposeForMode } from "./composeThreading";
-import type { ComposeMode, ComposeReplyHeaders } from "./composeTypes";
+import type { ComposeMode, ComposeReplyHeaders, SendInvitePayload } from "./composeTypes";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -15,6 +15,7 @@ export type SendPayloadInput = {
   markdown: string | undefined;
   html: string | undefined;
   attachments: Attachment[];
+  invite: SendInvitePayload | undefined;
   composeFormat: "text" | "html" | "markdown";
   composeReplyHeaders: ComposeReplyHeaders | null;
   composeReplyMessage: Message | null;
@@ -31,6 +32,7 @@ export type SmtpPayload = {
   markdown: string | undefined;
   html: string | undefined;
   attachments: Attachment[];
+  invite: SendInvitePayload | undefined;
   composeFormat: "text" | "html" | "markdown";
   inReplyTo: string | undefined;
   references: string[] | undefined;
@@ -53,6 +55,7 @@ export function buildSendPayload(mode: ComposeMode, input: SendPayloadInput): Sm
     markdown,
     html,
     attachments,
+    invite,
     composeFormat,
     composeReplyHeaders,
     composeReplyMessage,
@@ -93,6 +96,7 @@ export function buildSendPayload(mode: ComposeMode, input: SendPayloadInput): Sm
     markdown,
     html,
     attachments,
+    invite,
     composeFormat,
     inReplyTo: shouldThread ? replyHeaders.inReplyTo : undefined,
     references: shouldThread ? replyHeaders.references : undefined,

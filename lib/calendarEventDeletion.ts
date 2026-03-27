@@ -19,7 +19,7 @@ export type DeleteCalendarEventResult = {
 };
 
 function shouldResetInviteProcessing(event: CalendarEvent) {
-  return Boolean(event.rawIcs?.trim() || event.messageId?.trim() || event.sourceType === "email");
+  return Boolean(event.messageId?.trim() || event.sourceType === "email");
 }
 
 export async function deleteCalendarEventAndRelatedData({

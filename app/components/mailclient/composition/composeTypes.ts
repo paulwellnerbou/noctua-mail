@@ -1,4 +1,5 @@
 import type { Attachment } from "@/lib/data";
+import type { ComposeInviteDraft, ComposeInvitePayload } from "@/lib/composeInvite";
 
 export type ComposeView = "inline" | "modal" | "minimized";
 
@@ -61,5 +62,8 @@ export type DraftSavePayload = {
   inReplyTo?: string;
   references?: string[];
   xForwardedMessageId?: string;
+  invite?: ComposeInviteDraft;
   attachments?: Attachment[];
 };
+
+export type SendInvitePayload = ComposeInvitePayload;

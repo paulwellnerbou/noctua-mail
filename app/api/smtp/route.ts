@@ -1,12 +1,15 @@
 import { NextResponse } from "next/server";
 import { randomUUID } from "crypto";
 import { getFolders } from "@/lib/db";
+import type { ComposeInvitePayload } from "@/lib/composeInvite";
 import { appendImapMessage } from "@/lib/mail/imap";
 import { parseComposeAttachments, resolveComposeHtml } from "@/lib/mail/composePayload";
+import { buildSentInvite } from "@/lib/mail/sentInvite";
 import { sendSmtpMessage } from "@/lib/mail/smtp";
 import { folderMailboxPath } from "@/lib/mailboxPaths";
 import { findSentFolder } from "@/lib/specialFolders";
 import { requireAccountContext } from "@/app/api/_helpers/accountContext";
+import { upsertCalendarEvent } from "@/lib/db";
 
 function buildMessageId(address: string) {
   const domain = address.split("@")[1]?.trim();
@@ -28,6 +31,7 @@ export async function handleSendSmtpRequest(
     markdown?: string;
     html?: string;
     composeFormat?: string;
+    invite?: ComposeInvitePayload;
     inReplyTo?: string;
     references?: string[];
     replyTo?: string;
@@ -59,6 +63,12 @@ export async function handleSendSmtpRequest(
     );
   }
   const outboundTo = !to && !cc && bcc ? "undisclosed-recipients:;" : to;
+  if (payload.invite && !to && !cc) {
+    return NextResponse.json(
+      { ok: false, message: "Event invitations require at least one To or Cc recipient." },
+      { status: 400 }
+    );
+  }
 
   const attachments = parseComposeAttachments(payload.attachments);
   const html = await resolveComposeHtml({
@@ -67,6 +77,24 @@ export async function handleSendSmtpRequest(
     html: payload.html,
     attachments: payload.attachments
   });
+
+  const inviteResult = payload.invite
+    ? buildSentInvite({
+        account,
+        invite: payload.invite,
+        subject: payload.subject,
+        to,
+        cc,
+        descriptionText: payload.text ?? ""
+      })
+    : null;
+  if (inviteResult) {
+    attachments.push({
+      filename: inviteResult.filename,
+      contentType: "text/calendar; method=REQUEST; charset=UTF-8",
+      content: Buffer.from(inviteResult.ics, "utf8")
+    });
+  }
 
   const messageId = buildMessageId(account.email);
   const result = await sendSmtpMessage(account, {
@@ -97,11 +125,31 @@ export async function handleSendSmtpRequest(
     }
   }
 
+  let inviteScheduled = false;
+  let inviteEventId: string | null = null;
+  let inviteWarning: string | null = null;
+  if (inviteResult) {
+    try {
+      await upsertCalendarEvent(account.id, inviteResult.event);
+      inviteScheduled = true;
+      inviteEventId = inviteResult.event.id;
+    } catch (error) {
+      console.error("[smtp] failed to persist sent invite event", {
+        accountId: account.id,
+        error
+      });
+      inviteWarning = "The invitation email was sent, but the local calendar event could not be scheduled.";
+    }
+  }
+
   return NextResponse.json({
     ok: true,
     sentFolderId: sentFolder?.id ?? null,
     sentMessageUid: appendedUid,
-    messageId
+    messageId,
+    inviteScheduled,
+    inviteEventId,
+    inviteWarning
   });
 }
 

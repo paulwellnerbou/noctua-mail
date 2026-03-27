@@ -1,4 +1,5 @@
 import type { CalendarInviteActionType } from "./calendarInviteProcessing";
+import type { ComposeInviteDraft } from "./composeInvite";
 
 export type CaldavConfig = {
   url: string;
@@ -130,6 +131,7 @@ export type Message = {
   calendarInviteStates?: MessageCalendarInviteState[];
   listUnsubscribe?: string | null;
   listId?: string | null;
+  draftInvite?: ComposeInviteDraft | null;
   groupKey?: string;
   threadSortDateValue?: number;
   topics?: Topic[];
@@ -258,7 +260,7 @@ export type CalendarReminder = {
   updatedAtMs: number;
 };
 
-export type CalendarEventSourceType = "local" | "caldav" | "email";
+export type CalendarEventSourceType = "local" | "caldav" | "email" | "sent-invite";
 export type CalendarParticipationStatus =
   | "NEEDS-ACTION"
   | "ACCEPTED"

@@ -38,6 +38,7 @@ import {
   buildSavedDraftListMessage,
   reconcileSavedDraftMessages
 } from "./mailclient/composition/draftListState";
+import { resetComposeSession } from "./mailclient/composition/resetComposeSession";
 import { useComposeController } from "./mailclient/composition/useComposeController";
 import { useComposeState } from "./mailclient/composition/useComposeState";
 import { useComposeViewEffects } from "./mailclient/composition/useComposeViewEffects";
@@ -105,6 +106,13 @@ import {
   type ThreadDateSource
 } from "@/lib/threadDate";
 import { createComposeAttachment } from "@/lib/mail/composeAttachment";
+import {
+  buildComposeInvitePayload,
+  createDefaultComposeInviteDraft,
+  normalizeComposeInviteDraft,
+  type ComposeInviteDraft
+} from "@/lib/composeInvite";
+import { extractComposeInviteDraftFromSource } from "@/lib/composeInviteMetadata";
 import { stripHtmlToText } from "@/lib/html";
 import {
   buildAccountApiPath,
@@ -574,6 +582,18 @@ export default function MailClient({
     setComposeBody,
     composeBodyDebounceRef,
     composeBodyLastUpdateRef,
+    composeIncludeInvite,
+    setComposeIncludeInvite,
+    composeInviteLocation,
+    setComposeInviteLocation,
+    composeInviteStart,
+    setComposeInviteStart,
+    composeInviteEnd,
+    setComposeInviteEnd,
+    composeInviteAllDay,
+    setComposeInviteAllDay,
+    composeInviteRecurrenceRule,
+    setComposeInviteRecurrenceRule,
     composeHtml,
     setComposeHtml,
     composeHtmlText,
@@ -643,6 +663,8 @@ export default function MailClient({
     composeEditorInitRef,
     composeLastEditedRef
   } = compose;
+  const composeRef = useRef(compose);
+  composeRef.current = compose;
   const messageRefs = useRef<Map<string, HTMLElement>>(new Map());
   const listPaneRef = useRef<HTMLDivElement | null>(null);
   const [noticePaneRightOffset, setNoticePaneRightOffset] = useState(16);
@@ -1782,6 +1804,27 @@ export default function MailClient({
       .replace(/[ \\t]+$/gm, "")
       .replace(/(^|\\n)--/g, "$1--");
 
+  const currentComposeInviteDraft = useMemo<ComposeInviteDraft | null>(
+    () =>
+      composeIncludeInvite
+        ? normalizeComposeInviteDraft({
+            location: composeInviteLocation,
+            start: composeInviteStart,
+            end: composeInviteEnd,
+            allDay: composeInviteAllDay,
+            recurrenceRule: composeInviteRecurrenceRule
+          })
+        : null,
+    [
+      composeIncludeInvite,
+      composeInviteAllDay,
+      composeInviteEnd,
+      composeInviteLocation,
+      composeInviteRecurrenceRule,
+      composeInviteStart
+    ]
+  );
+
   const currentAccount = accounts.find((account) => account.id === activeAccountId) ?? null;
   const reloginAccount = accounts.find((account) => account.id === reloginAccountId) ?? null;
   const handleOpenReloginFromException = useCallback(
@@ -1878,24 +1921,40 @@ export default function MailClient({
       return;
     }
 
+    const hydrateDraftComposeMetadata = async (msg: Message) => {
+      if (!isDraftMessage(msg)) return msg;
+      const source = msg.source ?? (msg.hasSource
+        ? await apiFetch(buildAccountMessageSourcePath(msg.accountId, msg.id))
+            .then(async (response) => {
+              if (!response.ok) return "";
+              const data = (await response.json().catch(() => null)) as { source?: string } | null;
+              return data?.source ?? "";
+            })
+            .catch(() => "")
+        : "");
+      const draftInvite = source ? extractComposeInviteDraftFromSource(source) : null;
+      return draftInvite ? { ...msg, source, draftInvite } : msg;
+    };
+
     const afterOpen = async (msg: Message) => {
+      const messageWithDraftMetadata = await hydrateDraftComposeMetadata(msg);
       if (mode === "edit" && (msg.attachments?.length ?? 0) > 0) {
-        const attachments = await hydrateComposeAttachments(msg);
+        const attachments = await hydrateComposeAttachments(messageWithDraftMetadata);
         const hydratedMessage =
-          attachments.length > 0 && msg.htmlBody
+          attachments.length > 0 && messageWithDraftMetadata.htmlBody
             ? {
-                ...msg,
-                htmlBody: restoreInlineAttachmentDataUrls(msg.htmlBody, attachments)
+                ...messageWithDraftMetadata,
+                htmlBody: restoreInlineAttachmentDataUrls(messageWithDraftMetadata.htmlBody, attachments)
               }
-            : msg;
+            : messageWithDraftMetadata;
         openComposeInternal(mode, hydratedMessage, asNew);
         setComposeAttachments(attachments);
         return;
       }
 
-      openComposeInternal(mode, msg, asNew);
+      openComposeInternal(mode, messageWithDraftMetadata, asNew);
       if (mode === "forward") {
-        void loadForwardAttachments(msg, setComposeAttachments);
+        void loadForwardAttachments(messageWithDraftMetadata, setComposeAttachments);
       }
     };
 
@@ -2795,6 +2854,7 @@ export default function MailClient({
       composeHtml={composeHtml}
       composeHtmlText={composeHtmlText}
       composeMarkdown={composeMarkdown}
+      composeInvite={currentComposeInviteDraft}
       composeIncludeOriginal={composeIncludeOriginal}
       composeQuoteHtml={composeQuoteHtml}
       composeQuotedHtml={composeQuotedHtml}
@@ -2819,6 +2879,45 @@ export default function MailClient({
       setComposeHtml={setComposeHtml}
       setComposeHtmlText={setComposeHtmlText}
       setComposeMarkdown={setComposeMarkdown}
+      setComposeInviteEnabled={(enabled) => {
+        setComposeIncludeInvite(enabled);
+        if (!enabled) {
+          setComposeInviteLocation("");
+          setComposeInviteStart("");
+          setComposeInviteEnd("");
+          setComposeInviteAllDay(false);
+          setComposeInviteRecurrenceRule("");
+          composeDirtyRef.current = true;
+          return;
+        }
+        const nextDraft = createDefaultComposeInviteDraft();
+        setComposeInviteLocation(nextDraft.location ?? "");
+        setComposeInviteStart(nextDraft.start);
+        setComposeInviteEnd(nextDraft.end);
+        setComposeInviteAllDay(nextDraft.allDay);
+        setComposeInviteRecurrenceRule(nextDraft.recurrenceRule ?? "");
+        composeDirtyRef.current = true;
+      }}
+      setComposeInviteLocation={(value) => {
+        setComposeInviteLocation(value);
+        composeDirtyRef.current = true;
+      }}
+      setComposeInviteStart={(value) => {
+        setComposeInviteStart(value);
+        composeDirtyRef.current = true;
+      }}
+      setComposeInviteEnd={(value) => {
+        setComposeInviteEnd(value);
+        composeDirtyRef.current = true;
+      }}
+      setComposeInviteAllDay={(value) => {
+        setComposeInviteAllDay(value);
+        composeDirtyRef.current = true;
+      }}
+      setComposeInviteRecurrenceRule={(value) => {
+        setComposeInviteRecurrenceRule(value);
+        composeDirtyRef.current = true;
+      }}
       setComposeTab={setComposeTab}
       setComposeEditorReset={setComposeEditorReset}
       setComposeIncludeOriginal={setComposeIncludeOriginal}
@@ -2842,6 +2941,12 @@ export default function MailClient({
       reportError("Please add at least one recipient.");
       return;
     }
+    const invitePayload =
+      composeIncludeInvite ? buildComposeInvitePayload(currentComposeInviteDraft) : undefined;
+    if (composeIncludeInvite && !invitePayload) {
+      reportError("Please complete the event invitation details before sending.");
+      return;
+    }
     setSendingMail(true);
     try {
       const { text, html, markdown, attachments, composeFormat } = buildComposePayload();
@@ -2854,6 +2959,7 @@ export default function MailClient({
         markdown,
         html,
         attachments,
+        invite: invitePayload ?? undefined,
         composeFormat,
         composeReplyHeaders,
         composeReplyMessage,
@@ -2871,6 +2977,9 @@ export default function MailClient({
               sentFolderId?: string | null;
               sentMessageUid?: number | null;
               messageId?: string | null;
+              inviteScheduled?: boolean;
+              inviteEventId?: string | null;
+              inviteWarning?: string | null;
             }
           | null;
         if (composeReplyMessage) {
@@ -2955,6 +3064,13 @@ export default function MailClient({
           title: "Email sent.",
           description: composeSubject.trim() ? composeSubject.trim().slice(0, 180) : undefined
         });
+        if (sendResult?.inviteWarning) {
+          pushNotice({
+            type: "warning",
+            title: "Invitation email sent",
+            description: sendResult.inviteWarning
+          });
+        }
       } else {
         reportError(await readErrorMessage(res));
       }
@@ -4557,6 +4673,7 @@ export default function MailClient({
   useEffect(() => {
     if (prevAccountIdRef.current !== activeAccountId) {
       prevAccountIdRef.current = activeAccountId;
+      resetComposeSession(composeRef.current);
       if (searchScope === "all") {
         setActiveFolderId("");
       } else {
@@ -4883,6 +5000,7 @@ export default function MailClient({
     composeCc,
     composeBcc,
     composeSubject,
+    composeInvite: currentComposeInviteDraft,
     composeQuotedHtmlEdited,
     composeReplyHeaders,
     composeDraftId,
@@ -4928,6 +5046,7 @@ export default function MailClient({
     composeCc,
     composeBcc,
     composeSubject,
+    composeInvite: currentComposeInviteDraft,
     composeBody,
     composeHtml,
     composeHtmlText,
