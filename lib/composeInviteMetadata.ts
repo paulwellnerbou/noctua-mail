@@ -63,11 +63,26 @@ export function encodeComposeInviteHeader(invite: ComposeInviteDraft) {
   return encodeUtf8Base64(JSON.stringify(invite));
 }
 
+function isValidComposeInviteDraft(value: unknown): value is ComposeInviteDraft {
+  if (value === null || typeof value !== "object") return false;
+  const record = value as Record<string, unknown>;
+  if (typeof record.start !== "string") return false;
+  if (typeof record.end !== "string") return false;
+  if (typeof record.allDay !== "boolean") return false;
+  for (const key of Object.keys(record)) {
+    if (key === "start" || key === "end" || key === "allDay") continue;
+    const field = record[key];
+    if (field !== undefined && field !== null && typeof field !== "string") return false;
+  }
+  return true;
+}
+
 export function decodeComposeInviteHeader(value?: string | null): ComposeInviteDraft | null {
   const encoded = value?.trim();
   if (!encoded) return null;
   try {
-    return JSON.parse(decodeUtf8Base64(encoded)) as ComposeInviteDraft;
+    const parsed = JSON.parse(decodeUtf8Base64(encoded));
+    return isValidComposeInviteDraft(parsed) ? parsed : null;
   } catch {
     return null;
   }

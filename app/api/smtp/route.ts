@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { randomUUID } from "crypto";
-import { getFolders } from "@/lib/db";
+import { getFolders, upsertCalendarEvent } from "@/lib/db";
 import type { ComposeInvitePayload } from "@/lib/composeInvite";
 import { appendImapMessage } from "@/lib/mail/imap";
 import { parseComposeAttachments, resolveComposeHtml } from "@/lib/mail/composePayload";
@@ -10,7 +10,6 @@ import { folderMailboxPath } from "@/lib/mailboxPaths";
 import { findSentFolder } from "@/lib/specialFolders";
 import { requireAccountContext } from "@/app/api/_helpers/accountContext";
 import { toFiniteNumber } from "@/app/api/_helpers/numberParsing";
-import { upsertCalendarEvent } from "@/lib/db";
 
 function buildMessageId(address: string) {
   const domain = address.split("@")[1]?.trim();
@@ -86,6 +85,18 @@ export async function handleSendSmtpRequest(
           { status: 400 }
         );
       }
+    }
+    if (typeof payload.invite.location !== "undefined" && typeof payload.invite.location !== "string") {
+      return NextResponse.json(
+        { ok: false, message: "Invalid invite: location must be a string." },
+        { status: 400 }
+      );
+    }
+    if (typeof payload.invite.recurrenceRule !== "undefined" && typeof payload.invite.recurrenceRule !== "string") {
+      return NextResponse.json(
+        { ok: false, message: "Invalid invite: recurrenceRule must be a string." },
+        { status: 400 }
+      );
     }
   }
 
