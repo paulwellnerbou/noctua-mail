@@ -1,4 +1,4 @@
-import { afterAll, describe, expect, mock, test } from "bun:test";
+import { describe, expect, mock, test } from "bun:test";
 import type { CalendarEvent } from "@/lib/data";
 import { saveMessageSource } from "@/lib/storage";
 
@@ -40,11 +40,9 @@ mock.module("@/lib/db", () => ({
   cancelCalendarRemindersByEventUid
 }));
 
-afterAll(() => {
-  mock.restore();
-});
-
 const { processCalendarInviteForMessage } = await import("./calendarInviteProcessor");
+
+mock.restore();
 
 function makeIcs(lines: string[]) {
   return ["BEGIN:VCALENDAR", ...lines, "END:VCALENDAR"].join("\r\n");

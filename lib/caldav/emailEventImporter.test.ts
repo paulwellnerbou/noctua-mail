@@ -1,4 +1,4 @@
-import { afterAll, describe, expect, mock, test } from "bun:test";
+import { describe, expect, mock, test } from "bun:test";
 
 const upsertCalendarEventByUid = mock(() => Promise.resolve({ id: "cal-test" } as any));
 const cancelCalendarEventByUid = mock(() => Promise.resolve());
@@ -10,11 +10,9 @@ mock.module("@/lib/db", () => ({
   cancelCalendarEventByUid
 }));
 
-afterAll(() => {
-  mock.restore();
-});
-
 const { importEmailCalendarEvents } = await import("./emailEventImporter");
+
+mock.restore();
 
 function makeIcs(lines: string[]) {
   return ["BEGIN:VCALENDAR", ...lines, "END:VCALENDAR"].join("\r\n");

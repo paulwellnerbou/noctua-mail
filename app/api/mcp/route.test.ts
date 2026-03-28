@@ -1,4 +1,4 @@
-import { afterAll, beforeEach, describe, expect, mock, test } from "bun:test";
+import { beforeEach, describe, expect, mock, test } from "bun:test";
 import type { Account, Folder, Message } from "@/lib/data";
 import {
   createMcpAccessToken,
@@ -74,10 +74,6 @@ mock.module("@/lib/mail/smtp", () => ({
   buildRawMessage
 }));
 
-afterAll(() => {
-  mock.restore();
-});
-
 const {
   deleteMcpToken,
   getMcpTokenByHash,
@@ -88,6 +84,8 @@ const {
   upsertMessages
 } = await dbModulePromise;
 const { POST } = await import("./route");
+
+mock.restore();
 
 function buildAccount(accountId: string): Account {
   return {

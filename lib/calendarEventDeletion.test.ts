@@ -1,4 +1,4 @@
-import { afterAll, beforeEach, describe, expect, mock, test } from "bun:test";
+import { beforeEach, describe, expect, mock, test } from "bun:test";
 import type { CalendarEvent } from "@/lib/data";
 
 const getCalendarEventById = mock(() => Promise.resolve<CalendarEvent | null>(null));
@@ -17,11 +17,9 @@ mock.module("@/lib/db", () => ({
   clearMessageCalendarInviteStatesProcessedByEventUid
 }));
 
-afterAll(() => {
-  mock.restore();
-});
-
 const { deleteCalendarEventAndRelatedData } = await import("./calendarEventDeletion");
+
+mock.restore();
 
 function buildEvent(overrides: Partial<CalendarEvent> = {}): CalendarEvent {
   const now = Date.now();

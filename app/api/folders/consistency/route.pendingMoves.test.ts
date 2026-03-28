@@ -1,4 +1,4 @@
-import { afterAll, beforeEach, describe, expect, mock, test } from "bun:test";
+import { beforeEach, describe, expect, mock, test } from "bun:test";
 import { NextResponse } from "next/server";
 import type { Account, Folder } from "@/lib/data";
 import { sealSession, type SessionData } from "@/lib/auth";
@@ -31,11 +31,9 @@ mock.module("@/lib/mail/imap", () => ({
   getImapMailboxStatus
 }));
 
-afterAll(() => {
-  mock.restore();
-});
-
 const { handleFolderConsistencyRequest } = await import("./route");
+
+mock.restore();
 
 function buildFolder(id: string, name: string): Folder {
   return {

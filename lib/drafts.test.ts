@@ -1,4 +1,4 @@
-import { afterAll, beforeEach, describe, expect, mock, test } from "bun:test";
+import { beforeEach, describe, expect, mock, test } from "bun:test";
 import type { ComposeInviteDraft } from "@/lib/composeInvite";
 import type { Account, Folder, Message } from "@/lib/data";
 import { COMPOSE_INVITE_HEADER, decodeComposeInviteHeader } from "@/lib/composeInviteMetadata";
@@ -69,13 +69,11 @@ mock.module("@/lib/mail/smtp", () => ({
   buildRawMessage
 }));
 
-afterAll(() => {
-  mock.restore();
-});
-
 const { getMessageById, saveFoldersForAccount, upsertAccount, upsertMessages } =
   await dbModulePromise;
 const { buildDraftInputForMode, saveDraftForAccount } = await import("./drafts");
+
+mock.restore();
 
 function buildAccount(accountId: string): Account {
   return {
