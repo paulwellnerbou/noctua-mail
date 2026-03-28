@@ -1,4 +1,4 @@
-import { afterAll, beforeEach, describe, expect, mock, test } from "bun:test";
+import { beforeEach, describe, expect, mock, test } from "bun:test";
 import type { Account } from "@/lib/data";
 
 const updateMessageFolder = mock(async () => undefined);
@@ -18,14 +18,15 @@ mock.module("@/lib/mail/imap", () => ({
   moveImapMessages
 }));
 
-afterAll(() => {
-  mock.restore();
-});
-
 const {
   enqueueMessageMoveJobs,
   waitForMessageMoveJobsIdle
 } = await import("./messageMoveJobs");
+
+// Restore the global module registry immediately so parallel test files do not
+// observe this file's mocked db module while messageMoveJobs keeps its captured
+// mocked imports.
+mock.restore();
 
 const account: Account = {
   id: "acc-move-jobs",
