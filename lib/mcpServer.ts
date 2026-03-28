@@ -12,8 +12,10 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import { enrichMessagesWithThreadTopics } from "@/app/api/_helpers/enrichMessagesWithThreadTopics";
+import { runNewMailCheck } from "@/app/api/_helpers/newMailCheck";
 import type { Account, Folder, Message, McpTokenMetadata } from "@/lib/data";
 import {
+  getAccountsForUser,
   getFolders,
   getMessageById,
   listMessages,
@@ -83,7 +85,12 @@ type MessageListResult = {
   relatedSubject?: string;
 };
 
+const ACCOUNT_ID_ARG = {
+  accountId: z.string().trim().optional()
+};
+
 const LIST_MESSAGES_BY_FOLDER_SCHEMA = {
+  ...ACCOUNT_ID_ARG,
   folderId: z.string().trim().min(1),
   page: z.number().int().min(1).optional(),
   pageSize: z.number().int().min(1).max(MCP_MAX_PAGE_SIZE).optional(),
@@ -94,6 +101,7 @@ const LIST_MESSAGES_BY_FOLDER_SCHEMA = {
 };
 
 const SEARCH_MESSAGES_SCHEMA = {
+  ...ACCOUNT_ID_ARG,
   query: z.string().optional(),
   relatedId: z.string().optional(),
   threadIds: z.array(z.string()).optional(),
@@ -110,10 +118,12 @@ const SEARCH_MESSAGES_SCHEMA = {
 };
 
 const MESSAGE_ID_SCHEMA = {
+  ...ACCOUNT_ID_ARG,
   messageId: z.string().trim().min(1)
 };
 
 const CREATE_DRAFT_MESSAGE_SCHEMA = {
+  ...ACCOUNT_ID_ARG,
   mode: z.enum(["new", "reply", "forward"]).optional(),
   messageId: z.string().trim().optional(),
   to: z.string().optional(),
@@ -137,6 +147,7 @@ const CREATE_DRAFT_MESSAGE_SCHEMA = {
 };
 
 const TOPIC_MUTATION_SCHEMA = {
+  ...ACCOUNT_ID_ARG,
   threadId: z.string().trim().optional(),
   messageId: z.string().trim().optional(),
   topics: z.array(z.string()).min(1)
@@ -158,6 +169,38 @@ const LIST_FOLDERS_OUTPUT_SCHEMA = {
   ok: z.boolean(),
   folders: z.array(z.object(FOLDER_SCHEMA))
 };
+
+const ACCOUNT_SUMMARY_SCHEMA = {
+  id: z.string(),
+  name: z.string(),
+  email: z.string(),
+  avatar: z.string()
+};
+
+const LIST_ACCOUNTS_OUTPUT_SCHEMA = {
+  ok: z.boolean(),
+  accounts: z.array(z.object(ACCOUNT_SUMMARY_SCHEMA))
+};
+
+async function resolveAccountContext(
+  baseContext: McpAccountContext,
+  requestedAccountId?: string
+): Promise<McpAccountContext> {
+  const id = requestedAccountId?.trim();
+  if (!id || id === baseContext.accountId) {
+    return baseContext;
+  }
+  const userId = baseContext.authInfo?.extra?.["userId"] as string | undefined;
+  if (!userId) {
+    throw new Error("Cannot switch account: user identity not available in token.");
+  }
+  const accounts = await getAccountsForUser(userId);
+  const account = accounts.find((a) => a.id === id);
+  if (!account) {
+    throw new Error(`Account "${id}" not found or not accessible.`);
+  }
+  return { ...baseContext, accountId: account.id, account };
+}
 
 function normalizeStringList(values?: string[] | null) {
   return Array.from(
@@ -710,13 +753,36 @@ export async function executeMcpHttpRequest(params: {
   );
 
   server.registerTool(
+    "list_accounts",
+    {
+      description: "List all accounts accessible to the authenticated user.",
+      inputSchema: ACCOUNT_ID_ARG,
+      outputSchema: LIST_ACCOUNTS_OUTPUT_SCHEMA
+    },
+    async () => {
+      const userId = context.authInfo?.extra?.["userId"] as string | undefined;
+      if (!userId) {
+        throw new Error("User identity not available in token.");
+      }
+      const accounts = await getAccountsForUser(userId);
+      const summaries = accounts.map(({ id, name, email, avatar }) => ({ id, name, email, avatar }));
+      return buildToolResult(`Returned ${summaries.length} accounts.`, {
+        ok: true,
+        accounts: summaries
+      });
+    }
+  );
+
+  server.registerTool(
     "list_folders",
     {
       description: "List folders for the authenticated account.",
+      inputSchema: ACCOUNT_ID_ARG,
       outputSchema: LIST_FOLDERS_OUTPUT_SCHEMA
     },
-    async () => {
-      const folders = await getFolders(context.accountId);
+    async ({ accountId: requestedAccountId }) => {
+      const ctx = await resolveAccountContext(context, requestedAccountId);
+      const folders = await getFolders(ctx.accountId);
       return buildToolResult(formatFolderListContent(folders), {
         ok: true,
         folders
@@ -727,8 +793,10 @@ export async function executeMcpHttpRequest(params: {
   server.tool(
     "list_topics",
     "List topics for the authenticated account.",
-    async () => {
-      const topics = await listTopics(context.accountId);
+    ACCOUNT_ID_ARG,
+    async ({ accountId: requestedAccountId }) => {
+      const ctx = await resolveAccountContext(context, requestedAccountId);
+      const topics = await listTopics(ctx.accountId);
       return buildToolResult(`Returned ${topics.length} topics.`, {
         ok: true,
         topics
@@ -739,8 +807,10 @@ export async function executeMcpHttpRequest(params: {
   server.tool(
     "list_mailing_list_aliases",
     "List mailing list aliases for the authenticated account.",
-    async () => {
-      const aliases = await listRecipientAliases(context.accountId);
+    ACCOUNT_ID_ARG,
+    async ({ accountId: requestedAccountId }) => {
+      const ctx = await resolveAccountContext(context, requestedAccountId);
+      const aliases = await listRecipientAliases(ctx.accountId);
       return buildToolResult(`Returned ${aliases.length} mailing list aliases.`, {
         ok: true,
         aliases
@@ -749,10 +819,26 @@ export async function executeMcpHttpRequest(params: {
   );
 
   server.tool(
+    "check_new_mail",
+    "Check for new mail and sync any folders with new messages. Waits for sync to complete before returning.",
+    ACCOUNT_ID_ARG,
+    async ({ accountId: requestedAccountId }) => {
+      const ctx = await resolveAccountContext(context, requestedAccountId);
+      const result = await runNewMailCheck(ctx.account, ctx.accountId, `mcp:${ctx.tokenRecord.id}`);
+      const summary =
+        result.foldersWithNewMail > 0
+          ? `Synced ${result.foldersWithNewMail} folder(s) with new mail (checked ${result.foldersChecked}).${result.timedOut ? " Warning: timed out before all jobs completed." : ""}`
+          : `No new mail found (checked ${result.foldersChecked} folder(s)).`;
+      return buildToolResult(summary, result as unknown as Record<string, unknown>);
+    }
+  );
+
+  server.tool(
     "list_messages_by_folder",
     "List lightweight message rows for one folder.",
     LIST_MESSAGES_BY_FOLDER_SCHEMA,
     async (args: {
+      accountId?: string;
       folderId: string;
       page?: number;
       pageSize?: number;
@@ -761,7 +847,8 @@ export async function executeMcpHttpRequest(params: {
       attachmentsOnly?: boolean;
       excludedFolderIds?: string[];
     }) => {
-      const result = await listMessagesForFolder(context, args);
+      const ctx = await resolveAccountContext(context, args.accountId);
+      const result = await listMessagesForFolder(ctx, args);
       return buildToolResult(buildSummary(result), result as unknown as Record<string, unknown>);
     }
   );
@@ -771,7 +858,8 @@ export async function executeMcpHttpRequest(params: {
     "Search messages using standard, related, or thread-related modes.",
     SEARCH_MESSAGES_SCHEMA,
     async (args) => {
-      const result = await searchMessages(context, args);
+      const ctx = await resolveAccountContext(context, args.accountId);
+      const result = await searchMessages(ctx, args);
       return buildToolResult(buildSummary(result), result as unknown as Record<string, unknown>);
     }
   );
@@ -780,8 +868,9 @@ export async function executeMcpHttpRequest(params: {
     "assign_topics",
     "Assign one or more topics to a thread, resolved by threadId or messageId.",
     TOPIC_MUTATION_SCHEMA,
-    async (args: { threadId?: string; messageId?: string; topics: string[] }) => {
-      const result = await updateThreadTopics(context, args, "assign");
+    async (args: { accountId?: string; threadId?: string; messageId?: string; topics: string[] }) => {
+      const ctx = await resolveAccountContext(context, args.accountId);
+      const result = await updateThreadTopics(ctx, args, "assign");
       return buildToolResult(`Assigned ${args.topics.length} topics to thread ${result.threadId}.`, result);
     }
   );
@@ -790,8 +879,9 @@ export async function executeMcpHttpRequest(params: {
     "unassign_topics",
     "Remove one or more topics from a thread, resolved by threadId or messageId.",
     TOPIC_MUTATION_SCHEMA,
-    async (args: { threadId?: string; messageId?: string; topics: string[] }) => {
-      const result = await updateThreadTopics(context, args, "unassign");
+    async (args: { accountId?: string; threadId?: string; messageId?: string; topics: string[] }) => {
+      const ctx = await resolveAccountContext(context, args.accountId);
+      const result = await updateThreadTopics(ctx, args, "unassign");
       return buildToolResult(`Removed ${args.topics.length} topics from thread ${result.threadId}.`, result);
     }
   );
@@ -801,6 +891,7 @@ export async function executeMcpHttpRequest(params: {
     "Create a draft message. Supports new drafts, replies, and forwards.",
     CREATE_DRAFT_MESSAGE_SCHEMA,
     async (args: {
+      accountId?: string;
       mode?: DraftCreateMode;
       messageId?: string;
       to?: string;
@@ -820,7 +911,8 @@ export async function executeMcpHttpRequest(params: {
         dataUrl?: string;
       }>;
     }) => {
-      const result = await createDraftMessage(context, args);
+      const ctx = await resolveAccountContext(context, args.accountId);
+      const result = await createDraftMessage(ctx, args);
       return buildToolResult(
         `Created ${result.mode} draft${result.draftId ? ` ${result.draftId}` : ""}.`,
         result
@@ -832,21 +924,22 @@ export async function executeMcpHttpRequest(params: {
     "flag_message",
     "Add the IMAP flagged marker to one message.",
     MESSAGE_ID_SCHEMA,
-    async ({ messageId }) => {
-      const message = await getMessageById(context.accountId, messageId);
+    async ({ accountId: requestedAccountId, messageId }) => {
+      const ctx = await resolveAccountContext(context, requestedAccountId);
+      const message = await getMessageById(ctx.accountId, messageId);
       if (!message) {
         throw new Error("Message not found");
       }
       const nextFlags = await applyFlagMutationsToMessage({
-        accountId: context.accountId,
-        account: context.account,
+        accountId: ctx.accountId,
+        account: ctx.account,
         messageId,
         message,
         flag: "flagged",
         value: true,
-        clientId: `mcp:${context.tokenRecord.id}`
+        clientId: `mcp:${ctx.tokenRecord.id}`
       });
-      const finalFlags = await markMessageAiModified(context.accountId, messageId);
+      const finalFlags = await markMessageAiModified(ctx.accountId, messageId);
       return buildToolResult(`Flagged message ${messageId}.`, {
         ok: true,
         messageId,
@@ -859,21 +952,22 @@ export async function executeMcpHttpRequest(params: {
     "unflag_message",
     "Remove the IMAP flagged marker from one message.",
     MESSAGE_ID_SCHEMA,
-    async ({ messageId }) => {
-      const message = await getMessageById(context.accountId, messageId);
+    async ({ accountId: requestedAccountId, messageId }) => {
+      const ctx = await resolveAccountContext(context, requestedAccountId);
+      const message = await getMessageById(ctx.accountId, messageId);
       if (!message) {
         throw new Error("Message not found");
       }
       const nextFlags = await applyFlagMutationsToMessage({
-        accountId: context.accountId,
-        account: context.account,
+        accountId: ctx.accountId,
+        account: ctx.account,
         messageId,
         message,
         flag: "flagged",
         value: false,
-        clientId: `mcp:${context.tokenRecord.id}`
+        clientId: `mcp:${ctx.tokenRecord.id}`
       });
-      const finalFlags = await markMessageAiModified(context.accountId, messageId);
+      const finalFlags = await markMessageAiModified(ctx.accountId, messageId);
       return buildToolResult(`Unflagged message ${messageId}.`, {
         ok: true,
         messageId,
@@ -886,8 +980,9 @@ export async function executeMcpHttpRequest(params: {
     "mark_message_todo",
     "Mark a message as To-Do.",
     MESSAGE_ID_SCHEMA,
-    async ({ messageId }) => {
-      const result = await updateTodoState(context, messageId, "todo");
+    async ({ accountId: requestedAccountId, messageId }) => {
+      const ctx = await resolveAccountContext(context, requestedAccountId);
+      const result = await updateTodoState(ctx, messageId, "todo");
       return buildToolResult(`Marked message ${messageId} as To-Do.`, result);
     }
   );
@@ -896,8 +991,9 @@ export async function executeMcpHttpRequest(params: {
     "mark_message_done",
     "Mark a message as Done.",
     MESSAGE_ID_SCHEMA,
-    async ({ messageId }) => {
-      const result = await updateTodoState(context, messageId, "done");
+    async ({ accountId: requestedAccountId, messageId }) => {
+      const ctx = await resolveAccountContext(context, requestedAccountId);
+      const result = await updateTodoState(ctx, messageId, "done");
       return buildToolResult(`Marked message ${messageId} as Done.`, result);
     }
   );
@@ -906,8 +1002,9 @@ export async function executeMcpHttpRequest(params: {
     "clear_message_todo",
     "Clear To-Do and Done state from a message.",
     MESSAGE_ID_SCHEMA,
-    async ({ messageId }) => {
-      const result = await updateTodoState(context, messageId, "clear");
+    async ({ accountId: requestedAccountId, messageId }) => {
+      const ctx = await resolveAccountContext(context, requestedAccountId);
+      const result = await updateTodoState(ctx, messageId, "clear");
       return buildToolResult(`Cleared To-Do state from message ${messageId}.`, result);
     }
   );
