@@ -51,4 +51,6 @@ getSharedDbHarnessState();
 // Use a dedicated module specifier so Bun's global mock.module("@/lib/db", ...)
 // hooks in unrelated test files cannot replace the harness db module during
 // parallel test-file loading.
-export const dbModulePromise = import("./db.ts?test-harness");
+const DB_HARNESS_SPECIFIER = "./db.ts?test-harness";
+
+export const dbModulePromise: Promise<typeof import("./db")> = import(DB_HARNESS_SPECIFIER);
