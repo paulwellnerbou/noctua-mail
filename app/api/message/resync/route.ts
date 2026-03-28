@@ -4,6 +4,7 @@ import {
   upsertMessages
 } from "@/lib/db";
 import { syncImapMessage } from "@/lib/mail/imap";
+import { mergeLocalOnlyMessageState } from "@/lib/messageLocalState";
 import { sanitizeSyncedMessage } from "@/lib/mail/syncMessageSanitizer";
 import { appendMessageIdToError } from "../errorFormatting";
 import { requireAccountAndMessageContext } from "../routeHelpers";
@@ -59,7 +60,8 @@ export async function handleResyncMessageRequest(
     },
     account.id
   );
-  await upsertMessages(account.id, message.folderId, [sanitized], false);
+  const merged = mergeLocalOnlyMessageState(sanitized, existing);
+  await upsertMessages(account.id, message.folderId, [merged], false);
 
   return NextResponse.json({ ok: true });
 }

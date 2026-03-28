@@ -7,6 +7,7 @@ import {
   buildAccountMessageSourcePath
 } from "@/lib/accountApiPaths";
 import type { Message } from "@/lib/data";
+import { mergeLocalOnlyMessageState } from "@/lib/messageLocalState";
 import { applyFlagsToMessage } from "./utils/messageHelpers";
 import { THREAD_CACHE_LIMIT } from "./constants";
 import { hasHtmlContent } from "@/lib/ui/messageView";
@@ -252,30 +253,46 @@ export function useThreadContent({
         const detail = (await detailRes.json()) as { ok?: boolean; message?: Message };
         const hydrated = detail?.ok ? detail.message : null;
         if (!hydrated?.id) return null;
+        const mergedHydrated = mergeLocalOnlyMessageState(
+          hydrated,
+          messageById.get(message.id) ??
+            threadMessagesRef.current.find((item: Message) => item.id === message.id) ??
+            message
+        );
 
         // If the message is loaded but still empty, set a space so it's considered loaded
-        if (!hasHtmlContent(hydrated.htmlBody) && (!hydrated.body || hydrated.body === "")) {
-          hydrated.body = " ";
+        if (
+          !hasHtmlContent(mergedHydrated.htmlBody) &&
+          (!mergedHydrated.body || mergedHydrated.body === "")
+        ) {
+          mergedHydrated.body = " ";
         }
 
         updateMessagesWithCurrentResultPrune(
           (item) => {
-            if (item.id !== hydrated.id) return item;
+            if (item.id !== mergedHydrated.id) return item;
             return {
-              ...hydrated,
+              ...mergedHydrated,
               // Message detail responses do not include list grouping metadata; preserve the existing group key
               // so the row remains in the same visible group after hydration.
-              groupKey: item.groupKey ?? hydrated.groupKey
+              groupKey: item.groupKey ?? mergedHydrated.groupKey
             };
           },
           { source: "hydrate-message-from-server" }
         );
-        return hydrated;
+        return mergedHydrated;
       } catch {
         return null;
       }
     },
-    [apiFetch, readErrorMessage, reportError, updateMessagesWithCurrentResultPrune]
+    [
+      apiFetch,
+      messageById,
+      readErrorMessage,
+      reportError,
+      threadMessagesRef,
+      updateMessagesWithCurrentResultPrune
+    ]
   );
 
   const fetchSource = useCallback(
