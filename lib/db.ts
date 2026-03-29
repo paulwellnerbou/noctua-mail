@@ -3746,6 +3746,69 @@ function shouldSearchAttachmentFilenames(fields?: string[] | null) {
   return selected.includes("attachments");
 }
 
+function normalizeSearchTermList(values?: string[] | null) {
+  return Array.from(new Set((values ?? []).map((value) => value.trim()).filter(Boolean)));
+}
+
+type AddressSearchFilters = {
+  fromTerms?: string[];
+  recipientTerms?: string[];
+  participantTerms?: string[];
+};
+
+function applyAddressSearchFilters(params: {
+  where: string;
+  args: any[];
+  filters: AddressSearchFilters;
+  messageAlias?: string;
+}) {
+  const messageAlias = params.messageAlias ?? "m";
+  let where = params.where;
+  const fromTerms = params.filters.fromTerms ?? [];
+  const recipientTerms = params.filters.recipientTerms ?? [];
+  const participantTerms = params.filters.participantTerms ?? [];
+
+  fromTerms.forEach(() => {
+    where += ` AND lower(COALESCE(${messageAlias}.fromAddr, '')) LIKE ?`;
+  });
+  fromTerms.forEach((term) => params.args.push(`%${term.toLowerCase()}%`));
+
+  recipientTerms.forEach(() => {
+    where += ` AND (
+      lower(COALESCE(${messageAlias}.toAddr, '')) LIKE ?
+      OR lower(COALESCE(${messageAlias}.ccAddr, '')) LIKE ?
+      OR lower(COALESCE(${messageAlias}.bccAddr, '')) LIKE ?
+    )`;
+  });
+  recipientTerms.forEach((term) => {
+    const pattern = `%${term.toLowerCase()}%`;
+    params.args.push(pattern, pattern, pattern);
+  });
+
+  participantTerms.forEach(() => {
+    where += ` AND (
+      lower(COALESCE(${messageAlias}.fromAddr, '')) LIKE ?
+      OR lower(COALESCE(${messageAlias}.toAddr, '')) LIKE ?
+      OR lower(COALESCE(${messageAlias}.ccAddr, '')) LIKE ?
+      OR lower(COALESCE(${messageAlias}.bccAddr, '')) LIKE ?
+    )`;
+  });
+  participantTerms.forEach((term) => {
+    const pattern = `%${term.toLowerCase()}%`;
+    params.args.push(pattern, pattern, pattern, pattern);
+  });
+
+  return where;
+}
+
+function hasAddressSearchFilters(filters: AddressSearchFilters) {
+  return (
+    (filters.fromTerms?.length ?? 0) > 0 ||
+    (filters.recipientTerms?.length ?? 0) > 0 ||
+    (filters.participantTerms?.length ?? 0) > 0
+  );
+}
+
 function parseSearchInput(
   raw: string | null | undefined,
   fields?: string[] | null,
@@ -4634,36 +4697,52 @@ async function getGroupCounts(params: {
   badges?: string[] | null;
   attachmentsOnly?: boolean;
   excludedFolderIds?: string[] | null;
+  from?: string[] | null;
+  recipients?: string[] | null;
+  participants?: string[] | null;
 }) {
-  const { accountId, folderId, query, groupBy, fields, badges, attachmentsOnly, excludedFolderIds } =
+  const {
+    accountId,
+    folderId,
+    query,
+    groupBy,
+    fields,
+    badges,
+    attachmentsOnly,
+    excludedFolderIds,
+    from,
+    recipients,
+    participants
+  } =
     params;
   const db = await getAccountDb(accountId);
   const accountEmail = await getAccountEmail(accountId);
 
-  const { ftsTokenQueries, fromTerms, toTerms, inTerms, inviteUidTerms, threadTerms, topicTerms, rawQuery, attachmentFilenameTerms } = parseSearchInput(
+  const {
+    ftsTokenQueries,
+    fromTerms,
+    toTerms,
+    inTerms,
+    inviteUidTerms,
+    threadTerms,
+    topicTerms,
+    rawQuery,
+    attachmentFilenameTerms
+  } = parseSearchInput(
     query,
     fields,
     accountEmail
   );
+  const addressFilters = {
+    fromTerms: [...fromTerms, ...normalizeSearchTermList(from)],
+    recipientTerms: [...toTerms, ...normalizeSearchTermList(recipients)],
+    participantTerms: normalizeSearchTermList(participants)
+  };
   const baseWhere = `m.accountId = ? ${folderId ? "AND m.folderId = ?" : ""}`;
   const args: any[] = [accountId];
   if (folderId) args.push(folderId);
   let where = applyVisibleMessageFilters(baseWhere);
-
-  // Apply "from:" filter
-  fromTerms.forEach(() => {
-    where += " AND lower(m.fromAddr) LIKE ?";
-  });
-  fromTerms.forEach((term) => args.push(`%${term.toLowerCase()}%`));
-
-  // Apply "to:" filter (searches in To, Cc, and Bcc fields)
-  toTerms.forEach(() => {
-    where += " AND (lower(m.toAddr) LIKE ? OR lower(m.ccAddr) LIKE ? OR lower(m.bccAddr) LIKE ?)";
-  });
-  toTerms.forEach((term) => {
-    const pattern = `%${term.toLowerCase()}%`;
-    args.push(pattern, pattern, pattern);
-  });
+  where = applyAddressSearchFilters({ where, args, filters: addressFilters });
 
   // Apply "thread:" filter (exact thread ID match)
   threadTerms.forEach(() => {
@@ -4853,36 +4932,51 @@ async function getTotalCount(params: {
   badges?: string[] | null;
   attachmentsOnly?: boolean;
   excludedFolderIds?: string[] | null;
+  from?: string[] | null;
+  recipients?: string[] | null;
+  participants?: string[] | null;
 }) {
   const db = await getAccountDb(params.accountId);
-  const { accountId, folderId, query, fields, badges, attachmentsOnly, excludedFolderIds } =
+  const {
+    accountId,
+    folderId,
+    query,
+    fields,
+    badges,
+    attachmentsOnly,
+    excludedFolderIds,
+    from,
+    recipients,
+    participants
+  } =
     params;
   const accountEmail = await getAccountEmail(accountId);
 
-  const { ftsTokenQueries, fromTerms, toTerms, inTerms, inviteUidTerms, threadTerms, topicTerms, rawQuery, attachmentFilenameTerms } = parseSearchInput(
+  const {
+    ftsTokenQueries,
+    fromTerms,
+    toTerms,
+    inTerms,
+    inviteUidTerms,
+    threadTerms,
+    topicTerms,
+    rawQuery,
+    attachmentFilenameTerms
+  } = parseSearchInput(
     query,
     fields,
     accountEmail
   );
+  const addressFilters = {
+    fromTerms: [...fromTerms, ...normalizeSearchTermList(from)],
+    recipientTerms: [...toTerms, ...normalizeSearchTermList(recipients)],
+    participantTerms: normalizeSearchTermList(participants)
+  };
   const baseWhere = `m.accountId = ? ${folderId ? "AND m.folderId = ?" : ""}`;
   const args: any[] = [accountId];
   if (folderId) args.push(folderId);
   let where = applyVisibleMessageFilters(baseWhere);
-
-  // Apply "from:" filter
-  fromTerms.forEach(() => {
-    where += " AND lower(m.fromAddr) LIKE ?";
-  });
-  fromTerms.forEach((term) => args.push(`%${term.toLowerCase()}%`));
-
-  // Apply "to:" filter (searches in To, Cc, and Bcc fields)
-  toTerms.forEach(() => {
-    where += " AND (lower(m.toAddr) LIKE ? OR lower(m.ccAddr) LIKE ? OR lower(m.bccAddr) LIKE ?)";
-  });
-  toTerms.forEach((term) => {
-    const pattern = `%${term.toLowerCase()}%`;
-    args.push(pattern, pattern, pattern);
-  });
+  where = applyAddressSearchFilters({ where, args, filters: addressFilters });
 
   // Apply "thread:" filter (exact thread ID match)
   threadTerms.forEach(() => {
@@ -5449,6 +5543,9 @@ export async function listMessages(params: {
   badges?: string[] | null;
   attachmentsOnly?: boolean;
   excludedFolderIds?: string[] | null;
+  from?: string[] | null;
+  recipients?: string[] | null;
+  participants?: string[] | null;
 }) {
   const {
     accountId,
@@ -5460,37 +5557,41 @@ export async function listMessages(params: {
     fields,
     badges,
     attachmentsOnly,
-    excludedFolderIds
+    excludedFolderIds,
+    from,
+    recipients,
+    participants
   } = params;
   const db = await getAccountDb(accountId);
   const offset = (page - 1) * pageSize;
   const accountEmail = await getAccountEmail(accountId);
 
-  const { ftsTokenQueries, fromTerms, toTerms, inTerms, inviteUidTerms, threadTerms, topicTerms, rawQuery, attachmentFilenameTerms } = parseSearchInput(
+  const {
+    ftsTokenQueries,
+    fromTerms,
+    toTerms,
+    inTerms,
+    inviteUidTerms,
+    threadTerms,
+    topicTerms,
+    rawQuery,
+    attachmentFilenameTerms
+  } = parseSearchInput(
     query,
     fields,
     accountEmail
   );
+  const addressFilters = {
+    fromTerms: [...fromTerms, ...normalizeSearchTermList(from)],
+    recipientTerms: [...toTerms, ...normalizeSearchTermList(recipients)],
+    participantTerms: normalizeSearchTermList(participants)
+  };
   const hasInviteUidQuery = inviteUidTerms.length > 0;
   const baseWhere = `m.accountId = ? ${folderId ? "AND m.folderId = ?" : ""}`;
   const args: any[] = [accountId];
   if (folderId) args.push(folderId);
   let where = applyVisibleMessageFilters(baseWhere);
-
-  // Apply "from:" filter
-  fromTerms.forEach(() => {
-    where += " AND lower(m.fromAddr) LIKE ?";
-  });
-  fromTerms.forEach((term) => args.push(`%${term.toLowerCase()}%`));
-
-  // Apply "to:" filter (searches in To, Cc, and Bcc fields)
-  toTerms.forEach(() => {
-    where += " AND (lower(m.toAddr) LIKE ? OR lower(m.ccAddr) LIKE ? OR lower(m.bccAddr) LIKE ?)";
-  });
-  toTerms.forEach((term) => {
-    const pattern = `%${term.toLowerCase()}%`;
-    args.push(pattern, pattern, pattern);
-  });
+  where = applyAddressSearchFilters({ where, args, filters: addressFilters });
 
   // Apply "thread:" filter (exact thread ID match)
   threadTerms.forEach(() => {
@@ -5545,8 +5646,7 @@ export async function listMessages(params: {
     !hasInviteUidQuery &&
     !hasIdQuery &&
     !hasAttachmentFilenameQuery &&
-    fromTerms.length === 0 &&
-    toTerms.length === 0 &&
+    !hasAddressSearchFilters(addressFilters) &&
     inTerms.length === 0 &&
     threadTerms.length === 0 &&
     (badges?.length ?? 0) === 0 &&
@@ -5686,7 +5786,10 @@ export async function listMessages(params: {
           fields,
           badges,
           attachmentsOnly,
-          excludedFolderIds
+          excludedFolderIds,
+          from,
+          recipients,
+          participants
         }));
   const total =
     inviteDeckSummary?.total ??
@@ -5697,7 +5800,10 @@ export async function listMessages(params: {
       fields,
       badges,
       attachmentsOnly,
-      excludedFolderIds
+      excludedFolderIds,
+      from,
+      recipients,
+      participants
     }));
   const hasMore = offset + items.length < total;
   return { items, groups, total, hasMore, baseCount: items.length };
@@ -5715,6 +5821,9 @@ export async function listThreads(params: {
   badges?: string[] | null;
   attachmentsOnly?: boolean;
   excludedFolderIds?: string[] | null;
+  from?: string[] | null;
+  recipients?: string[] | null;
+  participants?: string[] | null;
 }) {
   const {
     accountId,
@@ -5727,7 +5836,10 @@ export async function listThreads(params: {
     fields,
     badges,
     attachmentsOnly,
-    excludedFolderIds
+    excludedFolderIds,
+    from,
+    recipients,
+    participants
   } = params;
   const db = await getAccountDb(accountId);
   await ensureThreadLatestReceivedDateValues(db, accountId);
@@ -5736,31 +5848,32 @@ export async function listThreads(params: {
   const normalizedThreadDateSource = normalizeThreadDateSource(threadDateSource);
   const threadDateColumn = getThreadDateColumn(groupBy, normalizedThreadDateSource);
 
-  const { ftsTokenQueries, fromTerms, toTerms, inTerms, inviteUidTerms, threadTerms, topicTerms, rawQuery, attachmentFilenameTerms } = parseSearchInput(
+  const {
+    ftsTokenQueries,
+    fromTerms,
+    toTerms,
+    inTerms,
+    inviteUidTerms,
+    threadTerms,
+    topicTerms,
+    rawQuery,
+    attachmentFilenameTerms
+  } = parseSearchInput(
     query,
     fields,
     accountEmail
   );
+  const addressFilters = {
+    fromTerms: [...fromTerms, ...normalizeSearchTermList(from)],
+    recipientTerms: [...toTerms, ...normalizeSearchTermList(recipients)],
+    participantTerms: normalizeSearchTermList(participants)
+  };
   const hasInviteUidQuery = inviteUidTerms.length > 0;
   const baseWhere = `m.accountId = ? ${folderId ? "AND m.folderId = ?" : ""}`;
   const args: any[] = [accountId];
   if (folderId) args.push(folderId);
   let where = applyVisibleMessageFilters(baseWhere);
-
-  // Apply "from:" filter
-  fromTerms.forEach(() => {
-    where += " AND lower(m.fromAddr) LIKE ?";
-  });
-  fromTerms.forEach((term) => args.push(`%${term.toLowerCase()}%`));
-
-  // Apply "to:" filter (searches in To, Cc, and Bcc fields)
-  toTerms.forEach(() => {
-    where += " AND (lower(m.toAddr) LIKE ? OR lower(m.ccAddr) LIKE ? OR lower(m.bccAddr) LIKE ?)";
-  });
-  toTerms.forEach((term) => {
-    const pattern = `%${term.toLowerCase()}%`;
-    args.push(pattern, pattern, pattern);
-  });
+  where = applyAddressSearchFilters({ where, args, filters: addressFilters });
 
   // Apply "thread:" filter (exact thread ID match)
   threadTerms.forEach(() => {
@@ -5819,8 +5932,7 @@ export async function listThreads(params: {
     !hasInviteUidQuery &&
     !hasIdQuery &&
     !hasAttachmentFilenameQuery &&
-    fromTerms.length === 0 &&
-    toTerms.length === 0 &&
+    !hasAddressSearchFilters(addressFilters) &&
     inTerms.length === 0 &&
     threadTerms.length === 0 &&
     (badges?.length ?? 0) === 0 &&
@@ -5831,8 +5943,7 @@ export async function listThreads(params: {
     !hasInviteUidQuery &&
     !hasIdQuery &&
     !hasAttachmentFilenameQuery &&
-    fromTerms.length === 0 &&
-    toTerms.length === 0 &&
+    !hasAddressSearchFilters(addressFilters) &&
     inTerms.length === 0 &&
     threadTerms.length === 0 &&
     (badges?.length ?? 0) === 0 &&
@@ -6001,7 +6112,10 @@ export async function listThreads(params: {
         fields,
         badges,
         attachmentsOnly,
-        excludedFolderIds
+        excludedFolderIds,
+        from,
+        recipients,
+        participants
       });
     }
 
@@ -6195,7 +6309,10 @@ export async function listThreads(params: {
             fields,
             badges,
             attachmentsOnly,
-            excludedFolderIds
+            excludedFolderIds,
+            from,
+            recipients,
+            participants
           })));
 
   const hasMore = offset + threadRows.length < threadTotal;

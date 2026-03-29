@@ -63,6 +63,9 @@ type SearchMessagesArgs = {
   threadIds?: string[];
   messageIds?: string[];
   topics?: string[];
+  from?: string[];
+  recipients?: string[];
+  participants?: string[];
   folderId?: string;
   fields?: string[];
   badges?: string[];
@@ -100,21 +103,65 @@ const LIST_MESSAGES_BY_FOLDER_SCHEMA = {
   excludedFolderIds: z.array(z.string()).optional()
 };
 
+const SEARCH_MODE_DESCRIPTION =
+  "Exactly one mode is allowed: standard search, related search via relatedId, or thread-related lookup via threadIds/messageIds.";
+const STANDARD_SEARCH_ONLY_DESCRIPTION =
+  "Standard search mode only. Do not combine with relatedId, threadIds, or messageIds.";
+const RELATED_SEARCH_ONLY_DESCRIPTION =
+  "Related-search mode. Do not combine with threadIds or messageIds.";
+const THREAD_RELATED_ONLY_DESCRIPTION =
+  "Thread-related mode only. When provided, do not combine with standard or related-search filters except optional groupBy.";
+
 const SEARCH_MESSAGES_SCHEMA = {
   ...ACCOUNT_ID_ARG,
-  query: z.string().optional(),
-  relatedId: z.string().optional(),
-  threadIds: z.array(z.string()).optional(),
-  messageIds: z.array(z.string()).optional(),
-  topics: z.array(z.string()).optional(),
-  folderId: z.string().optional(),
-  fields: z.array(z.string()).optional(),
-  badges: z.array(z.string()).optional(),
-  attachmentsOnly: z.boolean().optional(),
-  excludedFolderIds: z.array(z.string()).optional(),
-  page: z.number().int().min(1).optional(),
-  pageSize: z.number().int().min(1).max(MCP_MAX_PAGE_SIZE).optional(),
-  groupBy: z.string().optional()
+  query: z.string().optional().describe(
+    `Free-text search query for standard mode. Supports existing query operators such as from:, to:, in:, thread:, topic:, invite:, and event:. ${SEARCH_MODE_DESCRIPTION}`
+  ),
+  relatedId: z.string().trim().optional().describe(
+    `${RELATED_SEARCH_ONLY_DESCRIPTION} Finds messages related to the given message id or Message-ID.`
+  ),
+  threadIds: z.array(z.string().trim().min(1)).optional().describe(
+    `${THREAD_RELATED_ONLY_DESCRIPTION} Returns messages from the specified thread ids.`
+  ),
+  messageIds: z.array(z.string().trim().min(1)).optional().describe(
+    `${THREAD_RELATED_ONLY_DESCRIPTION} Returns messages for the threads that contain these message ids.`
+  ),
+  topics: z.array(z.string().trim().min(1)).optional().describe(
+    `Topic filters for standard mode. Accepts topic ids or topic names. ${STANDARD_SEARCH_ONLY_DESCRIPTION}`
+  ),
+  from: z.array(z.string().trim().min(1)).optional().describe(
+    `Sender filters for standard mode. Each value must match the From header. ${STANDARD_SEARCH_ONLY_DESCRIPTION}`
+  ),
+  recipients: z.array(z.string().trim().min(1)).optional().describe(
+    `Recipient filters for standard mode. Each value matches any of To, Cc, or Bcc. ${STANDARD_SEARCH_ONLY_DESCRIPTION}`
+  ),
+  participants: z.array(z.string().trim().min(1)).optional().describe(
+    `Participant filters for standard mode. Each value matches any of From, To, Cc, or Bcc. ${STANDARD_SEARCH_ONLY_DESCRIPTION}`
+  ),
+  folderId: z.string().trim().optional().describe(
+    `Restrict standard-mode search to one folder id. ${STANDARD_SEARCH_ONLY_DESCRIPTION}`
+  ),
+  fields: z.array(z.string().trim().min(1)).optional().describe(
+    `Limit standard-mode free-text search to specific indexed fields such as subject, from, to, cc, bcc, body, preview, or attachments. ${STANDARD_SEARCH_ONLY_DESCRIPTION}`
+  ),
+  badges: z.array(z.string().trim().min(1)).optional().describe(
+    "Filter results by message badges such as flagged, unread, attachments, draft, todo, or done."
+  ),
+  attachmentsOnly: z.boolean().optional().describe(
+    "When true, only return messages with meaningful non-inline attachments."
+  ),
+  excludedFolderIds: z.array(z.string().trim().min(1)).optional().describe(
+    "Exclude messages from these folder ids."
+  ),
+  page: z.number().int().min(1).optional().describe(
+    "1-based page number for standard and related search modes."
+  ),
+  pageSize: z.number().int().min(1).max(MCP_MAX_PAGE_SIZE).optional().describe(
+    `Maximum number of messages per page for standard and related search modes. Max ${MCP_MAX_PAGE_SIZE}.`
+  ),
+  groupBy: z.string().trim().optional().describe(
+    "Optional grouping key for returned results, such as date, week, year, sender, domain, folder, or event-oriented groupings."
+  )
 };
 
 const MESSAGE_ID_SCHEMA = {
@@ -180,6 +227,74 @@ const ACCOUNT_SUMMARY_SCHEMA = {
 const LIST_ACCOUNTS_OUTPUT_SCHEMA = {
   ok: z.boolean(),
   accounts: z.array(z.object(ACCOUNT_SUMMARY_SCHEMA))
+};
+
+const SEARCH_RESULT_TOPIC_SCHEMA = {
+  id: z.string(),
+  accountId: z.string(),
+  name: z.string(),
+  color: z.string().nullable(),
+  imapKeyword: z.string(),
+  createdAt: z.number(),
+  updatedAt: z.number(),
+  suggestionScore: z.number().optional(),
+  matchCount: z.number().optional()
+};
+
+const SEARCH_RESULT_MESSAGE_SCHEMA = {
+  id: z.string(),
+  accountId: z.string(),
+  folderId: z.string(),
+  threadId: z.string(),
+  subject: z.string(),
+  from: z.string(),
+  to: z.string(),
+  cc: z.string().optional(),
+  bcc: z.string().optional(),
+  preview: z.string(),
+  date: z.string(),
+  dateValue: z.number(),
+  body: z.string(),
+  htmlBody: z.string().optional(),
+  hasSource: z.boolean().optional(),
+  hasAttachments: z.boolean().optional(),
+  hasInlineAttachments: z.boolean().optional(),
+  unread: z.boolean().optional(),
+  priority: z.string().optional(),
+  flags: z.array(z.string()).optional(),
+  seen: z.boolean().optional(),
+  answered: z.boolean().optional(),
+  flagged: z.boolean().optional(),
+  deleted: z.boolean().optional(),
+  draft: z.boolean().optional(),
+  recent: z.boolean().optional(),
+  category: z.string().nullable().optional(),
+  categoryScore: z.number().nullable().optional(),
+  categorySignals: z.array(z.string()).optional(),
+  listUnsubscribe: z.string().nullable().optional(),
+  listId: z.string().nullable().optional(),
+  groupKey: z.string().optional(),
+  threadSortDateValue: z.number().optional(),
+  topics: z.array(z.object(SEARCH_RESULT_TOPIC_SCHEMA)).optional(),
+  topicSuggestions: z.array(z.object(SEARCH_RESULT_TOPIC_SCHEMA)).optional()
+};
+
+const SEARCH_RESULT_GROUP_SCHEMA = {
+  key: z.string(),
+  label: z.string(),
+  count: z.number()
+};
+
+const SEARCH_MESSAGES_OUTPUT_SCHEMA = {
+  items: z.array(z.object(SEARCH_RESULT_MESSAGE_SCHEMA)),
+  groups: z.array(z.object(SEARCH_RESULT_GROUP_SCHEMA)).optional(),
+  total: z.number().optional(),
+  baseCount: z.number().optional(),
+  hasMore: z.boolean().optional(),
+  page: z.number().optional(),
+  pageSize: z.number().optional(),
+  mode: z.enum(["search", "related", "thread-related"]),
+  relatedSubject: z.string().optional()
 };
 
 async function resolveAccountContext(
@@ -504,6 +619,9 @@ async function searchMessages(
   const badges = normalizeStringList(args.badges);
   const excludedFolderIds = normalizeStringList(args.excludedFolderIds);
   const fields = normalizeStringList(args.fields);
+  const from = normalizeStringList(args.from);
+  const recipients = normalizeStringList(args.recipients);
+  const participants = normalizeStringList(args.participants);
   const threadIds = normalizeStringList(args.threadIds);
   const messageIds = normalizeStringList(args.messageIds);
   const topicSelectors = normalizeStringList(args.topics);
@@ -525,6 +643,9 @@ async function searchMessages(
       rawQuery ||
       normalizedRelatedId ||
       topicSelectors.length > 0 ||
+      from.length > 0 ||
+      recipients.length > 0 ||
+      participants.length > 0 ||
       args.folderId ||
       fields.length > 0 ||
       badges.length > 0 ||
@@ -553,8 +674,17 @@ async function searchMessages(
   }
 
   if (hasRelatedMode) {
-    if (topicSelectors.length > 0 || fields.length > 0 || args.folderId) {
-      throw new Error("related search does not support topics, fields, or folderId.");
+    if (
+      topicSelectors.length > 0 ||
+      from.length > 0 ||
+      recipients.length > 0 ||
+      participants.length > 0 ||
+      fields.length > 0 ||
+      args.folderId
+    ) {
+      throw new Error(
+        "related search does not support topics, from, recipients, participants, fields, or folderId."
+      );
     }
     const data = await listRelatedMessages({
       accountId: context.accountId,
@@ -589,6 +719,9 @@ async function searchMessages(
     query,
     groupBy: args.groupBy ?? "date",
     fields,
+    from,
+    recipients,
+    participants,
     badges,
     attachmentsOnly: args.attachmentsOnly,
     excludedFolderIds
@@ -853,10 +986,14 @@ export async function executeMcpHttpRequest(params: {
     }
   );
 
-  server.tool(
+  server.registerTool(
     "search_messages",
-    "Search messages using standard, related, or thread-related modes.",
-    SEARCH_MESSAGES_SCHEMA,
+    {
+      description:
+        "Search messages using standard, related, or thread-related modes. Standard mode supports query, topic, sender, recipient, participant, folder, badge, attachment, pagination, and grouping filters.",
+      inputSchema: SEARCH_MESSAGES_SCHEMA,
+      outputSchema: SEARCH_MESSAGES_OUTPUT_SCHEMA
+    },
     async (args) => {
       const ctx = await resolveAccountContext(context, args.accountId);
       const result = await searchMessages(ctx, args);

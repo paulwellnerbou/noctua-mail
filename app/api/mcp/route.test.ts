@@ -140,6 +140,8 @@ function buildMessage(params: {
   subject: string;
   from: string;
   to: string;
+  cc?: string;
+  bcc?: string;
   dateValue: number;
   imapUid: number;
   messageId?: string;
@@ -156,6 +158,8 @@ function buildMessage(params: {
     subject: params.subject,
     from: params.from,
     to: params.to,
+    cc: params.cc,
+    bcc: params.bcc,
     preview: params.subject,
     date: new Date(params.dateValue).toISOString(),
     dateValue: params.dateValue,
@@ -252,7 +256,8 @@ async function seedMailbox(accountId: string) {
       threadId: `${accountId}-thread-alpha`,
       subject: "Re: Project Alpha kickoff",
       from: "bob@example.test",
-      to: "owner@example.test",
+      to: "team@example.test",
+      cc: "owner@example.test",
       dateValue: Date.UTC(2026, 2, 25, 10, 0, 0),
       imapUid: 102,
       inReplyTo: `<${accountId}-msg-1@example.test>`
@@ -264,7 +269,7 @@ async function seedMailbox(accountId: string) {
       threadId: `${accountId}-thread-budget`,
       subject: "Budget Review",
       from: "finance@example.test",
-      to: "owner@example.test",
+      to: "budget@example.test",
       dateValue: Date.UTC(2026, 2, 25, 11, 0, 0),
       imapUid: 103
     })
@@ -430,7 +435,15 @@ describe("/api/mcp", () => {
       rawToken
     );
     const toolsBody = (await toolsResponse.json()) as {
-      result?: { tools?: Array<{ name: string; outputSchema?: { properties?: Record<string, unknown> } }> };
+      result?: {
+        tools?: Array<{
+          name: string;
+          inputSchema?: {
+            properties?: Record<string, { description?: string }>;
+          };
+          outputSchema?: { properties?: Record<string, unknown> };
+        }>;
+      };
     };
     expect(toolsBody.result?.tools?.map((tool) => tool.name)).toEqual(
       expect.arrayContaining([
@@ -454,6 +467,26 @@ describe("/api/mcp", () => {
     ).toMatchObject({
       ok: expect.any(Object),
       folders: expect.any(Object)
+    });
+    expect(
+      toolsBody.result?.tools?.find((tool) => tool.name === "search_messages")?.inputSchema?.properties
+    ).toMatchObject({
+      from: {
+        description: expect.stringContaining("From header")
+      },
+      recipients: {
+        description: expect.stringContaining("To, Cc, or Bcc")
+      },
+      participants: {
+        description: expect.stringContaining("From, To, Cc, or Bcc")
+      }
+    });
+    expect(
+      toolsBody.result?.tools?.find((tool) => tool.name === "search_messages")?.outputSchema?.properties
+    ).toMatchObject({
+      items: expect.any(Object),
+      mode: expect.any(Object),
+      total: expect.any(Object)
     });
 
     const foldersResponse = await postMcp(
@@ -584,6 +617,70 @@ describe("/api/mcp", () => {
     expect(topicIdSearchBody.result?.structuredContent?.items?.map((item) => item.id)).toEqual([
       `${accountId}-msg-2`,
       `${accountId}-msg-1`
+    ]);
+
+    const fromSearchResponse = await postMcp(
+      {
+        jsonrpc: "2.0",
+        id: 51,
+        method: "tools/call",
+        params: {
+          name: "search_messages",
+          arguments: {
+            from: ["alice@example.test"]
+          }
+        }
+      },
+      rawToken
+    );
+    const fromSearchBody = (await fromSearchResponse.json()) as {
+      result?: { structuredContent?: { items?: Array<{ id: string }> } };
+    };
+    expect(fromSearchBody.result?.structuredContent?.items?.map((item) => item.id)).toEqual([
+      `${accountId}-msg-1`
+    ]);
+
+    const recipientsSearchResponse = await postMcp(
+      {
+        jsonrpc: "2.0",
+        id: 52,
+        method: "tools/call",
+        params: {
+          name: "search_messages",
+          arguments: {
+            recipients: ["owner@example.test"]
+          }
+        }
+      },
+      rawToken
+    );
+    const recipientsSearchBody = (await recipientsSearchResponse.json()) as {
+      result?: { structuredContent?: { items?: Array<{ id: string }> } };
+    };
+    expect(recipientsSearchBody.result?.structuredContent?.items?.map((item) => item.id)).toEqual([
+      `${accountId}-msg-2`,
+      `${accountId}-msg-1`
+    ]);
+
+    const participantsSearchResponse = await postMcp(
+      {
+        jsonrpc: "2.0",
+        id: 53,
+        method: "tools/call",
+        params: {
+          name: "search_messages",
+          arguments: {
+            participants: ["finance@example.test"]
+          }
+        }
+      },
+      rawToken
+    );
+    const participantsSearchBody = (await participantsSearchResponse.json()) as {
+      result?: { structuredContent?: { items?: Array<{ id: string }> } };
+    };
+    expect(participantsSearchBody.result?.structuredContent?.items?.map((item) => item.id)).toEqual([
+      `${accountId}-msg-3`
     ]);
 
     const assignTopicsResponse = await postMcp(
