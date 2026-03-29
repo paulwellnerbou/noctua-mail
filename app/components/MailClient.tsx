@@ -45,6 +45,7 @@ import { useComposeViewEffects } from "./mailclient/composition/useComposeViewEf
 import { buildSendPayload } from "./mailclient/composition/buildSendPayload";
 import { useComposeDraftAutoSave } from "./mailclient/composition/useComposeDraftAutoSave";
 import { useDraftManager } from "./mailclient/composition/useDraftManager";
+import { normalizeHtmlDerivedText } from "./mailclient/composition/composeTextNormalization";
 import {
   restoreInlineAttachmentDataUrls,
   useComposeHandlers
@@ -1801,11 +1802,6 @@ export default function MailClient({
   };
 
   const stripHtml = stripHtmlToText;
-
-  const normalizeHtmlDerivedText = (value: string): string =>
-    value
-      .replace(/[ \\t]+$/gm, "")
-      .replace(/(^|\\n)--/g, "$1--");
 
   const currentComposeInviteDraft = useMemo<ComposeInviteDraft | null>(
     () =>
