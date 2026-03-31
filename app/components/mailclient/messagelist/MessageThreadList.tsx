@@ -186,8 +186,8 @@ export default function MessageThreadList({
           isSuggestionRow && item.threadIndex === 0 && item.depth === 0;
         const isAddSuggestionPending = pendingSuggestedThreadIds.has(item.threadGroupId);
         const dateDisplay = getMessageListDateDisplay(
-          message.dateValue,
-          message.date,
+          item.displayDateValue,
+          item.displayDate,
           dateFormat
         );
         const isDragging = draggingMessageIds.has(message.id);

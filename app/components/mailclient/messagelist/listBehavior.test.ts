@@ -109,6 +109,32 @@ describe("list selection behavior", () => {
     expect(target.id).toBe("m2");
   });
 
+  it("prefers the message whose own date matches the thread sort date", () => {
+    const root = makeMessage("m1", 1000, { threadSortDateValue: 2000 });
+    const receivedReply = makeMessage("m2", 2000, {
+      parentId: "m1",
+      threadSortDateValue: 2000
+    });
+    const sentLater = makeMessage("m3", 3000, {
+      parentId: "m2",
+      threadSortDateValue: 2000
+    });
+    const flat = [
+      { message: root, depth: 0 },
+      { message: receivedReply, depth: 1 },
+      { message: sentLater, depth: 2 }
+    ];
+
+    const target = resolveCollapsedThreadSelectionTarget({
+      flat,
+      target: root,
+      isFlaggedMessage: (message) => Boolean(message.flagged),
+      options: { isFlaggedGroup: false }
+    });
+
+    expect(target.id).toBe("m2");
+  });
+
   it("uses visible rows for range selection, expanding collapsed roots and including expanded rows", () => {
     const m1 = makeMessage("m1", 1000);
     const m2 = makeMessage("m2", 2000);

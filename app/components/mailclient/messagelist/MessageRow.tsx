@@ -20,6 +20,8 @@ import TopicSuggestionAcceptButton from "./TopicSuggestionAcceptButton";
 
 type MessageRowProps = {
   message: Message;
+  displayDateValue?: number;
+  displayDate?: string;
   isCompactView: boolean;
   useExternalStateStyles?: boolean;
   subjectLeftPaddingForExternalCaret?: boolean;
@@ -92,6 +94,8 @@ type MessageRowProps = {
 
 function MessageRow({
   message,
+  displayDateValue,
+  displayDate,
   isCompactView,
   useExternalStateStyles = false,
   subjectLeftPaddingForExternalCaret = false,
@@ -223,7 +227,11 @@ function MessageRow({
   const fromLine = fromText && fromText.trim() ? fromText : message.from;
   const fromLineTooltip =
     fromTooltip && fromTooltip.trim() ? fromTooltip : message.from;
-  const dateDisplay = getMessageListDateDisplay(message.dateValue, message.date, dateFormat);
+  const dateDisplay = getMessageListDateDisplay(
+    displayDateValue ?? message.dateValue,
+    displayDate ?? message.date,
+    dateFormat
+  );
   const firstTopicColor = topicColorRows ? (messageTopics?.[0]?.color ?? null) : null;
   const topicTintVar = firstTopicColor ? ({ "--topic-tint": `var(--${firstTopicColor}-a3)`, "--topic-tint-selected": `var(--${firstTopicColor}-a4)` } as React.CSSProperties) : undefined;
 
@@ -533,6 +541,8 @@ const areEqual = (prev: MessageRowProps, next: MessageRowProps) =>
   prev.isThreadCaretOpen === next.isThreadCaretOpen &&
   prev.showThreadIndicator === next.showThreadIndicator &&
   prev.threadSize === next.threadSize &&
+  prev.displayDateValue === next.displayDateValue &&
+  prev.displayDate === next.displayDate &&
   prev.showFolderBadgesInSubjectMeta === next.showFolderBadgesInSubjectMeta &&
   prev.showFolderBadgesInMeta === next.showFolderBadgesInMeta &&
   prev.fromText === next.fromText &&

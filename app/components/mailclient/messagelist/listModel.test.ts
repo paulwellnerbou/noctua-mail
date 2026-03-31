@@ -2,7 +2,12 @@ import { describe, expect, it } from "bun:test";
 import type { Message } from "@/lib/data";
 import { buildGroupedMessages, buildMessageListItems, type MessageGroup } from "./listModel";
 
-function makeMessage(id: string, threadId: string, dateValue: number): Message {
+function makeMessage(
+  id: string,
+  threadId: string,
+  dateValue: number,
+  overrides?: Partial<Message>
+): Message {
   return {
     id,
     accountId: "acc-1",
@@ -14,7 +19,8 @@ function makeMessage(id: string, threadId: string, dateValue: number): Message {
     preview: `Preview ${id}`,
     date: new Date(dateValue).toISOString(),
     dateValue,
-    body: ""
+    body: "",
+    ...overrides
   };
 }
 
@@ -146,5 +152,70 @@ describe("buildMessageListItems", () => {
     });
 
     expect(items.map((item) => item.type)).toEqual(["group", "row", "row"]);
+  });
+
+  it("uses the sort-driving message date for collapsed threaded rows", () => {
+    const root = makeMessage("root", "thread-1", 1000, {
+      threadSortDateValue: 2000
+    });
+    const receivedReply = makeMessage("reply", "thread-1", 2000, {
+      parentId: "root",
+      threadSortDateValue: 2000
+    });
+    const sentLater = makeMessage("sent", "thread-1", 3000, {
+      parentId: "reply",
+      threadSortDateValue: 2000
+    });
+
+    const items = buildMessageListItems({
+      groupedMessages: [{
+        key: "Today",
+        label: "Today",
+        items: [root, receivedReply, sentLater]
+      }],
+      collapsedGroups: { Today: false },
+      collapsedThreads: { "thread-1": true },
+      supportsThreads: true,
+      includeThreadAcrossFolders: false,
+      searchScope: "folder",
+      activeFolderId: "acc-1:inbox",
+      buildThreadTree: (messages) => [{
+        message: messages[0]!,
+        children: [
+          {
+            message: messages[1]!,
+            children: [
+              {
+                message: messages[2]!,
+                children: []
+              }
+            ]
+          }
+        ]
+      }],
+      flattenThread: (node, depth = 0) => [
+        { message: node.message, depth },
+        ...node.children.flatMap((child) => [
+          { message: child.message, depth: depth + 1 },
+          ...child.children.map((grandchild) => ({
+            message: grandchild.message,
+            depth: depth + 2
+          }))
+        ])
+      ],
+      getThreadLatestDate: (node) => node.message.dateValue,
+      preferToDisplay: false,
+      mode: "flat"
+    });
+
+    expect(items).toHaveLength(2);
+    expect(items[1]).toEqual(
+      expect.objectContaining({
+        type: "row",
+        key: "root",
+        displayDateValue: 2000,
+        displayDate: new Date(2000).toISOString()
+      })
+    );
   });
 });

@@ -9,6 +9,8 @@ import {
   getThreadSubtreeMessageIds,
   hasThreadSubtreeChildren
 } from "./threadGroupUtils";
+import { isFlaggedMessage } from "../utils/messageHelpers";
+import { getCollapsedThreadRepresentativeMessage } from "./threadRepresentativeMessage";
 import type { ThreadNode } from "./threadTree";
 export type { ThreadNode } from "./threadTree";
 
@@ -48,6 +50,8 @@ export type ListRowItem = {
   groupKey: string;
   isFirstInGroup: boolean;
   message: Message;
+  displayDateValue: number;
+  displayDate: string;
   depth: number;
   threadGroupId: string;
   threadSize: number;
@@ -305,6 +309,15 @@ export function buildMessageListItems(params: BuildMessageListItemsParams): List
                 findRecipientAlias
               )
             : null;
+        const collapsedThreadRepresentative =
+          isCollapsed && threadSize > 1
+            ? getCollapsedThreadRepresentativeMessage({
+                flat: fullFlat,
+                target: fullFlat[0]?.message ?? entry.root.message,
+                isFlaggedMessage,
+                options: { isFlaggedGroup: group.key === "Flagged" }
+              })
+            : null;
 
         const visibleRows =
           mode === "nested"
@@ -352,6 +365,14 @@ export function buildMessageListItems(params: BuildMessageListItemsParams): List
             groupKey: group.key,
             isFirstInGroup: isFirstRow,
             message,
+            displayDateValue:
+              index === 0 && collapsedThreadRepresentative
+                ? collapsedThreadRepresentative.dateValue
+                : message.dateValue,
+            displayDate:
+              index === 0 && collapsedThreadRepresentative
+                ? collapsedThreadRepresentative.date
+                : message.date,
             depth,
             threadGroupId,
             threadSize,
@@ -396,6 +417,8 @@ export function buildMessageListItems(params: BuildMessageListItemsParams): List
         groupKey: group.key,
         isFirstInGroup: isFirstRow,
         message,
+        displayDateValue: message.dateValue,
+        displayDate: message.date,
         depth: 0,
         threadGroupId,
         threadSize: 1,

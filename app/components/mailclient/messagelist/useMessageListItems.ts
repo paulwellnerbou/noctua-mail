@@ -2,7 +2,7 @@ import { useMemo } from "react";
 import {
   buildMessageListItems,
   type BuildMessageListItemsParams,
-  type ListItem,
+  type ListItem
 } from "./listModel";
 
 type UseMessageListItemsParams = BuildMessageListItemsParams;

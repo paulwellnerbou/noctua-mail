@@ -278,6 +278,8 @@ export default function MessageCardList({
             )}
             <MessageRow
               message={message}
+              displayDateValue={item.displayDateValue}
+              displayDate={item.displayDate}
               isCompactView={isCompactView}
               useExternalStateStyles={useCompactThreadContainer}
               subjectLeftPaddingForExternalCaret={hasExternalThreadCaret}

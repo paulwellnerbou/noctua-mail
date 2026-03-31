@@ -1,6 +1,7 @@
 import type { Message } from "@/lib/data";
 import type { VisibleMessageEntry } from "./listModel";
 import type { SelectionStore } from "./selectionStore";
+import { getCollapsedThreadRepresentativeMessage } from "./threadRepresentativeMessage";
 
 type ThreadFlatEntry = { message: Message; depth: number };
 
@@ -166,33 +167,11 @@ function expandVisibleSelectionIds(params: {
   );
 }
 
-function getLatestThreadMessage(flat: ThreadFlatEntry[]) {
-  if (!flat.length) return null;
-  return flat.reduce(
-    (acc, item) => (item.message.dateValue > acc.dateValue ? item.message : acc),
-    flat[0].message
-  );
-}
-
-function getLatestFlaggedThreadMessage(
-  flat: ThreadFlatEntry[],
-  isFlaggedMessage: (message: Message) => boolean
-) {
-  const flagged = flat.filter((item) => isFlaggedMessage(item.message));
-  return getLatestThreadMessage(flagged);
-}
-
 export function resolveCollapsedThreadSelectionTarget(params: {
   flat: ThreadFlatEntry[];
   target: Message;
   isFlaggedMessage: (message: Message) => boolean;
   options?: { isFlaggedGroup?: boolean };
 }) {
-  const { flat, target, isFlaggedMessage, options } = params;
-  const latest = getLatestThreadMessage(flat);
-  const latestFlagged = options?.isFlaggedGroup
-    ? getLatestFlaggedThreadMessage(flat, isFlaggedMessage)
-    : null;
-  const hasTarget = flat.some((item) => item.message.id === target.id);
-  return latestFlagged ?? latest ?? (hasTarget ? target : (flat[0]?.message ?? target));
+  return getCollapsedThreadRepresentativeMessage(params);
 }

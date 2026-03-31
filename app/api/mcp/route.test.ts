@@ -469,6 +469,19 @@ describe("/api/mcp", () => {
       folders: expect.any(Object)
     });
     expect(
+      toolsBody.result?.tools?.find((tool) => tool.name === "list_mailing_list_aliases")?.inputSchema?.properties
+    ).toMatchObject({
+      accountId: {
+        description: expect.stringContaining("authenticated account")
+      }
+    });
+    expect(
+      toolsBody.result?.tools?.find((tool) => tool.name === "list_mailing_list_aliases")?.outputSchema?.properties
+    ).toMatchObject({
+      ok: expect.any(Object),
+      aliases: expect.any(Object)
+    });
+    expect(
       toolsBody.result?.tools?.find((tool) => tool.name === "search_messages")?.inputSchema?.properties
     ).toMatchObject({
       from: {

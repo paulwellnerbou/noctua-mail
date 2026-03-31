@@ -36,6 +36,12 @@ Discover connections across your inbox with related mails. When viewing any emai
 
 Access via the "Show related" option in the message action menu or search with `related:<mail-id>`. For calendar invites, use `invite:<uid>` (or `event:<uid>`) to find related invitation mails.
 
+### 🤖 MCP Integration
+Built-in **Model Context Protocol (MCP)** support lets AI clients work with your mailbox through a structured, documented tool interface:
+- **Search and retrieval tools** – Query messages, folders, topics, and mailing list aliases
+- **AI-friendly schemas** – Discover tool inputs and outputs through MCP `tools/list`
+- **Actionable workflows** – Create drafts and use mailbox data from external AI assistants without scraping the UI
+
 ### 🧵 Thread View Across Folders
 Unified conversation threading that works **across all folders**. Whether emails are in Inbox, Sent, or any other folder, Noctua Mail intelligently groups them into cohesive threads. Collapse and expand conversations with ease, maintaining context no matter where messages are stored.
 

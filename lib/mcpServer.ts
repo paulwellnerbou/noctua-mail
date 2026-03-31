@@ -229,6 +229,27 @@ const LIST_ACCOUNTS_OUTPUT_SCHEMA = {
   accounts: z.array(z.object(ACCOUNT_SUMMARY_SCHEMA))
 };
 
+const LIST_MAILING_LIST_ALIASES_SCHEMA = {
+  accountId: z.string().trim().optional().describe(
+    "Optional account id. Omit to use the authenticated account associated with the MCP token."
+  )
+};
+
+const MAILING_LIST_ALIAS_SCHEMA = {
+  id: z.string(),
+  accountId: z.string(),
+  name: z.string(),
+  recipients: z.string(),
+  normalizedRecipients: z.string(),
+  createdAt: z.number(),
+  updatedAt: z.number()
+};
+
+const LIST_MAILING_LIST_ALIASES_OUTPUT_SCHEMA = {
+  ok: z.boolean(),
+  aliases: z.array(z.object(MAILING_LIST_ALIAS_SCHEMA))
+};
+
 const SEARCH_RESULT_TOPIC_SCHEMA = {
   id: z.string(),
   accountId: z.string(),
@@ -937,10 +958,14 @@ export async function executeMcpHttpRequest(params: {
     }
   );
 
-  server.tool(
+  server.registerTool(
     "list_mailing_list_aliases",
-    "List mailing list aliases for the authenticated account.",
-    ACCOUNT_ID_ARG,
+    {
+      description:
+        "List saved mailing list aliases for the authenticated account. Each alias includes its display name and the expanded recipient list that will be inserted during compose.",
+      inputSchema: LIST_MAILING_LIST_ALIASES_SCHEMA,
+      outputSchema: LIST_MAILING_LIST_ALIASES_OUTPUT_SCHEMA
+    },
     async ({ accountId: requestedAccountId }) => {
       const ctx = await resolveAccountContext(context, requestedAccountId);
       const aliases = await listRecipientAliases(ctx.accountId);
