@@ -40,6 +40,8 @@ export default function AccountTabContent({
   onUpdateAccount,
   onRunProbe
 }: Props) {
+  const saveDisabled = !canSave;
+
   return (
     <Flex direction="column" gap="4" style={{ height: "100%", minHeight: 0 }}>
       <Flex direction="column" gap="4" style={{ flex: "1 1 auto", minHeight: 0, overflow: "auto" }}>
@@ -277,9 +279,9 @@ export default function AccountTabContent({
         </Button>
         <Flex gap="3" align="center">
           <Button size="2" variant="soft" color="gray" onClick={onClose}>
-            Cancel
+            {saveDisabled ? "Close" : "Cancel"}
           </Button>
-          <Button size="2" onClick={onSave} disabled={!canSave}>
+          <Button size="2" onClick={onSave} disabled={saveDisabled}>
             Save
           </Button>
         </Flex>

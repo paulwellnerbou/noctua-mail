@@ -20,6 +20,7 @@ export default function SignaturesTabContent({
   onSave
 }: Props) {
   const signatures = editingAccount.settings?.signatures ?? [];
+  const saveDisabled = !isExistingAccount || !canSave;
 
   return (
     <Flex direction="column" gap="4" style={{ height: "100%", minHeight: 0 }}>
@@ -136,9 +137,9 @@ export default function SignaturesTabContent({
         style={{ paddingTop: "var(--space-3)", borderTop: "1px solid var(--gray-a5)" }}
       >
         <Button size="2" variant="soft" color="gray" onClick={onClose}>
-          Cancel
+          {saveDisabled ? "Close" : "Cancel"}
         </Button>
-        <Button size="2" onClick={onSave} disabled={!isExistingAccount || !canSave}>
+        <Button size="2" onClick={onSave} disabled={saveDisabled}>
           Save
         </Button>
       </Flex>

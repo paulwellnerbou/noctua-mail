@@ -25,6 +25,10 @@ export function buildAccountTopicPath(accountId: string, topicId: string) {
   return buildAccountApiPath(accountId, `/topics/${encodeURIComponent(topicId)}`);
 }
 
+export function buildAccountTopicSignalsPath(accountId: string, topicId: string) {
+  return buildAccountApiPath(accountId, `/topics/${encodeURIComponent(topicId)}/signals`);
+}
+
 export function buildAccountTopicSuggestionsPath(
   accountId: string,
   topicId: string,

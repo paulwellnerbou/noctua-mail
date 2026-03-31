@@ -1,5 +1,7 @@
 import { randomUUID } from "crypto";
 import {
+  addTopicSignalExclusion,
+  clearTopicSignalExclusions,
   deleteTopicLearningSignals,
   getThreadIdsByMessageIds,
   upsertTopicLearningSignalsForThreadIds,
@@ -834,6 +836,7 @@ export async function updateTopic(
 export async function deleteTopic(accountId: string, topicId: string): Promise<boolean> {
   return withAccountDb(accountId, (db) => {
     deleteTopicLearningSignals(db, accountId, { topicIds: [topicId] });
+    clearTopicSignalExclusions(db, accountId, { topicIds: [topicId] });
     db.prepare(`DELETE FROM thread_topics WHERE topicId = ? AND accountId = ?`).run(
       topicId,
       accountId
@@ -967,6 +970,40 @@ export async function removeThreadTopic(
   });
 }
 
+export async function excludeTopicLearningSignal(
+  accountId: string,
+  topicId: string,
+  signalType: TopicSuggestionSignal,
+  signalValue: string
+): Promise<boolean> {
+  return withAccountDb(accountId, (db) => {
+    const normalizedTopicId = topicId.trim();
+    const normalizedSignalValue = signalValue.trim();
+    if (!normalizedTopicId || !normalizedSignalValue) return false;
+
+    const topicExists = db
+      .prepare(
+        `SELECT 1
+         FROM topics
+         WHERE accountId = ? AND id = ?
+         LIMIT 1`
+      )
+      .get(accountId, normalizedTopicId);
+    if (!topicExists) return false;
+
+    addTopicSignalExclusion(db, accountId, normalizedTopicId, signalType, normalizedSignalValue);
+    db.prepare(
+      `DELETE FROM topic_learning_signals
+       WHERE accountId = ?
+         AND topicId = ?
+         AND signalType = ?
+         AND signalValue = ?`
+    ).run(accountId, normalizedTopicId, signalType, normalizedSignalValue);
+
+    return true;
+  });
+}
+
 export async function exportTopicTransferData(accountId: string): Promise<TopicTransferData> {
   return withAccountDb(accountId, (db) => {
     const topics = (db
@@ -1070,6 +1107,7 @@ export async function importTopicTransferData(
     withAccountDb(accountId, (db) => {
       const clearThreadTopics = db.prepare(`DELETE FROM thread_topics WHERE accountId = ?`);
       const clearTopicLearningSignals = db.prepare(`DELETE FROM topic_learning_signals WHERE accountId = ?`);
+      const clearTopicSignalExclusions = db.prepare(`DELETE FROM topic_signal_exclusions WHERE accountId = ?`);
       const clearTopics = db.prepare(`DELETE FROM topics WHERE accountId = ?`);
       const insertTopic = db.prepare(
         `INSERT INTO topics (id, accountId, name, color, imapKeyword, createdAt, updatedAt)
@@ -1087,6 +1125,7 @@ export async function importTopicTransferData(
       const applyImport = db.transaction(() => {
         clearThreadTopics.run(accountId);
         clearTopicLearningSignals.run(accountId);
+        clearTopicSignalExclusions.run(accountId);
         clearTopics.run(accountId);
 
         data.topics.forEach((topic) => {

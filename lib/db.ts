@@ -966,6 +966,15 @@ function initAccountSchema(db: any) {
       PRIMARY KEY (accountId, topicId, threadId, signalType, signalValue)
     );
 
+    CREATE TABLE IF NOT EXISTS topic_signal_exclusions (
+      accountId TEXT NOT NULL,
+      topicId TEXT NOT NULL,
+      signalType TEXT NOT NULL,
+      signalValue TEXT NOT NULL,
+      createdAt INTEGER NOT NULL,
+      PRIMARY KEY (accountId, topicId, signalType, signalValue)
+    );
+
     CREATE TABLE IF NOT EXISTS calendar_reminders (
       id TEXT PRIMARY KEY,
       accountId TEXT NOT NULL,
@@ -1042,6 +1051,10 @@ function initAccountSchema(db: any) {
       ON topic_learning_signals(accountId, topicId, threadId);
     CREATE INDEX IF NOT EXISTS idx_topic_learning_signals_account_signal
       ON topic_learning_signals(accountId, signalType, signalValue, topicId, threadId);
+    CREATE INDEX IF NOT EXISTS idx_topic_signal_exclusions_account_topic
+      ON topic_signal_exclusions(accountId, topicId);
+    CREATE INDEX IF NOT EXISTS idx_topic_signal_exclusions_account_signal
+      ON topic_signal_exclusions(accountId, signalType, signalValue, topicId);
 
     CREATE TABLE IF NOT EXISTS calendar_events (
       id TEXT PRIMARY KEY,
@@ -1309,6 +1322,50 @@ function normalizeTopicIds(topicIds?: Array<string | null | undefined>) {
   return Array.from(new Set((topicIds ?? []).map((topicId) => (topicId ?? "").trim()).filter(Boolean)));
 }
 
+function buildTopicSignalExclusionKey(topicId: string, signalType: string, signalValue: string) {
+  return `${topicId}\u0000${signalType}\u0000${signalValue}`;
+}
+
+function getTopicSignalExclusionSet(
+  db: any,
+  accountId: string,
+  options?: {
+    topicIds?: string[];
+  }
+) {
+  const uniqueTopicIds = normalizeTopicIds(options?.topicIds);
+  const rows = uniqueTopicIds.length > 0
+    ? db
+      .prepare(
+        `SELECT topicId, signalType, signalValue
+         FROM topic_signal_exclusions
+         WHERE accountId = ?
+           AND topicId IN (${uniqueTopicIds.map(() => "?").join(",")})`
+      )
+      .all(accountId, ...uniqueTopicIds)
+    : db
+      .prepare(
+        `SELECT topicId, signalType, signalValue
+         FROM topic_signal_exclusions
+         WHERE accountId = ?`
+      )
+      .all(accountId);
+
+  return new Set(
+    (rows as Array<{
+      topicId?: string | null;
+      signalType?: string | null;
+      signalValue?: string | null;
+    }>)
+      .map((row) => buildTopicSignalExclusionKey(
+        (row.topicId ?? "").trim(),
+        (row.signalType ?? "").trim(),
+        (row.signalValue ?? "").trim()
+      ))
+      .filter((value) => value !== "\u0000\u0000")
+  );
+}
+
 export function deleteTopicLearningSignals(
   db: any,
   accountId: string,
@@ -1338,6 +1395,40 @@ export function deleteTopicLearningSignals(
   ).run(...args);
 }
 
+export function addTopicSignalExclusion(
+  db: any,
+  accountId: string,
+  topicId: string,
+  signalType: string,
+  signalValue: string
+) {
+  db.prepare(
+    `INSERT OR REPLACE INTO topic_signal_exclusions (
+      accountId, topicId, signalType, signalValue, createdAt
+    ) VALUES (?, ?, ?, ?, ?)`
+  ).run(accountId, topicId, signalType, signalValue, Date.now());
+}
+
+export function clearTopicSignalExclusions(
+  db: any,
+  accountId: string,
+  options?: {
+    topicIds?: string[];
+  }
+) {
+  const uniqueTopicIds = normalizeTopicIds(options?.topicIds);
+  if (uniqueTopicIds.length === 0) {
+    db.prepare(`DELETE FROM topic_signal_exclusions WHERE accountId = ?`).run(accountId);
+    return;
+  }
+
+  db.prepare(
+    `DELETE FROM topic_signal_exclusions
+     WHERE accountId = ?
+       AND topicId IN (${uniqueTopicIds.map(() => "?").join(",")})`
+  ).run(accountId, ...uniqueTopicIds);
+}
+
 export function upsertTopicLearningSignalsForThreadIds(
   db: any,
   accountId: string,
@@ -1349,6 +1440,9 @@ export function upsertTopicLearningSignalsForThreadIds(
   const uniqueThreadIds = normalizeThreadIds(threadIds);
   if (uniqueThreadIds.length === 0) return;
   const uniqueTopicIds = normalizeTopicIds(options?.topicIds);
+  const excludedSignals = getTopicSignalExclusionSet(db, accountId, {
+    topicIds: uniqueTopicIds.length > 0 ? uniqueTopicIds : undefined
+  });
   const insertLearningSignal = db.prepare(
     `INSERT OR IGNORE INTO topic_learning_signals (accountId, topicId, threadId, signalType, signalValue)
      VALUES (?, ?, ?, ?, ?)`
@@ -1381,6 +1475,9 @@ export function upsertTopicLearningSignalsForThreadIds(
       const signalType = (row.signalType ?? "").trim();
       const signalValue = (row.signalValue ?? "").trim();
       if (!topicId || !threadId || !signalType || !signalValue) return;
+      if (excludedSignals.has(buildTopicSignalExclusionKey(topicId, signalType, signalValue))) {
+        return;
+      }
       insertLearningSignal.run(accountId, topicId, threadId, signalType, signalValue);
     });
   }

@@ -1,10 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, type ChangeEvent } from "react";
-import { Pencil, Plus, Trash2 } from "lucide-react";
+import { Pencil, Plus, Trash2, X } from "lucide-react";
 import { Badge, Button, Card, Flex, IconButton, Switch, Text, TextField } from "@radix-ui/themes";
 import {
   buildAccountTopicPath,
+  buildAccountTopicSignalsPath,
   buildAccountTopicStatsPath,
   buildAccountTopicsPath,
   buildAccountTopicTransferPath
@@ -63,6 +64,7 @@ export default function TopicsTabContent({
   canSave
 }: Props) {
   const request = apiFetch ?? fetch;
+  const saveDisabled = !isExistingAccount || !canSave;
   const [topics, setTopics] = useState<Topic[]>([]);
   const [statsById, setStatsById] = useState<Map<string, TopicStat>>(new Map());
   const [loading, setLoading] = useState(false);
@@ -75,6 +77,7 @@ export default function TopicsTabContent({
   const [saving, setSaving] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [importing, setImporting] = useState(false);
+  const [removingSignalKey, setRemovingSignalKey] = useState("");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const importInputRef = useRef<HTMLInputElement | null>(null);
@@ -223,6 +226,41 @@ export default function TopicsTabContent({
       setExporting(false);
     }
   }, [accountId, readError, request]);
+
+  const handleRemoveSignal = useCallback(async (
+    topicId: string,
+    signalType: TopicSuggestionSignal,
+    signalValue: string
+  ) => {
+    if (!accountId) return;
+    const normalizedValue = signalValue.trim();
+    if (!normalizedValue) return;
+
+    const signalKey = `${topicId}\u0000${signalType}\u0000${normalizedValue}`;
+    setRemovingSignalKey(signalKey);
+    setError("");
+    setNotice("");
+    try {
+      const res = await request(buildAccountTopicSignalsPath(accountId, topicId), {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          signalType,
+          signalValue: normalizedValue
+        })
+      });
+      if (!res.ok) {
+        setError(await readError(res));
+        return;
+      }
+      await loadTopics();
+      setNotice("Learning signal removed.");
+    } catch {
+      setError("Failed to remove learning signal.");
+    } finally {
+      setRemovingSignalKey("");
+    }
+  }, [accountId, loadTopics, readError, request]);
 
   const handleImportFile = useCallback(async (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -450,10 +488,26 @@ export default function TopicsTabContent({
                     {topicIdx > 0 && <div className={styles.signalDivider} />}
                     <Badge color={topicColorToScale(topic.color) as any} variant="soft" size="1" style={{ alignSelf: "flex-start" }}>{topic.name}</Badge>
                     {signals.map((s) => {
+                      const signalKey = `${topic.id}\u0000${s.type}\u0000${s.value}`;
+                      const removing = removingSignalKey === signalKey;
                       return (
-                        <Text key={`${s.type}:${s.value}`} size="1" color="gray" style={{ overflowWrap: "anywhere" }}>
-                          {TOPIC_SIGNAL_LABELS[s.type]}: {s.value} · {s.count} {s.count === 1 ? "thread" : "threads"}
-                        </Text>
+                        <Flex key={`${s.type}:${s.value}`} align="start" gap="2" className={styles.signalRow}>
+                          <Text size="1" color="gray" className={styles.signalText}>
+                            {TOPIC_SIGNAL_LABELS[s.type]}: {s.value} · {s.count} {s.count === 1 ? "thread" : "threads"}
+                          </Text>
+                          <IconButton
+                            size="1"
+                            variant="ghost"
+                            color="gray"
+                            className={styles.signalRemoveButton}
+                            disabled={removing}
+                            onClick={() => void handleRemoveSignal(topic.id, s.type, s.value)}
+                            title={`Remove ${TOPIC_SIGNAL_LABELS[s.type]} signal`}
+                            aria-label={`Remove ${TOPIC_SIGNAL_LABELS[s.type]} signal`}
+                          >
+                            <X size={10} />
+                          </IconButton>
+                        </Flex>
                       );
                     })}
                   </Flex>
@@ -474,9 +528,9 @@ export default function TopicsTabContent({
       style={{ paddingTop: "var(--space-3)", borderTop: "1px solid var(--gray-a5)", flexShrink: 0 }}
     >
       <Button size="2" variant="soft" color="gray" onClick={onClose}>
-        Cancel
+        {saveDisabled ? "Close" : "Cancel"}
       </Button>
-      <Button size="2" onClick={onSave} disabled={!isExistingAccount || !canSave}>
+      <Button size="2" onClick={onSave} disabled={saveDisabled}>
         Save
       </Button>
     </Flex>

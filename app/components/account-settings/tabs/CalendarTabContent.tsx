@@ -36,6 +36,7 @@ export default function CalendarTabContent({
 }: Props) {
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<TestResult | null>(null);
+  const saveDisabled = !isExistingAccount || !canSave;
 
   const caldav = editingAccount.caldav;
 
@@ -226,9 +227,9 @@ export default function CalendarTabContent({
         style={{ paddingTop: "var(--space-3)", borderTop: "1px solid var(--gray-a5)" }}
       >
         <Button size="2" variant="soft" color="gray" onClick={onClose}>
-          Cancel
+          {saveDisabled ? "Close" : "Cancel"}
         </Button>
-        <Button size="2" onClick={onSave} disabled={!isExistingAccount || !canSave}>
+        <Button size="2" onClick={onSave} disabled={saveDisabled}>
           Save
         </Button>
       </Flex>

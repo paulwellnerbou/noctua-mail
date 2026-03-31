@@ -314,7 +314,7 @@ export default function CategorizationTabContent({
         style={{ paddingTop: "var(--space-3)", borderTop: "1px solid var(--gray-a5)" }}
       >
         <Button size="2" variant="soft" color="gray" onClick={onClose}>
-          Cancel
+          Close
         </Button>
         <Button size="2" onClick={onSave} disabled>
           Save

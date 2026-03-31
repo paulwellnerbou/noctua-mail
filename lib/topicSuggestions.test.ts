@@ -3,6 +3,7 @@ import { dbModulePromise } from "./testDbHarness";
 import type { Account, Folder, Message } from "./data";
 import {
   createTopic,
+  excludeTopicLearningSignal,
   getTopicThreadSuggestions,
   getTopicSuggestionExplanationForThread,
   getTopicStats,
@@ -996,6 +997,93 @@ describe("topic suggestions", () => {
     expect(suggestions.map((item) => item.name)).toEqual(["Unified-API"]);
     expect(suggestions[0]?.suggestionScore).toBe(5);
     expect(suggestions[0]?.matchCount).toBe(1);
+  });
+
+  test("keeps an excluded learning signal removed across rebuilds", async () => {
+    const accountId = "acc-topic-suggestions-excluded-signal";
+    const folder = buildFolder(accountId);
+    const { recomputeThreadsForAccount, saveFoldersForAccount, upsertAccount, upsertMessages } =
+      await dbModulePromise;
+
+    await upsertAccount(buildAccount(accountId));
+    await saveFoldersForAccount(accountId, [folder]);
+
+    await upsertMessages(
+      accountId,
+      folder.id,
+      [
+        buildMessage({
+          id: "msg-history",
+          accountId,
+          folderId: folder.id,
+          threadId: "thread-history",
+          messageId: "<history@example.com>",
+          from: "GitLab <gitlab@mg.gitlab.com>",
+          fromEmail: "gitlab@mg.gitlab.com",
+          to: "owner@example.com",
+          listId: "group/project-a <project-a.gitlab.example>",
+          dateValue: Date.UTC(2026, 2, 18, 10, 25, 0)
+        }),
+        buildMessage({
+          id: "msg-target",
+          accountId,
+          folderId: folder.id,
+          threadId: "thread-target",
+          messageId: "<target@example.com>",
+          from: "GitLab <gitlab@mg.gitlab.com>",
+          fromEmail: "gitlab@mg.gitlab.com",
+          to: "owner@example.com",
+          listId: "group/project-a <project-a.gitlab.example>",
+          dateValue: Date.UTC(2026, 2, 18, 10, 30, 0)
+        })
+      ],
+      true,
+      { recomputeThreads: false }
+    );
+
+    const topic = await createTopic(accountId, "Project A", "blue");
+    await setThreadTopics(accountId, "thread-history", [topic.id]);
+
+    let suggestions = await getTopicSuggestionsForThread(accountId, "thread-target", {
+      accountEmail: "owner@example.com"
+    });
+    expect(suggestions.map((item) => item.name)).toEqual(["Project A"]);
+    expect(suggestions[0]?.suggestionScore).toBe(9);
+
+    const removed = await excludeTopicLearningSignal(
+      accountId,
+      topic.id,
+      "listId",
+      "group/project-a <project-a.gitlab.example>"
+    );
+    expect(removed).toBe(true);
+
+    let stats = await getTopicStats(accountId, {
+      accountEmail: "owner@example.com"
+    });
+    expect(stats[0]?.topSignals.some((signal) =>
+      signal.type === "listId" && signal.value === "group/project-a <project-a.gitlab.example>"
+    )).toBe(false);
+
+    suggestions = await getTopicSuggestionsForThread(accountId, "thread-target", {
+      accountEmail: "owner@example.com"
+    });
+    expect(suggestions.map((item) => item.name)).toEqual(["Project A"]);
+    expect(suggestions[0]?.suggestionScore).toBe(5);
+
+    await recomputeThreadsForAccount(accountId, ["thread-history"]);
+
+    stats = await getTopicStats(accountId, {
+      accountEmail: "owner@example.com"
+    });
+    expect(stats[0]?.topSignals.some((signal) =>
+      signal.type === "listId" && signal.value === "group/project-a <project-a.gitlab.example>"
+    )).toBe(false);
+
+    suggestions = await getTopicSuggestionsForThread(accountId, "thread-target", {
+      accountEmail: "owner@example.com"
+    });
+    expect(suggestions[0]?.suggestionScore).toBe(5);
   });
 
   test("prunes orphaned thread-topic associations while retaining learned signals after the last message is deleted", async () => {

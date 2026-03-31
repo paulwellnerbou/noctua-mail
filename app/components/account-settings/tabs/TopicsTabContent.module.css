@@ -51,3 +51,18 @@
   background: var(--gray-a4);
   margin: 4px 0;
 }
+
+.signalRow {
+  width: 100%;
+}
+
+.signalText {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.signalRemoveButton {
+  flex: 0 0 auto;
+  margin-top: -2px;
+}
