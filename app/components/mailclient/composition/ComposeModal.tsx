@@ -23,6 +23,7 @@ type ComposeModalProps = {
     composeDraftId: string | null;
     composeOpen: boolean;
     composeFieldsReset: number;
+    canSaveDraft: boolean;
     draftSaving: boolean;
     draftSaveError: string | null;
     draftSavedAt: number | null;
@@ -104,6 +105,7 @@ export default function ComposeModal({
     composeDraftId,
     composeOpen,
     composeFieldsReset,
+    canSaveDraft,
     draftSaving,
     draftSaveError,
     draftSavedAt,
@@ -246,6 +248,7 @@ export default function ComposeModal({
         <ComposeActions
           composeDraftId={composeDraftId}
           composeOpen={composeOpen}
+          canSaveDraft={canSaveDraft}
           draftSaving={draftSaving}
           draftSaveError={draftSaveError}
           draftSavedAt={draftSavedAt}

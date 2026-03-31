@@ -1,7 +1,12 @@
 import { describe, expect, it } from "bun:test";
 import type { Attachment } from "@/lib/data";
 import type { ComposePayload } from "./composeContentBuilder";
-import { buildDraftSavePayload, computeDraftHash, hasDraftContent } from "./draftSaveUtils";
+import {
+  buildDraftSavePayload,
+  computeDraftHash,
+  getDraftChangeState,
+  hasDraftContent
+} from "./draftSaveUtils";
 
 const ATTACHMENTS: Attachment[] = [
   {
@@ -65,7 +70,8 @@ describe("draftSaveUtils", () => {
         bcc: "",
         subject: "",
         text: "  ",
-        html: ""
+        html: "",
+        attachments: []
       })
     ).toBe(false);
     expect(
@@ -75,7 +81,8 @@ describe("draftSaveUtils", () => {
         bcc: "",
         subject: "Hello",
         text: "",
-        html: undefined
+        html: undefined,
+        attachments: []
       })
     ).toBe(true);
     expect(
@@ -86,6 +93,7 @@ describe("draftSaveUtils", () => {
         subject: "",
         text: "",
         html: undefined,
+        attachments: [],
         invite: {
           start: "2026-03-27T09:00",
           end: "2026-03-27T10:00",
@@ -93,6 +101,66 @@ describe("draftSaveUtils", () => {
         }
       })
     ).toBe(true);
+    expect(
+      hasDraftContent({
+        to: "",
+        cc: "",
+        bcc: "",
+        subject: "",
+        text: "",
+        html: undefined,
+        attachments: ATTACHMENTS
+      })
+    ).toBe(true);
+  });
+
+  it("distinguishes autosave eligibility from manual save eligibility", () => {
+    expect(
+      getDraftChangeState({
+        draftId: null,
+        lastSavedHash: "",
+        to: "",
+        cc: "",
+        bcc: "",
+        subject: "",
+        text: "",
+        html: undefined,
+        attachments: ATTACHMENTS
+      })
+    ).toMatchObject({
+      hasContent: true,
+      hasUnsavedChanges: true,
+      canAutoSave: true,
+      canManualSave: true
+    });
+
+    expect(
+      getDraftChangeState({
+        draftId: "draft-1",
+        lastSavedHash: JSON.stringify({
+          to: "",
+          cc: "",
+          bcc: "",
+          subject: "Before",
+          text: "",
+          html: "",
+          attachments: "",
+          invite: null
+        }),
+        to: "",
+        cc: "",
+        bcc: "",
+        subject: "",
+        text: "",
+        html: undefined,
+        attachments: []
+      })
+    ).toMatchObject({
+      hasContent: false,
+      hasUnsavedChanges: true,
+      canAutoSave: false,
+      canManualSave: true
+    });
   });
 
   it("builds draft payloads with normalized html by default", () => {

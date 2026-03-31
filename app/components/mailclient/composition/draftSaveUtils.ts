@@ -17,6 +17,11 @@ type DraftHashInput = DraftEnvelopeFields & {
   invite?: ComposeInviteDraft | null;
 };
 
+type DraftChangeStateInput = DraftHashInput & {
+  draftId?: string | null;
+  lastSavedHash: string;
+};
+
 type DraftPayloadInput = DraftEnvelopeFields & {
   composeQuotedHtmlEdited: boolean;
   composeReplyHeaders: ComposeReplyHeaders | null;
@@ -42,10 +47,23 @@ export function computeDraftHash(input: DraftHashInput): string {
   });
 }
 
-export function hasDraftContent(input: Omit<DraftHashInput, "attachments">): boolean {
+export function hasDraftContent(input: DraftHashInput): boolean {
   return [input.to, input.cc, input.bcc, input.subject, input.text, input.html ?? ""].some(
     (value) => value.trim().length > 0
-  ) || hasComposeInviteDraftContent(input.invite);
+  ) || input.attachments.length > 0 || hasComposeInviteDraftContent(input.invite);
+}
+
+export function getDraftChangeState(input: DraftChangeStateInput) {
+  const hash = computeDraftHash(input);
+  const hasContent = hasDraftContent(input);
+  const hasUnsavedChanges = hash !== input.lastSavedHash;
+  return {
+    hash,
+    hasContent,
+    hasUnsavedChanges,
+    canAutoSave: hasContent && hasUnsavedChanges,
+    canManualSave: hasUnsavedChanges && (hasContent || Boolean(input.draftId))
+  };
 }
 
 export function buildDraftSavePayload(

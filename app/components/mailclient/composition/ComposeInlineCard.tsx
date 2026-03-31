@@ -23,6 +23,7 @@ type ComposeInlineCardProps = {
     composeDraftId: string | null;
     composeOpen: boolean;
     composeFieldsReset: number;
+    canSaveDraft: boolean;
     draftSaving: boolean;
     draftSaveError: string | null;
     draftSavedAt: number | null;
@@ -87,6 +88,7 @@ export default function ComposeInlineCard({
     composeDraftId,
     composeOpen,
     composeFieldsReset,
+    canSaveDraft,
     draftSaving,
     draftSaveError,
     draftSavedAt,
@@ -194,6 +196,7 @@ export default function ComposeInlineCard({
         <ComposeActions
           composeDraftId={composeDraftId}
           composeOpen={composeOpen}
+          canSaveDraft={canSaveDraft}
           draftSaving={draftSaving}
           draftSaveError={draftSaveError}
           draftSavedAt={draftSavedAt}

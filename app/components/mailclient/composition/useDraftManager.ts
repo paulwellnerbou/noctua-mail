@@ -7,7 +7,7 @@ import {
 } from "@/lib/accountApiPaths";
 import type { Message } from "@/lib/data";
 import type { ComposePayload } from "./composeContentBuilder";
-import { buildDraftSavePayload, computeDraftHash } from "./draftSaveUtils";
+import { buildDraftSavePayload, getDraftChangeState } from "./draftSaveUtils";
 import type {
   ComposeReplyHeaders,
   ComposeSelectionState,
@@ -285,7 +285,9 @@ export function useDraftManager(params: UseDraftManagerParams) {
     if (!composeOpen || !activeAccountId) return;
     const preferText = composeTab === "html" && composeLastEditedRef.current === "text";
     const composePayload = buildComposePayload({ preferText });
-    const hash = computeDraftHash({
+    const { hash, canManualSave } = getDraftChangeState({
+      draftId: composeDraftIdRef.current,
+      lastSavedHash: lastDraftHashRef.current,
       to: composeTo,
       cc: composeCc,
       bcc: composeBcc,
@@ -295,6 +297,7 @@ export function useDraftManager(params: UseDraftManagerParams) {
       attachments: composePayload.attachments,
       invite: composeInvite
     });
+    if (!canManualSave) return;
     const payload: DraftSavePayload = buildDraftSavePayload(
       {
         to: composeTo,

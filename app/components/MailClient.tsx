@@ -38,6 +38,7 @@ import {
   buildSavedDraftListMessage,
   reconcileSavedDraftMessages
 } from "./mailclient/composition/draftListState";
+import { getDraftChangeState } from "./mailclient/composition/draftSaveUtils";
 import { resetComposeSession } from "./mailclient/composition/resetComposeSession";
 import { useComposeController } from "./mailclient/composition/useComposeController";
 import { useComposeState } from "./mailclient/composition/useComposeState";
@@ -100,6 +101,7 @@ import MessageQuickActions from "./mailclient/message/MessageQuickActions";
 import MessageViewPane from "./mailclient/message/MessageViewPane";
 import MarkdownPanel from "./mailclient/message/MarkdownPanel";
 import MessageSourcePanel from "./mailclient/message/MessageSourcePanel";
+import threadViewStyles from "./mailclient/message/ThreadView.module.css";
 import { TODO_FLAG, DONE_FLAG, isMeaningfulNonInlineAttachment } from "@/lib/messageFlags";
 import { EVENT_GROUP_BY, INVITE_DECK_GROUP_BY } from "@/lib/messageGrouping";
 import {
@@ -5069,6 +5071,24 @@ export default function MailClient({
     saveDraft
   });
 
+  const canSaveCurrentDraft = (() => {
+    if (!composeOpen || !composeDraftId) return false;
+    const preferText = composeTab === "html" && composeLastEditedRef.current === "text";
+    const composePayload = buildComposePayload({ preferText });
+    return getDraftChangeState({
+      draftId: composeDraftId,
+      lastSavedHash: lastDraftHashRef.current,
+      to: composeTo,
+      cc: composeCc,
+      bcc: composeBcc,
+      subject: composeSubject,
+      text: composePayload.text,
+      html: composePayload.html,
+      attachments: composePayload.attachments,
+      invite: currentComposeInviteDraft
+    }).canManualSave;
+  })();
+
   // Auto-repair empty folders: if a folder shows no messages after loading,
   // check if raw messages exist in DB (threading issue → recompute) or not (missing → sync).
   useEffect(() => {
@@ -5804,8 +5824,8 @@ export default function MailClient({
         >
             {(() => {
               // Render function for ComposeInlineCard with ref
-              const renderComposeCard = () => (
-                <div ref={composeCardRef}>
+              const renderComposeCard = (wrapperClassName?: string) => (
+                <div ref={composeCardRef} className={wrapperClassName}>
                   <ComposeInlineCard
                     state={{
                       composeMode,
@@ -5818,6 +5838,7 @@ export default function MailClient({
                       composeDraftId,
                       composeOpen,
                       composeFieldsReset: composeEditorReset,
+                      canSaveDraft: canSaveCurrentDraft,
                       draftSaving,
                       draftSaveError,
                       draftSavedAt,
@@ -5886,7 +5907,8 @@ export default function MailClient({
 
               return (
                 <>
-                  {showComposeAtTop && renderComposeCard()}
+                  {showComposeAtTop &&
+                    renderComposeCard(activeThread.length > 0 ? threadViewStyles.threadItem : undefined)}
                   <ThreadView
                     showComposeInline={showComposeInline}
                     activeMessage={activeMessage ?? null}
@@ -6059,6 +6081,7 @@ export default function MailClient({
           composeDraftId,
           composeOpen,
           composeFieldsReset: composeEditorReset,
+          canSaveDraft: canSaveCurrentDraft,
           draftSaving,
           draftSaveError,
           draftSavedAt,

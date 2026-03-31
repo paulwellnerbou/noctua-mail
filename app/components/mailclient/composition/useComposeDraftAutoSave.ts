@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react";
 import type { ComposeInviteDraft } from "@/lib/composeInvite";
 import type { Attachment } from "@/lib/data";
 import type { ComposePayload } from "./composeContentBuilder";
-import { buildDraftSavePayload, computeDraftHash, hasDraftContent } from "./draftSaveUtils";
+import { buildDraftSavePayload, getDraftChangeState } from "./draftSaveUtils";
 import type { ComposeReplyHeaders, ComposeTab, DraftSavePayload } from "./composeTypes";
 
 export type UseComposeDraftAutoSaveParams = {
@@ -81,17 +81,9 @@ export function useComposeDraftAutoSave({
     const preferText = composeTab === "html" && composeLastEditedRef.current === "text";
     const composePayload = buildComposePayloadRef.current({ preferText });
     const { text, html, attachments } = composePayload;
-    const hasContent = hasDraftContent({
-      to: composeTo,
-      cc: composeCc,
-      bcc: composeBcc,
-      subject: composeSubject,
-      text,
-      html,
-      invite: composeInvite
-    });
-    if (!hasContent) return;
-    const hash = computeDraftHash({
+    const { hash, canAutoSave } = getDraftChangeState({
+      draftId: composeDraftId,
+      lastSavedHash: lastDraftHashRef.current,
       to: composeTo,
       cc: composeCc,
       bcc: composeBcc,
@@ -102,15 +94,17 @@ export function useComposeDraftAutoSave({
       invite: composeInvite
     });
     currentDraftHashRef.current = hash;
+    if (!canAutoSave) {
+      if (hash === lastDraftHashRef.current) {
+        composeDirtyRef.current = false;
+      }
+      return;
+    }
     if (composeBaselineHashRef.current === null) {
       composeBaselineHashRef.current = hash;
       if (composeDraftId && !composeDirtyRef.current) {
         lastDraftHashRef.current = hash;
       }
-      return;
-    }
-    if (hash === lastDraftHashRef.current) {
-      composeDirtyRef.current = false;
       return;
     }
     if (!composeDirtyRef.current) {
@@ -163,6 +157,7 @@ export function useComposeDraftAutoSave({
     composeReplyHeaders,
     composeAttachments,
     composeBaselineHashRef,
+    currentDraftHashRef,
     composeDirtyRef,
     composeLastEditedRef,
     draftSaveTimerRef,

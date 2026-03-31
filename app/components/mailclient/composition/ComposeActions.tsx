@@ -4,6 +4,7 @@ import styles from "./Compose.module.css";
 type ComposeActionsProps = {
   composeDraftId: string | null;
   composeOpen: boolean;
+  canSaveDraft: boolean;
   draftSaving: boolean;
   draftSaveError: string | null;
   draftSavedAt: number | null;
@@ -19,6 +20,7 @@ type ComposeActionsProps = {
 export default function ComposeActions({
   composeDraftId,
   composeOpen,
+  canSaveDraft,
   draftSaving,
   draftSaveError,
   draftSavedAt,
@@ -72,7 +74,7 @@ export default function ComposeActions({
               variant="soft"
               color="blue"
               onClick={handleSaveDraft}
-              disabled={draftSaving}
+              disabled={draftSaving || !canSaveDraft}
             >
               {draftSaving ? "Saving..." : "Save draft"}
             </Button>
