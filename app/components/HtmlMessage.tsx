@@ -1,7 +1,7 @@
 "use client";
 
 import { memo, useEffect, useRef } from "react";
-import { extractBodyContent, sanitizeHtmlForDisplay, selectPreferredHtmlDocument, stripConditionalComments } from "@/lib/html";
+import { extractBodyContent, sanitizeHtmlForDisplay, stripConditionalComments } from "@/lib/html";
 import { useMessageLinkPreview } from "@/app/components/mailclient/message/MessageLinkPreviewContext";
 import {
   acquireEmailFonts,
@@ -141,7 +141,7 @@ function HtmlMessage({
     if (!hostRef.current) return;
     const root = hostRef.current.shadowRoot ?? hostRef.current.attachShadow({ mode: "open" });
     const rawHtml = html || "";
-    const cleanedHtml = selectPreferredHtmlDocument(stripConditionalComments(rawHtml));
+    const cleanedHtml = stripConditionalComments(rawHtml);
     const hasExplicitColor = /(^|[^-])color\s*:/i.test(cleanedHtml);
     const stylesheetLinks = extractStylesheetLinks(cleanedHtml);
     const fontStylesheetUrls = Array.from(

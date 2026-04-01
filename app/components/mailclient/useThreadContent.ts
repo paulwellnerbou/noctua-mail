@@ -8,9 +8,9 @@ import {
 } from "@/lib/accountApiPaths";
 import type { Message } from "@/lib/data";
 import { mergeLocalOnlyMessageState } from "@/lib/messageLocalState";
+import { needsMessageContentHydration } from "@/lib/ui/messageView";
 import { applyFlagsToMessage } from "./utils/messageHelpers";
 import { THREAD_CACHE_LIMIT } from "./constants";
-import { hasHtmlContent } from "@/lib/ui/messageView";
 
 type ApiFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
@@ -260,14 +260,6 @@ export function useThreadContent({
             message
         );
 
-        // If the message is loaded but still empty, set a space so it's considered loaded
-        if (
-          !hasHtmlContent(mergedHydrated.htmlBody) &&
-          (!mergedHydrated.body || mergedHydrated.body === "")
-        ) {
-          mergedHydrated.body = " ";
-        }
-
         updateMessagesWithCurrentResultPrune(
           (item) => {
             if (item.id !== mergedHydrated.id) return item;
@@ -361,9 +353,7 @@ export function useThreadContent({
 
   const hydrateMessageOnOpenIfNeeded = useCallback(
     (message: Message) => {
-      const hasText = Boolean(message.body && message.body !== "");
-      const hasHtml = hasHtmlContent(message.htmlBody);
-      if (hasText || hasHtml) return null;
+      if (!needsMessageContentHydration(message)) return null;
 
       const key = `${message.accountId}:${message.id}`;
       const now = Date.now();
@@ -388,9 +378,7 @@ export function useThreadContent({
   const ensureMessageContent = useCallback(
     async (message: Message, options?: { manual?: boolean }): Promise<Message | null> => {
       const resolved = messageById.get(message.id) ?? message;
-      const hasText = Boolean(resolved.body && resolved.body !== "");
-      const hasHtml = hasHtmlContent(resolved.htmlBody);
-      if (hasText || hasHtml) return resolved;
+      if (!needsMessageContentHydration(resolved)) return resolved;
       if (messageContentLoadingRef.current[message.id]) return null;
 
       if (!options?.manual) {

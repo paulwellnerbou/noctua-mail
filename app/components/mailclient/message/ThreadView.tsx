@@ -1,7 +1,7 @@
 import React from "react";
 import type { Message } from "@/lib/data";
 import { Text } from "@radix-ui/themes";
-import { hasHtmlContent } from "@/lib/ui/messageView";
+import { needsMessageContentHydration } from "@/lib/ui/messageView";
 import ThreadMessageCard from "./ThreadMessageCard";
 import type { ThreadMessageCardProps } from "./ThreadMessageCard";
 import { getVisibleThreadMessages } from "./threadViewState";
@@ -38,10 +38,6 @@ export default function ThreadView({
     <>
       {activeMessage ? (
         (() => {
-          const hasMessageContent = (message?: Message | null) => {
-            if (!message) return false;
-            return (message.body ?? "").trim().length > 0 || hasHtmlContent(message.htmlBody);
-          };
           const activeThreadId =
             activeMessage.threadId ?? activeMessage.messageId ?? activeMessage.id;
           const hasFullThread = Boolean(
@@ -53,9 +49,12 @@ export default function ThreadView({
           const activeThreadError = activeThreadId ? threadContentErrorById[activeThreadId] : "";
           const activeMessageFromThread =
             activeThread.find((item) => item.id === activeMessage.id) ?? activeMessage;
-          const activeMessageBodyLoading = isThreadLoading && !hasMessageContent(activeMessageFromThread);
+          const activeMessageBodyLoading =
+            isThreadLoading && needsMessageContentHydration(activeMessageFromThread);
           const activeMessageBodyError =
-            !isThreadLoading && Boolean(activeThreadError) && !hasMessageContent(activeMessageFromThread);
+            !isThreadLoading &&
+            Boolean(activeThreadError) &&
+            needsMessageContentHydration(activeMessageFromThread);
           const baseThread =
             supportsThreads && isThreadLoading && !hasFullThread
               ? [activeMessageFromThread]

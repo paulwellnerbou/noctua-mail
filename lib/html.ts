@@ -93,50 +93,63 @@ export function selectPreferredHtmlDocument(input: string) {
     .filter(Boolean);
   if (candidates.length <= 1) return trimmed;
 
-  const scored = candidates
-    .map(scoreHtmlDocument)
-    .sort((left, right) => {
-      if (left.hasMeaningfulText !== right.hasMeaningfulText) {
-        return left.hasMeaningfulText ? -1 : 1;
-      }
-      if (left.visibleTextLength !== right.visibleTextLength) {
-        return right.visibleTextLength - left.visibleTextLength;
-      }
-      if (left.hasRenderableMedia !== right.hasRenderableMedia) {
-        return left.hasRenderableMedia ? -1 : 1;
-      }
-      return right.htmlLength - left.htmlLength;
-    });
-
-  return scored[0]?.html ?? trimmed;
+  const scored = candidates.map(scoreHtmlDocument);
+  return (
+    scored.find((candidate) => candidate.hasMeaningfulText)?.html ??
+    scored.find((candidate) => candidate.hasRenderableMedia)?.html ??
+    scored.find((candidate) => candidate.visibleTextLength > 0)?.html ??
+    scored[0]?.html ??
+    trimmed
+  );
 }
 
 export function extractBodyContent(input: string) {
-  const normalized = selectPreferredHtmlDocument(input);
-  if (!/<body[\s>]/i.test(normalized)) {
+  const candidates = splitConcatenatedHtmlDocuments(input)
+    .map((candidate) => candidate.trim())
+    .filter(Boolean);
+  const normalizedCandidates = candidates.length > 0 ? candidates : [input];
+
+  if (normalizedCandidates.length === 1 && !/<body[\s>]/i.test(normalizedCandidates[0] ?? "")) {
     return {
-      body: normalized,
-      styles: normalized.match(/<style[^>]*>[\s\S]*?<\/style>/gi) ?? [],
+      body: normalizedCandidates[0] ?? "",
+      styles: (normalizedCandidates[0] ?? "").match(/<style[^>]*>[\s\S]*?<\/style>/gi) ?? [],
       bodyAttrs: { className: "", style: "", id: "" }
     };
   }
 
-  const styles = normalized.match(/<style[^>]*>[\s\S]*?<\/style>/gi) ?? [];
-  const bodyMatch = normalized.match(/<body([^>]*)>([\s\S]*?)<\/body>/i);
-  const attrs = bodyMatch?.[1] ?? "";
-  const classMatch = attrs.match(/class=["']([^"']+)["']/i);
-  const styleMatch = attrs.match(/style=["']([^"']+)["']/i);
-  const idMatch = attrs.match(/id=["']([^"']+)["']/i);
-  const body = (bodyMatch?.[2] ?? normalized).replace(/<style[^>]*>[\s\S]*?<\/style>/gi, "");
+  const parts = normalizedCandidates.map((candidate) => {
+    const scored = scoreHtmlDocument(candidate);
+    const styles = candidate.match(/<style[^>]*>[\s\S]*?<\/style>/gi) ?? [];
+    const bodyMatch = candidate.match(/<body([^>]*)>([\s\S]*?)<\/body>/i);
+    const attrs = bodyMatch?.[1] ?? "";
+    const classMatch = attrs.match(/class=["']([^"']+)["']/i);
+    const styleMatch = attrs.match(/style=["']([^"']+)["']/i);
+    const idMatch = attrs.match(/id=["']([^"']+)["']/i);
+
+    return {
+      ...scored,
+      styles,
+      body: (bodyMatch?.[2] ?? candidate).replace(/<style[^>]*>[\s\S]*?<\/style>/gi, ""),
+      bodyAttrs: {
+        className: classMatch?.[1] ?? "",
+        style: styleMatch?.[1] ?? "",
+        id: idMatch?.[1] ?? ""
+      }
+    };
+  });
+
+  const visibleParts = parts.filter(
+    (part) => part.hasMeaningfulText || part.hasRenderableMedia || part.visibleTextLength > 0
+  );
+  const renderedParts = visibleParts.length > 0 ? visibleParts : parts;
+  const primaryPart =
+    renderedParts.find((part) => part.bodyAttrs.className || part.bodyAttrs.style || part.bodyAttrs.id) ??
+    renderedParts[0];
 
   return {
-    body,
-    styles,
-    bodyAttrs: {
-      className: classMatch?.[1] ?? "",
-      style: styleMatch?.[1] ?? "",
-      id: idMatch?.[1] ?? ""
-    }
+    body: renderedParts.map((part) => part.body).join(""),
+    styles: renderedParts.flatMap((part) => part.styles),
+    bodyAttrs: primaryPart?.bodyAttrs ?? { className: "", style: "", id: "" }
   };
 }
 

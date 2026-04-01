@@ -13,7 +13,11 @@ import { Badge, Button, Card, IconButton, Tabs } from "@radix-ui/themes";
 import { CaretRightIcon } from "@radix-ui/react-icons";
 import * as Collapsible from "@radix-ui/react-collapsible";
 import { badgeColors, getFlagBadgeColor, getPriorityBadgeColor } from "@/lib/ui/badgeColors";
-import { hasMeaningfulHtmlText } from "@/lib/ui/messageView";
+import {
+  hasMeaningfulHtmlText,
+  hasTextContent,
+  needsMessageContentHydration
+} from "@/lib/ui/messageView";
 import { getMessageDateDisplay } from "@/lib/dateFormatting";
 import type { AccountDateFormat, Message, RecipientAlias } from "@/lib/data";
 import {
@@ -180,10 +184,10 @@ export default function ThreadMessageCard({
   const priorityColor = getPriorityBadgeColor(message.priority);
   const isCollapsed = Boolean(collapsedMessages[message.id]);
   const hasHtml = hasHtmlContent(message.htmlBody);
-  const hasText = Boolean(message.body && message.body !== "");
+  const hasText = hasTextContent(message.body);
   const preferTextTab = hasHtml && hasText && !hasMeaningfulHtmlText(message.htmlBody);
   const hasSource = Boolean(message.hasSource);
-  const isContentMissing = !hasHtml && !hasText;
+  const needsContentHydration = needsMessageContentHydration(message);
   const contentLoading = bodyLoading || Boolean(messageContentLoading[message.id]);
   const fontScale = messageFontScale[message.id] ?? 1;
   const zoomValue = messageZoom[message.id] ?? 1;
@@ -214,7 +218,7 @@ export default function ThreadMessageCard({
 
   useEffect(() => {
     if (isCollapsed) return;
-    if (!isContentMissing) return;
+    if (!needsContentHydration) return;
     if (contentLoading) return;
     if (bodyLoadError) return;
     void ensureMessageContent(message);
@@ -223,7 +227,7 @@ export default function ThreadMessageCard({
     contentLoading,
     ensureMessageContent,
     isCollapsed,
-    isContentMissing,
+    needsContentHydration,
     message
   ]);
 
@@ -361,9 +365,10 @@ export default function ThreadMessageCard({
     </div>
   );
 
-  const renderTextOrEmpty = () => (isContentMissing ? renderLoadContentPanel() : renderTextPanel(message.body));
+  const renderTextOrEmpty = () =>
+    needsContentHydration ? renderLoadContentPanel() : renderTextPanel(message.body);
   const renderMarkdownOrEmpty = () =>
-    isContentMissing ? renderLoadContentPanel() : renderMarkdownPanel(message.body, message.id);
+    needsContentHydration ? renderLoadContentPanel() : renderMarkdownPanel(message.body, message.id);
 
   const wrapPanel = (key: string, node: React.ReactNode) => (
     <div key={key} className={styles.panel}>
@@ -372,14 +377,14 @@ export default function ThreadMessageCard({
   );
 
   let content: React.ReactNode = null;
-  if (bodyLoadError && isContentMissing) {
+  if (bodyLoadError && needsContentHydration) {
     content = wrapPanel(
       "load-error",
       <div className={styles.bodyLoadError} role="alert" aria-live="polite">
         <span className={styles.bodyLoadErrorLabel}>{bodyLoadError}</span>
       </div>
     );
-  } else if (contentLoading && isContentMissing) {
+  } else if (contentLoading && needsContentHydration) {
     content = wrapPanel(
       "loading",
       <div className={styles.bodyLoading} role="status" aria-live="polite">

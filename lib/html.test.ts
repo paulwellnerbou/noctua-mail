@@ -113,6 +113,24 @@ describe("stripConditionalComments", () => {
 });
 
 describe("selectPreferredHtmlDocument", () => {
+  it("falls back to a later html document when earlier ones are not meaningful", () => {
+    const empty = [
+      "<html><head><title>empty</title></head><body>",
+      '<div><blockquote type="cite"><div></div></blockquote></div><br>',
+      "</body></html>"
+    ].join("");
+    const meaningful = [
+      "<html><head><title>real</title></head><body>",
+      "<div>Liebe Elternbeiräte, hier steht der eigentliche Inhalt.</div>",
+      "</body></html>"
+    ].join("");
+
+    const selected = selectPreferredHtmlDocument(`${empty}${meaningful}`);
+
+    expect(selected).toContain("Liebe Elternbeiräte");
+    expect(extractVisibleHtmlText(selected)).toContain("Liebe Elternbeiräte");
+  });
+
   it("prefers the html document with meaningful visible text", () => {
     const meaningful = [
       "<html><head><title>real</title></head><body>",
@@ -129,6 +147,26 @@ describe("selectPreferredHtmlDocument", () => {
 
     expect(selected).toContain("Liebe Elternbeiräte");
     expect(extractVisibleHtmlText(selected)).toContain("Liebe Elternbeiräte");
+  });
+
+  it("keeps the first meaningful html document when a later document is only quoted content", () => {
+    const reply = [
+      "<html><head><title>reply</title></head><body>",
+      "<div>Lieber Paul,</div>",
+      "<div>ich habe deine Mail eben erst gesehen.</div>",
+      "</body></html>"
+    ].join("");
+    const quoted = [
+      "<html><head><title>quoted</title></head><body>",
+      '<blockquote type="cite"><div>Am 01.04.2026 um 12:17 schrieb Paul Wellner Bou:</div>',
+      "<div>Hallo Jule, das ist die vorherige Nachricht.</div></blockquote>",
+      "</body></html>"
+    ].join("");
+
+    const selected = selectPreferredHtmlDocument(`${reply}<br/>${quoted}`);
+
+    expect(selected).toContain("ich habe deine Mail eben erst gesehen");
+    expect(selected).not.toContain("Am 01.04.2026 um 12:17 schrieb");
   });
 
   it("does not split a single html document that contains literal html markup in its content", () => {
@@ -162,6 +200,27 @@ describe("extractBodyContent", () => {
 
     expect(result.body).toContain("Visible body");
     expect(result.body).not.toContain("<div><br></div>");
+    expect(result.bodyAttrs.className).toBe("mail-body");
+    expect(result.bodyAttrs.style).toBe("font-size:14px");
+    expect(result.styles).toEqual(["<style>.x{color:red}</style>"]);
+  });
+
+  it("concatenates later html documents after the first meaningful html body", () => {
+    const reply = [
+      '<html><head><style>.x{color:red}</style></head><body class="mail-body" style="font-size:14px">',
+      "<div>Visible reply</div>",
+      "</body></html>"
+    ].join("");
+    const quoted = [
+      "<html><body>",
+      '<blockquote type="cite"><div>Am 01.04.2026 um 12:17 schrieb Paul:</div><div>Earlier message</div></blockquote>',
+      "</body></html>"
+    ].join("");
+
+    const result = extractBodyContent(`${reply}<br/>${quoted}`);
+
+    expect(result.body).toContain("Visible reply");
+    expect(result.body).toContain("Earlier message");
     expect(result.bodyAttrs.className).toBe("mail-body");
     expect(result.bodyAttrs.style).toBe("font-size:14px");
     expect(result.styles).toEqual(["<style>.x{color:red}</style>"]);

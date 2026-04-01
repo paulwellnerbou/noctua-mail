@@ -9,6 +9,12 @@ import { extractVisibleHtmlText, selectPreferredHtmlDocument } from "@/lib/html"
 
 export type ImapFlagBadge = { label: string; kind: string };
 
+type MessageContentState = Pick<Message, "body" | "htmlBody" | "hasSource" | "mailboxPath" | "imapUid">;
+
+export function hasTextContent(body?: string | null) {
+  return typeof body === "string" && body.length > 0;
+}
+
 export function hasHtmlContent(html?: string) {
   if (!html) return false;
   const trimmed = selectPreferredHtmlDocument(html);
@@ -16,6 +22,19 @@ export function hasHtmlContent(html?: string) {
   if (/<(img|table|svg|video|iframe|canvas|object|embed)\b/i.test(trimmed)) return true;
   const textOnly = extractVisibleHtmlText(trimmed);
   return textOnly.length > 0;
+}
+
+export function needsMessageContentHydration(message?: MessageContentState | null) {
+  if (!message) return false;
+  if (hasTextContent(message.body) || hasHtmlContent(message.htmlBody)) return false;
+
+  const canResync =
+    typeof message.mailboxPath === "string" &&
+    message.mailboxPath.length > 0 &&
+    typeof message.imapUid === "number" &&
+    !Number.isNaN(message.imapUid);
+
+  return canResync && !Boolean(message.hasSource);
 }
 
 export function hasMeaningfulHtmlText(html?: string) {
