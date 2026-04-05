@@ -146,6 +146,7 @@ export function computeComposeInitState(
   opts: {
     accountEmail: string;
     accountDateFormat: AccountDateFormat;
+    preferredComposeTab?: ComposeTab;
     findMessageByMessageId?: (messageId: string) => Message | undefined;
   },
   deps: {
@@ -158,7 +159,7 @@ export function computeComposeInitState(
   }
 
   const { stripHtml, normalizeHtmlDerivedText } = deps;
-  const { accountEmail, accountDateFormat } = opts;
+  const { accountEmail, accountDateFormat, preferredComposeTab } = opts;
 
   const fromEmails = extractEmails(message.from);
   const fromRecipient = getDisplayRecipient(message.from);
@@ -182,12 +183,46 @@ export function computeComposeInitState(
 
   const formattedDate = formatMessageDate(message.dateValue, message.date, accountDateFormat);
 
+  const buildReplyContent = (header: string) => {
+    const hasValidHtml = prefersHtml && hasHtmlContent(message.htmlBody);
+    const wantsRichReply = preferredComposeTab !== "text";
+
+    if (wantsRichReply && hasValidHtml && message.htmlBody) {
+      const parts = buildQuotedHtmlPartsFromHtml(message.htmlBody, header, false);
+      return {
+        composeBody: "",
+        composeQuotedHtml: assembleQuotedHtml(parts, true),
+        composeQuotedParts: parts,
+        composeTab: preferredComposeTab === "markdown" ? "markdown" : "html"
+      } satisfies Pick<
+        ComposeInitFields,
+        "composeBody" | "composeQuotedHtml" | "composeQuotedParts" | "composeTab"
+      >;
+    }
+
+    const textSource =
+      typeof message.body === "string" && message.body.trim().length > 0
+        ? message.body
+        : hasValidHtml && message.htmlBody
+          ? stripHtml(message.htmlBody)
+          : "";
+
+    return {
+      composeBody: buildTextReplyBody(textSource, header),
+      composeQuotedHtml: "",
+      composeQuotedParts: null,
+      composeTab: "text"
+    } satisfies Pick<
+      ComposeInitFields,
+      "composeBody" | "composeQuotedHtml" | "composeQuotedParts" | "composeTab"
+    >;
+  };
+
   // -------------------------------------------------------------------------
   // reply
   // -------------------------------------------------------------------------
   if (mode === "reply") {
     const replyHeader = `On ${formattedDate}, ${message.from} wrote:`;
-    const hasValidHtml = prefersHtml && hasHtmlContent(message.htmlBody);
 
     let to: string;
     if (isSentByCurrentUser) {
@@ -199,27 +234,14 @@ export function computeComposeInitState(
       to = fromRecipient || uniqueEmails(fromEmails).join(", ");
     }
 
-    if (hasValidHtml && message.htmlBody) {
-      const parts = buildQuotedHtmlPartsFromHtml(message.htmlBody, replyHeader, false);
-      return {
-        ...BLANK,
-        composeTo: to,
-        composeSubject: prefixSubject("Re", message.subject),
-        composeQuotedHtml: assembleQuotedHtml(parts, true),
-        composeQuotedParts: parts,
-        composeReplyMessage: message,
-        composeReplyHeaders: { inReplyTo: replyMessageId, references: replyReferences },
-        composeTab: "html"
-      };
-    }
+    const replyContent = buildReplyContent(replyHeader);
     return {
       ...BLANK,
       composeTo: to,
       composeSubject: prefixSubject("Re", message.subject),
-      composeBody: buildTextReplyBody(message.body ?? "", replyHeader),
+      ...replyContent,
       composeReplyMessage: message,
-      composeReplyHeaders: { inReplyTo: replyMessageId, references: replyReferences },
-      composeTab: "text"
+      composeReplyHeaders: { inReplyTo: replyMessageId, references: replyReferences }
     };
   }
 
@@ -228,7 +250,6 @@ export function computeComposeInitState(
   // -------------------------------------------------------------------------
   if (mode === "replyAll") {
     const replyHeader = `On ${formattedDate}, ${message.from} wrote:`;
-    const hasValidHtml = prefersHtml && hasHtmlContent(message.htmlBody);
 
     let toList: string[];
     let ccList: string[];
@@ -269,29 +290,15 @@ export function computeComposeInitState(
       );
     }
 
-    if (hasValidHtml && message.htmlBody) {
-      const parts = buildQuotedHtmlPartsFromHtml(message.htmlBody, replyHeader, false);
-      return {
-        ...BLANK,
-        composeTo: toList.join(", "),
-        composeCc: ccList.join(", "),
-        composeSubject: prefixSubject("Re", message.subject),
-        composeQuotedHtml: assembleQuotedHtml(parts, true),
-        composeQuotedParts: parts,
-        composeReplyMessage: message,
-        composeReplyHeaders: { inReplyTo: replyMessageId, references: replyReferences },
-        composeTab: "html"
-      };
-    }
+    const replyContent = buildReplyContent(replyHeader);
     return {
       ...BLANK,
       composeTo: toList.join(", "),
       composeCc: ccList.join(", "),
       composeSubject: prefixSubject("Re", message.subject),
-      composeBody: buildTextReplyBody(message.body ?? "", replyHeader),
+      ...replyContent,
       composeReplyMessage: message,
-      composeReplyHeaders: { inReplyTo: replyMessageId, references: replyReferences },
-      composeTab: "text"
+      composeReplyHeaders: { inReplyTo: replyMessageId, references: replyReferences }
     };
   }
 
@@ -300,32 +307,19 @@ export function computeComposeInitState(
   // -------------------------------------------------------------------------
   if (mode === "forward") {
     const forwardHeader = `Forwarded message from ${message.from} on ${formattedDate}:`;
-    const hasValidHtml = prefersHtml && hasHtmlContent(message.htmlBody);
     const replyHeaders: ComposeReplyHeaders = {
       inReplyTo: replyMessageId,
       references: replyReferences,
       xForwardedMessageId: replyMessageId
     };
 
-    if (hasValidHtml && message.htmlBody) {
-      const parts = buildQuotedHtmlPartsFromHtml(message.htmlBody, forwardHeader, false);
-      return {
-        ...BLANK,
-        composeSubject: prefixSubject("Fwd", message.subject),
-        composeQuotedHtml: assembleQuotedHtml(parts, true),
-        composeQuotedParts: parts,
-        composeReplyMessage: message,
-        composeReplyHeaders: replyHeaders,
-        composeTab: "html"
-      };
-    }
+    const replyContent = buildReplyContent(forwardHeader);
     return {
       ...BLANK,
       composeSubject: prefixSubject("Fwd", message.subject),
-      composeBody: buildTextReplyBody(message.body ?? "", forwardHeader),
+      ...replyContent,
       composeReplyMessage: message,
-      composeReplyHeaders: replyHeaders,
-      composeTab: "text"
+      composeReplyHeaders: replyHeaders
     };
   }
 

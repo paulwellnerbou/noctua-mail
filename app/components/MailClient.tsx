@@ -1922,6 +1922,24 @@ export default function MailClient({
       return;
     }
 
+    const preferredComposeTab = (() => {
+      const tab = messageTabs[message.id];
+      return tab === "html" || tab === "markdown" || tab === "text" ? tab : undefined;
+    })();
+
+    const getComposeSourceMessage = (clickedMessage: Message) => {
+      const cachedMessage = messageById.get(clickedMessage.id);
+      if (!cachedMessage) return clickedMessage;
+
+      const scoreMessage = (candidate: Message) =>
+        (hasHtmlContent(candidate.htmlBody) ? 2 : 0) +
+        ((candidate.body ?? "").trim().length > 0 ? 1 : 0);
+
+      return scoreMessage(clickedMessage) >= scoreMessage(cachedMessage)
+        ? clickedMessage
+        : cachedMessage;
+    };
+
     const hydrateDraftComposeMetadata = async (msg: Message) => {
       if (!isDraftMessage(msg)) return msg;
       if (msg.draftInvite) return msg;
@@ -1949,18 +1967,18 @@ export default function MailClient({
                 htmlBody: restoreInlineAttachmentDataUrls(messageWithDraftMetadata.htmlBody, attachments)
               }
             : messageWithDraftMetadata;
-        openComposeInternal(mode, hydratedMessage, asNew);
+        openComposeInternal(mode, hydratedMessage, asNew, { preferredComposeTab });
         setComposeAttachments(attachments);
         return;
       }
 
-      openComposeInternal(mode, messageWithDraftMetadata, asNew);
+      openComposeInternal(mode, messageWithDraftMetadata, asNew, { preferredComposeTab });
       if (mode === "forward") {
         void loadForwardAttachments(messageWithDraftMetadata, setComposeAttachments);
       }
     };
 
-    const resolved = messageById.get(message.id) ?? message;
+    const resolved = getComposeSourceMessage(message);
     const hasText = Boolean((resolved.body ?? "").trim());
     const hasHtml = hasHtmlContent(resolved.htmlBody);
     if (hasText || hasHtml) {

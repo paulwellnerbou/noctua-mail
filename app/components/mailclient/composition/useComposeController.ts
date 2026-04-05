@@ -3,7 +3,7 @@ import type { Account, AccountDateFormat, Message } from "@/lib/data";
 import { escapeHtml } from "@/lib/html";
 import { buildComposePayload as buildComposePayloadFn } from "./composeContentBuilder";
 import { computeComposeInitState } from "./composeInitState";
-import type { ComposeMode } from "./composeTypes";
+import type { ComposeMode, ComposeTab } from "./composeTypes";
 import type { ComposeState } from "./useComposeState";
 
 type UseComposeControllerParams = {
@@ -125,7 +125,12 @@ export function useComposeController({
     );
   };
 
-  const openCompose = (mode: ComposeMode, message?: Message, asNew = false) => {
+  const openCompose = (
+    mode: ComposeMode,
+    message?: Message,
+    asNew = false,
+    options?: { preferredComposeTab?: ComposeTab }
+  ) => {
     // Reset refs and async state
     lastDraftHashRef.current = "";
     currentDraftHashRef.current = "";
@@ -149,7 +154,12 @@ export function useComposeController({
       mode,
       message,
       asNew,
-      { accountEmail: currentAccount?.email ?? "", accountDateFormat, findMessageByMessageId },
+      {
+        accountEmail: currentAccount?.email ?? "",
+        accountDateFormat,
+        preferredComposeTab: options?.preferredComposeTab,
+        findMessageByMessageId
+      },
       { stripHtml, normalizeHtmlDerivedText }
     );
 

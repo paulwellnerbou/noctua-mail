@@ -252,6 +252,35 @@ describe("computeComposeInitState — reply", () => {
     expect(fields.composeQuotedHtml).not.toBe("");
     expect(fields.composeBody).toBe("");
   });
+
+  it("keeps markdown compose when replying from markdown view to an html message", () => {
+    const fields = computeComposeInitState(
+      "reply",
+      makeMessage({ htmlBody: "<p>Hello</p>" }),
+      false,
+      { ...opts, preferredComposeTab: "markdown" },
+      deps
+    );
+    expect(fields.composeTab).toBe("markdown");
+    expect(fields.composeQuotedHtml).not.toBe("");
+    expect(fields.composeQuotedParts).not.toBeNull();
+  });
+
+  it("falls back to html-derived text when opening a text reply without a text body", () => {
+    const fields = computeComposeInitState(
+      "reply",
+      makeMessage({ body: "", htmlBody: "<p>Hello<br>World</p>" }),
+      false,
+      { ...opts, preferredComposeTab: "text" },
+      {
+        ...deps,
+        stripHtml: (value) => value.replace(/<br\s*\/?>/gi, "\n").replace(/<[^>]+>/g, "").trim()
+      }
+    );
+    expect(fields.composeTab).toBe("text");
+    expect(fields.composeBody).toContain("> Hello");
+    expect(fields.composeBody).toContain("> World");
+  });
 });
 
 // ---------------------------------------------------------------------------
