@@ -142,8 +142,7 @@ export const TOPIC_COLORS = [
   "tomato", "red", "ruby", "crimson", "pink", "plum",
   "purple", "violet", "iris", "indigo", "blue", "sky",
   "cyan", "teal", "mint", "jade", "green", "grass", "lime",
-  "yellow", "amber", "orange", "gold", "bronze", "brown",
-  "sand", "slate", "mauve", "olive", "sage", "gray",
+  "yellow", "amber", "orange", "gold", "bronze", "brown", "gray",
 ] as const;
 
 export type TopicColor = (typeof TOPIC_COLORS)[number];

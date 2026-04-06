@@ -27,6 +27,7 @@ describe("senderIdentity", () => {
 
   it("recognizes common free-mail domains", () => {
     expect(isFreeMailDomain("gmail.com")).toBe(true);
+    expect(isFreeMailDomain("outlook.de")).toBe(true);
     expect(isFreeMailDomain("apple.com")).toBe(false);
   });
 

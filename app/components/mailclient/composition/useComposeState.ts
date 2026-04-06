@@ -73,6 +73,7 @@ export function useComposeState() {
   const draftSaveTimerRef = useRef<number | null>(null);
   const draftSaveInFlightRef = useRef(false);
   const pendingDraftSaveRef = useRef<{ payload: DraftSavePayload; hash: string } | null>(null);
+  const composeSessionVersionRef = useRef(0);
   const composeDraftIdRef = useRef<string | null>(null);
   const lastDraftHashRef = useRef<string>("");
   const currentDraftHashRef = useRef<string>("");
@@ -180,6 +181,7 @@ export function useComposeState() {
     draftSaveTimerRef,
     draftSaveInFlightRef,
     pendingDraftSaveRef,
+    composeSessionVersionRef,
     composeDraftIdRef,
     lastDraftHashRef,
     currentDraftHashRef,

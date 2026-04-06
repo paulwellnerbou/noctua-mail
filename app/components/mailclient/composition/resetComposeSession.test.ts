@@ -100,6 +100,7 @@ describe("resetComposeSession", () => {
       draftSaveTimerRef: { current: setTimeout(() => undefined, 0) },
       draftSaveInFlightRef: { current: true },
       pendingDraftSaveRef: { current: { payload: { to: "", subject: "", text: "" }, hash: "hash-1" } },
+      composeSessionVersionRef: { current: 4 },
       composeDraftIdRef: { current: "draft-1" },
       lastDraftHashRef: { current: "last-hash" },
       currentDraftHashRef: { current: "current-hash" },
@@ -161,6 +162,7 @@ describe("resetComposeSession", () => {
     expect(compose.draftSaveTimerRef.current).toBeNull();
     expect(compose.draftSaveInFlightRef.current).toBe(false);
     expect(compose.pendingDraftSaveRef.current).toBeNull();
+    expect(compose.composeSessionVersionRef.current).toBe(5);
     expect(compose.composeDraftIdRef.current).toBeNull();
     expect(compose.lastDraftHashRef.current).toBe("");
     expect(compose.currentDraftHashRef.current).toBe("");

@@ -30,7 +30,7 @@ export type UseAccountControllerParams = {
   apiFetch: ApiFetch;
   readErrorMessage: (res: Response) => Promise<string>;
   reportError: (message: string) => void;
-  refreshFolders: () => Promise<Folder[] | null>;
+  refreshFolders: (accountIdOverride?: string) => Promise<Folder[] | null>;
   runSyncJob: (payload: {
     accountId: string;
     folderId?: string;
@@ -278,7 +278,7 @@ export function useAccountController({
       setEditingAccount(null);
       if (isNew) {
         await switchAccount(newAccountId);
-        await refreshFolders();
+        await refreshFolders(newAccountId);
         try {
           await runSyncJob({
             accountId: newAccountId,

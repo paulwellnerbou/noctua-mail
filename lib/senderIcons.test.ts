@@ -38,6 +38,16 @@ describe("senderIcons", () => {
     ]);
   });
 
+  it("treats outlook.de like other known free-mail domains", () => {
+    const identity = getSenderIdentity({ from: "\"User\" <person@outlook.de>" });
+    expect(buildSenderIconCandidates(identity)).toEqual([
+      {
+        provider: "gravatar",
+        url: expect.stringMatching(/^https:\/\/www\.gravatar\.com\/avatar\/[a-f0-9]{64}\?d=404&s=128$/)
+      }
+    ]);
+  });
+
   it("does not fetch remote providers when sender icons are disabled", async () => {
     let callCount = 0;
     globalThis.fetch = (async () => {

@@ -47,6 +47,7 @@ type ResettableComposeState = Pick<
   | "draftSaveTimerRef"
   | "draftSaveInFlightRef"
   | "pendingDraftSaveRef"
+  | "composeSessionVersionRef"
   | "composeDraftIdRef"
   | "lastDraftHashRef"
   | "currentDraftHashRef"
@@ -72,6 +73,7 @@ export function resetComposeSession(compose: ResettableComposeState) {
 
   compose.draftSaveInFlightRef.current = false;
   compose.pendingDraftSaveRef.current = null;
+  compose.composeSessionVersionRef.current += 1;
   compose.composeDraftIdRef.current = null;
   compose.lastDraftHashRef.current = "";
   compose.currentDraftHashRef.current = "";

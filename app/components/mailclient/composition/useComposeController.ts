@@ -13,6 +13,7 @@ type UseComposeControllerParams = {
   accountDateFormat: AccountDateFormat;
   stripHtml: (value: string) => string;
   normalizeHtmlDerivedText: (value: string) => string;
+  setDraftSaving: React.Dispatch<React.SetStateAction<boolean>>;
   setDraftSavedAt: React.Dispatch<React.SetStateAction<number | null>>;
   setDraftSaveError: React.Dispatch<React.SetStateAction<string | null>>;
   findMessageByMessageId?: (messageId: string) => Message | undefined;
@@ -25,6 +26,7 @@ export function useComposeController({
   accountDateFormat,
   stripHtml,
   normalizeHtmlDerivedText,
+  setDraftSaving,
   setDraftSavedAt,
   setDraftSaveError,
   findMessageByMessageId
@@ -137,6 +139,13 @@ export function useComposeController({
     composeBaselineHashRef.current = null;
     composeDirtyRef.current = false;
     composeEditorInitRef.current = false;
+    if (compose.draftSaveTimerRef.current !== null) {
+      clearTimeout(compose.draftSaveTimerRef.current);
+      compose.draftSaveTimerRef.current = null;
+    }
+    compose.pendingDraftSaveRef.current = null;
+    compose.composeSessionVersionRef.current += 1;
+    setDraftSaving(false);
     setDraftSavedAt(null);
     setDraftSaveError(null);
     composeSignatureRef.current = null;

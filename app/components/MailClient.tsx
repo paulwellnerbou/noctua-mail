@@ -505,13 +505,14 @@ export default function MailClient({
     apiFetch
   });
 
-  const refreshFolders = useCallback(async (): Promise<Folder[] | null> => {
-    if (!activeAccountId) {
+  const refreshFolders = useCallback(async (accountIdOverride?: string): Promise<Folder[] | null> => {
+    const targetAccountId = accountIdOverride?.trim() || activeAccountId;
+    if (!targetAccountId) {
       setFolders([]);
       return [];
     }
     try {
-      const foldersRes = await apiFetch(buildAccountFoldersPath(activeAccountId));
+      const foldersRes = await apiFetch(buildAccountFoldersPath(targetAccountId));
       if (foldersRes.ok) {
         const nextFolders = (await foldersRes.json()) as Folder[];
         setFolders(nextFolders);
@@ -659,6 +660,7 @@ export default function MailClient({
     draftSaveTimerRef,
     draftSaveInFlightRef,
     pendingDraftSaveRef,
+    composeSessionVersionRef,
     composeDraftIdRef,
     lastDraftHashRef,
     currentDraftHashRef,
@@ -1904,6 +1906,7 @@ export default function MailClient({
     accountDateFormat,
     stripHtml,
     normalizeHtmlDerivedText,
+    setDraftSaving,
     setDraftSavedAt,
     setDraftSaveError,
     findMessageByMessageId: (messageId: string) => {
@@ -2967,6 +2970,13 @@ export default function MailClient({
       reportError("Please complete the event invitation details before sending.");
       return;
     }
+    if (draftSaveTimerRef.current !== null) {
+      clearTimeout(draftSaveTimerRef.current);
+      draftSaveTimerRef.current = null;
+    }
+    pendingDraftSaveRef.current = null;
+    composeSessionVersionRef.current += 1;
+    setDraftSaving(false);
     setSendingMail(true);
     try {
       const { text, html, markdown, attachments, composeFormat } = buildComposePayload();
@@ -5041,6 +5051,7 @@ export default function MailClient({
     composeSelectionRef,
     pendingDraftSaveRef,
     draftSaveInFlightRef,
+    composeSessionVersionRef,
     viewMessage,
     setMessages,
     setViewMessage,

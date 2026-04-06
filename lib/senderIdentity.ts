@@ -4,6 +4,7 @@ const FREE_MAIL_DOMAINS = new Set([
   "gmail.com",
   "googlemail.com",
   "outlook.com",
+  "outlook.de",
   "hotmail.com",
   "live.com",
   "msn.com",
@@ -155,4 +156,3 @@ export function getSenderIdentity(params: {
     paletteIndex: getPaletteIndex(seed)
   } satisfies SenderIdentity;
 }
-

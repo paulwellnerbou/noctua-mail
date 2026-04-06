@@ -52,6 +52,7 @@ export type UseDraftManagerParams = {
   composeSelectionRef: React.MutableRefObject<ComposeSelectionState | null>;
   pendingDraftSaveRef: React.MutableRefObject<{ payload: DraftSavePayload; hash: string } | null>;
   draftSaveInFlightRef: React.MutableRefObject<boolean>;
+  composeSessionVersionRef: React.MutableRefObject<number>;
 
   // Message state
   viewMessage: Message | null;
@@ -110,6 +111,7 @@ export function useDraftManager(params: UseDraftManagerParams) {
     composeSelectionRef,
     pendingDraftSaveRef,
     draftSaveInFlightRef,
+    composeSessionVersionRef,
     viewMessage,
     setMessages,
     setViewMessage,
@@ -138,9 +140,11 @@ export function useDraftManager(params: UseDraftManagerParams) {
     if (!activeAccountId) return;
     const requestAccountId = activeAccountId;
     const requestScopeVersion = accountScopeVersionRef.current;
+    const requestComposeSessionVersion = composeSessionVersionRef.current;
     const isCurrentRequest = () =>
       activeAccountIdRef.current === requestAccountId &&
-      accountScopeVersionRef.current === requestScopeVersion;
+      accountScopeVersionRef.current === requestScopeVersion &&
+      composeSessionVersionRef.current === requestComposeSessionVersion;
     suppressDraftDeleteReconcile(composeDraftIdRef.current);
     if (composeTab === "text" && composeTextRef.current) {
       const element = composeTextRef.current;

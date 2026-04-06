@@ -19,6 +19,17 @@ type SerializedImageNode = {
   version: 1;
 } & SerializedLexicalNode;
 
+export function normalizeImageDimension(value?: number | string | null): number | undefined {
+  if (typeof value === "number") {
+    return Number.isFinite(value) && value > 0 ? value : undefined;
+  }
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  if (!trimmed) return undefined;
+  const parsed = Number(trimmed);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
+}
+
 const convertImageElement = (domNode: Node): DOMConversionOutput | null => {
   if (!(domNode instanceof HTMLImageElement)) return null;
   const src = domNode.getAttribute("src") || "";
@@ -30,8 +41,8 @@ const convertImageElement = (domNode: Node): DOMConversionOutput | null => {
     node: new ImageNode(
       src,
       alt,
-      width ? Number(width) : undefined,
-      height ? Number(height) : undefined
+      normalizeImageDimension(width),
+      normalizeImageDimension(height)
     )
   };
 };
@@ -89,8 +100,8 @@ export class ImageNode extends DecoratorNode<JSX.Element> {
     super(key);
     this.__src = src;
     this.__alt = alt;
-    this.__width = width;
-    this.__height = height;
+    this.__width = normalizeImageDimension(width);
+    this.__height = normalizeImageDimension(height);
   }
 
   exportDOM(): DOMExportOutput {
