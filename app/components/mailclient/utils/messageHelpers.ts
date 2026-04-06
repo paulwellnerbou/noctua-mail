@@ -9,7 +9,7 @@ import {
   hasDoneFlag as hasDoneFlagFromFlags,
   hasAiModifiedFlag as hasAiModifiedFlagFromFlags,
   CALENDAR_INVITE_FLAG,
-  isMeaningfulNonInlineAttachment
+  isMeaningfulVisibleAttachment
 } from "@/lib/messageFlags";
 
 export function computeGroupMeta(items: Message[]): MessageGroupMeta[] {
@@ -79,7 +79,7 @@ export function hasCalendarFlag(message: Message) {
 export function hasNonInlineAttachments(message: Message) {
   const attachments = message.attachments ?? [];
   if (attachments.length > 0) {
-    return attachments.some(isMeaningfulNonInlineAttachment);
+    return attachments.some((attachment) => isMeaningfulVisibleAttachment(attachment, message.htmlBody));
   }
   return Boolean(message.hasAttachments);
 }

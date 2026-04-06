@@ -86,6 +86,27 @@ export function isMeaningfulNonInlineAttachment(attachment: Attachment) {
   return size >= MIN_VISIBLE_ATTACHMENT_SIZE_BYTES;
 }
 
+export function isRenderableInlineAttachment(attachment: Attachment, htmlBody?: string | null) {
+  if (!attachment.inline) return false;
+  if (!htmlBody?.trim()) return false;
+  const contentType = normalize(attachment.contentType);
+  if (!contentType.startsWith("image/")) return false;
+  // The HTML fallback renderer intentionally skips SVG.
+  return contentType !== "image/svg+xml";
+}
+
+export function shouldHideAttachmentFromList(attachment: Attachment, htmlBody?: string | null) {
+  if (isCalendarAttachment(attachment)) return true;
+  return isRenderableInlineAttachment(attachment, htmlBody);
+}
+
+export function isMeaningfulVisibleAttachment(attachment: Attachment, htmlBody?: string | null) {
+  if (shouldHideAttachmentFromList(attachment, htmlBody)) return false;
+  if (isCryptographicSignatureAttachment(attachment)) return false;
+  const size = Number.isFinite(attachment.size) ? Number(attachment.size) : 0;
+  return size >= MIN_VISIBLE_ATTACHMENT_SIZE_BYTES;
+}
+
 function bodyLooksLikeCalendarInvite(textBody?: string | null, htmlBody?: string | null) {
   const combined = `${textBody ?? ""}\n${htmlBody ?? ""}`.toLowerCase();
   if (!combined.trim()) return false;

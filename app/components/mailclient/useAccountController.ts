@@ -9,6 +9,11 @@ import {
   buildAccountFoldersPath
 } from "@/lib/accountApiPaths";
 import type { Account, Folder, Message, User } from "@/lib/data";
+import type {
+  SearchBadgesState,
+  SearchFieldsState,
+  VirtualFolderDefinition
+} from "./useSearchState";
 import type { ManageTab } from "../AccountSettingsModal";
 import type { SyncJobResult, SyncMode } from "./types";
 
@@ -54,6 +59,15 @@ export type UseAccountControllerParams = {
   setActiveMessageId: React.Dispatch<React.SetStateAction<string>>;
   setViewMessage: React.Dispatch<React.SetStateAction<Message | null>>;
   setActiveFolderId: React.Dispatch<React.SetStateAction<string>>;
+  setQuery: React.Dispatch<React.SetStateAction<string>>;
+  setSearchScope: React.Dispatch<React.SetStateAction<"folder" | "all">>;
+  setSearchFields: React.Dispatch<React.SetStateAction<SearchFieldsState>>;
+  setSearchBadges: React.Dispatch<React.SetStateAction<SearchBadgesState>>;
+  setActiveVirtualFolderId: React.Dispatch<
+    React.SetStateAction<VirtualFolderDefinition["id"] | null>
+  >;
+  defaultSearchFields: SearchFieldsState;
+  defaultSearchBadges: SearchBadgesState;
   setLastFolderId: React.Dispatch<React.SetStateAction<string>>;
   setMessageListError: React.Dispatch<React.SetStateAction<string | null>>;
   setExceptionEntries: React.Dispatch<React.SetStateAction<Array<{ id: string; message: string; timestamp: number }>>>;
@@ -89,6 +103,13 @@ export function useAccountController({
   setActiveMessageId,
   setViewMessage,
   setActiveFolderId,
+  setQuery,
+  setSearchScope,
+  setSearchFields,
+  setSearchBadges,
+  setActiveVirtualFolderId,
+  defaultSearchFields,
+  defaultSearchBadges,
   setLastFolderId,
   setMessageListError,
   setExceptionEntries,
@@ -220,6 +241,11 @@ export function useAccountController({
         setTotalMessages(null);
         setActiveMessageId("");
         setViewMessage(null);
+        setQuery("");
+        setSearchScope("folder");
+        setSearchFields({ ...defaultSearchFields });
+        setSearchBadges({ ...defaultSearchBadges });
+        setActiveVirtualFolderId(null);
         setActiveFolderId("");
         setLastFolderId("");
         setActiveAccountId(switchedAccountId);
@@ -237,14 +263,21 @@ export function useAccountController({
       setActiveAccountId,
       setActiveMessageId,
       setActiveFolderId,
+      setActiveVirtualFolderId,
       setExceptionEntries,
       setHasMoreMessages,
       setLastFolderId,
       setMessageListError,
       setMessages,
       setMessagesPage,
+      setQuery,
+      setSearchBadges,
+      setSearchFields,
+      setSearchScope,
       setTotalMessages,
-      setViewMessage
+      setViewMessage,
+      defaultSearchBadges,
+      defaultSearchFields
     ]
   );
 

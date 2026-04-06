@@ -42,6 +42,7 @@ import InReplyToReferenceRow from "../InReplyToReferenceRow";
 import { hasNonInlineAttachments, getUnsubscribeCapability, resolveInReplyToRef } from "../utils/messageHelpers";
 import { getMessageFromDisplay } from "../messagelist/threadGroupUtils";
 import type { InviteProcessingStatePatch } from "../utils/calendarInviteState";
+import { isRenderableInlineAttachment } from "@/lib/messageFlags";
 
 type MessageTab = "html" | "text" | "markdown" | "source";
 
@@ -485,11 +486,17 @@ export default function ThreadMessageCard({
   }
 
   // Compact collapsed row (two-line summary, no card border)
+  const hasInlineImageAttachments =
+    (message.attachments?.length ?? 0) > 0
+      ? message.attachments?.some((attachment) =>
+          isRenderableInlineAttachment(attachment, message.htmlBody)
+        ) ?? false
+      : Boolean(message.hasInlineAttachments && message.htmlBody?.trim());
+
   if (threadViewMode === "compact" && isCollapsed) {
     const imapBadges = getImapFlagBadges(message);
     const showAttachmentIcon = hasNonInlineAttachments(message);
-    const showInlineImageIcon =
-      message.hasInlineAttachments ?? message.attachments?.some((a) => a.inline);
+    const showInlineImageIcon = hasInlineImageAttachments;
     const fromDisplay = getMessageFromDisplay(
       message.from ?? "",
       { to: message.to, cc: message.cc, bcc: message.bcc },
@@ -713,8 +720,7 @@ export default function ThreadMessageCard({
                       <Paperclip size={12} />
                     </Badge>
                   )}
-                  {(message.hasInlineAttachments ??
-                    message.attachments?.some((item) => item.inline)) && (
+                  {hasInlineImageAttachments && (
                     <Badge
                       size="1"
                       variant="soft"
@@ -840,7 +846,11 @@ export default function ThreadMessageCard({
                   readErrorMessage={readErrorMessage}
                   reportError={reportError}
                 />
-                <AttachmentsList attachments={message.attachments ?? []} showDownloadAll />
+                <AttachmentsList
+                  attachments={message.attachments ?? []}
+                  htmlBody={message.htmlBody}
+                  showDownloadAll
+                />
               </div>
             </Collapsible.Content>
           </Collapsible.Root>

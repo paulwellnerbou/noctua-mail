@@ -150,7 +150,12 @@ import {
   getSearchBadgeLabel,
   getSearchFieldLabel
 } from "@/lib/ui/searchFilters";
-import { useSearchState, VIRTUAL_FOLDERS } from "./mailclient/useSearchState";
+import {
+  DEFAULT_SEARCH_BADGES,
+  DEFAULT_SEARCH_FIELDS,
+  useSearchState,
+  VIRTUAL_FOLDERS
+} from "./mailclient/useSearchState";
 import { useReminderNotifications } from "./mailclient/useReminderNotifications";
 import { useMessageData } from "./mailclient/useMessageData";
 import { useThreadContent } from "./mailclient/useThreadContent";
@@ -365,6 +370,7 @@ export default function MailClient({
     useState<Set<string>>(new Set());
   const [recipientAliasDialogState, setRecipientAliasDialogState] =
     useState<RecipientAliasDialogState | null>(null);
+  const previousAccountIdRef = useRef("");
 
   const clientId = useMemo(() => {
     if (typeof window === "undefined") return "";
@@ -915,6 +921,7 @@ export default function MailClient({
     setSearchScope,
     setSearchFields,
     setSearchBadges,
+    setActiveVirtualFolderId,
     clearSearch,
     activateVirtualFolder
   } = searchActions;
@@ -1607,6 +1614,13 @@ export default function MailClient({
     setActiveMessageId,
     setViewMessage,
     setActiveFolderId,
+    setQuery,
+    setSearchScope,
+    setSearchFields,
+    setSearchBadges,
+    setActiveVirtualFolderId,
+    defaultSearchFields: DEFAULT_SEARCH_FIELDS,
+    defaultSearchBadges: DEFAULT_SEARCH_BADGES,
     setLastFolderId,
     setMessageListError,
     setExceptionEntries,
@@ -2745,8 +2759,9 @@ export default function MailClient({
   const activeMessage = useMemo(() => {
     if (hideThreadView || (composeOpen && composeMode === "new")) return undefined;
     if (!viewMessage) return undefined;
+    if (viewMessage.accountId !== activeAccountId) return undefined;
     return filteredMessages.find((m) => m.id === viewMessage.id) ?? viewMessage;
-  }, [viewMessage, filteredMessages, hideThreadView, composeOpen, composeMode]);
+  }, [viewMessage, filteredMessages, hideThreadView, composeOpen, composeMode, activeAccountId]);
   const activeMessageRef = useRef<Message | null>(null);
   activeMessageRef.current = activeMessage ?? null;
   const activeMessageThreadKey = (() => {
@@ -4751,8 +4766,35 @@ export default function MailClient({
   useEffect(() => {
     clearSelection();
     setActiveMessageId("");
-    // viewMessage is deliberately preserved so the right pane keeps showing the current message
-  }, [activeFolderId, activeAccountId, searchScope, clearSelection]);
+    const accountChanged =
+      previousAccountIdRef.current !== activeAccountId &&
+      Boolean(previousAccountIdRef.current || activeAccountId);
+    previousAccountIdRef.current = activeAccountId;
+    if (!accountChanged) {
+      // Preserve the open message when the folder/search changes inside the same account.
+      return;
+    }
+    setViewMessage(null);
+    setThreadRelatedMessages([]);
+    resetThreadCache();
+    setLoadingSource({});
+    setMessageContentLoading({});
+    sourceFetchRef.current = new Map();
+    autoHydrationAttemptAtRef.current = {};
+    setMessageTabs({});
+    setMessageFontScale({});
+  }, [
+    activeFolderId,
+    activeAccountId,
+    searchScope,
+    autoHydrationAttemptAtRef,
+    clearSelection,
+    resetThreadCache,
+    setLoadingSource,
+    setMessageContentLoading,
+    setThreadRelatedMessages,
+    sourceFetchRef
+  ]);
 
   const {
     folderNameById,

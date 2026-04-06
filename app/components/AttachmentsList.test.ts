@@ -33,9 +33,17 @@ describe("getVisibleAttachments", () => {
       makeAttachment({ id: "file" }),
       makeAttachment({ id: "inline", inline: true, contentType: "image/png" }),
       makeAttachment({ id: "invite", filename: "invite.ics", contentType: "text/calendar" })
-    ]);
+    ], "<html><body><p>Hello</p></body></html>");
 
     expect(result.map((attachment) => attachment.id)).toEqual(["file"]);
+  });
+
+  it("shows inline images as normal attachments when the message has no html body", () => {
+    const result = getVisibleAttachments([
+      makeAttachment({ id: "inline", inline: true, contentType: "image/jpeg" })
+    ]);
+
+    expect(result.map((attachment) => attachment.id)).toEqual(["inline"]);
   });
 });
 

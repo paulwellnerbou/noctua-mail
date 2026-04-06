@@ -13,7 +13,7 @@ import {
 } from "lucide-react";
 import type { Attachment } from "@/lib/data";
 import { openDetachedWindow } from "@/lib/ui/openDetachedWindow";
-import { isCalendarAttachment } from "@/lib/messageFlags";
+import { shouldHideAttachmentFromList } from "@/lib/messageFlags";
 
 const PREVIEW_MIME_PREFIXES = ["image/", "text/"];
 const PREVIEW_MIME_TYPES = new Set([
@@ -58,8 +58,8 @@ export const canPreviewAttachment = (contentType?: string, filename?: string) =>
   return PREVIEW_MIME_PREFIXES.some((prefix) => lower.startsWith(prefix));
 };
 
-export function getVisibleAttachments(attachments: Attachment[]) {
-  return attachments.filter((attachment) => !attachment.inline && !isCalendarAttachment(attachment));
+export function getVisibleAttachments(attachments: Attachment[], htmlBody?: string | null) {
+  return attachments.filter((attachment) => !shouldHideAttachmentFromList(attachment, htmlBody));
 }
 
 export function getAttachmentDownloadHref(attachment: Pick<Attachment, "url" | "dataUrl">) {
@@ -130,14 +130,16 @@ const getFileIcon = (contentType?: string, filename?: string) => {
 
 export default function AttachmentsList({
   attachments,
+  htmlBody,
   onRemove,
   showDownloadAll = false
 }: {
   attachments: Attachment[];
+  htmlBody?: string | null;
   onRemove?: (id: string) => void;
   showDownloadAll?: boolean;
 }) {
-  const visibleAttachments = getVisibleAttachments(attachments);
+  const visibleAttachments = getVisibleAttachments(attachments, htmlBody);
   const downloadableAttachments = visibleAttachments.filter(
     (attachment) => Boolean(getAttachmentDownloadHref(attachment))
   );

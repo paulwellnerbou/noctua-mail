@@ -49,6 +49,33 @@ describe("shouldShowAttachmentIcon", () => {
     expect(shouldShowAttachmentIcon(message)).toBe(true);
   });
 
+  it("shows icon for inline images when the message has no html body to render them", () => {
+    const message = makeMessage({
+      attachments: [
+        makeAttachment({
+          inline: true,
+          filename: "photo.jpg",
+          contentType: "image/jpeg"
+        })
+      ]
+    });
+    expect(shouldShowAttachmentIcon(message)).toBe(true);
+  });
+
+  it("hides icon for renderable inline images when html is available", () => {
+    const message = makeMessage({
+      htmlBody: "<html><body><p>Hello</p></body></html>",
+      attachments: [
+        makeAttachment({
+          inline: true,
+          filename: "photo.jpg",
+          contentType: "image/jpeg"
+        })
+      ]
+    });
+    expect(shouldShowAttachmentIcon(message)).toBe(false);
+  });
+
   it("hides icon when all known non-inline attachments are calendar files", () => {
     const message = makeMessage({
       attachments: [
