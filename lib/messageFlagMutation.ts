@@ -1,5 +1,5 @@
 import type { Account, Message } from "@/lib/data";
-import { updateMessageFlags } from "@/lib/db";
+import { updateMessageFlags } from "@/lib/serverDb";
 import { updateImapFlags } from "@/lib/mail/imap";
 import { preserveLocalOnlyMessageFlags } from "@/lib/messageFlags";
 

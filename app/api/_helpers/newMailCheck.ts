@@ -1,5 +1,5 @@
 import type { Account } from "@/lib/data";
-import { getFolders } from "@/lib/db";
+import { getFolders } from "@/lib/serverDb";
 import { planImapNewSyncFolders } from "@/lib/mail/imap";
 import { getSyncJob, startSyncJob, type SyncJob } from "@/lib/syncJobs";
 

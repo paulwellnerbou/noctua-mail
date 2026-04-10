@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireSessionAccountOr403, requireSessionOr401, type SessionData } from "@/lib/auth";
-import { getAccounts } from "@/lib/db";
+import { getAccounts } from "@/lib/serverDb";
 import type { Account } from "@/lib/data";
 
 export type AccountContext = {

@@ -2,7 +2,7 @@ import crypto from "crypto";
 import { NextResponse, type NextRequest } from "next/server";
 import type { Account } from "./data";
 import { cacheSessionCredentials } from "./credentials";
-import { getAccountById, getMcpTokenByHash, touchMcpTokenLastUsed } from "./db";
+import { getAccountById, getMcpTokenByHash, touchMcpTokenLastUsed } from "./serverDb";
 import { shouldIncludeSessionCredentials } from "./secret";
 
 const SESSION_KEY = process.env.SESSION_SEAL_KEY ?? "";

@@ -22,7 +22,7 @@ import {
   listRelatedMessages,
   listThreadMessages,
   updateMessageFlags
-} from "@/lib/db";
+} from "@/lib/serverDb";
 import {
   buildDraftInputForMode,
   saveDraftForAccount,

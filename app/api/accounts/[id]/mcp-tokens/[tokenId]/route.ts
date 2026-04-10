@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getAccountIdFromParams, requireAccountContext, type AccountRouteParams } from "@/app/api/_helpers/accountContext";
-import { deleteMcpToken } from "@/lib/db";
+import { deleteMcpToken } from "@/lib/serverDb";
 
 type Params = AccountRouteParams & {
   params: Promise<{ id?: string; accountId?: string; tokenId?: string }>;

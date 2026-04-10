@@ -2,7 +2,7 @@ import { randomUUID } from "crypto";
 import { NextResponse } from "next/server";
 import { getAccountIdFromParams, requireAccountContext, type AccountRouteParams } from "@/app/api/_helpers/accountContext";
 import { createMcpAccessToken } from "@/lib/auth";
-import { insertMcpToken, listMcpTokens } from "@/lib/db";
+import { insertMcpToken, listMcpTokens } from "@/lib/serverDb";
 
 type CreateTokenBody = {
   label?: string;
