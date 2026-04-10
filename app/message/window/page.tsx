@@ -376,7 +376,7 @@ export default function MessageWindowPage() {
                 activeFolderId: safeMessage.folderId,
                 threadPathById: (folderId: string) =>
                   folderId.replace(`${safeMessage.accountId}:`, ""),
-                folderNameById: (folderId: string) => folderById.get(folderId)?.name ?? folderId,
+                folderById: (folderId: string) => folderById.get(folderId),
                 setSearchScope: noop as React.Dispatch<React.SetStateAction<"folder" | "all">>,
                 setActiveFolderId: noop as React.Dispatch<React.SetStateAction<string>>,
                 getImapFlagBadges,

@@ -18,6 +18,20 @@
   justify-self: start;
 }
 
+.topicMeta {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  min-width: 0;
+}
+
+.topicShortName {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
 .topicRow:last-child {
   border-bottom: none;
 }

@@ -70,8 +70,10 @@ export default function TopicsTabContent({
   const [loading, setLoading] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState("");
+  const [editShortName, setEditShortName] = useState("");
   const [editColor, setEditColor] = useState<TopicColor | null>(null);
   const [newName, setNewName] = useState("");
+  const [newShortName, setNewShortName] = useState("");
   const [newColor, setNewColor] = useState<TopicColor | null>(null);
   const [showCreate, setShowCreate] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -129,7 +131,7 @@ export default function TopicsTabContent({
       const res = await request(buildAccountTopicsPath(accountId), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: newName.trim(), color: newColor })
+        body: JSON.stringify({ name: newName.trim(), shortName: newShortName.trim(), color: newColor })
       });
       const data = await res.json();
       if (!data.ok) { setError(data.message ?? "Failed to create topic"); return; }
@@ -137,6 +139,7 @@ export default function TopicsTabContent({
       setTopics(next);
       onTopicsChanged?.(next);
       setNewName("");
+      setNewShortName("");
       setShowCreate(false);
     } catch {
       setError("Failed to create topic");
@@ -148,10 +151,14 @@ export default function TopicsTabContent({
   const startEdit = (topic: Topic) => {
     setEditingId(topic.id);
     setEditName(topic.name);
+    setEditShortName(topic.shortName ?? "");
     setEditColor(topic.color);
   };
 
-  const cancelEdit = () => setEditingId(null);
+  const cancelEdit = () => {
+    setEditingId(null);
+    setEditShortName("");
+  };
 
   const handleSaveEdit = async (topicId: string) => {
     if (!accountId) return;
@@ -162,7 +169,7 @@ export default function TopicsTabContent({
       const res = await request(buildAccountTopicPath(accountId, topicId), {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: editName.trim(), color: editColor })
+        body: JSON.stringify({ name: editName.trim(), shortName: editShortName.trim(), color: editColor })
       });
       const data = await res.json();
       if (!data.ok) { setError(data.message ?? "Failed to update topic"); return; }
@@ -411,6 +418,11 @@ export default function TopicsTabContent({
                       }}
                       autoFocus
                     />
+                    <TextField.Root
+                      placeholder="Short name for message list (optional)"
+                      value={editShortName}
+                      onChange={(e) => setEditShortName(e.target.value)}
+                    />
                     <Flex align="center" gap="2" wrap="wrap">
                       <TopicColorPicker value={editColor} onChange={setEditColor} swatchSize="sm" />
                       <Flex gap="2" ml="auto">
@@ -424,7 +436,21 @@ export default function TopicsTabContent({
               const stat = statsById.get(topic.id);
               return (
                 <div key={topic.id} className={styles.topicRow}>
-                  <Badge color={topicColorToScale(topic.color) as any} variant="soft" size="2">{topic.name}</Badge>
+                  <div className={styles.topicMeta}>
+                    <Badge color={topicColorToScale(topic.color) as any} variant="soft" size="2">
+                      {topic.name}
+                    </Badge>
+                    {topic.shortName ? (
+                      <Badge
+                        color={topicColorToScale(topic.color) as any}
+                        variant="soft"
+                        size="1"
+                        className={styles.topicShortName}
+                      >
+                        {topic.shortName}
+                      </Badge>
+                    ) : null}
+                  </div>
                   <span className={styles.topicRowCount}>
                     {stat ? `${stat.threadCount} ${stat.threadCount === 1 ? "thread" : "threads"}` : ""}
                   </span>
@@ -458,10 +484,26 @@ export default function TopicsTabContent({
               }}
               autoFocus
             />
+            <TextField.Root
+              placeholder="Short name for message list (optional)"
+              value={newShortName}
+              onChange={(e) => setNewShortName(e.target.value)}
+            />
             <Flex align="center" gap="2" wrap="wrap">
               <TopicColorPicker value={newColor} onChange={setNewColor} swatchSize="sm" />
               <Flex gap="2" ml="auto">
-                <Button size="1" variant="soft" color="gray" onClick={() => { setShowCreate(false); setNewName(""); }}>Cancel</Button>
+                <Button
+                  size="1"
+                  variant="soft"
+                  color="gray"
+                  onClick={() => {
+                    setShowCreate(false);
+                    setNewName("");
+                    setNewShortName("");
+                  }}
+                >
+                  Cancel
+                </Button>
                 <Button size="1" onClick={handleCreate} disabled={!newName.trim() || saving} loading={saving}>Create</Button>
               </Flex>
             </Flex>

@@ -115,6 +115,7 @@ const calendarReminderSchemaSignatureByDb = new WeakMap<object, string>();
 const messageCalendarEventSchemaSignatureByDb = new WeakMap<object, string>();
 const threadSchemaSignatureByDb = new WeakMap<object, string>();
 const calendarEventRuntimeSignatureByDb = new WeakMap<object, string>();
+const topicSchemaSignatureByDb = new WeakMap<object, string>();
 const ACCOUNT_DB_IDLE_MS = (() => {
   const raw = process.env.ACCOUNT_DB_IDLE_MS?.trim();
   if (!raw) return 5 * 60 * 1000; // 5 minutes: releases SQLite page cache sooner after syncs
@@ -138,6 +139,7 @@ const MESSAGE_CALENDAR_EVENT_SCHEMA_SIGNATURE = [
   "processedAutomatically"
 ].join("|");
 const THREAD_SCHEMA_SIGNATURE = ["latestReceivedDateValue"].join("|");
+const TOPIC_SCHEMA_SIGNATURE = ["shortName"].join("|");
 const CALENDAR_EVENT_RUNTIME_SIGNATURE = [
   "myPartstat",
   "myPartstatUpdatedAtMs",
@@ -342,6 +344,22 @@ function ensureThreadRuntimeSchema(db: any) {
   }
   ensureThreadOptionalColumns(db);
   threadSchemaSignatureByDb.set(db, THREAD_SCHEMA_SIGNATURE);
+}
+
+function ensureTopicOptionalColumns(db: any) {
+  const topicColumns = getDbTableColumns(db, "topics");
+  if (topicColumns.size === 0) return;
+  if (!topicColumns.has("shortName")) {
+    db.prepare(`ALTER TABLE topics ADD COLUMN shortName TEXT`).run();
+  }
+}
+
+function ensureTopicRuntimeSchema(db: any) {
+  if (topicSchemaSignatureByDb.get(db) === TOPIC_SCHEMA_SIGNATURE) {
+    return;
+  }
+  ensureTopicOptionalColumns(db);
+  topicSchemaSignatureByDb.set(db, TOPIC_SCHEMA_SIGNATURE);
 }
 
 function ensureCalendarEventOptionalColumns(db: any) {
@@ -949,6 +967,7 @@ function initAccountSchema(db: any) {
       id TEXT PRIMARY KEY,
       accountId TEXT NOT NULL,
       name TEXT NOT NULL,
+      shortName TEXT,
       color TEXT NOT NULL,
       imapKeyword TEXT NOT NULL,
       createdAt INTEGER NOT NULL,
@@ -1184,6 +1203,7 @@ function initAccountSchema(db: any) {
       ON messages(accountId, folderId, pendingMoveSourceFolderId);
   `);
   ensureThreadOptionalColumns(db);
+  ensureTopicOptionalColumns(db);
   ensureMessageCalendarEventOptionalColumns(db);
 
   const reminderColumns = getDbTableColumns(db, "calendar_reminders");
@@ -1599,6 +1619,7 @@ async function getAccountDb(accountId: string) {
     accountDbInitialized.add(dbPath);
   }
   ensureThreadRuntimeSchema(accountDb);
+  ensureTopicRuntimeSchema(accountDb);
   ensureMessageCalendarEventRuntimeSchema(accountDb);
   ensureCalendarReminderRuntimeSchema(accountDb);
   await ensureCalendarEventRuntimeData(accountDb, accountId);

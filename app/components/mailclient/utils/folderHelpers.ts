@@ -3,6 +3,35 @@
  */
 import type { Folder } from "@/lib/data";
 
+export type FolderSpecialKind =
+  | "inbox"
+  | "sent"
+  | "drafts"
+  | "trash"
+  | "spam"
+  | "archive";
+
+export function getFolderSpecialKind(
+  folder: Pick<Folder, "name" | "specialUse"> | null | undefined
+): FolderSpecialKind | null {
+  const special = (folder?.specialUse ?? "").toLowerCase();
+  const name = (folder?.name ?? "").trim().toLowerCase();
+
+  if (special === "\\inbox" || name === "inbox") return "inbox";
+  if (special === "\\sent" || name === "sent") return "sent";
+  if (special === "\\drafts" || name === "drafts") return "drafts";
+  if (special === "\\trash") return "trash";
+  if (special === "\\junk" || special === "\\spam" || name === "junk") return "spam";
+  if (special === "\\archive" || name === "archive") return "archive";
+  return null;
+}
+
+export function isSentFolderRecord(
+  folder: Pick<Folder, "name" | "specialUse"> | null | undefined
+): boolean {
+  return getFolderSpecialKind(folder) === "sent";
+}
+
 export function buildFolderTree(items: Folder[]) {
   const map = new Map<string, Folder[]>();
   items.forEach((folder) => {
@@ -81,9 +110,7 @@ export function isSpamFolder(folderId: string | null | undefined, folders: Folde
 export function isSentFolder(folderId: string | null | undefined, folders: Folder[]): boolean {
   if (!folderId) return false;
   const folder = folders.find((item) => item.id === folderId);
-  if (!folder) return false;
-  const special = (folder.specialUse ?? "").toLowerCase();
-  return special === "\\sent";
+  return isSentFolderRecord(folder);
 }
 
 export function isNotificationSuppressedFolder(

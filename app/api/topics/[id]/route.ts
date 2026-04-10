@@ -14,6 +14,7 @@ export async function handleUpdateTopicRequest(
   const body = (await request.json().catch(() => null)) as {
     accountId?: string;
     name?: string;
+    shortName?: string | null;
     color?: string;
   } | null;
 
@@ -22,8 +23,12 @@ export async function handleUpdateTopicRequest(
   const context = await requireAccountContext(request, accountId);
   if (context instanceof NextResponse) return context;
 
-  const changes: { name?: string; color?: TopicColor | null } = {};
+  const changes: { name?: string; shortName?: string | null; color?: TopicColor | null } = {};
   if (body?.name !== undefined) changes.name = body.name.trim();
+  if (body?.shortName !== undefined) {
+    changes.shortName =
+      typeof body.shortName === "string" && body.shortName.trim() ? body.shortName.trim() : null;
+  }
   if (body?.color !== undefined) {
     changes.color =
       body.color && (TOPIC_COLORS as readonly string[]).includes(body.color)

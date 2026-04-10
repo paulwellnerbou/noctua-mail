@@ -9,7 +9,8 @@ import {
   getTopicsForThread,
   importTopicTransferData,
   listTopics,
-  setThreadTopics
+  setThreadTopics,
+  updateTopic
 } from "./topics";
 
 function buildAccount(accountId: string): Account {
@@ -238,5 +239,32 @@ describe("topic transfer", () => {
     });
 
     expect(suggestions.map((item) => item.name)).toEqual(["Support"]);
+  });
+
+  test("persists topic short names through update and transfer", async () => {
+    const sourceAccountId = "acc-topics-short-source";
+    const targetAccountId = "acc-topics-short-target";
+    const { upsertAccount } = await dbModulePromise;
+
+    await upsertAccount(buildAccount(sourceAccountId));
+    await upsertAccount(buildAccount(targetAccountId));
+
+    const created = await createTopic(
+      sourceAccountId,
+      "Ukulele-Stammtisch Frankfurt",
+      "green",
+      "Uke FFM"
+    );
+    expect(created.shortName).toBe("Uke FFM");
+
+    const updated = await updateTopic(sourceAccountId, created.id, { shortName: "Stammtisch" });
+    expect(updated?.shortName).toBe("Stammtisch");
+
+    const exported = await exportTopicTransferData(sourceAccountId);
+    expect(exported.topics[0]?.shortName).toBe("Stammtisch");
+
+    await importTopicTransferData(targetAccountId, exported);
+    const importedTopics = await listTopics(targetAccountId);
+    expect(importedTopics[0]?.shortName).toBe("Stammtisch");
   });
 });

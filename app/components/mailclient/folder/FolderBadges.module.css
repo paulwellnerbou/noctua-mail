@@ -2,7 +2,9 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  flex-shrink: 0;
+  flex-shrink: 1;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .badgeButton {
@@ -10,4 +12,17 @@
   align-items: center;
   gap: 4px;
   cursor: pointer;
+  min-width: 0;
+  max-width: 80px;
+}
+
+.badgeButton svg {
+  flex: 0 0 auto;
+}
+
+.badgeLabel {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }

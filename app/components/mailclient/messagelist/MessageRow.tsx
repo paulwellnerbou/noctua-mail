@@ -499,7 +499,7 @@ function MessageRow({
                   <CategoryBadge category={message.category as any} showText={false} />
                 )}
             {messageTopics && messageTopics.map((topic) => (
-              <TopicBadge key={topic.id} topic={topic} showText size="1" />
+              <TopicBadge key={topic.id} topic={topic} showText size="1" preferShortName />
             ))}
             {(threadHasFlagged ?? message.flagged) && (
               <FlagBadge onClick={() => toggleFlaggedFlag(message, collapsedThreadMessages)} />

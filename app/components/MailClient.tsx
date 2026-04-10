@@ -2115,11 +2115,15 @@ export default function MailClient({
     topicSuggestionExplanationThreadId
   ]);
 
-  const handleCreateTopic = useCallback(async (name: string, color: TopicColor | null): Promise<Topic> => {
+  const handleCreateTopic = useCallback(async (
+    name: string,
+    color: TopicColor | null,
+    shortName?: string | null
+  ): Promise<Topic> => {
     const res = await apiFetch(buildAccountTopicsPath(activeAccountId), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ name, color })
+      body: JSON.stringify({ name, shortName, color })
     });
     const data = await res.json();
     if (!data.ok) throw new Error(data.message ?? "Failed to create topic");
@@ -4756,7 +4760,6 @@ export default function MailClient({
   ]);
 
   const {
-    folderNameById,
     threadPathById,
     renderSelectIndicators,
     renderUnreadDot,
@@ -4779,7 +4782,7 @@ export default function MailClient({
           <Text as="span" size="1" color="gray">
             Suggested for
           </Text>
-          <TopicBadge topic={activeTopic} size="1" />
+          <TopicBadge topic={activeTopic} size="1" preferShortName />
           {activeTopicSuggestionsLoading && (
             <Text as="span" size="1" color="gray">
               Finding matches…
@@ -5962,7 +5965,7 @@ export default function MailClient({
                       includeThreadAcrossFolders,
                       activeFolderId,
                       threadPathById,
-                      folderNameById,
+                      folderById: (folderId: string) => folderById.get(folderId),
                       setSearchScope,
                       setActiveFolderId,
                       getImapFlagBadges,

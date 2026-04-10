@@ -17,7 +17,7 @@ type TopicPickerDialogProps = {
   messageTopics: Topic[];
   suggestions?: Topic[];
   onSave: (topicIds: string[]) => Promise<void>;
-  onCreateTopic: (name: string, color: TopicColor | null) => Promise<Topic>;
+  onCreateTopic: (name: string, color: TopicColor | null, shortName?: string | null) => Promise<Topic>;
 };
 
 function TopicRow({
@@ -50,6 +50,7 @@ export default function TopicPickerDialog({
 }: TopicPickerDialogProps) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [newName, setNewName] = useState("");
+  const [newShortName, setNewShortName] = useState("");
   const [newColor, setNewColor] = useState<TopicColor | null>(null);
   const [creating, setCreating] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -59,6 +60,7 @@ export default function TopicPickerDialog({
     if (open) {
       setSelected(new Set(messageTopics.map((t) => t.id)));
       setNewName("");
+      setNewShortName("");
       setShowCreate(false);
     }
     // messageTopics intentionally excluded: only reset when dialog opens
@@ -78,9 +80,10 @@ export default function TopicPickerDialog({
     if (!newName.trim()) return;
     setCreating(true);
     try {
-      const topic = await onCreateTopic(newName.trim(), newColor);
+      const topic = await onCreateTopic(newName.trim(), newColor, newShortName.trim() || null);
       setSelected((prev) => new Set(prev).add(topic.id));
       setNewName("");
+      setNewShortName("");
       setShowCreate(false);
     } finally {
       setCreating(false);
@@ -154,15 +157,29 @@ export default function TopicPickerDialog({
                 autoFocus
                 style={{ width: "100%" }}
               />
+              <TextField.Root
+                placeholder="Short name for message list (optional)"
+                value={newShortName}
+                onChange={(e) => setNewShortName(e.target.value)}
+                style={{ width: "100%" }}
+              />
               <Badge size="1" variant="soft" color={topicColorToScale(newColor) as any}>
-                {newName.trim() || (newColor ?? "No color")}
+                {newShortName.trim() || newName.trim() || (newColor ?? "No color")}
               </Badge>
               <TopicColorPicker value={newColor} onChange={setNewColor} swatchSize="sm" />
               <Flex gap="2" justify="end" style={{ width: "100%" }}>
                 <Button size="1" onClick={handleCreateAndAdd} disabled={!newName.trim() || creating} loading={creating}>
                   Create &amp; add
                 </Button>
-                <Button size="1" variant="soft" color="gray" onClick={() => setShowCreate(false)}>
+                <Button
+                  size="1"
+                  variant="soft"
+                  color="gray"
+                  onClick={() => {
+                    setShowCreate(false);
+                    setNewShortName("");
+                  }}
+                >
                   Cancel
                 </Button>
               </Flex>

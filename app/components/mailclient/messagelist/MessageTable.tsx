@@ -497,7 +497,7 @@ export default function MessageTable({
                   {renderFolderBadges(item.folderIds)}
                   <span className={styles.cellSubjectText}>{message.subject}</span>
                   {messageTopicsById?.get(message.threadId)?.map((topic) => (
-                    <TopicBadge key={topic.id} topic={topic} size="1" />
+                    <TopicBadge key={topic.id} topic={topic} size="1" preferShortName />
                   ))}
                 </span>
                 <span className={styles.cellDate}>

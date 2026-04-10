@@ -1,4 +1,5 @@
 import type { Message, Topic } from "@/lib/data";
+import { getTopicDisplayName } from "../topicPresentation";
 import type { MessageGroup } from "./listModel";
 
 export type TopicThreadSuggestion = {
@@ -124,7 +125,7 @@ export function buildTopicSuggestionGroup(params: {
   return [
     {
       key: buildTopicSuggestionGroupKey(topic.id),
-      label: topic.name,
+      label: getTopicDisplayName(topic, { preferShortName: true }),
       items: rankedMessages,
       showCount: false,
       allowToggleWhenEmpty: true,

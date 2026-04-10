@@ -6,6 +6,7 @@ import MessageQuickActions from "./message/MessageQuickActions";
 import MessageMenu from "./message/MessageMenu";
 import MessageSourcePanel from "./message/MessageSourcePanel";
 import MarkdownPanel from "./message/MarkdownPanel";
+import { getFolderSpecialKind } from "./utils/folderHelpers";
 
 export const renderQuickActions = (
   message: Message,
@@ -118,12 +119,12 @@ export const renderMarkdownPanel = (
 );
 
 export const folderSpecialIcon = (folder: Folder) => {
-  const special = (folder.specialUse ?? "").toLowerCase();
-  if (special === "\\inbox" || folder.name.toLowerCase() === "inbox") return <Inbox size={12} />;
-  if (special === "\\sent" || folder.name.toLowerCase() === "sent") return <Send size={12} />;
-  if (special === "\\drafts" || folder.name.toLowerCase() === "drafts") return <FileText size={12} />;
-  if (special === "\\trash") return <Trash2 size={12} />;
-  if (special === "\\junk" || special === "\\spam" || folder.name.toLowerCase() === "junk") return <ShieldOff size={12} />;
-  if (special === "\\archive" || folder.name.toLowerCase() === "archive") return <Archive size={12} />;
+  const kind = getFolderSpecialKind(folder);
+  if (kind === "inbox") return <Inbox size={12} />;
+  if (kind === "sent") return <Send size={12} />;
+  if (kind === "drafts") return <FileText size={12} />;
+  if (kind === "trash") return <Trash2 size={12} />;
+  if (kind === "spam") return <ShieldOff size={12} />;
+  if (kind === "archive") return <Archive size={12} />;
   return null;
 };

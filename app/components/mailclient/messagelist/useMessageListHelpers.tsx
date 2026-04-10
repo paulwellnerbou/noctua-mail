@@ -31,8 +31,8 @@ export function useMessageListHelpers({
   setSearchScope,
   setActiveFolderId
 }: UseMessageListHelpersParams) {
-  const folderNameById = useCallback(
-    (id: string) => folders.find((folder) => folder.id === id)?.name ?? id,
+  const folderById = useCallback(
+    (id: string) => folders.find((folder) => folder.id === id),
     [folders]
   );
 
@@ -83,14 +83,14 @@ export function useMessageListHelpers({
       <FolderBadges
         folderIds={folderIds}
         threadPathById={threadPathById}
-        folderNameById={folderNameById}
+        folderById={folderById}
         onSelectFolder={(folderId) => {
           setSearchScope("folder");
           setActiveFolderId(folderId);
         }}
       />
     ),
-    [folderNameById, setActiveFolderId, setSearchScope, threadPathById]
+    [folderById, setActiveFolderId, setSearchScope, threadPathById]
   );
 
   const getGroupLabel = useCallback(
@@ -104,7 +104,6 @@ export function useMessageListHelpers({
   );
 
   return {
-    folderNameById,
     threadPathById,
     renderSelectIndicators,
     renderUnreadDot,

@@ -26,7 +26,7 @@ export type TopicStat = {
 };
 export type TopicTransferTopic = Pick<
   Topic,
-  "id" | "name" | "color" | "imapKeyword" | "createdAt" | "updatedAt"
+  "id" | "name" | "shortName" | "color" | "imapKeyword" | "createdAt" | "updatedAt"
 >;
 export type TopicTransferThread = {
   threadId: string;
@@ -591,6 +591,7 @@ function normalizeTopicTransferData(input: unknown): NormalizedTopicTransferData
     topics.push({
       id,
       name,
+      shortName: normalizeTopicShortName(row.shortName),
       color: normalizeTopicColor(row.color),
       imapKeyword: buildImapKeyword(id),
       createdAt: normalizeTransferTimestamp(row.createdAt, now),
@@ -733,6 +734,12 @@ function resolveImportedThreadId(
   return { threadId: thread.threadId, resolved: false };
 }
 
+function normalizeTopicShortName(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim();
+  return normalized ? normalized : null;
+}
+
 function rememberTopicLearningForThread(
   db: any,
   accountId: string,
@@ -760,6 +767,7 @@ function rowToTopic(row: any): Topic {
     id: row.id,
     accountId: row.accountId,
     name: row.name,
+    shortName: normalizeTopicShortName(row.shortName),
     color: (row.color || null) as TopicColor | null,
     imapKeyword: row.imapKeyword,
     createdAt: row.createdAt,
@@ -788,18 +796,29 @@ export async function getTopicById(accountId: string, topicId: string): Promise<
 export async function createTopic(
   accountId: string,
   name: string,
-  color: TopicColor | null
+  color: TopicColor | null,
+  shortName?: string | null
 ): Promise<Topic> {
   const id = slugify(name) + "-" + randomUUID().slice(0, 8);
   const imapKeyword = buildImapKeyword(id);
   const now = Date.now();
-  const topic: Topic = { id, accountId, name, color: color ?? null, imapKeyword, createdAt: now, updatedAt: now };
+  const normalizedShortName = normalizeTopicShortName(shortName);
+  const topic: Topic = {
+    id,
+    accountId,
+    name,
+    shortName: normalizedShortName,
+    color: color ?? null,
+    imapKeyword,
+    createdAt: now,
+    updatedAt: now
+  };
 
   await withAccountDb(accountId, (db) => {
     db.prepare(
-      `INSERT INTO topics (id, accountId, name, color, imapKeyword, createdAt, updatedAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`
-    ).run(id, accountId, name, color ?? "", imapKeyword, now, now);
+      `INSERT INTO topics (id, accountId, name, shortName, color, imapKeyword, createdAt, updatedAt)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(id, accountId, name, normalizedShortName, color ?? "", imapKeyword, now, now);
   });
 
   return topic;
@@ -808,7 +827,7 @@ export async function createTopic(
 export async function updateTopic(
   accountId: string,
   topicId: string,
-  changes: { name?: string; color?: TopicColor | null }
+  changes: { name?: string; shortName?: string | null; color?: TopicColor | null }
 ): Promise<Topic | null> {
   return withAccountDb(accountId, (db) => {
     const now = Date.now();
@@ -817,6 +836,10 @@ export async function updateTopic(
     if (changes.name !== undefined) {
       sets.push("name = ?");
       values.push(changes.name);
+    }
+    if (changes.shortName !== undefined) {
+      sets.push("shortName = ?");
+      values.push(normalizeTopicShortName(changes.shortName));
     }
     if (changes.color !== undefined) {
       sets.push("color = ?");
@@ -1013,6 +1036,7 @@ export async function exportTopicTransferData(accountId: string): Promise<TopicT
       return {
         id: topic.id,
         name: topic.name,
+        shortName: topic.shortName,
         color: topic.color,
         imapKeyword: topic.imapKeyword,
         createdAt: topic.createdAt,
@@ -1110,8 +1134,8 @@ export async function importTopicTransferData(
       const clearTopicSignalExclusions = db.prepare(`DELETE FROM topic_signal_exclusions WHERE accountId = ?`);
       const clearTopics = db.prepare(`DELETE FROM topics WHERE accountId = ?`);
       const insertTopic = db.prepare(
-        `INSERT INTO topics (id, accountId, name, color, imapKeyword, createdAt, updatedAt)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO topics (id, accountId, name, shortName, color, imapKeyword, createdAt, updatedAt)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
       );
       const insertThreadTopic = db.prepare(
         `INSERT OR IGNORE INTO thread_topics (threadId, topicId, accountId, assignedAt)
@@ -1133,6 +1157,7 @@ export async function importTopicTransferData(
             topic.id,
             accountId,
             topic.name,
+            normalizeTopicShortName(topic.shortName),
             topic.color ?? "",
             buildImapKeyword(topic.id),
             topic.createdAt,

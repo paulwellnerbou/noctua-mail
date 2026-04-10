@@ -424,7 +424,7 @@ export default function MessageThreadList({
                     <MessageBadge kind="ai-modified" />
                   )}
                   {messageTopicsById?.get(message.threadId)?.map((topic) => (
-                    <TopicBadge key={topic.id} topic={topic} size="1" />
+                    <TopicBadge key={topic.id} topic={topic} size="1" preferShortName />
                   ))}
                 </span>
 

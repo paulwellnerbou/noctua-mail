@@ -254,6 +254,7 @@ const SEARCH_RESULT_TOPIC_SCHEMA = {
   id: z.string(),
   accountId: z.string(),
   name: z.string(),
+  shortName: z.string().nullable().optional(),
   color: z.string().nullable(),
   imapKeyword: z.string(),
   createdAt: z.number(),

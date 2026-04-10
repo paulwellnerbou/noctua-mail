@@ -19,7 +19,7 @@ import {
   needsMessageContentHydration
 } from "@/lib/ui/messageView";
 import { getMessageDateDisplay } from "@/lib/dateFormatting";
-import type { AccountDateFormat, Message, RecipientAlias } from "@/lib/data";
+import type { AccountDateFormat, Folder, Message, RecipientAlias } from "@/lib/data";
 import {
   appendUnreferencedInlineImages,
   replaceInlineImageSources,
@@ -59,7 +59,7 @@ type ThreadMessageCardProps = {
   includeThreadAcrossFolders: boolean;
   activeFolderId: string;
   threadPathById: (folderId: string) => string;
-  folderNameById: (folderId: string) => string;
+  folderById: (folderId: string) => Folder | undefined;
   setSearchScope: React.Dispatch<React.SetStateAction<"folder" | "all">>;
   setActiveFolderId: React.Dispatch<React.SetStateAction<string>>;
   getImapFlagBadges: (message: Message) => ImapFlagBadge[];
@@ -123,7 +123,7 @@ export default function ThreadMessageCard({
   includeThreadAcrossFolders,
   activeFolderId,
   threadPathById,
-  folderNameById,
+  folderById,
   setSearchScope,
   setActiveFolderId,
   getImapFlagBadges,
@@ -567,7 +567,7 @@ export default function ThreadMessageCard({
             >
               <FolderBadges
                 folderIds={folderBadgeIds}
-                folderNameById={folderNameById}
+                folderById={folderById}
                 threadPathById={threadPathById}
                 onSelectFolder={handleFolderBadgeSelect}
               />
@@ -695,7 +695,7 @@ export default function ThreadMessageCard({
                   )}
                   <FolderBadges
                     folderIds={folderBadgeIds}
-                    folderNameById={folderNameById}
+                    folderById={folderById}
                     threadPathById={threadPathById}
                     onSelectFolder={handleFolderBadgeSelect}
                   />

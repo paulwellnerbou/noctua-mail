@@ -25,6 +25,7 @@ export async function handleCreateTopicRequest(
   const body = (await request.json().catch(() => null)) as {
     accountId?: string;
     name?: string;
+    shortName?: string | null;
     color?: string;
   } | null;
 
@@ -41,8 +42,10 @@ export async function handleCreateTopicRequest(
     colorRaw && (TOPIC_COLORS as readonly string[]).includes(colorRaw)
       ? (colorRaw as TopicColor)
       : null;
+  const shortName =
+    typeof body?.shortName === "string" && body.shortName.trim() ? body.shortName.trim() : null;
 
-  const topic = await createTopic(accountId, name, color);
+  const topic = await createTopic(accountId, name, color, shortName);
   return NextResponse.json({ ok: true, topic }, { status: 201 });
 }
 

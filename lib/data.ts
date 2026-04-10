@@ -163,6 +163,7 @@ export type Topic = {
   id: string;
   accountId: string;
   name: string;
+  shortName?: string | null;
   color: TopicColor | null;
   imapKeyword: string;
   createdAt: number;

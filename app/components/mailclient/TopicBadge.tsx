@@ -1,6 +1,7 @@
 import { Badge } from "@radix-ui/themes";
 import type { Topic } from "@/lib/data";
 import { topicColorToScale } from "@/lib/data";
+import { getTopicDisplayName } from "./topicPresentation";
 import badgeStyles from "./message/MessageBadge.module.css";
 
 type TopicBadgeProps = {
@@ -8,9 +9,17 @@ type TopicBadgeProps = {
   showText?: boolean;
   size?: "1" | "2" | "3";
   onClick?: () => void;
+  preferShortName?: boolean;
 };
 
-export default function TopicBadge({ topic, showText = true, size = "1", onClick }: TopicBadgeProps) {
+export default function TopicBadge({
+  topic,
+  showText = true,
+  size = "1",
+  onClick,
+  preferShortName = false
+}: TopicBadgeProps) {
+  const displayName = getTopicDisplayName(topic, { preferShortName });
   return (
     <Badge
       size={size}
@@ -22,7 +31,7 @@ export default function TopicBadge({ topic, showText = true, size = "1", onClick
       style={onClick ? { cursor: "pointer" } : undefined}
       onClick={onClick}
     >
-      {showText ? topic.name : topic.name.slice(0, 1).toUpperCase()}
+      {showText ? displayName : displayName.slice(0, 1).toUpperCase()}
     </Badge>
   );
 }
