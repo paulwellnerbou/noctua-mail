@@ -1,4 +1,5 @@
 type ServerDbModule = typeof import("./db");
+type ResolveThreadingMessage = Parameters<ServerDbModule["resolveThreadingForAccountMessages"]>[1][number];
 
 const SERVER_DB_SPECIFIER = "./db.ts?server-runtime";
 
@@ -53,11 +54,12 @@ export async function listMcpTokens(...args: Parameters<ServerDbModule["listMcpT
   return db.listMcpTokens(...args);
 }
 
-export async function resolveThreadingForAccountMessages(
-  ...args: Parameters<ServerDbModule["resolveThreadingForAccountMessages"]>
+export async function resolveThreadingForAccountMessages<T extends ResolveThreadingMessage>(
+  accountId: string,
+  messages: readonly T[]
 ) {
   const db = await loadServerDb();
-  return db.resolveThreadingForAccountMessages(...args);
+  return db.resolveThreadingForAccountMessages(accountId, messages);
 }
 
 export async function listMessages(...args: Parameters<ServerDbModule["listMessages"]>) {
