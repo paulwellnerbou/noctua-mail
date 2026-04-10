@@ -7,9 +7,11 @@ import dynamic from "next/dynamic";
 import { buildAccountCalendarEventPath } from "@/lib/accountApiPaths";
 import InAppNoticeStack from "@/app/components/mailclient/InAppNoticeStack";
 import { NOTICE_TIMEOUTS } from "@/app/components/mailclient/constants";
+import { dispatchCalendarRemindersUpdatedEvent } from "@/app/components/mailclient/utils/calendarReminders";
 import { useInAppNotices } from "@/app/components/mailclient/useInAppNotices";
 import { dispatchCalendarEventsUpdatedEvent } from "./calendarEventsClient";
 import EventDetailPanel from "./EventDetailPanel";
+import type { CalendarEventDeleteAction } from "./EventDetailView";
 
 const CalendarView = dynamic(() => import("./CalendarView"), { ssr: false });
 
@@ -58,7 +60,10 @@ export default function CalendarEventBrowser({
   };
 
   const handleRestoreDeletedEvent = useCallback(
-    async (event: CalendarEvent) => {
+    async (
+      event: CalendarEvent,
+      scope: CalendarEventDeleteAction["scope"]
+    ) => {
       try {
         const response = await fetch(buildAccountCalendarEventPath(accountId, event.id), {
           method: "PUT",
@@ -76,9 +81,10 @@ export default function CalendarEventBrowser({
           throw new Error(data?.message ?? "Failed to restore event.");
         }
         dispatchCalendarEventsUpdatedEvent();
+        dispatchCalendarRemindersUpdatedEvent();
         pushNotice({
           type: "success",
-          title: "Event restored.",
+          title: scope === "occurrence" ? "Occurrence restored." : "Event restored.",
           description: data.event.summary,
           durationMs: NOTICE_TIMEOUTS.success
         });
@@ -94,15 +100,14 @@ export default function CalendarEventBrowser({
     [accountId, pushNotice]
   );
 
-  const handleEventDeleted = (event: CalendarEvent) => {
+  const handleEventDeleted = ({ event, scope }: CalendarEventDeleteAction) => {
     handleBack();
-    dispatchCalendarEventsUpdatedEvent();
     pushNotice({
       type: "success",
-      title: "Event deleted.",
+      title: scope === "occurrence" ? "Occurrence removed." : "Event deleted.",
       description: event.summary,
       actionLabel: "UNDO",
-      onAction: () => handleRestoreDeletedEvent(event),
+      onAction: () => handleRestoreDeletedEvent(event, scope),
       durationMs: NOTICE_TIMEOUTS.success
     });
   };

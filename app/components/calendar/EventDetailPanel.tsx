@@ -5,7 +5,7 @@ import { ArrowLeft } from "lucide-react";
 import type { CalendarEvent, CalendarReminder } from "@/lib/data";
 import { buildCalendarIcsFilename } from "@/lib/calendarIcs";
 import InviteAttachmentControls from "./InviteAttachmentControls";
-import EventDetailView from "./EventDetailView";
+import EventDetailView, { type CalendarEventDeleteAction } from "./EventDetailView";
 import styles from "./EventDetailPanel.module.css";
 
 type Props = {
@@ -17,7 +17,7 @@ type Props = {
   onOpenMessage?: (messageId: string) => void;
   onFindRelatedByInviteUid?: (uid: string) => void;
   onEventUpdated?: (event: CalendarEvent) => void;
-  onEventDeleted?: (event: CalendarEvent) => void;
+  onEventDeleted?: (action: CalendarEventDeleteAction) => void;
 };
 
 function parseAttendees(json?: string): string[] {
@@ -45,12 +45,21 @@ export default function EventDetailPanel({
   const isCalEvent = kind === "event";
   const calEv = isCalEvent ? (event as CalendarEvent) : null;
   const reminder = !isCalEvent ? (event as CalendarReminder) : null;
+  const selectedOccurrenceStartAtMs =
+    calEv?.recurrenceRule?.trim() && Number.isFinite(occurrenceStartAtMs)
+      ? occurrenceStartAtMs
+      : undefined;
 
   const startMs = calEv
-    ? calEv.startAtMs
+    ? (selectedOccurrenceStartAtMs ?? calEv.startAtMs)
     : (reminder ? (reminder.nextEventStartAtMs ?? reminder.eventStartAtMs) : undefined);
   const endMs = calEv
-    ? calEv.endAtMs
+    ? (() => {
+        if (selectedOccurrenceStartAtMs == null) return calEv.endAtMs;
+        if (!calEv.endAtMs || !calEv.startAtMs) return undefined;
+        const durationMs = calEv.endAtMs - calEv.startAtMs;
+        return durationMs > 0 ? selectedOccurrenceStartAtMs + durationMs : undefined;
+      })()
     : (() => {
         if (!reminder?.eventEndAtMs || !reminder.eventStartAtMs) return undefined;
         const dur = reminder.eventEndAtMs - reminder.eventStartAtMs;
@@ -113,11 +122,12 @@ export default function EventDetailPanel({
               : undefined
           }
           eventId={calEv?.id}
+          eventSnapshot={calEv ?? undefined}
           eventStartAtMs={calEv?.startAtMs ?? reminder?.eventStartAtMs}
           eventEndAtMs={calEv?.endAtMs ?? reminder?.eventEndAtMs}
           onOpenMessage={onOpenMessage}
           onEventUpdated={onEventUpdated}
-          onEventDeleted={calEv && onEventDeleted ? () => onEventDeleted(calEv) : undefined}
+          onEventDeleted={onEventDeleted}
           responseOccurrenceLabel="This occurrence"
         />
       </div>

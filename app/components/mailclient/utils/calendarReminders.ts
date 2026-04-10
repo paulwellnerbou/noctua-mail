@@ -144,7 +144,7 @@ export function getCalendarReminderEndAtMs(reminder: CalendarReminder) {
   return startAtMs + durationMs;
 }
 
-function dispatchReminderUpdateEvent() {
+export function dispatchCalendarRemindersUpdatedEvent() {
   if (typeof window === "undefined") return;
   window.dispatchEvent(new Event(CALENDAR_REMINDERS_UPDATED_EVENT));
 }
@@ -745,7 +745,7 @@ export async function upsertCalendarReminder(
       leadLabel: local.reminder.leadLabel
     }
   });
-  dispatchReminderUpdateEvent();
+  dispatchCalendarRemindersUpdatedEvent();
   try {
     await syncQueuedReminderMutations(accountId);
     const reminders = await fetchRemindersFromServer(accountId);
@@ -782,7 +782,7 @@ export async function autoCreateCalendarReminders(
   }
   const payload = (await res.json()) as Partial<AutomaticCalendarReminderCreationResult>;
   await fetchRemindersFromServer(accountIdValue);
-  dispatchReminderUpdateEvent();
+  dispatchCalendarRemindersUpdatedEvent();
   return {
     scannedEventUids: Number(payload.scannedEventUids ?? 0) || 0,
     created: Number(payload.created ?? 0) || 0,
@@ -805,7 +805,7 @@ export async function deleteCalendarReminder(accountId: string, reminderId: stri
     createdAtMs: Date.now(),
     payload: { reminderId }
   });
-  dispatchReminderUpdateEvent();
+  dispatchCalendarRemindersUpdatedEvent();
   try {
     await syncQueuedReminderMutations(accountId);
     await fetchRemindersFromServer(accountId);
@@ -820,7 +820,7 @@ export async function clearCalendarReminders(accountId: string): Promise<number>
   if (!accountIdValue) return 0;
   writeReminderCache(accountIdValue, []);
   writeReminderQueue(accountIdValue, []);
-  dispatchReminderUpdateEvent();
+  dispatchCalendarRemindersUpdatedEvent();
   try {
     const res = await fetch(buildAccountRemindersPath(accountIdValue), {
       method: "DELETE",
@@ -858,7 +858,7 @@ export async function deleteCalendarReminderForEvent(
       eventStartAtMs: event.eventStartAtMs
     }
   });
-  dispatchReminderUpdateEvent();
+  dispatchCalendarRemindersUpdatedEvent();
   try {
     await syncQueuedReminderMutations(accountId);
     await fetchRemindersFromServer(accountId);

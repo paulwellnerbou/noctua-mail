@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { AlarmClock, AlarmClockPlus, Clock, Mail, MapPin, Repeat, Trash2, User, Users } from "lucide-react";
-import { Badge, Button, Dialog, Flex, Select, Switch, Text } from "@radix-ui/themes";
+import { AlertDialog, Badge, Button, Dialog, Flex, Select, Switch, Text } from "@radix-ui/themes";
 import { buildCalendarRecurrenceSummary, formatCalendarEventDate } from "@/lib/calendar";
 import type { CalendarInviteActionType } from "@/lib/calendarInviteProcessing";
 import { formatAccountDateValue } from "@/lib/dateFormatting";
@@ -28,11 +28,21 @@ import {
   fetchCalendarReminders,
   findActiveCalendarReminderForEvent,
   getCalendarReminderLeadOption,
+  dispatchCalendarRemindersUpdatedEvent,
   upsertCalendarReminder,
   type CalendarReminder
 } from "@/app/components/mailclient/utils/calendarReminders";
+import AlertDialogContent from "@/app/components/mailclient/message/AlertDialogContent";
 import { dispatchCalendarEventsUpdatedEvent } from "./calendarEventsClient";
 import styles from "./EventDetailView.module.css";
+
+export type CalendarEventDeleteScope = "series" | "occurrence";
+
+export type CalendarEventDeleteAction = {
+  event: CalendarEvent;
+  scope: CalendarEventDeleteScope;
+  occurrenceStartAtMs?: number;
+};
 
 export type EventDetailViewProps = {
   accountId: string;
@@ -59,12 +69,13 @@ export type EventDetailViewProps = {
   /** Email specific to this occurrence (e.g. a reschedule or update for just this date). */
   occurrenceMessageId?: string;
   eventId?: string;
+  eventSnapshot?: CalendarEvent;
   /** The canonical event start used for reminder matching (e.g. original series start for recurring events) */
   eventStartAtMs?: number;
   eventEndAtMs?: number;
   onOpenMessage?: (messageId: string) => void;
   onEventUpdated?: (event: CalendarEvent) => void;
-  onEventDeleted?: () => void;
+  onEventDeleted?: (action: CalendarEventDeleteAction) => void;
   onInviteProcessed?: (
     eventUid: string,
     processedState?: {
@@ -131,6 +142,17 @@ function sanitizeDescriptionHtml(value: string) {
 
 function formatTriggerDate(date: Date) {
   return new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(date);
+}
+
+function buildOccurrenceExcludedDates(excludedDates: number[] | undefined, occurrenceStartAtMs: number) {
+  return Array.from(
+    new Set(
+      [...(excludedDates ?? []), occurrenceStartAtMs]
+        .map((value) => Number(value))
+        .filter((value) => Number.isFinite(value) && value > 0)
+        .map((value) => Math.round(value))
+    )
+  ).sort((left, right) => left - right);
 }
 
 const SOURCE_COLORS: Record<string, "blue" | "green" | "indigo"> = {
@@ -210,6 +232,7 @@ export default function EventDetailView({
   messageId,
   occurrenceMessageId,
   eventId,
+  eventSnapshot,
   eventStartAtMs,
   eventEndAtMs,
   onOpenMessage,
@@ -278,6 +301,11 @@ export default function EventDetailView({
   const [sendReply, setSendReply] = useState(replyRequested !== false);
   const [submittingResponse, setSubmittingResponse] = useState(false);
   const [deletingEvent, setDeletingEvent] = useState(false);
+  const [deleteScopeDialogOpen, setDeleteScopeDialogOpen] = useState(false);
+  const resolvedOccurrenceStartAtMs =
+    typeof resolvedStartMs === "number" && Number.isFinite(resolvedStartMs)
+      ? resolvedStartMs
+      : undefined;
 
   useEffect(() => {
     setCurrentMyPartstat(myPartstat);
@@ -453,25 +481,85 @@ export default function EventDetailView({
     }
   };
 
-  const handleDeleteEvent = async () => {
-    if (!accountId || !eventId) return;
+  const performDeleteEvent = async (scope: CalendarEventDeleteScope) => {
+    if (!accountId || !eventId || !eventSnapshot) return;
     setDeletingEvent(true);
+    setDeleteScopeDialogOpen(false);
     try {
+      if (scope === "occurrence") {
+        if (resolvedOccurrenceStartAtMs === undefined) {
+          setReminderNotice("Failed to delete occurrence.");
+          return;
+        }
+        const response = await fetch(buildAccountCalendarEventPath(accountId, eventId), {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            excludedDates: buildOccurrenceExcludedDates(
+              eventSnapshot.excludedDates,
+              resolvedOccurrenceStartAtMs
+            )
+          })
+        });
+        const payload = (await response.json().catch(() => null)) as
+          | {
+              ok?: boolean;
+              event?: CalendarEvent;
+              message?: string;
+            }
+          | null;
+        if (!response.ok || payload?.ok !== true || !payload.event) {
+          setReminderNotice(payload?.message ?? "Failed to delete occurrence.");
+          return;
+        }
+        dispatchCalendarEventsUpdatedEvent();
+        dispatchCalendarRemindersUpdatedEvent();
+        onEventDeleted?.({
+          event: eventSnapshot,
+          scope,
+          occurrenceStartAtMs: resolvedOccurrenceStartAtMs
+        });
+        return;
+      }
+
       const params = new URLSearchParams({ soft: "true" });
-      const res = await fetch(buildAccountCalendarEventPath(accountId, eventId, params), {
+      const response = await fetch(buildAccountCalendarEventPath(accountId, eventId, params), {
         method: "DELETE"
       });
-      if (!res.ok) {
-        setReminderNotice("Failed to delete event.");
+      const payload = (await response.json().catch(() => null)) as
+        | {
+            ok?: boolean;
+            message?: string;
+          }
+        | null;
+      if (!response.ok || payload?.ok !== true) {
+        setReminderNotice(payload?.message ?? "Failed to delete event.");
         return;
       }
       dispatchCalendarEventsUpdatedEvent();
-      onEventDeleted?.();
+      dispatchCalendarRemindersUpdatedEvent();
+      onEventDeleted?.({
+        event: eventSnapshot,
+        scope
+      });
     } catch {
-      setReminderNotice("Failed to delete event.");
+      setReminderNotice(scope === "occurrence" ? "Failed to delete occurrence." : "Failed to delete event.");
     } finally {
       setDeletingEvent(false);
     }
+  };
+
+  const canChooseDeleteScope =
+    Boolean(eventSnapshot) &&
+    Boolean(recurrenceRule?.trim()) &&
+    resolvedOccurrenceStartAtMs !== undefined;
+
+  const handleDeleteEvent = () => {
+    if (canChooseDeleteScope) {
+      setDeleteScopeDialogOpen(true);
+      return;
+    }
+    void performDeleteEvent("series");
   };
 
   const handleRespond = async () => {
@@ -770,7 +858,7 @@ export default function EventDetailView({
               variant="soft"
               color="red"
               disabled={deletingEvent}
-              onClick={() => void handleDeleteEvent()}
+              onClick={handleDeleteEvent}
             >
               <Trash2 size={14} />
               {deletingEvent ? "Removing…" : "Delete event"}
@@ -786,6 +874,54 @@ export default function EventDetailView({
       {reminderNotice && (
         <p className={styles.notice}>{reminderNotice}</p>
       )}
+
+      <AlertDialog.Root
+        open={deleteScopeDialogOpen}
+        onOpenChange={(open) => {
+          if (!deletingEvent) {
+            setDeleteScopeDialogOpen(open);
+          }
+        }}
+      >
+        <AlertDialogContent size="2">
+          <AlertDialog.Title size="3">Delete recurring event?</AlertDialog.Title>
+          <AlertDialog.Description>
+            Choose whether to remove only {responseOccurrenceLabel.toLowerCase()} or delete the whole series.
+          </AlertDialog.Description>
+          <div className={styles.responseSummary}>
+            <Text size="2" weight="medium">{title || "Untitled Event"}</Text>
+            {timeRange && (
+              <Text size="1" color="gray">{responseTargetLabel}</Text>
+            )}
+          </div>
+          <Flex gap="3" mt="4" justify="end" wrap="wrap">
+            <AlertDialog.Cancel>
+              <Button variant="soft" color="gray" disabled={deletingEvent}>
+                Cancel
+              </Button>
+            </AlertDialog.Cancel>
+            <AlertDialog.Action>
+              <Button
+                variant="soft"
+                color="gray"
+                disabled={deletingEvent}
+                onClick={() => void performDeleteEvent("occurrence")}
+              >
+                {responseOccurrenceLabel}
+              </Button>
+            </AlertDialog.Action>
+            <AlertDialog.Action>
+              <Button
+                color="red"
+                disabled={deletingEvent}
+                onClick={() => void performDeleteEvent("series")}
+              >
+                Whole series
+              </Button>
+            </AlertDialog.Action>
+          </Flex>
+        </AlertDialogContent>
+      </AlertDialog.Root>
 
       <Dialog.Root
         open={responseDialogOpen}

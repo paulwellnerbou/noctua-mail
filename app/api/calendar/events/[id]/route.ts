@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import {
   getCalendarEventById,
+  rescheduleCalendarRemindersByEventUid,
   upsertCalendarEvent
 } from "@/lib/db";
 import { requireAccountContext } from "@/app/api/_helpers/accountContext";
@@ -57,7 +58,8 @@ export async function handleUpdateCalendarEventRequest(
   }
 
   const summary = String(body?.summary ?? existing.summary).trim();
-  const startAtMs = toFiniteNumber(body?.startAtMs);
+  const startAtMs =
+    body?.startAtMs !== undefined ? toFiniteNumber(body.startAtMs) : existing.startAtMs;
   if (!summary) {
     return NextResponse.json({ ok: false, message: "Missing summary" }, { status: 400 });
   }
@@ -99,6 +101,20 @@ export async function handleUpdateCalendarEventRequest(
 
   try {
     await upsertCalendarEvent(accountId, updated);
+    if (updated.eventUid.trim()) {
+      await rescheduleCalendarRemindersByEventUid(accountId, updated.eventUid, {
+        eventTitle: updated.summary,
+        eventLocation: updated.location,
+        eventDescription: updated.description,
+        startTimezone: updated.startTimezone,
+        recurrenceRule: updated.recurrenceRule,
+        recurrenceDates: updated.recurrenceDates,
+        excludedDates: updated.excludedDates,
+        eventStartAtMs: updated.startAtMs,
+        eventEndAtMs: updated.endAtMs,
+        messageId: updated.messageId
+      });
+    }
     return NextResponse.json({ ok: true, event: updated });
   } catch (err) {
     console.error("[calendar/events/[id]] PUT error:", err);
