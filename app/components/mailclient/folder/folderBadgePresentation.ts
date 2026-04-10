@@ -15,3 +15,14 @@ export function getFolderBadgeKind(
 ): FolderSpecialKind | "folder" {
   return getFolderSpecialKind(folder) ?? "folder";
 }
+
+export function getFolderCountTitle(
+  folderPath: string,
+  totalCount: number,
+  unreadCount: number
+): string {
+  const normalizedTotalCount = Math.max(0, totalCount);
+  const normalizedUnreadCount = Math.max(0, unreadCount);
+
+  return `${folderPath} (${normalizedTotalCount} Messages, ${normalizedUnreadCount} Unread)`;
+}

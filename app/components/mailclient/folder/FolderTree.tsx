@@ -16,7 +16,6 @@ type FolderTreeProps = {
     deletingFolderIds: Set<string>;
     draggingMessageIds: Set<string>;
     dragOverFolderId: string | null;
-    messageCountByFolder: Map<string, number>;
   };
   actions: {
     setActiveFolderId: React.Dispatch<React.SetStateAction<string>>;
@@ -49,8 +48,7 @@ export default function FolderTree({ state, actions }: FolderTreeProps) {
     syncingFolders,
     deletingFolderIds,
     draggingMessageIds,
-    dragOverFolderId,
-    messageCountByFolder
+    dragOverFolderId
   } = state;
 
   const folderQueryText = folderQuery.trim().toLowerCase();
@@ -92,8 +90,7 @@ export default function FolderTree({ state, actions }: FolderTreeProps) {
             syncingFolders,
             deletingFolderIds,
             draggingMessageIds,
-            dragOverFolderId,
-            messageCountByFolder
+            dragOverFolderId
           }}
           actions={actions}
           helpers={{ hasFolderMatch, folderPathLabel }}

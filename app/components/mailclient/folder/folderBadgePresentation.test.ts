@@ -1,5 +1,9 @@
 import { describe, expect, it } from "bun:test";
-import { getFolderBadgeKind, getFolderBadgeLabel } from "./folderBadgePresentation";
+import {
+  getFolderBadgeKind,
+  getFolderBadgeLabel,
+  getFolderCountTitle
+} from "./folderBadgePresentation";
 
 describe("folder badge presentation", () => {
   it("renders special folders as icon-only badges", () => {
@@ -17,5 +21,13 @@ describe("folder badge presentation", () => {
 
     expect(getFolderBadgeKind(folder)).toBe("folder");
     expect(getFolderBadgeLabel(folder, folder.name)).toBe("Ukulelen-Stammtisch FFM");
+  });
+
+  it("formats folder count titles from total and unread counts", () => {
+    expect(getFolderCountTitle("INBOX", 933, 556)).toBe("INBOX (933 Messages, 556 Unread)");
+  });
+
+  it("clamps negative counts to zero", () => {
+    expect(getFolderCountTitle("Drafts", -3, -1)).toBe("Drafts (0 Messages, 0 Unread)");
   });
 });

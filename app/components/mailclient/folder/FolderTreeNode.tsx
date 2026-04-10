@@ -6,6 +6,7 @@ import { CaretRightIcon } from "@radix-ui/react-icons";
 import { badgeColors } from "@/lib/ui/badgeColors";
 import type { Folder } from "@/lib/data";
 import type { SyncTriggerOptions } from "../types";
+import { getFolderCountTitle } from "./folderBadgePresentation";
 import styles from "./FolderTree.module.css";
 
 type FolderTreeNodeProps = {
@@ -23,7 +24,6 @@ type FolderTreeNodeProps = {
     deletingFolderIds: Set<string>;
     draggingMessageIds: Set<string>;
     dragOverFolderId: string | null;
-    messageCountByFolder: Map<string, number>;
   };
   actions: {
     setActiveFolderId: React.Dispatch<React.SetStateAction<string>>;
@@ -65,8 +65,7 @@ export default function FolderTreeNode({
     syncingFolders,
     deletingFolderIds,
     draggingMessageIds,
-    dragOverFolderId,
-    messageCountByFolder
+    dragOverFolderId
   } = state;
   const {
     setActiveFolderId,
@@ -95,9 +94,7 @@ export default function FolderTreeNode({
     : true;
   const childNodes = folderTree.get(folder.id) ?? [];
   const fullPath = folderPathLabel(folder);
-  const totalCount = messageCountByFolder.get(folder.id) ?? folder.count ?? 0;
-  const unreadCount = folder.unreadCount ?? 0;
-  const folderTitle = `${fullPath} (${totalCount} Messages, ${unreadCount} Unread)`;
+  const folderTitle = getFolderCountTitle(fullPath, folder.count ?? 0, folder.unreadCount ?? 0);
   const isDeleting = deletingFolderIds.has(folder.id);
   const isSyncingFolder = syncingFolders.has(folder.id);
 
@@ -191,6 +188,7 @@ export default function FolderTreeNode({
             color={badgeColors.unread}
             className={styles.treeUnreadBadge}
             aria-label={`${folder.unreadCount} unread`}
+            title={folderTitle}
           >
             {folder.unreadCount}
           </Badge>

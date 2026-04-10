@@ -5451,8 +5451,7 @@ export default function MailClient({
               syncingFolders,
               deletingFolderIds,
               draggingMessageIds,
-              dragOverFolderId,
-              messageCountByFolder
+              dragOverFolderId
             }}
             actions={{
               setActiveFolderId,
