@@ -1,3 +1,4 @@
+import { randomUUID } from "crypto";
 import { beforeAll, describe, expect, test } from "bun:test";
 import { dbModulePromise } from "./testDbHarness";
 import type { Account, Folder, Message } from "./data";
@@ -71,6 +72,10 @@ function buildMessage(params: {
   };
 }
 
+function uniqueAccountId(prefix: string) {
+  return `${prefix}-${randomUUID()}`;
+}
+
 describe("topic transfer", () => {
   beforeAll(async () => {
     const { upsertAccount } = await dbModulePromise;
@@ -78,8 +83,8 @@ describe("topic transfer", () => {
   });
 
   test("imports topic assignments onto the local thread resolved by exported message ids", async () => {
-    const sourceAccountId = "acc-topics-source";
-    const targetAccountId = "acc-topics-target";
+    const sourceAccountId = uniqueAccountId("acc-topics-source");
+    const targetAccountId = uniqueAccountId("acc-topics-target");
     const sourceFolder = buildFolder(sourceAccountId);
     const targetFolder = buildFolder(targetAccountId);
     const exportedMessageId = "<topic-export@example.com>";
@@ -140,7 +145,7 @@ describe("topic transfer", () => {
   });
 
   test("replaces existing topics data and preserves unresolved imported assignments", async () => {
-    const accountId = "acc-topics-unresolved";
+    const accountId = uniqueAccountId("acc-topics-unresolved");
     const { upsertAccount } = await dbModulePromise;
 
     await upsertAccount(buildAccount(accountId));
@@ -181,8 +186,8 @@ describe("topic transfer", () => {
   });
 
   test("exports and imports retained learning data independently of local messages", async () => {
-    const sourceAccountId = "acc-topics-learning-source";
-    const targetAccountId = "acc-topics-learning-target";
+    const sourceAccountId = uniqueAccountId("acc-topics-learning-source");
+    const targetAccountId = uniqueAccountId("acc-topics-learning-target");
     const sourceFolder = buildFolder(sourceAccountId);
     const { saveFoldersForAccount, upsertAccount, upsertMessages } = await dbModulePromise;
 
@@ -242,8 +247,8 @@ describe("topic transfer", () => {
   });
 
   test("persists topic short names through update and transfer", async () => {
-    const sourceAccountId = "acc-topics-short-source";
-    const targetAccountId = "acc-topics-short-target";
+    const sourceAccountId = uniqueAccountId("acc-topics-short-source");
+    const targetAccountId = uniqueAccountId("acc-topics-short-target");
     const { upsertAccount } = await dbModulePromise;
 
     await upsertAccount(buildAccount(sourceAccountId));

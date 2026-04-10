@@ -1,3 +1,4 @@
+import { randomUUID } from "crypto";
 import { beforeEach, describe, expect, mock, test } from "bun:test";
 import type { Account, Folder, Message } from "@/lib/data";
 import {
@@ -58,19 +59,19 @@ const syncImapMessage = mock(async (account: Account, mailboxPath: string, uid: 
     attachments: []
   } satisfies Message;
 });
-const actualImap = await import("@/lib/mail/imap");
-const actualSmtp = await import("@/lib/mail/smtp");
+const actualServerImap = await import("@/lib/serverImap");
+const actualServerSmtp = await import("@/lib/serverSmtp");
 
-mock.module("@/lib/mail/imap", () => ({
-  ...actualImap,
+mock.module("@/lib/serverImap", () => ({
+  ...actualServerImap,
   appendImapMessage,
   deleteImapMessage,
   syncImapMessage,
   updateImapFlags
 }));
 
-mock.module("@/lib/mail/smtp", () => ({
-  ...actualSmtp,
+mock.module("@/lib/serverSmtp", () => ({
+  ...actualServerSmtp,
   buildRawMessage
 }));
 
@@ -179,6 +180,10 @@ function buildSession(accountId: string): SessionData {
     imap: { user: "owner@example.test", pass: "secret-imap" },
     smtp: { user: "owner@example.test", pass: "secret-smtp" }
   };
+}
+
+function uniqueAccountId(prefix: string) {
+  return `${prefix}-${randomUUID()}`;
 }
 
 async function createStoredToken(params: {
@@ -354,7 +359,7 @@ describe("/api/mcp", () => {
   });
 
   test("rejects malformed, wrong-prefix, deleted, and expired tokens", async () => {
-    const accountId = "acc-mcp-auth-failures";
+    const accountId = uniqueAccountId("acc-mcp-auth-failures");
     const { account } = await seedMailbox(accountId);
 
     const validToken = await createStoredToken({
@@ -395,7 +400,7 @@ describe("/api/mcp", () => {
   });
 
   test("handles initialize, tools/list, search, and flag/unflag flows", async () => {
-    const accountId = "acc-mcp-main-flow";
+    const accountId = uniqueAccountId("acc-mcp-main-flow");
     const { account, alphaTopic, betaTopic, folder } = await seedMailbox(accountId);
     const rawToken = await createStoredToken({
       account,
@@ -932,7 +937,7 @@ describe("/api/mcp", () => {
   });
 
   test("creates new, reply, and forward drafts via MCP", async () => {
-    const accountId = "acc-mcp-drafts";
+    const accountId = uniqueAccountId("acc-mcp-drafts");
     const { account } = await seedMailbox(accountId);
     const rawToken = await createStoredToken({
       account,
@@ -1041,7 +1046,7 @@ describe("/api/mcp", () => {
   });
 
   test("returns a clear error for ambiguous topic selectors", async () => {
-    const accountId = "acc-mcp-topic-ambiguity";
+    const accountId = uniqueAccountId("acc-mcp-topic-ambiguity");
     const { account } = await seedMailbox(accountId);
     await createTopic(accountId, "Shared", "blue");
     await createTopic(accountId, "shared", "red");

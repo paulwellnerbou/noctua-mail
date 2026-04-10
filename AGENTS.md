@@ -18,6 +18,8 @@ VERY IMPORTANT:
 - `bun run start` serves the production build.
 - `bun run lint` runs Next.js/ESLint checks.
 - `bun test` runs all tests.
+- `bun run test:ci` runs the exact primary CI test command.
+- `bun run test:stress` runs the randomized CI stress pass to catch order-dependent test failures.
 - `bun test app/components/mailclient/messagelist/listBehavior.test.ts` runs the message list behavior regression tests only.
 
 This project uses bun:sqlite for database access, so bun is required for running and building.
@@ -35,3 +37,6 @@ This project uses bun:sqlite for database access, so bun is required for running
 - Always ask for clarification if you are unsure about something.
 - Always search for already existing code and patterns to reuse, strive to keep the codebase consistent and reduce duplication.
 - Never use real personal data in code, fixtures, screenshots, or tests. Use clearly synthetic placeholders such as `example.com`, `example.test`, or `example.invalid`.
+- Avoid `mock.module()` on shared modules such as `@/lib/db` when a narrower seam exists. Prefer dedicated wrappers or explicit dependency injection for tests.
+- When production code imports a wrapper such as `@/lib/serverDb`, tests must mock that wrapper path instead of assuming mocks on the underlying module will be observed.
+- Before considering CI-related test fixes complete, run the repo scripts that mirror CI: `bun run test:ci` and, for mock-sensitive or flaky areas, `bun run test:stress`.

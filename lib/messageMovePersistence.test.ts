@@ -1,3 +1,4 @@
+import { randomUUID } from "crypto";
 import { beforeAll, describe, expect, test } from "bun:test";
 import type { Account, Folder, Message } from "./data";
 import { dbModulePromise } from "./testDbHarness";
@@ -61,6 +62,10 @@ function buildMessage(params: {
   };
 }
 
+function uniqueAccountId(prefix: string) {
+  return `${prefix}-${randomUUID()}`;
+}
+
 describe("message move persistence", () => {
   beforeAll(async () => {
     const { upsertAccount } = await dbModulePromise;
@@ -68,7 +73,7 @@ describe("message move persistence", () => {
   });
 
   test("stageMessageMoves persists pending move metadata", async () => {
-    const accountId = "acc-move-persistence-stage";
+    const accountId = uniqueAccountId("acc-move-persistence-stage");
     const sourceFolder = buildFolder(accountId, "Source");
     const targetFolder = buildFolder(accountId, "Target");
     const message = buildMessage({
@@ -139,7 +144,7 @@ describe("message move persistence", () => {
   });
 
   test("updateMessageFolder clears pending move metadata after a successful move", async () => {
-    const accountId = "acc-move-persistence-success";
+    const accountId = uniqueAccountId("acc-move-persistence-success");
     const sourceFolder = buildFolder(accountId, "Source");
     const targetFolder = buildFolder(accountId, "Target");
     const message = buildMessage({
@@ -196,7 +201,7 @@ describe("message move persistence", () => {
   });
 
   test("updateMessageFolder restores the source folder on rollback", async () => {
-    const accountId = "acc-move-persistence-rollback";
+    const accountId = uniqueAccountId("acc-move-persistence-rollback");
     const sourceFolder = buildFolder(accountId, "Source");
     const targetFolder = buildFolder(accountId, "Target");
     const message = buildMessage({

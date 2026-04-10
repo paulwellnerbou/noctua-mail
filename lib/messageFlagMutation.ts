@@ -1,7 +1,7 @@
 import type { Account, Message } from "@/lib/data";
 import { updateMessageFlags } from "@/lib/serverDb";
-import { updateImapFlags } from "@/lib/mail/imap";
 import { preserveLocalOnlyMessageFlags } from "@/lib/messageFlags";
+import { updateImapFlags } from "@/lib/serverImap";
 
 export const MESSAGE_FLAG_MAP: Record<string, string> = {
   seen: "\\Seen",

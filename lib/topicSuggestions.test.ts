@@ -1,3 +1,4 @@
+import { randomUUID } from "crypto";
 import { describe, expect, test } from "bun:test";
 import { dbModulePromise } from "./testDbHarness";
 import type { Account, Folder, Message } from "./data";
@@ -92,9 +93,13 @@ function buildMessage(params: {
   };
 }
 
+function uniqueAccountId(prefix: string) {
+  return `${prefix}-${randomUUID()}`;
+}
+
 describe("topic suggestions", () => {
   test("prefers a strong multi-signal match over a more common weak match", async () => {
-    const accountId = "acc-topic-suggestions";
+    const accountId = uniqueAccountId("acc-topic-suggestions");
     const folder = buildFolder(accountId);
     const { saveFoldersForAccount, upsertAccount, upsertMessages } = await dbModulePromise;
 
@@ -176,7 +181,7 @@ describe("topic suggestions", () => {
   });
 
   test("prefers an exact list-id match over more common shared sender history", async () => {
-    const accountId = "acc-topic-suggestions-gitlab-list-id";
+    const accountId = uniqueAccountId("acc-topic-suggestions-gitlab-list-id");
     const folder = buildFolder(accountId);
     const { saveFoldersForAccount, upsertAccount, upsertMessages } = await dbModulePromise;
 
@@ -271,7 +276,7 @@ describe("topic suggestions", () => {
   });
 
   test("uses match count as a tiebreak when best-thread scores are equal", async () => {
-    const accountId = "acc-topic-suggestions-best-score-tie";
+    const accountId = uniqueAccountId("acc-topic-suggestions-best-score-tie");
     const folder = buildFolder(accountId);
     const { saveFoldersForAccount, upsertAccount, upsertMessages } = await dbModulePromise;
 
@@ -349,7 +354,7 @@ describe("topic suggestions", () => {
   });
 
   test("ignores the account owner's own email as a recipient suggestion signal", async () => {
-    const accountId = "acc-topic-suggestions-own-recipient";
+    const accountId = uniqueAccountId("acc-topic-suggestions-own-recipient");
     const folder = buildFolder(accountId);
     const { saveFoldersForAccount, upsertAccount, upsertMessages } = await dbModulePromise;
 
@@ -402,7 +407,7 @@ describe("topic suggestions", () => {
   });
 
   test("ignores the account owner's own email as a sender suggestion signal for threads", async () => {
-    const accountId = "acc-topic-suggestions-own-sender";
+    const accountId = uniqueAccountId("acc-topic-suggestions-own-sender");
     const folder = buildFolder(accountId);
     const { saveFoldersForAccount, upsertAccount, upsertMessages } = await dbModulePromise;
 
@@ -451,7 +456,7 @@ describe("topic suggestions", () => {
   });
 
   test("uses Jira project keys to distinguish topics with otherwise identical sender signals", async () => {
-    const accountId = "acc-topic-suggestions-jira-message";
+    const accountId = uniqueAccountId("acc-topic-suggestions-jira-message");
     const folder = buildFolder(accountId);
     const { saveFoldersForAccount, upsertAccount, upsertMessages } = await dbModulePromise;
 
@@ -511,7 +516,7 @@ describe("topic suggestions", () => {
   });
 
   test("derives suggestion signals from stored thread messages", async () => {
-    const accountId = "acc-topic-suggestions-thread-signals";
+    const accountId = uniqueAccountId("acc-topic-suggestions-thread-signals");
     const folder = buildFolder(accountId);
     const { saveFoldersForAccount, upsertAccount, upsertMessages } = await dbModulePromise;
 
@@ -564,7 +569,7 @@ describe("topic suggestions", () => {
   });
 
   test("ignores free-mail sender signals for topic suggestions", async () => {
-    const accountId = "acc-topic-suggestions-free-mail";
+    const accountId = uniqueAccountId("acc-topic-suggestions-free-mail");
     const folder = buildFolder(accountId);
     const { saveFoldersForAccount, upsertAccount, upsertMessages } = await dbModulePromise;
 
@@ -618,7 +623,7 @@ describe("topic suggestions", () => {
   });
 
   test("derives Jira project keys from stored thread messages", async () => {
-    const accountId = "acc-topic-suggestions-thread-jira";
+    const accountId = uniqueAccountId("acc-topic-suggestions-thread-jira");
     const folder = buildFolder(accountId);
     const { saveFoldersForAccount, upsertAccount, upsertMessages } = await dbModulePromise;
 
@@ -687,7 +692,7 @@ describe("topic suggestions", () => {
   });
 
   test("explains why a thread topic suggestion was made", async () => {
-    const accountId = "acc-topic-suggestions-thread-explain";
+    const accountId = uniqueAccountId("acc-topic-suggestions-thread-explain");
     const folder = buildFolder(accountId);
     const { saveFoldersForAccount, upsertAccount, upsertMessages } = await dbModulePromise;
 
@@ -765,7 +770,7 @@ describe("topic suggestions", () => {
   });
 
   test("reports the best matching thread score in explanations while keeping all matches", async () => {
-    const accountId = "acc-topic-suggestions-thread-explain-best-match";
+    const accountId = uniqueAccountId("acc-topic-suggestions-thread-explain-best-match");
     const folder = buildFolder(accountId);
     const { saveFoldersForAccount, upsertAccount, upsertMessages } = await dbModulePromise;
 
@@ -855,7 +860,7 @@ describe("topic suggestions", () => {
   });
 
   test("batches thread suggestions and only returns matches for topic-less threads", async () => {
-    const accountId = "acc-topic-suggestions-thread-batch";
+    const accountId = uniqueAccountId("acc-topic-suggestions-thread-batch");
     const folder = buildFolder(accountId);
     const { saveFoldersForAccount, upsertAccount, upsertMessages } = await dbModulePromise;
 
@@ -925,7 +930,7 @@ describe("topic suggestions", () => {
   });
 
   test("refreshes persisted thread signals when new messages add learning signals to an existing topic thread", async () => {
-    const accountId = "acc-topic-suggestions-late-signal";
+    const accountId = uniqueAccountId("acc-topic-suggestions-late-signal");
     const folder = buildFolder(accountId);
     const { saveFoldersForAccount, upsertAccount, upsertMessages } = await dbModulePromise;
 
@@ -1000,7 +1005,7 @@ describe("topic suggestions", () => {
   });
 
   test("keeps an excluded learning signal removed across rebuilds", async () => {
-    const accountId = "acc-topic-suggestions-excluded-signal";
+    const accountId = uniqueAccountId("acc-topic-suggestions-excluded-signal");
     const folder = buildFolder(accountId);
     const { recomputeThreadsForAccount, saveFoldersForAccount, upsertAccount, upsertMessages } =
       await dbModulePromise;
@@ -1087,7 +1092,7 @@ describe("topic suggestions", () => {
   });
 
   test("prunes orphaned thread-topic associations while retaining learned signals after the last message is deleted", async () => {
-    const accountId = "acc-topic-orphan-prune";
+    const accountId = uniqueAccountId("acc-topic-orphan-prune");
     const folder = buildFolder(accountId);
     const { deleteMessageById, saveFoldersForAccount, upsertAccount, upsertMessages } = await dbModulePromise;
 
@@ -1142,7 +1147,7 @@ describe("topic suggestions", () => {
   });
 
   test("reports all learned signal types in topic stats", async () => {
-    const accountId = "acc-topic-stats-all-signals";
+    const accountId = uniqueAccountId("acc-topic-stats-all-signals");
     const folder = buildFolder(accountId);
     const { saveFoldersForAccount, upsertAccount, upsertMessages } = await dbModulePromise;
 
@@ -1220,7 +1225,7 @@ describe("topic suggestions", () => {
   });
 
   test("returns only Inbox threads without topics for the active topic, ordered by score then recency", async () => {
-    const accountId = "acc-topic-message-suggestions";
+    const accountId = uniqueAccountId("acc-topic-message-suggestions");
     const inboxFolder = buildFolder(accountId);
     const archiveFolder = buildArchiveFolder(accountId);
     const { saveFoldersForAccount, upsertAccount, upsertMessages } = await dbModulePromise;

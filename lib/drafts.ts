@@ -7,10 +7,10 @@ import {
   getMessageById,
   resolveThreadingForAccountMessages,
   upsertMessages
-} from "@/lib/db";
-import { appendImapMessage, deleteImapMessage, syncImapMessage } from "@/lib/mail/imap";
+} from "./serverDb";
 import { parseComposeAttachments, resolveComposeHtml } from "@/lib/mail/composePayload";
-import { buildRawMessage } from "@/lib/mail/smtp";
+import { appendImapMessage, deleteImapMessage, syncImapMessage } from "./serverImap";
+import { buildRawMessage } from "./serverSmtp";
 import { sanitizeSyncedMessage } from "@/lib/mail/syncMessageSanitizer";
 import { folderMailboxPath } from "@/lib/mailboxPaths";
 import { splitRecipientEntries } from "@/lib/recipientLists";

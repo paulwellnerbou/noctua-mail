@@ -54,18 +54,18 @@ const syncImapMessage = mock(async (account: Account, mailboxPath: string, uid: 
   } satisfies Message;
 });
 
-const actualImap = await import("@/lib/mail/imap");
-const actualSmtp = await import("@/lib/mail/smtp");
+const actualServerImap = await import("@/lib/serverImap");
+const actualServerSmtp = await import("@/lib/serverSmtp");
 
-mock.module("@/lib/mail/imap", () => ({
-  ...actualImap,
+mock.module("@/lib/serverImap", () => ({
+  ...actualServerImap,
   appendImapMessage,
   deleteImapMessage,
   syncImapMessage
 }));
 
-mock.module("@/lib/mail/smtp", () => ({
-  ...actualSmtp,
+mock.module("@/lib/serverSmtp", () => ({
+  ...actualServerSmtp,
   buildRawMessage
 }));
 

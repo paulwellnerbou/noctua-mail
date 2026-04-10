@@ -1,3 +1,4 @@
+import { randomUUID } from "crypto";
 import { describe, expect, test } from "bun:test";
 import type { Account } from "@/lib/data";
 import {
@@ -6,10 +7,11 @@ import {
   unsealMcpSession,
   type SessionData
 } from "@/lib/auth";
-import { shouldIncludeSessionCredentials } from "@/lib/secret";
 import { dbModulePromise } from "@/lib/testDbHarness";
+import { shouldIncludeSessionCredentials } from "@/lib/secret";
 
 const { getMcpTokenByHash, listMcpTokens, upsertAccount } = await dbModulePromise;
+
 const { DELETE } = await import("./[tokenId]/route");
 const { GET, POST } = await import("./route");
 
@@ -55,9 +57,13 @@ function buildCookieHeader(session: SessionData) {
   return `noctua_session=${encodeURIComponent(sealSession(session))}`;
 }
 
+function uniqueAccountId(prefix: string) {
+  return `${prefix}-${randomUUID()}`;
+}
+
 describe("account MCP token routes", () => {
   test("creates, lists, stores, and deletes hashed MCP tokens", async () => {
-    const accountId = "acc-mcp-token-crud";
+    const accountId = uniqueAccountId("acc-mcp-token-crud");
     await upsertAccount(buildAccount(accountId));
 
     const expiresAt = Date.now() + 90 * 24 * 60 * 60 * 1000;
@@ -139,7 +145,7 @@ describe("account MCP token routes", () => {
       return;
     }
 
-    const accountId = "acc-mcp-no-creds";
+    const accountId = uniqueAccountId("acc-mcp-no-creds");
     await upsertAccount(buildAccount(accountId));
 
     const response = await POST(

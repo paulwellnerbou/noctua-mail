@@ -28,6 +28,11 @@ export async function getFolders(...args: Parameters<ServerDbModule["getFolders"
   return db.getFolders(...args);
 }
 
+export async function deleteMessageById(...args: Parameters<ServerDbModule["deleteMessageById"]>) {
+  const db = await loadServerDb();
+  return db.deleteMessageById(...args);
+}
+
 export async function getMcpTokenByHash(...args: Parameters<ServerDbModule["getMcpTokenByHash"]>) {
   const db = await loadServerDb();
   return db.getMcpTokenByHash(...args);
@@ -46,6 +51,13 @@ export async function insertMcpToken(...args: Parameters<ServerDbModule["insertM
 export async function listMcpTokens(...args: Parameters<ServerDbModule["listMcpTokens"]>) {
   const db = await loadServerDb();
   return db.listMcpTokens(...args);
+}
+
+export async function resolveThreadingForAccountMessages(
+  ...args: Parameters<ServerDbModule["resolveThreadingForAccountMessages"]>
+) {
+  const db = await loadServerDb();
+  return db.resolveThreadingForAccountMessages(...args);
 }
 
 export async function listMessages(...args: Parameters<ServerDbModule["listMessages"]>) {
@@ -84,4 +96,9 @@ export async function updateMessageFlags(
 ) {
   const db = await loadServerDb();
   return db.updateMessageFlags(...args);
+}
+
+export async function upsertMessages(...args: Parameters<ServerDbModule["upsertMessages"]>) {
+  const db = await loadServerDb();
+  return db.upsertMessages(...args);
 }

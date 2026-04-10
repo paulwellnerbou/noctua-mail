@@ -1,3 +1,4 @@
+import { randomUUID } from "crypto";
 import { beforeAll, describe, expect, test } from "bun:test";
 import type { Account, Folder, Message } from "./data";
 import { dbModulePromise } from "./testDbHarness";
@@ -71,14 +72,18 @@ function buildMessage(params: {
   };
 }
 
+function uniqueAccountId(prefix: string) {
+  return `${prefix}-${randomUUID()}`;
+}
+
 describe("recipient aliases", () => {
   beforeAll(async () => {
     const { upsertAccount } = await dbModulePromise;
-    await upsertAccount(buildAccount("acc-recipient-aliases-bootstrap"));
+    await upsertAccount(buildAccount(uniqueAccountId("acc-recipient-aliases-bootstrap")));
   });
 
   test("creates, updates, lists, and deletes recipient aliases", async () => {
-    const accountId = "acc-recipient-alias-crud";
+    const accountId = uniqueAccountId("acc-recipient-alias-crud");
     const { upsertAccount } = await dbModulePromise;
     await upsertAccount(buildAccount(accountId));
 
@@ -113,7 +118,7 @@ describe("recipient aliases", () => {
   });
 
   test("rejects duplicate alias names case-insensitively per account", async () => {
-    const accountId = "acc-recipient-alias-duplicate";
+    const accountId = uniqueAccountId("acc-recipient-alias-duplicate");
     const { upsertAccount } = await dbModulePromise;
     await upsertAccount(buildAccount(accountId));
 
@@ -125,7 +130,7 @@ describe("recipient aliases", () => {
   });
 
   test("merges aliases ahead of historical recipient suggestions", async () => {
-    const accountId = "acc-recipient-alias-autocomplete";
+    const accountId = uniqueAccountId("acc-recipient-alias-autocomplete");
     const folder = buildFolder(accountId);
     const { saveFoldersForAccount, upsertAccount, upsertMessages } = await dbModulePromise;
     await upsertAccount(buildAccount(accountId));
@@ -162,7 +167,7 @@ describe("recipient aliases", () => {
   });
 
   test("filters aliases by name and recipient text", async () => {
-    const accountId = "acc-recipient-alias-filter";
+    const accountId = uniqueAccountId("acc-recipient-alias-filter");
     const { upsertAccount } = await dbModulePromise;
     await upsertAccount(buildAccount(accountId));
     await createRecipientAlias(
@@ -181,8 +186,8 @@ describe("recipient aliases", () => {
   });
 
   test("exports aliases and imports them by replacing the target account aliases", async () => {
-    const sourceAccountId = "acc-recipient-alias-transfer-source";
-    const targetAccountId = "acc-recipient-alias-transfer-target";
+    const sourceAccountId = uniqueAccountId("acc-recipient-alias-transfer-source");
+    const targetAccountId = uniqueAccountId("acc-recipient-alias-transfer-target");
     const { upsertAccount } = await dbModulePromise;
     await upsertAccount(buildAccount(sourceAccountId));
     await upsertAccount(buildAccount(targetAccountId));
@@ -222,7 +227,7 @@ describe("recipient aliases", () => {
   });
 
   test("rejects imported alias files with duplicate alias names", async () => {
-    const accountId = "acc-recipient-alias-transfer-invalid";
+    const accountId = uniqueAccountId("acc-recipient-alias-transfer-invalid");
     const { upsertAccount } = await dbModulePromise;
     await upsertAccount(buildAccount(accountId));
 

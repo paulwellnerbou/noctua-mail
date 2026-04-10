@@ -11,12 +11,16 @@
   "bugs": {
     "url": "https://github.com/paulwellnerbou/noctua-mail/issues"
   },
+  "packageManager": "bun@1.3.12",
   "type": "module",
   "scripts": {
     "dev": "ENV_FILE=${ENV_FILE:-.env.local} bun --bun build-scripts/generateRuntimeConfig.ts && bun --env-file=${ENV_FILE:-.env.local} --bun next dev",
     "build": "bun --bun build-scripts/generateBuildVersion.ts && bun --bun next build",
     "start": "ENV_FILE=${ENV_FILE:-.env.local} bun --bun build-scripts/generateRuntimeConfig.ts && bun --env-file=${ENV_FILE:-.env.local} --bun next start",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "test": "bun test",
+    "test:ci": "bun test",
+    "test:stress": "bun test --randomize --seed=1337 --rerun-each=3"
   },
   "dependencies": {
     "@fullcalendar/core": "^6.1.20",
