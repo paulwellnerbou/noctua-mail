@@ -1,8 +1,8 @@
 import { useCallback } from "react";
 import { buildAccountAttachmentPath } from "@/lib/accountApiPaths";
 import type { Message, Attachment } from "@/lib/data";
+import { replaceInlineImageSources } from "@/lib/html";
 import { createComposeAttachment } from "@/lib/mail/composeAttachment";
-import { isMeaningfulNonInlineAttachment } from "@/lib/messageFlags";
 
 type UseComposeHandlersProps = {
   composeDirtyRef: React.MutableRefObject<boolean>;
@@ -11,6 +11,18 @@ type UseComposeHandlersProps = {
   setComposeAttachments: React.Dispatch<React.SetStateAction<Attachment[]>>;
   apiFetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 };
+
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function replaceQuotedHtmlValue(html: string, target: string, replacement: string) {
+  if (!html || !target || target === replacement) return html;
+  return html.replace(
+    new RegExp(`(["'])${escapeRegExp(target)}\\1`, "g"),
+    (_match, quote: string) => `${quote}${replacement}${quote}`
+  );
+}
 
 function readBlobAsDataUrl(blob: Blob) {
   return new Promise<string>((resolve, reject) => {
@@ -25,9 +37,38 @@ export function restoreInlineAttachmentDataUrls(html: string, attachments: Attac
   let nextHtml = html;
   attachments.forEach((attachment) => {
     if (!attachment.inline || !attachment.url || !attachment.dataUrl) return;
-    nextHtml = nextHtml.split(attachment.url).join(attachment.dataUrl);
+    nextHtml = replaceQuotedHtmlValue(nextHtml, attachment.url, attachment.dataUrl);
   });
-  return nextHtml;
+  return replaceInlineImageSources(
+    nextHtml,
+    attachments
+      .filter((attachment) => attachment.inline && attachment.dataUrl)
+      .map((attachment) => ({ ...attachment, url: attachment.dataUrl }))
+  );
+}
+
+export function restoreComposeMessageAttachmentDataUrls(
+  message: Message,
+  attachments: Attachment[]
+): Message {
+  if (!message.htmlBody || attachments.length === 0) return message;
+  return {
+    ...message,
+    htmlBody: restoreInlineAttachmentDataUrls(message.htmlBody, attachments)
+  };
+}
+
+export function pruneUnreferencedInlineAttachments(attachments: Attachment[], html: string) {
+  const inlineAttachments = attachments.filter((attachment) => attachment.inline);
+  if (inlineAttachments.length === 0) return attachments;
+
+  const keep = new Set(
+    inlineAttachments
+      .filter((attachment) => attachment.dataUrl && html.includes(attachment.dataUrl))
+      .map((attachment) => attachment.id)
+  );
+  const next = attachments.filter((attachment) => !attachment.inline || keep.has(attachment.id));
+  return next.length === attachments.length ? attachments : next;
 }
 
 export function useComposeHandlers({
@@ -122,13 +163,12 @@ export function useComposeHandlers({
     event.target.value = "";
   };
 
-  const loadForwardAttachments = async (message: Message, setAttachments: typeof setComposeAttachments) => {
-    const attachments = await hydrateComposeAttachments(message, {
-      filter: isMeaningfulNonInlineAttachment
-    });
-    if (attachments.length > 0) {
-      setAttachments(attachments);
-    }
+  const loadForwardAttachments = async (message: Message) => {
+    const attachments = await hydrateComposeAttachments(message);
+    return {
+      attachments,
+      message: restoreComposeMessageAttachmentDataUrls(message, attachments)
+    };
   };
 
   return {

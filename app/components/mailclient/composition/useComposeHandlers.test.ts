@@ -1,5 +1,9 @@
 import { describe, expect, it } from "bun:test";
-import { restoreInlineAttachmentDataUrls } from "./useComposeHandlers";
+import {
+  pruneUnreferencedInlineAttachments,
+  restoreComposeMessageAttachmentDataUrls,
+  restoreInlineAttachmentDataUrls
+} from "./useComposeHandlers";
 
 describe("restoreInlineAttachmentDataUrls", () => {
   it("replaces inline attachment URLs with hydrated data URLs", () => {
@@ -36,5 +40,173 @@ describe("restoreInlineAttachmentDataUrls", () => {
     ]);
 
     expect(output).toBe(html);
+  });
+
+  it("replaces cid references with hydrated data URLs", () => {
+    const output = restoreInlineAttachmentDataUrls(
+      '<p>Hello</p><img src="cid:logo-cid@example.test">',
+      [
+        {
+          id: "att-inline",
+          filename: "logo.png",
+          contentType: "image/png",
+          size: 123,
+          inline: true,
+          cid: "logo-cid@example.test",
+          dataUrl: "data:image/png;base64,AAAA"
+        }
+      ]
+    );
+
+    expect(output).toContain("data:image/png;base64,AAAA");
+    expect(output).not.toContain("cid:logo-cid@example.test");
+  });
+
+  it("does not corrupt attachment URLs with shared prefixes", () => {
+    const output = restoreInlineAttachmentDataUrls(
+      [
+        '<img src="/api/accounts/acc-1/messages/msg-1/attachments/att-1">',
+        '<img src="/api/accounts/acc-1/messages/msg-1/attachments/att-10">',
+        '<img src="/api/accounts/acc-1/messages/msg-1/attachments/att-15">'
+      ].join(""),
+      [
+        {
+          id: "att-1",
+          filename: "logo.png",
+          contentType: "image/png",
+          size: 123,
+          inline: true,
+          cid: "logo",
+          url: "/api/accounts/acc-1/messages/msg-1/attachments/att-1",
+          dataUrl: "data:image/png;base64,AAAA"
+        },
+        {
+          id: "att-10",
+          filename: "barcode.gif",
+          contentType: "image/gif",
+          size: 456,
+          inline: true,
+          cid: "barcode",
+          url: "/api/accounts/acc-1/messages/msg-1/attachments/att-10",
+          dataUrl: "data:image/gif;base64,BBBB"
+        },
+        {
+          id: "att-15",
+          filename: "button.png",
+          contentType: "image/png",
+          size: 789,
+          inline: true,
+          cid: "button",
+          url: "/api/accounts/acc-1/messages/msg-1/attachments/att-15",
+          dataUrl: "data:image/png;base64,CCCC"
+        }
+      ]
+    );
+
+    expect(output).toContain('src="data:image/png;base64,AAAA"');
+    expect(output).toContain('src="data:image/gif;base64,BBBB"');
+    expect(output).toContain('src="data:image/png;base64,CCCC"');
+    expect(output).not.toContain("AAAA0");
+    expect(output).not.toContain("AAAA5");
+  });
+});
+
+describe("restoreComposeMessageAttachmentDataUrls", () => {
+  it("restores forwarded inline attachment URLs back to data URLs", () => {
+    const output = restoreComposeMessageAttachmentDataUrls(
+      {
+        id: "msg-1",
+        threadId: "thread-1",
+        subject: "Hello",
+        from: "alice@example.com",
+        to: "me@example.com",
+        preview: "Hello",
+        date: "Mon, 1 Jan 2024 12:00:00 +0000",
+        dateValue: 1704110400000,
+        folderId: "inbox",
+        accountId: "acc-1",
+        body: "Hello",
+        htmlBody: '<p>Hello</p><img src="/api/accounts/acc-1/messages/msg-1/attachments/att-inline">'
+      },
+      [
+        {
+          id: "att-inline",
+          filename: "logo.png",
+          contentType: "image/png",
+          size: 123,
+          inline: true,
+          url: "/api/accounts/acc-1/messages/msg-1/attachments/att-inline",
+          dataUrl: "data:image/png;base64,AAAA"
+        }
+      ]
+    );
+
+    expect(output.htmlBody).toContain("data:image/png;base64,AAAA");
+    expect(output.htmlBody).not.toContain("/api/accounts/acc-1/messages/msg-1/attachments/att-inline");
+  });
+});
+
+describe("pruneUnreferencedInlineAttachments", () => {
+  it("keeps inline attachments referenced from quoted html", () => {
+    const attachments = [
+      {
+        id: "att-inline",
+        filename: "logo.png",
+        contentType: "image/png",
+        size: 123,
+        inline: true,
+        dataUrl: "data:image/png;base64,AAAA"
+      },
+      {
+        id: "att-file",
+        filename: "contract.pdf",
+        contentType: "application/pdf",
+        size: 2048,
+        inline: false,
+        dataUrl: "data:application/pdf;base64,BBBB"
+      }
+    ];
+
+    expect(
+      pruneUnreferencedInlineAttachments(
+        attachments,
+        '<div id="noctua-quoted-html"><img src="data:image/png;base64,AAAA"></div>'
+      )
+    ).toEqual(attachments);
+  });
+
+  it("drops inline attachments that are no longer referenced", () => {
+    expect(
+      pruneUnreferencedInlineAttachments(
+        [
+          {
+            id: "att-inline",
+            filename: "logo.png",
+            contentType: "image/png",
+            size: 123,
+            inline: true,
+            dataUrl: "data:image/png;base64,AAAA"
+          },
+          {
+            id: "att-file",
+            filename: "contract.pdf",
+            contentType: "application/pdf",
+            size: 2048,
+            inline: false,
+            dataUrl: "data:application/pdf;base64,BBBB"
+          }
+        ],
+        "<p>No inline image here</p>"
+      )
+    ).toEqual([
+      {
+        id: "att-file",
+        filename: "contract.pdf",
+        contentType: "application/pdf",
+        size: 2048,
+        inline: false,
+        dataUrl: "data:application/pdf;base64,BBBB"
+      }
+    ]);
   });
 });

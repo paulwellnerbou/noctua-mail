@@ -48,7 +48,8 @@ import { useComposeDraftAutoSave } from "./mailclient/composition/useComposeDraf
 import { useDraftManager } from "./mailclient/composition/useDraftManager";
 import { normalizeHtmlDerivedText } from "./mailclient/composition/composeTextNormalization";
 import {
-  restoreInlineAttachmentDataUrls,
+  pruneUnreferencedInlineAttachments,
+  restoreComposeMessageAttachmentDataUrls,
   useComposeHandlers
 } from "./mailclient/composition/useComposeHandlers";
 import { useMessageDragDrop } from "./mailclient/useMessageDragDrop";
@@ -102,7 +103,7 @@ import MessageViewPane from "./mailclient/message/MessageViewPane";
 import MarkdownPanel from "./mailclient/message/MarkdownPanel";
 import MessageSourcePanel from "./mailclient/message/MessageSourcePanel";
 import threadViewStyles from "./mailclient/message/ThreadView.module.css";
-import { TODO_FLAG, DONE_FLAG, isMeaningfulNonInlineAttachment } from "@/lib/messageFlags";
+import { TODO_FLAG, DONE_FLAG } from "@/lib/messageFlags";
 import { EVENT_GROUP_BY, INVITE_DECK_GROUP_BY } from "@/lib/messageGrouping";
 import {
   DEFAULT_THREAD_DATE_SOURCE,
@@ -1800,18 +1801,20 @@ export default function MailClient({
 
   useEffect(() => {
     if (composeTab !== "html") return;
+    const referencedHtml = `${composeHtml}${
+      composeIncludeOriginal && !composeQuotedHtmlEdited ? composeQuotedHtml : ""
+    }`;
     setComposeAttachments((prev) => {
-      const inlineAttachments = prev.filter((attachment) => attachment.inline);
-      if (inlineAttachments.length === 0) return prev;
-      const keep = new Set(
-        inlineAttachments
-          .filter((attachment) => attachment.dataUrl && composeHtml.includes(attachment.dataUrl))
-          .map((attachment) => attachment.id)
-      );
-      const next = prev.filter((attachment) => !attachment.inline || keep.has(attachment.id));
-      return next.length === prev.length ? prev : next;
+      return pruneUnreferencedInlineAttachments(prev, referencedHtml);
     });
-  }, [composeHtml, composeTab, setComposeAttachments]);
+  }, [
+    composeHtml,
+    composeIncludeOriginal,
+    composeQuotedHtml,
+    composeQuotedHtmlEdited,
+    composeTab,
+    setComposeAttachments
+  ]);
 
   const isDraftMessage = (message: Message) => {
     const folder = folders.find((item) => item.id === message.folderId);
@@ -1977,22 +1980,25 @@ export default function MailClient({
       const messageWithDraftMetadata = await hydrateDraftComposeMetadata(msg);
       if (mode === "edit" && (msg.attachments?.length ?? 0) > 0) {
         const attachments = await hydrateComposeAttachments(messageWithDraftMetadata);
-        const hydratedMessage =
-          attachments.length > 0 && messageWithDraftMetadata.htmlBody
-            ? {
-                ...messageWithDraftMetadata,
-                htmlBody: restoreInlineAttachmentDataUrls(messageWithDraftMetadata.htmlBody, attachments)
-              }
-            : messageWithDraftMetadata;
+        const hydratedMessage = restoreComposeMessageAttachmentDataUrls(
+          messageWithDraftMetadata,
+          attachments
+        );
         openComposeInternal(mode, hydratedMessage, asNew, { preferredComposeTab });
         setComposeAttachments(attachments);
         return;
       }
 
-      openComposeInternal(mode, messageWithDraftMetadata, asNew, { preferredComposeTab });
       if (mode === "forward") {
-        void loadForwardAttachments(messageWithDraftMetadata, setComposeAttachments);
+        const { attachments, message: hydratedForwardMessage } = await loadForwardAttachments(
+          messageWithDraftMetadata
+        );
+        openComposeInternal(mode, hydratedForwardMessage, asNew, { preferredComposeTab });
+        setComposeAttachments(attachments);
+        return;
       }
+
+      openComposeInternal(mode, messageWithDraftMetadata, asNew, { preferredComposeTab });
     };
 
     const resolved = getComposeSourceMessage(message);

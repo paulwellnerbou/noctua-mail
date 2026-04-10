@@ -289,6 +289,10 @@ function normalizeInlineReferenceCandidate(value?: string | null) {
   return trimmed.replace(/^cid:/i, "").replace(/[<>]/g, "");
 }
 
+function escapeRegExp(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 function getInlineReferenceCandidates(attachment: InlineImageAttachment) {
   return Array.from(
     new Set(
@@ -316,7 +320,10 @@ export function replaceInlineImageSources(
   attachments.forEach((attachment) => {
     if (!attachment.inline || !attachment.url) return;
     getInlineReferenceCandidates(attachment).forEach((candidate) => {
-      nextHtml = nextHtml.replaceAll(`cid:${candidate}`, attachment.url!);
+      nextHtml = nextHtml.replace(
+        new RegExp(`cid:${escapeRegExp(candidate)}(?=["')\\s>])`, "g"),
+        attachment.url!
+      );
     });
   });
   return nextHtml;

@@ -56,6 +56,32 @@ describe("appendUnreferencedInlineImages", () => {
     expect(output).toContain(`src="${url}"`);
   });
 
+  it("does not corrupt cid references that share prefixes", () => {
+    const output = replaceInlineImageSources(
+      '<html><body><img src="cid:logo"><img src="cid:logo2"></body></html>',
+      [
+        {
+          inline: true,
+          contentType: "image/png",
+          filename: "logo.png",
+          cid: "logo",
+          url: "/api/accounts/a/messages/m/attachments/1"
+        },
+        {
+          inline: true,
+          contentType: "image/png",
+          filename: "logo2.png",
+          cid: "logo2",
+          url: "/api/accounts/a/messages/m/attachments/2"
+        }
+      ]
+    );
+
+    expect(output).toContain('src="/api/accounts/a/messages/m/attachments/1"');
+    expect(output).toContain('src="/api/accounts/a/messages/m/attachments/2"');
+    expect(output).not.toContain('/attachments/12');
+  });
+
   it("does not append when a matching cid reference is already present", () => {
     const input =
       '<html><body><img src="cid:E-Mail_Banner-Hoer-auf-dich(1)_bce67f06-2eb9-4fb5-b7a8-2659410eb50d.jpg"></body></html>';
