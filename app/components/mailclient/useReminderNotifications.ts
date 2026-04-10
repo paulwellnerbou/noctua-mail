@@ -2,8 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Account } from "@/lib/data";
-import type { ExceptionEntry, NoticeInput } from "./types";
-import type { InAppNotice } from "./InAppNoticeStack";
+import type { ExceptionEntry } from "./types";
 import {
   CALENDAR_REMINDERS_UPDATED_EVENT,
   type CalendarReminder,
@@ -18,9 +17,9 @@ import { buildNotificationUrl, makeClientId } from "./utils/clientHelpers";
 import {
   BUILD_VERSION_POLL_INTERVAL_MS,
   CALENDAR_REMINDER_REFRESH_INTERVAL_MS,
-  NOTICE_TIMEOUTS,
-  NOTICE_TIMEOUTS_NO_UNDO
+  NOTICE_TIMEOUTS
 } from "./constants";
+import { useInAppNotices } from "./useInAppNotices";
 
 type ApiFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
@@ -45,40 +44,11 @@ export function useReminderNotifications({
 }: UseReminderNotificationsParams) {
   const [pendingCalendarReminders, setPendingCalendarReminders] = useState<CalendarReminder[]>([]);
   const [exceptionEntries, setExceptionEntries] = useState<ExceptionEntry[]>([]);
-  const [inAppNotices, setInAppNotices] = useState<InAppNotice[]>([]);
   const [requiredBuildVersion, setRequiredBuildVersion] = useState<string | null>(null);
+  const { inAppNotices, pushNotice, dismissNotice } = useInAppNotices();
 
   const swRegistrationRef = useRef<ServiceWorkerRegistration | null>(null);
   const currentBuildVersionRef = useRef(buildVersionLabel.trim());
-
-  const pushNotice = useCallback((input: NoticeInput) => {
-    const { durationMs, ...notice } = input;
-    const baseTimeoutMs =
-      durationMs === null
-        ? null
-        : typeof durationMs === "number"
-          ? durationMs
-          : NOTICE_TIMEOUTS[notice.type];
-    const hasUndoAction =
-      notice.actionLabel?.trim().toLowerCase() === "undo" &&
-      typeof notice.onAction === "function";
-    const timeoutMs =
-      baseTimeoutMs == null
-        ? null
-        : hasUndoAction
-          ? baseTimeoutMs
-          : Math.min(baseTimeoutMs, NOTICE_TIMEOUTS_NO_UNDO[notice.type]);
-    const nextNotice: InAppNotice = {
-      ...notice,
-      id: makeClientId(),
-      expiresAt: timeoutMs == null ? null : Date.now() + timeoutMs
-    };
-    setInAppNotices((prev) => [...prev, nextNotice].slice(-3));
-  }, []);
-
-  const dismissNotice = useCallback((noticeId: string) => {
-    setInAppNotices((prev) => prev.filter((item) => item.id !== noticeId));
-  }, []);
 
   const reportError = useCallback(
     (message: string) => {
@@ -434,7 +404,6 @@ export function useReminderNotifications({
     exceptionEntries,
     setExceptionEntries,
     inAppNotices,
-    setInAppNotices,
     requiredBuildVersion,
     // Refs
     swRegistrationRef,

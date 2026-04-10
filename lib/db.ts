@@ -9,6 +9,7 @@ import {
   getMainDbPath,
   getSourcesAccountDir
 } from "./runtimePaths";
+import { buildAccountAttachmentPath } from "./accountApiPaths";
 import type {
   Account,
   AccountSettings,
@@ -146,6 +147,29 @@ const CALENDAR_EVENT_RUNTIME_SIGNATURE = [
   "emailStatusBackfillV1",
   "emailParticipationBackfillV1"
 ].join("|");
+
+function hydrateAttachment(
+  accountId: string,
+  messageId: string,
+  row: {
+    id: string;
+    filename: string;
+    contentType: string;
+    size: number;
+    inline: number | boolean;
+    cid?: string | null;
+  }
+): Attachment {
+  return {
+    id: row.id,
+    filename: row.filename,
+    contentType: row.contentType,
+    size: row.size,
+    inline: Boolean(row.inline),
+    cid: row.cid ?? undefined,
+    url: buildAccountAttachmentPath(accountId, messageId, row.id)
+  };
+}
 
 function ensureCalendarReminderTableSchema(db: any) {
   db.exec(`
@@ -6521,15 +6545,7 @@ export async function listThreadMessages(params: {
   const attachmentsByMessage = new Map<string, Attachment[]>();
   attachmentRows.forEach((row) => {
     const list = attachmentsByMessage.get(row.messageId) ?? [];
-    list.push({
-      id: row.id,
-      filename: row.filename,
-      contentType: row.contentType,
-      size: row.size,
-      inline: Boolean(row.inline),
-      cid: row.cid ?? undefined,
-      url: row.url ?? undefined
-    });
+    list.push(hydrateAttachment(accountId, row.messageId, row));
     attachmentsByMessage.set(row.messageId, list);
   });
 
@@ -7377,15 +7393,7 @@ export async function getMessageById(accountId: string, messageId: string) {
     htmlBody: row.htmlBody ?? undefined,
     priority: row.priority ?? undefined,
     hasSource: Boolean(row.hasSource),
-    attachments: attachments.map((att) => ({
-      id: att.id,
-      filename: att.filename,
-      contentType: att.contentType,
-      size: att.size,
-      inline: Boolean(att.inline),
-      cid: att.cid ?? undefined,
-      url: att.url ?? undefined
-    })),
+    attachments: attachments.map((att) => hydrateAttachment(accountId, row.id, att)),
     unread: Boolean(row.unread),
     flags: safeParseJson<string[]>(row.flags),
     seen: Boolean(row.seen),
@@ -8943,12 +8951,25 @@ export async function getCalendarEventByUid(
   eventUid: string
 ): Promise<CalendarEvent | null> {
   const db = await getAccountDb(accountId);
-  const row = db
+  const normalizedEventUid = String(eventUid ?? "").trim();
+  if (!normalizedEventUid) return null;
+  const exactRow = db
     .prepare(
       `SELECT * FROM calendar_events WHERE accountId = ? AND eventUid = ? AND deletedAtMs IS NULL`
     )
-    .get(accountId, eventUid) as any;
-  return row ? rowToCalendarEvent(row) : null;
+    .get(accountId, normalizedEventUid) as any;
+  if (exactRow) return rowToCalendarEvent(exactRow);
+  const foldedRow = db
+    .prepare(
+      `SELECT * FROM calendar_events
+       WHERE accountId = ?
+         AND lower(eventUid) = lower(?)
+         AND deletedAtMs IS NULL
+       ORDER BY CASE WHEN eventUid = ? THEN 0 ELSE 1 END, updatedAtMs DESC
+       LIMIT 1`
+    )
+    .get(accountId, normalizedEventUid, normalizedEventUid) as any;
+  return foldedRow ? rowToCalendarEvent(foldedRow) : null;
 }
 
 export async function upsertCalendarEventByUid(
@@ -8973,11 +8994,9 @@ export async function cancelCalendarEventByUid(
   accountId: string,
   eventUid: string
 ): Promise<void> {
-  const db = await getAccountDb(accountId);
-  db.prepare(
-    `UPDATE calendar_events SET status = 'CANCELLED', updatedAtMs = ?
-     WHERE accountId = ? AND eventUid = ? AND deletedAtMs IS NULL`
-  ).run(Date.now(), accountId, eventUid);
+  const existing = await getCalendarEventByUid(accountId, eventUid);
+  if (!existing) return;
+  await deleteCalendarEvent(accountId, existing.id);
 }
 
 export async function upsertCalendarEvent(

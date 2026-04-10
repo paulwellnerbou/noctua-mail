@@ -49,6 +49,67 @@ function makeIcs(lines: string[]) {
 }
 
 describe("processCalendarInviteForMessage", () => {
+  test("hard deletes a whole-event cancellation without rebuilding the event", async () => {
+    getCalendarEventByUid.mockClear();
+    listCalendarInviteSourceMessagesByEventUid.mockClear();
+    upsertCalendarEventByUid.mockClear();
+    upsertMessageCalendarInviteStates.mockClear();
+    markMessageCalendarInviteStatesProcessed.mockClear();
+    rescheduleCalendarRemindersByEventUid.mockClear();
+    ensureCalendarReminder.mockClear();
+    cancelCalendarEventByUid.mockClear();
+    cancelCalendarRemindersByEventUid.mockClear();
+
+    const cancelIcs = makeIcs([
+      "METHOD:CANCEL",
+      "BEGIN:VEVENT",
+      "UID:series-uid@example.test",
+      "SUMMARY:Cancelled Weekly standup",
+      "DTSTART:20260601T100000Z",
+      "DTEND:20260601T103000Z",
+      "STATUS:CANCELLED",
+      "SEQUENCE:7",
+      "END:VEVENT"
+    ]);
+
+    const result = await processCalendarInviteForMessage({
+      accountId: "acc-1",
+      messageId: "msg-cancel-series",
+      icsSource: cancelIcs,
+      process: true,
+      accountEmail: "paul@example.test",
+      reminderUserId: "user-1",
+      processedByUserId: "user-1",
+      processedAutomatically: false
+    });
+
+    expect(result.states).toEqual([
+      {
+        eventUid: "series-uid@example.test",
+        actionType: "cancellation",
+        processed: true,
+        processedAtMs: result.states[0]?.processedAtMs,
+        processedAutomatically: false
+      }
+    ]);
+    expect(cancelCalendarEventByUid).toHaveBeenCalledWith("acc-1", "series-uid@example.test");
+    expect(cancelCalendarRemindersByEventUid).toHaveBeenCalledWith(
+      "acc-1",
+      "series-uid@example.test"
+    );
+    expect(upsertCalendarEventByUid).not.toHaveBeenCalled();
+    expect(markMessageCalendarInviteStatesProcessed).toHaveBeenCalledWith(
+      "acc-1",
+      "msg-cancel-series",
+      ["series-uid@example.test"],
+      {
+        processedAtMs: result.states[0]?.processedAtMs,
+        processedByUserId: "user-1",
+        processedAutomatically: false
+      }
+    );
+  });
+
   test("hydrates a missing series from an older request before applying an instance cancellation", async () => {
     getCalendarEventByUid.mockClear();
     listCalendarInviteSourceMessagesByEventUid.mockClear();

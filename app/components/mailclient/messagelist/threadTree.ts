@@ -63,6 +63,22 @@ export function getThreadLatestDate(node: ThreadNode) {
   return latest;
 }
 
+export function findThreadRootByMessageId(
+  nodes: ThreadNode[],
+  messageId: string,
+  currentRoot: ThreadNode | null = null
+): ThreadNode | null {
+  for (const node of nodes) {
+    const nextRoot = currentRoot ?? node;
+    if (node.message.id === messageId) {
+      return nextRoot;
+    }
+    const childRoot = findThreadRootByMessageId(node.children, messageId, nextRoot);
+    if (childRoot) return childRoot;
+  }
+  return null;
+}
+
 export function flattenThread(node: ThreadNode, depth = 0, visited = new Set<string>()) {
   if (visited.has(node.message.id)) {
     return [];

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import type { Message } from "@/lib/data";
-import { getVisibleThreadMessages } from "./threadViewState";
+import { doesCachedThreadCoverMessages, getVisibleThreadMessages } from "./threadViewState";
 
 function makeMessage(overrides?: Partial<Message>): Message {
   return {
@@ -57,5 +57,31 @@ describe("getVisibleThreadMessages", () => {
     });
 
     expect(result).toEqual([original, draft]);
+  });
+});
+
+describe("doesCachedThreadCoverMessages", () => {
+  it("returns false when the visible thread includes a newer uncached message", () => {
+    const original = makeMessage({ id: "original" });
+    const reply = makeMessage({ id: "reply" });
+
+    expect(
+      doesCachedThreadCoverMessages({
+        activeThread: [original, reply],
+        cachedThread: [original]
+      })
+    ).toBe(false);
+  });
+
+  it("returns true when the cached thread already includes every visible message", () => {
+    const original = makeMessage({ id: "original" });
+    const reply = makeMessage({ id: "reply" });
+
+    expect(
+      doesCachedThreadCoverMessages({
+        activeThread: [original, reply],
+        cachedThread: [reply, original]
+      })
+    ).toBe(true);
   });
 });

@@ -31,6 +31,7 @@ import {
   upsertCalendarReminder,
   type CalendarReminder
 } from "@/app/components/mailclient/utils/calendarReminders";
+import { dispatchCalendarEventsUpdatedEvent } from "./calendarEventsClient";
 import styles from "./EventDetailView.module.css";
 
 export type EventDetailViewProps = {
@@ -464,6 +465,7 @@ export default function EventDetailView({
         setReminderNotice("Failed to delete event.");
         return;
       }
+      dispatchCalendarEventsUpdatedEvent();
       onEventDeleted?.();
     } catch {
       setReminderNotice("Failed to delete event.");
@@ -535,6 +537,7 @@ export default function EventDetailView({
         });
       }
       setResponseDialogOpen(false);
+      dispatchCalendarEventsUpdatedEvent();
       const savedLabel = formatCalendarParticipationLabel(payload.participation.partstat);
       const appliedLabel =
         (forceOccurrenceResponse ? "occurrence" : payload.participation.scope) === "occurrence"

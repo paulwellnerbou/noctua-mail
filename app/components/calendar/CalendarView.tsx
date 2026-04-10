@@ -17,6 +17,8 @@ import {
   expandCalendarEventForRange,
   filterCalendarReminderDuplicates
 } from "@/lib/calendarOccurrences";
+import { CALENDAR_REMINDERS_UPDATED_EVENT } from "@/app/components/mailclient/utils/calendarReminders";
+import { CALENDAR_EVENTS_UPDATED_EVENT } from "./calendarEventsClient";
 import "./fullcalendar-theme.css";
 
 export type CalendarViewHandle = {
@@ -90,13 +92,17 @@ export default function CalendarView({
 }: Props) {
   const internalRef = useRef<FullCalendar>(null);
   const calendarRef = (externalRef ?? internalRef) as React.RefObject<FullCalendar>;
-  const [fcEvents, setFcEvents] = useState<EventInput[]>([]);
+  const [fullCalendarEvents, setFullCalendarEvents] = useState<EventInput[]>([]);
   const fetchRangeRef = useRef<{ startMs: number; endMs: number } | null>(null);
+  const fetchRequestIdRef = useRef(0);
+  const previousAccountIdRef = useRef<string | null>(null);
   const [initialView] = useState<string>(getSavedView);
 
   const fetchEvents = useCallback(
     async (startMs: number, endMs: number) => {
       if (!accountId) return;
+      const requestId = fetchRequestIdRef.current + 1;
+      fetchRequestIdRef.current = requestId;
       try {
         const params = new URLSearchParams({
           startMs: String(startMs),
@@ -132,7 +138,10 @@ export default function CalendarView({
           ),
           ...visibleReminders.map(reminderToFcEvent)
         ];
-        setFcEvents(events);
+        if (fetchRequestIdRef.current !== requestId) {
+          return;
+        }
+        setFullCalendarEvents(events);
       } catch (err) {
         console.error("[CalendarView] fetch error:", err);
       }
@@ -174,8 +183,40 @@ export default function CalendarView({
 
   // Refetch when accountId changes
   useEffect(() => {
+    if (previousAccountIdRef.current === null) {
+      previousAccountIdRef.current = accountId;
+      return;
+    }
+    if (previousAccountIdRef.current === accountId) return;
+    previousAccountIdRef.current = accountId;
     fetchRangeRef.current = null;
+    fetchRequestIdRef.current += 1;
   }, [accountId]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const handleCalendarDataUpdated = () => {
+      const range =
+        fetchRangeRef.current ??
+        (() => {
+          const view = calendarRef.current?.getApi().view;
+          if (!view) return null;
+          return {
+            startMs: view.activeStart.getTime(),
+            endMs: view.activeEnd.getTime()
+          };
+        })();
+      if (!range) return;
+      fetchRangeRef.current = range;
+      void fetchEvents(range.startMs, range.endMs);
+    };
+    window.addEventListener(CALENDAR_EVENTS_UPDATED_EVENT, handleCalendarDataUpdated);
+    window.addEventListener(CALENDAR_REMINDERS_UPDATED_EVENT, handleCalendarDataUpdated);
+    return () => {
+      window.removeEventListener(CALENDAR_EVENTS_UPDATED_EVENT, handleCalendarDataUpdated);
+      window.removeEventListener(CALENDAR_REMINDERS_UPDATED_EVENT, handleCalendarDataUpdated);
+    };
+  }, [calendarRef, fetchEvents]);
 
   if (compact) {
     return (
@@ -186,7 +227,7 @@ export default function CalendarView({
           initialView="dayGridMonth"
           headerToolbar={false}
           firstDay={firstDay}
-          events={fcEvents}
+          events={fullCalendarEvents}
           datesSet={handleDatesSet}
           eventClick={handleEventClick}
           dateClick={handleDateClick}
@@ -209,7 +250,7 @@ export default function CalendarView({
         right: "dayGridMonth,timeGridWeek,timeGridDay"
       }}
       firstDay={firstDay}
-      events={fcEvents}
+      events={fullCalendarEvents}
       datesSet={handleDatesSet}
       eventClick={handleEventClick}
       dateClick={handleDateClick}

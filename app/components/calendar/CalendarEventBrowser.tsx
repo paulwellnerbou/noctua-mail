@@ -1,9 +1,14 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import FullCalendar from "@fullcalendar/react";
 import type { CalendarEvent, CalendarReminder } from "@/lib/data";
 import dynamic from "next/dynamic";
+import { buildAccountCalendarEventPath } from "@/lib/accountApiPaths";
+import InAppNoticeStack from "@/app/components/mailclient/InAppNoticeStack";
+import { NOTICE_TIMEOUTS } from "@/app/components/mailclient/constants";
+import { useInAppNotices } from "@/app/components/mailclient/useInAppNotices";
+import { dispatchCalendarEventsUpdatedEvent } from "./calendarEventsClient";
 import EventDetailPanel from "./EventDetailPanel";
 
 const CalendarView = dynamic(() => import("./CalendarView"), { ssr: false });
@@ -28,6 +33,7 @@ export default function CalendarEventBrowser({
   const [selectedEvent, setSelectedEvent] = useState<CalendarEvent | CalendarReminder | null>(null);
   const [selectedKind, setSelectedKind] = useState<"event" | "reminder" | null>(null);
   const [selectedOccurrenceStartAtMs, setSelectedOccurrenceStartAtMs] = useState<number | undefined>();
+  const { inAppNotices, pushNotice, dismissNotice } = useInAppNotices();
 
   const handleEventClick = (
     event: CalendarEvent | CalendarReminder,
@@ -48,36 +54,91 @@ export default function CalendarEventBrowser({
   const handleEventUpdated = (event: CalendarEvent) => {
     setSelectedEvent(event);
     setSelectedKind("event");
-    calendarRef.current?.getApi().refetchEvents();
+    dispatchCalendarEventsUpdatedEvent();
   };
 
-  const handleEventDeleted = () => {
+  const handleRestoreDeletedEvent = useCallback(
+    async (event: CalendarEvent) => {
+      try {
+        const response = await fetch(buildAccountCalendarEventPath(accountId, event.id), {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(event)
+        });
+        const data = (await response.json().catch(() => null)) as
+          | {
+              ok?: boolean;
+              event?: CalendarEvent;
+              message?: string;
+            }
+          | null;
+        if (!response.ok || data?.ok !== true || !data.event) {
+          throw new Error(data?.message ?? "Failed to restore event.");
+        }
+        dispatchCalendarEventsUpdatedEvent();
+        pushNotice({
+          type: "success",
+          title: "Event restored.",
+          description: data.event.summary,
+          durationMs: NOTICE_TIMEOUTS.success
+        });
+      } catch (error) {
+        pushNotice({
+          type: "error",
+          title: "Failed to restore event.",
+          description: error instanceof Error ? error.message : undefined,
+          durationMs: NOTICE_TIMEOUTS.error
+        });
+      }
+    },
+    [accountId, pushNotice]
+  );
+
+  const handleEventDeleted = (event: CalendarEvent) => {
     handleBack();
-    calendarRef.current?.getApi().refetchEvents();
+    dispatchCalendarEventsUpdatedEvent();
+    pushNotice({
+      type: "success",
+      title: "Event deleted.",
+      description: event.summary,
+      actionLabel: "UNDO",
+      onAction: () => handleRestoreDeletedEvent(event),
+      durationMs: NOTICE_TIMEOUTS.success
+    });
   };
 
-  if (selectedEvent && selectedKind) {
-    return (
-      <EventDetailPanel
-        event={selectedEvent}
-        kind={selectedKind}
-        accountId={accountId}
-        occurrenceStartAtMs={selectedOccurrenceStartAtMs}
-        onBack={handleBack}
-        onOpenMessage={onOpenMessage}
-        onFindRelatedByInviteUid={onFindRelatedByInviteUid}
-        onEventUpdated={handleEventUpdated}
-        onEventDeleted={handleEventDeleted}
-      />
-    );
-  }
-
-  return (
+  const content = selectedEvent && selectedKind ? (
+    <EventDetailPanel
+      event={selectedEvent}
+      kind={selectedKind}
+      accountId={accountId}
+      occurrenceStartAtMs={selectedOccurrenceStartAtMs}
+      onBack={handleBack}
+      onOpenMessage={onOpenMessage}
+      onFindRelatedByInviteUid={onFindRelatedByInviteUid}
+      onEventUpdated={handleEventUpdated}
+      onEventDeleted={handleEventDeleted}
+    />
+  ) : (
     <CalendarView
       accountId={accountId}
       calendarRef={calendarRef}
       firstDay={firstDay}
       onEventClick={handleEventClick}
     />
+  );
+
+  return (
+    <>
+      {content}
+      <InAppNoticeStack
+        className="inapp-notice-stack-pane"
+        state={{ inAppNotices }}
+        actions={{
+          onOpenNotice: () => {},
+          onDismissNotice: dismissNotice
+        }}
+      />
+    </>
   );
 }

@@ -77,9 +77,9 @@ import { useMessageListHelpers } from "./mailclient/messagelist/useMessageListHe
 import { useMessageListSelectionController } from "./mailclient/messagelist/useMessageListSelectionController";
 import {
   buildThreadTree,
+  findThreadRootByMessageId,
   flattenThread,
-  getThreadLatestDate,
-  type ThreadNode
+  getThreadLatestDate
 } from "./mailclient/messagelist/threadTree";
 import {
   mergeMessageInviteStatePatches,
@@ -166,6 +166,7 @@ import { useRecipientAliases } from "./mailclient/useRecipientAliases";
 import { useAccountController } from "./mailclient/useAccountController";
 import ThreadJsonModal from "./mailclient/message/ThreadJsonModal";
 import ThreadView from "./mailclient/message/ThreadView";
+import { doesCachedThreadCoverMessages } from "./mailclient/message/threadViewState";
 import TopicPickerDialog from "./mailclient/TopicPickerDialog";
 import RecipientAliasDialog from "./mailclient/RecipientAliasDialog";
 import AccountReloginDialog from "./mailclient/AccountReloginDialog";
@@ -2795,6 +2796,11 @@ export default function MailClient({
     setComposeResizing
   });
   const threadForest = useMemo(() => buildThreadTree(threadScopeMessages), [threadScopeMessages]);
+  const activeLocalThread = useMemo(() => {
+    if (!activeMessage || !supportsThreads) return [];
+    const localRoot = findThreadRootByMessageId(threadForest, activeMessage.id);
+    return localRoot ? flattenThread(localRoot).map((item) => item.message) : [];
+  }, [activeMessage, supportsThreads, threadForest]);
 
   const activeThread = useMemo(() => {
     if (!activeMessage) return [];
@@ -2806,25 +2812,6 @@ export default function MailClient({
       const sameFolder =
         fullThread?.filter((item) => item.folderId === activeMessage.folderId) ?? [];
       return sameFolder.length > 0 ? sameFolder : [activeMessage];
-    }
-    let localFlat: Message[] = [];
-    const findRoot = (
-      nodes: ThreadNode[],
-      currentRoot: ThreadNode | null = null
-    ): ThreadNode | null => {
-      for (const node of nodes) {
-        const nextRoot = currentRoot ?? node;
-        if (node.message.id === activeMessage.id) {
-          return nextRoot;
-        }
-        const childRoot = findRoot(node.children, nextRoot);
-        if (childRoot) return childRoot;
-      }
-      return null;
-    };
-    const localRoot = findRoot(threadForest, null);
-    if (localRoot) {
-      localFlat = flattenThread(localRoot).map((item) => item.message);
     }
     const mergeThreadItems = (primary: Message[], secondary: Message[]) => {
       if (primary.length === 0) return secondary;
@@ -2840,51 +2827,22 @@ export default function MailClient({
       const filteredFull = fullThread.filter(
         (item) => !checkIsThreadExcludedFolder(item.folderId)
       );
-      const merged = mergeThreadItems(filteredFull, localFlat);
+      const merged = mergeThreadItems(filteredFull, activeLocalThread);
       const fullForest = buildThreadTree(merged);
-      let fullRoot: ThreadNode | null = null;
-      const findFullRoot = (nodes: ThreadNode[], currentRoot: ThreadNode | null = null) => {
-        for (const node of nodes) {
-          const nextRoot = currentRoot ?? node;
-          if (node.message.id === activeMessage.id) {
-            fullRoot = nextRoot;
-            return true;
-          }
-          if (findFullRoot(node.children, nextRoot)) return true;
-        }
-        return false;
-      };
-      findFullRoot(fullForest, null);
+      const fullRoot = findThreadRootByMessageId(fullForest, activeMessage.id);
       if (fullRoot) {
         return flattenThread(fullRoot).map((item) => item.message);
       }
       return merged;
     }
-    if (localFlat.length > 0) {
-      const localForest = buildThreadTree(localFlat);
-      let localRoot: ThreadNode | null = null;
-      const findLocalRoot = (nodes: ThreadNode[], currentRoot: ThreadNode | null = null) => {
-        for (const node of nodes) {
-          const nextRoot = currentRoot ?? node;
-          if (node.message.id === activeMessage.id) {
-            localRoot = nextRoot;
-            return true;
-          }
-          if (findLocalRoot(node.children, nextRoot)) return true;
-        }
-        return false;
-      };
-      findLocalRoot(localForest, null);
-      if (localRoot) {
-        return flattenThread(localRoot).map((item) => item.message);
-      }
-      return localFlat;
+    if (activeLocalThread.length > 0) {
+      return activeLocalThread;
     }
     // fallback to threadId match
     return getThreadMessages(threadScopeMessages, activeMessage.threadId, activeAccountId).filter(
       (item) => !checkIsThreadExcludedFolder(item.folderId)
     );
-  }, [activeAccountId, activeMessage, threadContentById, threadScopeMessages, threadForest]);
+  }, [activeAccountId, activeLocalThread, activeMessage, threadContentById, threadScopeMessages]);
 
   const threadMessages = useMemo(() => activeThread, [activeThread]);
 
@@ -4389,12 +4347,24 @@ export default function MailClient({
       } else {
         clearThreadContentError(threadId);
       }
-      if (supportsThreads && cachedThread && cachedThread.length > 0 && activeHasContent) {
+      const localFlat = activeLocalThread.length > 0 ? activeLocalThread : [active];
+      const cachedThreadCoversLocalThread = doesCachedThreadCoverMessages({
+        activeThread: localFlat,
+        cachedThread
+      });
+      if (
+        supportsThreads &&
+        cachedThread &&
+        cachedThread.length > 0 &&
+        activeHasContent &&
+        cachedThreadCoversLocalThread
+      ) {
         logListDebug("info", "thread-related:content-effect:skip", {
           ...debugBase,
           reason: "cached-thread-with-content-supports-threads",
           threadId,
           cachedCount: cachedThread.length,
+          localCount: localFlat.length,
           activeMessageId: active.id
         });
         return;
@@ -4410,24 +4380,6 @@ export default function MailClient({
         return;
       }
 
-      const findRoot = (
-        nodes: ThreadNode[],
-        currentRoot: ThreadNode | null = null
-      ): ThreadNode | null => {
-        for (const node of nodes) {
-          const nextRoot = currentRoot ?? node;
-          if (node.message.id === active.id) {
-            return nextRoot;
-          }
-          const childRoot = findRoot(node.children, nextRoot);
-          if (childRoot) return childRoot;
-        }
-        return null;
-      };
-      const localRoot = supportsThreads ? findRoot(threadForest, null) : null;
-      const localFlat = localRoot
-        ? flattenThread(localRoot).map((item) => item.message)
-        : [active];
       const messageIds = Array.from(new Set(localFlat.map((item) => item.id)));
       const threadIds = supportsThreads
         ? Array.from(new Set(localFlat.map((item) => item.threadId).filter(Boolean)))
@@ -4506,6 +4458,7 @@ export default function MailClient({
     threadDateSource,
     supportsThreads,
     threadEvictVersion,
+    activeLocalThread,
     clearThreadContentError,
     hydrateMessageOnOpenIfNeeded,
     setThreadContentError,
