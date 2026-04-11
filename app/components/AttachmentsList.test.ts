@@ -3,6 +3,7 @@ import type { Attachment } from "@/lib/data";
 import {
   canPreviewAttachment,
   getAttachmentDownloadHref,
+  getAttachmentPreviewHref,
   getVisibleAttachments
 } from "./AttachmentsList";
 
@@ -66,5 +67,27 @@ describe("getAttachmentDownloadHref", () => {
     expect(
       getAttachmentDownloadHref(makeAttachment({ dataUrl: "data:text/plain;base64,SGVsbG8=" }))
     ).toBe("data:text/plain;base64,SGVsbG8=");
+  });
+});
+
+describe("getAttachmentPreviewHref", () => {
+  it("returns the attachment URL for previewable files", () => {
+    expect(
+      getAttachmentPreviewHref(
+        makeAttachment({ url: "/api/accounts/a/messages/m/attachments/att-1" })
+      )
+    ).toBe("/api/accounts/a/messages/m/attachments/att-1");
+  });
+
+  it("returns null for non-previewable files", () => {
+    expect(
+      getAttachmentPreviewHref(
+        makeAttachment({
+          filename: "archive.zip",
+          contentType: "application/zip",
+          url: "/api/accounts/a/messages/m/attachments/att-1"
+        })
+      )
+    ).toBeNull();
   });
 });

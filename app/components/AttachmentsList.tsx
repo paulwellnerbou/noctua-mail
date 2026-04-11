@@ -1,5 +1,4 @@
 import {
-  Eye,
   X,
   Download,
   FileText,
@@ -67,6 +66,25 @@ export function getAttachmentDownloadHref(attachment: Pick<Attachment, "url" | "
   if (!href) return null;
   if (href.startsWith("data:")) return href;
   return appendQueryParam(href, "download", "1");
+}
+
+export function getAttachmentPreviewHref(
+  attachment: Pick<Attachment, "contentType" | "filename" | "url" | "dataUrl">
+) {
+  if (!canPreviewAttachment(attachment.contentType, attachment.filename)) return null;
+  return attachment.url ?? attachment.dataUrl ?? null;
+}
+
+function openAttachmentPreview(url: string) {
+  if (url.startsWith("data:")) {
+    fetch(url)
+      .then((response) => response.blob())
+      .then((blob) => openDetachedWindow(URL.createObjectURL(blob), { width: 920, height: 760 }))
+      .catch(() => {});
+    return;
+  }
+
+  openDetachedWindow(url, { width: 920, height: 760 });
 }
 
 function triggerDownload(href: string, filename?: string) {
@@ -170,7 +188,10 @@ export default function AttachmentsList({
         {visibleAttachments.map((file) => {
           const FileIcon = getFileIcon(file.contentType, file.filename);
           const showImagePreview = isImage(file.contentType) && (file.url || file.dataUrl);
+          const previewHref = getAttachmentPreviewHref(file);
           const downloadHref = getAttachmentDownloadHref(file);
+          const defaultHref = previewHref ?? downloadHref ?? "#";
+          const defaultActionLabel = previewHref ? "Preview attachment" : "Download attachment";
           return (
             <div key={file.id} className="attachment-item">
               <div className="attachment-icon-wrapper">
@@ -183,9 +204,16 @@ export default function AttachmentsList({
               </div>
               <a
                 className="attachment-link"
-                href={downloadHref ?? "#"}
-                download={file.filename || true}
+                href={defaultHref}
+                download={!previewHref ? (file.filename || true) : undefined}
+                aria-label={defaultActionLabel}
+                title={defaultActionLabel}
                 onClick={(event) => {
+                  if (previewHref) {
+                    event.preventDefault();
+                    openAttachmentPreview(previewHref);
+                    return;
+                  }
                   if (!downloadHref) {
                     event.preventDefault();
                   }
@@ -198,27 +226,15 @@ export default function AttachmentsList({
                   </span>
                 </span>
               </a>
-            {canPreviewAttachment(file.contentType, file.filename) && (file.url || file.dataUrl) && (
+            {downloadHref && (
               <a
                 className="icon-button ghost attachment-preview"
-                href={file.url ?? file.dataUrl ?? "#"}
-                aria-label="Preview attachment"
-                title="Preview attachment"
-                onClick={(event) => {
-                  event.preventDefault();
-                  const url = file.url ?? file.dataUrl;
-                  if (!url) return;
-                  if (url.startsWith("data:")) {
-                    fetch(url)
-                      .then((r) => r.blob())
-                      .then((blob) => openDetachedWindow(URL.createObjectURL(blob), { width: 920, height: 760 }))
-                      .catch(() => {});
-                  } else {
-                    openDetachedWindow(url, { width: 920, height: 760 });
-                  }
-                }}
+                href={downloadHref}
+                download={file.filename || true}
+                aria-label="Download attachment"
+                title="Download attachment"
               >
-                <Eye size={12} />
+                <Download size={12} />
               </a>
             )}
             {onRemove && (
