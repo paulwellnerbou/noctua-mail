@@ -1644,6 +1644,16 @@ export default function MailClient({
     ? draftsFolder.count ?? messageCountByFolder.get(draftsFolder.id) ?? 0
     : 0;
   const listLoading = loadingMessages || refreshingMessages;
+  const listBootstrapping =
+    authState === "loading" ||
+    (Boolean(activeAccountId) && initialFoldersLoadedAccountId !== activeAccountId);
+  const listAwaitingFirstResult =
+    !messageListError &&
+    filteredMessages.length === 0 &&
+    totalMessages === null &&
+    Boolean(activeAccountId) &&
+    (searchScope !== "folder" || isRelatedSearch || Boolean(activeFolderId));
+  const showListLoadingState = listLoading || listBootstrapping || listAwaitingFirstResult;
 
   const getPrimaryEmail = (value?: string) => extractEmails(value)[0] ?? null;
   const getAccountFromValue = (account?: Account | null) => {
@@ -5563,7 +5573,7 @@ export default function MailClient({
                 </Flex>
               </Card>
             )}
-            {listLoading && sortedMessages.length === 0 && (
+            {showListLoadingState && sortedMessages.length === 0 && (
               <Card size="1" className={listMetaStyles.loadingCard}>
                 <Text size="1" color="gray">
                   Loading messages…
@@ -5631,7 +5641,7 @@ export default function MailClient({
               }}
               refs={{ scrollRef: listPaneRef }}
             />
-            {filteredMessages.length === 0 && !listLoading && (
+            {filteredMessages.length === 0 && !showListLoadingState && (
               <div
                 className={`${listPaneStyles.empty} ${
                   messageListError ? listPaneStyles.emptyError : ""
