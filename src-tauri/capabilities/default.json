@@ -4,17 +4,6 @@
   "description": "Default capabilities for Noctua Mail desktop",
   "windows": ["main"],
   "permissions": [
-    "core:default",
-    {
-      "identifier": "shell:allow-execute",
-      "allow": [
-        {
-          "name": "bun",
-          "sidecar": true,
-          "args": true
-        }
-      ]
-    },
-    "shell:allow-spawn"
+    "core:default"
   ]
 }
