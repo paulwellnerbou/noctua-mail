@@ -1,0 +1,5 @@
+[test]
+pathIgnorePatterns = [
+  ".next/**",
+  "src-tauri/target/**",
+]
