@@ -32,7 +32,7 @@ describe("normalizeAccountSettings", () => {
     expect(normalizeAccountSettings({})).toEqual({
       threading: { includeAcrossFolders: true },
       layout: { defaultView: "threads" },
-      appearance: { dateFormat: "locale", senderIcons: true },
+      appearance: { dateFormat: "locale", topicColorRows: true, senderIcons: true },
       signatures: [],
       defaultSignatureId: ""
     });
@@ -105,7 +105,7 @@ describe("hasSavableAccountSettingsChanges", () => {
     const current = makeAccount({
       settings: {
         appearance: {
-          topicColorRows: false
+          topicColorRows: true
         }
       }
     });

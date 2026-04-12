@@ -129,6 +129,10 @@ bun run dev
 
 Open [http://localhost:3654](http://localhost:3654) in your browser.
 
+### Desktop app
+
+Noctua Mail can also be packaged as a native desktop app using Tauri. See [`doc/DESKTOP.md`](doc/DESKTOP.md) for setup, development, and packaging instructions.
+
 ### Testing
 
 Run all tests:

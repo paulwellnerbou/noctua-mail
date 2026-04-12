@@ -12,7 +12,6 @@ import CalendarTabContent from "@/app/components/account-settings/tabs/CalendarT
 import TopicsTabContent from "@/app/components/account-settings/tabs/TopicsTabContent";
 import RecipientAliasesTabContent from "@/app/components/account-settings/tabs/RecipientAliasesTabContent";
 import McpTabContent from "@/app/components/account-settings/tabs/McpTabContent";
-
 export type ManageTab =
   | "account"
   | "signatures"
@@ -319,7 +318,7 @@ export default function AccountSettingsModal({
                 isExistingAccount={isExistingAccount}
                 apiFetch={apiFetch}
                 onTopicsChanged={onTopicsChanged}
-                topicColorRows={localAccount.settings?.appearance?.topicColorRows ?? false}
+                topicColorRows={localAccount.settings?.appearance?.topicColorRows ?? true}
                 onUpdateSettings={handleUpdateSettings}
                 currentAppearance={localAccount.settings?.appearance}
                 onClose={onClose}
@@ -379,6 +378,7 @@ export default function AccountSettingsModal({
                 readErrorMessage={readErrorMessage}
               />
             </Tabs.Content>
+
           </Tabs.Root>
         </Flex>
       </Dialog.Content>

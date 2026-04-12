@@ -20,7 +20,10 @@
     "lint": "eslint .",
     "test": "bun test",
     "test:ci": "bun test",
-    "test:stress": "bun test --randomize --seed=1337 --rerun-each=3"
+    "test:stress": "bun test --randomize --seed=1337 --rerun-each=3",
+    "desktop:dev-server": "PORT=3655 APP_ENV_LABEL=Desktop NOCTUA_DESKTOP_MODE=true IMAP_CREDENTIALS_STORAGE=db NOCTUA_DATA_DIR=../noctua-data-desktop bun run dev",
+    "desktop:dev": "bunx tauri dev",
+    "desktop:build": "bash build-scripts/build-desktop.sh"
   },
   "dependencies": {
     "@fullcalendar/core": "^6.1.20",
@@ -61,6 +64,7 @@
     "zod": "3.25.76"
   },
   "devDependencies": {
+    "@tauri-apps/cli": "^2.10.1",
     "@types/html-to-text": "^9.0.4",
     "@types/mailparser": "^3.4.6",
     "@types/node": "^22.19.15",

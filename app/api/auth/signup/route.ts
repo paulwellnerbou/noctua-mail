@@ -20,26 +20,33 @@ export async function POST(request: Request) {
   const clientId = request.headers.get("x-noctua-client") ?? undefined;
   const payload = (await request.json()) as { inviteCode: string; account: Account; password?: string };
   const code = payload.inviteCode?.trim();
+  const desktopMode = process.env.NOCTUA_DESKTOP_MODE === "true";
 
   // Use IMAP password as the user password (fallback to payload.password for backwards compatibility)
-  const imapPassword = payload.account?.imap?.password ?? payload.password ?? "";
-  const smtpPassword = payload.account?.smtp?.password ?? imapPassword;
+  const imapPassword = payload.account?.imap?.password || payload.password || "";
+  const smtpPassword = payload.account?.smtp?.password || imapPassword;
 
-  if (!code || !payload.account || !imapPassword) {
+  if ((!desktopMode && !code) || !payload.account || !imapPassword) {
     return NextResponse.json({ ok: false, message: "Invalid payload - IMAP password required" }, { status: 400 });
   }
 
-  // Pre-check invite code (non-atomic, just for fast rejection with clear error messages)
-  const invites = await getInviteCodes();
-  const invite = invites.find((i) => i.code === code);
-  if (!invite) {
-    return NextResponse.json({ ok: false, message: "Invalid invite code" }, { status: 400 });
-  }
-  if (invite.maxUses !== null && invite.uses >= invite.maxUses) {
-    return NextResponse.json({ ok: false, message: "Invite code already used" }, { status: 400 });
-  }
-  if (invite.expiresAt && invite.expiresAt < Date.now()) {
-    return NextResponse.json({ ok: false, message: "Invite code expired" }, { status: 400 });
+  // In desktop mode, invite codes are not required — the app is single-user
+  // and there is no multi-tenant signup flow.
+  let claimedInviteRole: "admin" | "user" = "admin";
+  if (!desktopMode) {
+    // Pre-check invite code (non-atomic, just for fast rejection with clear error messages)
+    const invites = await getInviteCodes();
+    const invite = invites.find((i) => i.code === code);
+    if (!invite) {
+      return NextResponse.json({ ok: false, message: "Invalid invite code" }, { status: 400 });
+    }
+    if (invite.maxUses !== null && invite.uses >= invite.maxUses) {
+      return NextResponse.json({ ok: false, message: "Invite code already used" }, { status: 400 });
+    }
+    if (invite.expiresAt && invite.expiresAt < Date.now()) {
+      return NextResponse.json({ ok: false, message: "Invite code expired" }, { status: 400 });
+    }
+    claimedInviteRole = invite.role;
   }
 
   // Validate email
@@ -71,10 +78,14 @@ export async function POST(request: Request) {
 
   const userId = randomUUID();
 
-  // Atomically claim the invite code (prevents double-use under concurrency)
-  const claimedInvite = await claimInviteCode(code, userId);
-  if (!claimedInvite) {
-    return NextResponse.json({ ok: false, message: "Invite code already used or expired" }, { status: 400 });
+  // In web mode, atomically claim the invite code (prevents double-use under concurrency).
+  // In desktop mode, skip — no invite codes are used.
+  if (!desktopMode) {
+    const claimedInvite = await claimInviteCode(code!, userId);
+    if (!claimedInvite) {
+      return NextResponse.json({ ok: false, message: "Invite code already used or expired" }, { status: 400 });
+    }
+    claimedInviteRole = claimedInvite.role;
   }
 
   const [users, accounts, links] = await Promise.all([
@@ -83,7 +94,7 @@ export async function POST(request: Request) {
     getUserAccounts()
   ]);
 
-  const assignedRole: "admin" | "user" = users.length === 0 ? "admin" : claimedInvite.role;
+  const assignedRole: "admin" | "user" = users.length === 0 ? "admin" : claimedInviteRole;
   const user = {
     id: userId,
     email: account.email,

@@ -350,7 +350,7 @@ export default function TopicsTabContent({
             <label>
               <Switch
                 size="1"
-                checked={topicColorRows ?? false}
+                checked={topicColorRows ?? true}
                 onCheckedChange={(checked) =>
                   onUpdateSettings?.({
                     appearance: {

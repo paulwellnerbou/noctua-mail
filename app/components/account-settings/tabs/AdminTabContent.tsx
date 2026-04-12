@@ -1,6 +1,48 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Check, Copy } from "lucide-react";
-import { Button, Card, Flex, IconButton, Text } from "@radix-ui/themes";
+import { Button, Card, Flex, IconButton, Spinner, Text } from "@radix-ui/themes";
+import { useIsDesktop } from "@/lib/desktop";
+
+type StorageInfo = {
+  dataDir: string;
+  dbPath: string;
+  attachmentsDir: string;
+  sourcesDir: string;
+};
+
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <IconButton
+      size="1"
+      variant="soft"
+      color="gray"
+      aria-label="Copy path"
+      onClick={() => {
+        navigator.clipboard.writeText(text).then(() => {
+          setCopied(true);
+          window.setTimeout(() => setCopied(false), 1400);
+        }).catch(() => {});
+      }}
+    >
+      {copied ? <Check size={13} /> : <Copy size={13} />}
+    </IconButton>
+  );
+}
+
+function PathRow({ label, value }: { label: string; value: string }) {
+  return (
+    <Flex direction="column" gap="1">
+      <Text size="1" color="gray" weight="medium">{label}</Text>
+      <Flex align="center" gap="2">
+        <Text size="1" style={{ fontFamily: "monospace", overflowWrap: "anywhere", flex: "1 1 auto" }}>
+          {value}
+        </Text>
+        <CopyButton text={value} />
+      </Flex>
+    </Flex>
+  );
+}
 
 export type AdminUserDirectoryAccount = {
   id: string;
@@ -81,6 +123,7 @@ export default function AdminTabContent({
   const [latestGeneratedInviteCode, setLatestGeneratedInviteCode] = useState<string | null>(null);
   const [generatingInviteCode, setGeneratingInviteCode] = useState(false);
   const [copiedCode, setCopiedCode] = useState<string | null>(null);
+  const [storageInfo, setStorageInfo] = useState<StorageInfo | null>(null);
 
   const request = apiFetch ?? fetch;
   const readError = useMemo(
@@ -182,10 +225,22 @@ export default function AdminTabContent({
     }
   }, []);
 
+  const desktop = useIsDesktop();
+
   useEffect(() => {
     if (!isActive || !isAdminUser) return;
     void loadAdminData();
   }, [isActive, isAdminUser, loadAdminData]);
+
+  useEffect(() => {
+    if (!isActive || !desktop || storageInfo) return;
+    fetch("/api/desktop/storage-info")
+      .then((r) => r.json())
+      .then((data: { ok?: boolean } & Partial<StorageInfo>) => {
+        if (data.ok) setStorageInfo(data as StorageInfo);
+      })
+      .catch(() => {});
+  }, [isActive, desktop, storageInfo]);
 
   useEffect(() => {
     if (isAdminUser) return;
@@ -203,7 +258,9 @@ export default function AdminTabContent({
         <Flex direction="column" gap="4">
           <Flex align="center" justify="between" gap="3" wrap="wrap">
             <Text size="2" color="gray">
-              Generate invite codes, review invite usage, and inspect users with linked accounts.
+              {desktop
+                ? "Inspect users with linked accounts."
+                : "Generate invite codes, review invite usage, and inspect users with linked accounts."}
             </Text>
             <Flex align="center" gap="2" wrap="wrap">
               <Button
@@ -214,13 +271,15 @@ export default function AdminTabContent({
               >
                 {loading ? "Refreshing..." : "Refresh"}
               </Button>
-              <Button
-                size="1"
-                onClick={() => void generateInviteCode()}
-                disabled={generatingInviteCode || loading}
-              >
-                {generatingInviteCode ? "Generating..." : "Generate invite code"}
-              </Button>
+              {!desktop && (
+                <Button
+                  size="1"
+                  onClick={() => void generateInviteCode()}
+                  disabled={generatingInviteCode || loading}
+                >
+                  {generatingInviteCode ? "Generating..." : "Generate invite code"}
+                </Button>
+              )}
             </Flex>
           </Flex>
 
@@ -232,7 +291,7 @@ export default function AdminTabContent({
             </Card>
           )}
 
-          {latestGeneratedInviteCode && (
+          {!desktop && latestGeneratedInviteCode && (
             <Card size="2">
               <Flex direction="column" gap="1">
                 <Text size="2" color="gray">
@@ -306,6 +365,22 @@ export default function AdminTabContent({
             </Flex>
           </Card>
 
+          {desktop && storageInfo && (
+            <Card size="2">
+              <Flex direction="column" gap="3">
+                <Text size="3" weight="medium">Storage</Text>
+                <Text size="2" color="gray">
+                  All data is stored locally on this machine. Nothing is sent to external servers.
+                </Text>
+                <PathRow label="Data directory" value={storageInfo.dataDir} />
+                <PathRow label="Database" value={storageInfo.dbPath} />
+                <PathRow label="Attachments" value={storageInfo.attachmentsDir} />
+                <PathRow label="Message sources" value={storageInfo.sourcesDir} />
+              </Flex>
+            </Card>
+          )}
+
+          {!desktop && (
           <Card size="2">
             <Flex direction="column" gap="2">
               <Text size="3" weight="medium">
@@ -363,6 +438,7 @@ export default function AdminTabContent({
               )}
             </Flex>
           </Card>
+          )}
         </Flex>
       </div>
 
