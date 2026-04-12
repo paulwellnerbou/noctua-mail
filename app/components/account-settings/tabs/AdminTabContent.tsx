@@ -369,9 +369,6 @@ export default function AdminTabContent({
             <Card size="2">
               <Flex direction="column" gap="3">
                 <Text size="3" weight="medium">Storage</Text>
-                <Text size="2" color="gray">
-                  All data is stored locally on this machine. Nothing is sent to external servers.
-                </Text>
                 <PathRow label="Data directory" value={storageInfo.dataDir} />
                 <PathRow label="Database" value={storageInfo.dbPath} />
                 <PathRow label="Attachments" value={storageInfo.attachmentsDir} />
