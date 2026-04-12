@@ -122,6 +122,26 @@ type FolderConsistencyResponse = FolderConsistencyResult & {
   };
 };
 
+export function getResolvedRemoteMailboxFingerprint(result: {
+  needsRepair: boolean;
+  remote?: {
+    count: number | null;
+    uidNext: number | null;
+    uidValidity: string | null;
+    highestModSeq: string | null;
+  } | null;
+}) {
+  if (result.needsRepair) {
+    return null;
+  }
+  return buildRemoteMailboxFingerprint({
+    count: result.remote?.count ?? null,
+    uidNext: result.remote?.uidNext ?? null,
+    uidValidity: result.remote?.uidValidity ?? null,
+    highestModSeq: result.remote?.highestModSeq ?? null
+  });
+}
+
 class FullSyncDebugCancelledError extends Error {
   constructor(reason: string) {
     super(`Full sync cancelled before start. Reason: ${reason}`);
@@ -734,19 +754,14 @@ export function useSyncController({
       try {
         const result = await checkFolderConsistency(activeFolderId);
         if (cancelled) return;
-        const remoteFingerprint = buildRemoteMailboxFingerprint({
-          count: result.remote?.count ?? null,
-          uidNext: result.remote?.uidNext ?? null,
-          uidValidity: result.remote?.uidValidity ?? null,
-          highestModSeq: result.remote?.highestModSeq ?? null
-        });
+        const resolvedFingerprint = getResolvedRemoteMailboxFingerprint(result);
         const lastResolvedFingerprint =
           lastConsistencyFingerprintByFolderRef.current[repairKey] ?? null;
-        if (lastResolvedFingerprint === remoteFingerprint) {
+        if (resolvedFingerprint && lastResolvedFingerprint === resolvedFingerprint) {
           console.info("[noctua][sync-policy] skipping folder consistency sync for unchanged remote state", {
             accountId: activeAccountId,
             folderId: activeFolderId,
-            remoteFingerprint
+            remoteFingerprint: resolvedFingerprint
           });
           return;
         }
@@ -767,14 +782,22 @@ export function useSyncController({
           decision
         });
         if (decision.kind !== "folder") {
-          if (!result.needsRepair) {
-            lastConsistencyFingerprintByFolderRef.current[repairKey] = remoteFingerprint;
+          const resolvedFingerprint = getResolvedRemoteMailboxFingerprint(result);
+          if (resolvedFingerprint) {
+            lastConsistencyFingerprintByFolderRef.current[repairKey] = resolvedFingerprint;
           }
           return;
         }
         const syncResult = await executeFolderSyncDecision(decision, { triggerId });
         if (syncResult) {
-          lastConsistencyFingerprintByFolderRef.current[repairKey] = remoteFingerprint;
+          // Only cache a remote fingerprint after a follow-up consistency
+          // check confirms the local folder state is healed.
+          const postSyncResult = await checkFolderConsistency(activeFolderId);
+          if (cancelled) return;
+          const resolvedFingerprint = getResolvedRemoteMailboxFingerprint(postSyncResult);
+          if (resolvedFingerprint) {
+            lastConsistencyFingerprintByFolderRef.current[repairKey] = resolvedFingerprint;
+          }
         }
       } catch (error) {
         if (!cancelled) {

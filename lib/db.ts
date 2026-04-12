@@ -6857,7 +6857,7 @@ export async function upsertMessages(
        WHERE accountId = ? AND id = ?`
     );
     const findFolderMessageDuplicates = db.prepare(
-      `SELECT id, threadId
+      `SELECT id, threadId, folderId, mailboxPath, imapUid
        FROM messages
        WHERE accountId = ? AND folderId = ? AND messageId = ? AND id <> ?`
     );
@@ -7019,8 +7019,17 @@ export async function upsertMessages(
             message.folderId,
             message.messageId,
             rowId
-          ) as Array<{ id: string; threadId: string | null }>;
+          ) as Array<{
+            id: string;
+            threadId: string | null;
+            folderId?: string | null;
+            mailboxPath?: string | null;
+            imapUid?: number | null;
+          }>;
           duplicates.forEach((row) => {
+            if (!isSameMailboxMessageCopy(row, message)) {
+              return;
+            }
             deleteAttachmentsForMessage.run(row.id);
             deleteCalendarEventsForMessage.run(accountId, row.id);
             deleteFts.run(row.id);

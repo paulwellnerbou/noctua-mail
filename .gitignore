@@ -35,3 +35,8 @@ pnpm-debug.log*
 
 # generated runtime config
 public/runtime-config.js
+
+# Tauri desktop
+src-tauri/target/
+src-tauri/binaries/
+src-tauri/gen/

@@ -5605,7 +5605,7 @@ export default function MailClient({
                 userEmail: currentAccount?.email,
                 findRecipientAlias,
                 dateFormat: accountDateFormat,
-                topicColorRows: currentAccount?.settings?.appearance?.topicColorRows ?? false,
+                topicColorRows: currentAccount?.settings?.appearance?.topicColorRows ?? true,
                 senderIconsEnabled: currentAccount?.settings?.appearance?.senderIcons ?? true
               }}
               actions={{

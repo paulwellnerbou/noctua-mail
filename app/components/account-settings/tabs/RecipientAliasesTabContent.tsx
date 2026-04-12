@@ -9,6 +9,7 @@ import {
 import type { RecipientAlias } from "@/lib/data";
 import type { RecipientAliasTransferImportSummary } from "@/lib/recipientAliases";
 import RecipientAliasManager from "@/app/components/mailclient/RecipientAliasManager";
+import ImportReplaceConfirmDialog from "./ImportReplaceConfirmDialog";
 
 type Props = {
   accountId?: string;
@@ -51,6 +52,7 @@ export default function RecipientAliasesTabContent({
   const [importing, setImporting] = useState(false);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [pendingImportFile, setPendingImportFile] = useState<File | null>(null);
 
   const readError = useCallback(async (res: Response) => {
     try {
@@ -93,18 +95,14 @@ export default function RecipientAliasesTabContent({
     }
   }, [accountId, readError, request]);
 
-  const handleImportFile = useCallback(async (event: ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file || !accountId) {
-      event.target.value = "";
-      return;
+  const resetImportInput = useCallback(() => {
+    if (importInputRef.current) {
+      importInputRef.current.value = "";
     }
+  }, []);
 
-    const confirmed = window.confirm(
-      "Importing mailing list aliases replaces all current mailing list aliases for this account. Continue?"
-    );
-    if (!confirmed) {
-      event.target.value = "";
+  const executeImport = useCallback(async (file: File) => {
+    if (!accountId) {
       return;
     }
 
@@ -154,10 +152,35 @@ export default function RecipientAliasesTabContent({
           : "Failed to import recipient aliases data."
       );
     } finally {
-      event.target.value = "";
+      resetImportInput();
       setImporting(false);
     }
-  }, [accountId, onAliasesChanged, readError, request]);
+  }, [accountId, onAliasesChanged, readError, request, resetImportInput]);
+
+  const handleImportFile = useCallback((event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file || !accountId) {
+      resetImportInput();
+      return;
+    }
+    setPendingImportFile(file);
+  }, [accountId, resetImportInput]);
+
+  const handleImportDialogOpenChange = useCallback((open: boolean) => {
+    if (!open) {
+      setPendingImportFile(null);
+      resetImportInput();
+    }
+  }, [resetImportInput]);
+
+  const confirmImport = useCallback(() => {
+    const file = pendingImportFile;
+    if (!file) {
+      return;
+    }
+    setPendingImportFile(null);
+    void executeImport(file);
+  }, [executeImport, pendingImportFile]);
 
   if (!isExistingAccount) {
     return null;
@@ -218,6 +241,14 @@ export default function RecipientAliasesTabContent({
           onDeleteAlias={onDeleteAlias}
         />
       </div>
+      <ImportReplaceConfirmDialog
+        open={pendingImportFile !== null}
+        title="Import mailing list aliases?"
+        description="Importing mailing list aliases replaces all current mailing list aliases for this account."
+        confirmLabel="Import"
+        onOpenChange={handleImportDialogOpenChange}
+        onConfirm={confirmImport}
+      />
       <Flex
         justify="end"
         style={{ paddingTop: "var(--space-3)", borderTop: "1px solid var(--gray-a5)", flexShrink: 0 }}

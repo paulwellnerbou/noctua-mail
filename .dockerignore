@@ -50,3 +50,6 @@ yarn-error.log*
 # Misc
 .eslintcache
 TODO
+
+# Tauri desktop (not used in the web/Docker build)
+src-tauri

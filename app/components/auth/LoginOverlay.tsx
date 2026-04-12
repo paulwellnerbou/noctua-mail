@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { X } from "lucide-react";
+import { isDesktop, useIsDesktop } from "@/lib/desktop";
 import {
   Button,
   Callout,
@@ -94,7 +95,45 @@ export default function LoginOverlay({ onAuthenticated }: Props) {
     void submitLogin();
   };
 
+  const desktop = useIsDesktop();
+
+  // In desktop mode with no accounts, skip the login screen and go straight to setup.
+  // isDesktop() is safe to call inside useEffect (window is always available there).
+  useEffect(() => {
+    if (!isDesktop()) return;
+    fetch("/api/desktop/needs-setup")
+      .then((r) => r.json())
+      .then((data: { needsSetup?: boolean }) => {
+        if (!data?.needsSetup) return;
+        setEditingAccount({
+          id: accountIdFromEmail(""),
+          name: "",
+          email: "",
+          avatar: "NW",
+          imap: { host: "", port: 993, secure: true, user: "", password: "" },
+          smtp: { host: "", port: 465, secure: true, user: "", password: "" }
+        });
+        setSignupOpen(true);
+      })
+      .catch(() => {});
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   const startInviteFlow = () => {
+    if (desktop) {
+      // In desktop mode, skip the invite code dialog and go directly to account setup.
+      if (!editingAccount) {
+        setEditingAccount({
+          id: accountIdFromEmail(email),
+          name: email || "",
+          email,
+          avatar: "NW",
+          imap: { host: "", port: 993, secure: true, user: email, password },
+          smtp: { host: "", port: 465, secure: true, user: email, password }
+        });
+      }
+      setSignupOpen(true);
+      return;
+    }
     setInviteError(null);
     setInviteOpen(true);
   };
@@ -163,7 +202,7 @@ export default function LoginOverlay({ onAuthenticated }: Props) {
                   )}
                   <Flex justify="between" align="center" gap="3" wrap="wrap">
                     <Button type="button" variant="ghost" onClick={startInviteFlow}>
-                      Got an invite code?
+                      {desktop ? "Set up new account" : "Got an invite code?"}
                     </Button>
                     <Button type="submit" disabled={submitting}>
                       {submitting ? "Working..." : "Log in"}

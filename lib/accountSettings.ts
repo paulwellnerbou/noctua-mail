@@ -13,6 +13,9 @@ export function normalizeAccountSettings(settings?: AccountSettings) {
   }
   if (!next.appearance) next.appearance = {};
   next.appearance.dateFormat = normalizeAccountDateFormat(next.appearance.dateFormat);
+  if (next.appearance.topicColorRows === undefined) {
+    next.appearance.topicColorRows = true;
+  }
   if (next.appearance.senderIcons === undefined) {
     next.appearance.senderIcons = true;
   }
@@ -40,7 +43,7 @@ function normalizeComparableSettings(settings?: AccountSettings) {
     ...normalized,
     appearance: {
       ...normalized.appearance,
-      topicColorRows: normalized.appearance?.topicColorRows ?? false,
+      topicColorRows: normalized.appearance?.topicColorRows ?? true,
       senderIcons: normalized.appearance?.senderIcons ?? true
     },
     calendar: {

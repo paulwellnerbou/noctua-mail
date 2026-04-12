@@ -1,9 +1,24 @@
+import { isDesktop } from "@/lib/desktop";
+
 type OpenDetachedWindowOptions = {
   width?: number;
   height?: number;
   left?: number;
   top?: number;
 };
+
+type TauriInternals = {
+  invoke: (cmd: string, args?: Record<string, unknown>) => Promise<unknown>;
+};
+
+/**
+ * Returns true for URL schemes that cannot be loaded in a Tauri WebviewWindow
+ * (blob:, data:, etc.). These must be handled separately via a browser fallback
+ * or by first converting to an app-relative path.
+ */
+function isUnsupportedTauriScheme(url: string): boolean {
+  return /^(blob|data):/i.test(url);
+}
 
 export function openDetachedWindow(
   url: string,
@@ -20,6 +35,24 @@ export function openDetachedWindow(
   );
   const width = options.width ?? fallbackWidth;
   const height = options.height ?? fallbackHeight;
+
+  // In the Tauri desktop shell window.open is blocked by the WebView.
+  // Use a native Tauri command to create a new WebviewWindow instead.
+  // blob: and data: URLs are not supported by Tauri WebviewWindows, so fall
+  // through to the regular window.open path for those.
+  if (isDesktop() && !isUnsupportedTauriScheme(url)) {
+    const tauri = (window as unknown as { __TAURI_INTERNALS__?: TauriInternals }).__TAURI_INTERNALS__;
+    if (tauri?.invoke) {
+      const label = `noctua-popup-${Date.now()}`;
+      tauri.invoke("open_detached_window", { label, url, width, height }).catch((err) => {
+        console.error("[noctua] open_detached_window failed:", err);
+      });
+      // Return a non-null truthy value so callers don't show "pop-up blocked"
+      // notices. Callers only check truthiness — no Window methods are called.
+      return {} as Window;
+    }
+  }
+
   const left =
     options.left ?? Math.max(0, Math.floor((window.screen.availWidth - width) / 2));
   const top =
