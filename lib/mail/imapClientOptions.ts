@@ -46,7 +46,17 @@ export function buildImapFlowOptions(
   const baseTls: NonNullable<ImapFlowOptions["tls"]> = {
     servername: account.imap.host,
     checkServerIdentity: (hostname, cert) => {
-      if (!cert) return undefined;
+      // Some IMAP servers (e.g. certain IONOS backends) present CN-only certs
+      // with no Subject Alternative Names. Node 17+ / Bun dropped CN fallback,
+      // so tls.checkServerIdentity throws "Cert does not contain a DNS name".
+      // Re-implement the CN fallback for these legacy certs.
+      if (!cert?.subjectaltname) {
+        const cn = (cert as { subject?: { CN?: string } } | undefined)?.subject?.CN;
+        if (!cn) return undefined; // cert is empty or unusable; TLS authorized flag stands
+        if (cn === hostname) return undefined;
+        if (cn.startsWith("*.") && hostname.endsWith(cn.slice(1))) return undefined;
+        return new Error(`Hostname "${hostname}" does not match certificate CN "${cn}"`);
+      }
       return tls.checkServerIdentity(hostname, cert);
     }
   };

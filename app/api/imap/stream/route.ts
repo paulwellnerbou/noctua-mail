@@ -402,8 +402,21 @@ export async function handleImapStreamRequest(
 
         const pollTimer = setInterval(pollFolders, pollIntervalMs);
 
+        // Send SSE comment pings to keep the connection alive in environments
+        // (e.g. WKWebView/Tauri) that aggressively time out idle SSE streams.
+        // Without this, frequent reconnects cause repeated IMAP TLS handshakes
+        // which can fail on servers with CN-only certificates (no SAN fields).
+        const keepaliveTimer = setInterval(() => {
+          try {
+            controller.enqueue(encoder.encode(":ping\n\n"));
+          } catch {
+            // stream already closed
+          }
+        }, 25_000);
+
         request.signal.addEventListener("abort", () => {
           clearInterval(pollTimer);
+          clearInterval(keepaliveTimer);
         });
       } catch (error) {
         send("error", { message: (error as Error).message ?? "Stream failed" });
