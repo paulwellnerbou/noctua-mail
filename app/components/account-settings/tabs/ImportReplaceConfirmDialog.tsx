@@ -32,7 +32,7 @@ export default function ImportReplaceConfirmDialog({
             </Button>
           </AlertDialog.Cancel>
           <AlertDialog.Action>
-            <Button color="gray" variant="soft" onClick={onConfirm}>
+            <Button variant="solid" onClick={onConfirm}>
               {confirmLabel}
             </Button>
           </AlertDialog.Action>

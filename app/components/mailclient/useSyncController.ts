@@ -754,12 +754,6 @@ export function useSyncController({
       try {
         const result = await checkFolderConsistency(activeFolderId);
         if (cancelled) return;
-        const remoteFingerprint = buildRemoteMailboxFingerprint({
-          count: result.remote?.count ?? null,
-          uidNext: result.remote?.uidNext ?? null,
-          uidValidity: result.remote?.uidValidity ?? null,
-          highestModSeq: result.remote?.highestModSeq ?? null
-        });
         const resolvedFingerprint = getResolvedRemoteMailboxFingerprint(result);
         const lastResolvedFingerprint =
           lastConsistencyFingerprintByFolderRef.current[repairKey] ?? null;
