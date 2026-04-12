@@ -54,9 +54,12 @@ export function buildImapFlowOptions(
       if (!cert?.subjectaltname) {
         const cn = (cert as { subject?: { CN?: string } } | undefined)?.subject?.CN;
         if (!cn) return new Error(`Certificate has no SAN and no CN — cannot verify hostname "${hostname}"`);
-        if (cn === hostname) return undefined;
+        // RFC 4343: DNS names are case-insensitive.
+        const cnLower = cn.toLowerCase();
+        const hostLower = hostname.toLowerCase();
+        if (cnLower === hostLower) return undefined;
         // RFC 6125 §6.4.3: wildcard certs match only a single left-most label.
-        if (cn.startsWith("*.") && hostname.endsWith(cn.slice(1)) && !hostname.slice(0, -cn.slice(1).length).includes(".")) {
+        if (cnLower.startsWith("*.") && hostLower.endsWith(cnLower.slice(1)) && !hostLower.slice(0, -cnLower.slice(1).length).includes(".")) {
           return undefined;
         }
         return new Error(`Hostname "${hostname}" does not match certificate CN "${cn}"`);
