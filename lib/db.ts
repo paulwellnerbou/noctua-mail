@@ -591,6 +591,18 @@ async function unlinkIfExists(filePath: string) {
   }
 }
 
+async function areEquivalentDbPaths(leftPath: string, rightPath: string) {
+  try {
+    const [leftRealPath, rightRealPath] = await Promise.all([
+      fs.realpath(leftPath),
+      fs.realpath(rightPath)
+    ]);
+    return leftRealPath === rightRealPath;
+  } catch {
+    return leftPath === rightPath;
+  }
+}
+
 async function cleanupAccountLifecycleArtifacts(
   accountId: string,
   dbPath: string,
@@ -1827,9 +1839,9 @@ export async function deleteAccountControlPlane(accountId: string) {
     const sharedPathRow = db
       .prepare(`SELECT COUNT(*) as count FROM accounts WHERE id <> ? AND dbPath = ?`)
       .get(accountId, dbPath) as { count: number } | undefined;
-    const mainDbPath = path.resolve(getMainDbPath());
+    const mainDbPath = getMainDbPath();
     const deleteShardFile =
-      (sharedPathRow?.count ?? 0) === 0 && path.resolve(dbPath) !== mainDbPath;
+      (sharedPathRow?.count ?? 0) === 0 && !(await areEquivalentDbPaths(dbPath, mainDbPath));
 
     closeAccountDbConnection(dbPath);
 
