@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Check, Copy } from "lucide-react";
-import { Button, Card, Flex, IconButton, Spinner, Text } from "@radix-ui/themes";
+import { Button, Card, Flex, IconButton, Text } from "@radix-ui/themes";
 import { useIsDesktop } from "@/lib/desktop";
 
 type StorageInfo = {
