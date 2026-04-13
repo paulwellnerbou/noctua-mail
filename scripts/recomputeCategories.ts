@@ -1,3 +1,6 @@
-import { runCategoryRecomputeCli } from "../lib/workers/recomputeCategories";
+import { installBackendConsoleTimestamps } from "../lib/logging/backendConsole";
 
+installBackendConsoleTimestamps();
+
+const { runCategoryRecomputeCli } = await import("../lib/workers/recomputeCategories");
 await runCategoryRecomputeCli();

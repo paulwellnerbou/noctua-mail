@@ -34,8 +34,8 @@ export default function SourcePanel({ messageId, fetchSource, scrubSource }: Sou
       active = false;
       console.info("[noctua] source panel cleanup", { messageId });
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- fetchSource changes frequently; use ref to avoid refetch loops.
   }, [messageId]);
+  
   const status =
     sourceState && sourceState.messageId === messageId ? sourceState.status : "loading";
   const source = sourceState && sourceState.messageId === messageId ? sourceState.source : "";

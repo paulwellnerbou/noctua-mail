@@ -4,9 +4,13 @@
  * Useful for troubleshooting sync issues and verifying system health
  */
 
-import { getAccounts, getFolders, getMailboxState, getLatestMessageUid } from "../lib/db";
+import { installBackendConsoleTimestamps } from "../lib/logging/backendConsole";
+
+installBackendConsoleTimestamps();
 
 async function diagnoseSyncState() {
+  const { getAccounts, getFolders, getMailboxState, getLatestMessageUid } = await import("../lib/db");
+
   console.log("=== Noctua Mail Sync State Diagnostic ===\n");
 
   const accounts = await getAccounts();

@@ -308,7 +308,7 @@ function bindImapSocketDiagnostics(client: ImapFlow, context: ImapClientLogConte
   if (logger === false) return;
 
   const instrumentedClient = client as ImapFlow & {
-    connect: (...args: unknown[]) => Promise<unknown>;
+    connect: ImapFlow["connect"];
     socket?: tls.TLSSocket & {
       remoteAddress?: string;
       remotePort?: number;
@@ -325,9 +325,9 @@ function bindImapSocketDiagnostics(client: ImapFlow, context: ImapClientLogConte
   if (typeof instrumentedClient.connect !== "function") return;
   instrumentedClient[CONNECT_DIAGNOSTICS_BOUND] = true;
 
-  const originalConnect = instrumentedClient.connect.bind(client);
-  instrumentedClient.connect = async (...args: unknown[]) => {
-    const connectPromise = originalConnect(...args);
+  const originalConnect = instrumentedClient.connect.bind(client) as ImapFlow["connect"];
+  instrumentedClient.connect = async () => {
+    const connectPromise = originalConnect();
     const socket = instrumentedClient.socket;
     if (socket && !socket[SOCKET_DIAGNOSTICS_BOUND]) {
       socket[SOCKET_DIAGNOSTICS_BOUND] = true;

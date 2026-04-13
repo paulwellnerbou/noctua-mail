@@ -3,5 +3,5 @@ import next from "eslint-config-next/core-web-vitals";
 
 export default defineConfig([
   ...next,
-  globalIgnores([".next/", "node_modules/", "dist/", ".data/"])
+  globalIgnores([".next/", "node_modules/", "dist/", ".data/", "src-tauri/"])
 ]);

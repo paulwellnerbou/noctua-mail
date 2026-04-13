@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useSyncExternalStore } from "react";
 
 /**
  * Returns true when the app is running inside the Tauri desktop shell.
@@ -13,6 +13,10 @@ export function isDesktop(): boolean {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 }
 
+function subscribeDesktopStatus() {
+  return () => {};
+}
+
 /**
  * React hook version of `isDesktop()`. Always returns `false` on the first
  * render (matching the server HTML), then updates to the real value after
@@ -20,9 +24,5 @@ export function isDesktop(): boolean {
  * desktop mode.
  */
 export function useIsDesktop(): boolean {
-  const [desktop, setDesktop] = useState(false);
-  useEffect(() => {
-    setDesktop(isDesktop());
-  }, []);
-  return desktop;
+  return useSyncExternalStore(subscribeDesktopStatus, isDesktop, () => false);
 }

@@ -116,7 +116,7 @@ export default function LoginOverlay({ onAuthenticated }: Props) {
         setSignupOpen(true);
       })
       .catch(() => {});
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []);
 
   const startInviteFlow = () => {
     if (desktop) {
