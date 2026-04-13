@@ -275,6 +275,208 @@ export function extractHtmlBody(value: string) {
   return value;
 }
 
+function splitCssSelectorList(selectors: string) {
+  const parts: string[] = [];
+  let current = "";
+  let depthParen = 0;
+  let depthBracket = 0;
+  let inString: "'" | "\"" | null = null;
+  for (let index = 0; index < selectors.length; index += 1) {
+    const char = selectors[index];
+    const previous = selectors[index - 1];
+    current += char;
+    if (inString) {
+      if (char === inString && previous !== "\\") {
+        inString = null;
+      }
+      continue;
+    }
+    if (char === "'" || char === "\"") {
+      inString = char;
+      continue;
+    }
+    if (char === "(") {
+      depthParen += 1;
+      continue;
+    }
+    if (char === ")") {
+      depthParen = Math.max(0, depthParen - 1);
+      continue;
+    }
+    if (char === "[") {
+      depthBracket += 1;
+      continue;
+    }
+    if (char === "]") {
+      depthBracket = Math.max(0, depthBracket - 1);
+      continue;
+    }
+    if (char === "," && depthParen === 0 && depthBracket === 0) {
+      parts.push(current.slice(0, -1));
+      current = "";
+    }
+  }
+  if (current) {
+    parts.push(current);
+  }
+  return parts;
+}
+
+function findCssBlockBoundary(input: string, start: number) {
+  let depthParen = 0;
+  let depthBracket = 0;
+  let inString: "'" | "\"" | null = null;
+  for (let index = start; index < input.length; index += 1) {
+    const char = input[index];
+    const next = input[index + 1];
+    const previous = input[index - 1];
+    if (!inString && char === "/" && next === "*") {
+      const commentEnd = input.indexOf("*/", index + 2);
+      return commentEnd === -1 ? input.length : findCssBlockBoundary(input, commentEnd + 2);
+    }
+    if (inString) {
+      if (char === inString && previous !== "\\") {
+        inString = null;
+      }
+      continue;
+    }
+    if (char === "'" || char === "\"") {
+      inString = char;
+      continue;
+    }
+    if (char === "(") {
+      depthParen += 1;
+      continue;
+    }
+    if (char === ")") {
+      depthParen = Math.max(0, depthParen - 1);
+      continue;
+    }
+    if (char === "[") {
+      depthBracket += 1;
+      continue;
+    }
+    if (char === "]") {
+      depthBracket = Math.max(0, depthBracket - 1);
+      continue;
+    }
+    if (depthParen === 0 && depthBracket === 0 && (char === "{" || char === ";")) {
+      return index;
+    }
+  }
+  return input.length;
+}
+
+function findCssMatchingBrace(input: string, openingBraceIndex: number) {
+  let depth = 1;
+  let inString: "'" | "\"" | null = null;
+  for (let index = openingBraceIndex + 1; index < input.length; index += 1) {
+    const char = input[index];
+    const next = input[index + 1];
+    const previous = input[index - 1];
+    if (!inString && char === "/" && next === "*") {
+      const commentEnd = input.indexOf("*/", index + 2);
+      if (commentEnd === -1) {
+        return input.length - 1;
+      }
+      index = commentEnd + 1;
+      continue;
+    }
+    if (inString) {
+      if (char === inString && previous !== "\\") {
+        inString = null;
+      }
+      continue;
+    }
+    if (char === "'" || char === "\"") {
+      inString = char;
+      continue;
+    }
+    if (char === "{") {
+      depth += 1;
+      continue;
+    }
+    if (char === "}") {
+      depth -= 1;
+      if (depth === 0) {
+        return index;
+      }
+    }
+  }
+  return input.length - 1;
+}
+
+function scopeCssSelector(selector: string, scope: string) {
+  const trimmed = selector.trim();
+  if (!trimmed) return trimmed;
+  const replacedRoot = trimmed
+    .replace(/(^|[\s>+~])(html|body|:root)\b/gi, (_, prefix: string) => `${prefix}${scope}`)
+    .replace(new RegExp(`${scope}\\s+${scope}`, "g"), scope);
+  if (replacedRoot.includes(scope)) {
+    return replacedRoot;
+  }
+  return `${scope} ${replacedRoot}`;
+}
+
+function scopeCssRules(input: string, scope: string, insideKeyframes = false): string {
+  let output = "";
+  let cursor = 0;
+  while (cursor < input.length) {
+    const boundary = findCssBlockBoundary(input, cursor);
+    if (boundary >= input.length) {
+      output += input.slice(cursor);
+      break;
+    }
+
+    const prelude = input.slice(cursor, boundary);
+    const token = input[boundary];
+
+    if (token === ";") {
+      output += `${prelude};`;
+      cursor = boundary + 1;
+      continue;
+    }
+
+    const closingBrace = findCssMatchingBrace(input, boundary);
+    const block = input.slice(boundary + 1, closingBrace);
+    const trimmedPrelude = prelude.trim();
+
+    if (trimmedPrelude.startsWith("@")) {
+      const lowerPrelude = trimmedPrelude.toLowerCase();
+      const shouldRecurse =
+        lowerPrelude.startsWith("@media") ||
+        lowerPrelude.startsWith("@supports") ||
+        lowerPrelude.startsWith("@container") ||
+        lowerPrelude.startsWith("@layer") ||
+        lowerPrelude.startsWith("@document") ||
+        lowerPrelude.startsWith("@scope");
+      const nextInsideKeyframes =
+        lowerPrelude.startsWith("@keyframes") || lowerPrelude.startsWith("@-webkit-keyframes");
+      const nextBlock = shouldRecurse || nextInsideKeyframes
+        ? scopeCssRules(block, scope, nextInsideKeyframes)
+        : block;
+      output += `${prelude}{${nextBlock}}`;
+      cursor = closingBrace + 1;
+      continue;
+    }
+
+    const scopedPrelude = insideKeyframes
+      ? prelude
+      : splitCssSelectorList(prelude)
+          .map((selector) => scopeCssSelector(selector, scope))
+          .join(", ");
+    output += `${scopedPrelude}{${scopeCssRules(block, scope, insideKeyframes)}}`;
+    cursor = closingBrace + 1;
+  }
+  return output;
+}
+
+function scopeStyleTagCss(styleTag: string, scope: string) {
+  return styleTag.replace(/<style([^>]*)>([\s\S]*?)<\/style>/gi, (_, attrs, css) => {
+    return `<style${attrs}>${scopeCssRules(css, scope)}</style>`;
+  });
+}
+
 function isRenderableInlineImageAttachment(attachment: InlineImageAttachment) {
   if (!attachment.inline || !attachment.url) return false;
   const contentType = attachment.contentType?.toLowerCase() ?? "";
@@ -413,11 +615,11 @@ export function buildQuotedHtmlPartsFromHtml(
   stripImages: boolean
 ): QuotedHtmlParts {
   const sanitizedHtml = stripConditionalComments(html);
-  let bodyContent = extractHtmlBody(sanitizedHtml);
+  const styles = (sanitizedHtml.match(/<style[\s\S]*?<\/style>/gi) ?? []).join("\n");
+  let bodyContent = extractHtmlBody(sanitizedHtml).replace(/<style[\s\S]*?<\/style>/gi, "");
   if (stripImages) {
     bodyContent = bodyContent.replace(/<img[\s\S]*?>/gi, "");
   }
-  const styles = (sanitizedHtml.match(/<style[\s\S]*?<\/style>/gi) ?? []).join("\n");
   return {
     styles,
     headerHtml: `<p>${escapeHtml(header)}</p>`,
@@ -426,11 +628,16 @@ export function buildQuotedHtmlPartsFromHtml(
 }
 
 export function assembleQuotedHtml(parts: QuotedHtmlParts, quoteHtml: boolean) {
-  if (!quoteHtml) {
-    return `${parts.styles}${parts.headerHtml}${parts.bodyHtml}`;
-  }
-  // Wrap the entire quoted section (styles + header + blockquote) in a div for easy extraction
-  return `<div id="noctua-quoted-html">${parts.styles}${parts.headerHtml}<blockquote type="cite" style="margin:0 0 0 .8ex;border-left:2px solid #cfcfcf;padding-left:1ex;">${parts.bodyHtml}</blockquote></div>`;
+  const scope = "#noctua-quoted-html .noctua-quoted-email-body";
+  const scopedStyles = parts.styles ? scopeStyleTagCss(parts.styles, scope) : "";
+  const emailBodyHtml = `<div class="noctua-quoted-email-body">${parts.bodyHtml}</div>`;
+  const bodyHtml = quoteHtml
+    ? `<blockquote type="cite" style="margin:0 0 0 .8ex;border-left:2px solid #cfcfcf;padding-left:1ex;">${emailBodyHtml}</blockquote>`
+    : emailBodyHtml;
+  // Wrap the entire quoted section (styles + header + body) in a div for easy extraction.
+  // Scope the original message CSS to the quoted email body only so the reply header
+  // stays visually outside the original message's own layout and styling.
+  return `<div id="noctua-quoted-html">${scopedStyles}${parts.headerHtml}${bodyHtml}</div>`;
 }
 
 /**

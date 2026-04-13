@@ -1,5 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import {
+  assembleQuotedHtml,
+  buildQuotedHtmlPartsFromHtml,
   extractBodyContent,
   extractVisibleHtmlText,
   decodeHtmlEntities,
@@ -224,6 +226,63 @@ describe("extractBodyContent", () => {
     expect(result.bodyAttrs.className).toBe("mail-body");
     expect(result.bodyAttrs.style).toBe("font-size:14px");
     expect(result.styles).toEqual(["<style>.x{color:red}</style>"]);
+  });
+});
+
+describe("assembleQuotedHtml", () => {
+  it("scopes quoted email styles to the quoted email body only", () => {
+    const parts = buildQuotedHtmlPartsFromHtml(
+      [
+        "<style>",
+        "body,table,td,a{color:red}",
+        ".wrapper{margin:0 auto}",
+        "</style>",
+        '<table id="body"><tr><td><a href="https://example.com">Quoted</a></td></tr></table>'
+      ].join(""),
+      "On Mon, Alice wrote:",
+      false
+    );
+
+    const result = assembleQuotedHtml(parts, true);
+
+    expect(result).toContain('<div id="noctua-quoted-html">');
+    expect(result).toContain('<p>On Mon, Alice wrote:</p><blockquote');
+    expect(result).toContain('<div class="noctua-quoted-email-body">');
+    expect(result).toContain("#noctua-quoted-html .noctua-quoted-email-body, #noctua-quoted-html .noctua-quoted-email-body table, #noctua-quoted-html .noctua-quoted-email-body td, #noctua-quoted-html .noctua-quoted-email-body a{color:red}");
+    expect(result).toContain("#noctua-quoted-html .noctua-quoted-email-body .wrapper{margin:0 auto}");
+    expect(result).not.toContain("body,table,td,a{color:red}");
+  });
+
+  it("scopes selectors inside media queries but leaves keyframes untouched", () => {
+    const parts = buildQuotedHtmlPartsFromHtml(
+      [
+        "<style>",
+        "@media only screen and (max-width: 639px){body,#body{min-width:320px}.wrapper td{padding:0}}",
+        "@keyframes fade{from{opacity:0}to{opacity:1}}",
+        "</style>",
+        '<table id="body" class="wrapper"><tr><td>Quoted</td></tr></table>'
+      ].join(""),
+      "Header",
+      false
+    );
+
+    const result = assembleQuotedHtml(parts, true);
+
+    expect(result).toContain(
+      "@media only screen and (max-width: 639px){#noctua-quoted-html .noctua-quoted-email-body, #noctua-quoted-html .noctua-quoted-email-body #body{min-width:320px}#noctua-quoted-html .noctua-quoted-email-body .wrapper td{padding:0}}"
+    );
+    expect(result).toContain("@keyframes fade{from{opacity:0}to{opacity:1}}");
+  });
+
+  it("keeps the quoted wrapper even when html quoting is disabled", () => {
+    const parts = buildQuotedHtmlPartsFromHtml("<p>Quoted</p>", "Header", false);
+
+    const result = assembleQuotedHtml(parts, false);
+
+    expect(result).toContain('<div id="noctua-quoted-html">');
+    expect(result).toContain('<div class="noctua-quoted-email-body"><p>Quoted</p></div>');
+    expect(result).toContain("<p>Header</p>");
+    expect(result).not.toContain("<blockquote");
   });
 });
 
