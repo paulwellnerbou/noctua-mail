@@ -1,5 +1,6 @@
 import { randomUUID } from "crypto";
-import { parseSyncWorkerLine } from "@/lib/syncWorkerProtocol";
+import { parseSyncWorkerLine } from "@/lib/workers/syncProtocol";
+import { workerScriptPaths } from "@/lib/workers/entrypoints";
 import type {
   SyncMode,
   SyncOperationProgress,
@@ -364,7 +365,7 @@ function spawnSyncWorker(job: SyncJob, clientId?: string) {
       clientId
     });
     const child = bun.spawn(
-      ["bun", "run", "scripts/runSyncJob.ts", childPayload],
+      ["bun", "run", workerScriptPaths.sync, childPayload],
       {
         cwd: process.cwd(),
         stdout: "pipe",

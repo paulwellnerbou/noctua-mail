@@ -1,9 +1,10 @@
 import { createWorkerJobRegistry, type WorkerJobRecord } from "./workerJobRegistry";
+import { workerScriptPaths } from "./workers/entrypoints";
 
 export type CategoryRecomputeJob = WorkerJobRecord;
 
 const categoryRecomputeJobs = createWorkerJobRegistry({
-  scriptPath: "scripts/recomputeCategories.ts",
+  scriptPath: workerScriptPaths.recomputeCategories,
   spawnStdout: "inherit",
   spawnStderr: "inherit",
   readStderrText: false,

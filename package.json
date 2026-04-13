@@ -21,6 +21,8 @@
     "test": "bun test",
     "test:ci": "bun test",
     "test:stress": "bun test --randomize --seed=1337 --rerun-each=3",
+    "test:standalone-workers": "bun run build && bun --bun build-scripts/verifyStandaloneWorkerBuild.ts",
+    "test:docker-workers": "bun --bun build-scripts/verifyDockerWorkerImage.ts",
     "desktop:dev-server": "PORT=3655 APP_ENV_LABEL=Desktop NOCTUA_DESKTOP_MODE=true IMAP_CREDENTIALS_STORAGE=db NOCTUA_DATA_DIR=../noctua-data-desktop bun run dev",
     "desktop:dev": "bunx tauri dev",
     "desktop:build": "bash build-scripts/build-desktop.sh"

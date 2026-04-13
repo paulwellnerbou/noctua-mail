@@ -50,6 +50,9 @@ jobs:
       - name: Run test stress pass
         run: bun run test:stress
 
+      - name: Run Docker worker packaging check
+        run: bun run test:docker-workers
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 

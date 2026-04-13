@@ -1,9 +1,10 @@
 import { createWorkerJobRegistry, type WorkerJobRecord } from "./workerJobRegistry";
+import { workerScriptPaths } from "./workers/entrypoints";
 
 export type ThreadRecomputeJob = WorkerJobRecord;
 
 const threadRecomputeJobs = createWorkerJobRegistry({
-  scriptPath: "scripts/recomputeThreads.ts",
+  scriptPath: workerScriptPaths.recomputeThreads,
   spawnStdout: "ignore",
   spawnStderr: "pipe",
   readStderrText: true,
