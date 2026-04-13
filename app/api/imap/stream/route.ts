@@ -163,7 +163,7 @@ export async function handleImapStreamRequest(
           buildImapFlowOptions(account, {
             maxIdleTime: 10 * 60 * 1000,
             qresync: true
-          })
+          }, { ...logContext, mailbox })
         );
         bindImapClientError(client, { ...logContext, mailbox });
 
@@ -353,7 +353,9 @@ export async function handleImapStreamRequest(
             );
             if (toPoll.length === 0) return;
 
-          const pollClient = new ImapFlow(buildImapFlowOptions(account));
+          const pollClient = new ImapFlow(
+            buildImapFlowOptions(account, {}, { ...logContext, mailbox: "poll" })
+          );
           bindImapClientError(pollClient, { ...logContext, mailbox: "poll" });
           try {
             await logImapOp("imap.connect", { ...logContext, mailbox: "poll" }, async () => {

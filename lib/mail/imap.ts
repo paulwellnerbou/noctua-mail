@@ -22,7 +22,7 @@ import { bindImapClientError, buildImapFlowOptions } from "@/lib/mail/imapClient
 import { ImapFlow } from "imapflow";
 
 const buildImapClient = (account: Account, logContext?: ImapLogContext) => {
-  const client = new ImapFlow(buildImapFlowOptions(account));
+  const client = new ImapFlow(buildImapFlowOptions(account, {}, logContext));
   bindImapClientError(client, logContext);
   return client;
 };

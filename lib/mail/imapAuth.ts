@@ -14,7 +14,7 @@ export async function verifyImapCredentials(
         user: account.imap.user,
         pass: password
       }
-    })
+    }, { accountId: account.id, clientId })
   );
   bindImapClientError(client, { accountId: account.id, clientId });
   try {

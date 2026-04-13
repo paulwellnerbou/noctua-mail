@@ -68,7 +68,7 @@ export function useComposeViewEffects({
       element.setSelectionRange(0, 0);
       element.scrollTop = 0;
     });
-  }, [composeTab, composeOpen, composeTextRef]);
+  }, [composeMode, composeOpen, composeTab, composeTextRef, composeView]);
 
   useEffect(() => {
     const previousActiveFolderId = previousActiveFolderIdRef.current;
@@ -87,7 +87,7 @@ export function useComposeViewEffects({
       firstField?.focus();
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [composeOpen, composeView, composeModalRef, composeCardRef]);
+  }, [composeCardRef, composeMode, composeModalRef, composeOpen, composeView]);
 
   useEffect(() => {
     if (!composeResizing || composeView !== "modal") return;

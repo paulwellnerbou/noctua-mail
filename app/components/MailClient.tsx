@@ -166,7 +166,11 @@ import { useRecipientAliases } from "./mailclient/useRecipientAliases";
 import { useAccountController } from "./mailclient/useAccountController";
 import ThreadJsonModal from "./mailclient/message/ThreadJsonModal";
 import ThreadView from "./mailclient/message/ThreadView";
-import { doesCachedThreadCoverMessages } from "./mailclient/message/threadViewState";
+import {
+  doesCachedThreadCoverMessages,
+  getComposeThreadFocusMessageId,
+  getInlineComposePlacement
+} from "./mailclient/message/threadViewState";
 import TopicPickerDialog from "./mailclient/TopicPickerDialog";
 import RecipientAliasDialog from "./mailclient/RecipientAliasDialog";
 import AccountReloginDialog from "./mailclient/AccountReloginDialog";
@@ -682,6 +686,13 @@ export default function MailClient({
   const messageRefs = useRef<Map<string, HTMLElement>>(new Map());
   const listPaneRef = useRef<HTMLDivElement | null>(null);
   const [noticePaneRightOffset, setNoticePaneRightOffset] = useState(16);
+  const [pendingSelectionCollapseMessageId, setPendingSelectionCollapseMessageId] = useState<
+    string | null
+  >(null);
+  const [pendingSelectionScrollMessageId, setPendingSelectionScrollMessageId] = useState<
+    string | null
+  >(null);
+  const composeThreadCollapseKeyRef = useRef("");
   const refreshMailboxDataRef = useRef<() => Promise<boolean>>(async () => false);
   const setMessagesRef = useRef<React.Dispatch<React.SetStateAction<Message[]>>>(() => {});
   const updateMessagesRef = useRef<(updater: (message: Message) => Message | null, options?: { source?: string }) => void>(() => {});
@@ -2652,6 +2663,8 @@ export default function MailClient({
       const currentThreadKey = currentMessage
         ? currentMessage.threadId ?? currentMessage.messageId ?? currentMessage.id
         : "";
+      setPendingSelectionCollapseMessageId(nextMessage.id);
+      setPendingSelectionScrollMessageId(nextMessage.id);
       logListDebug("info", "selecting message", {
         activeAccountId,
         activeFolderId,
@@ -2669,7 +2682,18 @@ export default function MailClient({
       }
       setViewMessage(nextMessage);
     },
-    [activeAccountId, activeFolderId, composeMode, composeOpen, composeView, searchScope, setComposeView, setViewMessage]
+    [
+      activeAccountId,
+      activeFolderId,
+      composeMode,
+      composeOpen,
+      composeView,
+      searchScope,
+      setComposeView,
+      setPendingSelectionCollapseMessageId,
+      setPendingSelectionScrollMessageId,
+      setViewMessage
+    ]
   );
 
   const {
@@ -2776,13 +2800,12 @@ export default function MailClient({
   const showComposeInline = composeOpen && composeView === "inline";
   const showComposeModal = composeOpen && composeView === "modal";
   const showComposeMinimized = composeOpen && composeView === "minimized";
-  const hideThreadView = showComposeInline && composeMode === "edit";
   const activeMessage = useMemo(() => {
-    if (hideThreadView || (composeOpen && composeMode === "new")) return undefined;
+    if (composeOpen && composeMode === "new") return undefined;
     if (!viewMessage) return undefined;
     if (viewMessage.accountId !== activeAccountId) return undefined;
     return filteredMessages.find((m) => m.id === viewMessage.id) ?? viewMessage;
-  }, [viewMessage, filteredMessages, hideThreadView, composeOpen, composeMode, activeAccountId]);
+  }, [viewMessage, filteredMessages, composeOpen, composeMode, activeAccountId]);
   const activeMessageRef = useRef<Message | null>(null);
   activeMessageRef.current = activeMessage ?? null;
   const activeMessageThreadKey = (() => {
@@ -2859,6 +2882,25 @@ export default function MailClient({
   }, [activeAccountId, activeLocalThread, activeMessage, threadContentById, threadScopeMessages]);
 
   const threadMessages = useMemo(() => activeThread, [activeThread]);
+  const inlineComposePlacement = useMemo(
+    () =>
+      getInlineComposePlacement({
+        activeThread,
+        showComposeInline,
+        composeReplyMessage
+      }),
+    [activeThread, composeReplyMessage, showComposeInline]
+  );
+  const composeThreadFocusMessageId = useMemo(
+    () =>
+      getComposeThreadFocusMessageId({
+        showComposeInline,
+        composeReplyMessage,
+        activeMessage,
+        composeDraftId
+      }),
+    [activeMessage, composeDraftId, composeReplyMessage, showComposeInline]
+  );
 
   const visibleComposeAttachments = composeAttachments.filter((item) => !item.inline);
   const composeMessageField = (
@@ -4540,9 +4582,11 @@ export default function MailClient({
     })();
   }, [accounts, activeAccountId, authState, messageByMessageId, switchAccount]);
 
-  // Collapse all messages in the active thread except the selected one
+  // Collapse all messages in the active thread except the selected one when
+  // that selection was triggered explicitly by the user.
   useEffect(() => {
     if (!activeMessage) return;
+    if (pendingSelectionCollapseMessageId !== activeMessage.id) return;
     setCollapsedMessages((prev) => {
       const next: Record<string, boolean> = { ...prev };
       threadMessages.forEach((msg) => {
@@ -4550,13 +4594,42 @@ export default function MailClient({
       });
       return next;
     });
-  }, [activeMessage, threadMessages]);
+    setPendingSelectionCollapseMessageId((current) =>
+      current === activeMessage.id ? null : current
+    );
+  }, [activeMessage, pendingSelectionCollapseMessageId, threadMessages]);
+
+  useEffect(() => {
+    if (!showComposeInline || !composeThreadFocusMessageId) {
+      composeThreadCollapseKeyRef.current = "";
+      return;
+    }
+    if (threadMessages.length === 0) return;
+    const collapseKey = [
+      composeMode,
+      composeThreadFocusMessageId,
+      composeDraftId ?? "",
+      threadMessages.map((message) => message.id).join("|")
+    ].join("::");
+    if (composeThreadCollapseKeyRef.current === collapseKey) return;
+    composeThreadCollapseKeyRef.current = collapseKey;
+    setCollapsedMessages((prev) => {
+      const next = { ...prev };
+      threadMessages.forEach((message) => {
+        next[message.id] = message.id !== composeThreadFocusMessageId;
+      });
+      return next;
+    });
+  }, [
+    composeDraftId,
+    composeMode,
+    composeThreadFocusMessageId,
+    setCollapsedMessages,
+    showComposeInline,
+    threadMessages
+  ]);
 
   const collapsedMessagesRef = useRef(collapsedMessages);
-  const threadLoadScrollRef = useRef<{
-    threadId: string;
-    messageId: string;
-  } | null>(null);
   const scrollActiveMessageIntoView = useCallback((behavior: ScrollBehavior) => {
     if (!activeMessageId) return false;
     const target = messageRefs.current.get(activeMessageId);
@@ -4595,42 +4668,26 @@ export default function MailClient({
   }, [collapsedMessages, threadMessages]);
 
   useEffect(() => {
-    if (!activeMessageId) return;
-    return scheduleActiveMessageScroll("smooth");
-    // threadRelatedMessages.length is included so that when cross-folder messages load
-    // asynchronously and are inserted before the active message in the thread (displacing
-    // the scroll position), we re-scroll to keep the active message in view.
-  }, [activeMessageId, scheduleActiveMessageScroll, threadRelatedMessages.length]);
-
-  useEffect(() => {
-    if (!activeMessageId) {
-      threadLoadScrollRef.current = null;
-      return;
-    }
+    if (!activeMessageId || pendingSelectionScrollMessageId !== activeMessageId) return;
     const activeThreadId =
       activeMessage?.threadId ?? activeMessage?.messageId ?? activeMessage?.id ?? "";
-    if (!activeThreadId) return;
-    if (threadContentLoading === activeThreadId) {
-      threadLoadScrollRef.current = {
-        threadId: activeThreadId,
-        messageId: activeMessageId
-      };
-      return;
-    }
-    if (threadContentLoading !== null) return;
-    const pending = threadLoadScrollRef.current;
-    if (!pending) return;
-    if (pending.threadId !== activeThreadId || pending.messageId !== activeMessageId) return;
-    if (threadMessages.length === 0) return;
-    if (!messageRefs.current.get(activeMessageId)) return;
-    threadLoadScrollRef.current = null;
-    return scheduleActiveMessageScroll("smooth");
+    if (activeThreadId && threadContentLoading === activeThreadId) return;
+    const cleanup = scheduleActiveMessageScroll("smooth");
+    const timer = window.setTimeout(() => {
+      setPendingSelectionScrollMessageId((current) =>
+        current === activeMessageId ? null : current
+      );
+    }, THREAD_COLLAPSE_SETTLE_MS + 50);
+    return () => {
+      cleanup();
+      window.clearTimeout(timer);
+    };
   }, [
     activeMessage,
     activeMessageId,
+    pendingSelectionScrollMessageId,
     scheduleActiveMessageScroll,
-    threadContentLoading,
-    threadMessages.length
+    threadContentLoading
   ]);
 
   useEffect(() => {
@@ -5928,16 +5985,6 @@ export default function MailClient({
                 </div>
               );
 
-              // Check if reply message is in current thread
-              const replyMessageInThread = composeReplyMessage
-                ? activeThread.some((msg) => msg.id === composeReplyMessage.id)
-                : false;
-
-              // Show at top for: new message, edit draft, or reply to message not in thread
-              const showComposeAtTop =
-                showComposeInline &&
-                (!composeReplyMessage || composeMode === "edit" || !replyMessageInThread);
-
               // Enhance messageByMessageId with messages from activeThread
               // (so "In Reply To" links work when viewing from any folder, e.g., Drafts)
               const enhancedMessageByMessageId = new Map(messageByMessageId);
@@ -5949,7 +5996,7 @@ export default function MailClient({
 
               return (
                 <>
-                  {showComposeAtTop &&
+                  {inlineComposePlacement.showComposeAtTop &&
                     renderComposeCard(activeThread.length > 0 ? threadViewStyles.threadItem : undefined)}
                   <ThreadView
                     showComposeInline={showComposeInline}
@@ -5960,13 +6007,9 @@ export default function MailClient({
                     threadContentLoading={threadContentLoading}
                     threadContentErrorById={threadContentErrorById}
                     composeDraftId={composeDraftId}
-                    composeReplyMessageId={
-                      showComposeInline && replyMessageInThread && composeReplyMessage
-                        ? composeReplyMessage.id
-                        : null
-                    }
+                    composeReplyMessageId={inlineComposePlacement.composeReplyMessageId}
                     renderComposeInlineCard={
-                      showComposeInline && replyMessageInThread ? renderComposeCard : null
+                      inlineComposePlacement.composeReplyMessageId ? renderComposeCard : null
                     }
                     messageCardProps={{
                       messageRefs,

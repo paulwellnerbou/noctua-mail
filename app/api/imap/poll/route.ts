@@ -44,7 +44,7 @@ export async function handleImapPollRequest(
     );
   }
 
-  const client = new ImapFlow(buildImapFlowOptions(account));
+  const client = new ImapFlow(buildImapFlowOptions(account, {}, { accountId, clientId, mailbox }));
   bindImapClientError(client, { accountId, clientId, mailbox });
 
   try {
