@@ -275,7 +275,7 @@ export function extractHtmlBody(value: string) {
   return value;
 }
 
-function splitCssSelectorList(selectors: string) {
+function splitCssSelectorList(selectors: string): string[] {
   const parts: string[] = [];
   let current = "";
   let depthParen = 0;
@@ -322,7 +322,7 @@ function splitCssSelectorList(selectors: string) {
   return parts;
 }
 
-function findCssBlockBoundary(input: string, start: number) {
+function findCssBlockBoundary(input: string, start: number): number {
   let depthParen = 0;
   let depthBracket = 0;
   let inString: "'" | "\"" | null = null;
@@ -367,7 +367,7 @@ function findCssBlockBoundary(input: string, start: number) {
   return input.length;
 }
 
-function findCssMatchingBrace(input: string, openingBraceIndex: number) {
+function findCssMatchingBrace(input: string, openingBraceIndex: number): number {
   let depth = 1;
   let inString: "'" | "\"" | null = null;
   for (let index = openingBraceIndex + 1; index < input.length; index += 1) {
@@ -406,7 +406,7 @@ function findCssMatchingBrace(input: string, openingBraceIndex: number) {
   return input.length - 1;
 }
 
-function scopeCssSelector(selector: string, scope: string) {
+function scopeCssSelector(selector: string, scope: string): string {
   const trimmed = selector.trim();
   if (!trimmed) return trimmed;
   const replacedRoot = trimmed
@@ -471,7 +471,7 @@ function scopeCssRules(input: string, scope: string, insideKeyframes = false): s
   return output;
 }
 
-function scopeStyleTagCss(styleTag: string, scope: string) {
+function scopeStyleTagCss(styleTag: string, scope: string): string {
   return styleTag.replace(/<style([^>]*)>([\s\S]*?)<\/style>/gi, (_, attrs, css) => {
     return `<style${attrs}>${scopeCssRules(css, scope)}</style>`;
   });
