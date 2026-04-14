@@ -39,6 +39,13 @@ function resolveCandidateBuffer(candidate?: ParsedAttachmentCandidate | null) {
   return getAttachmentContentBuffer(candidate as unknown as Attachment);
 }
 
+function filterCandidates(
+  parsedAttachments: ParsedAttachmentCandidate[],
+  predicate: (candidate: ParsedAttachmentCandidate) => boolean
+) {
+  return parsedAttachments.filter((candidate) => predicate(candidate) && Boolean(resolveCandidateBuffer(candidate)));
+}
+
 function pickParsedAttachment(
   parsedAttachments: ParsedAttachmentCandidate[],
   target: Pick<Attachment, "id" | "filename" | "contentType" | "cid">
@@ -52,34 +59,49 @@ function pickParsedAttachment(
 
   const targetFilename = normalizeText(target.filename);
   const targetContentType = normalizeContentType(target.contentType);
+  const index = resolveAttachmentIndex(target.id);
+  const byIndex = index >= 0 && index < parsedAttachments.length ? (parsedAttachments[index] ?? null) : null;
+
+  const chooseCandidate = (
+    candidates: ParsedAttachmentCandidate[]
+  ) => {
+    if (candidates.length === 1) return candidates[0] ?? null;
+    if (candidates.length === 0) return null;
+    if (byIndex && candidates.includes(byIndex) && resolveCandidateBuffer(byIndex)) {
+      return byIndex;
+    }
+    return null;
+  };
 
   if (targetFilename && targetContentType) {
-    const byNameAndType =
-      parsedAttachments.find(
+    const byNameAndType = chooseCandidate(
+      filterCandidates(
+        parsedAttachments,
         (item) =>
           normalizeText(item.filename) === targetFilename &&
           normalizeContentType(item.contentType) === targetContentType
-      ) ?? null;
+      )
+    );
     if (resolveCandidateBuffer(byNameAndType)) return byNameAndType;
   }
 
   if (targetFilename) {
-    const byName =
-      parsedAttachments.find((item) => normalizeText(item.filename) === targetFilename) ?? null;
+    const byName = chooseCandidate(
+      filterCandidates(parsedAttachments, (item) => normalizeText(item.filename) === targetFilename)
+    );
     if (resolveCandidateBuffer(byName)) return byName;
   }
 
   if (targetContentType) {
-    const byType =
-      parsedAttachments.find((item) => normalizeContentType(item.contentType) === targetContentType) ?? null;
+    const byType = chooseCandidate(
+      filterCandidates(
+        parsedAttachments,
+        (item) => normalizeContentType(item.contentType) === targetContentType
+      )
+    );
     if (resolveCandidateBuffer(byType)) return byType;
   }
 
-  const byIndex = (() => {
-    const index = resolveAttachmentIndex(target.id);
-    if (index < 0 || index >= parsedAttachments.length) return null;
-    return parsedAttachments[index] ?? null;
-  })();
   if (resolveCandidateBuffer(byIndex)) return byIndex;
 
   if (parsedAttachments.length === 1 && resolveCandidateBuffer(parsedAttachments[0])) {

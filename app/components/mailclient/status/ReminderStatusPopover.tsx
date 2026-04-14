@@ -15,7 +15,7 @@ import {
   Select,
   Text
 } from "@radix-ui/themes";
-import { buildCalendarRecurrenceSummary, formatCalendarEventDate } from "@/lib/calendar";
+import { buildCalendarRecurrenceSummary, formatCalendarEventRange } from "@/lib/calendar";
 import { formatCalendarTimeZoneShortLabel } from "@/lib/calendarTimezones";
 import {
   autoCreateCalendarReminders,
@@ -43,45 +43,13 @@ type ReminderStatusPopoverProps = {
   onReportError: (message: string) => void;
 };
 
-function formatEventStartTime(eventStartAtMs: number, timeZone?: string) {
-  if (!Number.isFinite(eventStartAtMs)) return "";
-  return formatCalendarEventDate(new Date(eventStartAtMs), { timeZone });
-}
-
-function formatEventTimeOnly(eventAtMs: number, timeZone?: string) {
-  if (!Number.isFinite(eventAtMs)) return "";
-  try {
-    return new Intl.DateTimeFormat(undefined, {
-      hour: "numeric",
-      minute: "2-digit",
-      ...(timeZone ? { timeZone } : {})
-    }).format(new Date(eventAtMs));
-  } catch {
-    return new Intl.DateTimeFormat(undefined, {
-      hour: "numeric",
-      minute: "2-digit"
-    }).format(new Date(eventAtMs));
-  }
-}
-
-function isSameEventDay(leftAtMs: number, rightAtMs: number, timeZone?: string) {
-  if (!Number.isFinite(leftAtMs) || !Number.isFinite(rightAtMs)) return false;
-  const formatter = new Intl.DateTimeFormat("en-CA", {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    ...(timeZone ? { timeZone } : {})
-  });
-  return formatter.format(new Date(leftAtMs)) === formatter.format(new Date(rightAtMs));
-}
-
 function formatEventTimeRange(startAtMs: number, endAtMs: number, timeZone?: string) {
-  const startLabel = formatEventStartTime(startAtMs, timeZone);
-  if (!Number.isFinite(endAtMs) || endAtMs <= startAtMs) return startLabel;
-  const endLabel = isSameEventDay(startAtMs, endAtMs, timeZone)
-    ? formatEventTimeOnly(endAtMs, timeZone)
-    : formatEventStartTime(endAtMs, timeZone);
-  return `${startLabel} - ${endLabel}`;
+  if (!Number.isFinite(startAtMs)) return "";
+  return formatCalendarEventRange(
+    new Date(startAtMs),
+    Number.isFinite(endAtMs) && endAtMs > startAtMs ? new Date(endAtMs) : undefined,
+    { startTimeZone: timeZone }
+  );
 }
 
 function formatEventDuration(startAtMs: number, endAtMs: number) {

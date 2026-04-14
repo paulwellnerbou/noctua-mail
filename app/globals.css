@@ -614,23 +614,17 @@ a {
 }
 
 .attachment-image-preview {
-  display: none;
-  position: absolute;
-  left: 100%;
-  top: 50%;
-  transform: translateY(-50%);
-  margin-left: 12px;
-  z-index: 1000;
-  background: var(--background);
+  background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   padding: 4px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  box-shadow: 0 10px 24px color-mix(in srgb, black 18%, transparent);
   pointer-events: none;
 }
 
-.attachment-icon-wrapper:hover .attachment-image-preview {
-  display: block;
+.attachment-image-preview-portal {
+  position: fixed;
+  z-index: 1000;
 }
 
 .attachment-image-preview img {

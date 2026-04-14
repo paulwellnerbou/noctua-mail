@@ -1,11 +1,13 @@
 import { NextResponse } from "next/server";
 import {
+  getAttachmentIds,
   resolveThreadingForAccountMessages,
   upsertMessages
 } from "@/lib/db";
 import { syncImapMessage } from "@/lib/mail/imap";
 import { mergeLocalOnlyMessageState } from "@/lib/messageLocalState";
 import { sanitizeSyncedMessage } from "@/lib/mail/syncMessageSanitizer";
+import { deleteAttachmentData } from "@/lib/storage";
 import { appendMessageIdToError } from "../errorFormatting";
 import { requireAccountAndMessageContext } from "../routeHelpers";
 
@@ -50,6 +52,11 @@ export async function handleResyncMessageRequest(
       { status: 404 }
     );
   }
+
+  const attachmentIds = await getAttachmentIds(accountId, existing.id);
+  await Promise.all(
+    attachmentIds.map((attachmentId) => deleteAttachmentData(accountId, existing.id, attachmentId))
+  );
 
   const [resolved] = await resolveThreadingForAccountMessages(account.id, [message]);
   const sanitized = await sanitizeSyncedMessage(

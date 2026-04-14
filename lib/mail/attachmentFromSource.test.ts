@@ -30,6 +30,31 @@ iVBORw0KGgo=
 --outer--
 `;
 
+const DUPLICATE_NAME_EML = `From: sender@example.com
+To: receiver@example.com
+Subject: Duplicate attachment names
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="dup"
+
+--dup
+Content-Type: text/plain; charset=utf-8
+
+Hello
+--dup
+Content-Type: image/jpeg; name="image0.jpeg"
+Content-Transfer-Encoding: base64
+Content-Disposition: inline; filename="image0.jpeg"
+
+RklSU1Q=
+--dup
+Content-Type: image/jpeg; name="image0.jpeg"
+Content-Transfer-Encoding: base64
+Content-Disposition: inline; filename="image0.jpeg"
+
+U0VDT05E
+--dup--
+`;
+
 describe("extractAttachmentBufferFromSource", () => {
   it("extracts by attachment index from id suffix", async () => {
     const buffer = await extractAttachmentBufferFromSource(SAMPLE_EML, {
@@ -83,6 +108,24 @@ describe("extractAttachmentBufferFromSource", () => {
       cid: undefined
     });
     expect(buffer).toBeNull();
+  });
+
+  it("uses the attachment index when duplicate filenames share the same content type", async () => {
+    const first = await extractAttachmentBufferFromSource(DUPLICATE_NAME_EML, {
+      id: "att-acc-123-0",
+      filename: "image0.jpeg",
+      contentType: "image/jpeg",
+      cid: undefined
+    });
+    const second = await extractAttachmentBufferFromSource(DUPLICATE_NAME_EML, {
+      id: "att-acc-123-1",
+      filename: "image0.jpeg",
+      contentType: "image/jpeg",
+      cid: undefined
+    });
+
+    expect(first?.toString("utf8")).toBe("FIRST");
+    expect(second?.toString("utf8")).toBe("SECOND");
   });
 
   it("prefers source attachment cid metadata over mismatched imap cid metadata", () => {

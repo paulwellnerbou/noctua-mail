@@ -1,5 +1,10 @@
 import { describe, expect, test } from "bun:test";
-import { buildCalendarRecurrenceSummary, parseIcsEvents } from "./calendar";
+import {
+  buildCalendarRecurrenceSummary,
+  formatCalendarEventDate,
+  formatCalendarEventRange,
+  parseIcsEvents
+} from "./calendar";
 
 function parseIcsEventInSubprocess(ics: string, timeZone: string) {
   const evalSource = `
@@ -39,6 +44,38 @@ describe("buildCalendarRecurrenceSummary", () => {
     expect(summary).toContain("Every 2 weeks on Wednesday, starting");
     expect(summary).toContain("until");
     expect(summary?.indexOf("starting")).toBeLessThan(summary?.indexOf("until") ?? 0);
+  });
+});
+
+describe("formatCalendarEventRange", () => {
+  test("omits the repeated date when the event starts and ends on the same day", () => {
+    const start = new Date(Date.UTC(2026, 3, 14, 15, 15, 0));
+    const end = new Date(Date.UTC(2026, 3, 14, 15, 45, 0));
+
+    const formattedStart = formatCalendarEventDate(start, { timeZone: "Europe/Berlin" });
+    const formattedEnd = formatCalendarEventDate(end, { timeZone: "Europe/Berlin" });
+    const endTimeOnly = new Intl.DateTimeFormat(undefined, {
+      hour: "numeric",
+      minute: "2-digit",
+      timeZone: "Europe/Berlin"
+    }).format(end);
+
+    expect(
+      formatCalendarEventRange(start, end, { startTimeZone: "Europe/Berlin" })
+    ).toBe(`${formattedStart} – ${endTimeOnly}`);
+    expect(formattedEnd).not.toBe(endTimeOnly);
+  });
+
+  test("keeps the second date when the event spans multiple days", () => {
+    const start = new Date(Date.UTC(2026, 3, 14, 15, 15, 0));
+    const end = new Date(Date.UTC(2026, 3, 15, 15, 45, 0));
+
+    const formattedStart = formatCalendarEventDate(start, { timeZone: "Europe/Berlin" });
+    const formattedEnd = formatCalendarEventDate(end, { timeZone: "Europe/Berlin" });
+
+    expect(
+      formatCalendarEventRange(start, end, { startTimeZone: "Europe/Berlin" })
+    ).toBe(`${formattedStart} – ${formattedEnd}`);
   });
 });
 

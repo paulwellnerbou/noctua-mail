@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { AlarmClock, AlarmClockPlus, Clock, Mail, MapPin, Repeat, Trash2, User, Users } from "lucide-react";
 import { AlertDialog, Badge, Button, Dialog, Flex, Select, Switch, Text } from "@radix-ui/themes";
-import { buildCalendarRecurrenceSummary, formatCalendarEventDate } from "@/lib/calendar";
+import { buildCalendarRecurrenceSummary, formatCalendarEventRange } from "@/lib/calendar";
 import type { CalendarInviteActionType } from "@/lib/calendarInviteProcessing";
 import { formatAccountDateValue } from "@/lib/dateFormatting";
 import {
@@ -251,15 +251,17 @@ export default function EventDetailView({
     ? formatCalendarTimeZoneShortLabel(startTimezone, new Date(resolvedStartMs))
     : null;
 
-  const formattedStart = resolvedStartMs
-    ? (formatCalendarEventDate(new Date(resolvedStartMs), { allDay, timeZone: startTimezone }) ?? "")
+  const timeRange = resolvedStartMs
+    ? formatCalendarEventRange(
+        new Date(resolvedStartMs),
+        endMs ? new Date(endMs) : undefined,
+        {
+          allDay,
+          startTimeZone: startTimezone,
+          endTimeZone: endTimezone
+        }
+      )
     : "";
-  const formattedEnd = endMs
-    ? (formatCalendarEventDate(new Date(endMs), { allDay, timeZone: endTimezone ?? startTimezone }) ?? "")
-    : "";
-  const timeRange = formattedEnd && formattedEnd !== formattedStart
-    ? `${formattedStart} – ${formattedEnd}`
-    : formattedStart;
 
   // Recurrence summary
   const recurrenceSummary = recurrenceRule && resolvedStartMs

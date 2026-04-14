@@ -58,6 +58,12 @@ type CalendarEventDateFormatInput = {
   timeZone?: string;
 };
 
+type CalendarEventRangeFormatInput = {
+  allDay?: boolean;
+  startTimeZone?: string;
+  endTimeZone?: string;
+};
+
 function unfoldLines(input: string) {
   const lines = input.replace(/\r\n/g, "\n").replace(/\r/g, "\n").split("\n");
   const unfolded: string[] = [];
@@ -153,6 +159,75 @@ export function formatCalendarEventDate(
       : { ...dateOptions, hour: "numeric", minute: "2-digit" };
     return new Intl.DateTimeFormat(undefined, fallbackOptions).format(date);
   }
+}
+
+function formatCalendarEventTime(
+  date?: Date,
+  { timeZone }: Pick<CalendarEventDateFormatInput, "timeZone"> = {}
+) {
+  if (!date) return "";
+  const options: Intl.DateTimeFormatOptions = {
+    hour: "numeric",
+    minute: "2-digit",
+    ...(timeZone ? { timeZone } : {})
+  };
+  try {
+    return new Intl.DateTimeFormat(undefined, options).format(date);
+  } catch {
+    return new Intl.DateTimeFormat(undefined, {
+      hour: "numeric",
+      minute: "2-digit"
+    }).format(date);
+  }
+}
+
+function formatCalendarDateKey(
+  date?: Date,
+  { allDay = false, timeZone }: CalendarEventDateFormatInput = {}
+) {
+  if (!date) return "";
+  const options: Intl.DateTimeFormatOptions = allDay
+    ? {
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        timeZone: "UTC"
+      }
+    : {
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+        ...(timeZone ? { timeZone } : {})
+      };
+  try {
+    return new Intl.DateTimeFormat("en-CA", options).format(date);
+  } catch {
+    return new Intl.DateTimeFormat("en-CA", {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit"
+    }).format(date);
+  }
+}
+
+export function formatCalendarEventRange(
+  start?: Date,
+  end?: Date,
+  { allDay = false, startTimeZone, endTimeZone }: CalendarEventRangeFormatInput = {}
+) {
+  const startLabel = formatCalendarEventDate(start, { allDay, timeZone: startTimeZone });
+  if (!startLabel || !end) return startLabel;
+
+  const sameDay =
+    formatCalendarDateKey(start, { allDay, timeZone: startTimeZone }) ===
+    formatCalendarDateKey(end, { allDay, timeZone: endTimeZone ?? startTimeZone });
+  const endLabel =
+    sameDay && !allDay
+      ? formatCalendarEventTime(end, { timeZone: endTimeZone ?? startTimeZone })
+      : formatCalendarEventDate(end, { allDay, timeZone: endTimeZone ?? startTimeZone });
+
+  if (!endLabel || endLabel === startLabel) return startLabel;
+  return `${startLabel} – ${endLabel}`;
 }
 
 function parseMultiDateValues(value: string, tzid?: string) {
