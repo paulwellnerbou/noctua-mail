@@ -1,5 +1,5 @@
 # Noctua Mail Dockerfile
-FROM oven/bun:1.3.9-debian AS base
+FROM oven/bun:1.3.12-debian AS base
 WORKDIR /app
 
 # Install dependencies
