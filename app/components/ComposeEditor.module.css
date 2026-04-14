@@ -93,6 +93,15 @@
   color: var(--input-fg);
 }
 
+.composeEditorInput :global(a) {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+.composeEditorInput :global(a:hover) {
+  color: var(--accent);
+}
+
 .composeEditorInput :global(img) {
   max-width: 100%;
   height: auto;
