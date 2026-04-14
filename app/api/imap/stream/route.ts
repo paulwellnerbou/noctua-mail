@@ -171,6 +171,12 @@ export async function handleImapStreamRequest(
             return nextClient;
           }
         });
+        // The newly connected client is not yet tracked in `sessions`. If any
+        // post-connect step below throws before we register it, `stopAll()`
+        // would leave the connection dangling. Flip this flag immediately
+        // after `sessions.set()` and clean up on failure otherwise.
+        let sessionRegistered = false;
+        try {
         const caps: any =
           (client as any).enabledCapabilities ||
           (client as any).serverCapabilities ||
@@ -222,6 +228,7 @@ export async function handleImapStreamRequest(
           lastUsed: Date.now(),
           inbox: inboxFolder ? folder.id === inboxFolder.id : false
         });
+        sessionRegistered = true;
         await enforceCapacity();
         send("folder:update", [
           {
@@ -332,6 +339,16 @@ export async function handleImapStreamRequest(
         };
 
         void idleLoop();
+        } catch (error) {
+          if (!sessionRegistered) {
+            await safeLogoutImapClient(
+              client,
+              { ...logContext, mailbox },
+              "imap.logout"
+            );
+          }
+          throw error;
+        }
       };
 
       try {

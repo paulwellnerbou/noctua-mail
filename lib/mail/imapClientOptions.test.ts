@@ -27,6 +27,7 @@ describe("buildImapFlowOptions TLS identity logging", () => {
   const originalLogLevel = process.env.IMAP_LOG_LEVEL;
   const originalRetryCount = process.env.IMAP_CONNECT_RETRY_COUNT;
   const originalRetryBaseDelay = process.env.IMAP_CONNECT_RETRY_BASE_DELAY_MS;
+  const originalRetryMaxDelay = process.env.IMAP_CONNECT_RETRY_MAX_DELAY_MS;
   const originalBreakerThreshold = process.env.IMAP_CONNECT_BREAKER_THRESHOLD;
   const originalBreakerCooldown = process.env.IMAP_CONNECT_BREAKER_COOLDOWN_MS;
   let infos: string[] = [];
@@ -63,6 +64,11 @@ describe("buildImapFlowOptions TLS identity logging", () => {
       process.env.IMAP_CONNECT_RETRY_BASE_DELAY_MS = originalRetryBaseDelay;
     } else {
       delete process.env.IMAP_CONNECT_RETRY_BASE_DELAY_MS;
+    }
+    if (typeof originalRetryMaxDelay === "string") {
+      process.env.IMAP_CONNECT_RETRY_MAX_DELAY_MS = originalRetryMaxDelay;
+    } else {
+      delete process.env.IMAP_CONNECT_RETRY_MAX_DELAY_MS;
     }
     if (typeof originalBreakerThreshold === "string") {
       process.env.IMAP_CONNECT_BREAKER_THRESHOLD = originalBreakerThreshold;
@@ -526,7 +532,9 @@ describe("buildImapFlowOptions TLS identity logging", () => {
     process.env.IMAP_LOG_LEVEL = "warn";
     process.env.IMAP_CONNECT_RETRY_COUNT = "0";
     process.env.IMAP_CONNECT_BREAKER_THRESHOLD = "1";
-    process.env.IMAP_CONNECT_BREAKER_COOLDOWN_MS = "500";
+    // Long cooldown so the breaker stays open for the whole test regardless of
+    // CI load — no timing assertions depend on the cooldown elapsing.
+    process.env.IMAP_CONNECT_BREAKER_COOLDOWN_MS = "60000";
 
     const leakAccount = { ...account, id: "acc-leak" } as Account;
     const sentinel = "SECRET-PII-a1b2c3d4";
@@ -683,7 +691,9 @@ describe("buildImapFlowOptions TLS identity logging", () => {
     process.env.IMAP_LOG_LEVEL = "warn";
     process.env.IMAP_CONNECT_RETRY_COUNT = "0";
     process.env.IMAP_CONNECT_BREAKER_THRESHOLD = "1";
-    process.env.IMAP_CONNECT_BREAKER_COOLDOWN_MS = "50";
+    // Long cooldown so the breaker stays open through the assertion even on
+    // slow CI — the test only asserts that it IS open immediately after.
+    process.env.IMAP_CONNECT_BREAKER_COOLDOWN_MS = "60000";
 
     const breakerAccount = {
       ...account,
