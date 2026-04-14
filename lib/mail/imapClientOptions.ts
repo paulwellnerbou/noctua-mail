@@ -271,6 +271,19 @@ export async function connectImapClientWithRetry(params: {
   throw lastError instanceof Error ? lastError : new Error("IMAP connection failed.");
 }
 
+export async function safeLogoutImapClient(
+  client: Pick<ImapFlow, "logout"> | null | undefined,
+  details: Record<string, unknown>,
+  op = "logout"
+) {
+  if (!client) return;
+  try {
+    await logImapOp(op, details, () => client.logout());
+  } catch {
+    // ignore logout errors
+  }
+}
+
 export function buildImapFlowOptions(
   account: Account,
   overrides: Partial<ImapFlowOptions> = {},

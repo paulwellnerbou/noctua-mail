@@ -3,7 +3,11 @@ import { EventEmitter } from "events";
 
 import type { Account } from "@/lib/data";
 
-import { bindImapClientError, buildImapFlowOptions } from "./imapClientOptions";
+import {
+  bindImapClientError,
+  buildImapFlowOptions,
+  connectImapClientWithRetry
+} from "./imapClientOptions";
 
 const account = {
   id: "acc-test",
@@ -20,6 +24,10 @@ describe("buildImapFlowOptions TLS identity logging", () => {
   const originalLog = console.log;
   const originalWarn = console.warn;
   const originalLogLevel = process.env.IMAP_LOG_LEVEL;
+  const originalRetryCount = process.env.IMAP_CONNECT_RETRY_COUNT;
+  const originalRetryBaseDelay = process.env.IMAP_CONNECT_RETRY_BASE_DELAY_MS;
+  const originalBreakerThreshold = process.env.IMAP_CONNECT_BREAKER_THRESHOLD;
+  const originalBreakerCooldown = process.env.IMAP_CONNECT_BREAKER_COOLDOWN_MS;
   let infos: string[] = [];
   let warnings: string[] = [];
 
@@ -40,9 +48,29 @@ describe("buildImapFlowOptions TLS identity logging", () => {
     console.warn = originalWarn;
     if (typeof originalLogLevel === "string") {
       process.env.IMAP_LOG_LEVEL = originalLogLevel;
-      return;
+    } else {
+      delete process.env.IMAP_LOG_LEVEL;
     }
-    delete process.env.IMAP_LOG_LEVEL;
+    if (typeof originalRetryCount === "string") {
+      process.env.IMAP_CONNECT_RETRY_COUNT = originalRetryCount;
+    } else {
+      delete process.env.IMAP_CONNECT_RETRY_COUNT;
+    }
+    if (typeof originalRetryBaseDelay === "string") {
+      process.env.IMAP_CONNECT_RETRY_BASE_DELAY_MS = originalRetryBaseDelay;
+    } else {
+      delete process.env.IMAP_CONNECT_RETRY_BASE_DELAY_MS;
+    }
+    if (typeof originalBreakerThreshold === "string") {
+      process.env.IMAP_CONNECT_BREAKER_THRESHOLD = originalBreakerThreshold;
+    } else {
+      delete process.env.IMAP_CONNECT_BREAKER_THRESHOLD;
+    }
+    if (typeof originalBreakerCooldown === "string") {
+      process.env.IMAP_CONNECT_BREAKER_COOLDOWN_MS = originalBreakerCooldown;
+    } else {
+      delete process.env.IMAP_CONNECT_BREAKER_COOLDOWN_MS;
+    }
   });
 
   it("logs an empty peer certificate separately from missing SAN/CN", () => {
@@ -216,5 +244,92 @@ describe("buildImapFlowOptions TLS identity logging", () => {
     expect(infos[0]).toContain('"fingerprint256":"AA:BB:CC"');
     expect(warnings[0]).toContain('"event":"imap.socket_error"');
     expect(warnings[0]).toContain('"error":"socket failed"');
+  });
+
+  it("retries connect with a fresh client and logs recovery", async () => {
+    process.env.IMAP_LOG_LEVEL = "info";
+    process.env.IMAP_CONNECT_RETRY_COUNT = "1";
+    process.env.IMAP_CONNECT_RETRY_BASE_DELAY_MS = "1";
+    process.env.IMAP_CONNECT_BREAKER_THRESHOLD = "9";
+
+    let createdClients = 0;
+    let connectCalls = 0;
+    const retryAccount = {
+      ...account,
+      id: "acc-retry"
+    } as Account;
+
+    const client = await connectImapClientWithRetry({
+      account: retryAccount,
+      logContext: { accountId: retryAccount.id, mailbox: "INBOX" },
+      createClient: () => {
+        createdClients += 1;
+        const nextClient = new EventEmitter() as EventEmitter & {
+          connect: () => Promise<void>;
+          logout: () => Promise<void>;
+        };
+        nextClient.connect = async () => {
+          connectCalls += 1;
+          if (connectCalls === 1) {
+            throw new Error('Peer certificate missing for hostname "imap.example.test"');
+          }
+        };
+        nextClient.logout = async () => {};
+        return nextClient as never;
+      }
+    });
+
+    expect(client).toBeTruthy();
+    expect(createdClients).toBe(2);
+    expect(connectCalls).toBe(2);
+    expect(warnings.some((line) => line.includes('"event":"imap.connect_retry"'))).toBe(true);
+    expect(infos.some((line) => line.includes('"event":"imap.connect_recovered"'))).toBe(true);
+  });
+
+  it("fast-fails after the breaker opens for repeated connect failures", async () => {
+    process.env.IMAP_LOG_LEVEL = "warn";
+    process.env.IMAP_CONNECT_RETRY_COUNT = "0";
+    process.env.IMAP_CONNECT_BREAKER_THRESHOLD = "1";
+    process.env.IMAP_CONNECT_BREAKER_COOLDOWN_MS = "50";
+
+    const breakerAccount = {
+      ...account,
+      id: "acc-breaker"
+    } as Account;
+
+    await expect(
+      connectImapClientWithRetry({
+        account: breakerAccount,
+        createClient: () => {
+          const nextClient = new EventEmitter() as EventEmitter & {
+            connect: () => Promise<void>;
+            logout: () => Promise<void>;
+          };
+          nextClient.connect = async () => {
+            throw new Error('Peer certificate missing for hostname "imap.example.test"');
+          };
+          nextClient.logout = async () => {};
+          return nextClient as never;
+        }
+      })
+    ).rejects.toThrow('Peer certificate missing for hostname "imap.example.test"');
+
+    await expect(
+      connectImapClientWithRetry({
+        account: breakerAccount,
+        createClient: () => {
+          const nextClient = new EventEmitter() as EventEmitter & {
+            connect: () => Promise<void>;
+            logout: () => Promise<void>;
+          };
+          nextClient.connect = async () => {};
+          nextClient.logout = async () => {};
+          return nextClient as never;
+        }
+      })
+    ).rejects.toThrow("IMAP connection temporarily unavailable");
+
+    expect(warnings.some((line) => line.includes('"event":"imap.connect_breaker_open"'))).toBe(true);
+    expect(warnings.some((line) => line.includes('"event":"imap.connect_fast_fail"'))).toBe(true);
   });
 });
