@@ -153,6 +153,44 @@ export function extractBodyContent(input: string) {
   };
 }
 
+export function shouldShowHtmlViewerFrame(input: string) {
+  const trimmed = input.trim();
+  if (!trimmed) return false;
+
+  const headSample = trimmed
+    .slice(0, 8192)
+    .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/\s+/g, " ");
+
+  if (/<body[^>]*\sbgcolor\s*=/i.test(headSample)) return false;
+  if (
+    /<body[^>]*style=["'][^"']*(background(?:-color)?\s*:|box-shadow\s*:|border(?:-radius)?\s*:|padding\s*:\s*(?:0\s+)?(?:1[2-9]|[2-9]\d)(?:px|rem|em)|margin\s*:\s*0)[^"']*["']/i.test(
+      headSample
+    )
+  ) {
+    return false;
+  }
+
+  if (
+    /<(?:table|td|div|section|article)[^>]*(?:\sbgcolor\s*=\s*["'][^"']+["']|style=["'][^"']*(?:background(?:-color)?\s*:|box-shadow\s*:|border(?:-radius)?\s*:|padding\s*:\s*(?:0\s+)?(?:1[2-9]|[2-9]\d)(?:px|rem|em)|margin\s*:\s*0(?:\s+auto)+|max-width\s*:\s*(?:[4-9]\d{2}|\d{4,})(?:px)?|width\s*:\s*(?:[4-9]\d{2}|\d{4,})(?:px)?)[^"']*["'])/i.test(
+      headSample
+    )
+  ) {
+    return false;
+  }
+
+  if (
+    /<table[^>]*\swidth=["']?(?:[4-9]\d{2}|\d{4,})["']?[^>]*>/i.test(headSample) &&
+    /<(?:table|td|div)[^>]*(?:align=["']center["']|style=["'][^"']*margin\s*:\s*0(?:\s+auto)+[^"']*["'])/i.test(
+      headSample
+    )
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
 export function escapeHtml(value: string) {
   return value
     .replace(/&/g, "&amp;")

@@ -1,8 +1,14 @@
 "use client";
 
 import { memo, useEffect, useRef } from "react";
-import { extractBodyContent, sanitizeHtmlForDisplay, stripConditionalComments } from "@/lib/html";
+import {
+  extractBodyContent,
+  sanitizeHtmlForDisplay,
+  shouldShowHtmlViewerFrame,
+  stripConditionalComments
+} from "@/lib/html";
 import { useMessageLinkPreview } from "@/app/components/mailclient/message/MessageLinkPreviewContext";
+import styles from "./HtmlMessage.module.css";
 import {
   acquireEmailFonts,
   extractTrustedFontStylesheetImportsFromHtml,
@@ -12,6 +18,9 @@ import {
 } from "@/app/components/emailFontRegistry";
 
 const stylesheetCache = new Map<string, string>();
+const NOCTUA_EMAIL_CONTENT_CLASS = "noctua-email-content";
+const NOCTUA_EMAIL_VIEWPORT_CLASS = "noctua-email-viewport";
+const NOCTUA_EMAIL_VIEWPORT_DEFAULT_MARGIN_CLASS = "noctua-email-viewport--default-margin";
 
 function scaleFontSizes(input: string) {
   return input
@@ -136,6 +145,8 @@ function HtmlMessage({
 }) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const setLinkPreviewUrl = useMessageLinkPreview();
+  const cleanedHtml = stripConditionalComments(html || "");
+  const showViewerFrame = shouldShowHtmlViewerFrame(cleanedHtml);
 
   useEffect(() => {
     if (!hostRef.current) return;
@@ -183,7 +194,7 @@ function HtmlMessage({
         :host { display: block; width: 100%; max-width: 100%; box-sizing: border-box; ${hostTextColor} color-scheme: ${
           darkMode ? "dark" : "light"
         }; font-size: 100%; }
-        :where(.content) {
+        :where(.${NOCTUA_EMAIL_CONTENT_CLASS}) {
           font-family: "Sora", system-ui, -apple-system, sans-serif;
           color: inherit;
           background: transparent;
@@ -200,6 +211,8 @@ function HtmlMessage({
           max-width: 100%;
           box-sizing: border-box;
         }
+        :where(.${NOCTUA_EMAIL_VIEWPORT_CLASS}) { width: 100%; max-width: 100%; min-width: 0; box-sizing: border-box; }
+        :where(.${NOCTUA_EMAIL_VIEWPORT_DEFAULT_MARGIN_CLASS}) { padding: 8px; }
         :where(.email-body) { width: 100%; max-width: 100%; min-width: 0; box-sizing: border-box; }
         :where(.email-body) a { color: ${linkColor}; }
         :where(img) { max-width: 100%; height: auto; }
@@ -215,13 +228,17 @@ function HtmlMessage({
         })
       ).join("\n")}
       <div class="html-scale">
+        <div class="${NOCTUA_EMAIL_VIEWPORT_CLASS} ${
+          showViewerFrame ? NOCTUA_EMAIL_VIEWPORT_DEFAULT_MARGIN_CLASS : ""
+        }">
         ${
           body
-            ? `<div class="content email-body ${bodyAttrs.className}" id="${
+            ? `<div class="${NOCTUA_EMAIL_CONTENT_CLASS} email-body ${bodyAttrs.className}" id="${
                 bodyAttrs.id || "NoctuaMessageViewBody"
               }" style="${bodyAttrs.style}">${body}</div>`
-            : `<div class="content email-body" id="NoctuaMessageViewBody">${scaledHtml}</div>`
+            : `<div class="${NOCTUA_EMAIL_CONTENT_CLASS} email-body" id="NoctuaMessageViewBody">${scaledHtml}</div>`
         }
+        </div>
       </div>
     `;
     root.querySelectorAll("a").forEach((link) => {
@@ -297,7 +314,9 @@ function HtmlMessage({
     };
   }, [darkMode, html, zoom, fontScale, setLinkPreviewUrl]);
 
-  return <div className="html-message" ref={hostRef} />;
+  return (
+    <div className={`${styles.htmlMessage} ${showViewerFrame ? styles.framed : styles.unframed}`} ref={hostRef} />
+  );
 }
 
 export default memo(HtmlMessage);

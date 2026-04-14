@@ -658,30 +658,6 @@ a {
   padding: 4px 6px;
 }
 
-.html-message {
-  width: 100%;
-  min-width: 0;
-  max-width: none;
-  display: block;
-  box-sizing: border-box;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  background: var(--mail-view-bg);
-  color: var(--mail-view-fg);
-  padding: 16px;
-  overflow-x: auto;
-  overflow-y: auto;
-}
-
-.html-message img {
-  max-width: 100%;
-  height: auto;
-}
-
-.html-message a {
-  color: var(--accent);
-}
-
 
 .message-flags {
   display: flex;

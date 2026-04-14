@@ -8,6 +8,7 @@ import {
   ensureHtmlDocumentTitle,
   linkifyHtmlTextNodes,
   selectPreferredHtmlDocument,
+  shouldShowHtmlViewerFrame,
   stripHtmlToText,
   stripConditionalComments
 } from "./html";
@@ -123,20 +124,20 @@ describe("selectPreferredHtmlDocument", () => {
     ].join("");
     const meaningful = [
       "<html><head><title>real</title></head><body>",
-      "<div>Liebe Elternbeiräte, hier steht der eigentliche Inhalt.</div>",
+      "<div>Liebe Empfänger, hier steht der eigentliche Inhalt.</div>",
       "</body></html>"
     ].join("");
 
     const selected = selectPreferredHtmlDocument(`${empty}${meaningful}`);
 
-    expect(selected).toContain("Liebe Elternbeiräte");
-    expect(extractVisibleHtmlText(selected)).toContain("Liebe Elternbeiräte");
+    expect(selected).toContain("Liebe Empfänger");
+    expect(extractVisibleHtmlText(selected)).toContain("Liebe Empfänger");
   });
 
   it("prefers the html document with meaningful visible text", () => {
     const meaningful = [
       "<html><head><title>real</title></head><body>",
-      "<div>Liebe Elternbeiräte, hier steht der eigentliche Inhalt.</div>",
+      "<div>Liebe Empfänger, hier steht der eigentliche Inhalt.</div>",
       "</body></html>"
     ].join("");
     const empty = [
@@ -147,8 +148,8 @@ describe("selectPreferredHtmlDocument", () => {
 
     const selected = selectPreferredHtmlDocument(`${meaningful}${empty}`);
 
-    expect(selected).toContain("Liebe Elternbeiräte");
-    expect(extractVisibleHtmlText(selected)).toContain("Liebe Elternbeiräte");
+    expect(selected).toContain("Liebe Empfänger");
+    expect(extractVisibleHtmlText(selected)).toContain("Liebe Empfänger");
   });
 
   it("keeps the first meaningful html document when a later document is only quoted content", () => {
@@ -226,6 +227,37 @@ describe("extractBodyContent", () => {
     expect(result.bodyAttrs.className).toBe("mail-body");
     expect(result.bodyAttrs.style).toBe("font-size:14px");
     expect(result.styles).toEqual(["<style>.x{color:red}</style>"]);
+  });
+});
+
+describe("shouldShowHtmlViewerFrame", () => {
+  it("keeps the viewer frame for simple html mails", () => {
+    const html = [
+      "<html><body>",
+      "<div>Hallo,</div>",
+      "<br>",
+      "<div><p>Der vorgemerkte Titel ist nun verfugbar.</p></div>",
+      '<div><a href="https://example.com/item">https://example.com/item</a></div>',
+      "</body></html>"
+    ].join("");
+
+    expect(shouldShowHtmlViewerFrame(html)).toBe(true);
+  });
+
+  it("drops the viewer frame for mails with their own outer card layout", () => {
+    const html = [
+      '<html><body bgcolor="#f5f5f5" style="margin:0;padding:0">',
+      '<table width="100%" cellspacing="0" cellpadding="0">',
+      '<tr><td style="padding:27px 20px 40px 20px;background-color:#f5f5f5;max-width:700px">',
+      '<table width="700" align="center" style="margin:0 auto;border:1px solid #d2d2d2;border-radius:5px">',
+      '<tr><td bgcolor="#ffffff" style="padding:20px 50px 40px">Hello Paul</td></tr>',
+      "</table>",
+      "</td></tr>",
+      "</table>",
+      "</body></html>"
+    ].join("");
+
+    expect(shouldShowHtmlViewerFrame(html)).toBe(false);
   });
 });
 
