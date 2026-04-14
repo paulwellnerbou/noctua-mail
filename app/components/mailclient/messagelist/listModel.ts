@@ -79,6 +79,10 @@ export type VisibleMessageEntry = {
   threadId: string;
 };
 
+export function getMessageListRowKey(message: Message) {
+  return message.draft && message.messageId ? `draft:${message.messageId}` : message.id;
+}
+
 export type ThreadSelectionState = {
   isThreadRoot: boolean;
   isSubThreadRoot: boolean;
@@ -361,7 +365,7 @@ export function buildMessageListItems(params: BuildMessageListItemsParams): List
 
           rows.push({
             type: "row",
-            key: message.id,
+            key: getMessageListRowKey(message),
             groupKey: group.key,
             isFirstInGroup: isFirstRow,
             message,
@@ -413,7 +417,7 @@ export function buildMessageListItems(params: BuildMessageListItemsParams): List
       );
       rows.push({
         type: "row",
-        key: message.id,
+        key: getMessageListRowKey(message),
         groupKey: group.key,
         isFirstInGroup: isFirstRow,
         message,

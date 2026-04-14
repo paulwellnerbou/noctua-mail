@@ -194,6 +194,8 @@ export async function saveDraftForAccount(params: {
     html: payload.html,
     attachments: payload.attachments
   });
+  const existingDraft = payload.draftId ? await getMessageById(accountId, payload.draftId) : null;
+  const preservedMessageId = existingDraft?.messageId?.trim() || undefined;
 
   const raw = await buildRawMessage(account, {
     to: payload.to,
@@ -203,6 +205,7 @@ export async function saveDraftForAccount(params: {
     subject: payload.subject,
     text: payload.text,
     html,
+    messageId: preservedMessageId,
     inReplyTo: payload.inReplyTo,
     references: payload.references,
     xForwardedMessageId: payload.xForwardedMessageId,
@@ -213,12 +216,11 @@ export async function saveDraftForAccount(params: {
   });
 
   if (payload.draftId) {
-    const existing = await getMessageById(accountId, payload.draftId);
-    if (existing?.imapUid && existing.mailboxPath) {
-      await deleteImapMessage(account, existing.mailboxPath, existing.imapUid, clientId);
+    if (existingDraft?.imapUid && existingDraft.mailboxPath) {
+      await deleteImapMessage(account, existingDraft.mailboxPath, existingDraft.imapUid, clientId);
     }
-    if (existing) {
-      await deleteMessageById(accountId, existing.id);
+    if (existingDraft) {
+      await deleteMessageById(accountId, existingDraft.id);
     }
   }
 

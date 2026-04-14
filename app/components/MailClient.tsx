@@ -23,7 +23,6 @@ import {
   Trash2,
   X
 } from "lucide-react";
-import { QuestionMarkCircledIcon } from "@radix-ui/react-icons";
 import LoginOverlay from "./auth/LoginOverlay";
 import FolderPane from "./mailclient/folder/FolderPane";
 import FolderTree from "./mailclient/folder/FolderTree";
@@ -93,7 +92,6 @@ import {
   Card,
   Flex,
   IconButton,
-  Popover,
   SegmentedControl,
   Text
 } from "@radix-ui/themes";
@@ -102,8 +100,10 @@ import MessageQuickActions from "./mailclient/message/MessageQuickActions";
 import MessageViewPane from "./mailclient/message/MessageViewPane";
 import MarkdownPanel from "./mailclient/message/MarkdownPanel";
 import MessageSourcePanel from "./mailclient/message/MessageSourcePanel";
+import ThreadTopicSuggestionsRow from "./mailclient/message/ThreadTopicSuggestionsRow";
 import threadViewStyles from "./mailclient/message/ThreadView.module.css";
 import { TODO_FLAG, DONE_FLAG } from "@/lib/messageFlags";
+import { mergeLocalOnlyMessageState } from "@/lib/messageLocalState";
 import { EVENT_GROUP_BY, INVITE_DECK_GROUP_BY } from "@/lib/messageGrouping";
 import {
   DEFAULT_THREAD_DATE_SOURCE,
@@ -2812,7 +2812,8 @@ export default function MailClient({
     if (!activeMessage) return "";
     const threadId = activeMessage.threadId ?? activeMessage.messageId ?? activeMessage.id;
     if (!threadId) return "";
-    return `${activeMessage.accountId}|${activeMessage.id}|${threadId}`;
+    const selectedMessageIdentity = activeMessage.messageId ?? activeMessage.id;
+    return `${activeMessage.accountId}|${selectedMessageIdentity}|${threadId}`;
   })();
 
   useComposeViewEffects({
@@ -2882,6 +2883,13 @@ export default function MailClient({
   }, [activeAccountId, activeLocalThread, activeMessage, threadContentById, threadScopeMessages]);
 
   const threadMessages = useMemo(() => activeThread, [activeThread]);
+  const handleToggleActiveMessageTopic = useCallback(
+    (topicId: string) => {
+      if (!activeMessage) return;
+      void handleToggleTopic(activeMessage, topicId);
+    },
+    [activeMessage, handleToggleTopic]
+  );
   const inlineComposePlacement = useMemo(
     () =>
       getInlineComposePlacement({
@@ -3382,9 +3390,33 @@ export default function MailClient({
   updateMessagesRef.current = updateMessagesWithCurrentResultPrune;
   const reconcileSavedDraftInUi = useCallback(
     (savedDraft: Message, previousDraftId: string | null) => {
+      const existingDraft =
+        messages.find((message) => message.id === previousDraftId || message.id === savedDraft.id) ??
+        (viewMessage?.id === previousDraftId || viewMessage?.id === savedDraft.id
+          ? viewMessage
+          : null);
+      const cachedThreadId =
+        savedDraft.threadId ??
+        existingDraft?.threadId ??
+        savedDraft.messageId ??
+        existingDraft?.messageId ??
+        null;
+      const cachedDraft =
+        (cachedThreadId
+          ? threadContentByIdRef.current[cachedThreadId]?.find(
+              (message) =>
+                message.id === previousDraftId ||
+                message.id === savedDraft.id ||
+                (Boolean(savedDraft.messageId) && message.messageId === savedDraft.messageId)
+            ) ?? null
+          : null);
+      const mergedSavedDraft = mergeLocalOnlyMessageState(
+        mergeLocalOnlyMessageState(savedDraft, cachedDraft),
+        existingDraft
+      );
       const nextSavedDraft = buildSavedDraftListMessage({
         messages,
-        savedDraft,
+        savedDraft: mergedSavedDraft,
         previousDraftId,
         groupBy: effectiveGroupBy,
         threadDateSource
@@ -3410,10 +3442,15 @@ export default function MailClient({
       if (activeMessageId === previousDraftId || activeMessageId === nextSavedDraft.id) {
         setActiveMessageId(nextSavedDraft.id);
       }
+      if (previousDraftId && previousDraftId !== nextSavedDraft.id) {
+        evictMessagesFromThreadCache([previousDraftId]);
+      }
+      updateThreadCacheWithMessage(nextSavedDraft);
     },
     [
       activeMessageId,
       activeFolderId,
+      evictMessagesFromThreadCache,
       effectiveGroupBy,
       includeThreadAcrossFoldersForList,
       messages,
@@ -3421,8 +3458,10 @@ export default function MailClient({
       setMessages,
       setViewMessage,
       shouldKeepMessageInCurrentResults,
+      threadContentByIdRef,
       threadDateSource,
-      viewMessage?.id
+      updateThreadCacheWithMessage,
+      viewMessage
     ]
   );
 
@@ -5239,20 +5278,6 @@ export default function MailClient({
 
   const deferredMessageView = useDeferredValue(messageView);
   const isCompactView = deferredMessageView === "compact";
-  const formatTopicSuggestionScore = (score?: number) => {
-    if (score === undefined) return null;
-    return Number.isInteger(score) ? String(score) : score.toFixed(2);
-  };
-  const formatTopicSuggestionSignal = (signal: { type: string; value: string; weight: number }) =>
-    `${signal.type}=${signal.value} (${signal.weight})`;
-  const formatTopicSuggestionFormula = (
-    signals: Array<{ type: string; value: string; weight: number }>
-  ) => {
-    if (signals.length === 0) return "0";
-    return signals
-      .map((signal) => `${signal.weight} (${signal.type}=${signal.value})`)
-      .join(" + ");
-  };
   useEffect(() => {
     setTopicSuggestionExplanationOpen(false);
   }, [activeMessage?.threadId]);
@@ -5742,7 +5767,7 @@ export default function MailClient({
           header={activeMessage ? (() => {
                   const rootSubject =
                     activeThread[0]?.subject ?? activeMessage?.subject ?? "";
-                  const threadTopics = messageTopicsById.get(activeMessage.threadId) ?? [];
+                  const threadTopics = getAssignedThreadTopics(activeMessage);
                   const threadSuggestions =
                     threadTopics.length > 0
                       ? []
@@ -5784,138 +5809,20 @@ export default function MailClient({
                           ))}
                         </Flex>
                       )}
-                      {threadTopics.length === 0 && visibleThreadSuggestions.length > 0 && (
-                        <Flex align="center" gap="2" wrap="wrap" justify="start" style={{ width: "100%" }}>
-                          <Text size="1" color="gray">
-                            Topic suggestion:
-                          </Text>
-                          {visibleThreadSuggestions.map((topic) => {
-                            const scoreLabel = formatTopicSuggestionScore(topic.suggestionScore);
-                            return (
-                              <Flex
-                                key={topic.id}
-                                align="center"
-                                gap="1"
-                                style={{ cursor: "pointer" }}
-                                onClick={() => {
-                                  void handleToggleTopic(activeMessage, topic.id);
-                                }}
-                              >
-                                <TopicBadge topic={topic} size="1" />
-                                {scoreLabel ? (
-                                  <Text size="1" color="gray">
-                                    ({scoreLabel})
-                                  </Text>
-                                ) : null}
-                              </Flex>
-                            );
-                          })}
-                          <Popover.Root
-                            open={topicSuggestionExplanationOpen}
-                            onOpenChange={(open) => {
-                              setTopicSuggestionExplanationOpen(open);
-                              if (open && explanationThreadId) {
-                                void handleLoadTopicSuggestionExplanation(explanationThreadId);
-                              }
-                            }}
-                          >
-                            <Popover.Trigger>
-                              <IconButton
-                                size="1"
-                                variant="ghost"
-                                color="gray"
-                                title="Why?"
-                                aria-label="Why?"
-                              >
-                                <QuestionMarkCircledIcon width={14} height={14} />
-                              </IconButton>
-                            </Popover.Trigger>
-                            <Popover.Content size="1" className="topic-suggestion-explanation-popover">
-                              <Flex direction="column" gap="3" className="topic-suggestion-explanation-layout">
-                                <Text size="2" weight="medium">
-                                  Why this suggestion?
-                                </Text>
-                                <Flex direction="column" gap="3" className="topic-suggestion-explanation-body">
-                                  {topicSuggestionExplanationLoading ? (
-                                    <Text size="1" color="gray">
-                                      Loading explanation…
-                                    </Text>
-                                  ) : topicSuggestionExplanationError ? (
-                                    <Text size="1" color="red">
-                                      {topicSuggestionExplanationError}
-                                    </Text>
-                                  ) : topicSuggestionExplanation ? (
-                                    <>
-                                      <Flex direction="column" gap="1">
-                                        <Text size="1" color="gray">
-                                          Numbers in parentheses are signal weights, not mail counts.
-                                        </Text>
-                                        <Text size="1" color="gray">
-                                          Per matching historical thread:
-                                          {" "}
-                                          <code>thread score = sum(signal weights)</code>
-                                        </Text>
-                                        <Text size="1" color="gray">
-                                          Per topic:
-                                          {" "}
-                                          <code>suggestion score = sum(thread scores)</code>,
-                                          {" "}
-                                          <code>match count = number of matching historical threads</code>
-                                        </Text>
-                                      </Flex>
-                                      <Flex direction="column" gap="1">
-                                        <Text size="1" weight="medium">
-                                          Current thread signals
-                                        </Text>
-                                        {topicSuggestionExplanation.signals.length > 0 ? (
-                                          topicSuggestionExplanation.signals.map((signal) => (
-                                            <Text key={`${signal.type}-${signal.value}`} size="1" color="gray">
-                                              {formatTopicSuggestionSignal(signal)}
-                                            </Text>
-                                          ))
-                                        ) : (
-                                          <Text size="1" color="gray">
-                                            No learned signals available.
-                                          </Text>
-                                        )}
-                                      </Flex>
-                                      <Flex direction="column" gap="3">
-                                        {topicSuggestionExplanation.topics.map((entry) => (
-                                          <Flex key={entry.topic.id} direction="column" gap="1">
-                                            <Text size="1" weight="medium">
-                                              {entry.topic.name}: score {entry.suggestionScore}, matches {entry.matchCount}
-                                            </Text>
-                                            <Text size="1" color="gray">
-                                              Best matching thread decides the score; extra matches only break ties.
-                                              {entry.matchedThreads[0]
-                                                ? ` Winner: ${entry.matchedThreads[0].threadId} (${entry.matchedThreads[0].score})`
-                                                : ""}
-                                            </Text>
-                                            {entry.matchedThreads.map((thread) => (
-                                              <Flex key={`${entry.topic.id}-${thread.threadId}`} direction="column" gap="1">
-                                                <Text size="1" color="gray">
-                                                  {thread.threadId}: {formatTopicSuggestionFormula(thread.signals)} = {thread.score}
-                                                </Text>
-                                                <Text size="1" color="gray">
-                                                  Signals: {thread.signals.map((signal) => formatTopicSuggestionSignal(signal)).join(", ")}
-                                                </Text>
-                                              </Flex>
-                                            ))}
-                                          </Flex>
-                                        ))}
-                                      </Flex>
-                                    </>
-                                  ) : (
-                                    <Text size="1" color="gray">
-                                      No explanation available.
-                                    </Text>
-                                  )}
-                                </Flex>
-                              </Flex>
-                            </Popover.Content>
-                          </Popover.Root>
-                        </Flex>
-                      )}
+                      <ThreadTopicSuggestionsRow
+                        threadId={explanationThreadId}
+                        hasAssignedTopics={threadTopics.length > 0}
+                        suggestions={visibleThreadSuggestions}
+                        explanationOpen={topicSuggestionExplanationOpen}
+                        explanationLoading={topicSuggestionExplanationLoading}
+                        explanationError={topicSuggestionExplanationError}
+                        explanation={topicSuggestionExplanation}
+                        onExplanationOpenChange={setTopicSuggestionExplanationOpen}
+                        onLoadExplanation={(threadId) => {
+                          void handleLoadTopicSuggestionExplanation(threadId);
+                        }}
+                        onToggleTopic={handleToggleActiveMessageTopic}
+                      />
                     </Flex>
                   );
                 })() : undefined

@@ -1,22 +1,44 @@
-import { describe, expect, it } from "bun:test";
+import { describe, expect, it, test } from "bun:test";
 import type { Message } from "@/lib/data";
-import { buildGroupedMessages, buildMessageListItems, type MessageGroup } from "./listModel";
+import {
+  buildGroupedMessages,
+  buildMessageListItems,
+  getMessageListRowKey,
+  type MessageGroup
+} from "./listModel";
 
 function makeMessage(
-  id: string,
-  threadId: string,
-  dateValue: number,
+  idOrOverrides: string | Partial<Message>,
+  threadId = "thread-1",
+  dateValue = Date.UTC(2026, 2, 26, 15, 0, 0),
   overrides?: Partial<Message>
 ): Message {
+  if (typeof idOrOverrides !== "string") {
+    return {
+      id: "msg-1",
+      threadId: "thread-1",
+      subject: "Subject",
+      from: "Alice <alice@example.test>",
+      to: "Bob <bob@example.test>",
+      preview: "Preview",
+      date: new Date(Date.UTC(2026, 2, 26, 15, 0, 0)).toISOString(),
+      dateValue: Date.UTC(2026, 2, 26, 15, 0, 0),
+      folderId: "acc-1:INBOX",
+      accountId: "acc-1",
+      body: "",
+      ...idOrOverrides
+    };
+  }
+
   return {
-    id,
+    id: idOrOverrides,
     accountId: "acc-1",
     folderId: "acc-1:inbox",
     threadId,
-    subject: `Subject ${id}`,
+    subject: `Subject ${idOrOverrides}`,
     from: "Alice <alice@example.com>",
     to: "Bob <bob@example.com>",
-    preview: `Preview ${id}`,
+    preview: `Preview ${idOrOverrides}`,
     date: new Date(dateValue).toISOString(),
     dateValue,
     body: "",
@@ -57,10 +79,7 @@ describe("buildMessageListItems", () => {
     const suggestionGroup: MessageGroup = {
       key: "topic-suggestions:topic-build",
       label: "Build Alerts",
-      items: [
-        makeMessage("m1", "thread-1", 1000),
-        makeMessage("m2", "thread-2", 900)
-      ],
+      items: [makeMessage("m1", "thread-1", 1000), makeMessage("m2", "thread-2", 900)],
       showCount: false,
       allowToggleWhenEmpty: true,
       variant: "topic-suggestions"
@@ -89,11 +108,7 @@ describe("buildMessageListItems", () => {
       mode: "flat"
     });
 
-    expect(items.map((item) => item.type)).toEqual([
-      "suggestion-section",
-      "group",
-      "row"
-    ]);
+    expect(items.map((item) => item.type)).toEqual(["suggestion-section", "group", "row"]);
     expect(items[0]).toEqual(
       expect.objectContaining({
         type: "suggestion-section",
@@ -117,10 +132,7 @@ describe("buildMessageListItems", () => {
     const normalGroup: MessageGroup = {
       key: "Today",
       label: "Today",
-      items: [
-        makeMessage("root", "thread-1", 1000),
-        makeMessage("reply", "thread-1", 900)
-      ]
+      items: [makeMessage("root", "thread-1", 1000), makeMessage("reply", "thread-1", 900)]
     };
 
     const items = buildMessageListItems({
@@ -131,20 +143,20 @@ describe("buildMessageListItems", () => {
       includeThreadAcrossFolders: false,
       searchScope: "folder",
       activeFolderId: "acc-1:inbox",
-      buildThreadTree: (messages) => [{
-        message: messages[0]!,
-        children: [
-          {
-            message: messages[1]!,
-            children: []
-          }
-        ]
-      }],
+      buildThreadTree: (messages) => [
+        {
+          message: messages[0]!,
+          children: [
+            {
+              message: messages[1]!,
+              children: []
+            }
+          ]
+        }
+      ],
       flattenThread: (node, depth = 0) => [
         { message: node.message, depth },
-        ...node.children.flatMap((child) => [
-          { message: child.message, depth: depth + 1 }
-        ])
+        ...node.children.flatMap((child) => [{ message: child.message, depth: depth + 1 }])
       ],
       getThreadLatestDate: (node) => node.message.dateValue,
       preferToDisplay: false,
@@ -168,31 +180,35 @@ describe("buildMessageListItems", () => {
     });
 
     const items = buildMessageListItems({
-      groupedMessages: [{
-        key: "Today",
-        label: "Today",
-        items: [root, receivedReply, sentLater]
-      }],
+      groupedMessages: [
+        {
+          key: "Today",
+          label: "Today",
+          items: [root, receivedReply, sentLater]
+        }
+      ],
       collapsedGroups: { Today: false },
       collapsedThreads: { "thread-1": true },
       supportsThreads: true,
       includeThreadAcrossFolders: false,
       searchScope: "folder",
       activeFolderId: "acc-1:inbox",
-      buildThreadTree: (messages) => [{
-        message: messages[0]!,
-        children: [
-          {
-            message: messages[1]!,
-            children: [
-              {
-                message: messages[2]!,
-                children: []
-              }
-            ]
-          }
-        ]
-      }],
+      buildThreadTree: (messages) => [
+        {
+          message: messages[0]!,
+          children: [
+            {
+              message: messages[1]!,
+              children: [
+                {
+                  message: messages[2]!,
+                  children: []
+                }
+              ]
+            }
+          ]
+        }
+      ],
       flattenThread: (node, depth = 0) => [
         { message: node.message, depth },
         ...node.children.flatMap((child) => [
@@ -217,5 +233,32 @@ describe("buildMessageListItems", () => {
         displayDate: new Date(2000).toISOString()
       })
     );
+  });
+});
+
+describe("getMessageListRowKey", () => {
+  test("uses a stable Message-ID based key for drafts", () => {
+    expect(
+      getMessageListRowKey(
+        makeMessage({
+          id: "draft-row-2",
+          draft: true,
+          folderId: "acc-1:Drafts",
+          messageId: "<draft-stable@example.test>"
+        })
+      )
+    ).toBe("draft:<draft-stable@example.test>");
+  });
+
+  test("falls back to the row id for non-drafts", () => {
+    expect(
+      getMessageListRowKey(
+        makeMessage({
+          id: "msg-2",
+          draft: false,
+          messageId: "<message@example.test>"
+        })
+      )
+    ).toBe("msg-2");
   });
 });

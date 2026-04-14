@@ -40,3 +40,4 @@ This project uses bun:sqlite for database access, so bun is required for running
 - Avoid `mock.module()` on shared modules such as `@/lib/db` when a narrower seam exists. Prefer dedicated wrappers or explicit dependency injection for tests.
 - When production code imports a wrapper such as `@/lib/serverDb`, tests must mock that wrapper path instead of assuming mocks on the underlying module will be observed.
 - Before considering CI-related test fixes complete, run the repo scripts that mirror CI: `bun run test:ci` and, for mock-sensitive or flaky areas, `bun run test:stress`.
+- Do not leave hook dependency or similar lint warnings ambiguous. Either fix the dependency list, or add a short comment and targeted eslint disable explaining why the warning is intentional.

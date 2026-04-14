@@ -84,6 +84,11 @@ export function reconcileSavedDraftMessages({
     excludedIds.add(previousDraftId);
   }
 
+  const hasExistingSavedDraft = messages.some((message) => excludedIds.has(message.id));
+  if (!hasExistingSavedDraft && !includeSavedDraft) {
+    return messages;
+  }
+
   const nextMessages = messages.filter((message) => !excludedIds.has(message.id));
   const reconciledMessages = includeSavedDraft ? [...nextMessages, savedDraft] : nextMessages;
   if (!pruneOptions) {

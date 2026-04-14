@@ -100,6 +100,21 @@ describe("reconcileSavedDraftMessages", () => {
 
     expect(result).toEqual([inbox, saved]);
   });
+
+  it("preserves list identity when the saved draft is not shown in the current results", () => {
+    const inbox = makeMessage({ id: "message-inbox" });
+    const messages = [inbox];
+    const saved = makeMessage({ id: "draft-new", folderId: "account-1:Drafts" });
+
+    const result = reconcileSavedDraftMessages({
+      messages,
+      savedDraft: saved,
+      previousDraftId: "draft-old",
+      includeSavedDraft: false
+    });
+
+    expect(result).toBe(messages);
+  });
 });
 
 describe("buildSavedDraftListMessage", () => {

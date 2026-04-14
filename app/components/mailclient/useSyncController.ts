@@ -20,6 +20,7 @@ import {
 } from "@/lib/syncPolicy";
 import { logSyncPolicyCall } from "@/lib/syncPolicyLogging";
 import { findInboxFolder } from "@/lib/specialFolders";
+import { isRecentLocalDraftSave } from "./recentLocalDraftSaves";
 import type {
   FullSyncConfirmState,
   SyncJobProgress,
@@ -1123,10 +1124,20 @@ export function useSyncController({
       );
       if (normalized.length === 0) return;
       const fallbackFolderId = inboxFolderRef.current?.id;
+      const externalItems = normalized.filter((item) => {
+        const folderId = item.folderId ?? fallbackFolderId ?? null;
+        return !isRecentLocalDraftSave({
+          accountId: activeAccountId,
+          folderId,
+          messageId: item.messageId ?? null,
+          uid: item.uid
+        });
+      });
+      if (externalItems.length === 0) return;
       const foldersToSync = prioritizeFolderIds(
         Array.from(
           new Set(
-            normalized
+            externalItems
               .map((item) => item.folderId ?? fallbackFolderId)
               .filter((id): id is string => Boolean(id))
           )

@@ -7,6 +7,7 @@ import {
 } from "@/lib/accountApiPaths";
 import type { Message } from "@/lib/data";
 import type { ComposePayload } from "./composeContentBuilder";
+import { registerRecentLocalDraftSave } from "../recentLocalDraftSaves";
 import { buildDraftSavePayload, getDraftChangeState } from "./draftSaveUtils";
 import type {
   ComposeReplyHeaders,
@@ -191,6 +192,12 @@ export function useDraftManager(params: UseDraftManagerParams) {
       }
       if (savedDraft) {
         reconcileSavedDraftInUi(savedDraft, previousDraftId);
+        registerRecentLocalDraftSave({
+          accountId: requestAccountId,
+          folderId: savedDraft.folderId,
+          messageId: savedDraft.messageId ?? null,
+          uid: savedDraft.imapUid ?? null
+        });
       }
       lastDraftHashRef.current = hash;
       const latestHash = currentDraftHashRef.current;

@@ -11,6 +11,7 @@ type BuiltDraftMail = {
   subject: string;
   text: string;
   html?: string;
+  messageId?: string;
   inReplyTo?: string;
   references?: string[];
   xForwardedMessageId?: string;
@@ -27,12 +28,13 @@ const appendImapMessage = mock(async () => 9001);
 const deleteImapMessage = mock(async () => {});
 const syncImapMessage = mock(async (account: Account, mailboxPath: string, uid: number) => {
   const mail = lastBuiltDraftMail;
+  const messageId = mail?.messageId ?? `<draft-${uid}@example.test>`;
   return {
     id: `${account.id}-draft-${uid}`,
     accountId: account.id,
     folderId: `${account.id}:Drafts`,
-    threadId: `<raw-draft-thread-${uid}@example.test>`,
-    messageId: `<draft-${uid}@example.test>`,
+    threadId: messageId,
+    messageId,
     inReplyTo: mail?.inReplyTo,
     references: mail?.references,
     xForwardedMessageId: mail?.xForwardedMessageId,
@@ -243,5 +245,43 @@ describe("saveDraftForAccount", () => {
       invite
     );
     expect(result.message?.draftInvite).toEqual(invite);
+  });
+
+  test("preserves the existing Message-ID when overwriting a saved draft", async () => {
+    const accountId = `acc-drafts-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const account = buildAccount(accountId);
+    const drafts = buildDraftsFolder(accountId);
+    const existingDraft = buildMessage({
+      id: "draft-row-1",
+      accountId,
+      folderId: drafts.id,
+      threadId: "<draft-stable@example.test>",
+      messageId: "<draft-stable@example.test>",
+      subject: "Draft subject",
+      from: account.email,
+      to: "team@example.test",
+      dateValue: Date.UTC(2026, 2, 26, 13, 0, 0),
+      imapUid: 44
+    });
+
+    await upsertAccount(account);
+    await saveFoldersForAccount(accountId, [drafts]);
+    await upsertMessages(accountId, drafts.id, [existingDraft], true);
+
+    const result = await saveDraftForAccount({
+      account,
+      accountId,
+      clientId: "draft-test-client",
+      payload: {
+        draftId: existingDraft.id,
+        to: "team@example.test",
+        subject: "Draft subject updated",
+        text: "Updated body"
+      }
+    });
+
+    expect(lastBuiltDraftMail?.messageId).toBe(existingDraft.messageId);
+    expect(result.message?.messageId).toBe(existingDraft.messageId);
+    expect(result.message?.threadId).toBe(existingDraft.threadId);
   });
 });
