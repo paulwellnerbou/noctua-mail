@@ -6,7 +6,8 @@ import type { Account } from "@/lib/data";
 import {
   bindImapClientError,
   buildImapFlowOptions,
-  connectImapClientWithRetry
+  connectImapClientWithRetry,
+  resetImapConnectFailureState
 } from "./imapClientOptions";
 
 const account = {
@@ -34,6 +35,7 @@ describe("buildImapFlowOptions TLS identity logging", () => {
   beforeEach(() => {
     infos = [];
     warnings = [];
+    resetImapConnectFailureState();
     process.env.IMAP_LOG_LEVEL = "warn";
     console.log = (...args: unknown[]) => {
       infos.push(args.map((item) => String(item)).join(" "));
@@ -44,6 +46,7 @@ describe("buildImapFlowOptions TLS identity logging", () => {
   });
 
   afterEach(() => {
+    resetImapConnectFailureState();
     console.log = originalLog;
     console.warn = originalWarn;
     if (typeof originalLogLevel === "string") {

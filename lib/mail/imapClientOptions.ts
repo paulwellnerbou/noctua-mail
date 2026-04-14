@@ -149,6 +149,14 @@ function clearImapConnectFailureState(account: Account) {
   imapConnectCircuitState.delete(key);
 }
 
+export function resetImapConnectFailureState(account?: Account) {
+  if (account) {
+    clearImapConnectFailureState(account);
+    return;
+  }
+  imapConnectCircuitState.clear();
+}
+
 function recordImapConnectFailure(account: Account, error: unknown) {
   const { key, state } = getImapConnectBreakerState(account);
   const options = getImapConnectRetryOptions();
