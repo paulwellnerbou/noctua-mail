@@ -1,9 +1,13 @@
 import { NextResponse } from "next/server";
-
 import { getLatestMessageUid } from "@/lib/db";
 import { getImapHttpError } from "@/lib/mail/imapError";
 import { getImapLogger, logImapOp } from "@/lib/mail/imapLogger";
-import { bindImapClientError, buildImapFlowOptions } from "@/lib/mail/imapClientOptions";
+import {
+  bindImapClientError,
+  buildImapFlowOptions,
+  connectImapClientWithRetry,
+  safeLogoutImapClient
+} from "@/lib/mail/imapClientOptions";
 import { requireAccountContext } from "@/app/api/_helpers/accountContext";
 
 type EnvelopeAddress = { name?: string | null; mailbox?: string | null; host?: string | null };
@@ -44,71 +48,78 @@ export async function handleImapPollRequest(
     );
   }
 
-  const client = new ImapFlow(buildImapFlowOptions(account, {}, { accountId, clientId, mailbox }));
-  bindImapClientError(client, { accountId, clientId, mailbox });
-
   try {
-    await logImapOp(
-      "connect",
-      { host: account.imap.host, accountId, clientId },
-      () => client.connect()
-    );
-    const mailboxInfo = await logImapOp(
-      "mailboxOpen",
-      { mailbox, accountId, clientId },
-      () => client.mailboxOpen(mailbox, { readOnly: true })
-    );
-    const uidNext = mailboxInfo?.uidNext ?? 0;
-    if (sinceUidNext !== null && !Number.isNaN(sinceUidNext) && uidNext <= sinceUidNext) {
-      return NextResponse.json({ ok: true, uidNext, messages: [] });
-    }
-    const latestUid = await getLatestMessageUid(accountId, mailbox);
-    const startUid =
-      typeof sinceUidNext === "number" && !Number.isNaN(sinceUidNext)
-        ? sinceUidNext
-        : typeof latestUid === "number"
-        ? latestUid + 1
-        : Math.max(1, uidNext ? uidNext - 50 : 1);
-    if (uidNext === 0) {
-      return NextResponse.json({ ok: true, uidNext, messages: [] });
-    }
-    const messages: Array<{
-      uid: number;
-      subject: string;
-      from: string;
-      date?: string | null;
-      messageId?: string | null;
-    }> = [];
-
-    if (uidNext >= startUid) {
-      const rangeStart = Math.max(1, startUid);
-      const range = { uid: `${rangeStart}:*` };
-      const start = Date.now();
-      let count = 0;
-      for await (const message of client.fetch(range, { envelope: true, uid: true })) {
-        const env = message.envelope as Envelope | undefined;
-        messages.push({
-          uid: message.uid,
-          subject: env?.subject ?? "(no subject)",
-          from: formatAddress(env?.from),
-          date: env?.date ? env.date.toISOString() : null,
-          messageId: env?.messageId ?? null
-        });
-        count += 1;
+    const client = await connectImapClientWithRetry({
+      account,
+      logContext: { accountId, clientId, mailbox },
+      createClient: () => {
+        const nextClient = new ImapFlow(
+          buildImapFlowOptions(account, {}, { accountId, clientId, mailbox })
+        );
+        bindImapClientError(nextClient, { accountId, clientId, mailbox });
+        return nextClient;
       }
-      const logger = getImapLogger();
-      if (logger !== false) {
-        logger.info?.({
-          op: "fetch",
-          mailbox,
-          range: range.uid,
-          count,
-          ms: Date.now() - start
-        });
+    });
+    try {
+      const mailboxInfo = await logImapOp(
+        "mailboxOpen",
+        { mailbox, accountId, clientId },
+        () => client.mailboxOpen(mailbox, { readOnly: true })
+      );
+      const uidNext = mailboxInfo?.uidNext ?? 0;
+      if (sinceUidNext !== null && !Number.isNaN(sinceUidNext) && uidNext <= sinceUidNext) {
+        return NextResponse.json({ ok: true, uidNext, messages: [] });
       }
-    }
+      const latestUid = await getLatestMessageUid(accountId, mailbox);
+      const startUid =
+        typeof sinceUidNext === "number" && !Number.isNaN(sinceUidNext)
+          ? sinceUidNext
+          : typeof latestUid === "number"
+            ? latestUid + 1
+            : Math.max(1, uidNext ? uidNext - 50 : 1);
+      if (uidNext === 0) {
+        return NextResponse.json({ ok: true, uidNext, messages: [] });
+      }
+      const messages: Array<{
+        uid: number;
+        subject: string;
+        from: string;
+        date?: string | null;
+        messageId?: string | null;
+      }> = [];
 
-    return NextResponse.json({ ok: true, uidNext, messages });
+      if (uidNext >= startUid) {
+        const rangeStart = Math.max(1, startUid);
+        const range = { uid: `${rangeStart}:*` };
+        const start = Date.now();
+        let count = 0;
+        for await (const message of client.fetch(range, { envelope: true, uid: true })) {
+          const env = message.envelope as Envelope | undefined;
+          messages.push({
+            uid: message.uid,
+            subject: env?.subject ?? "(no subject)",
+            from: formatAddress(env?.from),
+            date: env?.date ? env.date.toISOString() : null,
+            messageId: env?.messageId ?? null
+          });
+          count += 1;
+        }
+        const logger = getImapLogger();
+        if (logger !== false) {
+          logger.info?.({
+            op: "fetch",
+            mailbox,
+            range: range.uid,
+            count,
+            ms: Date.now() - start
+          });
+        }
+      }
+
+      return NextResponse.json({ ok: true, uidNext, messages });
+    } finally {
+      await safeLogoutImapClient(client, { accountId, clientId });
+    }
   } catch (error) {
     const imapHttpError = getImapHttpError(error);
     if (imapHttpError) {
@@ -127,12 +138,6 @@ export async function handleImapPollRequest(
       { ok: false, message: (error as Error).message ?? "Poll failed" },
       { status: 500 }
     );
-  } finally {
-    try {
-      await logImapOp("logout", { accountId, clientId }, () => client.logout());
-    } catch {
-      // ignore
-    }
   }
 }
 

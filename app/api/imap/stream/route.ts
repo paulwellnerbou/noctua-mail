@@ -8,7 +8,12 @@ import {
   saveMailboxState
 } from "@/lib/db";
 import { logImapOp } from "@/lib/mail/imapLogger";
-import { bindImapClientError, buildImapFlowOptions } from "@/lib/mail/imapClientOptions";
+import {
+  bindImapClientError,
+  buildImapFlowOptions,
+  connectImapClientWithRetry,
+  safeLogoutImapClient
+} from "@/lib/mail/imapClientOptions";
 import { registerStream } from "@/lib/mail/imapStreamRegistry";
 import { normalizeImapFlags } from "@/lib/messageFlags";
 import { mailboxPathFromFolderId } from "@/lib/mailboxPaths";
@@ -98,17 +103,11 @@ export async function handleImapStreamRequest(
 
       const stopAll = async () => {
         for (const item of sessions.values()) {
-          try {
-            await logImapOp(
-              "imap.logout",
-              { ...logContext, mailbox: item.mailbox },
-              async () => {
-                await item.client.logout();
-              }
-            );
-          } catch {
-            // ignore
-          }
+          await safeLogoutImapClient(
+            item.client,
+            { ...logContext, mailbox: item.mailbox },
+            "imap.logout"
+          );
         }
         controller.close();
         unregister();
@@ -122,13 +121,11 @@ export async function handleImapStreamRequest(
         const sess = sessions.get(folderId);
         if (!sess) return;
         sessions.delete(folderId);
-        try {
-          await logImapOp("imap.logout", { ...logContext, mailbox: sess.mailbox }, async () => {
-            await sess.client.logout();
-          });
-        } catch {
-          // ignore
-        }
+        await safeLogoutImapClient(
+          sess.client,
+          { ...logContext, mailbox: sess.mailbox },
+          "imap.logout"
+        );
       };
 
       const enforceCapacity = async () => {
@@ -159,17 +156,27 @@ export async function handleImapStreamRequest(
         }
         const mailbox = mailboxPathFromFolderId(folder.id, accountId);
 
-        const client = new ImapFlow(
-          buildImapFlowOptions(account, {
-            maxIdleTime: 10 * 60 * 1000,
-            qresync: true
-          }, { ...logContext, mailbox })
-        );
-        bindImapClientError(client, { ...logContext, mailbox });
-
-        await logImapOp("imap.connect", { ...logContext, mailbox }, async () => {
-          await client.connect();
+        const client = await connectImapClientWithRetry({
+          account,
+          logContext: { ...logContext, mailbox },
+          connectOp: "imap.connect",
+          createClient: () => {
+            const nextClient = new ImapFlow(
+              buildImapFlowOptions(account, {
+                maxIdleTime: 10 * 60 * 1000,
+                qresync: true
+              }, { ...logContext, mailbox })
+            );
+            bindImapClientError(nextClient, { ...logContext, mailbox });
+            return nextClient;
+          }
         });
+        // The newly connected client is not yet tracked in `sessions`. If any
+        // post-connect step below throws before we register it, `stopAll()`
+        // would leave the connection dangling. Flip this flag immediately
+        // after `sessions.set()` and clean up on failure otherwise.
+        let sessionRegistered = false;
+        try {
         const caps: any =
           (client as any).enabledCapabilities ||
           (client as any).serverCapabilities ||
@@ -221,6 +228,7 @@ export async function handleImapStreamRequest(
           lastUsed: Date.now(),
           inbox: inboxFolder ? folder.id === inboxFolder.id : false
         });
+        sessionRegistered = true;
         await enforceCapacity();
         send("folder:update", [
           {
@@ -331,6 +339,16 @@ export async function handleImapStreamRequest(
         };
 
         void idleLoop();
+        } catch (error) {
+          if (!sessionRegistered) {
+            await safeLogoutImapClient(
+              client,
+              { ...logContext, mailbox },
+              "imap.logout"
+            );
+          }
+          throw error;
+        }
       };
 
       try {
@@ -353,14 +371,19 @@ export async function handleImapStreamRequest(
             );
             if (toPoll.length === 0) return;
 
-          const pollClient = new ImapFlow(
-            buildImapFlowOptions(account, {}, { ...logContext, mailbox: "poll" })
-          );
-          bindImapClientError(pollClient, { ...logContext, mailbox: "poll" });
+          const pollClient = await connectImapClientWithRetry({
+            account,
+            logContext: { ...logContext, mailbox: "poll" },
+            connectOp: "imap.connect",
+            createClient: () => {
+              const nextClient = new ImapFlow(
+                buildImapFlowOptions(account, {}, { ...logContext, mailbox: "poll" })
+              );
+              bindImapClientError(nextClient, { ...logContext, mailbox: "poll" });
+              return nextClient;
+            }
+          });
           try {
-            await logImapOp("imap.connect", { ...logContext, mailbox: "poll" }, async () => {
-              await pollClient.connect();
-            });
             const updates: Array<{ id: string; uidNext?: number; unseen?: number; exists?: number }>
               = [];
             for (const folder of toPoll) {
@@ -392,13 +415,11 @@ export async function handleImapStreamRequest(
           } catch (error) {
             send("error", { message: (error as Error).message ?? "Poll failed" });
           } finally {
-            try {
-              await logImapOp("imap.logout", { ...logContext, mailbox: "poll" }, async () => {
-                await pollClient.logout();
-              });
-            } catch {
-              // ignore
-            }
+            await safeLogoutImapClient(
+              pollClient,
+              { ...logContext, mailbox: "poll" },
+              "imap.logout"
+            );
           }
         };
 

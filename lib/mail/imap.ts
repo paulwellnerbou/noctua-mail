@@ -18,14 +18,37 @@ import {
 } from "@/lib/mail/categorization";
 import { buildImapMessageRowId } from "@/lib/messageIds";
 import { getImapLogger, logImapOp } from "@/lib/mail/imapLogger";
-import { bindImapClientError, buildImapFlowOptions } from "@/lib/mail/imapClientOptions";
-import { ImapFlow } from "imapflow";
+import {
+  bindImapClientError,
+  buildImapFlowOptions,
+  connectImapClientWithRetry,
+  safeLogoutImapClient
+} from "@/lib/mail/imapClientOptions";
+import { ImapFlow, type ImapFlowOptions } from "imapflow";
 
-const buildImapClient = (account: Account, logContext?: ImapLogContext) => {
-  const client = new ImapFlow(buildImapFlowOptions(account, {}, logContext));
+const buildImapClient = (
+  account: Account,
+  logContext?: ImapLogContext,
+  overrides: Partial<ImapFlowOptions> = {}
+) => {
+  const client = new ImapFlow(buildImapFlowOptions(account, overrides, logContext));
   bindImapClientError(client, logContext);
   return client;
 };
+
+async function connectImapClient(
+  account: Account,
+  logContext?: ImapLogContext,
+  overrides: Partial<ImapFlowOptions> = {},
+  connectOp = "connect"
+) {
+  return await connectImapClientWithRetry({
+    account,
+    logContext,
+    connectOp,
+    createClient: () => buildImapClient(account, logContext, overrides)
+  });
+}
 
 type ImapSyncResult = {
   messages: Message[];
@@ -463,17 +486,12 @@ function resolveFolderSpecialUse(
 }
 
 async function listImapRaw(account: Account, logContext?: ImapLogContext) {
-  const client = buildImapClient(account, logContext);
+  const client = await connectImapClient(account, logContext);
 
   try {
-    await logImapOp("connect", { host: account.imap.host, ...logContext }, () => client.connect());
     return await logImapOp("list", { ...logContext }, () => client.list());
   } finally {
-    try {
-      await logImapOp("logout", { ...logContext }, () => client.logout());
-    } catch {
-      // ignore logout errors
-    }
+    await safeLogoutImapClient(client, { ...logContext });
   }
 }
 
@@ -514,10 +532,9 @@ export async function getImapMailboxStatus(
   clientId?: string
 ): Promise<ImapMailboxStatusSnapshot> {
   const logContext = buildLogContext(account, clientId);
-  const client = buildImapClient(account, logContext);
+  const client = await connectImapClient(account, logContext);
 
   try {
-    await logImapOp("connect", { host: account.imap.host, ...logContext }, () => client.connect());
     const statusQuery: Record<string, boolean> = {
       uidNext: true,
       messages: true,
@@ -547,11 +564,7 @@ export async function getImapMailboxStatus(
           : String((status as { highestModseq?: unknown }).highestModseq),
     };
   } finally {
-    try {
-      await logImapOp("logout", { ...logContext }, () => client.logout());
-    } catch {
-      // ignore logout errors
-    }
+    await safeLogoutImapClient(client, { ...logContext });
   }
 }
 
@@ -573,10 +586,9 @@ export async function listImapMailboxUids(
   clientId?: string
 ): Promise<ImapMailboxUidSnapshot> {
   const logContext = buildLogContext(account, clientId);
-  const client = buildImapClient(account, logContext);
+  const client = await connectImapClient(account, logContext);
 
   try {
-    await logImapOp("connect", { host: account.imap.host, ...logContext }, () => client.connect());
     const folderList = await logImapOp("list", { ...logContext }, () => client.list());
     const folders: Folder[] = mapImapFolders(account, folderList);
     const mailboxInfo = await logImapOp(
@@ -611,11 +623,7 @@ export async function listImapMailboxUids(
       folders
     };
   } finally {
-    try {
-      await logImapOp("logout", { ...logContext }, () => client.logout());
-    } catch {
-      // ignore logout errors
-    }
+    await safeLogoutImapClient(client, { ...logContext });
   }
 }
 
@@ -631,10 +639,9 @@ export async function listImapMailboxUidsAndFlags(
   clientId?: string
 ): Promise<ImapMailboxUidFlagSnapshot> {
   const logContext = buildLogContext(account, clientId);
-  const client = buildImapClient(account, logContext);
+  const client = await connectImapClient(account, logContext);
 
   try {
-    await logImapOp("connect", { host: account.imap.host, ...logContext }, () => client.connect());
     const folderList = await logImapOp("list", { ...logContext }, () => client.list());
     const folders: Folder[] = mapImapFolders(account, folderList);
     const mailboxInfo = await logImapOp(
@@ -682,11 +689,7 @@ export async function listImapMailboxUidsAndFlags(
       folders
     };
   } finally {
-    try {
-      await logImapOp("logout", { ...logContext }, () => client.logout());
-    } catch {
-      // ignore logout errors
-    }
+    await safeLogoutImapClient(client, { ...logContext });
   }
 }
 
@@ -1260,7 +1263,6 @@ export async function planImapNewSyncFolders(
   clientId?: string
 ): Promise<NewSyncFolderDecision[]> {
   const logContext = buildLogContext(account, clientId);
-  const client = buildImapClient(account, logContext);
   const uniqueFolderIds = Array.from(new Set(folderIds.filter(Boolean)));
   if (uniqueFolderIds.length === 0) return [];
 
@@ -1270,8 +1272,8 @@ export async function planImapNewSyncFolders(
     await validateAndFixMailboxHighestUid(account, folderId, mailboxPath);
   }
 
+  const client = await connectImapClient(account, logContext);
   try {
-    await logImapOp("connect", { host: account.imap.host, ...logContext }, () => client.connect());
     const decisions: NewSyncFolderDecision[] = [];
 
     for (const folderId of uniqueFolderIds) {
@@ -1380,11 +1382,7 @@ export async function planImapNewSyncFolders(
 
     return decisions;
   } finally {
-    try {
-      await logImapOp("logout", { ...logContext }, () => client.logout());
-    } catch {
-      // ignore logout errors
-    }
+    await safeLogoutImapClient(client, { ...logContext });
   }
 }
 
@@ -1578,11 +1576,7 @@ export async function* syncImapAccountBatched(
   options?: { resumeFromUid?: number; explicitUids?: number[] }
 ): AsyncGenerator<ImapSyncBatch> {
   const logContext = buildLogContext(account, clientId);
-  const client = buildImapClient(account, logContext);
-
-  await logImapOp("connect", { host: account.imap.host, ...logContext }, () =>
-    client.connect()
-  );
+  const client = await connectImapClient(account, logContext);
 
   try {
 
@@ -1870,11 +1864,7 @@ export async function* syncImapAccountBatched(
   if (finalBatch) yield finalBatch;
 
   } finally {
-    try {
-      await logImapOp("logout", { ...logContext }, () => client.logout());
-    } catch {
-      // ignore logout errors — connection may have already been closed
-    }
+    await safeLogoutImapClient(client, { ...logContext });
   }
 }
 
@@ -1885,14 +1875,11 @@ export async function syncImapMessage(
   clientId?: string
 ): Promise<Message | null> {
   const logContext = buildLogContext(account, clientId);
-  const client = buildImapClient(account, logContext);
   const linearModel = await getCategoryLinearModel(account.id);
+  const client = await connectImapClient(account, logContext);
 
   let message: Message | null = null;
   try {
-    await logImapOp("connect", { host: account.imap.host, ...logContext }, () =>
-      client.connect()
-    );
     await logImapOp("mailboxOpen", { mailbox: mailboxPath, ...logContext }, () =>
       client.mailboxOpen(mailboxPath)
     );
@@ -1931,11 +1918,7 @@ export async function syncImapMessage(
       );
     }
   } finally {
-    try {
-      await logImapOp("logout", { ...logContext }, () => client.logout());
-    } catch {
-      // ignore logout errors
-    }
+    await safeLogoutImapClient(client, { ...logContext });
   }
   return message;
 }
@@ -1955,14 +1938,10 @@ export async function findMissingStoredMailboxCopies(
   if (validCandidates.length === 0) return missingIds;
 
   const logContext = buildLogContext(account, clientId);
-  const client = buildImapClient(account, logContext);
   let currentMailbox = "";
+  const client = await connectImapClient(account, logContext);
 
   try {
-    await logImapOp("connect", { host: account.imap.host, ...logContext }, () =>
-      client.connect()
-    );
-
     for (const candidate of validCandidates) {
       const mailboxPath = candidate.mailboxPath.trim();
       try {
@@ -2000,11 +1979,7 @@ export async function findMissingStoredMailboxCopies(
       }
     }
   } finally {
-    try {
-      await logImapOp("logout", { ...logContext }, () => client.logout());
-    } catch {
-      // ignore logout errors
-    }
+    await safeLogoutImapClient(client, { ...logContext });
   }
 
   return missingIds;
@@ -2018,12 +1993,9 @@ export async function appendImapMessage(
   clientId?: string
 ) {
   const logContext = buildLogContext(account, clientId);
-  const client = buildImapClient(account, logContext);
+  const client = await connectImapClient(account, logContext);
 
   try {
-    await logImapOp("connect", { host: account.imap.host, ...logContext }, () =>
-      client.connect()
-    );
     const result = await logImapOp(
       "append",
       { mailbox: mailboxPath, ...logContext },
@@ -2033,11 +2005,7 @@ export async function appendImapMessage(
     const uid = (result as any).uid;
     return typeof uid === "number" ? uid : null;
   } finally {
-    try {
-      await logImapOp("logout", { ...logContext }, () => client.logout());
-    } catch {
-      // ignore logout errors
-    }
+    await safeLogoutImapClient(client, { ...logContext });
   }
 }
 
@@ -2055,12 +2023,9 @@ export async function moveImapMessages(
     return new Map<number, number | null>();
   }
   const logContext = buildLogContext(account, clientId);
-  const client = buildImapClient(account, logContext);
+  const client = await connectImapClient(account, logContext);
 
   try {
-    await logImapOp("connect", { host: account.imap.host, ...logContext }, () =>
-      client.connect()
-    );
     await logImapOp("mailboxOpen", { mailbox: mailboxPath, ...logContext }, () =>
       client.mailboxOpen(mailboxPath)
     );
@@ -2086,11 +2051,7 @@ export async function moveImapMessages(
       })
     );
   } finally {
-    try {
-      await logImapOp("logout", { ...logContext }, () => client.logout());
-    } catch {
-      // ignore logout errors
-    }
+    await safeLogoutImapClient(client, { ...logContext });
   }
 }
 
@@ -2138,12 +2099,9 @@ export async function deleteImapMessages(
   const groupedTargets = groupDeleteTargetsByMailbox(targets);
   if (groupedTargets.length === 0) return;
   const logContext = buildLogContext(account, clientId);
-  const client = buildImapClient(account, logContext);
+  const client = await connectImapClient(account, logContext);
 
   try {
-    await logImapOp("connect", { host: account.imap.host, ...logContext }, () =>
-      client.connect()
-    );
     for (const target of groupedTargets) {
       await logImapOp("mailboxOpen", { mailbox: target.mailboxPath, ...logContext }, () =>
         client.mailboxOpen(target.mailboxPath)
@@ -2155,11 +2113,7 @@ export async function deleteImapMessages(
       );
     }
   } finally {
-    try {
-      await logImapOp("logout", { ...logContext }, () => client.logout());
-    } catch {
-      // ignore logout errors
-    }
+    await safeLogoutImapClient(client, { ...logContext });
   }
 }
 
@@ -2181,12 +2135,9 @@ export async function updateImapFlags(
   clientId?: string
 ) {
   const logContext = buildLogContext(account, clientId);
-  const client = buildImapClient(account, logContext);
+  const client = await connectImapClient(account, logContext);
 
   try {
-    await logImapOp("connect", { host: account.imap.host, ...logContext }, () =>
-      client.connect()
-    );
     await logImapOp("mailboxOpen", { mailbox: mailboxPath, ...logContext }, () =>
       client.mailboxOpen(mailboxPath)
     );
@@ -2202,11 +2153,7 @@ export async function updateImapFlags(
       );
     }
   } finally {
-    try {
-      await logImapOp("logout", { ...logContext }, () => client.logout());
-    } catch {
-      // ignore logout errors
-    }
+    await safeLogoutImapClient(client, { ...logContext });
   }
 }
 
@@ -2217,20 +2164,13 @@ export async function listImapFolders(account: Account, clientId?: string) {
 
 export async function createImapFolder(account: Account, path: string, clientId?: string) {
   const logContext = buildLogContext(account, clientId);
-  const client = buildImapClient(account, logContext);
+  const client = await connectImapClient(account, logContext);
   try {
-    await logImapOp("connect", { host: account.imap.host, ...logContext }, () =>
-      client.connect()
-    );
     await logImapOp("mailboxCreate", { mailbox: path, ...logContext }, () =>
       client.mailboxCreate(path)
     );
   } finally {
-    try {
-      await logImapOp("logout", { ...logContext }, () => client.logout());
-    } catch {
-      // ignore logout errors
-    }
+    await safeLogoutImapClient(client, { ...logContext });
   }
 }
 
@@ -2241,41 +2181,27 @@ export async function renameImapFolder(
   clientId?: string
 ) {
   const logContext = buildLogContext(account, clientId);
-  const client = buildImapClient(account, logContext);
+  const client = await connectImapClient(account, logContext);
   try {
-    await logImapOp("connect", { host: account.imap.host, ...logContext }, () =>
-      client.connect()
-    );
     await logImapOp(
       "mailboxRename",
       { mailbox: path, newMailbox: newPath, ...logContext },
       () => client.mailboxRename(path, newPath)
     );
   } finally {
-    try {
-      await logImapOp("logout", { ...logContext }, () => client.logout());
-    } catch {
-      // ignore logout errors
-    }
+    await safeLogoutImapClient(client, { ...logContext });
   }
 }
 
 export async function deleteImapFolder(account: Account, path: string, clientId?: string) {
   const logContext = buildLogContext(account, clientId);
-  const client = buildImapClient(account, logContext);
+  const client = await connectImapClient(account, logContext);
   try {
-    await logImapOp("connect", { host: account.imap.host, ...logContext }, () =>
-      client.connect()
-    );
     await logImapOp("mailboxDelete", { mailbox: path, ...logContext }, () =>
       client.mailboxDelete(path)
     );
   } finally {
-    try {
-      await logImapOp("logout", { ...logContext }, () => client.logout());
-    } catch {
-      // ignore logout errors
-    }
+    await safeLogoutImapClient(client, { ...logContext });
   }
 }
 
@@ -2285,19 +2211,12 @@ export async function unsubscribeImapFolder(
   clientId?: string
 ) {
   const logContext = buildLogContext(account, clientId);
-  const client = buildImapClient(account, logContext);
+  const client = await connectImapClient(account, logContext);
   try {
-    await logImapOp("connect", { host: account.imap.host, ...logContext }, () =>
-      client.connect()
-    );
     await logImapOp("mailboxUnsubscribe", { mailbox: path, ...logContext }, () =>
       client.mailboxUnsubscribe(path)
     );
   } finally {
-    try {
-      await logImapOp("logout", { ...logContext }, () => client.logout());
-    } catch {
-      // ignore logout errors
-    }
+    await safeLogoutImapClient(client, { ...logContext });
   }
 }
