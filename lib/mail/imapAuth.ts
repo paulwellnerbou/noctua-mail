@@ -17,6 +17,7 @@ export async function verifyImapCredentials(
     const client = await connectImapClientWithRetry({
       account,
       logContext,
+      skipBreaker: true,
       createClient: () => {
         const nextClient = new ImapFlow(
           buildImapFlowOptions(account, {

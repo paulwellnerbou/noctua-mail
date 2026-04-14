@@ -27,19 +27,62 @@ const DEFAULT_IMAP_CONNECT_RETRY_BASE_DELAY_MS = 250;
 const DEFAULT_IMAP_CONNECT_RETRY_MAX_DELAY_MS = 2_000;
 const DEFAULT_IMAP_CONNECT_BREAKER_THRESHOLD = 3;
 const DEFAULT_IMAP_CONNECT_BREAKER_COOLDOWN_MS = 30_000;
+const DEFAULT_IMAP_CONNECT_BREAKER_STATE_TTL_MS = 24 * 60 * 60 * 1000;
+const DEFAULT_IMAP_CONNECT_BREAKER_MAX_ENTRIES = 10_000;
 
 type ImapConnectCircuitState = {
   consecutiveFailures: number;
   openedUntil: number;
   lastError?: string;
+  lastTouchedAt: number;
 };
+
+class PrunableImapConnectCircuitStateMap extends Map<string, ImapConnectCircuitState> {
+  private readonly staleTtlMs: number;
+  private readonly maxEntries: number;
+
+  constructor(
+    staleTtlMs = DEFAULT_IMAP_CONNECT_BREAKER_STATE_TTL_MS,
+    maxEntries = DEFAULT_IMAP_CONNECT_BREAKER_MAX_ENTRIES
+  ) {
+    super();
+    this.staleTtlMs = staleTtlMs;
+    this.maxEntries = maxEntries;
+  }
+
+  private isExpired(state: ImapConnectCircuitState, now: number) {
+    const cooldownElapsedAt = Math.max(state.openedUntil, state.lastTouchedAt);
+    return cooldownElapsedAt > 0 && now > cooldownElapsedAt + this.staleTtlMs;
+  }
+
+  private prune(now = Date.now()) {
+    for (const [key, state] of this.entries()) {
+      if (this.isExpired(state, now)) {
+        super.delete(key);
+      }
+    }
+    if (this.size <= this.maxEntries) return;
+    const overflow = this.size - this.maxEntries;
+    const oldest = Array.from(this.entries())
+      .sort(([, a], [, b]) => a.lastTouchedAt - b.lastTouchedAt)
+      .slice(0, overflow);
+    for (const [key] of oldest) {
+      super.delete(key);
+    }
+  }
+
+  override set(key: string, value: ImapConnectCircuitState) {
+    this.prune();
+    return super.set(key, value);
+  }
+}
 
 const imapConnectRuntimeState = globalThis as typeof globalThis & {
   __noctuaImapConnectCircuitState?: Map<string, ImapConnectCircuitState>;
 };
 
 if (!imapConnectRuntimeState.__noctuaImapConnectCircuitState) {
-  imapConnectRuntimeState.__noctuaImapConnectCircuitState = new Map();
+  imapConnectRuntimeState.__noctuaImapConnectCircuitState = new PrunableImapConnectCircuitStateMap();
 }
 
 const imapConnectCircuitState = imapConnectRuntimeState.__noctuaImapConnectCircuitState;
@@ -98,23 +141,67 @@ function getImapConnectRetryOptions() {
 }
 
 function buildImapCircuitKey(account: Account) {
-  return `${account.id}:${account.imap.host}:${account.imap.port}:${account.imap.secure ? "secure" : "starttls"}`;
+  return JSON.stringify([
+    account.id,
+    account.imap.host,
+    account.imap.port,
+    account.imap.secure
+  ]);
+}
+
+type ImapConnectErrorLike = {
+  message?: string;
+  response?: string;
+  responseText?: string;
+  responseStatus?: string;
+  executedCommand?: string;
+  serverResponseCode?: string;
+  authenticationFailed?: boolean;
+  code?: string;
+};
+
+function collectImapConnectErrorText(error: unknown) {
+  const candidate = error as ImapConnectErrorLike | null | undefined;
+  return [
+    candidate?.message,
+    candidate?.response,
+    candidate?.responseText,
+    candidate?.responseStatus,
+    candidate?.executedCommand,
+    candidate?.serverResponseCode,
+    candidate?.code
+  ]
+    .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+    .join("\n")
+    .toLowerCase();
 }
 
 function isRetryableImapConnectError(error: unknown) {
-  const message = ((error as Error | undefined)?.message ?? String(error ?? "")).toLowerCase();
-  if (!message) return false;
+  const candidate = error as ImapConnectErrorLike | null | undefined;
+  const text = collectImapConnectErrorText(error);
+  if (!text) return false;
+
+  if (
+    candidate?.authenticationFailed === true ||
+    candidate?.serverResponseCode === "AUTHENTICATIONFAILED"
+  ) {
+    return false;
+  }
+
   if (
     [
       "invalid imap credentials",
       "authentication failed",
+      "authenticationfailed",
+      "invalid credentials",
       "no password configured",
       "account not found",
       "missing accountid"
-    ].some((pattern) => message.includes(pattern))
+    ].some((pattern) => text.includes(pattern))
   ) {
     return false;
   }
+
   return [
     "peer certificate missing",
     "peer certificate is empty",
@@ -127,11 +214,15 @@ function isRetryableImapConnectError(error: unknown) {
     "timed out",
     "econnreset",
     "econnrefused",
+    "enotfound",
+    "ehostunreach",
+    "enetunreach",
+    "epipe",
     "socket hang up",
     "network is unreachable",
     "connection closed",
     "closedafterconnect"
-  ].some((pattern) => message.includes(pattern));
+  ].some((pattern) => text.includes(pattern));
 }
 
 function getImapConnectDelayMs(attempt: number, baseDelayMs: number, maxDelayMs: number) {
@@ -160,13 +251,17 @@ export function resetImapConnectFailureState(account?: Account) {
 function recordImapConnectFailure(account: Account, error: unknown) {
   const { key, state } = getImapConnectBreakerState(account);
   const options = getImapConnectRetryOptions();
+  const nextConsecutiveFailures = (state?.consecutiveFailures ?? 0) + 1;
+  const breakerDisabled = options.breakerThreshold <= 0;
+  const now = Date.now();
   const nextState: ImapConnectCircuitState = {
-    consecutiveFailures: (state?.consecutiveFailures ?? 0) + 1,
+    consecutiveFailures: nextConsecutiveFailures,
     openedUntil:
-      (state?.consecutiveFailures ?? 0) + 1 >= Math.max(1, options.breakerThreshold)
-        ? Date.now() + options.breakerCooldownMs
+      !breakerDisabled && nextConsecutiveFailures >= options.breakerThreshold
+        ? now + options.breakerCooldownMs
         : 0,
-    lastError: (error as Error | undefined)?.message ?? String(error ?? "")
+    lastError: (error as Error | undefined)?.message ?? String(error ?? ""),
+    lastTouchedAt: now
   };
   imapConnectCircuitState.set(key, nextState);
   return nextState;
@@ -176,7 +271,7 @@ function getImapBreakerFastFailError(account: Account, state: ImapConnectCircuit
   const remainingMs = Math.max(0, state.openedUntil - Date.now());
   const seconds = Math.max(1, Math.ceil(remainingMs / 1000));
   return new Error(
-    `IMAP connection temporarily unavailable for ${account.imap.host}; retry in ${seconds}s${state.lastError ? ` (last error: ${state.lastError})` : ""}`
+    `IMAP connection temporarily unavailable for ${account.imap.host}; retry in ${seconds}s`
   );
 }
 
@@ -185,26 +280,35 @@ export async function connectImapClientWithRetry(params: {
   createClient: () => ImapFlow;
   logContext?: ImapClientLogContext;
   connectOp?: string;
+  skipBreaker?: boolean;
 }) {
-  const { account, createClient, logContext = {}, connectOp = "connect" } = params;
+  const {
+    account,
+    createClient,
+    logContext = {},
+    connectOp = "connect",
+    skipBreaker = false
+  } = params;
   const logger = getImapLogger();
   const retryOptions = getImapConnectRetryOptions();
-  const breakerState = getImapConnectBreakerState(account).state;
-  if (breakerState && breakerState.openedUntil > Date.now()) {
-    const error = getImapBreakerFastFailError(account, breakerState);
-    if (logger !== false) {
-      logger.warn?.({
-        event: "imap.connect_fast_fail",
-        accountId: logContext.accountId ?? account.id,
-        clientId: logContext.clientId ?? null,
-        mailbox: logContext.mailbox ?? null,
-        host: account.imap.host,
-        openedUntil: breakerState.openedUntil,
-        consecutiveFailures: breakerState.consecutiveFailures,
-        error: error.message
-      });
+  if (!skipBreaker) {
+    const breakerState = getImapConnectBreakerState(account).state;
+    if (breakerState && breakerState.openedUntil > Date.now()) {
+      const error = getImapBreakerFastFailError(account, breakerState);
+      if (logger !== false) {
+        logger.warn?.({
+          event: "imap.connect_fast_fail",
+          accountId: logContext.accountId ?? account.id,
+          clientId: logContext.clientId ?? null,
+          mailbox: logContext.mailbox ?? null,
+          host: account.imap.host,
+          openedUntil: breakerState.openedUntil,
+          consecutiveFailures: breakerState.consecutiveFailures,
+          error: error.message
+        });
+      }
+      throw error;
     }
-    throw error;
   }
 
   const maxAttempts = Math.max(1, retryOptions.retryCount + 1);
@@ -237,7 +341,13 @@ export async function connectImapClientWithRetry(params: {
       const retryable = isRetryableImapConnectError(error);
       const isLastAttempt = attempt === maxAttempts;
 
-      if (!retryable || isLastAttempt) {
+      if (!retryable) {
+        // Non-retryable errors (auth, config) shouldn't trip the breaker —
+        // otherwise a bad-password run could block a subsequent correct retry.
+        throw error;
+      }
+
+      if (isLastAttempt) {
         const nextState = recordImapConnectFailure(account, error);
         if (logger !== false && nextState.openedUntil > Date.now()) {
           logger.warn?.({
