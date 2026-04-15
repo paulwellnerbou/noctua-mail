@@ -1,5 +1,5 @@
 import type { Folder } from "@/lib/data";
-import { getFolderSpecialKind, type FolderSpecialKind } from "../utils/folderHelpers";
+import { getFolderSpecialKind, type FolderSpecialKind } from "@/lib/specialFolders";
 
 export function getFolderBadgeLabel(
   folder: Pick<Folder, "name" | "specialUse"> | null | undefined,

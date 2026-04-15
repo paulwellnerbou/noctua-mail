@@ -218,14 +218,14 @@ import {
   hasNonInlineAttachments,
   getUnsubscribeCapability
 } from "./mailclient/utils/messageHelpers";
+import { buildFolderTree } from "./mailclient/utils/folderHelpers";
 import {
-  buildFolderTree,
   isDraftsFolder as checkIsDraftsFolder,
   isTrashFolder as checkIsTrashFolder,
   isSpamFolder as checkIsSpamFolder,
   isSentFolder as checkIsSentFolder,
   isNotificationSuppressedFolder as checkIsNotificationSuppressedFolder
-} from "./mailclient/utils/folderHelpers";
+} from "@/lib/specialFolders";
 import {
   extractEmails,
   getExceptionAccountId,

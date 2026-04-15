@@ -1,6 +1,6 @@
 import type { Folder, Message } from "@/lib/data";
 import type { VisibleMessageEntry } from "../messagelist/listModel";
-import { isDraftsFolder, isSentFolder } from "./folderHelpers";
+import { isDraftsFolder, isSentFolder } from "@/lib/specialFolders";
 import { getMessageThreadKey } from "./messageMutation";
 
 export type ThreadMoveRequest = {

@@ -6,7 +6,7 @@ import MessageQuickActions from "./message/MessageQuickActions";
 import MessageMenu from "./message/MessageMenu";
 import MessageSourcePanel from "./message/MessageSourcePanel";
 import MarkdownPanel from "./message/MarkdownPanel";
-import { getFolderSpecialKind } from "./utils/folderHelpers";
+import { getFolderSpecialKind } from "@/lib/specialFolders";
 
 export const renderQuickActions = (
   message: Message,

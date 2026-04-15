@@ -1,7 +1,7 @@
 /**
  * Pure utility functions for message operations
  */
-import type { Message, Folder, Topic } from "@/lib/data";
+import type { Message, Topic } from "@/lib/data";
 import type { MessageGroupMeta } from "../messagelist/listModel";
 import {
   hasMessageFlag,
@@ -27,14 +27,6 @@ export function computeGroupMeta(items: Message[]): MessageGroupMeta[] {
 
 export function isFlaggedMessage(message: Message): boolean {
   return isMessageFlagged(message);
-}
-
-export function isThreadExcludedFolder(folderId: string | null | undefined, folders: Folder[]): boolean {
-  if (!folderId) return false;
-  const folder = folders.find((item) => item.id === folderId);
-  if (!folder) return false;
-  const special = (folder.specialUse ?? "").toLowerCase();
-  return special === "\\trash" || special === "\\junk" || special === "\\spam";
 }
 
 export function getThreadMessages(items: Message[], threadId: string, accountId: string) {
