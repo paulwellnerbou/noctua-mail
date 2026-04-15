@@ -43,7 +43,7 @@ openssl rand -hex 32
 docker build -t noctua-mail .
 ```
 
-Worker subprocesses are started by API routes and execute TypeScript entrypoints from `./scripts` at runtime. In `output: 'standalone'` builds, those files must be included explicitly by Next's trace configuration in [next.config.ts](/Users/paul/src/mywebmail/next.config.ts). Do not rely on incidental file tracing to pull them into `.next/standalone`.
+Worker subprocesses are started by API routes and execute TypeScript entrypoints from `./scripts` at runtime. In `output: 'standalone'` builds, those files must be included explicitly by Next's trace configuration in [next.config.ts](next.config.ts). Do not rely on incidental file tracing to pull them into `.next/standalone`.
 
 **Verify Docker worker packaging:**
 ```bash
