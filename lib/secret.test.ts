@@ -1,6 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import { spawnSync } from "child_process";
-import { encodeSecret, decodeSecret } from "./secret";
+import { assertImapSecretKeyConfigured, encodeSecret, decodeSecret } from "./secret";
 
 describe("encodeSecret/decodeSecret", () => {
   it("round-trips a value when the key is set", () => {
@@ -35,9 +35,47 @@ describe("encodeSecret/decodeSecret", () => {
       }
     );
     expect(result.status).toBe(0);
-    // Module startup prints the missing-key warning to stderr on purpose.
-    expect(result.stderr).toContain("IMAP_SECRET_KEY");
     expect(result.stdout).toContain("THREW:");
     expect(result.stdout).toContain("IMAP_SECRET_KEY");
+  });
+});
+
+describe("assertImapSecretKeyConfigured", () => {
+  it("is a no-op when the key is set", () => {
+    expect(() => assertImapSecretKeyConfigured()).not.toThrow();
+  });
+
+  it("throws at startup when DB storage is configured but IMAP_SECRET_KEY is missing", () => {
+    // Run in a subprocess so the secret module initializes with an empty key.
+    const result = spawnSync(
+      "bun",
+      [
+        "-e",
+        "import('./lib/secret').then((m) => { try { m.assertImapSecretKeyConfigured(); console.log('NO_THROW'); } catch (err) { console.log('THREW:' + (err?.message ?? err)); } });"
+      ],
+      {
+        env: { ...process.env, IMAP_SECRET_KEY: "", IMAP_CREDENTIALS_STORAGE: "both" },
+        encoding: "utf8"
+      }
+    );
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("THREW:");
+    expect(result.stdout).toContain("IMAP_SECRET_KEY");
+  });
+
+  it("does not throw when cookie-only storage is configured with no key", () => {
+    const result = spawnSync(
+      "bun",
+      [
+        "-e",
+        "import('./lib/secret').then((m) => { try { m.assertImapSecretKeyConfigured(); console.log('NO_THROW'); } catch (err) { console.log('THREW:' + (err?.message ?? err)); } });"
+      ],
+      {
+        env: { ...process.env, IMAP_SECRET_KEY: "", IMAP_CREDENTIALS_STORAGE: "cookie" },
+        encoding: "utf8"
+      }
+    );
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain("NO_THROW");
   });
 });

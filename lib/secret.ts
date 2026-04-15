@@ -14,12 +14,15 @@ const MISSING_KEY_MESSAGE =
   "includes database storage ('db' or 'both'). Set a strong key, or set " +
   "IMAP_CREDENTIALS_STORAGE=cookie to skip DB storage.";
 
-// Warn loudly at startup when DB credential storage is configured without a
-// usable key. Previously a missing or short IMAP_SECRET_KEY silently caused
-// encodeSecret to store plaintext passwords in SQLite — a silent security
-// regression. encodeSecret/decodeSecret now throw rather than fall back.
-if (STORE_IN_DB && !hasKey) {
-  console.error(`[secret] ${MISSING_KEY_MESSAGE}`);
+// Called once from instrumentation.ts when the server boots. Throwing here
+// fails the server start-up so a misconfigured deployment cannot silently
+// store plaintext passwords. encodeSecret/decodeSecret keep their own
+// throw-on-use guards as defense-in-depth for any code path that doesn't
+// go through the instrumentation hook (tests, scripts, workers).
+export function assertImapSecretKeyConfigured(): void {
+  if (STORE_IN_DB && !hasKey) {
+    throw new Error(MISSING_KEY_MESSAGE);
+  }
 }
 
 function getKey(): Buffer {
