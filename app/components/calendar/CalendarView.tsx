@@ -6,7 +6,8 @@ import dayGridPlugin from "@fullcalendar/daygrid";
 import timeGridPlugin from "@fullcalendar/timegrid";
 import interactionPlugin from "@fullcalendar/interaction";
 import rrulePlugin from "@fullcalendar/rrule";
-import type { EventClickArg, DatesSetArg, EventInput } from "@fullcalendar/core";
+import type { EventClickArg, EventDidMountArg, DatesSetArg, EventInput } from "@fullcalendar/core";
+import { formatCalendarEventRange } from "@/lib/calendar";
 import type { CalendarEvent } from "@/lib/data";
 import type { CalendarReminder } from "@/lib/data";
 import {
@@ -80,6 +81,34 @@ function getSavedView(): string {
     if (v && ALLOWED_VIEWS.includes(v)) return v;
   } catch {}
   return "dayGridMonth";
+}
+
+function buildEventHoverTitle(arg: EventDidMountArg) {
+  const props = arg.event.extendedProps as {
+    kind: "event" | "reminder";
+    data: CalendarEvent | CalendarReminder;
+  };
+  const lines = [arg.event.title.trim() || "Calendar event"];
+
+  if (props.kind === "event") {
+    const event = props.data as CalendarEvent;
+    const rangeLabel = formatCalendarEventRange(arg.event.start ?? undefined, arg.event.end ?? undefined, {
+      allDay: event.allDay,
+      startTimeZone: event.startTimezone,
+      endTimeZone: event.endTimezone
+    });
+    if (rangeLabel) lines.push(rangeLabel);
+    if (event.location?.trim()) lines.push(event.location.trim());
+  } else {
+    const reminder = props.data as CalendarReminder;
+    const rangeLabel = formatCalendarEventRange(arg.event.start ?? undefined, arg.event.end ?? undefined, {
+      startTimeZone: reminder.startTimezone
+    });
+    if (rangeLabel) lines.push(rangeLabel);
+    if (reminder.eventLocation?.trim()) lines.push(reminder.eventLocation.trim());
+  }
+
+  return lines.join("\n");
 }
 
 export default function CalendarView({
@@ -181,6 +210,10 @@ export default function CalendarView({
     [onDateClick]
   );
 
+  const handleEventDidMount = useCallback((arg: EventDidMountArg) => {
+    arg.el.title = buildEventHoverTitle(arg);
+  }, []);
+
   // Refetch when accountId changes
   useEffect(() => {
     if (previousAccountIdRef.current === null) {
@@ -228,6 +261,7 @@ export default function CalendarView({
           headerToolbar={false}
           firstDay={firstDay}
           events={fullCalendarEvents}
+          eventDidMount={handleEventDidMount}
           datesSet={handleDatesSet}
           eventClick={handleEventClick}
           dateClick={handleDateClick}
@@ -244,6 +278,13 @@ export default function CalendarView({
       ref={calendarRef}
       plugins={[dayGridPlugin, timeGridPlugin, interactionPlugin, rrulePlugin]}
       initialView={initialView}
+      views={{
+        // Keep short events readable without making back-to-back entries tall
+        // enough to be treated like overlapping conflicts.
+        timeGrid: {
+          eventMinHeight: 10
+        }
+      }}
       headerToolbar={{
         left: "prev,next today",
         center: "title",
@@ -251,6 +292,8 @@ export default function CalendarView({
       }}
       firstDay={firstDay}
       events={fullCalendarEvents}
+      eventDidMount={handleEventDidMount}
+      nowIndicator
       datesSet={handleDatesSet}
       eventClick={handleEventClick}
       dateClick={handleDateClick}

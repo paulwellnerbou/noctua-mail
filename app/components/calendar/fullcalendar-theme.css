@@ -135,6 +135,31 @@
   text-decoration: line-through;
 }
 
+.fc .fc-timegrid-event-short .fc-event-main {
+  padding: 0 2px;
+}
+
+.fc .fc-timegrid-event-short .fc-event-main-frame {
+  align-items: center;
+  gap: 0.2rem;
+}
+
+.fc .fc-timegrid-event-short .fc-event-title-container {
+  align-items: center;
+  display: flex;
+  min-width: 0;
+}
+
+.fc .fc-timegrid-event-short .fc-event-time,
+.fc .fc-timegrid-event-short .fc-event-title {
+  display: block;
+  line-height: 1;
+  margin-bottom: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* Compact mode */
 .fc-compact .fc-toolbar {
   display: none;
