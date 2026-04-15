@@ -6,3 +6,8 @@
 if (!process.env.IMAP_SECRET_KEY) {
   process.env.IMAP_SECRET_KEY = "test-imap-secret-key-32-chars-minimum__";
 }
+// Exercise the DB-storage code path in tests so the throw-on-missing-key
+// guard is actually covered. Individual tests can override before import.
+if (!process.env.IMAP_CREDENTIALS_STORAGE) {
+  process.env.IMAP_CREDENTIALS_STORAGE = "db";
+}

@@ -34,6 +34,9 @@ describe("encodeSecret/decodeSecret", () => {
         encoding: "utf8"
       }
     );
+    expect(result.status).toBe(0);
+    // Module startup prints the missing-key warning to stderr on purpose.
+    expect(result.stderr).toContain("IMAP_SECRET_KEY");
     expect(result.stdout).toContain("THREW:");
     expect(result.stdout).toContain("IMAP_SECRET_KEY");
   });

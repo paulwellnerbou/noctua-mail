@@ -39,10 +39,21 @@ export function shouldIncludeSessionCredentials() {
   return STORE_IN_COOKIE;
 }
 
+function looksLikeEncryptedPayload(value: string): boolean {
+  if (!value.startsWith("enc:")) return false;
+  try {
+    // A valid payload is iv (12) + tag (16) + at least 1 byte ciphertext = 29 bytes.
+    const decoded = Buffer.from(value.slice(4), "base64");
+    return decoded.length >= 29;
+  } catch {
+    return false;
+  }
+}
+
 export function encodeSecret(value: string): string {
   if (!value) return "";
   if (!STORE_IN_DB) return "";
-  if (value.startsWith("enc:")) return value;
+  if (looksLikeEncryptedPayload(value)) return value;
   if (!hasKey) throw new Error(MISSING_KEY_MESSAGE);
   const iv = crypto.randomBytes(12);
   const cipher = crypto.createCipheriv("aes-256-gcm", getKey(), iv);
@@ -51,33 +62,31 @@ export function encodeSecret(value: string): string {
   return `enc:${Buffer.concat([iv, tag, encrypted]).toString("base64")}`;
 }
 
-export function decodeSecret(value: string | null | undefined): string {
-  if (!value) return "";
-  if (!STORE_IN_DB) return "";
-  if (!value.startsWith("enc:")) return value;
-  if (!hasKey) throw new Error(MISSING_KEY_MESSAGE);
-  const payload = Buffer.from(value.slice(4), "base64");
+function decryptPayload(payload: Buffer): string {
   const iv = payload.subarray(0, 12);
   const tag = payload.subarray(12, 28);
   const data = payload.subarray(28);
   const decipher = crypto.createDecipheriv("aes-256-gcm", getKey(), iv);
   decipher.setAuthTag(tag);
   const decrypted = Buffer.concat([decipher.update(data), decipher.final()]);
-  const decoded = decrypted.toString("utf8");
+  return decrypted.toString("utf8");
+}
+
+export function decodeSecret(value: string | null | undefined): string {
+  if (!value) return "";
+  if (!STORE_IN_DB) return "";
+  if (!value.startsWith("enc:")) return value;
+  if (!hasKey) throw new Error(MISSING_KEY_MESSAGE);
+  let decoded: string;
+  try {
+    decoded = decryptPayload(Buffer.from(value.slice(4), "base64"));
+  } catch (err) {
+    throw new Error("Failed to decrypt stored IMAP secret", { cause: err });
+  }
   // Handle legacy accidental double-encryption by unwrapping one extra layer.
   if (decoded.startsWith("enc:")) {
     try {
-      const nested = Buffer.from(decoded.slice(4), "base64");
-      const nestedIv = nested.subarray(0, 12);
-      const nestedTag = nested.subarray(12, 28);
-      const nestedData = nested.subarray(28);
-      const nestedDecipher = crypto.createDecipheriv("aes-256-gcm", getKey(), nestedIv);
-      nestedDecipher.setAuthTag(nestedTag);
-      const nestedDecrypted = Buffer.concat([
-        nestedDecipher.update(nestedData),
-        nestedDecipher.final()
-      ]);
-      return nestedDecrypted.toString("utf8");
+      return decryptPayload(Buffer.from(decoded.slice(4), "base64"));
     } catch {
       return decoded;
     }
