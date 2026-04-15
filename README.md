@@ -185,30 +185,38 @@ SESSION_SEAL_KEY=<32-byte-hex-key>  # Required for session cookie sealing
 
 The rate limiter (applied to `/api/auth/login`, `/api/auth/signup`, `/api/probe`) keys
 requests by client IP. Since `Request` doesn't expose the TCP peer, it relies on
-`X-Forwarded-For` — which means any client can spoof it unless you tell Noctua how
-many hops of proxy headers to trust.
+`X-Forwarded-For`, which means the reverse proxy in front of Noctua **must sanitise
+that header** so a client can't spoof their own rate-limit identity.
 
-```bash
-TRUST_PROXY=1   # Default: unset → forwarded headers are ignored (global rate limit)
-```
-
-- **Unset / `false` / `0`** — ignore `X-Forwarded-For`/`X-Real-IP`. Rate limiting
-  degrades to a single global bucket per limiter. Safe but coarse.
-- **`true` / `1`** — you have exactly one trusted reverse proxy (nginx, Caddy,
-  Cloudflare, Traefik) in front of Noctua. The rightmost XFF entry (i.e. what the
-  proxy observed as the connection IP) is used.
-- **`N` (integer ≥ 2)** — `N` trusted hops; the entry at `XFF[length - N]` is used.
-
-Your proxy **must** either strip or overwrite any incoming `X-Forwarded-For` from
-the client — otherwise a client can spoof their IP past the trusted hop. Example for
-Caddy (strips whatever the client sent and inserts the real remote address):
+Noctua assumes one trusted reverse proxy in front by default (no env var needed).
+The recommended Caddy configuration uses the global `trusted_proxies` directive,
+which instructs Caddy to ignore any `X-Forwarded-For` the client tries to send
+and insert the real remote IP instead:
 
 ```caddy
-reverse_proxy localhost:3654 {
-    header_up X-Forwarded-For {remote_host}
-    header_up X-Real-IP {remote_host}
+{
+    servers {
+        trusted_proxies static private_ranges
+    }
+}
+
+yourdomain.tld {
+    reverse_proxy localhost:3654
 }
 ```
+
+If you need a different topology, use `TRUST_PROXY` to override the default:
+
+```bash
+TRUST_PROXY=1   # Default — single reverse proxy in front (no need to set this)
+TRUST_PROXY=2   # Two chained trusted proxies
+TRUST_PROXY=0   # Noctua directly on a public interface; ignore XFF entirely
+```
+
+- **`1` (default)** — rightmost `X-Forwarded-For` entry (the IP the proxy saw) is used.
+- **`N ≥ 2`** — the entry at `XFF[length - N]` is used.
+- **`0` / `false`** — forwarded headers are ignored; rate limiting becomes a single
+  global bucket per limiter. Coarse, but safe when Noctua is exposed directly.
 
 ### Data Directory
 Customize the data directory location:

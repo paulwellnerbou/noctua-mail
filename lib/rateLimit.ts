@@ -60,23 +60,32 @@ export function createRateLimiter(opts?: RateLimiterOptions): RateLimiter {
 /**
  * Parse the `TRUST_PROXY` env setting into a hop count.
  *
- * - Unset / `""` / `"false"` / `"0"` / `"no"` → 0 (do NOT trust forwarded headers)
+ * Default (unset) is **1 hop** — Noctua's documented deployment mode is behind
+ * a single reverse proxy (Caddy, nginx, …) that sanitises forwarded headers.
+ * If you run Noctua directly on a public interface, or chain multiple proxies,
+ * set `TRUST_PROXY` explicitly.
+ *
+ * - Unset → 1 (single trusted proxy, the expected default)
+ * - `"0"` / `"false"` / `"no"` → 0 (do NOT trust forwarded headers, bucket all
+ *   requests into `"unknown"` — use this for direct-internet exposure)
  * - `"true"` / `"yes"` → 1
  * - Positive integer → that many hops
- * - Anything else → 0 (fail closed)
+ * - Anything else (garbage) → 0 (fail closed)
  *
- * With a trusted reverse proxy in front (nginx, Caddy, Cloudflare, Traefik,
- * …), the proxy **appends** the real connection IP to `X-Forwarded-For`, so
- * the *rightmost* entry is authoritative for one hop. If a client spoofs
- * `X-Forwarded-For: 1.2.3.4`, the proxy turns that into
- * `1.2.3.4, <real-client-ip>` and we correctly pick `<real-client-ip>`.
+ * With a trusted reverse proxy in front, the proxy **appends** the real
+ * connection IP to `X-Forwarded-For`, so the *rightmost* entry is authoritative
+ * for one hop. If a client spoofs `X-Forwarded-For: 1.2.3.4`, the proxy turns
+ * that into `1.2.3.4, <real-client-ip>` and we correctly pick `<real-client-ip>`.
+ *
+ * A well-configured proxy (see README — Caddy's `trusted_proxies` or explicit
+ * `header_up X-Forwarded-For {remote_host}`) sanitises or rewrites the header
+ * entirely, so the point is moot, but rightmost-of-N is robust either way.
  */
 export function parseTrustedProxyHops(raw: string | undefined | null): number {
-  if (raw == null) return 0;
+  if (raw == null) return 1;
   const normalized = raw.trim().toLowerCase();
-  if (!normalized || normalized === "false" || normalized === "no" || normalized === "0") {
-    return 0;
-  }
+  if (!normalized) return 1;
+  if (normalized === "false" || normalized === "no" || normalized === "0") return 0;
   if (normalized === "true" || normalized === "yes") return 1;
   const hops = Number.parseInt(normalized, 10);
   if (!Number.isFinite(hops) || hops <= 0) return 0;
@@ -84,14 +93,6 @@ export function parseTrustedProxyHops(raw: string | undefined | null): number {
 }
 
 const TRUSTED_PROXY_HOPS = parseTrustedProxyHops(process.env.TRUST_PROXY);
-
-if (TRUSTED_PROXY_HOPS === 0 && process.env.NODE_ENV !== "test") {
-  console.warn(
-    "[noctua] TRUST_PROXY is not set — ignoring X-Forwarded-For / X-Real-IP. " +
-      "Rate limiting is now global (not per-IP) for this process. " +
-      "Set TRUST_PROXY=1 behind a single reverse proxy that sanitizes forwarded headers."
-  );
-}
 
 export interface RequestIpResolver {
   (request: Request): string;

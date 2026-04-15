@@ -64,10 +64,14 @@ describe("createRateLimiter", () => {
 });
 
 describe("parseTrustedProxyHops", () => {
-  it("returns 0 for unset / falsy values", () => {
-    expect(parseTrustedProxyHops(undefined)).toBe(0);
-    expect(parseTrustedProxyHops(null)).toBe(0);
-    expect(parseTrustedProxyHops("")).toBe(0);
+  it("defaults to 1 when unset (assumes one reverse proxy in front)", () => {
+    expect(parseTrustedProxyHops(undefined)).toBe(1);
+    expect(parseTrustedProxyHops(null)).toBe(1);
+    expect(parseTrustedProxyHops("")).toBe(1);
+    expect(parseTrustedProxyHops("  ")).toBe(1);
+  });
+
+  it("returns 0 for explicit off values", () => {
     expect(parseTrustedProxyHops("false")).toBe(0);
     expect(parseTrustedProxyHops("FALSE")).toBe(0);
     expect(parseTrustedProxyHops("no")).toBe(0);
