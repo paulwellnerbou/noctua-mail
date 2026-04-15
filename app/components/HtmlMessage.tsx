@@ -315,7 +315,10 @@ function HtmlMessage({
   }, [darkMode, html, showViewerFrame, zoom, fontScale, setLinkPreviewUrl]);
 
   return (
-    <div className={`${styles.htmlMessage} ${showViewerFrame ? styles.framed : styles.unframed}`} ref={hostRef} />
+    <div
+      className={`${styles.htmlMessage} ${showViewerFrame ? styles.framed : styles.unframed}`}
+      ref={hostRef}
+    />
   );
 }
 

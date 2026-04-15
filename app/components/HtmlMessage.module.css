@@ -4,6 +4,7 @@
   max-width: none;
   display: block;
   box-sizing: border-box;
+  background: var(--mail-view-bg);
   color: var(--mail-view-fg);
   padding: 0;
   overflow-x: auto;
@@ -13,11 +14,9 @@
 .framed {
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
-  background: var(--mail-view-bg);
 }
 
 .unframed {
   border: 0;
   border-radius: 0;
-  background: transparent;
 }
