@@ -1072,6 +1072,29 @@ function initAccountSchema(db: any) {
       ON messages(accountId, folderId, flagged DESC, dateValue DESC);
     CREATE INDEX IF NOT EXISTS idx_messages_category
       ON messages(accountId, category, dateValue DESC);
+    -- Expression index for from:<term> searches. buildAddressSearchClause
+    -- emits lower(COALESCE(fromAddr, '')) LIKE ?; the indexed expression
+    -- must match the WHERE expression character-for-character for SQLite
+    -- to use it. With this index the planner does a per-account index
+    -- scan on the precomputed lowered value (~13x faster on a 7k-row DB)
+    -- instead of a full-table scan that re-evaluates lower(COALESCE(...))
+    -- per row.
+    --
+    -- Deliberately not adding analogous indexes for toAddr/ccAddr/bccAddr:
+    -- recipient/participant searches OR across multiple columns, and
+    -- SQLite's planner does not match expression-index expressions to
+    -- WHERE expressions when picking between equally-narrowing indexes.
+    -- With multiple competing expression indexes the planner picks the
+    -- smallest one (typically bcc, mostly NULL), which doesn't match the
+    -- column being filtered, and the LIKE falls back to per-row
+    -- evaluation. Improving recipient/participant search needs an FTS5
+    -- redesign, not more expression indexes — see CLEANUP/pass4-risk.md.
+    --
+    -- Also: do not run ANALYZE on this table without re-validating; with
+    -- selectivity stats present, the planner prefers a full SCAN over
+    -- this index because LIKE '%term%' cannot use it for a seek.
+    CREATE INDEX IF NOT EXISTS idx_messages_account_from_lower
+      ON messages(accountId, lower(COALESCE(fromAddr, '')));
     CREATE INDEX IF NOT EXISTS idx_threads_account_latest
       ON threads(accountId, latestDateValue DESC);
     CREATE INDEX IF NOT EXISTS idx_attachments_message
