@@ -5,7 +5,7 @@ import { AlarmClock, AlarmClockPlus, Clock, Mail, MapPin, Repeat, Trash2, User, 
 import { AlertDialog, Badge, Button, Dialog, Flex, Select, Switch, Text } from "@radix-ui/themes";
 import { buildCalendarRecurrenceSummary, formatCalendarEventRange } from "@/lib/calendar";
 import type { CalendarInviteActionType } from "@/lib/calendarInviteProcessing";
-import { formatAccountDateValue } from "@/lib/dateFormatting";
+import { formatAccountDateValue, formatAccountMediumDateTime } from "@/lib/dateFormatting";
 import {
   buildAccountCalendarEventPath,
   buildAccountCalendarEventRespondPath,
@@ -140,8 +140,8 @@ function sanitizeDescriptionHtml(value: string) {
   return enforceSafeLinks(linkifyHtmlTextNodes(sanitizeHtmlForDisplay(stripStyleTags(value))));
 }
 
-function formatTriggerDate(date: Date) {
-  return new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(date);
+function formatTriggerDate(date: Date, dateFormat?: AccountDateFormat) {
+  return formatAccountMediumDateTime(date.getTime(), dateFormat) ?? "";
 }
 
 function buildOccurrenceExcludedDates(excludedDates: number[] | undefined, occurrenceStartAtMs: number) {
@@ -457,8 +457,8 @@ export default function EventDetailView({
       const triggerDate = new Date(stored.reminder.triggerAtMs > Date.now() ? stored.reminder.triggerAtMs : Date.now());
       setReminderNotice(
         stored.replaced
-          ? `Reminder updated for ${formatTriggerDate(triggerDate)}.`
-          : `Reminder scheduled for ${formatTriggerDate(triggerDate)}.`
+          ? `Reminder updated for ${formatTriggerDate(triggerDate, dateFormat)}.`
+          : `Reminder scheduled for ${formatTriggerDate(triggerDate, dateFormat)}.`
       );
       setReminderModalOpen(false);
       await refreshReminder();

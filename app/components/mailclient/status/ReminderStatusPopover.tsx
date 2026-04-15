@@ -15,6 +15,8 @@ import {
 } from "@radix-ui/themes";
 import { buildCalendarRecurrenceSummary, formatCalendarEventRange } from "@/lib/calendar";
 import { formatCalendarTimeZoneShortLabel } from "@/lib/calendarTimezones";
+import type { AccountDateFormat } from "@/lib/data";
+import { formatAccountShortTime } from "@/lib/dateFormatting";
 import {
   clearCalendarReminders,
   deleteCalendarReminder,
@@ -36,6 +38,7 @@ type ReminderStatusPopoverProps = {
   onRefreshPendingReminders: () => Promise<void>;
   onOpenReminderMessage: (messageId: string) => void;
   onReportError: (message: string) => void;
+  accountDateFormat?: AccountDateFormat;
 };
 
 function formatEventTimeRange(startAtMs: number, endAtMs: number, timeZone?: string) {
@@ -95,7 +98,8 @@ export default function ReminderStatusPopover({
   pendingCalendarReminders,
   onRefreshPendingReminders,
   onOpenReminderMessage,
-  onReportError
+  onReportError,
+  accountDateFormat
 }: ReminderStatusPopoverProps) {
   const upcomingReminders = pendingCalendarReminders;
   const nextReminder = upcomingReminders[0] ?? null;
@@ -105,9 +109,7 @@ export default function ReminderStatusPopover({
     const reminderTitle = nextReminder.eventTitle || "Calendar event";
     const eventStartAtMs = getCalendarReminderStartAtMs(nextReminder);
     const displayAtMs = Number.isFinite(eventStartAtMs) ? eventStartAtMs : nextReminder.triggerAtMs;
-    const time = new Intl.DateTimeFormat(undefined, { timeStyle: "short" }).format(
-      new Date(displayAtMs)
-    );
+    const time = formatAccountShortTime(displayAtMs, accountDateFormat) ?? "";
     return `${reminderCount} · ${reminderTitle} @ ${time}`;
   })();
   const remindersStatusTone: BottomStatusTone = reminderCount > 0 ? "normal" : "muted";

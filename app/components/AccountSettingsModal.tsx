@@ -287,6 +287,7 @@ export default function AccountSettingsModal({
                 accountId={localAccount.id}
                 isActive={manageTab === "categorization"}
                 isExistingAccount={isExistingAccount}
+                accountDateFormat={localAccount.settings?.appearance?.dateFormat}
                 onClose={onClose}
                 onSave={handleSave}
                 onModelResetSuccess={() =>
@@ -335,6 +336,7 @@ export default function AccountSettingsModal({
                 accountId={localAccount.id}
                 isActive={manageTab === "mcp"}
                 isExistingAccount={isExistingAccount}
+                accountDateFormat={localAccount.settings?.appearance?.dateFormat}
                 apiFetch={apiFetch}
                 onClose={onClose}
               />
@@ -367,6 +369,7 @@ export default function AccountSettingsModal({
               <AdminTabContent
                 isActive={manageTab === "admin"}
                 isAdminUser={isAdminUser}
+                accountDateFormat={localAccount.settings?.appearance?.dateFormat}
                 onClose={onClose}
                 onInviteGenerated={() =>
                   onNotifySuccess?.(

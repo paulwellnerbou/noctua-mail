@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import type { Folder } from "@/lib/data";
+import type { AccountDateFormat, Folder } from "@/lib/data";
+import { formatAccountMediumDateTime } from "@/lib/dateFormatting";
 import type { CalendarReminder } from "../utils/calendarReminders";
 import type { ExceptionEntry, SyncJobProgress } from "../types";
 import {
@@ -36,6 +37,7 @@ type BottomStatusBarProps = {
   onFindRelatedCalendarInviteUid?: (uid: string) => void;
   onRecomputeCalendarRelations: () => Promise<void>;
   calendarFirstDay?: 0 | 1;
+  accountDateFormat?: AccountDateFormat;
 };
 
 export default function BottomStatusBar({
@@ -60,7 +62,8 @@ export default function BottomStatusBar({
   onOpenCalendarMessage,
   onFindRelatedCalendarInviteUid,
   onRecomputeCalendarRelations,
-  calendarFirstDay
+  calendarFirstDay,
+  accountDateFormat
 }: BottomStatusBarProps) {
   const [processPanelOpen, setProcessPanelOpen] = useState(false);
   const [exceptionPanelOpen, setExceptionPanelOpen] = useState(false);
@@ -68,17 +71,9 @@ export default function BottomStatusBar({
   const [calendarPanelOpen, setCalendarPanelOpen] = useState(false);
   const [currentTimeMs, setCurrentTimeMs] = useState<number | null>(null);
 
-  const dateTimeFormatter = useMemo(
-    () =>
-      new Intl.DateTimeFormat(undefined, {
-        dateStyle: "medium",
-        timeStyle: "short"
-      }),
-    []
-  );
   const currentDateTimeLabel = useMemo(
-    () => (currentTimeMs === null ? "" : dateTimeFormatter.format(new Date(currentTimeMs))),
-    [currentTimeMs, dateTimeFormatter]
+    () => (currentTimeMs === null ? "" : formatAccountMediumDateTime(currentTimeMs, accountDateFormat) ?? ""),
+    [currentTimeMs, accountDateFormat]
   );
 
   useEffect(() => {
@@ -184,6 +179,7 @@ export default function BottomStatusBar({
         onRefreshPendingReminders={onRefreshPendingReminders}
         onOpenReminderMessage={onOpenReminderMessage}
         onReportError={onReportError}
+        accountDateFormat={accountDateFormat}
       />
     </div>
   );

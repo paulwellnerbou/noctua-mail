@@ -4,6 +4,8 @@ import {
   buildAccountCategoriesDebugPath,
   buildAccountCategoriesModelResetPath
 } from "@/lib/accountApiPaths";
+import type { AccountDateFormat } from "@/lib/data";
+import { formatAccountTimestampLabel } from "@/lib/dateFormatting";
 import type { CategoryLearningDebugSnapshot } from "@/lib/mail/categorization/debugTypes";
 
 type CategoryDebugResponse = {
@@ -21,6 +23,7 @@ type Props = {
   accountId?: string;
   isActive: boolean;
   isExistingAccount: boolean;
+  accountDateFormat?: AccountDateFormat;
   onClose: () => void;
   onSave: () => void;
   onModelResetSuccess?: () => void;
@@ -32,6 +35,7 @@ export default function CategorizationTabContent({
   accountId,
   isActive,
   isExistingAccount,
+  accountDateFormat,
   onClose,
   onSave,
   onModelResetSuccess,
@@ -58,14 +62,8 @@ export default function CategorizationTabContent({
     [readErrorMessage]
   );
 
-  const formatTimestamp = (value?: number | null) => {
-    if (!value || !Number.isFinite(value)) return "Never";
-    try {
-      return new Date(value).toLocaleString();
-    } catch {
-      return "Never";
-    }
-  };
+  const formatTimestamp = (value?: number | null) =>
+    formatAccountTimestampLabel(value, accountDateFormat);
 
   const formatCategory = (value: string | null) => {
     if (!value) return "none";

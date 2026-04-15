@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { Account } from "@/lib/data";
+import { formatAccountMediumDateTime } from "@/lib/dateFormatting";
 import type { ExceptionEntry } from "./types";
 import {
   CALENDAR_REMINDERS_UPDATED_EVENT,
@@ -229,10 +230,11 @@ export function useReminderNotifications({
         if (reminder.triggerAtMs > now) continue;
         if (getCalendarReminderEndAtMs(reminder) <= now) continue;
         if (hasReminderBeenDeliveredOnClient(activeAccountId, clientId, reminder)) continue;
-        const eventDateLabel = new Intl.DateTimeFormat(undefined, {
-          dateStyle: "medium",
-          timeStyle: "short"
-        }).format(new Date(reminder.nextEventStartAtMs));
+        const reminderAccountId = reminder.accountId ?? activeAccountId;
+        const reminderAccount = accounts.find((entry) => entry.id === reminderAccountId);
+        const reminderDateFormat = reminderAccount?.settings?.appearance?.dateFormat;
+        const eventDateLabel =
+          formatAccountMediumDateTime(reminder.nextEventStartAtMs, reminderDateFormat) ?? "";
         const bodyParts = [`${reminder.leadLabel} reminder`, `Starts ${eventDateLabel}`];
         if (reminder.eventLocation) {
           bodyParts.push(reminder.eventLocation);

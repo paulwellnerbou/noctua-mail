@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Check, Copy } from "lucide-react";
 import { Button, Card, Flex, IconButton, Text } from "@radix-ui/themes";
+import type { AccountDateFormat } from "@/lib/data";
+import { formatAccountMediumDateTime } from "@/lib/dateFormatting";
 import { useIsDesktop } from "@/lib/desktop";
 
 type StorageInfo = {
@@ -92,25 +94,23 @@ type AdminInviteCreateResponse = {
 type Props = {
   isActive: boolean;
   isAdminUser: boolean;
+  accountDateFormat?: AccountDateFormat;
   onClose: () => void;
   onInviteGenerated?: () => void;
   apiFetch?: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
   readErrorMessage?: (res: Response) => Promise<string>;
 };
 
-function formatTimestamp(value?: number | null) {
+function formatTimestamp(value: number | null | undefined, accountDateFormat?: AccountDateFormat) {
   if (value === null) return "Never";
   if (!value || !Number.isFinite(value)) return "Unknown";
-  try {
-    return new Date(value).toLocaleString();
-  } catch {
-    return "Unknown";
-  }
+  return formatAccountMediumDateTime(value, accountDateFormat) ?? "Unknown";
 }
 
 export default function AdminTabContent({
   isActive,
   isAdminUser,
+  accountDateFormat,
   onClose,
   onInviteGenerated,
   apiFetch,
@@ -334,7 +334,7 @@ export default function AdminTabContent({
                           {user.email}
                         </Text>
                         <Text size="2" color="gray">
-                          Role: {user.role} · Created: {user.createdAt ? new Date(user.createdAt).toLocaleString() : "Unknown"}
+                          Role: {user.role} · Created: {formatTimestamp(user.createdAt, accountDateFormat)}
                         </Text>
                         <Text size="1" color="gray" style={{ fontFamily: "monospace", overflowWrap: "anywhere" }}>
                           User ID: {user.id}
@@ -425,7 +425,7 @@ export default function AdminTabContent({
                             Used by: {usedByText}
                           </Text>
                           <Text size="1" color="gray">
-                            Created: {formatTimestamp(invite.createdAt)} · Expires: {formatTimestamp(invite.expiresAt)}
+                            Created: {formatTimestamp(invite.createdAt, accountDateFormat)} · Expires: {formatTimestamp(invite.expiresAt, accountDateFormat)}
                           </Text>
                         </Flex>
                       </Card>
