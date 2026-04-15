@@ -8389,95 +8389,108 @@ export async function recomputeCategoriesForAccount(
   let processed = 0;
   let categorized = 0;
 
-  for (const message of messages) {
-    const id = message.id;
-    try {
-      const metadataHeaderMap = new Map<string, unknown>();
-      const inReplyTo = message.inReplyTo?.trim();
-      if (inReplyTo) {
-        metadataHeaderMap.set("in-reply-to", inReplyTo);
-      }
-      const refs = parseReferences(message.references);
-      if (refs && refs.length > 0) {
-        metadataHeaderMap.set("references", refs.join(" "));
-      }
+  const SOURCE_READ_CHUNK_SIZE = 24;
 
-      let classificationInput:
-        | {
-            subject?: string | null;
-            from?: unknown;
-            attachments?: Array<{ filename?: string | null }> | undefined;
-            headers?: Map<string, unknown>;
-          }
-        | null = null;
+  type ParsedSourceInput = {
+    subject?: string | null;
+    from?: unknown;
+    attachments?: Array<{ filename?: string | null }> | undefined;
+    headers?: Map<string, unknown>;
+  };
 
-      if (message.hasSource) {
-        const source = await getMessageSource(accountId, id);
-        if (source) {
+  for (let chunkStart = 0; chunkStart < messages.length; chunkStart += SOURCE_READ_CHUNK_SIZE) {
+    const chunk = messages.slice(chunkStart, chunkStart + SOURCE_READ_CHUNK_SIZE);
+    const parsedSources = new Map<string, ParsedSourceInput>();
+
+    await Promise.all(
+      chunk.map(async (message) => {
+        if (!message.hasSource) return;
+        try {
+          const source = await getMessageSource(accountId, message.id);
+          if (!source) return;
           const parsed = await parseMailForCategorization(source);
-          classificationInput = {
+          parsedSources.set(message.id, {
             subject: parsed.subject,
             from: parsed.from,
             attachments: parsed.attachments as Array<{ filename?: string | null }> | undefined,
             headers: parsed.headers as Map<string, unknown>
+          });
+        } catch (error) {
+          console.error(`Failed to read/parse source for message ${message.id}:`, error);
+        }
+      })
+    );
+
+    for (const message of chunk) {
+      const id = message.id;
+      try {
+        const metadataHeaderMap = new Map<string, unknown>();
+        const inReplyTo = message.inReplyTo?.trim();
+        if (inReplyTo) {
+          metadataHeaderMap.set("in-reply-to", inReplyTo);
+        }
+        const refs = parseReferences(message.references);
+        if (refs && refs.length > 0) {
+          metadataHeaderMap.set("references", refs.join(" "));
+        }
+
+        let classificationInput: ParsedSourceInput | null = parsedSources.get(id) ?? null;
+
+        if (!classificationInput) {
+          const attachmentRows = db
+            .prepare(`SELECT filename FROM attachments WHERE messageId = ?`)
+            .all(id) as Array<{ filename?: string | null }>;
+          const attachmentFilenames = attachmentRows
+            .map((item) => (item.filename ?? "").trim())
+            .filter(Boolean);
+          const fallbackParsed = buildFallbackParsedMessageForFeedback(
+            {
+              fromAddr: message.fromAddr,
+              fromEmail: message.fromEmail,
+              subject: message.subject
+            },
+            attachmentFilenames
+          );
+          classificationInput = {
+            subject: fallbackParsed.subject,
+            from: fallbackParsed.from,
+            attachments: fallbackParsed.attachments as Array<{ filename?: string | null }> | undefined,
+            headers: metadataHeaderMap
           };
         }
-      }
 
-      if (!classificationInput) {
-        const attachmentRows = db
-          .prepare(`SELECT filename FROM attachments WHERE messageId = ?`)
-          .all(id) as Array<{ filename?: string | null }>;
-        const attachmentFilenames = attachmentRows
-          .map((item) => (item.filename ?? "").trim())
-          .filter(Boolean);
-        const fallbackParsed = buildFallbackParsedMessageForFeedback(
-          {
-            fromAddr: message.fromAddr,
-            fromEmail: message.fromEmail,
-            subject: message.subject
-          },
-          attachmentFilenames
+        const classification = classifyCategoryFromMetadata(classificationInput, {
+          config,
+          linearModel,
+          context: {
+            accountEmail,
+            mailboxPath: message.mailboxPath ?? null,
+            folderSpecialUse: message.folderSpecialUse ?? null,
+            fromAddressHint: message.fromEmail ?? message.fromAddr ?? null
+          }
+        });
+
+        await withDbWriteRetry("recomputeCategoriesForAccount.updateCategory", () =>
+          updateStmt.run(
+            classification.category || null,
+            classification.confidence || null,
+            JSON.stringify(classification.signals ?? []),
+            accountId,
+            id
+          )
         );
-        classificationInput = {
-          subject: fallbackParsed.subject,
-          from: fallbackParsed.from,
-          attachments: fallbackParsed.attachments as Array<{ filename?: string | null }> | undefined,
-          headers: metadataHeaderMap
-        };
-      }
 
-      const classification = classifyCategoryFromMetadata(classificationInput, {
-        config,
-        linearModel,
-        context: {
-          accountEmail,
-          mailboxPath: message.mailboxPath ?? null,
-          folderSpecialUse: message.folderSpecialUse ?? null,
-          fromAddressHint: message.fromEmail ?? message.fromAddr ?? null
+        if (classification.category) {
+          categorized++;
         }
-      });
 
-      await withDbWriteRetry("recomputeCategoriesForAccount.updateCategory", () =>
-        updateStmt.run(
-          classification.category || null,
-          classification.confidence || null,
-          JSON.stringify(classification.signals ?? []),
-          accountId,
-          id
-        )
-      );
-
-      if (classification.category) {
-        categorized++;
+        processed++;
+        if (processed % 100 === 0) {
+          console.log(`Processed ${processed}/${messages.length} messages, ${categorized} categorized`);
+        }
+      } catch (error) {
+        console.error(`Failed to recompute category for message ${id}:`, error);
       }
-
-      processed++;
-      if (processed % 100 === 0) {
-        console.log(`Processed ${processed}/${messages.length} messages, ${categorized} categorized`);
-      }
-    } catch (error) {
-      console.error(`Failed to recompute category for message ${id}:`, error);
     }
   }
 
