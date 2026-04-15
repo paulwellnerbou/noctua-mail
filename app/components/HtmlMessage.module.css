@@ -1,14 +1,23 @@
 .htmlMessage {
   width: 100%;
   min-width: 0;
-  max-width: none;
+  max-width: 100%;
   display: block;
   box-sizing: border-box;
   background: var(--mail-view-bg);
   color: var(--mail-view-fg);
   padding: 0;
-  overflow-x: auto;
-  overflow-y: auto;
+  overflow: hidden;
+}
+
+.frame {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  min-height: 1px;
+  border: 0;
+  background: transparent;
 }
 
 .framed {
