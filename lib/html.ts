@@ -172,7 +172,7 @@ export function shouldShowHtmlViewerFrame(input: string) {
   }
 
   if (
-    /<(?:table|td|div|section|article)[^>]*(?:\sbgcolor\s*=\s*["'][^"']+["']|style=["'][^"']*(?:background(?:-color)?\s*:|box-shadow\s*:|border(?:-radius)?\s*:|padding\s*:\s*(?:0\s+)?(?:1[2-9]|[2-9]\d)(?:px|rem|em)|margin\s*:\s*0(?:\s+auto)+|max-width\s*:\s*(?:[4-9]\d{2}|\d{4,})(?:px)?|width\s*:\s*(?:[4-9]\d{2}|\d{4,})(?:px)?)[^"']*["'])/i.test(
+    /<(?:table|td|div|section|article)[^>]*(?:\sbgcolor\s*=\s*["'][^"']+["']|style=["'][^"']*(?:background(?:-color)?\s*:|box-shadow\s*:|border(?:-radius)?\s*:|padding\s*:\s*(?:0\s+)?(?:1[2-9]|[2-9]\d)(?:px|rem|em)|margin\s*:\s*0(?:\s+auto)+)[^"']*["'])/i.test(
       headSample
     )
   ) {

@@ -312,7 +312,7 @@ function HtmlMessage({
       hostEl.removeEventListener("mouseleave", handleHostMouseLeave);
       releaseEmailFonts(fontStylesheetUrls);
     };
-  }, [darkMode, html, zoom, fontScale, setLinkPreviewUrl]);
+  }, [darkMode, html, showViewerFrame, zoom, fontScale, setLinkPreviewUrl]);
 
   return (
     <div className={`${styles.htmlMessage} ${showViewerFrame ? styles.framed : styles.unframed}`} ref={hostRef} />

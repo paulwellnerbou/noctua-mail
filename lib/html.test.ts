@@ -244,6 +244,20 @@ describe("shouldShowHtmlViewerFrame", () => {
     expect(shouldShowHtmlViewerFrame(html)).toBe(true);
   });
 
+  it("keeps the viewer frame for simple mails that only constrain width", () => {
+    const html = [
+      "<html><body>",
+      `<div style="max-width: 1024px; color: #242424; font-family:'Segoe UI', Arial, sans-serif">`,
+      '<div style="margin-bottom:24px;overflow:hidden;white-space:nowrap;">________________________________</div>',
+      '<div style="margin-bottom:12px;"><span style="font-size:20px;font-weight:600">Microsoft Teams-Besprechung</span></div>',
+      '<div style="margin-bottom:6px;overflow-wrap:break-word;"><a href="https://example.com/meet">https://example.com/meet</a></div>',
+      "</div>",
+      "</body></html>"
+    ].join("");
+
+    expect(shouldShowHtmlViewerFrame(html)).toBe(true);
+  });
+
   it("drops the viewer frame for mails with their own outer card layout", () => {
     const html = [
       '<html><body bgcolor="#f5f5f5" style="margin:0;padding:0">',
