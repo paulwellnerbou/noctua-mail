@@ -198,7 +198,7 @@ function findFolderRecord(folderId: string | null | undefined, folders: Folder[]
   return folders.find((item) => item.id === folderId) ?? null;
 }
 
-/** Strict: matches only folders with `specialUse === "\Drafts"`. */
+/** Strict: matches only folders whose `specialUse` is the IMAP `\Drafts` token. */
 export function isDraftsFolder(
   folderId: string | null | undefined,
   folders: Folder[]
@@ -208,7 +208,7 @@ export function isDraftsFolder(
   return (folder.specialUse ?? "").toLowerCase() === "\\drafts";
 }
 
-/** Strict: matches only folders with `specialUse === "\Trash"`. */
+/** Strict: matches only folders whose `specialUse` is the IMAP `\Trash` token. */
 export function isTrashFolder(
   folderId: string | null | undefined,
   folders: Folder[]
@@ -246,17 +246,29 @@ export function isSentFolder(
 /**
  * Folders we don't want to surface in new-message notifications: drafts,
  * trash, spam, and the user's own sent folder.
+ *
+ * Inlines the four role checks against a single folder lookup instead of
+ * calling the individual predicates, each of which would re-scan `folders`.
+ * This is on the per-message notification hot path in `useSyncController`.
  */
 export function isNotificationSuppressedFolder(
   folderId: string | null | undefined,
   folders: Folder[]
 ): boolean {
-  return (
-    isDraftsFolder(folderId, folders) ||
-    isTrashFolder(folderId, folders) ||
-    isSpamFolder(folderId, folders) ||
-    isSentFolder(folderId, folders)
-  );
+  const folder = findFolderRecord(folderId, folders);
+  if (!folder) return false;
+  const special = (folder.specialUse ?? "").toLowerCase();
+  if (
+    special === "\\drafts" ||
+    special === "\\trash" ||
+    special === "\\junk" ||
+    special === "\\spam"
+  ) {
+    return true;
+  }
+  const name = folder.name.toLowerCase();
+  if (name.includes("junk") || name.includes("spam")) return true;
+  return isSentFolderRecord(folder);
 }
 
 /**
