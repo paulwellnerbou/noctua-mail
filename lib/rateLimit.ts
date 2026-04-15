@@ -58,17 +58,19 @@ export function createRateLimiter(opts?: RateLimiterOptions): RateLimiter {
 }
 
 /**
- * Parse the `TRUST_PROXY` env setting into a hop count.
+ * Parse the `TRUSTED_PROXY_HOPS` env setting into a hop count.
  *
- * Default (unset) is **1 hop** — Noctua's documented deployment mode is behind
- * a single reverse proxy (Caddy, nginx, …) that sanitises forwarded headers.
- * If you run Noctua directly on a public interface, or chain multiple proxies,
- * set `TRUST_PROXY` explicitly.
+ * The value is the number of reverse-proxy hops whose `X-Forwarded-For` entry
+ * Noctua should trust. Default (unset) is **1 hop** — Noctua's documented
+ * deployment mode is behind a single reverse proxy (Caddy, nginx, …) that
+ * sanitises forwarded headers. Set to `0` if Noctua is on a public interface
+ * with no proxy in front; set to `2` for chained proxies (e.g. Cloudflare →
+ * Caddy → Noctua).
  *
  * - Unset → 1 (single trusted proxy, the expected default)
  * - `"0"` / `"false"` / `"no"` → 0 (do NOT trust forwarded headers, bucket all
  *   requests into `"unknown"` — use this for direct-internet exposure)
- * - `"true"` / `"yes"` → 1
+ * - `"1"` / `"true"` / `"yes"` → 1
  * - Positive integer → that many hops
  * - Anything else (garbage) → 0 (fail closed)
  *
@@ -77,9 +79,9 @@ export function createRateLimiter(opts?: RateLimiterOptions): RateLimiter {
  * for one hop. If a client spoofs `X-Forwarded-For: 1.2.3.4`, the proxy turns
  * that into `1.2.3.4, <real-client-ip>` and we correctly pick `<real-client-ip>`.
  *
- * A well-configured proxy (see README — Caddy's `trusted_proxies` or explicit
- * `header_up X-Forwarded-For {remote_host}`) sanitises or rewrites the header
- * entirely, so the point is moot, but rightmost-of-N is robust either way.
+ * A well-configured proxy (see README — Caddy's `trusted_proxies` directive)
+ * sanitises or rewrites the header entirely, so the point is moot, but
+ * rightmost-of-N is robust either way.
  */
 export function parseTrustedProxyHops(raw: string | undefined | null): number {
   if (raw == null) return 1;
@@ -92,7 +94,7 @@ export function parseTrustedProxyHops(raw: string | undefined | null): number {
   return hops;
 }
 
-const TRUSTED_PROXY_HOPS = parseTrustedProxyHops(process.env.TRUST_PROXY);
+const TRUSTED_PROXY_HOPS = parseTrustedProxyHops(process.env.TRUSTED_PROXY_HOPS);
 
 export interface RequestIpResolver {
   (request: Request): string;
@@ -131,7 +133,7 @@ export function createRequestIpResolver(trustedHops: number): RequestIpResolver 
 
 const defaultResolver = createRequestIpResolver(TRUSTED_PROXY_HOPS);
 
-/** Extract the client IP from proxy headers, governed by TRUST_PROXY. */
+/** Extract the client IP from proxy headers, governed by TRUSTED_PROXY_HOPS. */
 export function getRequestIp(request: Request): string {
   return defaultResolver(request);
 }

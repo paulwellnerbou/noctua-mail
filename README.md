@@ -205,12 +205,14 @@ yourdomain.tld {
 }
 ```
 
-If you need a different topology, use `TRUST_PROXY` to override the default:
+If you need a different topology, use `TRUSTED_PROXY_HOPS` to override the default.
+The value is the number of reverse-proxy hops whose `X-Forwarded-For` entry Noctua
+should trust:
 
 ```bash
-TRUST_PROXY=1   # Default — single reverse proxy in front (no need to set this)
-TRUST_PROXY=2   # Two chained trusted proxies
-TRUST_PROXY=0   # Noctua directly on a public interface; ignore XFF entirely
+TRUSTED_PROXY_HOPS=1   # Default — single reverse proxy in front (no need to set this)
+TRUSTED_PROXY_HOPS=2   # Two chained trusted proxies (e.g. Cloudflare → Caddy → Noctua)
+TRUSTED_PROXY_HOPS=0   # Noctua directly on a public interface; ignore XFF entirely
 ```
 
 - **`1` (default)** — rightmost `X-Forwarded-For` entry (the IP the proxy saw) is used.

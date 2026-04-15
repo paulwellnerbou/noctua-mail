@@ -155,7 +155,7 @@ describe("createRequestIpResolver", () => {
 });
 
 describe("getRequestIp (env-backed default)", () => {
-  // The default resolver is bound to TRUST_PROXY at module load — we can't
+  // The default resolver is bound to TRUSTED_PROXY_HOPS at module load — we can't
   // meaningfully reassign it here. Just assert the function exists and returns
   // a string. Behaviour is exercised through createRequestIpResolver above.
   it("returns a string for any Request", () => {
