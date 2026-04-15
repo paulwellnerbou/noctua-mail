@@ -72,6 +72,8 @@ function formatReminderTimeZoneLabel(eventStartAtMs: number, timeZone?: string) 
   return formatCalendarTimeZoneShortLabel(timeZone, new Date(eventStartAtMs));
 }
 
+const REMINDER_NOTICE_TIMEOUT_MS = 3600;
+
 function buildReminderRecurrenceSummary(reminder: CalendarReminder) {
   if (!reminder.recurrenceRule?.trim()) return null;
   const startAtMs = getCalendarReminderStartAtMs(reminder);
@@ -125,7 +127,7 @@ export default function ReminderStatusPopover({
     if (!reminderNotice) return;
     const timer = window.setTimeout(() => {
       setReminderNotice(null);
-    }, 3600);
+    }, REMINDER_NOTICE_TIMEOUT_MS);
     return () => window.clearTimeout(timer);
   }, [reminderNotice]);
 
@@ -234,7 +236,7 @@ export default function ReminderStatusPopover({
         </Flex>
         <Box className="popover-body">
           {reminderNotice ? (
-            <Text as="p" size="1" color="gray" className="reminder-auto-notice">
+            <Text as="p" size="1" color="gray" className="reminder-notice">
               {reminderNotice}
             </Text>
           ) : null}
