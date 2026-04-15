@@ -5,9 +5,17 @@ import {
 } from "./searchQueryLength";
 
 describe("rejectOverlongSearchQuery", () => {
-  it("returns null for null / undefined / non-string input", () => {
+  it("returns null for null and undefined input", () => {
     expect(rejectOverlongSearchQuery(null)).toBeNull();
     expect(rejectOverlongSearchQuery(undefined)).toBeNull();
+  });
+
+  it("returns null for non-string input (defensive — searchParams.get may be stubbed in tests)", () => {
+    // The type signature says string | null | undefined, but the runtime guard
+    // lets us stay safe if a caller passes something unexpected.
+    expect(rejectOverlongSearchQuery(12345 as unknown as string)).toBeNull();
+    expect(rejectOverlongSearchQuery({} as unknown as string)).toBeNull();
+    expect(rejectOverlongSearchQuery([] as unknown as string)).toBeNull();
   });
 
   it("returns null for empty and short queries", () => {

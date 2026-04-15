@@ -10,6 +10,12 @@ export async function handleListThreadsRequest(
   options?: { accountId?: string | null }
 ) {
   const { searchParams } = new URL(request.url);
+  // Cap the search input before any auth / DB work so pathological queries are
+  // bounced without touching the account lookup.
+  const query = searchParams.get("q");
+  const overlong = rejectOverlongSearchQuery(query);
+  if (overlong) return overlong;
+
   const accountId = options?.accountId ?? "";
   const context = await requireAccountContext(request, accountId);
   if (context instanceof NextResponse) return context;
@@ -25,9 +31,6 @@ export async function handleListThreadsRequest(
     ? excludedFolderIdsParam.split(",").map((value) => value.trim()).filter(Boolean)
     : undefined;
   const attachmentsOnly = searchParams.get("attachments") === "1";
-  const query = searchParams.get("q");
-  const overlong = rejectOverlongSearchQuery(query);
-  if (overlong) return overlong;
 
   const data = await listThreads({
     accountId: context.accountId,
