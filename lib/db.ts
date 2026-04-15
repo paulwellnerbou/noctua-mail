@@ -3266,23 +3266,55 @@ export async function autoCreateCalendarRemindersFromInvites(
   const upsertInputs: UpsertCalendarReminderInput[] = [];
   const existingReminderUids = listExistingCalendarReminderUids(db, accountId, userId);
 
+  // Dedupe distinct source files to fetch once per rowMessageId — multiple
+  // rows can share a rowMessageId (one message can carry several event
+  // UIDs). Then fetch+parse with bounded concurrency: the original serial
+  // loop serialized one filesystem read + one simpleParser call per row,
+  // which on accounts with hundreds of invites added up to seconds of
+  // wall-clock wait.
+  const pendingByRowMessageId = new Map<string, string | undefined>();
+  for (const row of latestRows) {
+    if (!row.hasSource) continue;
+    if (pendingByRowMessageId.has(row.rowMessageId)) continue;
+    pendingByRowMessageId.set(row.rowMessageId, row.messageId ?? undefined);
+  }
+  const noSourceRowMessageIds = new Set<string>();
+  const CALENDAR_SOURCE_FETCH_CONCURRENCY = 16;
+  const pendingEntries = Array.from(pendingByRowMessageId.entries());
+  for (let i = 0; i < pendingEntries.length; i += CALENDAR_SOURCE_FETCH_CONCURRENCY) {
+    const chunk = pendingEntries.slice(i, i + CALENDAR_SOURCE_FETCH_CONCURRENCY);
+    await Promise.all(
+      chunk.map(async ([rowMessageId, messageId]) => {
+        const source = await getMessageSource(accountId, rowMessageId);
+        if (!source) {
+          noSourceRowMessageIds.add(rowMessageId);
+          return;
+        }
+        const mutations = await collectCalendarReminderMutationsByEventUidFromSource(
+          source,
+          messageId
+        );
+        mutationCacheByRowMessageId.set(rowMessageId, mutations);
+      })
+    );
+  }
+
   for (const row of latestRows) {
     if (!row.hasSource) {
       result.skippedNoSource += 1;
       continue;
     }
-    let mutationsForMessage = mutationCacheByRowMessageId.get(row.rowMessageId);
+    if (noSourceRowMessageIds.has(row.rowMessageId)) {
+      result.skippedNoSource += 1;
+      continue;
+    }
+    const mutationsForMessage = mutationCacheByRowMessageId.get(row.rowMessageId);
     if (!mutationsForMessage) {
-      const source = await getMessageSource(accountId, row.rowMessageId);
-      if (!source) {
-        result.skippedNoSource += 1;
-        continue;
-      }
-      mutationsForMessage = await collectCalendarReminderMutationsByEventUidFromSource(
-        source,
-        row.messageId
-      );
-      mutationCacheByRowMessageId.set(row.rowMessageId, mutationsForMessage);
+      // Defensive: rowMessageId was in latestRows with hasSource=true but
+      // neither fetched nor flagged missing — treat as no-source rather
+      // than crash.
+      result.skippedNoSource += 1;
+      continue;
     }
     const mutation = mutationsForMessage.get(row.eventUidKey);
     if (!mutation) {
