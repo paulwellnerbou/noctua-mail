@@ -1,10 +1,8 @@
 /**
- * Folder utility functions that don't belong in `lib/specialFolders.ts`
- * because they have nothing to do with classifying folders by role. These
- * are pure tree / ordering helpers used by the sidebar and move-target UI.
+ * Folder tree and ordering helpers used by the sidebar and move-target UI.
  *
- * For classification (`isDraftsFolder`, `getFolderSpecialKind`, etc.)
- * import from `@/lib/specialFolders`.
+ * For folder role classification (`isDraftsFolder`, `getFolderSpecialKind`,
+ * etc.) import from `@/lib/specialFolders`.
  */
 import type { Folder } from "@/lib/data";
 

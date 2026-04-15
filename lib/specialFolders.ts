@@ -148,12 +148,6 @@ export function findTrashFolder(folders: Folder[], accountId: string) {
 // (and, where applicable, a narrow set of well-known names), and they are
 // used on hot paths like rendering message rows and deciding whether a move
 // should be treated as "delete permanently".
-//
-// These rules used to live in
-// `app/components/mailclient/utils/folderHelpers.ts` (per-role predicates)
-// and `app/components/mailclient/utils/messageHelpers.ts`
-// (`isThreadExcludedFolder`). Having them here keeps folder classification
-// in a single place alongside the `find*Folder` queries.
 
 export type FolderSpecialKind =
   | "inbox"
