@@ -45,7 +45,14 @@ export type SenderIdentity = {
   paletteIndex: number;
 };
 
-function normalizeWhitespace(value: string) {
+/**
+ * Collapses any whitespace run to a single space and trims both ends. Used to
+ * normalize RFC 5322-style address strings before the other parsers in this
+ * module inspect them — callers that want the same behavior for their own
+ * preprocessing (e.g., before splitting lists) can import this directly
+ * rather than rolling their own copy.
+ */
+export function normalizeWhitespace(value: string) {
   return value.replace(/\s+/g, " ").trim();
 }
 
