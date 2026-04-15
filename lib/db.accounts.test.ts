@@ -86,8 +86,18 @@ describe("patchAccount", () => {
     const accountId = uniqueAccountId("acc-patch-imap");
     await upsertAccount(buildAccount(accountId));
 
+    // `patchAccount`'s public type is `Partial<Account>`, which requires
+    // `imap` to be a complete `Account["imap"]`. At runtime `mergeAccount`
+    // supports nested partials, which is exactly what this test exercises.
+    // Use `Partial<Account["imap"]>` at the construction site so future
+    // additions/renames to the IMAP shape still fail the build, then narrow
+    // the cast to just the imap field (not the whole payload).
+    const imapPatch: Partial<Account["imap"]> = {
+      host: "imap2.example.test",
+      port: 1143
+    };
     const updated = await patchAccount(accountId, {
-      imap: { host: "imap2.example.test", port: 1143 } as any
+      imap: imapPatch as Account["imap"]
     });
     expect(updated?.imap.host).toBe("imap2.example.test");
     expect(updated?.imap.port).toBe(1143);
