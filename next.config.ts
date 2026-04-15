@@ -10,14 +10,14 @@ const nextConfig: NextConfig = {
   outputFileTracingIncludes: {
     "/api/accounts/*/sync": [
       ...workerRuntimeTraceFiles,
-      // Worker subprocess loads lib/html.ts as TS source. sanitize-html +
-      // its transitive deps aren't traced by the Turbopack route tracer so
-      // we copy them explicitly (others like htmlparser2/postcss/entities
-      // are already pulled in via mailparser/html-to-text).
+      // Worker subprocess loads lib/html.ts as TS source. Packages imported
+      // by lib/html.ts aren't traced into the sync-route standalone output
+      // automatically, so copy them explicitly.
       "./node_modules/sanitize-html/**",
       "./node_modules/is-plain-object/**",
       "./node_modules/parse-srcset/**",
-      "./node_modules/escape-string-regexp/**"
+      "./node_modules/escape-string-regexp/**",
+      "./node_modules/entities/**"
     ],
     "/api/accounts/*/threads/recompute": workerRuntimeTraceFiles,
     "/api/accounts/*/categories/recompute": workerRuntimeTraceFiles
