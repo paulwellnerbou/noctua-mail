@@ -14,9 +14,23 @@ import type { Account } from "@/lib/data";
 import { verifyImapCredentials } from "@/lib/mail/imapAuth";
 import { shouldStorePasswordInDb } from "@/lib/secret";
 import { accountIdFromEmail } from "@/lib/accountId";
+import { createRateLimiter, getRequestIp } from "@/lib/rateLimit";
 import { randomUUID } from "crypto";
 
+// Signup is more expensive than login (DB writes + IMAP verify + invite
+// claim) and successful signups are inherently rare, so the budget is
+// tighter than the login limiter's 5/min.
+const signupLimiter = createRateLimiter({ windowMs: 60_000, max: 3 });
+
 export async function POST(request: Request) {
+  const ip = getRequestIp(request);
+  if (signupLimiter.isLimited(ip)) {
+    return NextResponse.json(
+      { ok: false, message: "Too many signup attempts — try again later" },
+      { status: 429 }
+    );
+  }
+
   const clientId = request.headers.get("x-noctua-client") ?? undefined;
   const payload = (await request.json()) as { inviteCode: string; account: Account; password?: string };
   const code = payload.inviteCode?.trim();
