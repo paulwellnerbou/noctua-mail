@@ -147,14 +147,3 @@ export function resolveInReplyToRef(
   return { refId, target, isForward: Boolean(message.xForwardedMessageId) };
 }
 
-/**
- * Extracts a display name from an RFC 5322 formatted "From" address string.
- * e.g. `"John Doe" <john@example.com>` → `John Doe`
- *      `john@example.com` → `john@example.com`
- */
-export function extractSenderName(from?: string | null): string {
-  if (!from) return "(unknown)";
-  const match = from.match(/^"?([^"<]+)"?\s*</);
-  if (match) return match[1].trim();
-  return from.replace(/<[^>]+>/g, "").trim() || from;
-}

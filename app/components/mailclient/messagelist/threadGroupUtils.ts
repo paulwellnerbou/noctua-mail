@@ -1,4 +1,9 @@
 import type { Message, RecipientAlias } from "@/lib/data";
+import {
+  extractDisplayName,
+  extractPrimaryEmail,
+  normalizeWhitespace
+} from "@/lib/senderIdentity";
 import type { ThreadNode } from "./threadTree";
 
 type MessageGroup = {
@@ -28,39 +33,6 @@ type ParticipantEntry = {
   text: string;
   tooltip: string;
   key: string;
-};
-
-const EMAIL_PATTERN = /[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i;
-
-const normalizeFromValue = (value: string) => value.replace(/\s+/g, " ").trim();
-
-const stripWrappingQuotes = (value: string) => {
-  if (
-    (value.startsWith("\"") && value.endsWith("\"")) ||
-    (value.startsWith("'") && value.endsWith("'"))
-  ) {
-    return value.slice(1, -1).trim();
-  }
-  return value;
-};
-
-const extractDisplayName = (value: string) => {
-  const normalized = normalizeFromValue(value);
-  if (!normalized) return "";
-  const ltIndex = normalized.lastIndexOf("<");
-  if (ltIndex <= 0 || !normalized.endsWith(">")) return "";
-  const rawName = normalizeFromValue(normalized.slice(0, ltIndex));
-  if (!rawName) return "";
-  return stripWrappingQuotes(rawName);
-};
-
-const extractPrimaryEmail = (value: string) => {
-  const normalized = normalizeFromValue(value);
-  if (!normalized) return null;
-  const angleMatch = normalized.match(/<\s*([^>]+)\s*>/);
-  if (angleMatch?.[1]) return angleMatch[1].trim().toLowerCase();
-  const directMatch = normalized.match(EMAIL_PATTERN);
-  return directMatch?.[0]?.toLowerCase() ?? null;
 };
 
 const isMessageFromUser = (fromValue: string, userEmail?: string): boolean => {
@@ -190,7 +162,7 @@ export function getMessageFromDisplay(
   forceRecipientDisplay?: boolean,
   findRecipientAlias?: FindRecipientAlias
 ): FromDisplayInfo {
-  const normalized = normalizeFromValue(fromValue);
+  const normalized = normalizeWhitespace(fromValue);
   if (!normalized && !forceRecipientDisplay) return { text: "", tooltip: "" };
 
   const isFromUser = normalized ? isMessageFromUser(normalized, userEmail) : false;
@@ -240,7 +212,7 @@ export function getCollapsedThreadIconParticipant(
   const normalizedUserEmail = userEmail?.trim().toLowerCase() ?? null;
 
   for (const { message } of fullFlat) {
-    const normalizedFrom = normalizeFromValue(message.from ?? "");
+    const normalizedFrom = normalizeWhitespace(message.from ?? "");
     if (!normalizedFrom) continue;
     const fromEmail = extractPrimaryEmail(normalizedFrom);
     if (fromEmail && normalizedUserEmail && fromEmail === normalizedUserEmail) continue;
@@ -278,7 +250,7 @@ export function getCollapsedThreadFromDisplay(
   };
 
   fullFlat.forEach(({ message }) => {
-    const normalized = normalizeFromValue(message.from ?? "");
+    const normalized = normalizeWhitespace(message.from ?? "");
     if (!normalized && !forceRecipientDisplay) return;
 
     if (forceRecipientDisplay) {
