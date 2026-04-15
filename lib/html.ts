@@ -1,6 +1,79 @@
-import DOMPurify from "isomorphic-dompurify";
+import sanitizeHtml from "sanitize-html";
 import { decodeHTMLStrict } from "entities";
 import { splitTextWithUrls } from "./linkify";
+
+// sanitize-html starts from a tight allowlist. Extend it to cover typical
+// HTML-email markup the viewer wants to render: tables, images, stylesheets,
+// document structure, etc. External stylesheets (<link>) remain disallowed —
+// they're a tracking vector (CSS load leaks open) and can restyle the webmail
+// UI when not sandboxed. <iframe>, <object>, <embed>, <form>, <base>, <meta>
+// are excluded for the usual XSS/phishing reasons.
+const SANITIZE_HTML_OPTIONS: sanitizeHtml.IOptions = {
+  allowedTags: [
+    ...sanitizeHtml.defaults.allowedTags,
+    "img",
+    "style",
+    "html",
+    "head",
+    "body",
+    "title",
+    "table",
+    "thead",
+    "tbody",
+    "tfoot",
+    "tr",
+    "td",
+    "th",
+    "caption",
+    "colgroup",
+    "col",
+    "center",
+    "font",
+    "u",
+    "s",
+    "strike"
+  ],
+  allowedAttributes: {
+    "*": [
+      "id",
+      "class",
+      "style",
+      "title",
+      "dir",
+      "lang",
+      "align",
+      "valign",
+      "bgcolor",
+      "color",
+      "width",
+      "height"
+    ],
+    a: ["href", "name", "target", "rel"],
+    img: ["src", "srcset", "alt", "title", "width", "height", "align"],
+    table: ["border", "cellspacing", "cellpadding", "summary"],
+    td: ["colspan", "rowspan", "headers", "scope"],
+    th: ["colspan", "rowspan", "headers", "scope"],
+    col: ["span"],
+    colgroup: ["span"],
+    font: ["face", "size"],
+    body: ["bgcolor"]
+  },
+  allowedSchemes: ["http", "https", "mailto", "tel", "cid"],
+  allowedSchemesByTag: { img: ["http", "https", "data", "cid"] },
+  allowedStyles: {
+    "*": {
+      "*": [/.*/]
+    }
+  },
+  allowedClasses: { "*": [/.*/] },
+  allowVulnerableTags: true,
+  parser: { lowerCaseTags: true, lowerCaseAttributeNames: true }
+};
+
+export function sanitizeHtmlForDisplay(input: string) {
+  if (!input) return input;
+  return sanitizeHtml(input, SANITIZE_HTML_OPTIONS);
+}
 
 type QuotedHtmlParts = {
   styles: string;
@@ -29,18 +102,6 @@ export function stripConditionalComments(input: string) {
 
 export function stripStyleTags(input: string) {
   return input.replace(/<style[\s\S]*?<\/style>/gi, "");
-}
-
-export function sanitizeHtmlForDisplay(input: string) {
-  if (!input) return input;
-  const preserveWholeDocument = /<html[\s>]/i.test(input);
-  const output = DOMPurify.sanitize(input, {
-    WHOLE_DOCUMENT: preserveWholeDocument,
-    ADD_TAGS: ["style"],
-    FORBID_TAGS: ["iframe", "object", "embed", "form", "link", "meta", "base"],
-    FORBID_ATTR: ["srcdoc", "formaction", "ping"]
-  });
-  return typeof output === "string" ? output : String(output);
 }
 
 export function extractVisibleHtmlText(html: string) {
