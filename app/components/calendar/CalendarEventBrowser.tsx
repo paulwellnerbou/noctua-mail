@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useRef, useState } from "react";
-import FullCalendar from "@fullcalendar/react";
+import type FullCalendar from "@fullcalendar/react";
 import type { CalendarEvent, CalendarReminder } from "@/lib/data";
 import dynamic from "next/dynamic";
 import { buildAccountCalendarEventPath } from "@/lib/accountApiPaths";

@@ -2,7 +2,7 @@
 
 import { Suspense, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import FullCalendar from "@fullcalendar/react";
+import type FullCalendar from "@fullcalendar/react";
 import { DropdownMenu, IconButton, Text } from "@radix-ui/themes";
 import { MoreVertical } from "lucide-react";
 import CalendarEventBrowser from "@/app/components/calendar/CalendarEventBrowser";
