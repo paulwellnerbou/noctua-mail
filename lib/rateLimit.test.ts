@@ -93,7 +93,9 @@ describe("parseTrustedProxyHops", () => {
   it("returns 0 for non-numeric or negative nonsense (fail closed)", () => {
     expect(parseTrustedProxyHops("-1")).toBe(0);
     expect(parseTrustedProxyHops("abc")).toBe(0);
-    expect(parseTrustedProxyHops("1.5")).toBe(1); // parseInt truncates — acceptable
+    expect(parseTrustedProxyHops("1.5")).toBe(0); // reject fractional strings
+    expect(parseTrustedProxyHops("2abc")).toBe(0); // reject prefixed garbage
+    expect(parseTrustedProxyHops(" 1 ")).toBe(1); // surrounding whitespace OK
   });
 });
 
@@ -123,20 +125,30 @@ describe("createRequestIpResolver", () => {
     expect(resolve(request)).toBe("203.0.113.5");
   });
 
-  it("clamps to leftmost when trustedHops exceeds XFF length", () => {
+  it("returns 'unknown' when trustedHops exceeds XFF length (fail closed on topology mismatch)", () => {
     const resolve = createRequestIpResolver(5);
+    // Only one entry, but caller claims 5 hops — can't trust any entry as the
+    // last-proxy-inserted one, so don't guess.
     const request = new Request("https://example.test", {
       headers: { "x-forwarded-for": "203.0.113.5" }
     });
-    expect(resolve(request)).toBe("203.0.113.5");
+    expect(resolve(request)).toBe("unknown");
   });
 
-  it("falls back to x-real-ip when XFF is absent and hops >= 1", () => {
+  it("falls back to x-real-ip only when hops === 1 and XFF is absent", () => {
     const resolve = createRequestIpResolver(1);
     const request = new Request("https://example.test", {
       headers: { "x-real-ip": "198.51.100.7" }
     });
     expect(resolve(request)).toBe("198.51.100.7");
+  });
+
+  it("ignores x-real-ip when hops !== 1 (topology mismatch)", () => {
+    const resolve = createRequestIpResolver(2);
+    const request = new Request("https://example.test", {
+      headers: { "x-real-ip": "198.51.100.7" }
+    });
+    expect(resolve(request)).toBe("unknown");
   });
 
   it("returns 'unknown' when trusted but no forwarded headers are present", () => {

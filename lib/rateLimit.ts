@@ -89,6 +89,10 @@ export function parseTrustedProxyHops(raw: string | undefined | null): number {
   if (!normalized) return 1;
   if (normalized === "false" || normalized === "no" || normalized === "0") return 0;
   if (normalized === "true" || normalized === "yes") return 1;
+  // Only accept a bare non-negative integer. `parseInt` would happily turn
+  // "1.5" into 1 or "2abc" into 2 — that violates the documented fail-closed
+  // contract for garbage input, so require an exact digit-only string.
+  if (!/^\d+$/.test(normalized)) return 0;
   const hops = Number.parseInt(normalized, 10);
   if (!Number.isFinite(hops) || hops <= 0) return 0;
   return hops;
@@ -120,13 +124,23 @@ export function createRequestIpResolver(trustedHops: number): RequestIpResolver 
         .split(",")
         .map((entry) => entry.trim())
         .filter(Boolean);
-      if (entries.length > 0) {
-        const idx = Math.max(0, entries.length - trustedHops);
-        return entries[idx] ?? "unknown";
+      // Fail closed on topology mismatch: if the chain is shorter than
+      // configured, we don't know which entry is the proxy-inserted one vs a
+      // client spoof. Returning "unknown" buckets everything into a single
+      // limiter slot rather than trusting a potentially attacker-controlled
+      // leftmost entry.
+      if (entries.length >= trustedHops) {
+        return entries[entries.length - trustedHops] ?? "unknown";
       }
+      return "unknown";
     }
-    const realIp = request.headers.get("x-real-ip")?.trim();
-    if (realIp) return realIp;
+    // x-real-ip is a single value, equivalent to a one-hop XFF. Only honour
+    // it when the operator has configured exactly one trusted hop — for any
+    // other topology it carries insufficient information to fail open.
+    if (trustedHops === 1) {
+      const realIp = request.headers.get("x-real-ip")?.trim();
+      if (realIp) return realIp;
+    }
     return "unknown";
   };
 }

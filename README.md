@@ -216,7 +216,10 @@ TRUSTED_PROXY_HOPS=0   # Noctua directly on a public interface; ignore XFF entir
 ```
 
 - **`1` (default)** — rightmost `X-Forwarded-For` entry (the IP the proxy saw) is used.
-- **`N ≥ 2`** — the entry at `XFF[length - N]` is used.
+- **`N ≥ 2`** — the entry at `XFF[length - N]` is used. Requires at least `N`
+  entries in `XFF`; if fewer are present (topology mismatch), the request falls
+  back to the `"unknown"` global bucket rather than trusting a potentially
+  client-supplied leftmost entry.
 - **`0` / `false`** — forwarded headers are ignored; rate limiting becomes a single
   global bucket per limiter. Coarse, but safe when Noctua is exposed directly.
 
