@@ -1,8 +1,5 @@
 import type { CalendarReminder } from "@/lib/data";
-import {
-  buildAccountRemindersAutoCreatePath,
-  buildAccountRemindersPath
-} from "@/lib/accountApiPaths";
+import { buildAccountRemindersPath } from "@/lib/accountApiPaths";
 import { normalizeReminderDateList, resolveNextReminderOccurrence } from "@/lib/reminderRecurrence";
 import { resolveCalendarTimeZoneId } from "@/lib/calendarTimezones";
 
@@ -54,17 +51,6 @@ export type CalendarReminderEventKey = {
   eventUid?: string;
   eventTitle?: string;
   eventStartAtMs: number;
-};
-
-export type AutomaticCalendarReminderCreationResult = {
-  scannedEventUids: number;
-  created: number;
-  updated: number;
-  skippedExistingUid: number;
-  skippedCanceled: number;
-  skippedNoSource: number;
-  skippedNoInviteData: number;
-  skippedNoFutureEvent: number;
 };
 
 type DeliveredReminderMap = Record<string, number>;
@@ -759,40 +745,6 @@ export async function upsertCalendarReminder(
   } catch {
     return { reminder: local.reminder, replaced: local.replaced };
   }
-}
-
-export async function autoCreateCalendarReminders(
-  accountId: string,
-  input: { leadMinutes: number; leadLabel: string }
-): Promise<AutomaticCalendarReminderCreationResult> {
-  const accountIdValue = accountId.trim();
-  if (!accountIdValue) {
-    throw new Error("Missing accountId");
-  }
-  const res = await fetch(buildAccountRemindersAutoCreatePath(accountIdValue), {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      leadMinutes: input.leadMinutes,
-      leadLabel: input.leadLabel
-    })
-  });
-  if (!res.ok) {
-    throw new Error(`auto reminder creation failed (${res.status})`);
-  }
-  const payload = (await res.json()) as Partial<AutomaticCalendarReminderCreationResult>;
-  await fetchRemindersFromServer(accountIdValue);
-  dispatchCalendarRemindersUpdatedEvent();
-  return {
-    scannedEventUids: Number(payload.scannedEventUids ?? 0) || 0,
-    created: Number(payload.created ?? 0) || 0,
-    updated: Number(payload.updated ?? 0) || 0,
-    skippedExistingUid: Number(payload.skippedExistingUid ?? 0) || 0,
-    skippedCanceled: Number(payload.skippedCanceled ?? 0) || 0,
-    skippedNoSource: Number(payload.skippedNoSource ?? 0) || 0,
-    skippedNoInviteData: Number(payload.skippedNoInviteData ?? 0) || 0,
-    skippedNoFutureEvent: Number(payload.skippedNoFutureEvent ?? 0) || 0
-  };
 }
 
 export async function deleteCalendarReminder(accountId: string, reminderId: string): Promise<boolean> {

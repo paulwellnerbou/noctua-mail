@@ -1,29 +1,24 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Trash2, X, MapPin, Clock, Repeat, Wand2, Loader2 } from "lucide-react";
+import { Trash2, X, MapPin, Clock, Repeat, Loader2 } from "lucide-react";
 import {
   Badge,
   Box,
   Button,
   Card,
-  Dialog,
   Flex,
   Heading,
   IconButton,
   Popover,
-  Select,
   Text
 } from "@radix-ui/themes";
 import { buildCalendarRecurrenceSummary, formatCalendarEventRange } from "@/lib/calendar";
 import { formatCalendarTimeZoneShortLabel } from "@/lib/calendarTimezones";
 import {
-  autoCreateCalendarReminders,
-  CALENDAR_REMINDER_LEAD_OPTIONS,
   clearCalendarReminders,
   deleteCalendarReminder,
   getCalendarReminderEndAtMs,
-  getCalendarReminderLeadOption,
   getCalendarReminderStartAtMs,
   type CalendarReminder
 } from "../utils/calendarReminders";
@@ -77,6 +72,8 @@ function formatReminderTimeZoneLabel(eventStartAtMs: number, timeZone?: string) 
   return formatCalendarTimeZoneShortLabel(timeZone, new Date(eventStartAtMs));
 }
 
+const REMINDER_NOTICE_TIMEOUT_MS = 3600;
+
 function buildReminderRecurrenceSummary(reminder: CalendarReminder) {
   if (!reminder.recurrenceRule?.trim()) return null;
   const startAtMs = getCalendarReminderStartAtMs(reminder);
@@ -122,22 +119,17 @@ export default function ReminderStatusPopover({
       ),
     [upcomingReminders]
   );
-  const [autoReminderDialogOpen, setAutoReminderDialogOpen] = useState(false);
-  const [leadOptionValue, setLeadOptionValue] = useState(
-    CALENDAR_REMINDER_LEAD_OPTIONS[3]?.value ?? "15"
-  );
-  const [creatingAutomaticReminders, setCreatingAutomaticReminders] = useState(false);
   const [clearingReminders, setClearingReminders] = useState(false);
   const [deletingReminderIds, setDeletingReminderIds] = useState<Set<string>>(new Set());
-  const [autoReminderNotice, setAutoReminderNotice] = useState<string | null>(null);
+  const [reminderNotice, setReminderNotice] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!autoReminderNotice) return;
+    if (!reminderNotice) return;
     const timer = window.setTimeout(() => {
-      setAutoReminderNotice(null);
-    }, 3600);
+      setReminderNotice(null);
+    }, REMINDER_NOTICE_TIMEOUT_MS);
     return () => window.clearTimeout(timer);
-  }, [autoReminderNotice]);
+  }, [reminderNotice]);
 
   const handleDeleteReminder = useCallback(
     async (reminderId: string) => {
@@ -165,39 +157,6 @@ export default function ReminderStatusPopover({
     [activeAccountId, onRefreshPendingReminders, onReportError]
   );
 
-  const openAutoReminderDialog = useCallback(() => {
-    setLeadOptionValue(CALENDAR_REMINDER_LEAD_OPTIONS[3]?.value ?? "15");
-    setAutoReminderDialogOpen(true);
-  }, []);
-
-  const handleCreateAutomaticReminders = useCallback(async () => {
-    if (!activeAccountId.trim()) return;
-    const selectedLeadOption = getCalendarReminderLeadOption(leadOptionValue);
-    setCreatingAutomaticReminders(true);
-    try {
-      const summary = await autoCreateCalendarReminders(activeAccountId, {
-        leadMinutes: selectedLeadOption.minutes,
-        leadLabel: selectedLeadOption.label
-      });
-      await onRefreshPendingReminders();
-      const changedCount = summary.created + summary.updated;
-      if (changedCount > 0) {
-        setAutoReminderNotice(
-          `Applied reminders to ${changedCount} event${changedCount === 1 ? "" : "s"} (${summary.created} new, ${summary.updated} updated).`
-        );
-      } else if (summary.scannedEventUids > 0) {
-        setAutoReminderNotice("No upcoming calendar events were eligible for reminders.");
-      } else {
-        setAutoReminderNotice("No calendar invite events were found.");
-      }
-      setAutoReminderDialogOpen(false);
-    } catch {
-      onReportError("Failed to create reminders automatically.");
-    } finally {
-      setCreatingAutomaticReminders(false);
-    }
-  }, [activeAccountId, leadOptionValue, onRefreshPendingReminders, onReportError]);
-
   const handleClearReminders = useCallback(async () => {
     if (!activeAccountId.trim()) return;
     setClearingReminders(true);
@@ -205,9 +164,9 @@ export default function ReminderStatusPopover({
       const cleared = await clearCalendarReminders(activeAccountId);
       await onRefreshPendingReminders();
       if (cleared > 0) {
-        setAutoReminderNotice(`Cleared ${cleared} reminder${cleared === 1 ? "" : "s"}.`);
+        setReminderNotice(`Cleared ${cleared} reminder${cleared === 1 ? "" : "s"}.`);
       } else {
-        setAutoReminderNotice("No reminders to clear.");
+        setReminderNotice("No reminders to clear.");
       }
     } catch {
       onReportError("Failed to clear reminders.");
@@ -263,63 +222,6 @@ export default function ReminderStatusPopover({
                 "Clear reminder"
               )}
             </Button>
-            <Dialog.Root open={autoReminderDialogOpen} onOpenChange={setAutoReminderDialogOpen}>
-              <IconButton
-                variant="ghost"
-                color="gray"
-                size="2"
-                title="Automatically create reminders"
-                aria-label="Automatically create reminders"
-                onClick={openAutoReminderDialog}
-              >
-                <Wand2 size={15} />
-              </IconButton>
-              <Dialog.Content size="2">
-                <Flex direction="column" gap="3">
-                  <Dialog.Title size="4">Automatically Create Reminders</Dialog.Title>
-                  <Text size="2" color="gray">
-                    Create reminders for upcoming calendar events found across your mailbox.
-                  </Text>
-                  <Text size="1" color="gray">
-                    Trash, spam, and archive folders are skipped. If multiple messages exist for the
-                    same event UID, the newest one is used.
-                  </Text>
-                  <Flex direction="column" gap="2">
-                    <Text size="2" weight="medium">
-                      Notify me
-                    </Text>
-                    <Select.Root value={leadOptionValue} onValueChange={setLeadOptionValue}>
-                      <Select.Trigger />
-                      <Select.Content position="popper">
-                        {CALENDAR_REMINDER_LEAD_OPTIONS.map((option) => (
-                          <Select.Item key={option.value} value={option.value}>
-                            {option.label}
-                          </Select.Item>
-                        ))}
-                      </Select.Content>
-                    </Select.Root>
-                  </Flex>
-                  <Flex justify="end" gap="2">
-                    <Button
-                      variant="soft"
-                      color="gray"
-                      onClick={() => setAutoReminderDialogOpen(false)}
-                      disabled={creatingAutomaticReminders}
-                    >
-                      Cancel
-                    </Button>
-                    <Button
-                      onClick={() => {
-                        void handleCreateAutomaticReminders();
-                      }}
-                      disabled={creatingAutomaticReminders || !activeAccountId.trim()}
-                    >
-                      {creatingAutomaticReminders ? "Working..." : "OK"}
-                    </Button>
-                  </Flex>
-                </Flex>
-              </Dialog.Content>
-            </Dialog.Root>
             <IconButton
               variant="ghost"
               color="gray"
@@ -333,9 +235,9 @@ export default function ReminderStatusPopover({
           </Flex>
         </Flex>
         <Box className="popover-body">
-          {autoReminderNotice ? (
-            <Text as="p" size="1" color="gray" className="reminder-auto-notice">
-              {autoReminderNotice}
+          {reminderNotice ? (
+            <Text as="p" size="1" color="gray" className="reminder-notice">
+              {reminderNotice}
             </Text>
           ) : null}
           {upcomingReminders.length > 0 ? (
