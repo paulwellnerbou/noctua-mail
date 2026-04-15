@@ -112,8 +112,7 @@ async function processReminderNotifications(source) {
     if (!accountId || typeof accountId !== "string") continue;
     let items = [];
     try {
-      const params = new URLSearchParams({ accountId });
-      const res = await fetch(`/api/reminders?${params.toString()}`, {
+      const res = await fetch(`/api/accounts/${encodeURIComponent(accountId)}/reminders`, {
         cache: "no-store",
         credentials: "include"
       });
