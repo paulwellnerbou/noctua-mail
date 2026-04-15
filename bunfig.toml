@@ -1,4 +1,5 @@
 [test]
+preload = ["./lib/testSetupEnv.ts"]
 pathIgnorePatterns = [
   ".next/**",
   "src-tauri/target/**",
