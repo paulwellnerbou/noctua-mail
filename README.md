@@ -181,6 +181,35 @@ Control access to the application:
 SESSION_SEAL_KEY=<32-byte-hex-key>  # Required for session cookie sealing
 ```
 
+#### Reverse Proxy / Rate Limiting
+
+The rate limiter (applied to `/api/auth/login`, `/api/auth/signup`, `/api/probe`) keys
+requests by client IP. Since `Request` doesn't expose the TCP peer, it relies on
+`X-Forwarded-For` — which means any client can spoof it unless you tell Noctua how
+many hops of proxy headers to trust.
+
+```bash
+TRUST_PROXY=1   # Default: unset → forwarded headers are ignored (global rate limit)
+```
+
+- **Unset / `false` / `0`** — ignore `X-Forwarded-For`/`X-Real-IP`. Rate limiting
+  degrades to a single global bucket per limiter. Safe but coarse.
+- **`true` / `1`** — you have exactly one trusted reverse proxy (nginx, Caddy,
+  Cloudflare, Traefik) in front of Noctua. The rightmost XFF entry (i.e. what the
+  proxy observed as the connection IP) is used.
+- **`N` (integer ≥ 2)** — `N` trusted hops; the entry at `XFF[length - N]` is used.
+
+Your proxy **must** either strip or overwrite any incoming `X-Forwarded-For` from
+the client — otherwise a client can spoof their IP past the trusted hop. Example for
+Caddy (strips whatever the client sent and inserts the real remote address):
+
+```caddy
+reverse_proxy localhost:3654 {
+    header_up X-Forwarded-For {remote_host}
+    header_up X-Real-IP {remote_host}
+}
+```
+
 ### Data Directory
 Customize the data directory location:
 

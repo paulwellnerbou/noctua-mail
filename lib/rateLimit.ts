@@ -57,11 +57,80 @@ export function createRateLimiter(opts?: RateLimiterOptions): RateLimiter {
   };
 }
 
-/** Extract the client IP from standard proxy headers. */
-export function getRequestIp(request: Request): string {
-  return (
-    request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
-    request.headers.get("x-real-ip") ??
-    "unknown"
+/**
+ * Parse the `TRUST_PROXY` env setting into a hop count.
+ *
+ * - Unset / `""` / `"false"` / `"0"` / `"no"` → 0 (do NOT trust forwarded headers)
+ * - `"true"` / `"yes"` → 1
+ * - Positive integer → that many hops
+ * - Anything else → 0 (fail closed)
+ *
+ * With a trusted reverse proxy in front (nginx, Caddy, Cloudflare, Traefik,
+ * …), the proxy **appends** the real connection IP to `X-Forwarded-For`, so
+ * the *rightmost* entry is authoritative for one hop. If a client spoofs
+ * `X-Forwarded-For: 1.2.3.4`, the proxy turns that into
+ * `1.2.3.4, <real-client-ip>` and we correctly pick `<real-client-ip>`.
+ */
+export function parseTrustedProxyHops(raw: string | undefined | null): number {
+  if (raw == null) return 0;
+  const normalized = raw.trim().toLowerCase();
+  if (!normalized || normalized === "false" || normalized === "no" || normalized === "0") {
+    return 0;
+  }
+  if (normalized === "true" || normalized === "yes") return 1;
+  const hops = Number.parseInt(normalized, 10);
+  if (!Number.isFinite(hops) || hops <= 0) return 0;
+  return hops;
+}
+
+const TRUSTED_PROXY_HOPS = parseTrustedProxyHops(process.env.TRUST_PROXY);
+
+if (TRUSTED_PROXY_HOPS === 0 && process.env.NODE_ENV !== "test") {
+  console.warn(
+    "[noctua] TRUST_PROXY is not set — ignoring X-Forwarded-For / X-Real-IP. " +
+      "Rate limiting is now global (not per-IP) for this process. " +
+      "Set TRUST_PROXY=1 behind a single reverse proxy that sanitizes forwarded headers."
   );
+}
+
+export interface RequestIpResolver {
+  (request: Request): string;
+}
+
+/**
+ * Build a request-IP resolver for the given number of trusted proxy hops.
+ *
+ * Exposed separately from the env-backed default so tests can exercise the
+ * behaviour without mutating `process.env`.
+ */
+export function createRequestIpResolver(trustedHops: number): RequestIpResolver {
+  if (trustedHops <= 0) {
+    // Fail closed: no way to authenticate a client IP from the Request object
+    // alone, so bucket everything together. Better a global rate limit than a
+    // trivially bypassable per-IP one.
+    return () => "unknown";
+  }
+  return (request: Request): string => {
+    const xff = request.headers.get("x-forwarded-for");
+    if (xff) {
+      const entries = xff
+        .split(",")
+        .map((entry) => entry.trim())
+        .filter(Boolean);
+      if (entries.length > 0) {
+        const idx = Math.max(0, entries.length - trustedHops);
+        return entries[idx] ?? "unknown";
+      }
+    }
+    const realIp = request.headers.get("x-real-ip")?.trim();
+    if (realIp) return realIp;
+    return "unknown";
+  };
+}
+
+const defaultResolver = createRequestIpResolver(TRUSTED_PROXY_HOPS);
+
+/** Extract the client IP from proxy headers, governed by TRUST_PROXY. */
+export function getRequestIp(request: Request): string {
+  return defaultResolver(request);
 }
