@@ -1,5 +1,6 @@
 import type React from "react";
 import type { Account, AccountDateFormat, Message } from "@/lib/data";
+import { formatAccountMediumDateTime } from "@/lib/dateFormatting";
 import { escapeHtml } from "@/lib/html";
 import { buildComposePayload as buildComposePayloadFn } from "./composeContentBuilder";
 import { computeComposeInitState } from "./composeInitState";
@@ -155,7 +156,7 @@ export function useComposeController({
     compose.setComposeAttachments([]);
     compose.setComposeDragActive(false);
     compose.setComposeMode(mode);
-    compose.setComposeOpenedAt(new Date().toLocaleString());
+    compose.setComposeOpenedAt(formatAccountMediumDateTime(Date.now(), accountDateFormat) ?? "");
     compose.setComposeSignatureId(defaultSignatureId ?? "");
 
     // Compute mode-specific fields

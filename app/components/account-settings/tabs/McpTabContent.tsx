@@ -7,12 +7,14 @@ import {
   buildAccountMcpTokenPath,
   buildAccountMcpTokensPath
 } from "@/lib/accountApiPaths";
-import type { McpTokenMetadata } from "@/lib/data";
+import type { AccountDateFormat, McpTokenMetadata } from "@/lib/data";
+import { formatAccountTimestampLabel } from "@/lib/dateFormatting";
 
 type Props = {
   accountId?: string;
   isActive: boolean;
   isExistingAccount: boolean;
+  accountDateFormat?: AccountDateFormat;
   apiFetch?: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
   onClose: () => void;
 };
@@ -38,12 +40,8 @@ const EXPIRY_PRESETS = [
   { value: "custom", label: "Custom" }
 ] as const;
 
-function formatTimestamp(value: number | null) {
-  if (value == null) return "Never";
-  return new Intl.DateTimeFormat(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short"
-  }).format(new Date(value));
+function formatTimestamp(value: number | null, accountDateFormat?: AccountDateFormat) {
+  return formatAccountTimestampLabel(value, accountDateFormat);
 }
 
 function toDateTimeLocalValue(value: number) {
@@ -73,6 +71,7 @@ export default function McpTabContent({
   accountId,
   isActive,
   isExistingAccount,
+  accountDateFormat,
   apiFetch,
   onClose
 }: Props) {
@@ -352,9 +351,9 @@ export default function McpTabContent({
                       {deletingId === token.id ? "Deleting..." : "Delete"}
                     </Button>
                   </Flex>
-                  <Text size="1" color="gray">Created: {formatTimestamp(token.createdAt)}</Text>
-                  <Text size="1" color="gray">Expires: {formatTimestamp(token.expiresAt)}</Text>
-                  <Text size="1" color="gray">Last used: {formatTimestamp(token.lastUsedAt)}</Text>
+                  <Text size="1" color="gray">Created: {formatTimestamp(token.createdAt, accountDateFormat)}</Text>
+                  <Text size="1" color="gray">Expires: {formatTimestamp(token.expiresAt, accountDateFormat)}</Text>
+                  <Text size="1" color="gray">Last used: {formatTimestamp(token.lastUsedAt, accountDateFormat)}</Text>
                 </Flex>
               </Card>
             ))

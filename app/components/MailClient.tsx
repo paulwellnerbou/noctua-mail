@@ -6042,6 +6042,7 @@ export default function MailClient({
         onFindRelatedCalendarInviteUid={handleFindRelatedByCalendarInviteUid}
         onRecomputeCalendarRelations={handleRecomputeCalendarRelations}
         calendarFirstDay={calendarFirstDay}
+        accountDateFormat={accountDateFormat}
       />
     </div>
   );
