@@ -8389,7 +8389,11 @@ export async function recomputeCategoriesForAccount(
   let processed = 0;
   let categorized = 0;
 
-  const SOURCE_READ_CHUNK_SIZE = 24;
+  // Chunk size is intentionally small: `parseMailForCategorization` runs
+  // simpleParser, which is CPU-bound and blocks the event loop per call.
+  // 4 is enough to overlap filesystem I/O across a slow disk without
+  // monopolising the single JS thread on low-powered hosts (e.g. a 1–2 vCPU VPS).
+  const SOURCE_READ_CHUNK_SIZE = 4;
 
   type ParsedSourceInput = {
     subject?: string | null;
