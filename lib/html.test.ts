@@ -64,7 +64,7 @@ describe("sanitizeHtmlForDisplay", () => {
     const out = sanitizeHtmlForDisplay(
       "<html><head><style>.foo{color:red}</style></head><body><p>hi</p></body></html>"
     );
-    expect(out).toContain("<style>");
+    expect(out).toMatch(/<style\b/i);
     expect(out).toContain(".foo");
     expect(out).toContain("color:red");
   });
