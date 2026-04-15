@@ -7,11 +7,90 @@ import {
   decodeHtmlEntities,
   ensureHtmlDocumentTitle,
   linkifyHtmlTextNodes,
+  sanitizeHtmlForDisplay,
   selectPreferredHtmlDocument,
   shouldShowHtmlViewerFrame,
   stripHtmlToText,
   stripConditionalComments
 } from "./html";
+
+describe("sanitizeHtmlForDisplay", () => {
+  it("strips quoted inline event handlers", () => {
+    const out = sanitizeHtmlForDisplay('<img src="x" onerror="alert(1)">');
+    expect(out).not.toContain("onerror");
+    expect(out).not.toContain("alert");
+  });
+
+  it("strips unquoted inline event handlers (previous sanitizer bypass)", () => {
+    const out = sanitizeHtmlForDisplay("<img src=x onerror=alert(1)>");
+    expect(out).not.toContain("onerror");
+    expect(out).not.toContain("alert");
+  });
+
+  it("strips javascript: URLs whether quoted or not", () => {
+    const quoted = sanitizeHtmlForDisplay('<a href="javascript:alert(1)">x</a>');
+    expect(quoted.toLowerCase()).not.toContain("javascript:");
+    const unquoted = sanitizeHtmlForDisplay("<a href=javascript:alert(1)>x</a>");
+    expect(unquoted.toLowerCase()).not.toContain("javascript:");
+  });
+
+  it("removes <script> tags and inline payloads", () => {
+    const out = sanitizeHtmlForDisplay("<p>ok</p><script>alert(1)</script>");
+    expect(out).not.toContain("<script");
+    expect(out).not.toContain("alert(1)");
+    expect(out).toContain("<p>ok</p>");
+  });
+
+  it("removes dangerous structural tags (iframe/object/embed/form)", () => {
+    const out = sanitizeHtmlForDisplay(
+      '<iframe src="javascript:alert(1)"></iframe>' +
+        '<object data="evil"></object>' +
+        "<embed src=\"evil\">" +
+        "<form action=\"http://attacker\"><input></form>"
+    );
+    expect(out.toLowerCase()).not.toContain("<iframe");
+    expect(out.toLowerCase()).not.toContain("<object");
+    expect(out.toLowerCase()).not.toContain("<embed");
+    expect(out.toLowerCase()).not.toContain("<form");
+  });
+
+  it("blocks SVG script-injection vectors", () => {
+    const out = sanitizeHtmlForDisplay('<svg><script>alert(1)</script></svg>');
+    expect(out).not.toContain("<script");
+    expect(out).not.toContain("alert(1)");
+  });
+
+  it("preserves <style> blocks used by the HTML viewer", () => {
+    const out = sanitizeHtmlForDisplay(
+      "<html><head><style>.foo{color:red}</style></head><body><p>hi</p></body></html>"
+    );
+    expect(out).toContain("<style>");
+    expect(out).toContain(".foo");
+    expect(out).toContain("color:red");
+  });
+
+  it("preserves the document structure when the input is a full document", () => {
+    const out = sanitizeHtmlForDisplay(
+      "<html><head><title>t</title></head><body><p>hi</p></body></html>"
+    );
+    expect(out).toMatch(/<html[\s>]/i);
+    expect(out).toMatch(/<body[\s>]/i);
+  });
+
+  it("returns a fragment (no auto-wrap) when input has no <html>", () => {
+    const out = sanitizeHtmlForDisplay("<p>hi</p>");
+    expect(out).not.toMatch(/<html[\s>]/i);
+    expect(out).not.toMatch(/<body[\s>]/i);
+    expect(out).toContain("<p>hi</p>");
+  });
+
+  it("strips <link> tags (used for stylesheet exfiltration in emails)", () => {
+    const out = sanitizeHtmlForDisplay(
+      '<html><head><link rel="stylesheet" href="http://attacker/x.css"></head><body>x</body></html>'
+    );
+    expect(out.toLowerCase()).not.toContain("<link");
+  });
+});
 
 describe("decodeHtmlEntities", () => {
   it("decodes named and angle-bracket entities", () => {

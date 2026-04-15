@@ -1,3 +1,4 @@
+import DOMPurify from "isomorphic-dompurify";
 import { decodeHTMLStrict } from "entities";
 import { splitTextWithUrls } from "./linkify";
 
@@ -31,11 +32,15 @@ export function stripStyleTags(input: string) {
 }
 
 export function sanitizeHtmlForDisplay(input: string) {
-  return input
-    .replace(/<script[\s\S]*?>[\s\S]*?<\/script>/gi, "")
-    .replace(/<link[\s\S]*?>/gi, "")
-    .replace(/\son[a-z]+\s*=\s*["'][\s\S]*?["']/gi, "")
-    .replace(/\s(href|src)\s*=\s*["']\s*javascript:[^"']*["']/gi, "");
+  if (!input) return input;
+  const preserveWholeDocument = /<html[\s>]/i.test(input);
+  const output = DOMPurify.sanitize(input, {
+    WHOLE_DOCUMENT: preserveWholeDocument,
+    ADD_TAGS: ["style"],
+    FORBID_TAGS: ["iframe", "object", "embed", "form", "link", "meta", "base"],
+    FORBID_ATTR: ["srcdoc", "formaction", "ping"]
+  });
+  return typeof output === "string" ? output : String(output);
 }
 
 export function extractVisibleHtmlText(html: string) {
