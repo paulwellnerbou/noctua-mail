@@ -57,11 +57,97 @@ export function createRateLimiter(opts?: RateLimiterOptions): RateLimiter {
   };
 }
 
-/** Extract the client IP from standard proxy headers. */
+/**
+ * Parse the `TRUSTED_PROXY_HOPS` env setting into a hop count.
+ *
+ * The value is the number of reverse-proxy hops whose `X-Forwarded-For` entry
+ * Noctua should trust. Default (unset) is **1 hop** — Noctua's documented
+ * deployment mode is behind a single reverse proxy (Caddy, nginx, …) that
+ * sanitises forwarded headers. Set to `0` if Noctua is on a public interface
+ * with no proxy in front; set to `2` for chained proxies (e.g. Cloudflare →
+ * Caddy → Noctua).
+ *
+ * - Unset → 1 (single trusted proxy, the expected default)
+ * - `"0"` / `"false"` / `"no"` → 0 (do NOT trust forwarded headers, bucket all
+ *   requests into `"unknown"` — use this for direct-internet exposure)
+ * - `"1"` / `"true"` / `"yes"` → 1
+ * - Positive integer → that many hops
+ * - Anything else (garbage) → 0 (fail closed)
+ *
+ * With a trusted reverse proxy in front, the proxy **appends** the real
+ * connection IP to `X-Forwarded-For`, so the *rightmost* entry is authoritative
+ * for one hop. If a client spoofs `X-Forwarded-For: 1.2.3.4`, the proxy turns
+ * that into `1.2.3.4, <real-client-ip>` and we correctly pick `<real-client-ip>`.
+ *
+ * A well-configured proxy (see README — Caddy's `trusted_proxies` directive)
+ * sanitises or rewrites the header entirely, so the point is moot, but
+ * rightmost-of-N is robust either way.
+ */
+export function parseTrustedProxyHops(raw: string | undefined | null): number {
+  if (raw == null) return 1;
+  const normalized = raw.trim().toLowerCase();
+  if (!normalized) return 1;
+  if (normalized === "false" || normalized === "no" || normalized === "0") return 0;
+  if (normalized === "true" || normalized === "yes") return 1;
+  // Only accept a bare non-negative integer. `parseInt` would happily turn
+  // "1.5" into 1 or "2abc" into 2 — that violates the documented fail-closed
+  // contract for garbage input, so require an exact digit-only string.
+  if (!/^\d+$/.test(normalized)) return 0;
+  const hops = Number.parseInt(normalized, 10);
+  if (!Number.isFinite(hops) || hops <= 0) return 0;
+  return hops;
+}
+
+const TRUSTED_PROXY_HOPS = parseTrustedProxyHops(process.env.TRUSTED_PROXY_HOPS);
+
+export interface RequestIpResolver {
+  (request: Request): string;
+}
+
+/**
+ * Build a request-IP resolver for the given number of trusted proxy hops.
+ *
+ * Exposed separately from the env-backed default so tests can exercise the
+ * behaviour without mutating `process.env`.
+ */
+export function createRequestIpResolver(trustedHops: number): RequestIpResolver {
+  if (trustedHops <= 0) {
+    // Fail closed: no way to authenticate a client IP from the Request object
+    // alone, so bucket everything together. Better a global rate limit than a
+    // trivially bypassable per-IP one.
+    return () => "unknown";
+  }
+  return (request: Request): string => {
+    const xff = request.headers.get("x-forwarded-for");
+    if (xff) {
+      const entries = xff
+        .split(",")
+        .map((entry) => entry.trim())
+        .filter(Boolean);
+      // Fail closed on topology mismatch: if the chain is shorter than
+      // configured, we don't know which entry is the proxy-inserted one vs a
+      // client spoof. Returning "unknown" buckets everything into a single
+      // limiter slot rather than trusting a potentially attacker-controlled
+      // leftmost entry.
+      if (entries.length >= trustedHops) {
+        return entries[entries.length - trustedHops] ?? "unknown";
+      }
+      return "unknown";
+    }
+    // x-real-ip is a single value, equivalent to a one-hop XFF. Only honour
+    // it when the operator has configured exactly one trusted hop — for any
+    // other topology it carries insufficient information to fail open.
+    if (trustedHops === 1) {
+      const realIp = request.headers.get("x-real-ip")?.trim();
+      if (realIp) return realIp;
+    }
+    return "unknown";
+  };
+}
+
+const defaultResolver = createRequestIpResolver(TRUSTED_PROXY_HOPS);
+
+/** Extract the client IP from proxy headers, governed by TRUSTED_PROXY_HOPS. */
 export function getRequestIp(request: Request): string {
-  return (
-    request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
-    request.headers.get("x-real-ip") ??
-    "unknown"
-  );
+  return defaultResolver(request);
 }

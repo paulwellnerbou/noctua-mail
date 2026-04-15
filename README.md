@@ -181,6 +181,48 @@ Control access to the application:
 SESSION_SEAL_KEY=<32-byte-hex-key>  # Required for session cookie sealing
 ```
 
+#### Reverse Proxy / Rate Limiting
+
+The rate limiter (applied to `/api/auth/login`, `/api/auth/signup`, `/api/probe`) keys
+requests by client IP. Since `Request` doesn't expose the TCP peer, it relies on
+`X-Forwarded-For`, which means the reverse proxy in front of Noctua **must sanitise
+that header** so a client can't spoof their own rate-limit identity.
+
+Noctua assumes one trusted reverse proxy in front by default (no env var needed).
+The recommended Caddy configuration uses the global `trusted_proxies` directive,
+which instructs Caddy to ignore any `X-Forwarded-For` the client tries to send
+and insert the real remote IP instead:
+
+```caddy
+{
+    servers {
+        trusted_proxies static private_ranges
+    }
+}
+
+yourdomain.tld {
+    reverse_proxy localhost:3654
+}
+```
+
+If you need a different topology, use `TRUSTED_PROXY_HOPS` to override the default.
+The value is the number of reverse-proxy hops whose `X-Forwarded-For` entry Noctua
+should trust:
+
+```bash
+TRUSTED_PROXY_HOPS=1   # Default — single reverse proxy in front (no need to set this)
+TRUSTED_PROXY_HOPS=2   # Two chained trusted proxies (e.g. Cloudflare → Caddy → Noctua)
+TRUSTED_PROXY_HOPS=0   # Noctua directly on a public interface; ignore XFF entirely
+```
+
+- **`1` (default)** — rightmost `X-Forwarded-For` entry (the IP the proxy saw) is used.
+- **`N ≥ 2`** — the entry at `XFF[length - N]` is used. Requires at least `N`
+  entries in `XFF`; if fewer are present (topology mismatch), the request falls
+  back to the `"unknown"` global bucket rather than trusting a potentially
+  client-supplied leftmost entry.
+- **`0` / `false`** — forwarded headers are ignored; rate limiting becomes a single
+  global bucket per limiter. Coarse, but safe when Noctua is exposed directly.
+
 ### Data Directory
 Customize the data directory location:
 
