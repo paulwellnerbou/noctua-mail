@@ -103,6 +103,7 @@ import {
   type CategoryLinearModel
 } from "./mail/categorization/linearModel";
 import type { CategoryLearningDebugSnapshot } from "./mail/categorization/debugTypes";
+import type { CategoryClassificationInput } from "./mail/categorization";
 
 let masterDbInstance: any | null = null;
 let masterInitialized = false;
@@ -8390,21 +8391,15 @@ export async function recomputeCategoriesForAccount(
   let categorized = 0;
 
   // Chunk size is intentionally small: `parseMailForCategorization` runs
-  // simpleParser, which is CPU-bound and blocks the event loop per call.
-  // 4 is enough to overlap filesystem I/O across a slow disk without
-  // monopolising the single JS thread on low-powered hosts (e.g. a 1–2 vCPU VPS).
+  // simpleParser, which is CPU-bound and blocks the event loop per call and
+  // materialises attachment Buffers. 4 overlaps filesystem I/O across a slow
+  // disk without monopolising the single JS thread or ballooning peak memory
+  // on low-powered hosts (e.g. a 1–2 vCPU VPS).
   const SOURCE_READ_CHUNK_SIZE = 4;
-
-  type ParsedSourceInput = {
-    subject?: string | null;
-    from?: unknown;
-    attachments?: Array<{ filename?: string | null }> | undefined;
-    headers?: Map<string, unknown>;
-  };
 
   for (let chunkStart = 0; chunkStart < messages.length; chunkStart += SOURCE_READ_CHUNK_SIZE) {
     const chunk = messages.slice(chunkStart, chunkStart + SOURCE_READ_CHUNK_SIZE);
-    const parsedSources = new Map<string, ParsedSourceInput>();
+    const parsedSources = new Map<string, CategoryClassificationInput>();
 
     await Promise.all(
       chunk.map(async (message) => {
@@ -8413,10 +8408,16 @@ export async function recomputeCategoriesForAccount(
           const source = await getMessageSource(accountId, message.id);
           if (!source) return;
           const parsed = await parseMailForCategorization(source);
+          // Copy only the fields classification actually reads. Critically, map
+          // attachments to `{ filename }` so the parsed attachment content
+          // Buffers can be GC'd as soon as this callback returns — otherwise
+          // the map pins them until the chunk finishes.
           parsedSources.set(message.id, {
             subject: parsed.subject,
             from: parsed.from,
-            attachments: parsed.attachments as Array<{ filename?: string | null }> | undefined,
+            attachments: parsed.attachments?.map((attachment: { filename?: string | null }) => ({
+              filename: attachment.filename ?? null
+            })),
             headers: parsed.headers as Map<string, unknown>
           });
         } catch (error) {
@@ -8438,7 +8439,8 @@ export async function recomputeCategoriesForAccount(
           metadataHeaderMap.set("references", refs.join(" "));
         }
 
-        let classificationInput: ParsedSourceInput | null = parsedSources.get(id) ?? null;
+        let classificationInput: CategoryClassificationInput | null =
+          parsedSources.get(id) ?? null;
 
         if (!classificationInput) {
           const attachmentRows = db
