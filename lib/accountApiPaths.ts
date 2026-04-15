@@ -134,10 +134,6 @@ export function buildAccountRemindersPath(
   return appendQuery(buildAccountApiPath(accountId, "/reminders"), query);
 }
 
-export function buildAccountRemindersAutoCreatePath(accountId: string) {
-  return buildAccountApiPath(accountId, "/reminders/auto-create");
-}
-
 export function buildAccountDraftSavePath(accountId: string) {
   return buildAccountApiPath(accountId, "/drafts/save");
 }
