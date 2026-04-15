@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { rejectOverlongSearchQuery } from "@/app/api/_helpers/searchQueryLength";
 import { requireSessionAccountOr403, requireSessionOr401 } from "@/lib/auth";
 import { listRecipientAutocompleteSuggestions } from "@/lib/recipientAliases";
 
@@ -16,6 +17,8 @@ export async function handleListRecipientSuggestionsRequest(
   const access = await requireSessionAccountOr403(session, accountId);
   if (access instanceof NextResponse) return access;
   const query = searchParams.get("q");
+  const overlong = rejectOverlongSearchQuery(query);
+  if (overlong) return overlong;
   const limitParam = searchParams.get("limit");
   const limit = limitParam ? Number(limitParam) : 200;
   const results = await listRecipientAutocompleteSuggestions(

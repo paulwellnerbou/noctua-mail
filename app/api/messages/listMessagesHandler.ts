@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { enrichMessagesWithThreadTopics } from "@/app/api/_helpers/enrichMessagesWithThreadTopics";
+import { rejectOverlongSearchQuery } from "@/app/api/_helpers/searchQueryLength";
 import { listMessages } from "@/lib/db";
 import { requireSessionAccountOr403, requireSessionOr401 } from "@/lib/auth";
 
@@ -30,6 +31,8 @@ export async function handleListMessagesRequest(
   const pageSize = Math.max(1, Math.min(1000, Number(searchParams.get("pageSize") ?? 200) || 200));
   const groupBy = searchParams.get("groupBy") ?? "date";
   const query = searchParams.get("q") ?? options?.defaultQuery ?? null;
+  const overlong = rejectOverlongSearchQuery(query);
+  if (overlong) return overlong;
   if (!accountId) {
     return NextResponse.json({ ok: false, message: "Missing accountId" }, { status: 400 });
   }

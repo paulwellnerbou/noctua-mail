@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireAccountContext } from "@/app/api/_helpers/accountContext";
 import { enrichMessagesWithThreadTopics } from "@/app/api/_helpers/enrichMessagesWithThreadTopics";
+import { rejectOverlongSearchQuery } from "@/app/api/_helpers/searchQueryLength";
 import { listThreads } from "@/lib/db";
 import { normalizeThreadDateSource } from "@/lib/threadDate";
 
@@ -25,6 +26,8 @@ export async function handleListThreadsRequest(
     : undefined;
   const attachmentsOnly = searchParams.get("attachments") === "1";
   const query = searchParams.get("q");
+  const overlong = rejectOverlongSearchQuery(query);
+  if (overlong) return overlong;
 
   const data = await listThreads({
     accountId: context.accountId,
