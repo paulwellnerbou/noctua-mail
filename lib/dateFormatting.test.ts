@@ -55,6 +55,13 @@ describe("dateFormatting helpers", () => {
     expect(output!.length).toBeGreaterThan(0);
   });
 
+  test("formatAccountShortTime with ymd preset returns only a time label", () => {
+    const output = formatAccountShortTime(SAMPLE_MS, "ymd");
+    expect(output).not.toBeNull();
+    expect(output).toMatch(/^\d{2}:\d{2}$/);
+    expect(output).not.toContain("-");
+  });
+
   test("formatAccountTimestampLabel returns the fallback for null/invalid input", () => {
     expect(formatAccountTimestampLabel(null)).toBe("Never");
     expect(formatAccountTimestampLabel(undefined)).toBe("Never");

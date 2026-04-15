@@ -203,13 +203,18 @@ function formatStyled(
   const format = normalizeAccountDateFormat(preferredFormat);
   if (format === "ymd") {
     // The "ymd" preset has no matching BCP47 tag, so fall back to the YYYY-MM-DD
-    // shape for the date portion and append a 24h time when requested.
-    const datePart = formatYmd(date, false).split(" ")[0] ?? "";
-    const timePart =
-      options.timeStyle || options.hour || options.minute
-        ? `${pad(date.getHours())}:${pad(date.getMinutes())}`
-        : "";
-    return timePart ? `${datePart} ${timePart}` : datePart;
+    // shape for requested date fields and append a 24h time when requested.
+    const hasDatePart = Boolean(
+      options.dateStyle || options.year || options.month || options.day
+    );
+    const hasTimePart = Boolean(options.timeStyle || options.hour || options.minute);
+    const datePart = hasDatePart ? formatYmd(date, false).split(" ")[0] ?? "" : "";
+    const timePart = hasTimePart
+      ? `${pad(date.getHours())}:${pad(date.getMinutes())}`
+      : "";
+    if (datePart && timePart) return `${datePart} ${timePart}`;
+    if (datePart) return datePart;
+    return timePart;
   }
   const locale = resolveLocaleForFormat(format);
   const formatter = getStyledFormatter(locale, options, cacheKey);
