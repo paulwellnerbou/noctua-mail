@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { enrichMessagesWithThreadTopics } from "@/app/api/_helpers/enrichMessagesWithThreadTopics";
+import { rejectOverlongSearchQuery } from "@/app/api/_helpers/searchQueryLength";
 import { listMessages } from "@/lib/db";
 import { requireSessionAccountOr403, requireSessionOr401 } from "@/lib/auth";
 
@@ -12,9 +13,14 @@ export async function handleListMessagesRequest(
   request: Request,
   options?: ListMessagesHandlerOptions
 ) {
+  const { searchParams } = new URL(request.url);
+  // Cap the search input before any auth / DB work so pathological queries are
+  // bounced without touching the account lookup.
+  const query = searchParams.get("q") ?? options?.defaultQuery ?? null;
+  const overlong = rejectOverlongSearchQuery(query);
+  if (overlong) return overlong;
   const session = requireSessionOr401(request);
   if (session instanceof NextResponse) return session;
-  const { searchParams } = new URL(request.url);
   const accountId = options?.accountId ?? "";
   const folderId = searchParams.get("folderId");
   const fieldsParam = searchParams.get("fields");
@@ -29,7 +35,6 @@ export async function handleListMessagesRequest(
   const page = Math.max(1, Number(searchParams.get("page") ?? 1) || 1);
   const pageSize = Math.max(1, Math.min(1000, Number(searchParams.get("pageSize") ?? 200) || 200));
   const groupBy = searchParams.get("groupBy") ?? "date";
-  const query = searchParams.get("q") ?? options?.defaultQuery ?? null;
   if (!accountId) {
     return NextResponse.json({ ok: false, message: "Missing accountId" }, { status: 400 });
   }

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireAccountContext } from "@/app/api/_helpers/accountContext";
 import { enrichMessagesWithThreadTopics } from "@/app/api/_helpers/enrichMessagesWithThreadTopics";
+import { rejectOverlongSearchQuery } from "@/app/api/_helpers/searchQueryLength";
 import { listThreads } from "@/lib/db";
 import { normalizeThreadDateSource } from "@/lib/threadDate";
 
@@ -9,6 +10,12 @@ export async function handleListThreadsRequest(
   options?: { accountId?: string | null }
 ) {
   const { searchParams } = new URL(request.url);
+  // Cap the search input before any auth / DB work so pathological queries are
+  // bounced without touching the account lookup.
+  const query = searchParams.get("q");
+  const overlong = rejectOverlongSearchQuery(query);
+  if (overlong) return overlong;
+
   const accountId = options?.accountId ?? "";
   const context = await requireAccountContext(request, accountId);
   if (context instanceof NextResponse) return context;
@@ -24,7 +31,6 @@ export async function handleListThreadsRequest(
     ? excludedFolderIdsParam.split(",").map((value) => value.trim()).filter(Boolean)
     : undefined;
   const attachmentsOnly = searchParams.get("attachments") === "1";
-  const query = searchParams.get("q");
 
   const data = await listThreads({
     accountId: context.accountId,
