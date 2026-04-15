@@ -140,13 +140,21 @@ export function useConfirmDialogs(): UseConfirmDialogsResult {
     []
   );
 
-  // Cancel any in-flight delete prompt if the component unmounts so the
-  // caller's Promise never hangs.
+  // Cancel any in-flight confirmation prompts if the component unmounts so
+  // the callers' Promises never hang (e.g., on navigation/logout).
   useEffect(() => {
     return () => {
       if (deleteConfirmResolveRef.current) {
         deleteConfirmResolveRef.current("cancel");
         deleteConfirmResolveRef.current = null;
+      }
+      if (fullSyncConfirmResolveRef.current) {
+        fullSyncConfirmResolveRef.current(false);
+        fullSyncConfirmResolveRef.current = null;
+      }
+      if (unsubscribeConfirmResolveRef.current) {
+        unsubscribeConfirmResolveRef.current(false);
+        unsubscribeConfirmResolveRef.current = null;
       }
     };
   }, []);

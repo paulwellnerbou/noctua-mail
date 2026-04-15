@@ -78,13 +78,12 @@ type Props = {
 
 /**
  * Left sidebar that houses the virtual folders, topic shortcuts, and folder
- * tree. Owns the purely-local UI state that was previously threaded through
- * MailClient: the folder search query, the folder collapse map, the drag-over
- * highlight, and whether the topics section is collapsed.
+ * tree. Owns the purely local UI state managed here: the folder search query,
+ * the folder collapse map, and whether the topics section is collapsed.
  *
- * Everything outside that UI-only bucket — selection state, sync state, folder
- * data, handlers that touch the data layer — still lives in MailClient and
- * arrives as props.
+ * Selection state, sync state, folder data, drag-over highlight state, and
+ * handlers that touch the data layer still live in MailClient and arrive as
+ * props.
  */
 export default function FolderSidebarPane({
   leftWidth,
