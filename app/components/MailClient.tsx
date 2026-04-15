@@ -24,11 +24,11 @@ import {
   X
 } from "lucide-react";
 import LoginOverlay from "./auth/LoginOverlay";
-import FolderPane from "./mailclient/folder/FolderPane";
-import FolderTree from "./mailclient/folder/FolderTree";
+import FolderSidebarPane from "./mailclient/folder/FolderSidebarPane";
 import MoveToDialog, { recordRecentMoveFolder, getRecentMoveFolderIds } from "./mailclient/message/MoveToDialog";
 import InAppNoticeStack, { type InAppNotice } from "./mailclient/InAppNoticeStack";
-import BuildRefreshDialog from "./mailclient/BuildRefreshDialog";
+import DialogsHost from "./mailclient/dialogs/DialogsHost";
+import { useConfirmDialogs } from "./mailclient/dialogs/useConfirmDialogs";
 import ComposeInlineCard from "./mailclient/composition/ComposeInlineCard";
 import ComposeMinimized from "./mailclient/composition/ComposeMinimized";
 import ComposeMessageField from "./mailclient/composition/ComposeMessageField";
@@ -171,11 +171,9 @@ import {
   getComposeThreadFocusMessageId,
   getInlineComposePlacement
 } from "./mailclient/message/threadViewState";
-import TopicPickerDialog from "./mailclient/TopicPickerDialog";
 import RecipientAliasDialog from "./mailclient/RecipientAliasDialog";
 import AccountReloginDialog from "./mailclient/AccountReloginDialog";
 import TopicBadge from "./mailclient/TopicBadge";
-import TopicsSidebarSection from "./mailclient/folder/TopicsSidebarSection";
 import { applyActiveTopicSuggestion } from "./mailclient/topicSuggestionActions";
 import { parseSimpleTopicSearchMode } from "./mailclient/topicSearch";
 import {
@@ -206,9 +204,6 @@ import type {
   User
 } from "@/lib/data";
 import AccountSettingsModal, { type ManageTab } from "./AccountSettingsModal";
-import DeleteConfirmDialog from "./mailclient/message/DeleteConfirmDialog";
-import FullSyncConfirmDialog from "./mailclient/message/FullSyncConfirmDialog";
-import UnsubscribeConfirmDialog from "./mailclient/message/UnsubscribeConfirmDialog";
 import {
   computeGroupMeta,
   isFlaggedMessage,
@@ -254,10 +249,7 @@ import {
   THREAD_COLLAPSE_SETTLE_MS
 } from "./mailclient/constants";
 import type {
-  ExceptionEntry,
-  DeleteConfirmAction,
-  DeleteConfirmState,
-  FullSyncConfirmState
+  ExceptionEntry
 } from "./mailclient/types";
 import { normalizeAccountDateFormat } from "@/lib/dateFormatting";
 import {
@@ -353,8 +345,6 @@ export default function MailClient({
   const dragImageRef = useRef<HTMLDivElement | null>(null);
   const [sortKey, setSortKey] = useState<"date" | "from" | "subject">("date");
   const [sortDir, setSortDir] = useState<"desc" | "asc">("desc");
-  const [collapsedFolders, setCollapsedFolders] = useState<Record<string, boolean>>({});
-  const [folderQuery, setFolderQuery] = useState("");
   const [messageView, setMessageView] = useState<"card" | "table" | "compact" | "threads">("threads");
   const [threadViewMode, setThreadViewMode] = useState<"full" | "compact">("compact");
   const [messageTopicsById, setMessageTopicsById] = useState<Map<string, Topic[]>>(new Map());
@@ -367,7 +357,6 @@ export default function MailClient({
   const [topicSuggestionExplanation, setTopicSuggestionExplanation] =
     useState<TopicSuggestionExplanation | null>(null);
   const [topicSuggestionExplanationThreadId, setTopicSuggestionExplanationThreadId] = useState("");
-  const [topicSidebarCollapsed, setTopicSidebarCollapsed] = useState(false);
   const [activeTopicSuggestions, setActiveTopicSuggestions] = useState<TopicThreadSuggestion[]>([]);
   const [activeTopicSuggestionMessages, setActiveTopicSuggestionMessages] = useState<Message[]>([]);
   const [activeTopicSuggestionsLoading, setActiveTopicSuggestionsLoading] = useState(false);
@@ -566,15 +555,12 @@ export default function MailClient({
   const [initialFoldersLoadedAccountId, setInitialFoldersLoadedAccountId] = useState<string | null>(null);
   const [sessionTtlSeconds, setSessionTtlSeconds] = useState<number | null>(null);
   const [pendingMessageActions, setPendingMessageActions] = useState<Set<string>>(new Set());
-  const [deleteConfirm, setDeleteConfirm] = useState<DeleteConfirmState | null>(null);
-  const deleteConfirmResolveRef = useRef<((action: DeleteConfirmAction) => void) | null>(null);
-  const [fullSyncConfirm, setFullSyncConfirm] = useState<FullSyncConfirmState | null>(null);
-  const fullSyncConfirmResolveRef = useRef<((confirmed: boolean) => void) | null>(null);
-  const [unsubscribeConfirm, setUnsubscribeConfirm] = useState<{
-    sender: string;
-    listId?: string;
-  } | null>(null);
-  const unsubscribeConfirmResolveRef = useRef<((confirmed: boolean) => void) | null>(null);
+  const {
+    confirmDelete,
+    confirmUnsubscribe,
+    confirmFullSyncStart,
+    view: confirmDialogsView
+  } = useConfirmDialogs();
   // searchScope moved to useSearchState hook
   const [includeSentInEverywhere, setIncludeSentInEverywhere] = useState(false);
   const [lastFolderId, setLastFolderId] = useState("");
@@ -889,13 +875,7 @@ export default function MailClient({
     updateMessagesWithCurrentResultPrune: forwardMessageResultPruneUpdate,
     confirmFullSyncStart: (state) =>
       FULL_SYNC_CONFIRM_DIALOG_ENABLED
-        ? new Promise<boolean>((resolve) => {
-            if (fullSyncConfirmResolveRef.current) {
-              fullSyncConfirmResolveRef.current(false);
-            }
-            fullSyncConfirmResolveRef.current = resolve;
-            setFullSyncConfirm(state);
-          })
+        ? confirmFullSyncStart(state)
         : Promise.resolve(true),
     inboxFolder: inboxFolder ?? null,
     currentKeyRef
@@ -3154,87 +3134,6 @@ export default function MailClient({
     }
   };
 
-  const resolveDeleteConfirm = useCallback((action: DeleteConfirmAction) => {
-    const resolve = deleteConfirmResolveRef.current;
-    deleteConfirmResolveRef.current = null;
-    setDeleteConfirm(null);
-    resolve?.(action);
-  }, []);
-
-  const resolveFullSyncConfirm = useCallback((confirmed: boolean) => {
-    const resolve = fullSyncConfirmResolveRef.current;
-    fullSyncConfirmResolveRef.current = null;
-    setFullSyncConfirm(null);
-    resolve?.(confirmed);
-  }, []);
-
-  const handleFullSyncConfirmOpenChange = useCallback(
-    (open: boolean) => {
-      if (!open) {
-        resolveFullSyncConfirm(false);
-      }
-    },
-    [resolveFullSyncConfirm]
-  );
-
-  const confirmDelete = useCallback(
-    (nextDeleteConfirm: DeleteConfirmState) =>
-      new Promise<DeleteConfirmAction>((resolve) => {
-        if (deleteConfirmResolveRef.current) {
-          deleteConfirmResolveRef.current("cancel");
-        }
-        deleteConfirmResolveRef.current = resolve;
-        setDeleteConfirm(nextDeleteConfirm);
-      }),
-    []
-  );
-
-  const handleDeleteDialogOpenChange = useCallback(
-    (open: boolean) => {
-      if (!open) {
-        resolveDeleteConfirm("cancel");
-      }
-    },
-    [resolveDeleteConfirm]
-  );
-
-  const resolveUnsubscribeConfirm = useCallback((confirmed: boolean) => {
-    const resolve = unsubscribeConfirmResolveRef.current;
-    unsubscribeConfirmResolveRef.current = null;
-    setUnsubscribeConfirm(null);
-    resolve?.(confirmed);
-  }, []);
-
-  const confirmUnsubscribe = useCallback(
-    (sender: string, listId?: string) =>
-      new Promise<boolean>((resolve) => {
-        if (unsubscribeConfirmResolveRef.current) {
-          unsubscribeConfirmResolveRef.current(false);
-        }
-        unsubscribeConfirmResolveRef.current = resolve;
-        setUnsubscribeConfirm({ sender, listId });
-      }),
-    []
-  );
-
-  const handleUnsubscribeDialogOpenChange = useCallback(
-    (open: boolean) => {
-      if (!open) {
-        resolveUnsubscribeConfirm(false);
-      }
-    },
-    [resolveUnsubscribeConfirm]
-  );
-
-  useEffect(() => {
-    return () => {
-      if (deleteConfirmResolveRef.current) {
-        deleteConfirmResolveRef.current("cancel");
-        deleteConfirmResolveRef.current = null;
-      }
-    };
-  }, []);
-
   const evaluateMessageInCurrentResults = useCallback(
     (message: Message): CurrentResultDecision => {
       if (message.accountId !== activeAccountId) {
@@ -5464,102 +5363,67 @@ export default function MailClient({
         state={{ inAppNotices }}
         actions={{ onOpenNotice: handleNoticeOpen, onDismissNotice: handleDismissNotice }}
       />
-      <BuildRefreshDialog
-        buildVersion={requiredBuildVersion}
-        onRefresh={refreshForBuildUpdate}
-      />
-      <DeleteConfirmDialog
-        deleteConfirm={deleteConfirm}
-        onOpenChange={handleDeleteDialogOpenChange}
-        resolveDeleteConfirm={resolveDeleteConfirm}
-      />
-      <FullSyncConfirmDialog
-        confirmState={fullSyncConfirm}
-        onOpenChange={handleFullSyncConfirmOpenChange}
-        resolveConfirm={resolveFullSyncConfirm}
-      />
-
-      <UnsubscribeConfirmDialog
-        unsubscribeConfirm={unsubscribeConfirm}
-        onOpenChange={handleUnsubscribeDialogOpenChange}
-        resolveUnsubscribeConfirm={resolveUnsubscribeConfirm}
-      />
-
-      <TopicPickerDialog
-        open={topicPickerOpen}
-        onOpenChange={setTopicPickerOpen}
-        allTopics={allTopics}
-        messageTopics={topicPickerMessage ? (messageTopicsById.get(topicPickerMessage.threadId) ?? []) : []}
-        suggestions={topicSuggestions}
-        onSave={handleSaveMessageTopics}
-        onCreateTopic={handleCreateTopic}
+      <DialogsHost
+        confirm={confirmDialogsView}
+        buildRefresh={{
+          buildVersion: requiredBuildVersion,
+          onRefresh: refreshForBuildUpdate
+        }}
+        topicPicker={{
+          open: topicPickerOpen,
+          onOpenChange: setTopicPickerOpen,
+          allTopics,
+          messageTopics: topicPickerMessage
+            ? (messageTopicsById.get(topicPickerMessage.threadId) ?? [])
+            : [],
+          suggestions: topicSuggestions,
+          onSave: handleSaveMessageTopics,
+          onCreateTopic: handleCreateTopic
+        }}
       />
 
       <section className="content-grid" ref={containerRef}>
-        <FolderPane
-          state={{
-            leftWidth,
-            folderQuery,
-            accountFolderCount: accountFolders.length,
-            virtualFolders: virtualFoldersForPane,
-            isRecomputingThreads,
-            isRecomputingCategories
+        <FolderSidebarPane
+          leftWidth={leftWidth}
+          accountFolderCount={accountFolders.length}
+          virtualFolders={virtualFoldersForPane}
+          isRecomputingThreads={isRecomputingThreads}
+          isRecomputingCategories={isRecomputingCategories}
+          activateVirtualFolder={activateVirtualFolder}
+          syncAccount={syncAccount}
+          recomputeThreads={recomputeThreads}
+          recomputeCategories={recomputeCategories}
+          allTopics={allTopics}
+          topicMessageCountById={topicMessageCountById}
+          activeTopicId={activeTopicId}
+          onTopicClick={(topicId) => {
+            const current = activeTopicId;
+            if (current === topicId) {
+              setQuery("");
+            } else {
+              setQuery(`topic:${topicId}`);
+              setSearchScope("all");
+            }
           }}
-          actions={{
-            setFolderQuery,
-            activateVirtualFolder,
-            syncAccount,
-            recomputeThreads,
-            recomputeCategories
-          }}
-          topSlot={
-            <TopicsSidebarSection
-              topics={allTopics}
-              topicMessageCountById={topicMessageCountById}
-              activeTopicId={activeTopicId}
-              collapsed={topicSidebarCollapsed}
-              onToggleCollapsed={() => setTopicSidebarCollapsed((v) => !v)}
-              onTopicClick={(topicId) => {
-                const current = activeTopicId;
-                if (current === topicId) {
-                  setQuery("");
-                } else {
-                  setQuery(`topic:${topicId}`);
-                  setSearchScope("all");
-                }
-              }}
-            />
-          }
-        >
-          <FolderTree
-            state={{
-              rootFolders,
-              folderTree,
-              folderById,
-              folderQuery,
-              searchScope,
-              activeFolderId,
-              collapsedFolders,
-              syncingFolders,
-              deletingFolderIds,
-              draggingMessageIds,
-              dragOverFolderId
-            }}
-            actions={{
-              setActiveFolderId,
-              setSearchScope,
-              clearSearch,
-              setCollapsedFolders,
-              setDragOverFolderId,
-              handleMoveMessages,
-              handleCreateSubfolder,
-              handleRenameFolderItem,
-              handleDeleteFolderItem,
-              syncAccount,
-              folderSpecialIcon
-            }}
-          />
-        </FolderPane>
+          rootFolders={rootFolders}
+          folderTree={folderTree}
+          folderById={folderById}
+          searchScope={searchScope}
+          activeFolderId={activeFolderId}
+          setActiveFolderId={setActiveFolderId}
+          setSearchScope={setSearchScope}
+          clearSearch={clearSearch}
+          syncingFolders={syncingFolders}
+          deletingFolderIds={deletingFolderIds}
+          draggingMessageIds={draggingMessageIds}
+          dragOverFolderId={dragOverFolderId}
+          setDragOverFolderId={setDragOverFolderId}
+          handleMoveMessages={handleMoveMessages}
+          handleCreateSubfolder={handleCreateSubfolder}
+          handleRenameFolderItem={handleRenameFolderItem}
+          handleDeleteFolderItem={handleDeleteFolderItem}
+          folderSpecialIcon={folderSpecialIcon}
+        />
 
         <div
           className="resizer"
