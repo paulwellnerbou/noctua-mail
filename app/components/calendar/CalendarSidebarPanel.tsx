@@ -1,7 +1,7 @@
 "use client";
 
 import { useRef } from "react";
-import FullCalendar from "@fullcalendar/react";
+import type FullCalendar from "@fullcalendar/react";
 import { DropdownMenu, Flex, Heading, IconButton } from "@radix-ui/themes";
 import { X, ExternalLink, MoreVertical } from "lucide-react";
 import { openDetachedWindow } from "@/lib/ui/openDetachedWindow";

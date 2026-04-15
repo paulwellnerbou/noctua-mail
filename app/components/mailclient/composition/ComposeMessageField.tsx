@@ -1,8 +1,11 @@
+"use client";
+
 import type React from "react";
 import * as Collapsible from "@radix-ui/react-collapsible";
 import { CaretRightIcon, ChevronDownIcon } from "@radix-ui/react-icons";
 import { Button, DropdownMenu, Tabs } from "@radix-ui/themes";
 import { Paperclip } from "lucide-react";
+import dynamic from "next/dynamic";
 import type { ComposeInviteDraft } from "@/lib/composeInvite";
 import type { Attachment } from "@/lib/data";
 import { assembleQuotedHtml } from "@/lib/html";
@@ -12,7 +15,6 @@ import {
   computeMarkdownOnSwitchToMarkdown
 } from "./composeTabSwitch";
 import AttachmentsList from "../../AttachmentsList";
-import ComposeEditor from "../../ComposeEditor";
 import ComposeMarkdownEditor from "../../ComposeMarkdownEditor";
 import ComposePlainTextEditor from "../../ComposePlainTextEditor";
 import HtmlMessage from "../../HtmlMessage";
@@ -20,6 +22,12 @@ import threadStyles from "../message/ThreadMessageCard.module.css";
 import composeStyles from "./Compose.module.css";
 import styles from "./ComposeMessageField.module.css";
 import ComposeInviteSection from "./ComposeInviteSection";
+
+// @lexical/* (~5 MB of packages) only mounts when the user switches to the
+// HTML compose tab — keep it out of the initial MailClient chunk.
+const ComposeEditor = dynamic(() => import("../../ComposeEditor"), {
+  ssr: false
+});
 
 type ComposeTab = "text" | "html" | "markdown";
 type ComposeMode = "new" | "reply" | "replyAll" | "forward" | "edit" | "editAsNew";
