@@ -60,6 +60,35 @@ describe("sanitizeHtmlForDisplay", () => {
     expect(out).not.toContain("alert(1)");
   });
 
+  it("preserves inline style attributes (HTML email layout depends on them)", () => {
+    const out = sanitizeHtmlForDisplay(
+      '<table><tr><td style="background-color:#f00;padding:12px;font-family:Arial,sans-serif">x</td></tr></table>'
+    );
+    expect(out).toContain('style="background-color:#f00;padding:12px;font-family:Arial,sans-serif"');
+  });
+
+  it("keeps style attributes with modern CSS sanitize-html's parser might reject", () => {
+    const out = sanitizeHtmlForDisplay(
+      '<div style="background:linear-gradient(90deg,#f00,#00f);transform:translateX(-50%);--noctua-var:42">x</div>'
+    );
+    expect(out).toContain("linear-gradient");
+    expect(out).toContain("translateX(-50%)");
+    expect(out).toContain("--noctua-var:42");
+  });
+
+  it("keeps meta, role, xmlns and xml:lang that email templates rely on", () => {
+    const out = sanitizeHtmlForDisplay(
+      '<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en"><head>' +
+        '<meta http-equiv="Content-Type" content="text/html; charset=utf-8">' +
+        '</head><body><div role="presentation">x</div></body></html>'
+    );
+    expect(out).toMatch(/<meta\b/i);
+    expect(out).toContain('content="text/html; charset=utf-8"');
+    expect(out).toContain('role="presentation"');
+    expect(out).toContain('xmlns="http://www.w3.org/1999/xhtml"');
+    expect(out).toContain('xml:lang="en"');
+  });
+
   it("preserves <style> blocks used by the HTML viewer", () => {
     const out = sanitizeHtmlForDisplay(
       "<html><head><style>.foo{color:red}</style></head><body><p>hi</p></body></html>"
