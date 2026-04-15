@@ -6,7 +6,7 @@ import dayGridPlugin from "@fullcalendar/daygrid";
 import timeGridPlugin from "@fullcalendar/timegrid";
 import interactionPlugin from "@fullcalendar/interaction";
 import rrulePlugin from "@fullcalendar/rrule";
-import type { EventClickArg, EventDidMountArg, DatesSetArg, EventInput } from "@fullcalendar/core";
+import type { EventClickArg, EventMountArg, DatesSetArg, EventInput } from "@fullcalendar/core";
 import { formatCalendarEventRange } from "@/lib/calendar";
 import type { CalendarEvent } from "@/lib/data";
 import type { CalendarReminder } from "@/lib/data";
@@ -83,7 +83,7 @@ function getSavedView(): string {
   return "dayGridMonth";
 }
 
-function buildEventHoverTitle(arg: EventDidMountArg) {
+function buildEventHoverTitle(arg: EventMountArg) {
   const props = arg.event.extendedProps as {
     kind: "event" | "reminder";
     data: CalendarEvent | CalendarReminder;
@@ -210,7 +210,7 @@ export default function CalendarView({
     [onDateClick]
   );
 
-  const handleEventDidMount = useCallback((arg: EventDidMountArg) => {
+  const handleEventDidMount = useCallback((arg: EventMountArg) => {
     arg.el.title = buildEventHoverTitle(arg);
   }, []);
 
