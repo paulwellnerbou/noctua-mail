@@ -15,6 +15,7 @@ const SANITIZE_HTML_OPTIONS: sanitizeHtml.IOptions = {
     "style",
     "html",
     "head",
+    "meta",
     "body",
     "title",
     "table",
@@ -39,8 +40,11 @@ const SANITIZE_HTML_OPTIONS: sanitizeHtml.IOptions = {
       "class",
       "style",
       "title",
+      "role",
       "dir",
       "lang",
+      "xmlns",
+      "xml:lang",
       "align",
       "valign",
       "bgcolor",
@@ -56,15 +60,16 @@ const SANITIZE_HTML_OPTIONS: sanitizeHtml.IOptions = {
     col: ["span"],
     colgroup: ["span"],
     font: ["face", "size"],
-    body: ["bgcolor"]
+    body: ["bgcolor"],
+    meta: ["charset", "name", "content", "http-equiv"]
   },
   allowedSchemes: ["http", "https", "mailto", "tel", "cid"],
   allowedSchemesByTag: { img: ["http", "https", "data", "cid"] },
-  allowedStyles: {
-    "*": {
-      "*": [/.*/]
-    }
-  },
+  // Intentionally omit allowedStyles so inline style="..." attributes pass
+  // through unfiltered. Emails rely on inline CSS for layout; sanitize-html
+  // strips the whole style attribute when no explicit property allowlist
+  // matches, and its allowlist schema does not accept a wildcard property
+  // name.
   allowedClasses: { "*": [/.*/] },
   allowVulnerableTags: true,
   parser: { lowerCaseTags: true, lowerCaseAttributeNames: true }
