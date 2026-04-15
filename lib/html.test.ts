@@ -366,6 +366,19 @@ describe("shouldShowHtmlViewerFrame", () => {
     expect(shouldShowHtmlViewerFrame(html)).toBe(true);
   });
 
+  it("keeps the viewer frame for mails with rich link cards but no body background", () => {
+    const html = [
+      '<html><body style="overflow-wrap: break-word; -webkit-nbsp-mode: space; line-break: after-white-space;">',
+      '<div><a style="border-radius:10px;display:block;overflow:hidden;text-decoration:none;" href="https://example.com/zoom">',
+      '<table style="table-layout:fixed;border-collapse:collapse;width:228px;background-color:#E5E6E9;" width="228"><tr><td><img width="228" height="228" src="https://example.com/thumb.png"></td></tr></table>',
+      "</a></div>",
+      "<div>Hallo Mario,</div>",
+      "</body></html>"
+    ].join("");
+
+    expect(shouldShowHtmlViewerFrame(html)).toBe(true);
+  });
+
   it("drops the viewer frame for mails with their own outer card layout", () => {
     const html = [
       '<html><body bgcolor="#f5f5f5" style="margin:0;padding:0">',
