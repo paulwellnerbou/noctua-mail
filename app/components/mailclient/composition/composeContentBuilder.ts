@@ -1,6 +1,6 @@
-import TurndownService from "turndown";
 import type { Attachment } from "@/lib/data";
 import { stripStyleTags } from "@/lib/html";
+import { htmlToMarkdown } from "@/lib/markdownConvert";
 import type { ComposeTab } from "./composeTypes";
 
 export type ComposeContentState = {
@@ -128,13 +128,11 @@ export function buildComposePayload(
   if (useHtml) {
     let textFromHtml = "";
     if (html) {
-      const turndownService = new TurndownService();
+      // Strip style tags before converting to text to avoid CSS in plain text
+      const htmlWithoutStyles = stripStyleTags(html);
       try {
-        // Strip style tags before converting to text to avoid CSS in plain text
-        const htmlWithoutStyles = stripStyleTags(html);
-        textFromHtml = normalizeHtmlDerivedText(turndownService.turndown(htmlWithoutStyles));
+        textFromHtml = normalizeHtmlDerivedText(htmlToMarkdown(htmlWithoutStyles));
       } catch {
-        const htmlWithoutStyles = stripStyleTags(html);
         textFromHtml = normalizeHtmlDerivedText(stripHtml(htmlWithoutStyles));
       }
     }
