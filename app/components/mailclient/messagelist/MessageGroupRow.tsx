@@ -1,3 +1,4 @@
+import { memo } from "react";
 import type React from "react";
 import * as Collapsible from "@radix-ui/react-collapsible";
 import { CaretRightIcon } from "@radix-ui/react-icons";
@@ -19,7 +20,7 @@ type MessageGroupRowProps = {
   renderAsVirtualItem?: boolean;
 };
 
-export default function MessageGroupRow({
+function MessageGroupRow({
   group,
   isCollapsed,
   top = 0,
@@ -74,3 +75,5 @@ export default function MessageGroupRow({
     </Collapsible.Root>
   );
 }
+
+export default memo(MessageGroupRow);
