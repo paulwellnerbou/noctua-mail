@@ -1,4 +1,4 @@
-import { describe, expect, mock, test } from "bun:test";
+import { beforeEach, describe, expect, mock, test } from "bun:test";
 import type { CalendarEvent, Message } from "@/lib/data";
 import type { CalendarEventEmailSnapshot } from "@/lib/calendarEventEmailSnapshot";
 import { saveMessageSource } from "@/lib/storage";
@@ -41,23 +41,33 @@ mock.module("@/lib/db", () => ({
   cancelCalendarRemindersByEventUid
 }));
 
-// Mock the snapshot helper rather than `@/lib/db.getMessageById` itself —
-// bun's module mocks are global, so overriding `getMessageById` would leak
-// into later test files (e.g. the source-route test that also reads
-// messages via the real DB). The wrapper is the only thing the processor
-// actually uses, so this keeps the mock scope tight.
-const buildCalendarEventEmailSnapshotFromMessageId = mock(
-  async (_accountId: string, _messageId: string): Promise<CalendarEventEmailSnapshot | null> =>
-    null
-);
+// We mock `@/lib/calendarEventEmailSnapshot.server` so we can seed
+// message fixtures without touching the shared test DB. BUT Bun's
+// `mock.module()` registrations are GLOBAL and persist for the lifetime
+// of the worker — `mock.restore()` does NOT undo them. Under
+// `--randomize`, this test file may load before `calendarEventEmailSnapshot.test.ts`
+// (which also exercises this helper against real DB fixtures), so the
+// mock MUST delegate to the real implementation for any messageId we
+// have not explicitly seeded. Otherwise the snapshot tests see `null`
+// and fail.
+//
+// IMPORTANT: we capture the real function into a *local variable* before
+// installing the mock. Bun's `mock.module()` mutates the namespace's
+// live bindings in place — a later `realSnapshotServer.buildXxx`
+// access would return the mock itself, giving infinite recursion. The
+// local captures the pre-mock function reference.
+//
+// The real helper closes over `getMessageById` from `@/lib/db`. That
+// import is resolved through our already-installed db mock, which
+// spreads `...actualDb`, so `getMessageById` is still the real impl.
+const realSnapshotServer = await import("./calendarEventEmailSnapshot.server");
+const realBuildSnapshot = realSnapshotServer.buildCalendarEventEmailSnapshotFromMessageId;
+
 const messagesByIdForSnapshot = new Map<string, Message>();
-function configureSnapshotMessageFixtures(messages: Message[]) {
-  messagesByIdForSnapshot.clear();
-  for (const msg of messages) messagesByIdForSnapshot.set(msg.id, msg);
-  buildCalendarEventEmailSnapshotFromMessageId.mockImplementation(
-    async (_accountId: string, messageId: string) => {
-      const msg = messagesByIdForSnapshot.get(messageId);
-      if (!msg) return null;
+const buildCalendarEventEmailSnapshotFromMessageId = mock(
+  async (accountId: string, messageId: string): Promise<CalendarEventEmailSnapshot | null> => {
+    const msg = messagesByIdForSnapshot.get(messageId);
+    if (msg) {
       return {
         sourceSubject: msg.subject,
         sourceFromAddr: msg.from,
@@ -69,7 +79,14 @@ function configureSnapshotMessageFixtures(messages: Message[]) {
         sourceBodyHtml: msg.htmlBody
       };
     }
-  );
+    // Delegate to the real helper for any messageId we haven't seeded.
+    // See above for why this matters under --randomize.
+    return realBuildSnapshot(accountId, messageId);
+  }
+);
+function configureSnapshotMessageFixtures(messages: Message[]) {
+  messagesByIdForSnapshot.clear();
+  for (const msg of messages) messagesByIdForSnapshot.set(msg.id, msg);
 }
 
 mock.module("@/lib/calendarEventEmailSnapshot.server", () => ({
@@ -78,7 +95,26 @@ mock.module("@/lib/calendarEventEmailSnapshot.server", () => ({
 
 const { processCalendarInviteForMessage } = await import("./calendarInviteProcessor");
 
-mock.restore();
+// Reset per-test mutable mock state. Under `--randomize`, tests within
+// this file run in arbitrary order, so any `mockResolvedValue(...)`
+// installed by one test must not leak into the next. `mockClear()`
+// only resets call history — it does NOT restore the implementation —
+// so we re-arm the defaults here.
+beforeEach(() => {
+  getCalendarEventByUid.mockClear();
+  getCalendarEventByUid.mockResolvedValue(null);
+  listCalendarInviteSourceMessagesByEventUid.mockClear();
+  listCalendarInviteSourceMessagesByEventUid.mockResolvedValue([]);
+  upsertCalendarEventByUid.mockClear();
+  upsertMessageCalendarInviteStates.mockClear();
+  markMessageCalendarInviteStatesProcessed.mockClear();
+  rescheduleCalendarRemindersByEventUid.mockClear();
+  ensureCalendarReminder.mockClear();
+  cancelCalendarEventByUid.mockClear();
+  cancelCalendarRemindersByEventUid.mockClear();
+  buildCalendarEventEmailSnapshotFromMessageId.mockClear();
+  messagesByIdForSnapshot.clear();
+});
 
 function makeIcs(lines: string[]) {
   return ["BEGIN:VCALENDAR", ...lines, "END:VCALENDAR"].join("\r\n");
@@ -86,16 +122,6 @@ function makeIcs(lines: string[]) {
 
 describe("processCalendarInviteForMessage", () => {
   test("hard deletes a whole-event cancellation without rebuilding the event", async () => {
-    getCalendarEventByUid.mockClear();
-    listCalendarInviteSourceMessagesByEventUid.mockClear();
-    upsertCalendarEventByUid.mockClear();
-    upsertMessageCalendarInviteStates.mockClear();
-    markMessageCalendarInviteStatesProcessed.mockClear();
-    rescheduleCalendarRemindersByEventUid.mockClear();
-    ensureCalendarReminder.mockClear();
-    cancelCalendarEventByUid.mockClear();
-    cancelCalendarRemindersByEventUid.mockClear();
-
     const cancelIcs = makeIcs([
       "METHOD:CANCEL",
       "BEGIN:VEVENT",
@@ -147,16 +173,6 @@ describe("processCalendarInviteForMessage", () => {
   });
 
   test("hydrates a missing series from an older request before applying an instance cancellation", async () => {
-    getCalendarEventByUid.mockClear();
-    listCalendarInviteSourceMessagesByEventUid.mockClear();
-    upsertCalendarEventByUid.mockClear();
-    upsertMessageCalendarInviteStates.mockClear();
-    markMessageCalendarInviteStatesProcessed.mockClear();
-    rescheduleCalendarRemindersByEventUid.mockClear();
-    ensureCalendarReminder.mockClear();
-    cancelCalendarEventByUid.mockClear();
-    cancelCalendarRemindersByEventUid.mockClear();
-
     const baseRequestIcs = makeIcs([
       "METHOD:REQUEST",
       "BEGIN:VEVENT",
@@ -235,17 +251,6 @@ describe("processCalendarInviteForMessage", () => {
   });
 
   test("captures a per-occurrence snapshot when a REQUEST reschedules one occurrence", async () => {
-    getCalendarEventByUid.mockClear();
-    listCalendarInviteSourceMessagesByEventUid.mockClear();
-    upsertCalendarEventByUid.mockClear();
-    upsertMessageCalendarInviteStates.mockClear();
-    markMessageCalendarInviteStatesProcessed.mockClear();
-    rescheduleCalendarRemindersByEventUid.mockClear();
-    ensureCalendarReminder.mockClear();
-    cancelCalendarEventByUid.mockClear();
-    cancelCalendarRemindersByEventUid.mockClear();
-    buildCalendarEventEmailSnapshotFromMessageId.mockClear();
-
     // Existing series event — 10am every Monday starting Jun 1.
     const existingSeries: CalendarEvent = {
       id: "cal-existing",
@@ -346,18 +351,6 @@ describe("processCalendarInviteForMessage", () => {
   });
 
   test("skips occurrenceSnapshots for a plain series REQUEST (no RECURRENCE-ID)", async () => {
-    getCalendarEventByUid.mockClear();
-    listCalendarInviteSourceMessagesByEventUid.mockClear();
-    upsertCalendarEventByUid.mockClear();
-    upsertMessageCalendarInviteStates.mockClear();
-    markMessageCalendarInviteStatesProcessed.mockClear();
-    rescheduleCalendarRemindersByEventUid.mockClear();
-    ensureCalendarReminder.mockClear();
-    cancelCalendarEventByUid.mockClear();
-    cancelCalendarRemindersByEventUid.mockClear();
-    buildCalendarEventEmailSnapshotFromMessageId.mockClear();
-
-    getCalendarEventByUid.mockResolvedValue(null);
     const seriesDate = Date.UTC(2026, 4, 20, 9, 0, 0);
     configureSnapshotMessageFixtures([
       {
