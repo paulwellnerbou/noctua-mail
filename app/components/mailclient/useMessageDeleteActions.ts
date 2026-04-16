@@ -19,6 +19,10 @@ import {
   getMessageSubjectForNotice,
   pruneDetachedCrossFolderThreadMessages
 } from "./utils/messageMutation";
+import {
+  findTrashFolderIdForAccount,
+  isPermanentDeleteTarget as isPermanentDeleteTargetPure
+} from "./utils/trashFolder";
 
 const getThreadKey = (item: Message) => item.threadId ?? item.messageId ?? item.id;
 
@@ -127,10 +131,8 @@ export function useMessageDeleteActions({
   markDeleteReconcileSuppression
 }: UseMessageDeleteActionsOptions) {
   const isPermanentDeleteTarget = useCallback(
-    (target: Message, trashFolderId: string | null) => {
-      if (trashFolderId && target.folderId === trashFolderId) return true;
-      return isTrashFolder(target.folderId);
-    },
+    (target: Message, trashFolderId: string | null) =>
+      isPermanentDeleteTargetPure(target, trashFolderId, isTrashFolder),
     [isTrashFolder]
   );
 
@@ -139,11 +141,10 @@ export function useMessageDeleteActions({
     lastSelectedIdRef.current = null;
   }, [lastSelectedIdRef, selectionStore]);
 
-  const findTrashFolderId = useCallback(() => {
-    const candidates = folders.filter((folder) => folder.accountId === activeAccountId);
-    const bySpecialUse = candidates.find((folder) => (folder.specialUse ?? "").toLowerCase() === "\\trash");
-    return bySpecialUse?.id ?? null;
-  }, [activeAccountId, folders]);
+  const findTrashFolderId = useCallback(
+    () => findTrashFolderIdForAccount(folders, activeAccountId),
+    [activeAccountId, folders]
+  );
 
   const buildDeleteConfirmState = useCallback(
     async (
