@@ -41,9 +41,20 @@ import { unified } from "unified";
  *   switch pastes into the editor. `markdownToEmailHtml` wraps it and inlines
  *   `@uiw/react-markdown-preview` CSS so outbound mail renders consistently
  *   in external clients. Both sit on top of the same remark/rehype pipeline
- *   configured below, which mirrors `react-markdown`'s configuration in the
- *   display path — so compose preview, sent mail, and received mail now all
- *   go through the same parser stack (P2-13).
+ *   configured below, which shares its core plugins (`remark-gfm` +
+ *   `remark-breaks`) with the display path's `react-markdown` configuration
+ *   in `MarkdownPanel.tsx` — so compose preview, sent mail, and received
+ *   mail run through the same parser stack (P2-13, replacing the previous
+ *   `marked`-based send path).
+ *
+ *   Intentional deltas from the display path:
+ *     - The send path enables `rehype-raw` so authors can embed raw HTML in
+ *       markdown source and have it reach the recipient as HTML.
+ *       `MarkdownPanel` deliberately does not, since received-mail HTML is
+ *       untrusted and the display layer prefers escaping over rendering.
+ *     - `MarkdownPanel` preprocesses input via `normalizeMarkdownBody` (fixes
+ *       a handful of malformed-link patterns common in scraped/forwarded
+ *       mail); the send path trusts its own output and skips that step.
  */
 
 /**
