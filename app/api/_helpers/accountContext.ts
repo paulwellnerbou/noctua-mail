@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireSessionAccountOr403, requireSessionOr401, type SessionData } from "@/lib/auth";
-import { getAccounts } from "@/lib/serverDb";
+import { getAccountById } from "@/lib/serverDb";
 import type { Account } from "@/lib/data";
 import { errorResponse } from "./response";
 
@@ -49,8 +49,7 @@ export async function requireAccountContext(
   if (session instanceof NextResponse) return session;
   const access = await requireSessionAccountOr403(session, accountId);
   if (access instanceof NextResponse) return access;
-  const accounts = await getAccounts();
-  const account = accounts.find((item) => item.id === accountId);
+  const account = await getAccountById(accountId);
   if (!account) {
     return errorResponse("Account not found", 404);
   }

@@ -20,7 +20,7 @@ type ReloginPayload = {
 export async function POST(request: Request, { params }: AccountRouteParams) {
   const accountContext = await requireAccountContextFromParams(request, params);
   if (accountContext instanceof NextResponse) return accountContext;
-  const { session, accountId, account: currentAccount } = accountContext;
+  const { session, accountId, account: currentAccount, clientId } = accountContext;
 
   const payload = (await request.json().catch(() => null)) as ReloginPayload | null;
   const imapUser = payload?.imap?.user?.trim() ?? "";
@@ -36,7 +36,6 @@ export async function POST(request: Request, { params }: AccountRouteParams) {
       user: imapUser
     }
   };
-  const clientId = request.headers.get("x-noctua-client") ?? undefined;
   const verified = await verifyImapCredentials(verifiedAccount, imapPassword, clientId);
   if (!verified) {
     return errorResponse("Invalid IMAP credentials", 401);
