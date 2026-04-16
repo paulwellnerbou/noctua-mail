@@ -3,6 +3,7 @@
 import type React from "react";
 import { useCallback, useEffect } from "react";
 import {
+  buildAccountApiPath,
   buildAccountFolderDeletePath,
   buildAccountFolderRenamePath,
   buildAccountFoldersCreatePath,
@@ -289,7 +290,7 @@ export function useAccountController({
     const exists = accounts.find((a) => a.id === account.id);
     const isNew = !exists;
     const accountToSave = isNew ? ({ ...account, id: undefined } as Record<string, unknown>) : account;
-    const endpoint = exists ? `/api/accounts/${account.id}` : "/api/accounts";
+    const endpoint = exists ? buildAccountApiPath(account.id, "") : "/api/accounts";
     const method = exists ? "PUT" : "POST";
     const saveResult = await apiFetch(endpoint, {
       method,
@@ -336,7 +337,7 @@ export function useAccountController({
     const exists = accounts.find((a) => a.id === account.id);
     if (!exists) return;
     const caldav = account.caldav?.url?.trim() ? account.caldav : null;
-    const res = await apiFetch(`/api/accounts/${account.id}`, {
+    const res = await apiFetch(buildAccountApiPath(account.id, ""), {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -360,7 +361,7 @@ export function useAccountController({
   };
 
   const deleteAccount = async (accountId: string) => {
-    const res = await apiFetch(`/api/accounts/${accountId}`, { method: "DELETE" });
+    const res = await apiFetch(buildAccountApiPath(accountId, ""), { method: "DELETE" });
     if (!res.ok) {
       reportError(await readErrorMessage(res));
       return;

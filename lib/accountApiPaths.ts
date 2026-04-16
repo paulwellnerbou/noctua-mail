@@ -5,7 +5,11 @@ function appendQuery(path: string, query?: URLSearchParams | string | null) {
 }
 
 export function buildAccountApiPath(accountId: string, suffix: string) {
-  const normalizedSuffix = suffix.startsWith("/") ? suffix : `/${suffix}`;
+  const normalizedSuffix = suffix
+    ? suffix.startsWith("/")
+      ? suffix
+      : `/${suffix}`
+    : "";
   return `/api/accounts/${encodeURIComponent(accountId)}${normalizedSuffix}`;
 }
 
