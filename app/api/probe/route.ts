@@ -3,6 +3,13 @@ import net from "net";
 import tls from "tls";
 import { createRateLimiter, getRequestIp } from "@/lib/rateLimit";
 
+/**
+ * POST /api/probe — tests whether a user-supplied IMAP/SMTP host:port
+ * supports implicit TLS and/or STARTTLS. Invoked from the "Test connection"
+ * button in `AccountSettingsModal.tsx` during account setup. Rate-limited
+ * per-IP because it does arbitrary outbound TCP to user-supplied hosts.
+ */
+
 const TIMEOUT_MS = 3500;
 
 const probeLimiter = createRateLimiter({ windowMs: 60_000, max: 10 });
