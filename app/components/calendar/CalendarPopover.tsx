@@ -23,9 +23,13 @@ type Props = {
 };
 
 type Position = { x: number; y: number };
+type Size = { width: number; height: number };
 
 const PANEL_WIDTH = 860;
 const PANEL_HEIGHT = 660;
+const MIN_WIDTH = 480;
+const MIN_HEIGHT = 360;
+const VIEWPORT_MARGIN = 16;
 
 function getInitialPosition(): Position {
   if (typeof window === "undefined") return { x: 100, y: 100 };
@@ -49,7 +53,9 @@ export default function CalendarPopover({
 }: Props) {
   const calendarRef = useRef<FullCalendar>(null);
   const [position, setPosition] = useState<Position>(getInitialPosition);
+  const [size, setSize] = useState<Size>({ width: PANEL_WIDTH, height: PANEL_HEIGHT });
   const dragStateRef = useRef({ active: false, startX: 0, startY: 0, posX: 0, posY: 0 });
+  const resizeStateRef = useRef({ active: false, startX: 0, startY: 0, startWidth: 0, startHeight: 0 });
 
   // Drag handling
   const handleDragStart = (e: React.MouseEvent<HTMLDivElement>) => {
@@ -78,6 +84,35 @@ export default function CalendarPopover({
     document.addEventListener("mouseup", onUp);
   };
 
+  // Resize handling (bottom-right grip)
+  const handleResizeStart = (e: React.MouseEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const rs = resizeStateRef.current;
+    rs.active = true;
+    rs.startX = e.clientX;
+    rs.startY = e.clientY;
+    rs.startWidth = size.width;
+    rs.startHeight = size.height;
+
+    const onMove = (ev: MouseEvent) => {
+      if (!rs.active) return;
+      const maxW = Math.max(MIN_WIDTH, window.innerWidth - VIEWPORT_MARGIN);
+      const maxH = Math.max(MIN_HEIGHT, window.innerHeight - VIEWPORT_MARGIN);
+      setSize({
+        width: Math.min(maxW, Math.max(MIN_WIDTH, rs.startWidth + (ev.clientX - rs.startX))),
+        height: Math.min(maxH, Math.max(MIN_HEIGHT, rs.startHeight + (ev.clientY - rs.startY)))
+      });
+    };
+    const onUp = () => {
+      rs.active = false;
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+    };
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+  };
+
   const handleRecomputeRelations = async () => {
     if (!onRecomputeRelations) return;
     await onRecomputeRelations();
@@ -97,7 +132,7 @@ export default function CalendarPopover({
   const panel = open ? (
     <div
       className={styles.floatingPanel}
-      style={{ left: position.x, top: position.y }}
+      style={{ left: position.x, top: position.y, width: size.width, height: size.height }}
     >
       <Flex align="center" justify="between" className={styles.header} onMouseDown={handleDragStart}>
         <Flex align="center" gap="2">
@@ -147,6 +182,13 @@ export default function CalendarPopover({
           } : undefined}
         />
       </div>
+
+      <div
+        className={styles.resizeHandle}
+        onMouseDown={handleResizeStart}
+        aria-hidden
+        title="Resize"
+      />
     </div>
   ) : null;
 
