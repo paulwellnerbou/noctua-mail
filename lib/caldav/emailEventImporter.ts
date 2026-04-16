@@ -5,6 +5,7 @@ import {
 } from "@/lib/calendarParticipation";
 import { resolveEmailCalendarEventStatus } from "@/lib/calendarEventStatus";
 import { cancelCalendarEventByUid, upsertCalendarEventByUid } from "@/lib/db";
+import { buildCalendarEventEmailSnapshotFromMessageId } from "@/lib/calendarEventEmailSnapshot";
 
 export async function importEmailCalendarEvents(
   accountId: string,
@@ -54,6 +55,9 @@ export async function importEmailCalendarEvents(
             )
           : undefined;
 
+      // Capture the source email snapshot (Topic 2) alongside the event.
+      const snapshot = await buildCalendarEventEmailSnapshotFromMessageId(accountId, messageId);
+
       await upsertCalendarEventByUid(accountId, {
         eventUid: group.eventUid,
         summary: base.summary?.trim() || "Untitled Event",
@@ -76,7 +80,8 @@ export async function importEmailCalendarEvents(
         replyRequested: participation.replyRequested,
         sourceType: "email",
         messageId,
-        rawIcs: icsSource
+        rawIcs: icsSource,
+        ...(snapshot ?? {})
       });
     }
   } catch (err) {

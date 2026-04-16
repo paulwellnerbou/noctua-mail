@@ -10,6 +10,7 @@ import {
   upsertCalendarEventByUid,
   upsertMessageCalendarInviteStates
 } from "@/lib/db";
+import { buildCalendarEventEmailSnapshotFromMessageId } from "@/lib/calendarEventEmailSnapshot";
 import {
   collectCalendarInviteMutationGroups,
   inferCalendarInviteActionType,
@@ -147,7 +148,14 @@ async function hydrateExistingEventFromPriorInviteSource(
       accountEmail
     );
     if (!mergedEvent) continue;
-    return upsertCalendarEventByUid(accountId, mergedEvent);
+    const snapshot = await buildCalendarEventEmailSnapshotFromMessageId(
+      accountId,
+      candidate.messageId
+    );
+    return upsertCalendarEventByUid(accountId, {
+      ...mergedEvent,
+      ...(snapshot ?? {})
+    });
   }
   return null;
 }
@@ -249,7 +257,28 @@ export async function processCalendarInviteForMessage({
         continue;
       }
 
-      const savedEvent = await upsertCalendarEventByUid(accountId, mergedEvent);
+      // Capture the source email snapshot (Topic 2) before upsert. Preserve
+      // the existing snapshot when the email is no longer locally available
+      // (processing a reprocessed invite whose original message was purged).
+      const snapshot = await buildCalendarEventEmailSnapshotFromMessageId(
+        accountId,
+        mergedEvent.messageId ?? messageId
+      );
+      const snapshotFields: Partial<CalendarEvent> = snapshot ?? {
+        sourceSubject: existingEvent?.sourceSubject,
+        sourceFromAddr: existingEvent?.sourceFromAddr,
+        sourceToAddr: existingEvent?.sourceToAddr,
+        sourceCcAddr: existingEvent?.sourceCcAddr,
+        sourceBccAddr: existingEvent?.sourceBccAddr,
+        sourceDateMs: existingEvent?.sourceDateMs,
+        sourceBodyText: existingEvent?.sourceBodyText,
+        sourceBodyHtml: existingEvent?.sourceBodyHtml
+      };
+
+      const savedEvent = await upsertCalendarEventByUid(accountId, {
+        ...mergedEvent,
+        ...snapshotFields
+      });
       await rescheduleCalendarRemindersByEventUid(accountId, group.eventUid, {
         eventTitle: savedEvent.summary,
         eventLocation: savedEvent.location,
