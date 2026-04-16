@@ -19,6 +19,7 @@ import type {
 } from "@/lib/data";
 import { formatCalendarParticipationLabel } from "@/lib/calendarParticipation";
 import { formatCalendarTimeZoneShortLabel } from "@/lib/calendarTimezones";
+import { selectCalendarEventEmailSnapshot } from "@/lib/calendarEventEmailSnapshot";
 import {
   enforceSafeLinks,
   linkifyHtmlTextNodes,
@@ -861,7 +862,10 @@ export default function EventDetailView({
 
       {eventSnapshot && (
         <CalendarEventEmailSnapshot
-          snapshot={eventSnapshot}
+          // Prefer the per-occurrence snapshot (populated by occurrence-only
+          // invite updates) when viewing a specific occurrence; otherwise
+          // fall back to the series-level snapshot on the event row.
+          snapshot={selectCalendarEventEmailSnapshot(eventSnapshot, resolvedStartMs)}
           dateFormat={dateFormat}
         />
       )}

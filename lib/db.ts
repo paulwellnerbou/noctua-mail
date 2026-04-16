@@ -15,6 +15,7 @@ import type {
   AccountSettings,
   Attachment,
   CalendarEvent,
+  CalendarEventEmailSnapshotFields,
   CalendarParticipationScope,
   CalendarParticipationStatus,
   CalendarEventSourceType,
@@ -148,7 +149,8 @@ const CALENDAR_EVENT_RUNTIME_SIGNATURE = [
   "emailStatusBackfillV1",
   "emailParticipationBackfillV1",
   "sourceEmailSnapshotColumnsV1",
-  "sourceEmailSnapshotBackfillV1"
+  "sourceEmailSnapshotBackfillV1",
+  "occurrenceSnapshotsColumnV1"
 ].join("|");
 
 function hydrateAttachment(
@@ -408,30 +410,46 @@ function ensureCalendarEventOptionalColumns(db: any) {
   if (!calendarEventColumns.has("sourceBodyHtml")) {
     db.prepare(`ALTER TABLE calendar_events ADD COLUMN sourceBodyHtml TEXT`).run();
   }
+  // Per-occurrence source email snapshots (Topic 2, Option C extension).
+  // Stored as JSON keyed by occurrence startAtMs, mirroring occurrenceMessageIds.
+  if (!calendarEventColumns.has("occurrenceSnapshots")) {
+    db.prepare(`ALTER TABLE calendar_events ADD COLUMN occurrenceSnapshots TEXT`).run();
+  }
 }
 
 // MIGRATION-CLEANUP:
 // This back-fill is a ONE-OFF migration. It populates the new source email
 // snapshot columns on `calendar_events` rows created before the Topic 2
-// feature landed (Calendar-Improvements.md, Apr 2026). It executes exactly
-// once per account DB, gated by CALENDAR_EVENT_RUNTIME_SIGNATURE
-// (sourceEmailSnapshotBackfillV1). After a reasonable adoption window — once
-// every running deployment has passed this runtime signature at least once —
-// both this function and its call site in `ensureCalendarEventRuntimeData`
-// should be deleted. See TODO/Migrations-To-Remove.md for the ledger entry.
+// feature landed (Calendar-Improvements.md, Apr 2026). It handles BOTH
+// the series-level `source*` columns (from `messageId`) and the
+// per-occurrence `occurrenceSnapshots` JSON (from `occurrenceMessageIds`).
+// It executes exactly once per account DB, gated by
+// CALENDAR_EVENT_RUNTIME_SIGNATURE (sourceEmailSnapshotBackfillV1). After a
+// reasonable adoption window — once every running deployment has passed
+// this runtime signature at least once — both this function and its call
+// site in `ensureCalendarEventRuntimeData` should be deleted. See
+// TODO/Migrations-To-Remove.md for the ledger entry.
 function backfillCalendarEventSourceSnapshots(db: any) {
   const calendarEventColumns = getDbTableColumns(db, "calendar_events");
   if (calendarEventColumns.size === 0) return;
   if (
     !calendarEventColumns.has("sourceSubject") ||
     !calendarEventColumns.has("sourceFromAddr") ||
-    !calendarEventColumns.has("sourceBodyText")
+    !calendarEventColumns.has("sourceBodyText") ||
+    !calendarEventColumns.has("occurrenceSnapshots")
   ) {
     return;
   }
 
-  // Only touch rows that have a messageId but no snapshot yet.
-  const rows = db
+  const selectMessage = db.prepare(
+    `SELECT subject, fromAddr, toAddr, ccAddr, bccAddr, dateValue, body, htmlBody
+     FROM messages
+     WHERE id = ?`
+  );
+
+  // --- Step 1: back-fill series-level snapshot columns ---
+  // Only touch rows that have a messageId but no series snapshot yet.
+  const seriesRows = db
     .prepare(
       `SELECT id, messageId
        FROM calendar_events
@@ -447,14 +465,8 @@ function backfillCalendarEventSourceSnapshots(db: any) {
          AND sourceBodyHtml IS NULL`
     )
     .all() as Array<{ id?: string | null; messageId?: string | null }>;
-  if (rows.length === 0) return;
 
-  const selectMessage = db.prepare(
-    `SELECT subject, fromAddr, toAddr, ccAddr, bccAddr, dateValue, body, htmlBody
-     FROM messages
-     WHERE id = ?`
-  );
-  const updateSnapshot = db.prepare(
+  const updateSeriesSnapshot = db.prepare(
     `UPDATE calendar_events
      SET sourceSubject = ?,
          sourceFromAddr = ?,
@@ -468,52 +480,106 @@ function backfillCalendarEventSourceSnapshots(db: any) {
      WHERE id = ?`
   );
 
-  const now = Date.now();
-  const runBackfill = db.transaction(
-    (
-      items: Array<{
-        id: string;
-        messageId: string;
-      }>
-    ) => {
-      items.forEach((item) => {
-        const msg = selectMessage.get(item.messageId) as
-          | {
-              subject?: string | null;
-              fromAddr?: string | null;
-              toAddr?: string | null;
-              ccAddr?: string | null;
-              bccAddr?: string | null;
-              dateValue?: number | null;
-              body?: string | null;
-              htmlBody?: string | null;
-            }
-          | undefined;
-        if (!msg) return; // message no longer present — leave columns null
-        updateSnapshot.run(
-          msg.subject ?? null,
-          msg.fromAddr ?? null,
-          msg.toAddr ?? null,
-          msg.ccAddr ?? null,
-          msg.bccAddr ?? null,
-          typeof msg.dateValue === "number" ? msg.dateValue : null,
-          msg.body ?? null,
-          msg.htmlBody ?? null,
-          now,
-          item.id
-        );
-      });
-    }
+  // --- Step 2: back-fill per-occurrence snapshots JSON ---
+  // Touch rows that have occurrenceMessageIds but no occurrenceSnapshots yet.
+  const occurrenceRows = db
+    .prepare(
+      `SELECT id, occurrenceMessageIds
+       FROM calendar_events
+       WHERE occurrenceMessageIds IS NOT NULL
+         AND TRIM(occurrenceMessageIds) <> ''
+         AND occurrenceSnapshots IS NULL`
+    )
+    .all() as Array<{ id?: string | null; occurrenceMessageIds?: string | null }>;
+
+  const updateOccurrenceSnapshots = db.prepare(
+    `UPDATE calendar_events
+     SET occurrenceSnapshots = ?,
+         updatedAtMs = ?
+     WHERE id = ?`
   );
 
-  const normalized = rows.flatMap((row) => {
-    const id = String(row.id ?? "").trim();
-    const messageId = String(row.messageId ?? "").trim();
-    if (!id || !messageId) return [];
-    return [{ id, messageId }];
+  if (seriesRows.length === 0 && occurrenceRows.length === 0) return;
+
+  const now = Date.now();
+
+  type MessageRow = {
+    subject?: string | null;
+    fromAddr?: string | null;
+    toAddr?: string | null;
+    ccAddr?: string | null;
+    bccAddr?: string | null;
+    dateValue?: number | null;
+    body?: string | null;
+    htmlBody?: string | null;
+  };
+
+  function messageRowToSnapshotJson(msg: MessageRow): Record<string, unknown> {
+    const snap: Record<string, unknown> = {};
+    if (msg.subject != null) snap.sourceSubject = msg.subject;
+    if (msg.fromAddr != null) snap.sourceFromAddr = msg.fromAddr;
+    if (msg.toAddr != null) snap.sourceToAddr = msg.toAddr;
+    if (msg.ccAddr != null) snap.sourceCcAddr = msg.ccAddr;
+    if (msg.bccAddr != null) snap.sourceBccAddr = msg.bccAddr;
+    if (typeof msg.dateValue === "number") snap.sourceDateMs = msg.dateValue;
+    if (msg.body != null) snap.sourceBodyText = msg.body;
+    if (msg.htmlBody != null) snap.sourceBodyHtml = msg.htmlBody;
+    return snap;
+  }
+
+  const runBackfill = db.transaction(() => {
+    // Step 1: series rows
+    for (const row of seriesRows) {
+      const id = String(row.id ?? "").trim();
+      const messageId = String(row.messageId ?? "").trim();
+      if (!id || !messageId) continue;
+      const msg = selectMessage.get(messageId) as MessageRow | undefined;
+      if (!msg) continue; // message no longer present — leave columns null
+      updateSeriesSnapshot.run(
+        msg.subject ?? null,
+        msg.fromAddr ?? null,
+        msg.toAddr ?? null,
+        msg.ccAddr ?? null,
+        msg.bccAddr ?? null,
+        typeof msg.dateValue === "number" ? msg.dateValue : null,
+        msg.body ?? null,
+        msg.htmlBody ?? null,
+        now,
+        id
+      );
+    }
+    // Step 2: per-occurrence snapshots
+    for (const row of occurrenceRows) {
+      const id = String(row.id ?? "").trim();
+      const raw = String(row.occurrenceMessageIds ?? "").trim();
+      if (!id || !raw) continue;
+      let parsed: Record<string, unknown> | null = null;
+      try {
+        const candidate = JSON.parse(raw);
+        if (candidate && typeof candidate === "object" && !Array.isArray(candidate)) {
+          parsed = candidate as Record<string, unknown>;
+        }
+      } catch {
+        parsed = null;
+      }
+      if (!parsed) continue;
+      const snapshots: Record<string, Record<string, unknown>> = {};
+      for (const [occKey, messageIdRaw] of Object.entries(parsed)) {
+        const messageId = typeof messageIdRaw === "string" ? messageIdRaw.trim() : "";
+        if (!messageId) continue;
+        const msg = selectMessage.get(messageId) as MessageRow | undefined;
+        if (!msg) continue; // source message purged — skip this occurrence
+        const snap = messageRowToSnapshotJson(msg);
+        if (Object.keys(snap).length > 0) {
+          snapshots[occKey] = snap;
+        }
+      }
+      if (Object.keys(snapshots).length === 0) continue;
+      updateOccurrenceSnapshots.run(JSON.stringify(snapshots), now, id);
+    }
   });
-  if (normalized.length === 0) return;
-  runBackfill(normalized);
+
+  runBackfill();
 }
 
 function backfillEmailCalendarEventStatuses(db: any) {
@@ -1309,6 +1375,7 @@ function initAccountSchema(db: any) {
       sourceDateMs INTEGER,
       sourceBodyText TEXT,
       sourceBodyHtml TEXT,
+      occurrenceSnapshots TEXT,
       createdAtMs INTEGER NOT NULL,
       updatedAtMs INTEGER NOT NULL,
       deletedAtMs INTEGER
@@ -8690,6 +8757,9 @@ function rowToCalendarEvent(row: any): CalendarEvent {
     sourceDateMs: typeof row.sourceDateMs === "number" ? row.sourceDateMs : undefined,
     sourceBodyText: row.sourceBodyText ?? undefined,
     sourceBodyHtml: row.sourceBodyHtml ?? undefined,
+    occurrenceSnapshots: safeParseJson<Record<string, CalendarEventEmailSnapshotFields>>(
+      row.occurrenceSnapshots
+    ),
     createdAtMs: row.createdAtMs,
     updatedAtMs: row.updatedAtMs,
     deletedAtMs: row.deletedAtMs ?? undefined
@@ -8933,9 +9003,9 @@ export async function upsertCalendarEvent(
       status, organizer, attendees, myPartstat, myPartstatUpdatedAtMs, myAttendeeEmail, replyRequested,
       remoteEtag, remoteHref, rawIcs, sourceType, messageId, occurrenceMessageIds,
       sourceSubject, sourceFromAddr, sourceToAddr, sourceCcAddr, sourceBccAddr,
-      sourceDateMs, sourceBodyText, sourceBodyHtml,
+      sourceDateMs, sourceBodyText, sourceBodyHtml, occurrenceSnapshots,
       createdAtMs, updatedAtMs, deletedAtMs
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     event.id,
     event.accountId,
@@ -8975,6 +9045,9 @@ export async function upsertCalendarEvent(
     typeof event.sourceDateMs === "number" ? event.sourceDateMs : null,
     event.sourceBodyText ?? null,
     event.sourceBodyHtml ?? null,
+    event.occurrenceSnapshots && Object.keys(event.occurrenceSnapshots).length > 0
+      ? JSON.stringify(event.occurrenceSnapshots)
+      : null,
     event.createdAtMs,
     event.updatedAtMs,
     event.deletedAtMs ?? null

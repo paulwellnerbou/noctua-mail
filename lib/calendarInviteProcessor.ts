@@ -275,9 +275,34 @@ export async function processCalendarInviteForMessage({
         sourceBodyHtml: existingEvent?.sourceBodyHtml
       };
 
+      // Per-occurrence snapshots (Option C): for each occurrence added or
+      // replaced by this ICS, capture a snapshot from the delivering email
+      // so the detail pane can show the occurrence-specific source email
+      // rather than the series invite. Existing entries are preserved.
+      const occurrenceSnapshotsUpdate: Record<
+        string,
+        NonNullable<CalendarEvent["occurrenceSnapshots"]>[string]
+      > = { ...(existingEvent?.occurrenceSnapshots ?? {}) };
+      if (group.instanceOccurrences.length > 0) {
+        const occurrenceSnapshot = await buildCalendarEventEmailSnapshotFromMessageId(
+          accountId,
+          messageId
+        );
+        if (occurrenceSnapshot) {
+          for (const occ of group.instanceOccurrences) {
+            occurrenceSnapshotsUpdate[String(occ.startAtMs)] = occurrenceSnapshot;
+          }
+        }
+      }
+      const occurrenceSnapshotsField =
+        Object.keys(occurrenceSnapshotsUpdate).length > 0
+          ? occurrenceSnapshotsUpdate
+          : undefined;
+
       const savedEvent = await upsertCalendarEventByUid(accountId, {
         ...mergedEvent,
-        ...snapshotFields
+        ...snapshotFields,
+        occurrenceSnapshots: occurrenceSnapshotsField
       });
       await rescheduleCalendarRemindersByEventUid(accountId, group.eventUid, {
         eventTitle: savedEvent.summary,

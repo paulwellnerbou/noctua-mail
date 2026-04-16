@@ -3,7 +3,9 @@ import { describe, expect, test } from "bun:test";
 import type { Account, CalendarEvent, Folder, Message } from "./data";
 import {
   EMPTY_CALENDAR_EVENT_EMAIL_SNAPSHOT,
-  hasCalendarEventEmailSnapshot
+  extractSeriesCalendarEventEmailSnapshot,
+  hasCalendarEventEmailSnapshot,
+  selectCalendarEventEmailSnapshot
 } from "./calendarEventEmailSnapshot";
 import { dbModulePromise } from "./testDbHarness";
 
@@ -257,5 +259,182 @@ describe("upsertCalendarEvent with snapshot columns", () => {
     expect(fetched?.sourceFromAddr).toBeUndefined();
     expect(fetched?.sourceDateMs).toBeUndefined();
     expect(fetched?.sourceBodyHtml).toBeUndefined();
+  });
+
+  test("round-trips the occurrenceSnapshots JSON column", async () => {
+    const accountId = uniqueAccountId("acc-cal-occ-snap-roundtrip");
+    await upsertAccount(buildAccount(accountId));
+    const occStartA = Date.UTC(2026, 5, 15, 14, 0, 0);
+    const occStartB = Date.UTC(2026, 5, 22, 14, 0, 0);
+    const event = buildEvent(accountId, {
+      messageId: "msg-series",
+      // Series snapshot intentionally left empty — we want to prove the
+      // per-occurrence JSON survives without leaking into those columns.
+      occurrenceMessageIds: {
+        [String(occStartA)]: "msg-occ-a",
+        [String(occStartB)]: "msg-occ-b"
+      },
+      occurrenceSnapshots: {
+        [String(occStartA)]: {
+          sourceSubject: "Updated: Team sync (A)",
+          sourceFromAddr: "alice@example.test",
+          sourceBodyText: "moved to 4pm"
+        },
+        [String(occStartB)]: {
+          sourceSubject: "Updated: Team sync (B)",
+          sourceFromAddr: "alice@example.test",
+          sourceBodyHtml: "<p>moved to 4pm</p>"
+        }
+      }
+    });
+
+    await upsertCalendarEvent(accountId, event);
+    const fetched = await getCalendarEventById(accountId, event.id);
+    expect(fetched?.occurrenceSnapshots).toBeDefined();
+    expect(fetched?.occurrenceSnapshots?.[String(occStartA)]?.sourceSubject).toBe(
+      "Updated: Team sync (A)"
+    );
+    expect(fetched?.occurrenceSnapshots?.[String(occStartA)]?.sourceBodyText).toBe("moved to 4pm");
+    expect(fetched?.occurrenceSnapshots?.[String(occStartB)]?.sourceSubject).toBe(
+      "Updated: Team sync (B)"
+    );
+    expect(fetched?.occurrenceSnapshots?.[String(occStartB)]?.sourceBodyHtml).toBe(
+      "<p>moved to 4pm</p>"
+    );
+    // Series columns were never set — per-occurrence data stays isolated.
+    expect(fetched?.sourceSubject).toBeUndefined();
+    expect(fetched?.sourceBodyText).toBeUndefined();
+  });
+
+  test("stores null when occurrenceSnapshots is empty or undefined", async () => {
+    const accountId = uniqueAccountId("acc-cal-occ-snap-empty");
+    await upsertAccount(buildAccount(accountId));
+    const eventEmpty = buildEvent(accountId, { occurrenceSnapshots: {} });
+    await upsertCalendarEvent(accountId, eventEmpty);
+    const fetchedEmpty = await getCalendarEventById(accountId, eventEmpty.id);
+    expect(fetchedEmpty?.occurrenceSnapshots).toBeUndefined();
+
+    const eventUndef = buildEvent(accountId);
+    await upsertCalendarEvent(accountId, eventUndef);
+    const fetchedUndef = await getCalendarEventById(accountId, eventUndef.id);
+    expect(fetchedUndef?.occurrenceSnapshots).toBeUndefined();
+  });
+});
+
+describe("extractSeriesCalendarEventEmailSnapshot", () => {
+  test("copies the eight source-email columns verbatim", () => {
+    const dateMs = Date.UTC(2026, 3, 14, 9, 15, 0);
+    const snapshot = extractSeriesCalendarEventEmailSnapshot({
+      sourceSubject: "Invite: Kickoff",
+      sourceFromAddr: "alice@example.test",
+      sourceToAddr: "owner@example.test",
+      sourceCcAddr: "bob@example.test",
+      sourceBccAddr: "carol@example.test",
+      sourceDateMs: dateMs,
+      sourceBodyText: "plain body",
+      sourceBodyHtml: "<p>html body</p>"
+    });
+    expect(snapshot).toEqual({
+      sourceSubject: "Invite: Kickoff",
+      sourceFromAddr: "alice@example.test",
+      sourceToAddr: "owner@example.test",
+      sourceCcAddr: "bob@example.test",
+      sourceBccAddr: "carol@example.test",
+      sourceDateMs: dateMs,
+      sourceBodyText: "plain body",
+      sourceBodyHtml: "<p>html body</p>"
+    });
+  });
+
+  test("propagates undefined for absent fields without inventing values", () => {
+    const snapshot = extractSeriesCalendarEventEmailSnapshot({
+      sourceSubject: "Only a subject"
+    });
+    expect(snapshot.sourceSubject).toBe("Only a subject");
+    expect(snapshot.sourceFromAddr).toBeUndefined();
+    expect(snapshot.sourceBodyHtml).toBeUndefined();
+    expect(snapshot.sourceDateMs).toBeUndefined();
+  });
+});
+
+describe("selectCalendarEventEmailSnapshot", () => {
+  const occStart = Date.UTC(2026, 5, 15, 14, 0, 0);
+  const baseSeries = {
+    sourceSubject: "Series: Weekly sync",
+    sourceFromAddr: "alice@example.test",
+    sourceBodyText: "original series body"
+  } as const;
+
+  test("returns the series snapshot when no occurrence start is supplied", () => {
+    const snapshot = selectCalendarEventEmailSnapshot({
+      ...baseSeries,
+      occurrenceSnapshots: {
+        [String(occStart)]: { sourceSubject: "Updated occurrence" }
+      }
+    });
+    expect(snapshot.sourceSubject).toBe("Series: Weekly sync");
+    expect(snapshot.sourceBodyText).toBe("original series body");
+  });
+
+  test("returns the per-occurrence snapshot when the key matches", () => {
+    const snapshot = selectCalendarEventEmailSnapshot(
+      {
+        ...baseSeries,
+        occurrenceSnapshots: {
+          [String(occStart)]: {
+            sourceSubject: "Updated: Team sync",
+            sourceFromAddr: "alice@example.test",
+            sourceBodyText: "moved to 4pm"
+          }
+        }
+      },
+      occStart
+    );
+    expect(snapshot.sourceSubject).toBe("Updated: Team sync");
+    expect(snapshot.sourceBodyText).toBe("moved to 4pm");
+  });
+
+  test("falls back to series snapshot when the occurrence has no entry", () => {
+    const snapshot = selectCalendarEventEmailSnapshot(
+      {
+        ...baseSeries,
+        occurrenceSnapshots: {
+          [String(occStart + 7 * 86_400_000)]: { sourceSubject: "different occ" }
+        }
+      },
+      occStart
+    );
+    expect(snapshot.sourceSubject).toBe("Series: Weekly sync");
+  });
+
+  test("falls back to series snapshot when the per-occurrence entry is empty", () => {
+    const snapshot = selectCalendarEventEmailSnapshot(
+      {
+        ...baseSeries,
+        occurrenceSnapshots: {
+          [String(occStart)]: { sourceSubject: "", sourceBodyHtml: "  " }
+        }
+      },
+      occStart
+    );
+    expect(snapshot.sourceSubject).toBe("Series: Weekly sync");
+  });
+
+  test("ignores occurrenceSnapshots entirely when event has no such map", () => {
+    const snapshot = selectCalendarEventEmailSnapshot(baseSeries, occStart);
+    expect(snapshot.sourceSubject).toBe("Series: Weekly sync");
+  });
+
+  test("ignores non-finite occurrence start values", () => {
+    const snapshot = selectCalendarEventEmailSnapshot(
+      {
+        ...baseSeries,
+        occurrenceSnapshots: {
+          [String(occStart)]: { sourceSubject: "Updated" }
+        }
+      },
+      Number.NaN
+    );
+    expect(snapshot.sourceSubject).toBe("Series: Weekly sync");
   });
 });
