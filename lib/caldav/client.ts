@@ -1,6 +1,10 @@
 import { createDAVClient, type DAVCalendar, type DAVObject } from "tsdav";
 import type { CaldavConfig } from "@/lib/data";
-import { assertPublicUrl, type LookupFn } from "@/lib/net/urlSafety";
+import {
+  assertPublicUrl,
+  type AssertPublicUrlRejectionReason,
+  type LookupFn
+} from "@/lib/net/urlSafety";
 
 export type CaldavClient = Awaited<ReturnType<typeof createDAVClient>>;
 
@@ -10,19 +14,20 @@ export type CaldavClient = Awaited<ReturnType<typeof createDAVClient>>;
  * (API routes, settings UI) can surface a specific message.
  */
 export class CaldavUrlRejectedError extends Error {
-  readonly reason: string;
-  constructor(reason: string) {
+  readonly reason: AssertPublicUrlRejectionReason;
+  constructor(reason: AssertPublicUrlRejectionReason) {
     super(`CalDAV server URL rejected (${reason})`);
     this.name = "CaldavUrlRejectedError";
     this.reason = reason;
   }
 }
 
-// CalDAV allows both http:// and https:// — self-hosted servers (Radicale,
-// Baïkal, Nextcloud behind a reverse proxy on a trusted LAN, etc.) are
-// commonly plain HTTP. The private-IP / DNS guards in `assertPublicUrl`
-// still apply, so `http://localhost/` and `http://169.254.169.254/` are
-// rejected regardless.
+// CalDAV allows both http:// and https:// — some self-hosted servers
+// (Radicale, Baïkal, Nextcloud behind a reverse proxy, etc.) are exposed
+// over plain HTTP. Allowing `http:` here does not bypass `assertPublicUrl`:
+// private / LAN / link-local hosts are still rejected, so URLs like
+// `http://localhost/`, `http://192.168.1.10/`, and `http://169.254.169.254/`
+// are blocked regardless.
 const CALDAV_ALLOWED_PROTOCOLS = ["http:", "https:"] as const;
 
 /**
@@ -56,10 +61,13 @@ export async function createCaldavClient(
   config: CaldavConfig,
   options?: { lookup?: LookupFn }
 ): Promise<CaldavClient> {
-  // SSRF guard — `config.url` is user-controlled account settings.
-  await assertSafeCaldavUrl(config.url, options);
+  // SSRF guard — `config.url` is user-controlled account settings. Use
+  // the parsed/validated URL returned by the guard rather than the raw
+  // string so tsdav doesn't re-parse the untrusted input (avoids any
+  // canonicalization discrepancy between parsers).
+  const safeUrl = await assertSafeCaldavUrl(config.url, options);
   const client = await createDAVClient({
-    serverUrl: config.url,
+    serverUrl: safeUrl.toString(),
     credentials: { username: config.user, password: config.password },
     authMethod: "Basic",
     defaultAccountType: "caldav"

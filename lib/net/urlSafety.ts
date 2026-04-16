@@ -96,18 +96,17 @@ function expandIpv6(addr: string): number[] | null {
   return groups;
 }
 
+export type AssertPublicUrlRejectionReason =
+  | "invalid-url"
+  | "unsupported-protocol"
+  | "empty-host"
+  | "private-ip"
+  | "no-dns-records"
+  | "dns-lookup-failed";
+
 export type AssertPublicUrlResult =
   | { ok: true; url: URL; resolved: string[] }
-  | {
-      ok: false;
-      reason:
-        | "invalid-url"
-        | "unsupported-protocol"
-        | "empty-host"
-        | "private-ip"
-        | "no-dns-records"
-        | "dns-lookup-failed";
-    };
+  | { ok: false; reason: AssertPublicUrlRejectionReason };
 
 /**
  * Parses `rawUrl`, enforces an allowed-protocol list (default `["https:"]`),
@@ -118,11 +117,12 @@ export type AssertPublicUrlResult =
  * from untrusted input (e.g. email headers, user-configured server URLs)
  * to mitigate SSRF.
  *
- * Pass `protocols: ["http:", "https:"]` for contexts where plain HTTP is
- * legitimately supported (e.g. self-hosted CalDAV servers behind a
- * reverse proxy or on a trusted LAN). The private-IP / DNS guards still
- * apply — a public-facing HTTP server is fine, but `http://127.0.0.1/`
- * is still rejected.
+ * Pass `protocols: ["http:", "https:"]` only for contexts where plain
+ * HTTP is legitimately supported for publicly reachable servers (for
+ * example, a self-hosted CalDAV server exposed through a public reverse
+ * proxy). The private-IP / DNS guards still apply, so the host must
+ * still resolve only to public IPs — `http://127.0.0.1/` and
+ * private / LAN hosts (RFC 1918, link-local, etc.) are still rejected.
  */
 export type LookupFn = (
   hostname: string

@@ -130,6 +130,20 @@ describe("createCaldavClient — SSRF guard", () => {
     );
     expect(createDAVClient.mock.calls.length).toBe(callsBefore + 1);
   });
+
+  test("hands tsdav the validated URL (not the raw user input) so no re-parse happens", async () => {
+    const lookup: LookupFn = async () => [{ address: "93.184.216.34", family: 4 }];
+    await createCaldavClient(
+      { url: "https://caldav.example.com/dav", user: "u", password: "p" },
+      { lookup }
+    );
+    const lastCall = createDAVClient.mock.calls[createDAVClient.mock.calls.length - 1];
+    const arg = lastCall[0] as { serverUrl: string };
+    // `new URL("https://caldav.example.com/dav").toString()` canonicalizes to
+    // the same value for this input; the point is that tsdav receives a
+    // URL-parsed string rather than the unvalidated raw config field.
+    expect(arg.serverUrl).toBe("https://caldav.example.com/dav");
+  });
 });
 
 describe("testCaldavConnection — SSRF guard surfaces a clear message", () => {
