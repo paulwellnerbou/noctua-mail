@@ -1,8 +1,10 @@
 /**
- * Post-process sanitized HTML to enforce safe link attributes:
- *   - `target="_blank"` so external links open in a new tab
+ * Post-process sanitized HTML to enforce safe link attributes on every
+ * `<a>` tag (regardless of whether the href is external, relative,
+ * `mailto:`, `#...`, etc. — the transform is applied uniformly):
+ *   - `target="_blank"` on anchors that do not already specify `target`
  *   - `rel="noopener noreferrer"` to prevent reverse-tabnabbing and
- *     referer leakage
+ *     referer leakage (merged with any existing `rel` tokens)
  *
  * Use this AFTER `sanitizeHtmlForDisplay`. The sanitizer allow-lists tags
  * and attributes but intentionally leaves `target`/`rel` policy up to the

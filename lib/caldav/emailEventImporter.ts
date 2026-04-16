@@ -17,6 +17,24 @@ export async function importEmailCalendarEvents(
   try {
     const groups = collectCalendarInviteMutationGroups(icsSource);
 
+    // Resolve the source email snapshot once — it only depends on
+    // (accountId, messageId) and is loop-invariant across all groups parsed
+    // from the same ICS attachment. A single ICS can contain multiple
+    // events (e.g. an exception event alongside a base event), and looking
+    // up the snapshot per-group would issue one redundant DB read per
+    // group. We still only need the snapshot when at least one group has
+    // a `baseEvent` (non-cancellation, non-instance-only), so defer the
+    // lookup until we know it will be used.
+    let snapshotPromise:
+      | Promise<Awaited<ReturnType<typeof buildCalendarEventEmailSnapshotFromMessageId>>>
+      | null = null;
+    const resolveSnapshot = () => {
+      if (!snapshotPromise) {
+        snapshotPromise = buildCalendarEventEmailSnapshotFromMessageId(accountId, messageId);
+      }
+      return snapshotPromise;
+    };
+
     for (const group of groups) {
       if (inferCalendarInviteActionType(group) === "cancellation") {
         await cancelCalendarEventByUid(accountId, group.eventUid);
@@ -56,7 +74,9 @@ export async function importEmailCalendarEvents(
           : undefined;
 
       // Capture the source email snapshot (Topic 2) alongside the event.
-      const snapshot = await buildCalendarEventEmailSnapshotFromMessageId(accountId, messageId);
+      // The snapshot is identical for every group from this ICS, so we
+      // cache the resolver and reuse the same Promise across groups.
+      const snapshot = await resolveSnapshot();
 
       await upsertCalendarEventByUid(accountId, {
         eventUid: group.eventUid,

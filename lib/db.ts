@@ -418,17 +418,22 @@ function ensureCalendarEventOptionalColumns(db: any) {
 }
 
 // MIGRATION-CLEANUP:
-// This back-fill is a ONE-OFF migration. It populates the new source email
-// snapshot columns on `calendar_events` rows created before the Topic 2
-// feature landed (Calendar-Improvements.md, Apr 2026). It handles BOTH
-// the series-level `source*` columns (from `messageId`) and the
+// This back-fill is an idempotent migration. It populates the new source
+// email snapshot columns on `calendar_events` rows created before the
+// Topic 2 feature landed (Calendar-Improvements.md, Apr 2026). It handles
+// BOTH the series-level `source*` columns (from `messageId`) and the
 // per-occurrence `occurrenceSnapshots` JSON (from `occurrenceMessageIds`).
-// It executes exactly once per account DB, gated by
-// CALENDAR_EVENT_RUNTIME_SIGNATURE (sourceEmailSnapshotBackfillV1). After a
-// reasonable adoption window — once every running deployment has passed
-// this runtime signature at least once — both this function and its call
-// site in `ensureCalendarEventRuntimeData` should be deleted. Cleanup is
-// tracked in https://github.com/paulwellnerbou/noctua-mail/issues/38.
+// Execution is gated by CALENDAR_EVENT_RUNTIME_SIGNATURE
+// (sourceEmailSnapshotBackfillV1) only for the current runtime / DB
+// connection (`calendarEventRuntimeSignatureByDb` is an in-process
+// WeakMap and is not persisted per DB file), so this function may run
+// again after a process restart or DB reopen. Re-runs are no-ops because
+// the SELECT statements below only match rows still missing snapshot
+// data. After a reasonable adoption window — once every running
+// deployment has passed this runtime signature at least once — both this
+// function and its call site in `ensureCalendarEventRuntimeData` should
+// be deleted. Cleanup is tracked in
+// https://github.com/paulwellnerbou/noctua-mail/issues/38.
 function backfillCalendarEventSourceSnapshots(db: any) {
   const calendarEventColumns = getDbTableColumns(db, "calendar_events");
   if (calendarEventColumns.size === 0) return;

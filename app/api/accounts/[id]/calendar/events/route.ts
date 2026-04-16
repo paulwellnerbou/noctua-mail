@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import {
+  getCalendarEventById,
   getCalendarEventByUid,
   listCalendarEvents,
   upsertCalendarEvent
@@ -75,7 +76,11 @@ export async function POST(request: Request, { params }: AccountRouteParams) {
   const existingId = body?.id?.trim() ?? "";
   const eventUid = body?.eventUid?.trim() || generateId();
 
-  const existing = existingId ? await getCalendarEventByUid(accountId, existingId) : null;
+  // `existingId` is the calendar_events row id (reused as `event.id` below),
+  // so the lookup must be by-id. Using getCalendarEventByUid here would
+  // only ever hit for the edge case of id === eventUid and silently break
+  // snapshot-fallback when the POST body updates an existing event.
+  const existing = existingId ? await getCalendarEventById(accountId, existingId) : null;
   const resolvedMessageId = body?.messageId?.trim() || undefined;
   const freshSnapshot =
     isNew && resolvedMessageId

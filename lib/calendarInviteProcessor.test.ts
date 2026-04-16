@@ -1,5 +1,6 @@
 import { describe, expect, mock, test } from "bun:test";
 import type { CalendarEvent, Message } from "@/lib/data";
+import type { CalendarEventEmailSnapshot } from "@/lib/calendarEventEmailSnapshot";
 import { saveMessageSource } from "@/lib/storage";
 
 const getCalendarEventByUid = mock(() => Promise.resolve(null));
@@ -25,9 +26,6 @@ const rescheduleCalendarRemindersByEventUid = mock(() => Promise.resolve(0));
 const ensureCalendarReminder = mock(() => Promise.resolve(null));
 const cancelCalendarEventByUid = mock(() => Promise.resolve());
 const cancelCalendarRemindersByEventUid = mock(() => Promise.resolve());
-const getMessageById = mock(
-  async (_accountId: string, _messageId: string): Promise<Message | null> => null
-);
 
 const actualDb = await import("./db");
 mock.module("@/lib/db", () => ({
@@ -40,8 +38,42 @@ mock.module("@/lib/db", () => ({
   rescheduleCalendarRemindersByEventUid,
   ensureCalendarReminder,
   cancelCalendarEventByUid,
-  cancelCalendarRemindersByEventUid,
-  getMessageById
+  cancelCalendarRemindersByEventUid
+}));
+
+// Mock the snapshot helper rather than `@/lib/db.getMessageById` itself —
+// bun's module mocks are global, so overriding `getMessageById` would leak
+// into later test files (e.g. the source-route test that also reads
+// messages via the real DB). The wrapper is the only thing the processor
+// actually uses, so this keeps the mock scope tight.
+const buildCalendarEventEmailSnapshotFromMessageId = mock(
+  async (_accountId: string, _messageId: string): Promise<CalendarEventEmailSnapshot | null> =>
+    null
+);
+const messagesByIdForSnapshot = new Map<string, Message>();
+function configureSnapshotMessageFixtures(messages: Message[]) {
+  messagesByIdForSnapshot.clear();
+  for (const msg of messages) messagesByIdForSnapshot.set(msg.id, msg);
+  buildCalendarEventEmailSnapshotFromMessageId.mockImplementation(
+    async (_accountId: string, messageId: string) => {
+      const msg = messagesByIdForSnapshot.get(messageId);
+      if (!msg) return null;
+      return {
+        sourceSubject: msg.subject,
+        sourceFromAddr: msg.from,
+        sourceToAddr: msg.to,
+        sourceCcAddr: msg.cc,
+        sourceBccAddr: msg.bcc,
+        sourceDateMs: msg.dateValue,
+        sourceBodyText: msg.body,
+        sourceBodyHtml: msg.htmlBody
+      };
+    }
+  );
+}
+
+mock.module("@/lib/calendarEventEmailSnapshot.server", () => ({
+  buildCalendarEventEmailSnapshotFromMessageId
 }));
 
 const { processCalendarInviteForMessage } = await import("./calendarInviteProcessor");
@@ -212,7 +244,7 @@ describe("processCalendarInviteForMessage", () => {
     ensureCalendarReminder.mockClear();
     cancelCalendarEventByUid.mockClear();
     cancelCalendarRemindersByEventUid.mockClear();
-    getMessageById.mockClear();
+    buildCalendarEventEmailSnapshotFromMessageId.mockClear();
 
     // Existing series event — 10am every Monday starting Jun 1.
     const existingSeries: CalendarEvent = {
@@ -236,41 +268,36 @@ describe("processCalendarInviteForMessage", () => {
     // per-occurrence snapshot).
     const seriesDate = Date.UTC(2026, 4, 20, 9, 0, 0);
     const rescheduleDate = Date.UTC(2026, 5, 7, 14, 0, 0);
-    getMessageById.mockImplementation(async (_accountId, messageId) => {
-      if (messageId === "msg-series-invite") {
-        return {
-          id: "msg-series-invite",
-          threadId: "t1",
-          accountId: "acc-1",
-          folderId: "acc-1:INBOX",
-          subject: "Invite: Weekly standup",
-          from: "alice@example.test",
-          to: "paul@example.test",
-          preview: "",
-          date: new Date(seriesDate).toISOString(),
-          dateValue: seriesDate,
-          body: "series body",
-          htmlBody: "<p>series body</p>"
-        } satisfies Message;
+    configureSnapshotMessageFixtures([
+      {
+        id: "msg-series-invite",
+        threadId: "t1",
+        accountId: "acc-1",
+        folderId: "acc-1:INBOX",
+        subject: "Invite: Weekly standup",
+        from: "alice@example.test",
+        to: "paul@example.test",
+        preview: "",
+        date: new Date(seriesDate).toISOString(),
+        dateValue: seriesDate,
+        body: "series body",
+        htmlBody: "<p>series body</p>"
+      },
+      {
+        id: "msg-reschedule",
+        threadId: "t2",
+        accountId: "acc-1",
+        folderId: "acc-1:INBOX",
+        subject: "Updated: Weekly standup (Jun 8 moved to 4pm)",
+        from: "alice@example.test",
+        to: "paul@example.test",
+        preview: "",
+        date: new Date(rescheduleDate).toISOString(),
+        dateValue: rescheduleDate,
+        body: "moved to 4pm this week",
+        htmlBody: "<p>moved to 4pm this week</p>"
       }
-      if (messageId === "msg-reschedule") {
-        return {
-          id: "msg-reschedule",
-          threadId: "t2",
-          accountId: "acc-1",
-          folderId: "acc-1:INBOX",
-          subject: "Updated: Weekly standup (Jun 8 moved to 4pm)",
-          from: "alice@example.test",
-          to: "paul@example.test",
-          preview: "",
-          date: new Date(rescheduleDate).toISOString(),
-          dateValue: rescheduleDate,
-          body: "moved to 4pm this week",
-          htmlBody: "<p>moved to 4pm this week</p>"
-        } satisfies Message;
-      }
-      return null;
-    });
+    ]);
 
     // REQUEST with RECURRENCE-ID pointing at the Jun 8 occurrence,
     // rescheduling it to 16:00 the same day.
@@ -328,13 +355,12 @@ describe("processCalendarInviteForMessage", () => {
     ensureCalendarReminder.mockClear();
     cancelCalendarEventByUid.mockClear();
     cancelCalendarRemindersByEventUid.mockClear();
-    getMessageById.mockClear();
+    buildCalendarEventEmailSnapshotFromMessageId.mockClear();
 
     getCalendarEventByUid.mockResolvedValue(null);
     const seriesDate = Date.UTC(2026, 4, 20, 9, 0, 0);
-    getMessageById.mockImplementation(async (_accountId, messageId) => {
-      if (messageId !== "msg-new-series") return null;
-      return {
+    configureSnapshotMessageFixtures([
+      {
         id: "msg-new-series",
         threadId: "t1",
         accountId: "acc-1",
@@ -346,8 +372,8 @@ describe("processCalendarInviteForMessage", () => {
         date: new Date(seriesDate).toISOString(),
         dateValue: seriesDate,
         body: "kickoff"
-      } satisfies Message;
-    });
+      }
+    ]);
 
     const requestIcs = makeIcs([
       "METHOD:REQUEST",
