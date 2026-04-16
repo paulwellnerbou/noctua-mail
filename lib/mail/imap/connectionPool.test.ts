@@ -45,7 +45,8 @@ const {
   releasePooledImapClient,
   withPooledImapClient,
   getImapConnectionPoolSize,
-  __resetImapConnectionPoolForTests
+  __resetImapConnectionPoolForTests,
+  __getConnectedAtForTests
 } = await import("./connectionPool");
 
 function makeAccount(id: string): Account {
@@ -166,6 +167,34 @@ describe("releasePooledImapClient", () => {
     (reused as unknown as EventEmitter).emit("error", new Error("post-acquire"));
     expect(getImapConnectionPoolSize()).toBe(0);
     expect(reused.__logoutCount).toBe(0);
+  });
+});
+
+describe("connection-age tracking (MAX_CONNECTION_AGE_MS cap)", () => {
+  test("connectedAt is set on fresh connect and preserved across reuse", async () => {
+    const account = makeAccount("acc-1");
+    const first = await acquirePooledImapClient(account, logCtx);
+    const firstConnectedAt = __getConnectedAtForTests(first);
+    expect(typeof firstConnectedAt).toBe("number");
+
+    releasePooledImapClient(account, first, logCtx);
+    // Advance wall-clock at least 1 ms so any naive "reset on release" bug
+    // would be visible.
+    await new Promise((r) => setTimeout(r, 2));
+
+    const reused = await acquirePooledImapClient(account, logCtx);
+    expect(reused).toBe(first);
+    const reusedConnectedAt = __getConnectedAtForTests(reused);
+    // Same original timestamp — NOT reset by the release-then-reacquire cycle.
+    expect(reusedConnectedAt).toBe(firstConnectedAt);
+  });
+
+  test("connectedAt is dropped when the client is evicted", async () => {
+    const account = makeAccount("acc-1");
+    const client = await acquirePooledImapClient(account, logCtx);
+    expect(__getConnectedAtForTests(client)).toBeDefined();
+    releasePooledImapClient(account, client, logCtx, { evict: true });
+    expect(__getConnectedAtForTests(client)).toBeUndefined();
   });
 });
 

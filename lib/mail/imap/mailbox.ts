@@ -59,8 +59,9 @@ export function resolveFolderSpecialUse(
 }
 
 export async function listImapRaw(account: Account, logContext?: ImapLogContext) {
-  return withPooledImapClient(account, logContext ?? buildLogContext(account), (client) =>
-    logImapOp("list", { ...logContext }, () => client.list())
+  const ctx = logContext ?? buildLogContext(account);
+  return withPooledImapClient(account, ctx, (client) =>
+    logImapOp("list", { ...ctx }, () => client.list())
   );
 }
 

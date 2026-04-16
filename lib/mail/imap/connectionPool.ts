@@ -28,6 +28,9 @@
 // ## Eviction triggers
 //
 // - Idle for longer than `POOL_IDLE_MS` (default 60 s)
+// - Cumulative age exceeds `MAX_CONNECTION_AGE_MS` (default 10 min) —
+//   tracked from the original `connect()` time via a `WeakMap`, so repeat
+//   reuse does NOT reset the cap (subtle bug Copilot caught).
 // - Connection emits `error` or `close` while cached
 // - Caller explicitly requests eviction via `release(..., { evict: true })`,
 //   which our `finally` blocks do when the operation itself threw
@@ -39,6 +42,14 @@
 // circuit breaker uses: `[accountId, host, port, secure]`. So if a user
 // edits their IMAP host mid-session, the new connections land in a new
 // slot and the old slot ages out.
+//
+// ## Runtime state lives on `globalThis`
+//
+// `pool` and `cleanupTimer` live under `globalThis.__noctuaImapConnectionPoolState`
+// so Next.js / Turbopack dev-mode HMR can't accidentally strand a second
+// copy of the pool after a module re-evaluation. Matches the convention
+// already used by the circuit breaker in `imapClientOptions.ts` and the
+// sync-job registry.
 
 import type { Account } from "@/lib/data";
 import type { ImapFlow } from "imapflow";
@@ -54,58 +65,75 @@ const MAX_CONNECTION_AGE_MS = 10 * 60_000;
 
 type PoolEntry = {
   client: ImapFlow;
-  acquiredAt: number;
   releasedAt: number;
   lastLogContext: ImapLogContext;
   // Cleanup hook that removes our `error`/`close` listeners — invoked on evict.
   detach: () => void;
 };
 
-// Map from identity key → currently-idle cached connection.
-// Invariant: entries in this map are NOT in use. Active callers hold the
-// ImapFlow reference directly; the pool slot becomes empty when acquired.
-const pool = new Map<string, PoolEntry>();
+type PoolRuntimeState = {
+  pool: Map<string, PoolEntry>;
+  cleanupTimer: ReturnType<typeof setInterval> | null;
+  // Original connect timestamps, keyed by ImapFlow instance. Survives
+  // release-then-reacquire cycles so MAX_CONNECTION_AGE_MS actually caps
+  // total lifetime rather than time-since-last-release.
+  connectedAt: WeakMap<ImapFlow, number>;
+};
 
-let cleanupTimer: ReturnType<typeof setInterval> | null = null;
+const runtimeHost = globalThis as typeof globalThis & {
+  __noctuaImapConnectionPoolState?: PoolRuntimeState;
+};
+
+if (!runtimeHost.__noctuaImapConnectionPoolState) {
+  runtimeHost.__noctuaImapConnectionPoolState = {
+    pool: new Map<string, PoolEntry>(),
+    cleanupTimer: null,
+    connectedAt: new WeakMap<ImapFlow, number>()
+  };
+}
+
+const state = runtimeHost.__noctuaImapConnectionPoolState;
 
 function scheduleCleanup() {
-  if (cleanupTimer || pool.size === 0) return;
-  cleanupTimer = setInterval(runCleanup, CLEANUP_INTERVAL_MS);
+  if (state.cleanupTimer || state.pool.size === 0) return;
+  state.cleanupTimer = setInterval(runCleanup, CLEANUP_INTERVAL_MS);
   // Don't block Node.js process exit on this timer.
-  if (typeof cleanupTimer.unref === "function") cleanupTimer.unref();
+  if (typeof state.cleanupTimer.unref === "function") state.cleanupTimer.unref();
 }
 
 function runCleanup() {
   const now = Date.now();
-  for (const [key, entry] of pool) {
+  for (const [key, entry] of state.pool) {
     const idleFor = now - entry.releasedAt;
-    const totalAge = now - entry.acquiredAt;
+    const connectedAt = state.connectedAt.get(entry.client);
+    const totalAge = connectedAt != null ? now - connectedAt : 0;
     if (idleFor > POOL_IDLE_MS || totalAge > MAX_CONNECTION_AGE_MS) {
       evictEntry(key, entry, "idle-timeout");
     }
   }
-  if (pool.size === 0 && cleanupTimer) {
-    clearInterval(cleanupTimer);
-    cleanupTimer = null;
+  if (state.pool.size === 0 && state.cleanupTimer) {
+    clearInterval(state.cleanupTimer);
+    state.cleanupTimer = null;
   }
 }
 
 function evictEntry(key: string, entry: PoolEntry, _reason: string) {
-  pool.delete(key);
+  state.pool.delete(key);
   entry.detach();
+  state.connectedAt.delete(entry.client);
   // Fire-and-forget logout. safeLogoutImapClient swallows errors.
   void safeLogoutImapClient(entry.client, { ...entry.lastLogContext }, "pool-evict");
 }
 
 function attachErrorListeners(client: ImapFlow, key: string): () => void {
   const onError = () => {
-    const current = pool.get(key);
+    const current = state.pool.get(key);
     if (current && current.client === client) {
       evictEntry(key, current, "client-error");
     }
   };
   const onClose = () => {
-    const current = pool.get(key);
+    const current = state.pool.get(key);
     if (current && current.client === client) {
       evictEntry(key, current, "client-close");
     }
@@ -131,17 +159,19 @@ export async function acquirePooledImapClient(
   logContext: ImapLogContext
 ): Promise<ImapFlow> {
   const key = buildImapIdentityKey(account);
-  const cached = pool.get(key);
+  const cached = state.pool.get(key);
   if (cached) {
     // Remove from pool immediately so a concurrent acquire doesn't see it.
-    pool.delete(key);
+    state.pool.delete(key);
     cached.detach();
     // Trust the error listeners: if the connection had died, it would have
     // been evicted already. No explicit health check here — if the next
     // operation fails, the caller evicts via `release(..., { evict: true })`.
     return cached.client;
   }
-  return connectImapClient(account, logContext);
+  const client = await connectImapClient(account, logContext);
+  state.connectedAt.set(client, Date.now());
+  return client;
 }
 
 /**
@@ -161,21 +191,24 @@ export function releasePooledImapClient(
   opts?: { evict?: boolean }
 ): void {
   if (opts?.evict) {
+    state.connectedAt.delete(client);
     void safeLogoutImapClient(client, { ...logContext }, "pool-evict");
     return;
   }
   const key = buildImapIdentityKey(account);
-  if (pool.has(key)) {
+  if (state.pool.has(key)) {
     // Slot is already taken by another concurrent release. Logout this one.
+    state.connectedAt.delete(client);
     void safeLogoutImapClient(client, { ...logContext }, "pool-overflow");
     return;
   }
-  const now = Date.now();
+  // NB: we do NOT touch `state.connectedAt.get(client)` — the original
+  // connect time is preserved across reuses so `MAX_CONNECTION_AGE_MS`
+  // caps total lifetime, not time-since-last-release.
   const detach = attachErrorListeners(client, key);
-  pool.set(key, {
+  state.pool.set(key, {
     client,
-    acquiredAt: now,
-    releasedAt: now,
+    releasedAt: Date.now(),
     lastLogContext: { ...logContext },
     detach
   });
@@ -205,7 +238,7 @@ export async function withPooledImapClient<T>(
 
 /** Size of the current idle pool. For tests / telemetry. */
 export function getImapConnectionPoolSize(): number {
-  return pool.size;
+  return state.pool.size;
 }
 
 /**
@@ -214,10 +247,17 @@ export function getImapConnectionPoolSize(): number {
  * production this should never be invoked.
  */
 export function __resetImapConnectionPoolForTests(): void {
-  for (const entry of pool.values()) entry.detach();
-  pool.clear();
-  if (cleanupTimer) {
-    clearInterval(cleanupTimer);
-    cleanupTimer = null;
+  for (const entry of state.pool.values()) entry.detach();
+  state.pool.clear();
+  // WeakMap doesn't expose a clear() in all environments; it's acceptable to
+  // leave stale entries here — they age out with garbage collection.
+  if (state.cleanupTimer) {
+    clearInterval(state.cleanupTimer);
+    state.cleanupTimer = null;
   }
+}
+
+/** Test-only: read the internal connectedAt record for a client. */
+export function __getConnectedAtForTests(client: ImapFlow): number | undefined {
+  return state.connectedAt.get(client);
 }
