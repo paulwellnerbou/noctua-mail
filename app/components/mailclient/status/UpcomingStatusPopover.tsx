@@ -155,7 +155,7 @@ export default function UpcomingStatusPopover({
 
   const handleDeleteReminder = useCallback(
     async (reminderId: string) => {
-      if (!activeAccountId) return;
+      if (!activeAccountId.trim()) return;
       let shouldDelete = false;
       setDeletingReminderIds((prev) => {
         if (prev.has(reminderId)) return prev;

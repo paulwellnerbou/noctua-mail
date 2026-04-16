@@ -214,4 +214,65 @@ describe("buildUpcomingEntries", () => {
     const shouldRenderDelete = entries[0]?.reminder !== undefined;
     expect(shouldRenderDelete).toBe(true);
   });
+
+  it("assigns distinct keys to each occurrence of a recurring event", () => {
+    // Two expanded occurrences of the same recurring event: same uid, same
+    // event.id, different startAtMs. React needs unique keys.
+    const events = [
+      makeEvent({ id: "e-rec", eventUid: "UID-REC", startAtMs: nowMs + 1 * DAY }),
+      makeEvent({ id: "e-rec", eventUid: "UID-REC", startAtMs: nowMs + 8 * DAY })
+    ];
+    const { entries } = buildUpcomingEntries(events, [], { nowMs });
+    expect(entries).toHaveLength(2);
+    const keys = entries.map((e) => e.key);
+    expect(new Set(keys).size).toBe(2);
+  });
+
+  it("attaches a recurring reminder to the occurrence matching nextEventStartAtMs", () => {
+    // Two occurrences of the same recurring series; the reminder fires for
+    // the SECOND occurrence. It must attach to that occurrence, not the first.
+    const firstStart = nowMs + 1 * DAY;
+    const secondStart = nowMs + 8 * DAY;
+    const events = [
+      makeEvent({ id: "e-rec", eventUid: "UID-REC", startAtMs: firstStart }),
+      makeEvent({ id: "e-rec", eventUid: "UID-REC", startAtMs: secondStart })
+    ];
+    const reminders = [
+      makeReminder({
+        id: "r-next",
+        eventUid: "UID-REC",
+        eventStartAtMs: firstStart,
+        nextEventStartAtMs: secondStart
+      })
+    ];
+    const { entries } = buildUpcomingEntries(events, reminders, { nowMs });
+    expect(entries).toHaveLength(2);
+    const first = entries.find((e) => e.startAtMs === firstStart);
+    const second = entries.find((e) => e.startAtMs === secondStart);
+    expect(first?.reminder).toBeUndefined();
+    expect(second?.reminder?.id).toBe("r-next");
+  });
+
+  it("uses the occurrence-adjusted end time for reminder-only recurring rows", () => {
+    // Reminder has nextEventStartAtMs one week out with a 30-minute duration
+    // inferred from eventEndAtMs - eventStartAtMs. The underlying event is
+    // outside the window so this stays a reminder-only row. endAtMs should
+    // track the occurrence, not the original eventEndAtMs.
+    const originalStart = nowMs + 50 * DAY; // outside 4-week window
+    const originalEnd = originalStart + 30 * 60 * 1000;
+    const nextStart = nowMs + 2 * DAY; // inside the window
+    const reminders = [
+      makeReminder({
+        id: "r-rec",
+        eventUid: "UID-FAR",
+        eventStartAtMs: originalStart,
+        eventEndAtMs: originalEnd,
+        nextEventStartAtMs: nextStart
+      })
+    ];
+    const { entries } = buildUpcomingEntries([], reminders, { nowMs });
+    expect(entries).toHaveLength(1);
+    expect(entries[0]?.startAtMs).toBe(nextStart);
+    expect(entries[0]?.endAtMs).toBe(nextStart + 30 * 60 * 1000);
+  });
 });

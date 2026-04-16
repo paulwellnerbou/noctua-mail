@@ -1,5 +1,6 @@
 import type { CalendarEvent } from "@/lib/data";
 import {
+  getCalendarReminderEndAtMs,
   getCalendarReminderStartAtMs,
   type CalendarReminder
 } from "../utils/calendarReminders";
@@ -40,8 +41,9 @@ export type UpcomingEntry = {
   /** Underlying reminder, when this row has a reminder attached. */
   reminder?: CalendarReminder;
   /**
-   * MessageId used for the click-to-open-source-mail target. Prefers the
-   * reminder's messageId, falls back to the event's messageId.
+   * MessageId used for the click-to-open-source-mail target. When an event is
+   * present its `messageId` wins; reminder's `messageId` is only used as a
+   * fallback (or on reminder-only rows).
    */
   messageId?: string;
 };
@@ -75,16 +77,19 @@ export function buildUpcomingEntries(
   const capAt = options?.capAt ?? DEFAULT_UPCOMING_CAP;
   const endBoundMs = nowMs + windowMs;
 
-  // Filter + build event entries, keyed by normalized eventUid so
-  // reminders can attach.
-  const eventEntriesByUid = new Map<string, UpcomingEntry>();
+  // Filter + build event entries. Keyed by normalized eventUid so reminders
+  // can attach; we keep an array per uid to support recurring series where
+  // multiple occurrences share the same uid but land on different dates.
+  const eventEntriesByUid = new Map<string, UpcomingEntry[]>();
   const eventEntries: UpcomingEntry[] = [];
 
   events.forEach((event) => {
     if (!Number.isFinite(event.startAtMs)) return;
     if (event.startAtMs < nowMs || event.startAtMs > endBoundMs) return;
     const entry: UpcomingEntry = {
-      key: `event:${event.id || event.eventUid}`,
+      // Include startAtMs in the key so recurring occurrences (same uid,
+      // different date) don't collide during React reconciliation.
+      key: `event:${event.id || event.eventUid}:${event.startAtMs}`,
       startAtMs: event.startAtMs,
       endAtMs: Number.isFinite(event.endAtMs ?? Number.NaN) ? event.endAtMs : undefined,
       title: event.summary || "Calendar event",
@@ -96,16 +101,36 @@ export function buildUpcomingEntries(
     eventEntries.push(entry);
     const uid = normalizeEventUid(event.eventUid);
     if (uid) {
-      eventEntriesByUid.set(uid, entry);
+      const existing = eventEntriesByUid.get(uid);
+      if (existing) {
+        existing.push(entry);
+      } else {
+        eventEntriesByUid.set(uid, [entry]);
+      }
     }
   });
 
-  // Walk reminders and either attach to the matching event entry or add as
-  // a standalone entry.
+  // Walk reminders and either attach to the matching event entry (matching
+  // the specific occurrence by start time for recurring series) or add as a
+  // standalone entry.
   const reminderOnlyEntries: UpcomingEntry[] = [];
   reminders.forEach((reminder) => {
     const uid = normalizeEventUid(reminder.eventUid);
-    const matchingEventEntry = uid ? eventEntriesByUid.get(uid) : undefined;
+    const candidates = uid ? eventEntriesByUid.get(uid) : undefined;
+    const reminderStartAtMs = getCalendarReminderStartAtMs(reminder);
+    let matchingEventEntry: UpcomingEntry | undefined;
+    if (candidates && candidates.length > 0) {
+      if (Number.isFinite(reminderStartAtMs)) {
+        matchingEventEntry = candidates.find(
+          (entry) => entry.startAtMs === reminderStartAtMs
+        );
+      }
+      // If the reminder's occurrence isn't in the window, attach to the
+      // earliest candidate so at least the lead label is surfaced.
+      if (!matchingEventEntry && candidates.length === 1) {
+        matchingEventEntry = candidates[0];
+      }
+    }
     if (matchingEventEntry) {
       matchingEventEntry.reminder = reminder;
       // Prefer reminder.messageId if the event didn't carry one.
@@ -114,14 +139,14 @@ export function buildUpcomingEntries(
       }
       return;
     }
-    const startAtMs = getCalendarReminderStartAtMs(reminder);
-    if (!Number.isFinite(startAtMs)) return;
+    if (!Number.isFinite(reminderStartAtMs)) return;
+    const reminderEndAtMs = getCalendarReminderEndAtMs(reminder);
     reminderOnlyEntries.push({
       key: `reminder:${reminder.id}`,
-      startAtMs,
+      startAtMs: reminderStartAtMs,
       endAtMs:
-        typeof reminder.eventEndAtMs === "number" && Number.isFinite(reminder.eventEndAtMs)
-          ? reminder.eventEndAtMs
+        Number.isFinite(reminderEndAtMs) && reminderEndAtMs > reminderStartAtMs
+          ? reminderEndAtMs
           : undefined,
       title: reminder.eventTitle || "Calendar event",
       timeZone: reminder.startTimezone,
