@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type FullCalendar from "@fullcalendar/react";
 import { DropdownMenu, Flex, Heading, IconButton } from "@radix-ui/themes";
@@ -23,9 +23,22 @@ type Props = {
 };
 
 type Position = { x: number; y: number };
+type Size = { width: number; height: number };
 
 const PANEL_WIDTH = 860;
 const PANEL_HEIGHT = 660;
+const MIN_WIDTH = 480;
+const MIN_HEIGHT = 360;
+const VIEWPORT_MARGIN = 16;
+const KEYBOARD_RESIZE_STEP = 20;
+const KEYBOARD_RESIZE_STEP_LARGE = 60;
+
+function computeMaxSize(position: Position): { maxW: number; maxH: number } {
+  return {
+    maxW: Math.max(MIN_WIDTH, window.innerWidth - position.x - VIEWPORT_MARGIN),
+    maxH: Math.max(MIN_HEIGHT, window.innerHeight - position.y - VIEWPORT_MARGIN)
+  };
+}
 
 function getInitialPosition(): Position {
   if (typeof window === "undefined") return { x: 100, y: 100 };
@@ -49,7 +62,23 @@ export default function CalendarPopover({
 }: Props) {
   const calendarRef = useRef<FullCalendar>(null);
   const [position, setPosition] = useState<Position>(getInitialPosition);
+  const [size, setSize] = useState<Size>({ width: PANEL_WIDTH, height: PANEL_HEIGHT });
   const dragStateRef = useRef({ active: false, startX: 0, startY: 0, posX: 0, posY: 0 });
+  const resizeStateRef = useRef({ active: false, startX: 0, startY: 0, startWidth: 0, startHeight: 0 });
+  // Tracks the teardown for whichever pointer gesture is currently active
+  // (drag or resize). Cleared when the gesture ends via mouseup. The
+  // component-unmount effect below calls this to avoid leaked document-level
+  // listeners and stale setState calls if the popover closes mid-gesture.
+  const activeGestureCleanupRef = useRef<(() => void) | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (activeGestureCleanupRef.current) {
+        activeGestureCleanupRef.current();
+        activeGestureCleanupRef.current = null;
+      }
+    };
+  }, []);
 
   // Drag handling
   const handleDragStart = (e: React.MouseEvent<HTMLDivElement>) => {
@@ -69,13 +98,65 @@ export default function CalendarPopover({
         y: ds.posY + (ev.clientY - ds.startY)
       });
     };
-    const onUp = () => {
+    const cleanup = () => {
       ds.active = false;
       document.removeEventListener("mousemove", onMove);
-      document.removeEventListener("mouseup", onUp);
+      document.removeEventListener("mouseup", cleanup);
+      activeGestureCleanupRef.current = null;
     };
     document.addEventListener("mousemove", onMove);
-    document.addEventListener("mouseup", onUp);
+    document.addEventListener("mouseup", cleanup);
+    activeGestureCleanupRef.current = cleanup;
+  };
+
+  // Resize handling (bottom-right grip)
+  const handleResizeStart = (e: React.MouseEvent<HTMLButtonElement>) => {
+    e.preventDefault();
+    e.stopPropagation();
+    const rs = resizeStateRef.current;
+    rs.active = true;
+    rs.startX = e.clientX;
+    rs.startY = e.clientY;
+    rs.startWidth = size.width;
+    rs.startHeight = size.height;
+
+    const onMove = (ev: MouseEvent) => {
+      if (!rs.active) return;
+      const { maxW, maxH } = computeMaxSize(position);
+      setSize({
+        width: Math.min(maxW, Math.max(MIN_WIDTH, rs.startWidth + (ev.clientX - rs.startX))),
+        height: Math.min(maxH, Math.max(MIN_HEIGHT, rs.startHeight + (ev.clientY - rs.startY)))
+      });
+    };
+    const cleanup = () => {
+      rs.active = false;
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", cleanup);
+      activeGestureCleanupRef.current = null;
+    };
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", cleanup);
+    activeGestureCleanupRef.current = cleanup;
+  };
+
+  // Keyboard resize: focus the grip and use arrow keys (shift = larger step).
+  const handleResizeKeyDown = (e: React.KeyboardEvent<HTMLButtonElement>) => {
+    const step = e.shiftKey ? KEYBOARD_RESIZE_STEP_LARGE : KEYBOARD_RESIZE_STEP;
+    let deltaW = 0;
+    let deltaH = 0;
+    switch (e.key) {
+      case "ArrowRight": deltaW = step; break;
+      case "ArrowLeft":  deltaW = -step; break;
+      case "ArrowDown":  deltaH = step; break;
+      case "ArrowUp":    deltaH = -step; break;
+      default: return;
+    }
+    e.preventDefault();
+    const { maxW, maxH } = computeMaxSize(position);
+    setSize((prev) => ({
+      width: Math.min(maxW, Math.max(MIN_WIDTH, prev.width + deltaW)),
+      height: Math.min(maxH, Math.max(MIN_HEIGHT, prev.height + deltaH))
+    }));
   };
 
   const handleRecomputeRelations = async () => {
@@ -97,7 +178,7 @@ export default function CalendarPopover({
   const panel = open ? (
     <div
       className={styles.floatingPanel}
-      style={{ left: position.x, top: position.y }}
+      style={{ left: position.x, top: position.y, width: size.width, height: size.height }}
     >
       <Flex align="center" justify="between" className={styles.header} onMouseDown={handleDragStart}>
         <Flex align="center" gap="2">
@@ -147,6 +228,15 @@ export default function CalendarPopover({
           } : undefined}
         />
       </div>
+
+      <button
+        type="button"
+        className={styles.resizeHandle}
+        onMouseDown={handleResizeStart}
+        onKeyDown={handleResizeKeyDown}
+        aria-label="Resize calendar panel (use arrow keys; hold shift for larger step)"
+        title="Resize"
+      />
     </div>
   ) : null;
 

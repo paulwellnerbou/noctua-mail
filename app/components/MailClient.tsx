@@ -489,6 +489,7 @@ export default function MailClient({
     exceptionEntries,
     setExceptionEntries,
     pendingCalendarReminders,
+    upcomingCalendarEvents,
     inAppNotices,
     requiredBuildVersion,
     swRegistrationRef,
@@ -6026,6 +6027,7 @@ export default function MailClient({
         mailCheckMode={mailCheckMode}
         activeAccountId={activeAccountId}
         pendingCalendarReminders={pendingCalendarReminders}
+        upcomingEvents={upcomingCalendarEvents}
         onRefreshPendingReminders={refreshPendingCalendarReminders}
         onOpenReminderMessage={(messageId) => {
           openMessageByExternalMessageId(messageId, "status-reminder-click");

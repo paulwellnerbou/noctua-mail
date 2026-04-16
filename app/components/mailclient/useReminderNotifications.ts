@@ -1,9 +1,13 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { Account } from "@/lib/data";
+import type { Account, CalendarEvent } from "@/lib/data";
 import { formatAccountMediumDateTime } from "@/lib/dateFormatting";
+import { buildAccountCalendarEventsPath } from "@/lib/accountApiPaths";
+import { expandCalendarEventForRange } from "@/lib/calendarOccurrences";
+import { CALENDAR_EVENTS_UPDATED_EVENT } from "@/app/components/calendar/calendarEventsClient";
 import type { ExceptionEntry } from "./types";
+import { DEFAULT_UPCOMING_WINDOW_MS } from "./status/upcomingEntries";
 import {
   CALENDAR_REMINDERS_UPDATED_EVENT,
   type CalendarReminder,
@@ -44,6 +48,7 @@ export function useReminderNotifications({
   apiFetch
 }: UseReminderNotificationsParams) {
   const [pendingCalendarReminders, setPendingCalendarReminders] = useState<CalendarReminder[]>([]);
+  const [upcomingCalendarEvents, setUpcomingCalendarEvents] = useState<CalendarEvent[]>([]);
   const [exceptionEntries, setExceptionEntries] = useState<ExceptionEntry[]>([]);
   const [requiredBuildVersion, setRequiredBuildVersion] = useState<string | null>(null);
   const { inAppNotices, pushNotice, dismissNotice } = useInAppNotices();
@@ -276,6 +281,54 @@ export function useReminderNotifications({
     }
   }, [activeAccountId, clientId, processDueCalendarReminders, syncReminderStateToServiceWorker]);
 
+  const refreshUpcomingCalendarEvents = useCallback(async () => {
+    if (!activeAccountId.trim()) {
+      setUpcomingCalendarEvents([]);
+      return;
+    }
+    const nowMs = Date.now();
+    const endMs = nowMs + DEFAULT_UPCOMING_WINDOW_MS;
+    try {
+      const params = new URLSearchParams({
+        startMs: String(nowMs),
+        endMs: String(endMs)
+      });
+      const response = await apiFetch(
+        buildAccountCalendarEventsPath(activeAccountId, params),
+        { credentials: "include", cache: "no-store" }
+      );
+      if (!response.ok) {
+        return;
+      }
+      const payload = (await response.json().catch(() => null)) as
+        | { items?: CalendarEvent[] }
+        | null;
+      const rawEvents = payload?.items ?? [];
+      // Expand recurring events into per-occurrence synthetic events so the
+      // popover can sort/display them by actual start time. Each occurrence
+      // preserves the master event's metadata (id/uid/title/location/...)
+      // but overrides startAtMs/endAtMs to the displayed occurrence.
+      const expanded: CalendarEvent[] = [];
+      rawEvents.forEach((event) => {
+        const occurrences = expandCalendarEventForRange(event, nowMs, endMs);
+        occurrences.forEach((occurrence) => {
+          if (occurrence.displayStartAtMs === event.startAtMs) {
+            expanded.push(event);
+            return;
+          }
+          expanded.push({
+            ...event,
+            startAtMs: occurrence.displayStartAtMs,
+            endAtMs: occurrence.displayEndAtMs
+          });
+        });
+      });
+      setUpcomingCalendarEvents(expanded);
+    } catch {
+      // ignore upcoming events fetch failures in status UI
+    }
+  }, [activeAccountId, apiFetch]);
+
   // Service worker registration
   useEffect(() => {
     if (!("serviceWorker" in navigator)) return;
@@ -378,6 +431,30 @@ export function useReminderNotifications({
     };
   }, [refreshPendingCalendarReminders]);
 
+  // Upcoming calendar events refresh on mount, on dispatch, and on interval
+  // matching the reminder refresh cadence.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    let active = true;
+    const run = () => {
+      if (!active) return;
+      void refreshUpcomingCalendarEvents();
+    };
+    void run();
+    const handleUpdate = () => {
+      run();
+    };
+    window.addEventListener(CALENDAR_EVENTS_UPDATED_EVENT, handleUpdate);
+    window.addEventListener(CALENDAR_REMINDERS_UPDATED_EVENT, handleUpdate);
+    const interval = window.setInterval(run, CALENDAR_REMINDER_REFRESH_INTERVAL_MS);
+    return () => {
+      active = false;
+      window.removeEventListener(CALENDAR_EVENTS_UPDATED_EVENT, handleUpdate);
+      window.removeEventListener(CALENDAR_REMINDERS_UPDATED_EVENT, handleUpdate);
+      window.clearInterval(interval);
+    };
+  }, [refreshUpcomingCalendarEvents]);
+
   // Process due calendar reminders
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -403,6 +480,8 @@ export function useReminderNotifications({
     // State
     pendingCalendarReminders,
     setPendingCalendarReminders,
+    upcomingCalendarEvents,
+    setUpcomingCalendarEvents,
     exceptionEntries,
     setExceptionEntries,
     inAppNotices,
@@ -421,6 +500,7 @@ export function useReminderNotifications({
     showNotification,
     syncReminderStateToServiceWorker,
     processDueCalendarReminders,
-    refreshPendingCalendarReminders
+    refreshPendingCalendarReminders,
+    refreshUpcomingCalendarEvents
   };
 }
