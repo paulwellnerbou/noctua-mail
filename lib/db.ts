@@ -427,8 +427,8 @@ function ensureCalendarEventOptionalColumns(db: any) {
 // CALENDAR_EVENT_RUNTIME_SIGNATURE (sourceEmailSnapshotBackfillV1). After a
 // reasonable adoption window — once every running deployment has passed
 // this runtime signature at least once — both this function and its call
-// site in `ensureCalendarEventRuntimeData` should be deleted. See
-// TODO/Migrations-To-Remove.md for the ledger entry.
+// site in `ensureCalendarEventRuntimeData` should be deleted. Cleanup is
+// tracked in https://github.com/paulwellnerbou/noctua-mail/issues/38.
 function backfillCalendarEventSourceSnapshots(db: any) {
   const calendarEventColumns = getDbTableColumns(db, "calendar_events");
   if (calendarEventColumns.size === 0) return;
@@ -735,7 +735,8 @@ async function ensureCalendarEventRuntimeData(db: any, accountId: string) {
   backfillEmailCalendarEventParticipation(db, account?.email);
   // MIGRATION-CLEANUP: one-off back-fill for the source email snapshot
   // columns (Topic 2). Remove alongside backfillCalendarEventSourceSnapshots
-  // after the adoption window — see TODO/Migrations-To-Remove.md.
+  // after the adoption window — tracked in
+  // https://github.com/paulwellnerbou/noctua-mail/issues/38.
   backfillCalendarEventSourceSnapshots(db);
   calendarEventRuntimeSignatureByDb.set(db, CALENDAR_EVENT_RUNTIME_SIGNATURE);
 }
