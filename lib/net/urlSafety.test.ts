@@ -202,3 +202,58 @@ describe("assertPublicUrl", () => {
     if (!res.ok) expect(res.reason).toBe("no-dns-records");
   });
 });
+
+describe("assertPublicUrl — protocols option", () => {
+  const denyLookup: LookupFn = async () => {
+    throw new Error("DNS should not be called in this test");
+  };
+
+  it("accepts http:// when protocols allows it (e.g. self-hosted CalDAV)", async () => {
+    const lookup: LookupFn = async () => [{ address: "93.184.216.34", family: 4 }];
+    const res = await assertPublicUrl("http://caldav.example.com/", {
+      lookup,
+      protocols: ["http:", "https:"]
+    });
+    expect(res.ok).toBe(true);
+    if (res.ok) expect(res.url.protocol).toBe("http:");
+  });
+
+  it("accepts https:// when protocols allows both schemes", async () => {
+    const lookup: LookupFn = async () => [{ address: "93.184.216.34", family: 4 }];
+    const res = await assertPublicUrl("https://caldav.example.com/", {
+      lookup,
+      protocols: ["http:", "https:"]
+    });
+    expect(res.ok).toBe(true);
+    if (res.ok) expect(res.url.protocol).toBe("https:");
+  });
+
+  it("still rejects private-IP even when protocols allows http://", async () => {
+    const res = await assertPublicUrl("http://127.0.0.1/", {
+      lookup: denyLookup,
+      protocols: ["http:", "https:"]
+    });
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.reason).toBe("private-ip");
+  });
+
+  it("rejects http:// when only https: is in the allowed list", async () => {
+    const res = await assertPublicUrl("http://example.com/", {
+      lookup: denyLookup,
+      protocols: ["https:"]
+    });
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.reason).toBe("unsupported-protocol");
+  });
+
+  it("still rejects ftp/file/javascript even when http+https are allowed", async () => {
+    for (const url of ["ftp://example.com/", "file:///etc/passwd", "javascript:alert(1)"]) {
+      const res = await assertPublicUrl(url, {
+        lookup: denyLookup,
+        protocols: ["http:", "https:"]
+      });
+      expect(res.ok).toBe(false);
+      if (!res.ok) expect(res.reason).toBe("unsupported-protocol");
+    }
+  });
+});

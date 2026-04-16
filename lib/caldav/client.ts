@@ -1,11 +1,73 @@
 import { createDAVClient, type DAVCalendar, type DAVObject } from "tsdav";
 import type { CaldavConfig } from "@/lib/data";
+import {
+  assertPublicUrl,
+  type AssertPublicUrlRejectionReason,
+  type LookupFn
+} from "@/lib/net/urlSafety";
 
 export type CaldavClient = Awaited<ReturnType<typeof createDAVClient>>;
 
-export async function createCaldavClient(config: CaldavConfig): Promise<CaldavClient> {
+/**
+ * Error thrown when the user-configured CalDAV server URL fails the SSRF
+ * guard. Carries the rejection reason from `assertPublicUrl` so callers
+ * (API routes, settings UI) can surface a specific message.
+ */
+export class CaldavUrlRejectedError extends Error {
+  readonly reason: AssertPublicUrlRejectionReason;
+  constructor(reason: AssertPublicUrlRejectionReason) {
+    super(`CalDAV server URL rejected (${reason})`);
+    this.name = "CaldavUrlRejectedError";
+    this.reason = reason;
+  }
+}
+
+// CalDAV allows both http:// and https:// — some self-hosted servers
+// (Radicale, Baïkal, Nextcloud behind a reverse proxy, etc.) are exposed
+// over plain HTTP. Allowing `http:` here does not bypass `assertPublicUrl`:
+// private / LAN / link-local hosts are still rejected, so URLs like
+// `http://localhost/`, `http://192.168.1.10/`, and `http://169.254.169.254/`
+// are blocked regardless.
+const CALDAV_ALLOWED_PROTOCOLS = ["http:", "https:"] as const;
+
+/**
+ * SSRF guard for the user-configured CalDAV server URL. Rejects
+ * loopback / RFC 1918 / link-local / multicast / IPv6 unique-local hosts
+ * (both literal and DNS-resolved) and non-`http(s)` schemes. Must run
+ * before handing the URL to `tsdav`, which otherwise issues requests to
+ * any reachable host.
+ *
+ * Residual risk: `fetchRemoteCalendars` and related read/write helpers
+ * receive URLs the *server* returned (e.g. calendar hrefs) and pass them
+ * through `tsdav` without re-validation. A malicious CalDAV server could
+ * reply with a href pointing at a private IP. Re-validating each server-
+ * returned href would require wrapping every `tsdav` call; deferred.
+ */
+export async function assertSafeCaldavUrl(
+  rawUrl: string,
+  options?: { lookup?: LookupFn }
+): Promise<URL> {
+  const result = await assertPublicUrl(rawUrl, {
+    lookup: options?.lookup,
+    protocols: CALDAV_ALLOWED_PROTOCOLS
+  });
+  if (!result.ok) {
+    throw new CaldavUrlRejectedError(result.reason);
+  }
+  return result.url;
+}
+
+export async function createCaldavClient(
+  config: CaldavConfig,
+  options?: { lookup?: LookupFn }
+): Promise<CaldavClient> {
+  // SSRF guard — `config.url` is user-controlled account settings. Use
+  // the parsed/validated URL returned by the guard rather than the raw
+  // string so tsdav doesn't re-parse the untrusted input (avoids any
+  // canonicalization discrepancy between parsers).
+  const safeUrl = await assertSafeCaldavUrl(config.url, options);
   const client = await createDAVClient({
-    serverUrl: config.url,
+    serverUrl: safeUrl.toString(),
     credentials: { username: config.user, password: config.password },
     authMethod: "Basic",
     defaultAccountType: "caldav"
@@ -77,10 +139,11 @@ export async function deleteRemoteEvent(
 }
 
 export async function testCaldavConnection(
-  config: Pick<CaldavConfig, "url" | "user" | "password">
+  config: Pick<CaldavConfig, "url" | "user" | "password">,
+  options?: { lookup?: LookupFn }
 ): Promise<{ ok: true; calendars: { displayName?: string; url: string }[] } | { ok: false; message: string }> {
   try {
-    const client = await createCaldavClient({ ...config, url: config.url });
+    const client = await createCaldavClient({ ...config, url: config.url }, options);
     const calendars = await client.fetchCalendars();
     return {
       ok: true,
@@ -90,6 +153,9 @@ export async function testCaldavConnection(
       }))
     };
   } catch (err) {
+    if (err instanceof CaldavUrlRejectedError) {
+      return { ok: false, message: err.message };
+    }
     const message = err instanceof Error ? err.message : "Unknown error";
     return { ok: false, message };
   }

@@ -96,25 +96,33 @@ function expandIpv6(addr: string): number[] | null {
   return groups;
 }
 
+export type AssertPublicUrlRejectionReason =
+  | "invalid-url"
+  | "unsupported-protocol"
+  | "empty-host"
+  | "private-ip"
+  | "no-dns-records"
+  | "dns-lookup-failed";
+
 export type AssertPublicUrlResult =
   | { ok: true; url: URL; resolved: string[] }
-  | {
-      ok: false;
-      reason:
-        | "invalid-url"
-        | "unsupported-protocol"
-        | "empty-host"
-        | "private-ip"
-        | "no-dns-records"
-        | "dns-lookup-failed";
-    };
+  | { ok: false; reason: AssertPublicUrlRejectionReason };
 
 /**
- * Parses `rawUrl`, enforces `https:`, rejects literal IP hosts in
- * private/loopback/link-local/multicast/unspecified ranges, and resolves
- * the hostname via DNS, rejecting if *any* resolved address falls in those
- * same ranges. Use this before issuing server-side `fetch()` to URLs that
- * come from untrusted input (e.g. email headers) to mitigate SSRF.
+ * Parses `rawUrl`, enforces an allowed-protocol list (default `["https:"]`),
+ * rejects literal IP hosts in private/loopback/link-local/multicast/
+ * unspecified ranges, and resolves the hostname via DNS, rejecting if
+ * *any* resolved address falls in those same ranges. Use this before
+ * issuing server-side `fetch()` / client connections to URLs that come
+ * from untrusted input (e.g. email headers, user-configured server URLs)
+ * to mitigate SSRF.
+ *
+ * Pass `protocols: ["http:", "https:"]` only for contexts where plain
+ * HTTP is legitimately supported for publicly reachable servers (for
+ * example, a self-hosted CalDAV server exposed through a public reverse
+ * proxy). The private-IP / DNS guards still apply, so the host must
+ * still resolve only to public IPs — `http://127.0.0.1/` and
+ * private / LAN hosts (RFC 1918, link-local, etc.) are still rejected.
  */
 export type LookupFn = (
   hostname: string
@@ -123,9 +131,11 @@ export type LookupFn = (
 const defaultLookup: LookupFn = (hostname) =>
   dnsLookup(hostname, { all: true, verbatim: true });
 
+const DEFAULT_PROTOCOLS = ["https:"] as const;
+
 export async function assertPublicUrl(
   rawUrl: string,
-  options?: { lookup?: LookupFn }
+  options?: { lookup?: LookupFn; protocols?: readonly string[] }
 ): Promise<AssertPublicUrlResult> {
   let parsed: URL;
   try {
@@ -133,7 +143,8 @@ export async function assertPublicUrl(
   } catch {
     return { ok: false, reason: "invalid-url" };
   }
-  if (parsed.protocol !== "https:") {
+  const allowedProtocols = options?.protocols ?? DEFAULT_PROTOCOLS;
+  if (!allowedProtocols.includes(parsed.protocol)) {
     return { ok: false, reason: "unsupported-protocol" };
   }
 
