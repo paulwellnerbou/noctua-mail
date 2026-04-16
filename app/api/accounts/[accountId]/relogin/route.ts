@@ -1,16 +1,14 @@
 import { NextResponse } from "next/server";
-import {
-  buildSessionPayload,
-  requireSessionAccountOr403,
-  requireSessionOr401,
-  setSessionCookie
-} from "@/lib/auth";
+import { buildSessionPayload, setSessionCookie } from "@/lib/auth";
 import { sanitizeAccountForClient } from "@/lib/accountPresentation";
-import { getAccountById, patchAccount } from "@/lib/db";
+import { patchAccount } from "@/lib/db";
 import { verifyImapCredentials } from "@/lib/mail/imapAuth";
 import { shouldStorePasswordInDb } from "@/lib/secret";
-
-type Params = { params: Promise<{ accountId: string }> };
+import {
+  requireAccountContextFromParams,
+  type AccountRouteParams
+} from "@/app/api/_helpers/accountContext";
+import { errorResponse, okResponse } from "@/app/api/_helpers/response";
 
 type ReloginPayload = {
   imap?: {
@@ -19,27 +17,16 @@ type ReloginPayload = {
   };
 };
 
-export async function POST(request: Request, { params }: Params) {
-  const session = requireSessionOr401(request);
-  if (session instanceof NextResponse) return session;
-
-  const { accountId } = await params;
-  const access = await requireSessionAccountOr403(session, accountId);
-  if (access instanceof NextResponse) return access;
+export async function POST(request: Request, { params }: AccountRouteParams) {
+  const accountContext = await requireAccountContextFromParams(request, params);
+  if (accountContext instanceof NextResponse) return accountContext;
+  const { session, accountId, account: currentAccount, clientId } = accountContext;
 
   const payload = (await request.json().catch(() => null)) as ReloginPayload | null;
   const imapUser = payload?.imap?.user?.trim() ?? "";
   const imapPassword = payload?.imap?.password ?? "";
   if (!imapUser || !imapPassword) {
-    return NextResponse.json(
-      { ok: false, message: "IMAP user and password are required." },
-      { status: 400 }
-    );
-  }
-
-  const currentAccount = await getAccountById(accountId);
-  if (!currentAccount) {
-    return NextResponse.json({ ok: false, message: "Account not found" }, { status: 404 });
+    return errorResponse("IMAP user and password are required.", 400);
   }
 
   const verifiedAccount = {
@@ -49,13 +36,9 @@ export async function POST(request: Request, { params }: Params) {
       user: imapUser
     }
   };
-  const clientId = request.headers.get("x-noctua-client") ?? undefined;
   const verified = await verifyImapCredentials(verifiedAccount, imapPassword, clientId);
   if (!verified) {
-    return NextResponse.json(
-      { ok: false, message: "Invalid IMAP credentials" },
-      { status: 401 }
-    );
+    return errorResponse("Invalid IMAP credentials", 401);
   }
 
   const nextStoredImapPassword = shouldStorePasswordInDb() ? imapPassword : "";
@@ -67,7 +50,7 @@ export async function POST(request: Request, { params }: Params) {
     }
   });
   if (!updated) {
-    return NextResponse.json({ ok: false, message: "Account not found" }, { status: 404 });
+    return errorResponse("Account not found", 404);
   }
 
   const sessionAccount = {
@@ -77,10 +60,7 @@ export async function POST(request: Request, { params }: Params) {
       user: imapUser
     }
   };
-  const response = NextResponse.json({
-    ok: true,
-    account: sanitizeAccountForClient(sessionAccount)
-  });
+  const response = okResponse({ account: sanitizeAccountForClient(sessionAccount) });
   setSessionCookie(
     response,
     buildSessionPayload({

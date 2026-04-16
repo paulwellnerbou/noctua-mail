@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { requireSessionAccountOr403, requireSessionOr401, type SessionData } from "@/lib/auth";
-import { getAccounts } from "@/lib/serverDb";
+import { getAccountById } from "@/lib/serverDb";
 import type { Account } from "@/lib/data";
+import { errorResponse } from "./response";
 
 export type AccountContext = {
   session: SessionData;
@@ -42,19 +43,15 @@ export async function requireAccountContext(
   }
 ): Promise<AccountContext | NextResponse> {
   if (!accountId) {
-    return NextResponse.json(
-      { ok: false, message: options?.missingAccountMessage ?? "Missing accountId" },
-      { status: 400 }
-    );
+    return errorResponse(options?.missingAccountMessage ?? "Missing accountId", 400);
   }
   const session = requireSessionOr401(request);
   if (session instanceof NextResponse) return session;
   const access = await requireSessionAccountOr403(session, accountId);
   if (access instanceof NextResponse) return access;
-  const accounts = await getAccounts();
-  const account = accounts.find((item) => item.id === accountId);
+  const account = await getAccountById(accountId);
   if (!account) {
-    return NextResponse.json({ ok: false, message: "Account not found" }, { status: 404 });
+    return errorResponse("Account not found", 404);
   }
   const clientId = request.headers.get("x-noctua-client") ?? undefined;
   return { session, accountId, account, clientId };

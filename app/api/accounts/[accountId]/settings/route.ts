@@ -1,21 +1,21 @@
 import { NextResponse } from "next/server";
 import { patchAccount } from "@/lib/db";
 import type { AccountSettings } from "@/lib/data";
-import { requireSessionAccountOr403, requireSessionOr401 } from "@/lib/auth";
+import {
+  requireAccountContextFromParams,
+  type AccountRouteParams
+} from "@/app/api/_helpers/accountContext";
+import { errorResponse } from "@/app/api/_helpers/response";
 import { sanitizeAccountForClient } from "@/lib/accountPresentation";
 
-type Params = { params: Promise<{ accountId: string }> };
-
-export async function PUT(request: Request, { params }: Params) {
-  const auth = await requireSessionOr401(request);
-  if (auth instanceof NextResponse) return auth;
-  const { accountId } = await params;
-  const access = await requireSessionAccountOr403(auth, accountId);
-  if (access instanceof NextResponse) return access;
+export async function PUT(request: Request, { params }: AccountRouteParams) {
+  const accountContext = await requireAccountContextFromParams(request, params);
+  if (accountContext instanceof NextResponse) return accountContext;
+  const { accountId } = accountContext;
   const payload = (await request.json()) as { settings?: AccountSettings };
   const updated = await patchAccount(accountId, { settings: payload.settings ?? {} });
   if (!updated) {
-    return NextResponse.json({ ok: false, message: "Account not found" }, { status: 404 });
+    return errorResponse("Account not found", 404);
   }
   return NextResponse.json(sanitizeAccountForClient(updated));
 }
