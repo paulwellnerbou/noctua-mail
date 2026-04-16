@@ -69,22 +69,36 @@ export async function performOneClickUnsubscribe(
 }
 
 /**
- * Parse List-Unsubscribe header to extract HTTPS URLs and mailto URLs.
- * The header format is: <url1>, <url2>, ...
+ * Parse List-Unsubscribe header to extract HTTPS URLs, HTTP URLs, and
+ * mailto URLs. The header format is: <url1>, <url2>, ...
+ *
+ * `http:` and `https:` are kept in separate buckets because the one-click
+ * POST path can only safely use `https:` (RFC 8058; `assertPublicUrl`
+ * rejects `http:` as `unsupported-protocol`). Lumping them together would
+ * make a header like `<http://evil/>, <https://legit/>` pick the
+ * attacker's `http` URL, fail validation, and silently skip the valid
+ * `https` one.
  */
-function parseListUnsubscribeUrls(raw: string): { https: string[]; mailto: string[] } {
+export function parseListUnsubscribeUrls(raw: string): {
+  https: string[];
+  http: string[];
+  mailto: string[];
+} {
   const https: string[] = [];
+  const http: string[] = [];
   const mailto: string[] = [];
   const matches = raw.match(/<[^>]+>/g) ?? [];
   for (const match of matches) {
     const url = match.slice(1, -1).trim();
-    if (url.startsWith("https://") || url.startsWith("http://")) {
+    if (url.startsWith("https://")) {
       https.push(url);
+    } else if (url.startsWith("http://")) {
+      http.push(url);
     } else if (url.startsWith("mailto:")) {
       mailto.push(url);
     }
   }
-  return { https, mailto };
+  return { https, http, mailto };
 }
 
 /**
@@ -141,7 +155,9 @@ export async function POST(request: Request, { params }: Params) {
   const urls = parseListUnsubscribeUrls(listUnsubscribe);
 
   // Case 1: RFC 8058 one-click (has List-Unsubscribe-Post + HTTPS URL).
-  // Server-side fetch — validate the URL before sending (SSRF guard).
+  // Server-side fetch — https-only, and validated before sending (SSRF
+  // guard). We deliberately skip `urls.http` here because RFC 8058 says
+  // one-click SHOULD be https and `assertPublicUrl` rejects http anyway.
   if (hasOneClick && urls.https.length > 0) {
     const targetUrl = urls.https[0];
     const result = await performOneClickUnsubscribe(targetUrl);
@@ -154,12 +170,15 @@ export async function POST(request: Request, { params }: Params) {
     );
   }
 
-  // Case 2: No one-click, but has an HTTPS URL -> return it for browser open
-  if (urls.https.length > 0) {
+  // Case 2: No one-click, but has an http(s) URL -> return it for the
+  // browser to open. No server-side fetch happens here, so plain http
+  // is acceptable. Prefer https when both are present.
+  const browserUrl = urls.https[0] ?? urls.http[0];
+  if (browserUrl) {
     return NextResponse.json({
       ok: true,
       method: "browser",
-      url: urls.https[0]
+      url: browserUrl
     });
   }
 

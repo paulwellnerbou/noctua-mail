@@ -1,6 +1,6 @@
 import { describe, expect, mock, test } from "bun:test";
 import type { LookupFn } from "@/lib/net/urlSafety";
-import { performOneClickUnsubscribe } from "./route";
+import { parseListUnsubscribeUrls, performOneClickUnsubscribe } from "./route";
 
 // These tests cover the SSRF guard around the RFC 8058 one-click POST.
 // `assertPublicUrl` itself is covered exhaustively in lib/net/urlSafety.test.ts;
@@ -144,5 +144,50 @@ describe("performOneClickUnsubscribe — request behaviour", () => {
       expect(res.status).toBe(502);
       expect(res.message).toContain("ECONNREFUSED");
     }
+  });
+});
+
+describe("parseListUnsubscribeUrls — http/https separation", () => {
+  test("splits http and https into separate buckets", () => {
+    const result = parseListUnsubscribeUrls(
+      "<http://insecure.example.test/unsub>, <https://secure.example.test/unsub>"
+    );
+    expect(result.https).toEqual(["https://secure.example.test/unsub"]);
+    expect(result.http).toEqual(["http://insecure.example.test/unsub"]);
+    expect(result.mailto).toEqual([]);
+  });
+
+  test("collects mailto separately from web URLs", () => {
+    const result = parseListUnsubscribeUrls(
+      "<mailto:unsub@example.test>, <https://example.test/unsub>"
+    );
+    expect(result.https).toEqual(["https://example.test/unsub"]);
+    expect(result.http).toEqual([]);
+    expect(result.mailto).toEqual(["mailto:unsub@example.test"]);
+  });
+
+  test("regression: does NOT lump http into the https bucket — one-click would otherwise pick the insecure URL and fail validation even when a valid https URL is present", () => {
+    // This is the scenario called out in the PR review: a header like
+    // `<http://...>, <https://...>` used to put both into `urls.https`,
+    // so the one-click path would pick the http entry (position 0), get
+    // rejected by assertPublicUrl as `unsupported-protocol`, and never
+    // try the https entry.
+    const result = parseListUnsubscribeUrls(
+      "<http://first.example.test/u>, <https://second.example.test/u>"
+    );
+    expect(result.https[0]).toBe("https://second.example.test/u");
+    expect(result.http[0]).toBe("http://first.example.test/u");
+  });
+
+  test("ignores unknown schemes", () => {
+    const result = parseListUnsubscribeUrls("<javascript:alert(1)>, <ftp://example.test/u>");
+    expect(result.https).toEqual([]);
+    expect(result.http).toEqual([]);
+    expect(result.mailto).toEqual([]);
+  });
+
+  test("returns empty buckets for a header with no angle-bracketed URLs", () => {
+    const result = parseListUnsubscribeUrls("junk without brackets");
+    expect(result).toEqual({ https: [], http: [], mailto: [] });
   });
 });
