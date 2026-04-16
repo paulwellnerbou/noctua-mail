@@ -30,12 +30,10 @@ import {
 } from "@/lib/mail/categorization";
 import { buildImapMessageRowId } from "@/lib/messageIds";
 import { getImapLogger, logImapOp } from "@/lib/mail/imapLogger";
-import { safeLogoutImapClient } from "@/lib/mail/imapClientOptions";
 import { ImapFlow } from "imapflow";
 import {
   buildFolderId,
   buildLogContext,
-  connectImapClient,
   mailboxPathFromFolderId,
   normalizeImapInternalDate,
   toFiniteNumber,
@@ -43,6 +41,11 @@ import {
   type ImapEnvelope,
   type ImapParsedMessage
 } from "./_shared";
+import {
+  acquirePooledImapClient,
+  releasePooledImapClient,
+  withPooledImapClient
+} from "./connectionPool";
 import {
   buildFolderSpecialUseByPath,
   mapImapFolders,
@@ -744,8 +747,7 @@ export async function planImapNewSyncFolders(
     await validateAndFixMailboxHighestUid(account, folderId, mailboxPath);
   }
 
-  const client = await connectImapClient(account, logContext);
-  try {
+  return withPooledImapClient(account, logContext, async (client) => {
     const decisions: NewSyncFolderDecision[] = [];
 
     for (const folderId of uniqueFolderIds) {
@@ -853,9 +855,7 @@ export async function planImapNewSyncFolders(
     }
 
     return decisions;
-  } finally {
-    await safeLogoutImapClient(client, { ...logContext });
-  }
+  });
 }
 
 type NewModeRangeDecision = {
@@ -1048,7 +1048,13 @@ export async function* syncImapAccountBatched(
   options?: { resumeFromUid?: number; explicitUids?: number[] }
 ): AsyncGenerator<ImapSyncBatch> {
   const logContext = buildLogContext(account, clientId);
-  const client = await connectImapClient(account, logContext);
+  // Use manual acquire + unconditional-evict release (not `withPooledImapClient`).
+  // In an async generator's `finally`, we can't tell whether the consumer ran
+  // to completion or broke out mid-stream — the early-exit path may leave the
+  // connection in the middle of an IMAP FETCH stream, which is unsafe to
+  // return to the pool. The batched-sync op is already long-running, so
+  // forgoing pooling here costs little.
+  const client = await acquirePooledImapClient(account, logContext);
 
   try {
 
@@ -1336,7 +1342,7 @@ export async function* syncImapAccountBatched(
   if (finalBatch) yield finalBatch;
 
   } finally {
-    await safeLogoutImapClient(client, { ...logContext });
+    releasePooledImapClient(account, client, logContext, { evict: true });
   }
 }
 
@@ -1348,10 +1354,7 @@ export async function syncImapMessage(
 ): Promise<Message | null> {
   const logContext = buildLogContext(account, clientId);
   const linearModel = await getCategoryLinearModel(account.id);
-  const client = await connectImapClient(account, logContext);
-
-  let message: Message | null = null;
-  try {
+  return withPooledImapClient(account, logContext, async (client) => {
     await logImapOp("mailboxOpen", { mailbox: mailboxPath, ...logContext }, () =>
       client.mailboxOpen(mailboxPath)
     );
@@ -1373,7 +1376,7 @@ export async function syncImapMessage(
         )
     );
     if (item && (item as any).source) {
-      message = await parseImapMessage(
+      return parseImapMessage(
         account,
         mailboxPath,
         {
@@ -1389,10 +1392,8 @@ export async function syncImapMessage(
         linearModel
       );
     }
-  } finally {
-    await safeLogoutImapClient(client, { ...logContext });
-  }
-  return message;
+    return null;
+  });
 }
 
 export async function findMissingStoredMailboxCopies(
@@ -1410,10 +1411,8 @@ export async function findMissingStoredMailboxCopies(
   if (validCandidates.length === 0) return missingIds;
 
   const logContext = buildLogContext(account, clientId);
-  let currentMailbox = "";
-  const client = await connectImapClient(account, logContext);
-
-  try {
+  await withPooledImapClient(account, logContext, async (client) => {
+    let currentMailbox = "";
     for (const candidate of validCandidates) {
       const mailboxPath = candidate.mailboxPath.trim();
       try {
@@ -1450,9 +1449,7 @@ export async function findMissingStoredMailboxCopies(
         missingIds.add(candidate.id);
       }
     }
-  } finally {
-    await safeLogoutImapClient(client, { ...logContext });
-  }
+  });
 
   return missingIds;
 }
