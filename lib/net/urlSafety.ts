@@ -110,11 +110,19 @@ export type AssertPublicUrlResult =
     };
 
 /**
- * Parses `rawUrl`, enforces `https:`, rejects literal IP hosts in
- * private/loopback/link-local/multicast/unspecified ranges, and resolves
- * the hostname via DNS, rejecting if *any* resolved address falls in those
- * same ranges. Use this before issuing server-side `fetch()` to URLs that
- * come from untrusted input (e.g. email headers) to mitigate SSRF.
+ * Parses `rawUrl`, enforces an allowed-protocol list (default `["https:"]`),
+ * rejects literal IP hosts in private/loopback/link-local/multicast/
+ * unspecified ranges, and resolves the hostname via DNS, rejecting if
+ * *any* resolved address falls in those same ranges. Use this before
+ * issuing server-side `fetch()` / client connections to URLs that come
+ * from untrusted input (e.g. email headers, user-configured server URLs)
+ * to mitigate SSRF.
+ *
+ * Pass `protocols: ["http:", "https:"]` for contexts where plain HTTP is
+ * legitimately supported (e.g. self-hosted CalDAV servers behind a
+ * reverse proxy or on a trusted LAN). The private-IP / DNS guards still
+ * apply — a public-facing HTTP server is fine, but `http://127.0.0.1/`
+ * is still rejected.
  */
 export type LookupFn = (
   hostname: string
@@ -123,9 +131,11 @@ export type LookupFn = (
 const defaultLookup: LookupFn = (hostname) =>
   dnsLookup(hostname, { all: true, verbatim: true });
 
+const DEFAULT_PROTOCOLS = ["https:"] as const;
+
 export async function assertPublicUrl(
   rawUrl: string,
-  options?: { lookup?: LookupFn }
+  options?: { lookup?: LookupFn; protocols?: readonly string[] }
 ): Promise<AssertPublicUrlResult> {
   let parsed: URL;
   try {
@@ -133,7 +143,8 @@ export async function assertPublicUrl(
   } catch {
     return { ok: false, reason: "invalid-url" };
   }
-  if (parsed.protocol !== "https:") {
+  const allowedProtocols = options?.protocols ?? DEFAULT_PROTOCOLS;
+  if (!allowedProtocols.includes(parsed.protocol)) {
     return { ok: false, reason: "unsupported-protocol" };
   }
 
