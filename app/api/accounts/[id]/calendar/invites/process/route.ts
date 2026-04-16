@@ -4,7 +4,7 @@ import {
   requireAccountContext,
   type AccountRouteParams
 } from "@/app/api/_helpers/accountContext";
-import { appendMessageIdToError } from "@/app/api/message/errorFormatting";
+import { appendMessageIdToError } from "@/app/api/_helpers/message/errorFormatting";
 import { processCalendarInviteForMessage } from "@/lib/calendarInviteProcessor";
 import { getMessageById } from "@/lib/db";
 

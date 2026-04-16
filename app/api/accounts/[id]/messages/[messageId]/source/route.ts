@@ -3,7 +3,7 @@ import { type AccountRouteParams, getAccountIdFromParams } from "@/app/api/_help
 import { getMessageSource } from "@/lib/storage";
 import { getMessageById } from "@/lib/db";
 import { requireSessionAccountOr403, requireSessionOr401 } from "@/lib/auth";
-import { appendMessageIdToError } from "@/app/api/message/errorFormatting";
+import { appendMessageIdToError } from "@/app/api/_helpers/message/errorFormatting";
 
 type Params = AccountRouteParams & {
   params: Promise<{ id?: string; accountId?: string; messageId?: string }>;

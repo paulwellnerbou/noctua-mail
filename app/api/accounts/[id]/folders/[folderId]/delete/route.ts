@@ -12,7 +12,7 @@ import {
   unsubscribeImapFolder
 } from "@/lib/mail/imap";
 import { notifyFolderDeleted } from "@/lib/mail/imapStreamRegistry";
-import { findTrashFolder, mailboxPathFromFolderId } from "@/app/api/message/delete/trashUtils";
+import { findTrashFolder, mailboxPathFromFolderId } from "@/app/api/_helpers/message/trashUtils";
 import {
   getAccountIdFromParams,
   requireAccountContext,

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { buildFlagMutations } from "./route";
+import { buildFlagMutations } from "@/lib/messageFlagMutation";
 
 describe("buildFlagMutations", () => {
   it("adds seen when answered is enabled", () => {
