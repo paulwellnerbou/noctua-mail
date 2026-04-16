@@ -52,7 +52,6 @@
     "lexical": "^0.39.0",
     "lucide-react": "^0.471.2",
     "mailparser": "^3.9.6",
-    "marked": "^12.0.2",
     "next": "16.1.6",
     "nodemailer": "^6.10.1",
     "react": "19.0.0",
