@@ -221,6 +221,43 @@ describe("stripConditionalComments", () => {
       '<div class="outer"><img class="tracking" src="https://example.com/pixel.png"><div class="hero">hero</div><div class="footer">footer</div></div>'
     );
   });
+
+  it("preserves downlevel-hidden !mso content without leaving broken markers", () => {
+    const html = [
+      "<html><head>",
+      '<!--[if !mso]><meta http-equiv="X-UA-Compatible" content="IE=edge" /><![endif]-->',
+      "</head><body><div>visible</div></body></html>"
+    ].join("");
+
+    expect(stripConditionalComments(html)).toBe(
+      '<html><head><meta http-equiv="X-UA-Compatible" content="IE=edge" /></head><body><div>visible</div></body></html>'
+    );
+  });
+});
+
+describe("html message regression", () => {
+  it("keeps hero content after stripping Patreon-style !mso conditional markup", () => {
+    const html = [
+      "<!DOCTYPE html>",
+      "<html><head>",
+      "<title>How to Improvise a Solo - Going Live on Rock Class 101!</title>",
+      '<!--[if !mso]><meta http-equiv="X-UA-Compatible" content="IE=edge" /><![endif]-->',
+      "</head>",
+      '<body id="body" style="background-color: transparent;">',
+      '<div><img src="https://example.com/hero.png" width="592" /></div>',
+      '<h2><a href="https://example.com/post">How to Improvise a Solo - Going Live on Rock Class 101!</a></h2>',
+      "<div>Matt Dahlberg</div>",
+      "<p>In this session, you’ll learn what improvising is.</p>",
+      "</body></html>"
+    ].join("");
+
+    const out = sanitizeHtmlForDisplay(stripConditionalComments(html));
+
+    expect(out).toMatch(/<body[\s>]/i);
+    expect(out).toContain("hero.png");
+    expect(out).toContain("Matt Dahlberg");
+    expect(out).toContain("In this session");
+  });
 });
 
 describe("selectPreferredHtmlDocument", () => {

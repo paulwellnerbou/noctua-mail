@@ -96,13 +96,14 @@ type InlineImageAttachment = {
 
 export function stripConditionalComments(input: string) {
   return input
-    .replace(/<!--\s*\[if([^\]]+)\]>(?!\s*<!--)([\s\S]*?)<!\s*\[endif\s*\]-->/gi, (match, condition) => {
-      return String(condition).trim().startsWith("!") ? match : "";
-    })
-    .replace(/<!--\s*\[if[^\]]+\]>\s*<!-->/gi, "")
-    .replace(/<!--\s*\[if[^\]]+\]>\s*<!--\s*-->/gi, "")
-    .replace(/<!--\s*\[if[^\]]+\]>\s*<!---->/gi, "")
-    .replace(/<!--\s*<!\s*\[endif\s*\]\s*-->/gi, "");
+    .replace(
+      /<!--\s*\[if\s*![^\]]+\]\s*>\s*(?:<!-->|<!--\s*-->|<!---->)?\s*([\s\S]*?)\s*(?:<!--\s*)?<!\s*\[endif\s*\]\s*-->/gi,
+      "$1"
+    )
+    .replace(
+      /<!--\s*\[if[^\]]+\]\s*>\s*(?:<!-->|<!--\s*-->|<!---->)?\s*[\s\S]*?\s*(?:<!--\s*)?<!\s*\[endif\s*\]\s*-->/gi,
+      ""
+    );
 }
 
 export function stripStyleTags(input: string) {
