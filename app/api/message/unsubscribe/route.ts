@@ -12,7 +12,7 @@ function parseListUnsubscribeUrls(raw: string): { https: string[]; mailto: strin
   const matches = raw.match(/<[^>]+>/g) ?? [];
   for (const match of matches) {
     const url = match.slice(1, -1).trim();
-    if (url.startsWith("https://") || url.startsWith("http://")) {
+    if (url.startsWith("https://")) {
       https.push(url);
     } else if (url.startsWith("mailto:")) {
       mailto.push(url);
@@ -100,7 +100,7 @@ export async function handleUnsubscribeRequest(
         urlCheck.reason === "private-ip"
           ? "Unsubscribe URL rejected (internal/private address)"
           : urlCheck.reason === "unsupported-protocol" || urlCheck.reason === "invalid-url"
-            ? "Unsubscribe URL is not a valid http(s) URL"
+            ? "Unsubscribe URL is not a valid https URL"
             : "Could not resolve unsubscribe URL host";
       return NextResponse.json(
         { ok: false, message, method: "one-click" },

@@ -110,7 +110,7 @@ export type AssertPublicUrlResult =
     };
 
 /**
- * Parses `rawUrl`, enforces `http:`/`https:`, rejects literal IP hosts in
+ * Parses `rawUrl`, enforces `https:`, rejects literal IP hosts in
  * private/loopback/link-local/multicast/unspecified ranges, and resolves
  * the hostname via DNS, rejecting if *any* resolved address falls in those
  * same ranges. Use this before issuing server-side `fetch()` to URLs that
@@ -133,7 +133,7 @@ export async function assertPublicUrl(
   } catch {
     return { ok: false, reason: "invalid-url" };
   }
-  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+  if (parsed.protocol !== "https:") {
     return { ok: false, reason: "unsupported-protocol" };
   }
 

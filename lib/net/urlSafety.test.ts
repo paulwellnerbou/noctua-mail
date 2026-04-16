@@ -110,8 +110,9 @@ describe("assertPublicUrl", () => {
     if (!res.ok) expect(res.reason).toBe("invalid-url");
   });
 
-  it("rejects non-http(s) protocols", async () => {
+  it("rejects non-https protocols", async () => {
     for (const url of [
+      "http://example.com/",
       "ftp://example.com/",
       "file:///etc/passwd",
       "gopher://example.com/",
@@ -124,13 +125,13 @@ describe("assertPublicUrl", () => {
   });
 
   it("rejects literal loopback IPv4 without DNS", async () => {
-    const res = await assertPublicUrl("http://127.0.0.1/path", { lookup: denyLookup });
+    const res = await assertPublicUrl("https://127.0.0.1/path", { lookup: denyLookup });
     expect(res.ok).toBe(false);
     if (!res.ok) expect(res.reason).toBe("private-ip");
   });
 
   it("rejects literal cloud metadata IP without DNS", async () => {
-    const res = await assertPublicUrl("http://169.254.169.254/latest/meta-data/", {
+    const res = await assertPublicUrl("https://169.254.169.254/latest/meta-data/", {
       lookup: denyLookup
     });
     expect(res.ok).toBe(false);
@@ -138,13 +139,13 @@ describe("assertPublicUrl", () => {
   });
 
   it("rejects literal IPv6 loopback in bracket form", async () => {
-    const res = await assertPublicUrl("http://[::1]/", { lookup: denyLookup });
+    const res = await assertPublicUrl("https://[::1]/", { lookup: denyLookup });
     expect(res.ok).toBe(false);
     if (!res.ok) expect(res.reason).toBe("private-ip");
   });
 
   it("rejects IPv6 link-local fe80::1", async () => {
-    const res = await assertPublicUrl("http://[fe80::1]/", { lookup: denyLookup });
+    const res = await assertPublicUrl("https://[fe80::1]/", { lookup: denyLookup });
     expect(res.ok).toBe(false);
     if (!res.ok) expect(res.reason).toBe("private-ip");
   });
