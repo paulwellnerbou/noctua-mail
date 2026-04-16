@@ -25,13 +25,9 @@ type Params = AccountRouteParams & {
 
 export async function POST(request: Request, { params }: Params) {
   const startedAt = Date.now();
-  const payload = (await request.json().catch(() => null)) as
-    | { accountId?: string; folderId?: string }
-    | null;
   const accountId = await getAccountIdFromParams(params);
   const { folderId: rawFolderId } = await params;
   const folderId = typeof rawFolderId === "string" ? rawFolderId.trim() : "";
-  void payload;
   if (!accountId || !folderId) {
     return NextResponse.json({ ok: false, message: "Missing accountId or folderId" }, { status: 400 });
   }

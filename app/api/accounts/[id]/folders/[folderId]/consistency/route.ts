@@ -14,17 +14,10 @@ type Params = AccountRouteParams & {
   params: Promise<{ id?: string; accountId?: string; folderId?: string }>;
 };
 
-type FolderConsistencyPayload = {
-  accountId?: string;
-  folderId?: string;
-};
-
 export async function handleFolderConsistencyRequest(
   request: Request,
   options?: { accountId?: string | null; folderId?: string | null }
 ) {
-  const payload = (await request.json()) as FolderConsistencyPayload;
-
   const accountContext = await requireAccountContext(
     request,
     options?.accountId ?? "",

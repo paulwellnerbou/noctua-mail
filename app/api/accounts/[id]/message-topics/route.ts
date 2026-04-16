@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import type { Topic } from "@/lib/data";
 import {
   getAccountIdFromParams,
   requireAccountContext,
@@ -25,7 +26,7 @@ export async function GET(request: Request, { params }: AccountRouteParams) {
   }
 
   const topicsMap = await getTopicsForThreads(accountId, threadIds);
-  const topicsByThreadId: Record<string, any[]> = {};
+  const topicsByThreadId: Record<string, Topic[]> = {};
   for (const [threadId, topics] of topicsMap) {
     topicsByThreadId[threadId] = topics;
   }
