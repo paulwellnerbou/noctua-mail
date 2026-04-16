@@ -8,15 +8,14 @@
 
 import type { Account, Folder } from "@/lib/data";
 import { logImapOp } from "@/lib/mail/imapLogger";
-import { safeLogoutImapClient } from "@/lib/mail/imapClientOptions";
 import type { ImapFlow } from "imapflow";
 import {
   buildFolderId,
   buildLogContext,
-  connectImapClient,
   toFiniteNumber,
   type ImapLogContext
 } from "./_shared";
+import { withPooledImapClient } from "./connectionPool";
 
 export function mapImapFolders(account: Account, list: Awaited<ReturnType<typeof listImapRaw>>) {
   return list.map((item) => {
@@ -60,13 +59,9 @@ export function resolveFolderSpecialUse(
 }
 
 export async function listImapRaw(account: Account, logContext?: ImapLogContext) {
-  const client = await connectImapClient(account, logContext);
-
-  try {
-    return await logImapOp("list", { ...logContext }, () => client.list());
-  } finally {
-    await safeLogoutImapClient(client, { ...logContext });
-  }
+  return withPooledImapClient(account, logContext ?? buildLogContext(account), (client) =>
+    logImapOp("list", { ...logContext }, () => client.list())
+  );
 }
 
 export type ImapMailboxStatusSnapshot = {
@@ -106,9 +101,7 @@ export async function getImapMailboxStatus(
   clientId?: string
 ): Promise<ImapMailboxStatusSnapshot> {
   const logContext = buildLogContext(account, clientId);
-  const client = await connectImapClient(account, logContext);
-
-  try {
+  return withPooledImapClient(account, logContext, async (client) => {
     const statusQuery: Record<string, boolean> = {
       uidNext: true,
       messages: true,
@@ -137,9 +130,7 @@ export async function getImapMailboxStatus(
           ? null
           : String((status as { highestModseq?: unknown }).highestModseq),
     };
-  } finally {
-    await safeLogoutImapClient(client, { ...logContext });
-  }
+  });
 }
 
 export function clientSupportsQresync(client: ImapFlow) {
@@ -160,9 +151,7 @@ export async function listImapMailboxUids(
   clientId?: string
 ): Promise<ImapMailboxUidSnapshot> {
   const logContext = buildLogContext(account, clientId);
-  const client = await connectImapClient(account, logContext);
-
-  try {
+  return withPooledImapClient(account, logContext, async (client) => {
     const folderList = await logImapOp("list", { ...logContext }, () => client.list());
     const folders: Folder[] = mapImapFolders(account, folderList);
     const mailboxInfo = await logImapOp(
@@ -196,9 +185,7 @@ export async function listImapMailboxUids(
       uids,
       folders
     };
-  } finally {
-    await safeLogoutImapClient(client, { ...logContext });
-  }
+  });
 }
 
 /**
@@ -213,9 +200,7 @@ export async function listImapMailboxUidsAndFlags(
   clientId?: string
 ): Promise<ImapMailboxUidFlagSnapshot> {
   const logContext = buildLogContext(account, clientId);
-  const client = await connectImapClient(account, logContext);
-
-  try {
+  return withPooledImapClient(account, logContext, async (client) => {
     const folderList = await logImapOp("list", { ...logContext }, () => client.list());
     const folders: Folder[] = mapImapFolders(account, folderList);
     const mailboxInfo = await logImapOp(
@@ -262,7 +247,5 @@ export async function listImapMailboxUidsAndFlags(
       entries,
       folders
     };
-  } finally {
-    await safeLogoutImapClient(client, { ...logContext });
-  }
+  });
 }

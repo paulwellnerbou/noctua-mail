@@ -2,14 +2,15 @@
 //
 // Public surface: appendImapMessage, moveImapMessage, moveImapMessages,
 // deleteImapMessage, deleteImapMessages, updateImapFlags.
+//
+// All entry points run through `withPooledImapClient` so the IMAP connection
+// can be reused across back-to-back mutations for the same account. See
+// `connectionPool.ts` for the caching semantics.
 
 import type { Account } from "@/lib/data";
 import { logImapOp } from "@/lib/mail/imapLogger";
-import { safeLogoutImapClient } from "@/lib/mail/imapClientOptions";
-import {
-  buildLogContext,
-  connectImapClient
-} from "./_shared";
+import { buildLogContext } from "./_shared";
+import { withPooledImapClient } from "./connectionPool";
 
 export async function appendImapMessage(
   account: Account,
@@ -19,9 +20,7 @@ export async function appendImapMessage(
   clientId?: string
 ) {
   const logContext = buildLogContext(account, clientId);
-  const client = await connectImapClient(account, logContext);
-
-  try {
+  return withPooledImapClient(account, logContext, async (client) => {
     const result = await logImapOp(
       "append",
       { mailbox: mailboxPath, ...logContext },
@@ -30,9 +29,7 @@ export async function appendImapMessage(
     if (!result) return null;
     const uid = (result as any).uid;
     return typeof uid === "number" ? uid : null;
-  } finally {
-    await safeLogoutImapClient(client, { ...logContext });
-  }
+  });
 }
 
 export async function moveImapMessages(
@@ -49,9 +46,7 @@ export async function moveImapMessages(
     return new Map<number, number | null>();
   }
   const logContext = buildLogContext(account, clientId);
-  const client = await connectImapClient(account, logContext);
-
-  try {
+  return withPooledImapClient(account, logContext, async (client) => {
     await logImapOp("mailboxOpen", { mailbox: mailboxPath, ...logContext }, () =>
       client.mailboxOpen(mailboxPath)
     );
@@ -76,9 +71,7 @@ export async function moveImapMessages(
         return [uid, typeof destinationUid === "number" ? destinationUid : null] as const;
       })
     );
-  } finally {
-    await safeLogoutImapClient(client, { ...logContext });
-  }
+  });
 }
 
 export async function moveImapMessage(
@@ -125,9 +118,7 @@ export async function deleteImapMessages(
   const groupedTargets = groupDeleteTargetsByMailbox(targets);
   if (groupedTargets.length === 0) return;
   const logContext = buildLogContext(account, clientId);
-  const client = await connectImapClient(account, logContext);
-
-  try {
+  await withPooledImapClient(account, logContext, async (client) => {
     for (const target of groupedTargets) {
       await logImapOp("mailboxOpen", { mailbox: target.mailboxPath, ...logContext }, () =>
         client.mailboxOpen(target.mailboxPath)
@@ -138,9 +129,7 @@ export async function deleteImapMessages(
         () => client.messageDelete(target.uids, { uid: true })
       );
     }
-  } finally {
-    await safeLogoutImapClient(client, { ...logContext });
-  }
+  });
 }
 
 export async function deleteImapMessage(
@@ -161,9 +150,7 @@ export async function updateImapFlags(
   clientId?: string
 ) {
   const logContext = buildLogContext(account, clientId);
-  const client = await connectImapClient(account, logContext);
-
-  try {
+  await withPooledImapClient(account, logContext, async (client) => {
     await logImapOp("mailboxOpen", { mailbox: mailboxPath, ...logContext }, () =>
       client.mailboxOpen(mailboxPath)
     );
@@ -178,7 +165,5 @@ export async function updateImapFlags(
         () => client.messageFlagsRemove(uid, [flag], { uid: true })
       );
     }
-  } finally {
-    await safeLogoutImapClient(client, { ...logContext });
-  }
+  });
 }

@@ -140,7 +140,14 @@ function getImapConnectRetryOptions() {
   };
 }
 
-function buildImapCircuitKey(account: Account) {
+/**
+ * Stable identity key for an account's IMAP endpoint. Used by the connection
+ * circuit breaker and the connection pool (`lib/mail/imap/connectionPool.ts`)
+ * so both treat "the same account, host, port, TLS mode" as the same bucket.
+ * If any of these fields change (e.g. user re-configures IMAP host), the key
+ * differs and stale entries age out on their own timers.
+ */
+export function buildImapIdentityKey(account: Account) {
   return JSON.stringify([
     account.id,
     account.imap.host,
@@ -230,7 +237,7 @@ function getImapConnectDelayMs(attempt: number, baseDelayMs: number, maxDelayMs:
 }
 
 function getImapConnectBreakerState(account: Account) {
-  const key = buildImapCircuitKey(account);
+  const key = buildImapIdentityKey(account);
   const state = imapConnectCircuitState.get(key) ?? null;
   return { key, state };
 }

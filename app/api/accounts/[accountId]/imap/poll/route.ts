@@ -3,11 +3,9 @@ import { getLatestMessageUid } from "@/lib/db";
 import { getImapHttpError } from "@/lib/mail/imapError";
 import { getImapLogger, logImapOp } from "@/lib/mail/imapLogger";
 import {
-  bindImapClientError,
-  buildImapFlowOptions,
-  connectImapClientWithRetry,
-  safeLogoutImapClient
-} from "@/lib/mail/imapClientOptions";
+  acquirePooledImapClient,
+  releasePooledImapClient
+} from "@/lib/mail/imap/connectionPool";
 import {
   getAccountIdFromParams,
   requireAccountContext,
@@ -39,28 +37,11 @@ export async function GET(request: Request, { params }: AccountRouteParams) {
   if (accountContext instanceof NextResponse) return accountContext;
   const { accountId, account, clientId } = accountContext;
 
-  let ImapFlow: typeof import("imapflow").ImapFlow;
-  try {
-    ({ ImapFlow } = await import("imapflow"));
-  } catch {
-    return NextResponse.json(
-      { ok: false, message: "IMAP library is missing. Run `bun install`." },
-      { status: 500 }
-    );
-  }
+  const logContext = { accountId, clientId };
 
   try {
-    const client = await connectImapClientWithRetry({
-      account,
-      logContext: { accountId, clientId, mailbox },
-      createClient: () => {
-        const nextClient = new ImapFlow(
-          buildImapFlowOptions(account, {}, { accountId, clientId, mailbox })
-        );
-        bindImapClientError(nextClient, { accountId, clientId, mailbox });
-        return nextClient;
-      }
-    });
+    const client = await acquirePooledImapClient(account, logContext);
+    let pooledClientOk = true;
     try {
       const mailboxInfo = await logImapOp(
         "mailboxOpen",
@@ -118,8 +99,11 @@ export async function GET(request: Request, { params }: AccountRouteParams) {
       }
 
       return NextResponse.json({ ok: true, uidNext, messages });
+    } catch (err) {
+      pooledClientOk = false;
+      throw err;
     } finally {
-      await safeLogoutImapClient(client, { accountId, clientId });
+      releasePooledImapClient(account, client, logContext, { evict: !pooledClientOk });
     }
   } catch (error) {
     const imapHttpError = getImapHttpError(error);

@@ -2,14 +2,15 @@
 //
 // Public surface: listImapFolders, createImapFolder, renameImapFolder,
 // deleteImapFolder, unsubscribeImapFolder.
+//
+// All CRUD entry points run through `withPooledImapClient` so back-to-back
+// folder operations (e.g. create + rename + delete) for the same account
+// can reuse a single authenticated connection.
 
 import type { Account } from "@/lib/data";
 import { logImapOp } from "@/lib/mail/imapLogger";
-import { safeLogoutImapClient } from "@/lib/mail/imapClientOptions";
-import {
-  buildLogContext,
-  connectImapClient
-} from "./_shared";
+import { buildLogContext } from "./_shared";
+import { withPooledImapClient } from "./connectionPool";
 import { listImapRaw, mapImapFolders } from "./mailbox";
 
 export async function listImapFolders(account: Account, clientId?: string) {
@@ -19,14 +20,11 @@ export async function listImapFolders(account: Account, clientId?: string) {
 
 export async function createImapFolder(account: Account, path: string, clientId?: string) {
   const logContext = buildLogContext(account, clientId);
-  const client = await connectImapClient(account, logContext);
-  try {
+  await withPooledImapClient(account, logContext, async (client) => {
     await logImapOp("mailboxCreate", { mailbox: path, ...logContext }, () =>
       client.mailboxCreate(path)
     );
-  } finally {
-    await safeLogoutImapClient(client, { ...logContext });
-  }
+  });
 }
 
 export async function renameImapFolder(
@@ -36,28 +34,22 @@ export async function renameImapFolder(
   clientId?: string
 ) {
   const logContext = buildLogContext(account, clientId);
-  const client = await connectImapClient(account, logContext);
-  try {
+  await withPooledImapClient(account, logContext, async (client) => {
     await logImapOp(
       "mailboxRename",
       { mailbox: path, newMailbox: newPath, ...logContext },
       () => client.mailboxRename(path, newPath)
     );
-  } finally {
-    await safeLogoutImapClient(client, { ...logContext });
-  }
+  });
 }
 
 export async function deleteImapFolder(account: Account, path: string, clientId?: string) {
   const logContext = buildLogContext(account, clientId);
-  const client = await connectImapClient(account, logContext);
-  try {
+  await withPooledImapClient(account, logContext, async (client) => {
     await logImapOp("mailboxDelete", { mailbox: path, ...logContext }, () =>
       client.mailboxDelete(path)
     );
-  } finally {
-    await safeLogoutImapClient(client, { ...logContext });
-  }
+  });
 }
 
 export async function unsubscribeImapFolder(
@@ -66,12 +58,9 @@ export async function unsubscribeImapFolder(
   clientId?: string
 ) {
   const logContext = buildLogContext(account, clientId);
-  const client = await connectImapClient(account, logContext);
-  try {
+  await withPooledImapClient(account, logContext, async (client) => {
     await logImapOp("mailboxUnsubscribe", { mailbox: path, ...logContext }, () =>
       client.mailboxUnsubscribe(path)
     );
-  } finally {
-    await safeLogoutImapClient(client, { ...logContext });
-  }
+  });
 }
