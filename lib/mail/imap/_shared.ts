@@ -3,7 +3,7 @@
 // Not exported from the barrel (index.ts). External callers should import
 // from "@/lib/mail/imap", which only exposes the public surface.
 
-import type { Account, Folder, Message } from "@/lib/data";
+import type { Account } from "@/lib/data";
 import {
   bindImapClientError,
   buildImapFlowOptions,
@@ -16,7 +16,7 @@ export type ImapLogContext = {
   clientId?: string;
 };
 
-export const buildImapClient = (
+const buildImapClient = (
   account: Account,
   logContext?: ImapLogContext,
   overrides: Partial<ImapFlowOptions> = {}
@@ -39,11 +39,6 @@ export async function connectImapClient(
     createClient: () => buildImapClient(account, logContext, overrides)
   });
 }
-
-export type ImapSyncResult = {
-  messages: Message[];
-  folders: Folder[];
-};
 
 export type ImapParsedMessage = {
   uid: number;

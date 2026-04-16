@@ -9,7 +9,7 @@
 import type { Account, Folder } from "@/lib/data";
 import { logImapOp } from "@/lib/mail/imapLogger";
 import { safeLogoutImapClient } from "@/lib/mail/imapClientOptions";
-import { ImapFlow } from "imapflow";
+import type { ImapFlow } from "imapflow";
 import {
   buildFolderId,
   buildLogContext,

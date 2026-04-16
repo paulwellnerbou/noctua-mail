@@ -1,8 +1,13 @@
 // IMAP body-structure and header/envelope parsing helpers.
 //
-// Public surface: ImapBodyStructure (re-exported from _shared) and
-// extractMessageStructureMetadata. The remaining helpers are consumed
-// internally by lib/mail/imap/sync.ts.
+// Public surface (re-exported from the barrel index.ts): ImapBodyStructure
+// (itself re-exported from _shared) and extractMessageStructureMetadata.
+//
+// The remaining helpers in this file (formatEnvelopeAddresses,
+// parseHeaderMap, resolveHeaderDate, etc.) are intentionally exported so
+// lib/mail/imap/sync.ts can consume them across file boundaries, but they
+// are NOT re-exported from the barrel — they remain an internal API of the
+// imap/ subtree.
 
 import type { Account } from "@/lib/data";
 import type { ImapBodyStructure, ImapEnvelope, ImapEnvelopeAddress } from "./_shared";
