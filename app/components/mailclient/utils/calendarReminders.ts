@@ -767,32 +767,6 @@ export async function deleteCalendarReminder(accountId: string, reminderId: stri
   return local.deleted;
 }
 
-export async function clearCalendarReminders(accountId: string): Promise<number> {
-  const accountIdValue = accountId.trim();
-  if (!accountIdValue) return 0;
-  writeReminderCache(accountIdValue, []);
-  writeReminderQueue(accountIdValue, []);
-  dispatchCalendarRemindersUpdatedEvent();
-  try {
-    const res = await fetch(buildAccountRemindersPath(accountIdValue), {
-      method: "DELETE",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        clearAll: true
-      })
-    });
-    if (!res.ok) {
-      throw new Error(`clear reminders failed (${res.status})`);
-    }
-    const payload = (await res.json()) as { cleared?: unknown };
-    await fetchRemindersFromServer(accountIdValue);
-    return Number(payload.cleared ?? 0) || 0;
-  } catch {
-    // optimistic clear already applied
-    return 0;
-  }
-}
-
 export async function deleteCalendarReminderForEvent(
   accountId: string,
   event: CalendarReminderEventKey

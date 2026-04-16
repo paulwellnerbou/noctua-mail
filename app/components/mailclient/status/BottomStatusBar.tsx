@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import type { AccountDateFormat, Folder } from "@/lib/data";
+import type { AccountDateFormat, CalendarEvent, Folder } from "@/lib/data";
 import { formatAccountMediumDateTime } from "@/lib/dateFormatting";
 import type { CalendarReminder } from "../utils/calendarReminders";
 import type { ExceptionEntry, SyncJobProgress } from "../types";
@@ -10,7 +10,7 @@ import {
   type BottomStatusTone
 } from "./BottomStatusSection";
 import ProcessStatusPopover from "./ProcessStatusPopover";
-import ReminderStatusPopover from "./ReminderStatusPopover";
+import UpcomingStatusPopover from "./UpcomingStatusPopover";
 import ExceptionStatusPopover from "./ExceptionStatusPopover";
 import CalendarPopover from "@/app/components/calendar/CalendarPopover";
 
@@ -25,6 +25,7 @@ type BottomStatusBarProps = {
   mailCheckMode: "idle" | "polling";
   activeAccountId: string;
   pendingCalendarReminders: CalendarReminder[];
+  upcomingEvents: CalendarEvent[];
   onRefreshPendingReminders: () => Promise<void>;
   onOpenReminderMessage: (messageId: string) => void;
   onReportError: (message: string) => void;
@@ -51,6 +52,7 @@ export default function BottomStatusBar({
   mailCheckMode,
   activeAccountId,
   pendingCalendarReminders,
+  upcomingEvents,
   onRefreshPendingReminders,
   onOpenReminderMessage,
   onReportError,
@@ -171,13 +173,15 @@ export default function BottomStatusBar({
         formatRelativeTime={formatRelativeTime}
         onRelogin={onReloginAccount}
       />
-      <ReminderStatusPopover
+      <UpcomingStatusPopover
         open={reminderPanelOpen}
         onOpenChange={handleReminderPanelOpenChange}
         activeAccountId={activeAccountId}
         pendingCalendarReminders={pendingCalendarReminders}
+        upcomingEvents={upcomingEvents}
         onRefreshPendingReminders={onRefreshPendingReminders}
         onOpenReminderMessage={onOpenReminderMessage}
+        onOpenCalendarSidebar={onOpenCalendarSidebar}
         onReportError={onReportError}
         accountDateFormat={accountDateFormat}
       />
