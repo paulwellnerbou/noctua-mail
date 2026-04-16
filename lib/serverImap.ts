@@ -1,6 +1,6 @@
 type ServerImapModule = typeof import("./mail/imap");
 
-const SERVER_IMAP_SPECIFIER = "./mail/imap.ts?server-runtime";
+const SERVER_IMAP_SPECIFIER = "./mail/imap/index.ts?server-runtime";
 
 function loadServerImap(): Promise<ServerImapModule> {
   return import(SERVER_IMAP_SPECIFIER);
