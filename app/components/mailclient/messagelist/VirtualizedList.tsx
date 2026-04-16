@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
 import type React from "react";
 
 type VirtualizedListProps<T> = {
@@ -25,7 +25,7 @@ const findStartIndex = (offsets: number[], value: number) => {
   return Math.max(0, lo - 1);
 };
 
-export default function VirtualizedList<T>({
+function VirtualizedList<T>({
   items,
   scrollRef,
   className,
@@ -102,4 +102,7 @@ export default function VirtualizedList<T>({
     </div>
   );
 }
+
+// Preserve the generic signature after wrapping with memo.
+export default memo(VirtualizedList) as typeof VirtualizedList;
 

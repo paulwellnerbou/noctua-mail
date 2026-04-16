@@ -1,3 +1,4 @@
+import { memo } from "react";
 import type React from "react";
 import { CaretRightIcon } from "@radix-ui/react-icons";
 import styles from "./MessageThreadList.module.css";
@@ -16,7 +17,7 @@ type ThreadMarkersProps = {
   onToggleNested?: () => void;
 };
 
-export default function ThreadMarkers({
+function ThreadMarkers({
   depth,
   threadIndex,
   threadSize,
@@ -110,3 +111,5 @@ export default function ThreadMarkers({
 
   return <>{markers}</>;
 }
+
+export default memo(ThreadMarkers);
