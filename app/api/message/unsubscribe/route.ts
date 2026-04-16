@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { assertPublicUrl } from "@/lib/net/urlSafety";
 import { requireAccountAndMessageContext } from "../routeHelpers";
 
 /**
@@ -82,6 +83,30 @@ export async function handleUnsubscribeRequest(
   // Case 1: RFC 8058 one-click (has List-Unsubscribe-Post + HTTPS URL)
   if (hasOneClick && urls.https.length > 0) {
     const targetUrl = urls.https[0];
+    // Validate the URL before fetching to prevent SSRF: the List-Unsubscribe
+    // header is attacker-controlled (it comes from an email sender). Without
+    // this check, an attacker could point it at loopback, link-local
+    // (including cloud metadata 169.254.169.254), or RFC 1918 private
+    // addresses and the server would dutifully POST to them.
+    //
+    // Residual risk: `redirect: "follow"` below means a 3xx Location: could
+    // still land on a private IP after the initial check passes. We accept
+    // this for now — legitimate unsubscribe endpoints occasionally redirect,
+    // and re-validating each hop requires dropping back to `redirect:
+    // "manual"` and rebuilding the redirect chain manually.
+    const urlCheck = await assertPublicUrl(targetUrl);
+    if (!urlCheck.ok) {
+      const message =
+        urlCheck.reason === "private-ip"
+          ? "Unsubscribe URL rejected (internal/private address)"
+          : urlCheck.reason === "unsupported-protocol" || urlCheck.reason === "invalid-url"
+            ? "Unsubscribe URL is not a valid http(s) URL"
+            : "Could not resolve unsubscribe URL host";
+      return NextResponse.json(
+        { ok: false, message, method: "one-click" },
+        { status: 400 }
+      );
+    }
     try {
       const res = await fetch(targetUrl, {
         method: "POST",
