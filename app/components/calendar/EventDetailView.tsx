@@ -34,6 +34,7 @@ import {
 } from "@/app/components/mailclient/utils/calendarReminders";
 import AlertDialogContent from "@/app/components/mailclient/message/AlertDialogContent";
 import { dispatchCalendarEventsUpdatedEvent } from "./calendarEventsClient";
+import CalendarEventEmailSnapshot from "./CalendarEventEmailSnapshot";
 import styles from "./EventDetailView.module.css";
 
 export type CalendarEventDeleteScope = "series" | "occurrence";
@@ -875,6 +876,13 @@ export default function EventDetailView({
 
       {reminderNotice && (
         <p className={styles.notice}>{reminderNotice}</p>
+      )}
+
+      {eventSnapshot && (
+        <CalendarEventEmailSnapshot
+          snapshot={eventSnapshot}
+          dateFormat={dateFormat}
+        />
       )}
 
       <AlertDialog.Root

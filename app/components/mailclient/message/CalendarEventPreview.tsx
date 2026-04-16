@@ -411,6 +411,7 @@ export default function CalendarEventPreview({
                       sourceType={storedEvent?.sourceType}
                       messageId={sourceMessageRowId}
                       eventId={storedEvent?.id}
+                      eventSnapshot={storedEvent ?? undefined}
                       eventStartAtMs={event.start?.getTime()}
                       eventEndAtMs={event.end?.getTime()}
                       onEventUpdated={(updatedEvent) => {

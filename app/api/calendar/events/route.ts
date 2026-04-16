@@ -8,7 +8,7 @@ import { requireAccountContext } from "@/app/api/_helpers/accountContext";
 import type { CalendarEvent, CalendarEventSourceType } from "@/lib/data";
 import { toFiniteNumber, toPositiveNumberArray } from "@/app/api/_helpers/numberParsing";
 import { deleteCalendarEventAndRelatedData } from "@/lib/calendarEventDeletion";
-import { buildCalendarEventEmailSnapshotFromMessageId } from "@/lib/calendarEventEmailSnapshot";
+import { buildCalendarEventEmailSnapshotFromMessageId } from "@/lib/calendarEventEmailSnapshot.server";
 
 function generateId() {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {

@@ -10,7 +10,7 @@ import {
   upsertCalendarEventByUid,
   upsertMessageCalendarInviteStates
 } from "@/lib/db";
-import { buildCalendarEventEmailSnapshotFromMessageId } from "@/lib/calendarEventEmailSnapshot";
+import { buildCalendarEventEmailSnapshotFromMessageId } from "@/lib/calendarEventEmailSnapshot.server";
 import {
   collectCalendarInviteMutationGroups,
   inferCalendarInviteActionType,

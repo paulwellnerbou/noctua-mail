@@ -5,7 +5,7 @@ import {
 } from "@/lib/calendarParticipation";
 import { resolveEmailCalendarEventStatus } from "@/lib/calendarEventStatus";
 import { cancelCalendarEventByUid, upsertCalendarEventByUid } from "@/lib/db";
-import { buildCalendarEventEmailSnapshotFromMessageId } from "@/lib/calendarEventEmailSnapshot";
+import { buildCalendarEventEmailSnapshotFromMessageId } from "@/lib/calendarEventEmailSnapshot.server";
 
 export async function importEmailCalendarEvents(
   accountId: string,
