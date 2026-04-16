@@ -100,7 +100,7 @@ export async function handleUnsubscribeRequest(
         urlCheck.reason === "private-ip"
           ? "Unsubscribe URL rejected (internal/private address)"
           : urlCheck.reason === "unsupported-protocol" || urlCheck.reason === "invalid-url"
-            ? "Unsubscribe URL is not a valid https URL"
+            ? "Unsubscribe URL is not a valid HTTPS URL"
             : "Could not resolve unsubscribe URL host";
       return NextResponse.json(
         { ok: false, message, method: "one-click" },
