@@ -48,6 +48,13 @@
   height: 14px;
   cursor: nwse-resize;
   z-index: 1;
+  /* Neutralize default <button> chrome so the grip looks like before. */
+  appearance: none;
+  border: none;
+  padding: 0;
+  background-color: transparent;
+  color: inherit;
+  font: inherit;
   /* Two diagonal lines forming a subtle grip */
   background-image:
     linear-gradient(135deg, transparent 0, transparent 5px, var(--border) 5px, var(--border) 6px, transparent 6px, transparent 9px, var(--border) 9px, var(--border) 10px, transparent 10px);
@@ -55,5 +62,11 @@
 }
 
 .resizeHandle:hover {
+  opacity: 1;
+}
+
+.resizeHandle:focus-visible {
+  outline: 2px solid var(--accent-9, #3b82f6);
+  outline-offset: 2px;
   opacity: 1;
 }
