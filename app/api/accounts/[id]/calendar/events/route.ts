@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import {
+  getCalendarEventById,
   getCalendarEventByUid,
   listCalendarEvents,
   upsertCalendarEvent
@@ -12,6 +13,7 @@ import {
 import type { CalendarEvent, CalendarEventSourceType } from "@/lib/data";
 import { toFiniteNumber, toPositiveNumberArray } from "@/app/api/_helpers/numberParsing";
 import { deleteCalendarEventAndRelatedData } from "@/lib/calendarEventDeletion";
+import { buildCalendarEventEmailSnapshotFromMessageId } from "@/lib/calendarEventEmailSnapshot.server";
 
 function generateId() {
   if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
@@ -74,7 +76,16 @@ export async function POST(request: Request, { params }: AccountRouteParams) {
   const existingId = body?.id?.trim() ?? "";
   const eventUid = body?.eventUid?.trim() || generateId();
 
-  const existing = existingId ? await getCalendarEventByUid(accountId, existingId) : null;
+  // `existingId` is the calendar_events row id (reused as `event.id` below),
+  // so the lookup must be by-id. Using getCalendarEventByUid here would
+  // only ever hit for the edge case of id === eventUid and silently break
+  // snapshot-fallback when the POST body updates an existing event.
+  const existing = existingId ? await getCalendarEventById(accountId, existingId) : null;
+  const resolvedMessageId = body?.messageId?.trim() || undefined;
+  const freshSnapshot =
+    isNew && resolvedMessageId
+      ? await buildCalendarEventEmailSnapshotFromMessageId(accountId, resolvedMessageId)
+      : null;
 
   const event: CalendarEvent = {
     id: existingId || generateId(),
@@ -103,7 +114,15 @@ export async function POST(request: Request, { params }: AccountRouteParams) {
     remoteHref: body?.remoteHref?.trim() || undefined,
     rawIcs: body?.rawIcs ?? undefined,
     sourceType: (body?.sourceType as CalendarEventSourceType) ?? "local",
-    messageId: body?.messageId?.trim() || undefined,
+    messageId: resolvedMessageId,
+    sourceSubject: freshSnapshot?.sourceSubject ?? existing?.sourceSubject,
+    sourceFromAddr: freshSnapshot?.sourceFromAddr ?? existing?.sourceFromAddr,
+    sourceToAddr: freshSnapshot?.sourceToAddr ?? existing?.sourceToAddr,
+    sourceCcAddr: freshSnapshot?.sourceCcAddr ?? existing?.sourceCcAddr,
+    sourceBccAddr: freshSnapshot?.sourceBccAddr ?? existing?.sourceBccAddr,
+    sourceDateMs: freshSnapshot?.sourceDateMs ?? existing?.sourceDateMs,
+    sourceBodyText: freshSnapshot?.sourceBodyText ?? existing?.sourceBodyText,
+    sourceBodyHtml: freshSnapshot?.sourceBodyHtml ?? existing?.sourceBodyHtml,
     createdAtMs: existing?.createdAtMs ?? now,
     updatedAtMs: now,
     deletedAtMs: undefined

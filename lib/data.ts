@@ -269,6 +269,24 @@ export type CalendarParticipationStatus =
   | "DELEGATED";
 export type CalendarParticipationScope = "series" | "occurrence";
 
+/**
+ * Snapshot of the source email captured onto a calendar event row. Used
+ * both as the series-level snapshot (flat fields on `CalendarEvent`) and
+ * as the value type of `occurrenceSnapshots` for per-occurrence overrides.
+ * Defined here rather than in `@/lib/calendarEventEmailSnapshot` to keep
+ * the direction of imports one-way (that module depends on this type).
+ */
+export type CalendarEventEmailSnapshotFields = {
+  sourceSubject?: string;
+  sourceFromAddr?: string;
+  sourceToAddr?: string;
+  sourceCcAddr?: string;
+  sourceBccAddr?: string;
+  sourceDateMs?: number;
+  sourceBodyText?: string;
+  sourceBodyHtml?: string;
+};
+
 export type CalendarEvent = {
   id: string;
   accountId: string;
@@ -299,6 +317,29 @@ export type CalendarEvent = {
   messageId?: string;
   /** Per-occurrence message links for rescheduled occurrences. Key = occurrence startAtMs as string. */
   occurrenceMessageIds?: Record<string, string>;
+  /**
+   * Source email snapshot captured at event creation time (Topic 2,
+   * Calendar-Improvements.md). Preserves the standard fields of the email
+   * that spawned this event so the snapshot survives deletion of the source
+   * message. All fields are nullable because events from CalDAV or manual
+   * creation have no email source.
+   */
+  sourceSubject?: string;
+  sourceFromAddr?: string;
+  sourceToAddr?: string;
+  sourceCcAddr?: string;
+  sourceBccAddr?: string;
+  sourceDateMs?: number;
+  sourceBodyText?: string;
+  sourceBodyHtml?: string;
+  /**
+   * Per-occurrence email snapshots for rescheduled occurrences that were
+   * delivered by a separate email from the series invite. Mirrors the shape
+   * of `occurrenceMessageIds`: key = occurrence `startAtMs` as a string,
+   * value = the snapshot captured from that occurrence's email. UI prefers
+   * this over the series-level snapshot when viewing a specific occurrence.
+   */
+  occurrenceSnapshots?: Record<string, CalendarEventEmailSnapshotFields>;
   createdAtMs: number;
   updatedAtMs: number;
   deletedAtMs?: number;

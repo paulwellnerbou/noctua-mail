@@ -5,6 +5,7 @@ import {
 } from "@/lib/calendarParticipation";
 import { resolveEmailCalendarEventStatus } from "@/lib/calendarEventStatus";
 import { cancelCalendarEventByUid, upsertCalendarEventByUid } from "@/lib/db";
+import { buildCalendarEventEmailSnapshotFromMessageId } from "@/lib/calendarEventEmailSnapshot.server";
 
 export async function importEmailCalendarEvents(
   accountId: string,
@@ -15,6 +16,24 @@ export async function importEmailCalendarEvents(
   if (!icsSource?.trim()) return;
   try {
     const groups = collectCalendarInviteMutationGroups(icsSource);
+
+    // Resolve the source email snapshot once — it only depends on
+    // (accountId, messageId) and is loop-invariant across all groups parsed
+    // from the same ICS attachment. A single ICS can contain multiple
+    // events (e.g. an exception event alongside a base event), and looking
+    // up the snapshot per-group would issue one redundant DB read per
+    // group. We still only need the snapshot when at least one group has
+    // a `baseEvent` (non-cancellation, non-instance-only), so defer the
+    // lookup until we know it will be used.
+    let snapshotPromise:
+      | Promise<Awaited<ReturnType<typeof buildCalendarEventEmailSnapshotFromMessageId>>>
+      | null = null;
+    const resolveSnapshot = () => {
+      if (!snapshotPromise) {
+        snapshotPromise = buildCalendarEventEmailSnapshotFromMessageId(accountId, messageId);
+      }
+      return snapshotPromise;
+    };
 
     for (const group of groups) {
       if (inferCalendarInviteActionType(group) === "cancellation") {
@@ -54,6 +73,11 @@ export async function importEmailCalendarEvents(
             )
           : undefined;
 
+      // Capture the source email snapshot (Topic 2) alongside the event.
+      // The snapshot is identical for every group from this ICS, so we
+      // cache the resolver and reuse the same Promise across groups.
+      const snapshot = await resolveSnapshot();
+
       await upsertCalendarEventByUid(accountId, {
         eventUid: group.eventUid,
         summary: base.summary?.trim() || "Untitled Event",
@@ -76,7 +100,8 @@ export async function importEmailCalendarEvents(
         replyRequested: participation.replyRequested,
         sourceType: "email",
         messageId,
-        rawIcs: icsSource
+        rawIcs: icsSource,
+        ...(snapshot ?? {})
       });
     }
   } catch (err) {

@@ -10,6 +10,7 @@ import {
   upsertCalendarEventByUid,
   upsertMessageCalendarInviteStates
 } from "@/lib/db";
+import { buildCalendarEventEmailSnapshotFromMessageId } from "@/lib/calendarEventEmailSnapshot.server";
 import {
   collectCalendarInviteMutationGroups,
   inferCalendarInviteActionType,
@@ -147,7 +148,14 @@ async function hydrateExistingEventFromPriorInviteSource(
       accountEmail
     );
     if (!mergedEvent) continue;
-    return upsertCalendarEventByUid(accountId, mergedEvent);
+    const snapshot = await buildCalendarEventEmailSnapshotFromMessageId(
+      accountId,
+      candidate.messageId
+    );
+    return upsertCalendarEventByUid(accountId, {
+      ...mergedEvent,
+      ...(snapshot ?? {})
+    });
   }
   return null;
 }
@@ -249,7 +257,53 @@ export async function processCalendarInviteForMessage({
         continue;
       }
 
-      const savedEvent = await upsertCalendarEventByUid(accountId, mergedEvent);
+      // Capture the source email snapshot (Topic 2) before upsert. Preserve
+      // the existing snapshot when the email is no longer locally available
+      // (processing a reprocessed invite whose original message was purged).
+      const snapshot = await buildCalendarEventEmailSnapshotFromMessageId(
+        accountId,
+        mergedEvent.messageId ?? messageId
+      );
+      const snapshotFields: Partial<CalendarEvent> = snapshot ?? {
+        sourceSubject: existingEvent?.sourceSubject,
+        sourceFromAddr: existingEvent?.sourceFromAddr,
+        sourceToAddr: existingEvent?.sourceToAddr,
+        sourceCcAddr: existingEvent?.sourceCcAddr,
+        sourceBccAddr: existingEvent?.sourceBccAddr,
+        sourceDateMs: existingEvent?.sourceDateMs,
+        sourceBodyText: existingEvent?.sourceBodyText,
+        sourceBodyHtml: existingEvent?.sourceBodyHtml
+      };
+
+      // Per-occurrence snapshots (Option C): for each occurrence added or
+      // replaced by this ICS, capture a snapshot from the delivering email
+      // so the detail pane can show the occurrence-specific source email
+      // rather than the series invite. Existing entries are preserved.
+      const occurrenceSnapshotsUpdate: Record<
+        string,
+        NonNullable<CalendarEvent["occurrenceSnapshots"]>[string]
+      > = { ...(existingEvent?.occurrenceSnapshots ?? {}) };
+      if (group.instanceOccurrences.length > 0) {
+        const occurrenceSnapshot = await buildCalendarEventEmailSnapshotFromMessageId(
+          accountId,
+          messageId
+        );
+        if (occurrenceSnapshot) {
+          for (const occ of group.instanceOccurrences) {
+            occurrenceSnapshotsUpdate[String(occ.startAtMs)] = occurrenceSnapshot;
+          }
+        }
+      }
+      const occurrenceSnapshotsField =
+        Object.keys(occurrenceSnapshotsUpdate).length > 0
+          ? occurrenceSnapshotsUpdate
+          : undefined;
+
+      const savedEvent = await upsertCalendarEventByUid(accountId, {
+        ...mergedEvent,
+        ...snapshotFields,
+        occurrenceSnapshots: occurrenceSnapshotsField
+      });
       await rescheduleCalendarRemindersByEventUid(accountId, group.eventUid, {
         eventTitle: savedEvent.summary,
         eventLocation: savedEvent.location,
