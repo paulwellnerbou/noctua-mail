@@ -79,4 +79,24 @@ describe("CalendarEventEmailSnapshot", () => {
     const html = render({ sourceSubject: "Invite" });
     expect(html).toContain('data-testid="calendar-event-email-snapshot"');
   });
+
+  it("enforces target=_blank and rel=noopener noreferrer on HTML body links", () => {
+    const html = render({
+      sourceBodyHtml: '<p><a href="https://example.test/landing">click me</a></p>'
+    });
+    expect(html).toContain('href="https://example.test/landing"');
+    expect(html).toContain('target="_blank"');
+    expect(html).toMatch(/rel="[^"]*noopener[^"]*noreferrer[^"]*"|rel="[^"]*noreferrer[^"]*noopener[^"]*"/);
+  });
+
+  it("augments existing rel attributes with noopener/noreferrer instead of dropping them", () => {
+    const html = render({
+      sourceBodyHtml:
+        '<p><a href="https://example.test/landing" rel="nofollow">click me</a></p>'
+    });
+    // nofollow must be preserved; noopener + noreferrer must be added.
+    expect(html).toContain("nofollow");
+    expect(html).toContain("noopener");
+    expect(html).toContain("noreferrer");
+  });
 });

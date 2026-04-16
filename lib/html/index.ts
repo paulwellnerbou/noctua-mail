@@ -28,6 +28,7 @@ export {
 } from "./extract";
 export { shouldShowHtmlViewerFrame, ensureHtmlDocumentTitle } from "./document";
 export { linkifyHtmlTextNodes } from "./linkify";
+export { enforceSafeLinks } from "./safeLinks";
 export {
   replaceInlineImageSources,
   stripRedundantInlineImageFallbacks,

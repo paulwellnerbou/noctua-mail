@@ -19,7 +19,12 @@ import type {
 } from "@/lib/data";
 import { formatCalendarParticipationLabel } from "@/lib/calendarParticipation";
 import { formatCalendarTimeZoneShortLabel } from "@/lib/calendarTimezones";
-import { linkifyHtmlTextNodes, sanitizeHtmlForDisplay, stripStyleTags } from "@/lib/html";
+import {
+  enforceSafeLinks,
+  linkifyHtmlTextNodes,
+  sanitizeHtmlForDisplay,
+  stripStyleTags
+} from "@/lib/html";
 import { resolveNextReminderOccurrence } from "@/lib/reminderRecurrence";
 import { linkifyText } from "@/app/components/LinkifiedText";
 import {
@@ -111,30 +116,6 @@ function parseHttpUrl(value?: string): string | null {
 
 function looksLikeHtml(value: string) {
   return /<\s*\/?\s*[a-z][\w:-]*(\s[^>]*?)?>/i.test(value);
-}
-
-function enforceSafeLinks(html: string) {
-  return html.replace(/<a\b([^>]*)>/gi, (_, attrs: string) => {
-    let result = attrs.trim();
-    if (!/\btarget\s*=/.test(result)) {
-      result = result ? `${result} target="_blank"` : 'target="_blank"';
-    }
-    if (/\brel\s*=/.test(result)) {
-      result = result.replace(
-        /\brel\s*=\s*("([^"]*)"|'([^']*)'|(\S+))/i,
-        (_m, _full, dq, sq, uq) => {
-          const value = dq ?? sq ?? uq ?? "";
-          const tokens = value.split(/\s+/).filter(Boolean);
-          if (!tokens.includes("noopener")) tokens.push("noopener");
-          if (!tokens.includes("noreferrer")) tokens.push("noreferrer");
-          return `rel="${tokens.join(" ")}"`;
-        }
-      );
-    } else {
-      result = result ? `${result} rel="noreferrer noopener"` : 'rel="noreferrer noopener"';
-    }
-    return result ? `<a ${result}>` : "<a>";
-  });
 }
 
 function sanitizeDescriptionHtml(value: string) {

@@ -3,24 +3,14 @@
 import { Card } from "@radix-ui/themes";
 import type { AccountDateFormat } from "@/lib/data";
 import { formatAccountMediumDateTime } from "@/lib/dateFormatting";
-import { hasCalendarEventEmailSnapshot } from "@/lib/calendarEventEmailSnapshot";
-import { sanitizeHtmlForDisplay, stripStyleTags } from "@/lib/html";
+import {
+  hasCalendarEventEmailSnapshot,
+  type CalendarEventEmailSnapshot as CalendarEventEmailSnapshotData
+} from "@/lib/calendarEventEmailSnapshot";
+import { enforceSafeLinks, sanitizeHtmlForDisplay, stripStyleTags } from "@/lib/html";
 import styles from "./CalendarEventEmailSnapshot.module.css";
 
-/**
- * Preserves source-email snapshot columns from `calendar_events`
- * (Topic 2, Calendar-Improvements.md). Used by CalendarEventEmailSnapshot.
- */
-export type CalendarEventEmailSnapshotData = {
-  sourceSubject?: string;
-  sourceFromAddr?: string;
-  sourceToAddr?: string;
-  sourceCcAddr?: string;
-  sourceBccAddr?: string;
-  sourceDateMs?: number;
-  sourceBodyText?: string;
-  sourceBodyHtml?: string;
-};
+export type { CalendarEventEmailSnapshotData };
 
 type Props = {
   snapshot: CalendarEventEmailSnapshotData;
@@ -68,10 +58,14 @@ export default function CalendarEventEmailSnapshot({
       : null;
 
   // Prefer HTML, fall back to text. Sanitize through the same pipeline used
-  // by the regular message viewer. This is display-only — no link preview,
-  // no font rescaling, no inline image resolution (we intentionally don't
-  // store attachments with the snapshot).
-  const renderedHtml = bodyHtml ? sanitizeHtmlForDisplay(stripStyleTags(bodyHtml)) : null;
+  // by the regular message viewer, then enforce safe link attributes (so
+  // external links carry `rel="noopener noreferrer"` and open in a new
+  // tab — preventing reverse-tabnabbing). This is display-only — no link
+  // preview, no font rescaling, no inline image resolution (we intentionally
+  // don't store attachments with the snapshot).
+  const renderedHtml = bodyHtml
+    ? enforceSafeLinks(sanitizeHtmlForDisplay(stripStyleTags(bodyHtml)))
+    : null;
 
   const rootClassName = className ? `${styles.card} ${className}` : styles.card;
 
