@@ -299,6 +299,21 @@ export type CalendarEvent = {
   messageId?: string;
   /** Per-occurrence message links for rescheduled occurrences. Key = occurrence startAtMs as string. */
   occurrenceMessageIds?: Record<string, string>;
+  /**
+   * Source email snapshot captured at event creation time (Topic 2,
+   * Calendar-Improvements.md). Preserves the standard fields of the email
+   * that spawned this event so the snapshot survives deletion of the source
+   * message. All fields are nullable because events from CalDAV or manual
+   * creation have no email source.
+   */
+  sourceSubject?: string;
+  sourceFromAddr?: string;
+  sourceToAddr?: string;
+  sourceCcAddr?: string;
+  sourceBccAddr?: string;
+  sourceDateMs?: number;
+  sourceBodyText?: string;
+  sourceBodyHtml?: string;
   createdAtMs: number;
   updatedAtMs: number;
   deletedAtMs?: number;
