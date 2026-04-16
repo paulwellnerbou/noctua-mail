@@ -4,8 +4,10 @@ import sanitizeHtml from "sanitize-html";
 // HTML-email markup the viewer wants to render: tables, images, stylesheets,
 // document structure, etc. External stylesheets (<link>) remain disallowed —
 // they're a tracking vector (CSS load leaks open) and can restyle the webmail
-// UI when not sandboxed. <iframe>, <object>, <embed>, <form>, <base>, <meta>
-// are excluded for the usual XSS/phishing reasons.
+// UI when not sandboxed. <iframe>, <object>, <embed>, <form>, and <base> are
+// excluded for the usual XSS/phishing reasons. <meta> is allowed only with
+// the explicitly allowlisted attributes below (charset, name, content,
+// http-equiv) — everything else on <meta> is stripped.
 const SANITIZE_HTML_OPTIONS: sanitizeHtml.IOptions = {
   allowedTags: [
     ...sanitizeHtml.defaults.allowedTags,

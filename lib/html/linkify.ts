@@ -2,9 +2,11 @@ import { splitTextWithUrls } from "../linkify";
 import { escapeHtml } from "./strip";
 
 // Auto-linkify bare URLs in text nodes of an HTML fragment, without
-// double-wrapping URLs that are already inside an <a>. The tag tracking
-// (stack of open tags) avoids a full DOM parse while still being
-// structurally safe.
+// double-wrapping URLs that are already inside an <a>. We track only the
+// current <a>-nesting depth (rather than a full tag stack) since that's
+// the only structural question we need to answer, and void tags in email
+// HTML (<br>, <img>, <hr>, etc.) are commonly written without a trailing
+// "/>" and would otherwise leak onto the stack.
 
 function buildLinkHtml(url: string) {
   const safeUrl = escapeHtml(url);
@@ -28,26 +30,23 @@ export function linkifyHtmlTextNodes(input: string) {
   if (!input.includes("http://") && !input.includes("https://")) return input;
 
   const parts = input.split(/(<[^>]+>)/g);
-  const stack: string[] = [];
+  let anchorDepth = 0;
 
   return parts.map((part) => {
     if (!part) return "";
     if (part.startsWith("<")) {
       const tagName = parseHtmlTagName(part);
-      if (tagName) {
+      if (tagName === "a") {
         if (isClosingHtmlTag(part)) {
-          const index = stack.lastIndexOf(tagName);
-          if (index >= 0) {
-            stack.splice(index, 1);
-          }
+          if (anchorDepth > 0) anchorDepth -= 1;
         } else if (!isSelfClosingHtmlTag(part)) {
-          stack.push(tagName);
+          anchorDepth += 1;
         }
       }
       return part;
     }
 
-    if (stack.includes("a")) {
+    if (anchorDepth > 0) {
       return part;
     }
 
