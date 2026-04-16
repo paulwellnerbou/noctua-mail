@@ -29,7 +29,9 @@ export async function getAccountIdFromParams(
   paramsPromise: Promise<Record<string, AccountRouteParamValue>>
 ) {
   const params = await paramsPromise;
-  return normalizeRouteParamValue(params.accountId) || normalizeRouteParamValue(params.id);
+  // Route convention: all nested routes sit under `app/api/accounts/[accountId]/…`,
+  // so `params.accountId` is the single source of truth for the outer segment.
+  return normalizeRouteParamValue(params.accountId);
 }
 
 export async function requireAccountContext(

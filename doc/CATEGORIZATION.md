@@ -145,8 +145,8 @@ Current write-path detail:
 
 Recompute API endpoints:
 
-- `POST /api/accounts/:accountId/categories/recompute` (`app/api/accounts/[id]/categories/recompute/route.ts`)
-- `GET /api/accounts/:accountId/categories/recompute/status?jobId=...` (`app/api/accounts/[id]/categories/recompute/status/route.ts`)
+- `POST /api/accounts/:accountId/categories/recompute` (`app/api/accounts/[accountId]/categories/recompute/route.ts`)
+- `GET /api/accounts/:accountId/categories/recompute/status?jobId=...` (`app/api/accounts/[accountId]/categories/recompute/status/route.ts`)
 
 Worker flow:
 
@@ -175,7 +175,7 @@ The classifier now supports a lightweight per-account linear calibration model:
 
 Manual category actions update both message state and model:
 
-- API endpoint: `POST /api/accounts/:accountId/messages/:messageId/category` (`app/api/accounts/[id]/messages/[messageId]/category/route.ts`)
+- API endpoint: `POST /api/accounts/:accountId/messages/:messageId/category` (`app/api/accounts/[accountId]/messages/[messageId]/category/route.ts`)
 - Backend feedback + online update: `applyCategoryFeedback(...)` (`lib/db.ts`)
 - Persistence tables:
   - `category_model_state` (per-account model JSON)
@@ -205,7 +205,7 @@ Important distinction:
 
 ### Debug / Inspection
 
-- API: `GET /api/accounts/:accountId/categories/debug?limit=...` (`app/api/accounts/[id]/categories/debug/route.ts`)
+- API: `GET /api/accounts/:accountId/categories/debug?limit=...` (`app/api/accounts/[accountId]/categories/debug/route.ts`)
 - UI: Account settings modal, `Categorization` tab (`app/components/AccountSettingsModal.tsx`)
 - Backing DB snapshot query: `getCategoryLearningDebugSnapshot(...)` (`lib/db.ts`)
 
