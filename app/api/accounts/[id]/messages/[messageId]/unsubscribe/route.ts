@@ -54,7 +54,7 @@ export async function performOneClickUnsubscribe(
       redirect: "follow",
       signal: AbortSignal.timeout(timeoutMs)
     });
-    if (res.ok || res.status === 200 || res.status === 202) {
+    if (res.ok) {
       return { ok: true, status: res.status };
     }
     return {
