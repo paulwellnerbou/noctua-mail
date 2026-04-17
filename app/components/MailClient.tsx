@@ -5418,7 +5418,7 @@ export default function MailClient({
 
         <MessageListOrchestrator
           listWidth={listWidth}
-          listPaneRef={listPaneRef}
+          scrollRef={listPaneRef}
           isCompactView={isCompactView}
           header={{
             state: {
@@ -5513,7 +5513,6 @@ export default function MailClient({
             handleShowRelated,
             isTrashFolder
           }}
-          listViewRefs={{ scrollRef: listPaneRef }}
           showListLoadingState={showListLoadingState}
           listLoading={listLoading}
           sortedMessagesCount={sortedMessages.length}

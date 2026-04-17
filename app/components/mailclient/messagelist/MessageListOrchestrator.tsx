@@ -12,7 +12,6 @@ import type {
   MessageListViewActions,
   MessageListViewHelpers,
   MessageListViewProps,
-  MessageListViewRefs,
   MessageListViewState
 } from "./messageListViewTypes";
 
@@ -33,10 +32,16 @@ import type {
  */
 
 export type MessageListOrchestratorProps = {
-  // Pane container + scroll ref (passed to MessageListPane and to the
-  // list view as its scrollRef).
+  // Pane width; drives the fixed width on the pane container.
   listWidth: number;
-  listPaneRef: React.RefObject<HTMLDivElement | null>;
+
+  // Scroll container ref. Attached to the pane's scrolling `<aside>` AND
+  // passed to the list view as its `scrollRef` — the virtualization logic
+  // reads scroll offsets from the same element the pane rendered. These
+  // two consumers are always the same element, so the orchestrator takes
+  // a single ref and distributes it internally rather than exposing two
+  // props that could diverge.
+  scrollRef: React.RefObject<HTMLDivElement | null>;
 
   // Whether the current view is the "compact" card layout — affects the
   // pane wrapper CSS.
@@ -58,7 +63,6 @@ export type MessageListOrchestratorProps = {
   listViewState: MessageListViewState;
   listViewActions: MessageListViewActions;
   listViewHelpers: MessageListViewHelpers;
-  listViewRefs: MessageListViewRefs;
 
   // Loading + empty-state banners.
   showListLoadingState: boolean;
@@ -73,7 +77,7 @@ export type MessageListOrchestratorProps = {
 
 export default function MessageListOrchestrator({
   listWidth,
-  listPaneRef,
+  scrollRef,
   isCompactView,
   header,
   searchActive,
@@ -86,7 +90,6 @@ export default function MessageListOrchestrator({
   listViewState,
   listViewActions,
   listViewHelpers,
-  listViewRefs,
   showListLoadingState,
   listLoading,
   sortedMessagesCount,
@@ -97,7 +100,7 @@ export default function MessageListOrchestrator({
   searchScope
 }: MessageListOrchestratorProps) {
   return (
-    <MessageListPane state={{ listWidth }} refs={{ listPaneRef }}>
+    <MessageListPane state={{ listWidth }} refs={{ listPaneRef: scrollRef }}>
       <div
         className={`${listPaneStyles.list} ${isCompactView ? listPaneStyles.listCompact : ""}`}
       >
@@ -170,7 +173,7 @@ export default function MessageListOrchestrator({
           state={listViewState}
           actions={listViewActions}
           helpers={listViewHelpers}
-          refs={listViewRefs}
+          refs={{ scrollRef }}
         />
 
         {filteredMessagesCount === 0 && !showListLoadingState && (
