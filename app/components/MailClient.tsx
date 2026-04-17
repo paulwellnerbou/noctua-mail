@@ -3469,9 +3469,8 @@ export default function MailClient({
     []
   );
   const handleDeleteMessage = useCallback(
-    async (message: Message, options?: { allowThreadDeletion?: boolean }) => {
-      listHandleRef.current?.handleDeleteMessage(message, options);
-    },
+    (message: Message, options?: { allowThreadDeletion?: boolean }) =>
+      listHandleRef.current?.handleDeleteMessage(message, options) ?? Promise.resolve(),
     []
   );
   const handleDeleteMessagesByIds = useCallback(
