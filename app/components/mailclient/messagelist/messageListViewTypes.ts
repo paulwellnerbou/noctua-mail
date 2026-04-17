@@ -6,9 +6,14 @@ import type { SelectionStore } from "./selectionStore";
 export type SortKey = "date" | "from" | "subject";
 
 /**
- * The four layouts the message list can render in. Adding a new layout
- * requires touching only this list — the derived `MessageViewMode` type
- * and the orchestrator's runtime validator both read from it.
+ * The four layouts the message list can render in. This list is the
+ * single source of truth for the derived `MessageViewMode` type and for
+ * the orchestrator's runtime validator — but adding a new layout also
+ * requires updating the rendering call sites (the segmented control in
+ * `MessageListHeader`, the branch in `MessageListView`, and any settings
+ * UI that exposes the choice). The type/validator pair won't compile /
+ * validate the new option until it's added here, so this is the right
+ * place to start, but it's not the only file that changes.
  */
 export const MESSAGE_VIEW_MODES = ["card", "table", "compact", "threads"] as const;
 export type MessageViewMode = (typeof MESSAGE_VIEW_MODES)[number];
