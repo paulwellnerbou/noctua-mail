@@ -33,6 +33,13 @@ describe("findTrashFolderIdForAccount", () => {
     expect(findTrashFolderIdForAccount(folders, "a")).toBe("a:Trash");
   });
 
+  test("tolerates stray whitespace in specialUse (IMAP may return padded values)", () => {
+    const folders: Folder[] = [
+      folder({ id: "a:Trash", accountId: "a", specialUse: "  \\Trash  " })
+    ];
+    expect(findTrashFolderIdForAccount(folders, "a")).toBe("a:Trash");
+  });
+
   test("does not match by name — only by specialUse", () => {
     const folders: Folder[] = [
       folder({ id: "a:Trash", accountId: "a", specialUse: undefined }),

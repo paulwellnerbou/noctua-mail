@@ -69,7 +69,7 @@ describe("buildMessageListQueryUrl — endpoint selection", () => {
     expect(url).toMatch(/^\/api\/accounts\/acc-1\/search\?/);
     const params = parseQuery(url);
     expect(params.q).toBe("report draft");
-    // fields are added only on search (not /related)
+    // fields are added for non-related query requests (including /search and /threads)
     expect(params.fields).toBe("subject,from");
   });
 

@@ -16,7 +16,9 @@ export function findTrashFolderIdForAccount(
 ): string | null {
   const candidates = folders.filter((folder) => folder.accountId === accountId);
   const bySpecialUse = candidates.find(
-    (folder) => (folder.specialUse ?? "").toLowerCase() === "\\trash"
+    // Trim before lowercasing to match `lib/specialFolders.ts`'s `normalize()`
+    // — IMAP-sourced `specialUse` values can include stray whitespace.
+    (folder) => (folder.specialUse ?? "").trim().toLowerCase() === "\\trash"
   );
   return bySpecialUse?.id ?? null;
 }
