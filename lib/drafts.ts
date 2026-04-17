@@ -3,15 +3,17 @@ import type { ComposeInviteDraft } from "@/lib/composeInvite";
 import { COMPOSE_INVITE_HEADER, encodeComposeInviteHeader } from "@/lib/composeInviteMetadata";
 import {
   deleteMessageById,
+  getAttachmentIds,
   getFolders,
   getMessageById,
   resolveThreadingForAccountMessages,
   upsertMessages
 } from "./serverDb";
-import { getMessageSource } from "@/lib/storage";
+import { deleteMessageFiles, getMessageSource } from "@/lib/storage";
 import { parseComposeAttachments, resolveComposeHtml } from "@/lib/mail/composePayload";
 import { appendImapMessage, deleteImapMessage, syncImapMessage } from "./serverImap";
 import { buildRawMessage, sendRawSmtpMessage } from "./serverSmtp";
+import { stripBccHeader } from "@/lib/mail/stripBccHeader";
 import { sanitizeSyncedMessage } from "@/lib/mail/syncMessageSanitizer";
 import { folderMailboxPath } from "@/lib/mailboxPaths";
 import { splitRecipientEntries } from "@/lib/recipientLists";
@@ -307,13 +309,23 @@ export async function sendDraftForAccount(params: {
     );
   }
 
+  // SECURITY: drafts are built with `keepBcc: true`, so the cached raw
+  // MIME contains a `Bcc:` header. Relaying that unchanged would disclose
+  // Bcc addresses to every To/Cc recipient. Strip the header before
+  // handing `raw` to the SMTP transport. The envelope recipients we
+  // built from the draft's parsed fields still include Bcc addresses,
+  // so they receive the message — they just don't appear in its
+  // headers.
+  const wireSource = stripBccHeader(rawSource);
   const envelopeRecipients = buildDraftSendEnvelopeRecipients(draft);
-  await sendRawSmtpMessage(account, rawSource, {
+  await sendRawSmtpMessage(account, wireSource, {
     from: account.email,
     to: envelopeRecipients
   });
 
   // Append to Sent (best-effort — mirror `/api/accounts/[accountId]/smtp/send`).
+  // Uses the ORIGINAL rawSource, keeping the Bcc header intact so the
+  // user can still see whom they bcc'd when they look at their Sent copy.
   const folders = await getFolders(account.id);
   const sentFolder = findSentFolder(folders, account.id);
   const sentMailbox = sentFolder ? folderMailboxPath(sentFolder, account.id) : null;
@@ -332,18 +344,27 @@ export async function sendDraftForAccount(params: {
     }
   }
 
-  // Discard the draft — IMAP first, then local store. An IMAP delete
-  // failure fails the whole operation so the UI doesn't end up with a
-  // phantom-sent draft that's still sitting in the server's Drafts.
+  // Discard the draft on the server (best-effort — see note) and in the
+  // local store, then drop its cached source + attachment files so
+  // sending a draft doesn't leak storage the way the compose-editor
+  // send + discard pair doesn't either.
+  //
+  // IMAP delete is non-fatal: if it fails (network blip, server
+  // rejection, etc.), the send has already gone through — we don't
+  // want to surface an error the user would read as "send failed".
+  // The draft will re-appear on next sync, at which point the user
+  // can delete it manually. Surfacing this as a soft "sent, but couldn't
+  // remove server-side draft" notice is a future UX polish.
+  const attachmentIds = await getAttachmentIds(accountId, draft.id);
   if (draft.mailboxPath && typeof draft.imapUid === "number") {
     try {
       await deleteImapMessage(account, draft.mailboxPath, draft.imapUid, clientId);
     } catch {
-      // Non-fatal: the send itself succeeded. The draft may re-appear on
-      // next sync but won't break subsequent operations.
+      // Non-fatal — see block comment above.
     }
   }
   await deleteMessageById(accountId, draft.id);
+  await deleteMessageFiles(accountId, draft.id, attachmentIds);
 
   return {
     sentFolderId: sentFolder?.id ?? null,
