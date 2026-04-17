@@ -281,13 +281,15 @@ export async function saveDraftForAccount(params: {
  * Send a previously-saved draft without re-opening it in compose.
  *
  * The draft is relayed from its stored raw MIME source, which helps
- * preserve attachments, `Content-ID`s, the compose-invite header, and
- * the original `Message-ID` as stored with the draft. (The cached
- * source is a UTF-8 string, so calling this "byte-for-byte" would be
- * overstating it — encoding-preserving round-trips happen via the
- * `latin1` bridge in `stripBccHeader`.) The SMTP envelope is built
- * from the draft's parsed `to`/`cc`/`bcc` — we don't re-parse the raw
- * blob for recipients.
+ * preserve the drafted MIME structure and headers — attachments,
+ * `Content-ID`s, the compose-invite header, and the original
+ * `Message-ID` — as stored with the draft. The cached source in this
+ * path is a UTF-8 string, so this preserves headers and structure
+ * without promising byte-for-byte preservation; the `latin1` round-trip
+ * inside `stripBccHeader` only matters when a caller hands us a
+ * `Buffer` containing binary bytes, which isn't the case here. The
+ * SMTP envelope is built from the draft's parsed `to`/`cc`/`bcc` —
+ * we don't re-parse the raw blob for recipients.
  *
  * Two header-level edits happen before relay:
  *   1. `stripBccHeader` — the local draft is saved with
@@ -319,26 +321,29 @@ export async function sendDraftForAccount(params: {
   // source and parseable recipients could be relayed via SMTP —
   // including *received* messages whose `From:` header is someone else,
   // which would let this endpoint be used as an abuse/spoofing vector.
-  // A "real" draft is one that either:
-  //   (a) carries the IMAP `\Draft` flag (how the compose editor
-  //       tags its saves — see `saveDraftForAccount`), or
-  //   (b) lives in the account's Drafts folder.
-  // We require at least one of the two; otherwise we refuse. This does
-  // not replace SMTP-level `From:` authorization (that's the SMTP
-  // server's job — it will reject an unauthorized sender address), it
-  // just keeps us from even trying.
-  const folders = await getFolders(account.id);
-  const draftsFolder = findDraftsFolder(folders, account.id);
+  //
+  // Only messages explicitly marked with the IMAP `\Draft` flag are
+  // considered sendable here. Folder placement alone is NOT enough,
+  // because an arbitrary received message can be moved into the Drafts
+  // folder (either deliberately by an attacker with session access, or
+  // incidentally by drag-and-drop) and its raw MIME — including a
+  // spoofed `From:` header — would then be eligible for relay. The
+  // `\Draft` flag is set by our own `saveDraftForAccount` when the
+  // compose editor saves, and is preserved only by messages written
+  // that way; no legitimate draft should be missing it.
+  //
+  // This does not replace SMTP-level `From:` authorization (that's the
+  // SMTP server's job — it will reject an unauthorized sender address
+  // at MAIL FROM time), it just keeps us from attempting relay in the
+  // first place.
   const hasDraftFlag = hasMessageFlag(draft.flags, "\\Draft");
-  const isInDraftsFolder = Boolean(
-    draftsFolder && draft.folderId && draft.folderId === draftsFolder.id
-  );
-  if (!hasDraftFlag && !isInDraftsFolder) {
+  if (!hasDraftFlag) {
     throw new DraftSendError(
       403,
-      "Only drafts can be sent via this endpoint."
+      "Only messages saved as drafts can be sent via this endpoint. Open the message in compose and save it as a draft first."
     );
   }
+  const folders = await getFolders(account.id);
 
   if (!draftHasSendableRecipients(draft)) {
     throw new DraftSendError(400, "Please add at least one recipient before sending.");
