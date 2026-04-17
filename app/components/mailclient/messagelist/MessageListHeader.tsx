@@ -6,7 +6,7 @@ import type { ThreadDateSource } from "@/lib/threadDate";
 import type { MessageGroup } from "./listModel";
 import styles from "./MessageListHeader.module.css";
 
-type MessageListHeaderProps = {
+export type MessageListHeaderProps = {
   state: {
     listWidth: number;
     searchScope: "folder" | "all";
