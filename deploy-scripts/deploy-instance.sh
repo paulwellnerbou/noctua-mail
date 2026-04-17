@@ -17,6 +17,8 @@ DEPLOY_PATH=${DEPLOY_PATH:-/opt/noctua-mail}
 REGISTRY=${REGISTRY:-ghcr.io}
 IMAGE_NAME=${IMAGE_NAME:-$GITHUB_REPOSITORY}
 FULL_IMAGE="$REGISTRY/$IMAGE_NAME:$IMAGE_TAG"
+CONTAINER_NETWORK=${CONTAINER_NETWORK:-}
+HOST_BIND_IP=${HOST_BIND_IP:-127.0.0.1}
 
 # Validate instance
 if [[ "$INSTANCE" != "dev" && "$INSTANCE" != "prod" ]]; then
@@ -71,20 +73,35 @@ if [[ "$INSTANCE" == "dev" ]]; then
   DEFAULT_APP_ENV_LABEL="DEV"
 fi
 APP_ENV_LABEL_VALUE="${APP_ENV_LABEL:-$DEFAULT_APP_ENV_LABEL}"
-docker run -d \
-  --name noctua-mail-$INSTANCE \
-  --restart unless-stopped \
-  --network noctua-net \
-  --memory=1g \
-  --memory-reservation=512m \
-  -v "$DEPLOY_PATH/data-$INSTANCE:/app/.data" \
-  -e PORT=3654 \
-  -e NOCTUA_DATA_DIR=/app/.data/ \
-  -e SESSION_SEAL_KEY="${SESSION_SEAL_KEY:-}" \
-  -e IMAP_SECRET_KEY="${IMAP_SECRET_KEY:-}" \
-  -e IMAP_CREDENTIALS_STORAGE="${IMAP_CREDENTIALS_STORAGE:-both}" \
-  -e APP_ENV_LABEL="$APP_ENV_LABEL_VALUE" \
-  "$FULL_IMAGE"
+PORT_VALUE="${PORT:-3654}"
+DATA_DIR_VALUE="${NOCTUA_DATA_DIR:-/app/.data/}"
+DEFAULT_HOST_PORT=3654
+if [[ "$INSTANCE" == "dev" ]]; then
+  DEFAULT_HOST_PORT=3655
+fi
+HOST_PORT_VALUE="${HOST_PORT:-$DEFAULT_HOST_PORT}"
+
+DOCKER_ARGS=(
+  -d
+  --name "noctua-mail-$INSTANCE"
+  --restart unless-stopped
+  --memory=1g
+  --memory-reservation=512m
+  -v "$DEPLOY_PATH/data-$INSTANCE:/app/.data"
+  -p "$HOST_BIND_IP:$HOST_PORT_VALUE:$PORT_VALUE"
+  -e PORT="$PORT_VALUE"
+  -e NOCTUA_DATA_DIR="$DATA_DIR_VALUE"
+  -e SESSION_SEAL_KEY="${SESSION_SEAL_KEY:-}"
+  -e IMAP_SECRET_KEY="${IMAP_SECRET_KEY:-}"
+  -e IMAP_CREDENTIALS_STORAGE="${IMAP_CREDENTIALS_STORAGE:-both}"
+  -e APP_ENV_LABEL="$APP_ENV_LABEL_VALUE"
+)
+
+if [[ -n "$CONTAINER_NETWORK" ]]; then
+  DOCKER_ARGS+=(--network "$CONTAINER_NETWORK")
+fi
+
+docker run "${DOCKER_ARGS[@]}" "$FULL_IMAGE"
 
 # Wait for container to be healthy
 echo "Waiting for container to start..."
@@ -115,4 +132,5 @@ echo "=========================================="
 echo "✅ $INSTANCE deployment complete!"
 echo "Container: noctua-mail-$INSTANCE"
 echo "Image: $FULL_IMAGE"
+echo "Host port: $HOST_BIND_IP:$HOST_PORT_VALUE -> $PORT_VALUE"
 echo "=========================================="
