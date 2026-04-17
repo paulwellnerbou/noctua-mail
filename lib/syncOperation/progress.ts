@@ -55,11 +55,14 @@ export type SyncProgressContext = {
 };
 
 export type SyncProgressEmitter = (
+  // `phase` stays required because `Omit<>` doesn't remove it (it's not
+  // in the omitted-keys list), and `SyncOperationProgress["phase"]` is
+  // itself required — so the caller must provide it. No explicit
+  // `& Pick<…, "phase">` intersection needed.
   partial: Omit<
     SyncOperationProgress,
     "accountId" | "folderId" | "mailboxPath" | "mode" | "updatedAt"
-  > &
-    Pick<SyncOperationProgress, "phase">
+  >
 ) => void;
 
 /**
