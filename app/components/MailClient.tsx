@@ -4,7 +4,6 @@ import type React from "react";
 import {
   startTransition,
   useCallback,
-  useDeferredValue,
   useEffect,
   useMemo,
   useRef,
@@ -346,7 +345,6 @@ export default function MailClient({
   const dragImageRef = useRef<HTMLDivElement | null>(null);
   const [sortKey, setSortKey] = useState<"date" | "from" | "subject">("date");
   const [sortDir, setSortDir] = useState<"desc" | "asc">("desc");
-  const [messageView, setMessageView] = useState<"card" | "table" | "compact" | "threads">("threads");
   const [threadViewMode, setThreadViewMode] = useState<"full" | "compact">("compact");
   const [messageTopicsById, setMessageTopicsById] = useState<Map<string, Topic[]>>(new Map());
   const [topicPickerOpen, setTopicPickerOpen] = useState(false);
@@ -2000,18 +1998,6 @@ export default function MailClient({
       await afterOpen(hydrated ?? resolved);
     })();
   };
-
-  useEffect(() => {
-    const preferred = currentAccount?.settings?.layout?.defaultView;
-    if (
-      preferred === "card" ||
-      preferred === "table" ||
-      preferred === "compact" ||
-      preferred === "threads"
-    ) {
-      setMessageView(preferred);
-    }
-  }, [currentAccount?.settings?.layout?.defaultView]);
 
   // Derive topics map from messages (topics are now included in the messages API response)
   useEffect(() => {
@@ -5236,8 +5222,6 @@ export default function MailClient({
   ]);
 
 
-  const deferredMessageView = useDeferredValue(messageView);
-  const isCompactView = deferredMessageView === "compact";
   useEffect(() => {
     setTopicSuggestionExplanationOpen(false);
   }, [activeMessage?.threadId]);
@@ -5497,7 +5481,7 @@ export default function MailClient({
         <MessageListOrchestrator
           listWidth={listWidth}
           scrollRef={listPaneRef}
-          isCompactView={isCompactView}
+          defaultMessageView={currentAccount?.settings?.layout?.defaultView}
           header={{
             state: {
               listWidth,
@@ -5509,7 +5493,6 @@ export default function MailClient({
               listLoading,
               loadingMessages,
               hasMoreMessages,
-              messageView,
               groupBy,
               eventGroupingAvailable: isCalendarGroupByAvailable,
               threadDateSource,
@@ -5520,7 +5503,6 @@ export default function MailClient({
             },
             actions: {
               setMessagesPage,
-              setMessageView,
               setGroupBy,
               setThreadDateSource,
               setThreadsEnabled,
@@ -5533,7 +5515,6 @@ export default function MailClient({
           searchCriteriaLabel={searchCriteriaLabel}
           searchCriteriaBadges={searchCriteriaBadges}
           onClearSearch={clearSearch}
-          view={deferredMessageView}
           listViewState={{
             groupedMessages,
             visibleMessages,
