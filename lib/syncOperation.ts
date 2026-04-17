@@ -26,66 +26,30 @@ import { deleteMessageFiles } from "@/lib/storage";
 import { listImapMailboxUidsAndFlags, syncImapAccountBatched } from "@/lib/mail/imap";
 import { reconcileVerifiedCrossFolderMoves } from "@/lib/syncMoveReconciliation";
 import { collectThreadReferenceIds, resolveThreadingForItems } from "@/lib/threading";
-export type { SyncMode } from "@/lib/syncPolicy";
 
-export type SyncPayload = {
-  accountId: string;
-  folderId?: string;
-  fullSync?: boolean;
-  mode?: SyncMode;
-  recategorizeFolder?: boolean;
-  /** UID of the last successfully processed message from a previous attempt; sync resumes from the next UID. */
-  resumeFromUid?: number;
-  /** Explicit IMAP UIDs to fetch directly, used for targeted repair backfills. */
-  backfillUids?: number[];
-};
-
-export type SyncNotificationMessage = {
-  folderId: string;
-  uid: number;
-  subject: string;
-  from: string;
-  messageId?: string | null;
-  category?: string | null;
-};
-
-export type SyncOperationResult = {
-  count: number;
-  newMessages?: SyncNotificationMessage[];
-  /** Highest IMAP UID successfully written to DB; used for resume on retry. */
-  highestProcessedUid?: number;
-};
-
-export type SyncOperationProgressPhase =
-  | "starting"
-  | "fetching"
-  | "finalizing"
-  | "done"
-  | "failed"
-  | "retrying";
-
-export type SyncOperationProgress = {
-  accountId: string;
-  folderId?: string;
-  mailboxPath: string;
-  mode: SyncMode;
-  phase: SyncOperationProgressPhase;
-  processed: number;
-  batchNumber?: number;
-  batchSize?: number;
-  estimatedTotal?: number;
-  percent?: number;
-  message?: string;
-  retryAttempt?: number;
-  maxRetries?: number;
-  /** Highest IMAP UID committed to DB so far; emitted after each successful batch write. */
-  highestProcessedUid?: number;
-  updatedAt: number;
-};
-
-export type SyncOperationOptions = {
-  onProgress?: (progress: SyncOperationProgress) => void;
-};
+// Public types and progress helpers live in `lib/syncOperation/` siblings;
+// we re-export the types here so existing `@/lib/syncOperation` callers
+// keep compiling without edits. See `CLEANUP/pass3-architecture.md` P2-9.
+import {
+  calculateProgressPercent,
+  createSyncProgressTracker
+} from "./syncOperation/progress";
+export type {
+  SyncMode,
+  SyncNotificationMessage,
+  SyncOperationOptions,
+  SyncOperationProgress,
+  SyncOperationProgressPhase,
+  SyncOperationResult,
+  SyncPayload
+} from "./syncOperation/types";
+import type {
+  SyncNotificationMessage,
+  SyncOperationOptions,
+  SyncOperationProgress,
+  SyncOperationResult,
+  SyncPayload
+} from "./syncOperation/types";
 
 export function diffLocalAndRemoteFolderUids(
   localRows: Array<{ id: string; imapUid: number }>,
@@ -322,27 +286,19 @@ export async function runSyncOperationBatched(
     : undefined;
   const resolvedMailboxPath = mailboxPath ?? "INBOX";
   const syncMode = payload.mode ?? (payload.fullSync ? "full" : "recent");
-  const emitProgress = (
-    progress: Omit<
-      SyncOperationProgress,
-      "accountId" | "folderId" | "mailboxPath" | "mode" | "updatedAt"
-    > &
-      Pick<SyncOperationProgress, "phase">
-  ) => {
-    options?.onProgress?.({
+  // Tracker holds the per-sync context and stamps it onto every progress
+  // event. See `lib/syncOperation/progress.ts` for the extracted logic.
+  const { emit: emitProgress } = createSyncProgressTracker(
+    {
       accountId: account.id,
       folderId: payload.folderId,
       mailboxPath: resolvedMailboxPath,
-      mode: syncMode,
-      ...progress,
-      updatedAt: Date.now()
-    });
-  };
-  const calculatePercent = (processed: number, estimatedTotal?: number) => {
-    if (typeof estimatedTotal !== "number" || !Number.isFinite(estimatedTotal)) return undefined;
-    if (estimatedTotal <= 0) return 100;
-    return Math.min(100, Math.round((Math.max(0, processed) / estimatedTotal) * 1000) / 10);
-  };
+      mode: syncMode
+    },
+    options
+  );
+  // Local alias so the ~6 call sites below don't need touching.
+  const calculatePercent = calculateProgressPercent;
 
   const yieldToEventLoop = () =>
     new Promise<void>((resolve) => {
