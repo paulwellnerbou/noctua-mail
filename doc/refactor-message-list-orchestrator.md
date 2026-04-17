@@ -32,7 +32,6 @@ migration" state.
 **State**
 
 - `selectionStore` / `selectionStoreRef` / `lastSelectedIdRef`
-- `draggingMessageIds`
 - `pendingMessageActions`
 - `collapsedThreads` / `collapsedGroups`
 - `messages` (+ `setMessages`) / `groupMeta` / `messagesPage` /
@@ -47,6 +46,22 @@ migration" state.
   `visibleMessages` / `toggleAllGroups` / `visibleMessagesRef`)
 - `useMessageListSelectionController`
 - `useMessageListHelpers`
+
+## What DOES NOT move (discovered mid-plan)
+
+- `draggingMessageIds` — consumed by `FolderSidebarPane` at MailClient
+  level (to highlight drop targets). Moving it into the orchestrator
+  would force a sibling pane to reach inside — worse than leaving it
+  at the shell level where siblings legitimately meet.
+- `useMessageDragDrop` — the hook itself takes `setDraggingMessageIds`
+  AND `setDragOverFolderId` (which is folder-sidebar state). Both
+  writes cross panes. The hook stays in MailClient for the same reason
+  its state does. It's already a thin wrapper around event handlers;
+  leaving it there is fine.
+
+Rule of thumb: state moves when the pane genuinely owns it
+end-to-end. State that connects two sibling panes (drag-and-drop is
+the canonical example) stays at the shared parent.
 - `useMessageDragDrop`
 - `useMessageMutations` / `useMessageMoveActions` /
   `useMessageDeleteActions`
@@ -90,45 +105,80 @@ Each phase ends with:
 - `MailClient.tsx` LOC reduced by the stated delta (rough estimate)
 - `MessageListOrchestrator.tsx` owning the listed state / hooks
 
-### 4c. Selection + drag cluster
+### 4c. Selection cluster + mutation hooks (combined)
 
 **Moves:** `selectionStore` + `selectionStoreRef` + `lastSelectedIdRef`
-+ `draggingMessageIds` + `pendingMessageActions` + the three selection
-hooks (`useMessageListSelectionController`, `useMessageListHelpers`,
-`useMessageDragDrop`).
++ `pendingMessageActions` + `useMessageMutations` +
+`useMessageMoveActions` + `useMessageDeleteActions`.
 
-**The seam:** expose an imperative `listHandleRef` from the
-orchestrator that carries:
-- `getSelectionIds(): Set<string>`
-- `clearSelection(): void`
-- `setActiveId(id: string | null): void`
-- `markMessageActionPending(id: string, pending: boolean): void`
+(Originally 4c and 4e were separate phases. Mid-implementation I
+realized they're inseparable: if selection state moves into the
+orchestrator but the mutation hooks that read it stay in MailClient,
+you need a handle-ref exposure layer. If the hooks move too,
+selection has no external consumers and the handle ref isn't needed.
+The handle ref would be a workaround for a phasing that doesn't
+need to happen. Combining is cleaner.)
 
-MailClient-level handlers that read/write the selection store today
-(`useMessageMutations`, `useMessageMoveActions`,
-`useMessageDeleteActions`, keyboard-nav handler at line 1412, auto-
-select effect at line 4517) migrate to reading from the handle ref
-instead of the store directly.
+(NOT `useMessageListSelectionController` or `useMessageListHelpers`
+or `useMessageDragDrop` — their inputs are derived from 4d state
+(`visibleMessagesRef`, `messageById`, `threadScopeMessages`) or are
+inherently cross-pane (drag).)
 
-**Why pendingMessageActions moves in this phase:** it's read by the
-drag hook (which *is* moving) *and* written by the mutation hooks
-(which are *not* moving yet). The imperative
-`markMessageActionPending` on the handle lets the still-in-MailClient
-mutation hooks toggle pending state on the now-in-orchestrator state.
+**The seam:** the orchestrator exposes handler callbacks via its
+`listHandleRef` out-ref for the small set of MailClient-level
+consumers that genuinely need to trigger a list mutation externally:
 
-**LOC estimate:** MailClient −150; Orchestrator +200.
+- Keyboard shortcuts (delete-active, archive-active, todo-toggle) —
+  called from `KeyboardShortcutsDialog` / window-level listeners
+- `useMessageDragDrop` — reads `selectionStore.getIds()` to figure
+  out which messages are being dragged; the ref exposes the store
+- Compose-send / send-draft-from-list code paths — may need to
+  mark the target draft as pending; the ref exposes
+  `setPendingMessageActions`
 
-**Risk:** medium. The selection store is currently a *reference
-shared by closure*; the handle-ref pattern preserves identity
-(selection store is a stable object for the orchestrator's lifetime).
-Smoke-test: shift-click range select, ctrl-click multi-select,
-keyboard arrow navigation.
+Handle shape:
 
-### 4d. Data pipeline + collapsed state
+```ts
+type MessageListHandle = {
+  // For drag hook + keyboard nav in MailClient
+  selectionStore: SelectionStore;
+  lastSelectedIdRef: RefObject<string | null>;
+
+  // For send-draft / compose
+  setPendingMessageActions: Dispatch<SetStateAction<Set<string>>>;
+
+  // For keyboard shortcuts
+  handleDeleteActive: () => void;
+  handleArchiveActive: () => void;
+  toggleTodoActive: () => void;
+  // etc. — only handlers with MailClient-level callers
+};
+```
+
+Everything else — the mutation hooks' full output, the selection
+store's internal callers — is consumed inside the orchestrator's
+JSX subtree and never needs to cross back up.
+
+**LOC estimate:** MailClient −400; Orchestrator +500.
+
+**Risk:** high. This is the big one. `useMessageMutations` /
+`Move` / `Delete` each have ~30–50 LOC of input-prop destructuring
+and all consume cross-pane signals (viewMessage clearing on
+delete-of-active, sent-folder sync after send, etc.). Those signals
+keep coming from MailClient via props, but the hooks themselves move.
+
+Smoke-test: delete a single message, multi-select delete, archive,
+move (including undo), flag toggle, todo toggle, spam mark. Plus
+keyboard shortcuts for each. Plus view-message pane behavior when
+the viewed message is deleted / moved.
+
+### 4d. Data pipeline + collapsed state + selection controller
 
 **Moves:** `useMessageData` + all its outputs, `collapsedThreads` /
 `collapsedGroups`, `accountMessages` / `sortedMessages` /
-`threadRelatedCandidateIds`, `useMessageListDerivedState`.
+`threadRelatedCandidateIds`, `useMessageListDerivedState`, and
+`useMessageListSelectionController` (which consumes the derived state
+above — the only reason it couldn't move in 4c).
 
 **The seam:** the existing `listHandleRef` gains:
 - `getMessages(): Message[]`
@@ -157,29 +207,10 @@ component — ~20 call sites touching it. Smoke-test matrix: load
 folder / paginate / refresh / search / compose+save draft (should
 update the list) / send / undo / sync events arrive mid-view.
 
-### 4e. Mutation hooks
+### 4e. Removed (folded into 4c)
 
-**Moves:** `useMessageMutations` + `useMessageMoveActions` +
-`useMessageDeleteActions`.
-
-With selection + pendingMessageActions + messages already living in
-the orchestrator, these hooks are natural to co-locate: their
-callees (quick action buttons, message menu) are already in the
-orchestrator's subtree, and their dependencies (selection + pending)
-are now handed in as internal values rather than prop-chains.
-
-**The seam:** the handle ref gains the per-handler exposures that
-*external* callers need: keyboard shortcuts in MailClient that
-trigger delete / archive / todo-toggle from a hotkey call through
-`listHandleRef.current.handleDeleteActive()` etc.
-
-**LOC estimate:** MailClient −250; Orchestrator +300.
-
-**Risk:** medium. The mutation hooks interact with MessageView (when
-the viewed message is deleted / moved, the view clears). That
-cross-pane signal currently goes through `setViewMessage` /
-`setActiveMessageId` props on the hooks. Those props keep flowing
-from MailClient — they're *MessageView*-side state, not list-side.
+See 4c above — the selection cluster and mutation hooks now move
+together because they're inseparable without a handle-ref workaround.
 
 ### 4f. Props shrink + cleanup
 
