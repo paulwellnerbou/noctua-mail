@@ -111,3 +111,53 @@ function isBccHeaderLine(line: string): boolean {
   const name = line.slice(0, 3).toLowerCase();
   return name === "bcc" && line[3] === ":";
 }
+
+/**
+ * Prepend `To: undisclosed-recipients:;` to the input's header block.
+ *
+ * Intended for the BCC-only case: after `stripBccHeader` removes the
+ * `Bcc:` header and the draft had no `To:` or `Cc:` to begin with, the
+ * wire copy would carry no recipient header at all — technically valid
+ * SMTP (the envelope still has `RCPT TO` addresses) but several MUAs
+ * display such messages awkwardly. `/api/accounts/[accountId]/smtp/send`
+ * already handles this case the same way (see the `outboundTo` fallback
+ * in that route); this helper mirrors the behavior for draft-send.
+ *
+ * No-op when the input already has a `To:` or `Cc:` header (only bucks
+ * in when there truly are no recipient headers). Line terminator of the
+ * inserted header is `\r\n` regardless of the rest of the blob's line
+ * style — RFC 5322 uses CRLF, and mixing within a header block is fine.
+ */
+export function injectUndisclosedRecipientsToHeader(raw: Buffer): Buffer;
+export function injectUndisclosedRecipientsToHeader(raw: string): string;
+export function injectUndisclosedRecipientsToHeader(raw: MimeBytes): MimeBytes;
+export function injectUndisclosedRecipientsToHeader(raw: MimeBytes): MimeBytes {
+  if (Buffer.isBuffer(raw)) {
+    const asString = raw.toString("latin1");
+    const out = injectInText(asString);
+    return Buffer.from(out, "latin1");
+  }
+  return injectInText(raw);
+}
+
+function injectInText(raw: string): string {
+  // If the header block already has a To: or Cc:, do nothing.
+  if (headerBlockContainsRecipient(raw)) return raw;
+  const insertion = "To: undisclosed-recipients:;\r\n";
+  return insertion + raw;
+}
+
+function headerBlockContainsRecipient(raw: string): boolean {
+  let cursor = 0;
+  while (cursor < raw.length) {
+    const { lineText, nextCursor } = readLine(raw, cursor);
+    if (lineText.length === 0) return false; // Reached end of headers.
+    if (lineText[0] !== " " && lineText[0] !== "\t") {
+      // Non-continuation line → a header name lives here.
+      const lower = lineText.toLowerCase();
+      if (lower.startsWith("to:") || lower.startsWith("cc:")) return true;
+    }
+    cursor = nextCursor;
+  }
+  return false;
+}

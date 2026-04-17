@@ -13,7 +13,10 @@ import { deleteMessageFiles, getMessageSource } from "@/lib/storage";
 import { parseComposeAttachments, resolveComposeHtml } from "@/lib/mail/composePayload";
 import { appendImapMessage, deleteImapMessage, syncImapMessage } from "./serverImap";
 import { buildRawMessage, sendRawSmtpMessage } from "./serverSmtp";
-import { stripBccHeader } from "@/lib/mail/stripBccHeader";
+import {
+  injectUndisclosedRecipientsToHeader,
+  stripBccHeader
+} from "@/lib/mail/stripBccHeader";
 import { sanitizeSyncedMessage } from "@/lib/mail/syncMessageSanitizer";
 import { folderMailboxPath } from "@/lib/mailboxPaths";
 import { splitRecipientEntries } from "@/lib/recipientLists";
@@ -276,11 +279,23 @@ export async function saveDraftForAccount(params: {
 /**
  * Send a previously-saved draft without re-opening it in compose.
  *
- * The draft is relayed byte-for-byte from its stored raw MIME source,
- * so attachments, `Content-ID`s, the compose-invite header, and the
- * original `Message-ID` are preserved exactly as the user left them.
- * The SMTP envelope is built from the draft's parsed `to`/`cc`/`bcc`
- * — we don't re-parse the raw blob for recipients.
+ * The draft is relayed from its stored raw MIME source, which helps
+ * preserve attachments, `Content-ID`s, the compose-invite header, and
+ * the original `Message-ID` as stored with the draft. (The cached
+ * source is a UTF-8 string, so calling this "byte-for-byte" would be
+ * overstating it — encoding-preserving round-trips happen via the
+ * `latin1` bridge in `stripBccHeader`.) The SMTP envelope is built
+ * from the draft's parsed `to`/`cc`/`bcc` — we don't re-parse the raw
+ * blob for recipients.
+ *
+ * Two header-level edits happen before relay:
+ *   1. `stripBccHeader` — the local draft is saved with
+ *      `keepBcc: true`, but the wire copy must not carry `Bcc:` or
+ *      blind-carbon addresses would leak to every To/Cc recipient.
+ *   2. `injectUndisclosedRecipientsToHeader` — for BCC-only drafts
+ *      (no To, no Cc), insert `To: undisclosed-recipients:;` so the
+ *      wire copy has a recipient header. Mirrors the `outboundTo`
+ *      fallback in `/api/accounts/[accountId]/smtp/send`.
  *
  * On success the draft is removed from both the IMAP Drafts mailbox
  * and the local message store, and a copy is appended to the Sent
@@ -309,14 +324,20 @@ export async function sendDraftForAccount(params: {
     );
   }
 
-  // SECURITY: drafts are built with `keepBcc: true`, so the cached raw
-  // MIME contains a `Bcc:` header. Relaying that unchanged would disclose
-  // Bcc addresses to every To/Cc recipient. Strip the header before
-  // handing `raw` to the SMTP transport. The envelope recipients we
-  // built from the draft's parsed fields still include Bcc addresses,
-  // so they receive the message — they just don't appear in its
-  // headers.
-  const wireSource = stripBccHeader(rawSource);
+  // Prepare the wire copy:
+  //   - `stripBccHeader` removes the `Bcc:` header that's in the cached
+  //     draft (saved with `keepBcc: true`). Relaying that unchanged would
+  //     disclose blind-carbon addresses to every To/Cc recipient.
+  //   - `injectUndisclosedRecipientsToHeader` handles the BCC-only case
+  //     (no To, no Cc): after the strip, the message would have no
+  //     recipient header at all — technically valid SMTP (the envelope
+  //     still has `RCPT TO`) but several MUAs render it awkwardly.
+  //     Inject `To: undisclosed-recipients:;` to match `/smtp/send`.
+  //
+  // The envelope recipients we build from the draft's parsed fields
+  // still include Bcc addresses, so they receive the message — they
+  // just don't appear in the message's own headers.
+  const wireSource = injectUndisclosedRecipientsToHeader(stripBccHeader(rawSource));
   const envelopeRecipients = buildDraftSendEnvelopeRecipients(draft);
   await sendRawSmtpMessage(account, wireSource, {
     from: account.email,

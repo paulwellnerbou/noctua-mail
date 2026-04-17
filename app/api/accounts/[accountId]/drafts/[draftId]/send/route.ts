@@ -5,6 +5,7 @@ import {
   requireAccountContext,
   type AccountRouteParams
 } from "@/app/api/_helpers/accountContext";
+import { errorResponse, okResponse } from "@/app/api/_helpers/response";
 
 /**
  * POST /api/accounts/[accountId]/drafts/[draftId]/send
@@ -25,10 +26,7 @@ export async function POST(request: Request, { params }: Params) {
   const { draftId: rawDraftId } = await params;
   const draftId = typeof rawDraftId === "string" ? rawDraftId.trim() : "";
   if (!accountId || !draftId) {
-    return NextResponse.json(
-      { ok: false, message: "Missing accountId or draftId" },
-      { status: 400 }
-    );
+    return errorResponse("Missing accountId or draftId", 400);
   }
   const accountContext = await requireAccountContext(request, accountId, {
     missingAccountMessage: "Missing accountId"
@@ -43,18 +41,14 @@ export async function POST(request: Request, { params }: Params) {
       clientId: clientId ?? "",
       draftId
     });
-    return NextResponse.json({
-      ok: true,
+    return okResponse({
       sentFolderId: result.sentFolderId,
       sentMessageUid: result.sentMessageUid,
       messageId: result.messageId
     });
   } catch (error) {
     if (error instanceof DraftSendError) {
-      return NextResponse.json(
-        { ok: false, message: error.message },
-        { status: error.status }
-      );
+      return errorResponse(error.message, error.status);
     }
     throw error;
   }
