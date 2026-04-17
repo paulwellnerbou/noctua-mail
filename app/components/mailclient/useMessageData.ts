@@ -12,13 +12,7 @@ import {
 import { mergeLoadedMessageCount, resolveLoadedMessageCount } from "./utils/listCount";
 import { logListDebug, summarizeMessageForListDebug } from "./messagelist/listDebug";
 import type { SearchBadgesState } from "./useSearchState";
-import {
-  buildAccountMessagesPath,
-  buildAccountRelatedPath,
-  buildAccountSearchPath,
-  buildAccountThreadsPath
-} from "@/lib/accountApiPaths";
-import { INVITE_DECK_GROUP_BY } from "@/lib/messageGrouping";
+import { buildMessageListQueryUrl } from "./messageListQueryUrl";
 import type { ThreadDateSource } from "@/lib/threadDate";
 
 type ApiFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
@@ -159,48 +153,23 @@ export function useMessageData({
     });
   };
 
-  const buildQueryUrl = (page: number) => {
-    const trimmedQuery = query.trim();
-    const pageSize =
-      groupBy === INVITE_DECK_GROUP_BY ? 200 : searchScope === "all" ? 600 : 300;
-    const params = new URLSearchParams({
-      page: String(page),
-      pageSize: String(pageSize),
-      groupBy
+  const buildQueryUrl = (page: number) =>
+    buildMessageListQueryUrl({
+      accountId: activeAccountId,
+      page,
+      groupBy,
+      searchScope,
+      activeFolderId,
+      currentSearchExcludedFolderIds,
+      supportsThreads,
+      threadDateSource,
+      isRelatedSearch,
+      relatedQueryId,
+      query,
+      selectedSearchFields,
+      searchBadges: { attachments: searchBadges.attachments },
+      effectiveSearchBadges
     });
-    if (supportsThreads) {
-      params.set("threadDateSource", threadDateSource);
-    }
-    if (!isRelatedSearch && trimmedQuery) {
-      params.set("fields", selectedSearchFields.join(","));
-    }
-    if (searchBadges.attachments) {
-      params.set("attachments", "1");
-    }
-    if (effectiveSearchBadges.length > 0) {
-      params.set("badges", effectiveSearchBadges.join(","));
-    }
-    if (!isRelatedSearch && searchScope === "folder" && activeFolderId) {
-      params.set("folderId", activeFolderId);
-    }
-    if (searchScope === "all" && currentSearchExcludedFolderIds.length > 0) {
-      params.set("excludeFolderIds", currentSearchExcludedFolderIds.join(","));
-    }
-    let endpointBuilder = buildAccountMessagesPath;
-    if (isRelatedSearch) {
-      endpointBuilder = buildAccountRelatedPath;
-      params.set("relatedId", relatedQueryId);
-    } else if (supportsThreads) {
-      endpointBuilder = buildAccountThreadsPath;
-    } else if (trimmedQuery) {
-      endpointBuilder = buildAccountSearchPath;
-      params.set("q", trimmedQuery);
-    }
-    if (trimmedQuery && endpointBuilder === buildAccountThreadsPath) {
-      params.set("q", trimmedQuery);
-    }
-    return endpointBuilder(activeAccountId, params);
-  };
 
   // Paginated message load effect.
   useEffect(() => {

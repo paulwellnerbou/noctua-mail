@@ -2,7 +2,11 @@ import { useCallback } from "react";
 import { buildAccountMessageActionPath } from "@/lib/accountApiPaths";
 import type { Message } from "@/lib/data";
 import { applyFlagsToMessage, isFlaggedMessage, hasTodoFlag, hasDoneFlag, getUnsubscribeCapability } from "./utils/messageHelpers";
-import { getMessageSubjectForNotice, remapMessageReferenceIds } from "./utils/messageMutation";
+import {
+  computeOptimisticMovedMessage,
+  getMessageSubjectForNotice,
+  resolveMoveViewTransition
+} from "./utils/messageMutation";
 import { TODO_FLAG, DONE_FLAG } from "@/lib/messageFlags";
 import { NOTICE_TIMEOUTS } from "./constants";
 import type { UndoMoveTarget } from "./useMessageMoveActions";
@@ -131,51 +135,32 @@ export function useMessageMutations({
     } = params;
     evictMessageCaches(Array.from(new Set([message.id, movedMessageId])));
 
-    const movedMessage =
-      searchScope === "all" && destinationFolderId
-        ? remapMessageReferenceIds(
-            applyFlagsToMessage(
-              {
-                ...message,
-                id: movedMessageId,
-                folderId: destinationFolderId,
-                mailboxPath: destinationMailbox ?? message.mailboxPath
-              },
-              flags ?? message.flags ?? []
-            ),
-            message.id,
-            movedMessageId
-          )
-        : null;
+    const optimisticParams = {
+      movedMessageId,
+      destinationFolderId,
+      destinationMailbox,
+      flags,
+      searchScope
+    };
+    const movedMessage = computeOptimisticMovedMessage(message, optimisticParams);
 
     updateMessagesWithCurrentResultPrune((item) => {
       if (item.id !== message.id) return item;
-      if (searchScope === "all" && destinationFolderId) {
-        return remapMessageReferenceIds(
-          applyFlagsToMessage(
-            {
-              ...item,
-              id: movedMessageId,
-              folderId: destinationFolderId,
-              mailboxPath: destinationMailbox ?? item.mailboxPath
-            },
-            flags ?? item.flags ?? []
-          ),
-          item.id,
-          movedMessageId
-        );
-      }
-      return null;
+      return computeOptimisticMovedMessage(item, optimisticParams);
     }, { source });
 
-    if (viewMessage?.id === message.id) {
-      if (!movedMessage || !shouldKeepMessageInCurrentResults(movedMessage)) {
-        setViewMessage(null);
-        setActiveMessageId("");
-      } else if (movedMessageId !== message.id) {
-        setViewMessage(movedMessage);
-        setActiveMessageId(movedMessageId);
-      }
+    const transition = resolveMoveViewTransition(
+      viewMessage,
+      message.id,
+      movedMessage,
+      shouldKeepMessageInCurrentResults
+    );
+    if (transition.kind === "clear") {
+      setViewMessage(null);
+      setActiveMessageId("");
+    } else if (transition.kind === "retarget") {
+      setViewMessage(transition.nextViewMessage);
+      setActiveMessageId(transition.nextActiveMessageId);
     }
 
     const undoTarget: UndoMoveTarget = {
