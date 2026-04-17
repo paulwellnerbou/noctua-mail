@@ -62,6 +62,10 @@ import {
 import MessageListHeader from "./mailclient/messagelist/MessageListHeader";
 import MessageListPane from "./mailclient/messagelist/MessageListPane";
 import MessageListView from "./mailclient/messagelist/MessageListView";
+import {
+  dedupeAccountMessages,
+  sortMessages
+} from "./mailclient/messagelist/sortAndDedupeMessages";
 import listMetaStyles from "./mailclient/messagelist/MessageListMeta.module.css";
 import listPaneStyles from "./mailclient/messagelist/MessageListPane.module.css";
 import { createSelectionStore } from "./mailclient/messagelist/selectionStore";
@@ -1308,29 +1312,25 @@ export default function MailClient({
   setMessagesRef.current = setMessages;
 
   const accountMessages = useMemo(() => {
-    const filtered = messages.filter((message) => message.accountId === activeAccountId);
-    const seen = new Set<string>();
-    const duplicateEntries: ReturnType<typeof summarizeMessageForListDebug>[] = [];
-    const deduped: Message[] = [];
-    filtered.forEach((msg, index) => {
-      let nextId = msg.id;
-      if (seen.has(nextId)) {
-        duplicateEntries.push(summarizeMessageForListDebug(msg));
-        nextId = `${msg.id}-${index}`;
-      }
-      seen.add(nextId);
-      deduped.push({ ...msg, id: nextId });
-    });
-    if (duplicateEntries.length > 0) {
-      const sample = duplicateEntries.slice(0, LIST_DEBUG_SAMPLE_LIMIT);
-      const fingerprint = `${activeAccountId}|${duplicateEntries.length}|${sample
+    const { deduped, duplicates } = dedupeAccountMessages(messages, activeAccountId);
+    if (duplicates.length > 0) {
+      // Rebuild the original-message sample for the debug payload; the
+      // helper only reports ids, but the logger wants the richer shape
+      // so we resolve each reassignedId back to its source message.
+      const duplicatedMessages = deduped.filter((msg) =>
+        duplicates.some((dup) => dup.reassignedId === msg.id)
+      );
+      const sample = duplicatedMessages
+        .slice(0, LIST_DEBUG_SAMPLE_LIMIT)
+        .map((msg) => summarizeMessageForListDebug(msg));
+      const fingerprint = `${activeAccountId}|${duplicates.length}|${sample
         .map((entry) => entry?.id ?? "")
         .join(",")}`;
       if (duplicateMessageIdLogFingerprintRef.current !== fingerprint) {
         duplicateMessageIdLogFingerprintRef.current = fingerprint;
         logListDebug("warn", "duplicate local message ids detected", {
           activeAccountId,
-          duplicateCount: duplicateEntries.length,
+          duplicateCount: duplicates.length,
           sample
         });
       }
@@ -1342,21 +1342,10 @@ export default function MailClient({
 
   const filteredMessages = accountMessages;
 
-  const sortedMessages = useMemo(() => {
-    const items = [...filteredMessages];
-    items.sort((a, b) => {
-      let cmp = 0;
-      if (sortKey === "date") {
-        cmp = a.dateValue - b.dateValue;
-      } else if (sortKey === "from") {
-        cmp = a.from.localeCompare(b.from);
-      } else {
-        cmp = a.subject.localeCompare(b.subject);
-      }
-      return sortDir === "asc" ? cmp : -cmp;
-    });
-    return items;
-  }, [filteredMessages, sortDir, sortKey]);
+  const sortedMessages = useMemo(
+    () => sortMessages(filteredMessages, sortKey, sortDir),
+    [filteredMessages, sortDir, sortKey]
+  );
   const threadRelatedCandidateIds = useMemo(() => {
     if (sortedMessages.length === 0) return [];
     const ids = Array.from(
