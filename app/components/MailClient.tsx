@@ -59,15 +59,11 @@ import {
   renderMarkdownPanel as renderMarkdownPanelHelper,
   folderSpecialIcon
 } from "./mailclient/RenderHelpers";
-import MessageListHeader from "./mailclient/messagelist/MessageListHeader";
-import MessageListPane from "./mailclient/messagelist/MessageListPane";
-import MessageListView from "./mailclient/messagelist/MessageListView";
+import MessageListOrchestrator from "./mailclient/messagelist/MessageListOrchestrator";
 import {
   dedupeAccountMessages,
   sortMessages
 } from "./mailclient/messagelist/sortAndDedupeMessages";
-import listMetaStyles from "./mailclient/messagelist/MessageListMeta.module.css";
-import listPaneStyles from "./mailclient/messagelist/MessageListPane.module.css";
 import { createSelectionStore } from "./mailclient/messagelist/selectionStore";
 import { useMessageListDerivedState } from "./mailclient/messagelist/listState";
 import {
@@ -5420,186 +5416,113 @@ export default function MailClient({
           }}
         />
 
-        <MessageListPane state={{ listWidth }} refs={{ listPaneRef }}>
-          <div
-            className={`${listPaneStyles.list} ${isCompactView ? listPaneStyles.listCompact : ""}`}
-          >
-            <MessageListHeader
-              state={{
-                listWidth,
-                searchScope,
-                activeFolderName,
-                activeVirtualFolderName: activeVirtualFolder?.name,
-                loadedMessageCount,
-                totalMessages,
-                listLoading,
-                loadingMessages,
-                hasMoreMessages,
-                messageView,
-                groupBy,
-                eventGroupingAvailable: isCalendarGroupByAvailable,
-                threadDateSource,
-                threadsEnabled,
-                threadsAllowed,
-                groupedMessages,
-                collapsedGroups
-              }}
-              actions={{
-                setMessagesPage,
-                setMessageView,
-                setGroupBy,
-                setThreadDateSource,
-                setThreadsEnabled,
-                toggleAllGroups
-              }}
-            />
-            {(searchActive || isRelatedSearch) && (
-              <Card size="1" className={listMetaStyles.searchCard}>
-                <Flex
-                  align="center"
-                  justify="between"
-                  gap="3"
-                  className={listMetaStyles.searchRow}
-                >
-                  <Flex align="center" gap="2" className={listMetaStyles.searchSummary}>
-                    <Search size={12} />
-                    {isRelatedSearch ? (
-                      <Text size="1" color="gray">
-                        {relatedNotice}
-                      </Text>
-                    ) : (
-                      <>
-                        <Text size="1" color="gray">
-                          Searching
-                        </Text>
-                        <div
-                          className={listMetaStyles.searchCriteria}
-                          aria-label={searchCriteriaLabel || "all messages"}
-                          title={searchCriteriaLabel || "All messages"}
-                        >
-                          {searchCriteriaBadges.map((badge) => (
-                            <Badge
-                              key={badge.key}
-                              size="1"
-                              variant="soft"
-                              color="gray"
-                              className={listMetaStyles.searchBadge}
-                              title={badge.label}
-                            >
-                              <span className={listMetaStyles.searchBadgeLabel}>{badge.label}</span>
-                            </Badge>
-                          ))}
-                        </div>
-                      </>
-                    )}
-                  </Flex>
-                  <IconButton
-                    size="1"
-                    variant="ghost"
-                    color="gray"
-                    onClick={clearSearch}
-                    title="Clear search"
-                    aria-label="Clear search"
-                  >
-                    <X size={12} />
-                  </IconButton>
-                </Flex>
-              </Card>
-            )}
-            {showListLoadingState && sortedMessages.length === 0 && (
-              <Card size="1" className={listMetaStyles.loadingCard}>
-                <Text size="1" color="gray">
-                  Loading messages…
-                </Text>
-              </Card>
-            )}
-            <MessageListView
-              view={deferredMessageView}
-              state={{
-                groupedMessages,
-                visibleMessages,
-                selectionStore,
-                draggingMessageIds,
-                collapsedGroups,
-                collapsedThreads,
-                pendingMessageActions,
-                supportsThreads,
-                includeThreadAcrossFolders,
-                searchScope,
-                activeFolderId,
-                messageById: listMessageById,
-                messageTopicsById,
-                suggestedThreadIds,
-                pendingSuggestedThreadIds: pendingTopicSuggestionThreadIds,
-                sortDir,
-                listIsNarrow,
-                preferToDisplay,
-                activeTopic,
-                userEmail: currentAccount?.email,
-                findRecipientAlias,
-                dateFormat: accountDateFormat,
-                topicColorRows: currentAccount?.settings?.appearance?.topicColorRows ?? true,
-                senderIconsEnabled: currentAccount?.settings?.appearance?.senderIcons ?? true
-              }}
-              actions={{
-                setSortKey,
-                setSortDir,
-                setCollapsedGroups,
-                setCollapsedThreads,
-                setLastSelectedIdRef,
-                handleMessageDragStart,
-                handleMessageDragEnd,
-                handleRowClick,
-                handleSelectMessage,
-                toggleMessageSelection,
-                selectRangeTo,
-                selectCollapsedThread,
-                handleDeleteMessage,
-                toggleFlaggedFlag,
-                toggleTodoFlag,
-                handleAddSuggestedThread: handleAddActiveTopicSuggestion
-              }}
-              helpers={{
-                buildThreadTree,
-                flattenThread,
-                getThreadLatestDate,
-                getGroupLabel,
-                renderUnreadDot,
-                renderSelectIndicators,
-                renderFolderBadges,
-                renderQuickActions,
-                renderMessageMenu,
-                handleShowRelated,
-                isTrashFolder
-              }}
-              refs={{ scrollRef: listPaneRef }}
-            />
-            {filteredMessages.length === 0 && !showListLoadingState && (
-              <div
-                className={`${listPaneStyles.empty} ${
-                  messageListError ? listPaneStyles.emptyError : ""
-                }`}
-              >
-                {messageListError
-                  ? `Failed to load messages. ${messageListError}`
-                  : emptyListSyncing
-                    ? "Syncing messages…"
-                    : activeVirtualFolder
-                      ? `No messages in ${activeVirtualFolder.name}.`
-                      : searchScope === "all"
-                        ? "No messages match this search."
-                        : "No messages in this folder."}
-              </div>
-            )}
-            {listLoading && sortedMessages.length > 0 && (
-              <Card size="1" className={listMetaStyles.loadingCard}>
-                <Text size="1" color="gray">
-                  Loading more…
-                </Text>
-              </Card>
-            )}
-          </div>
-        </MessageListPane>
+        <MessageListOrchestrator
+          listWidth={listWidth}
+          listPaneRef={listPaneRef}
+          isCompactView={isCompactView}
+          header={{
+            state: {
+              listWidth,
+              searchScope,
+              activeFolderName,
+              activeVirtualFolderName: activeVirtualFolder?.name,
+              loadedMessageCount,
+              totalMessages,
+              listLoading,
+              loadingMessages,
+              hasMoreMessages,
+              messageView,
+              groupBy,
+              eventGroupingAvailable: isCalendarGroupByAvailable,
+              threadDateSource,
+              threadsEnabled,
+              threadsAllowed,
+              groupedMessages,
+              collapsedGroups
+            },
+            actions: {
+              setMessagesPage,
+              setMessageView,
+              setGroupBy,
+              setThreadDateSource,
+              setThreadsEnabled,
+              toggleAllGroups
+            }
+          }}
+          searchActive={searchActive}
+          isRelatedSearch={isRelatedSearch}
+          relatedNotice={relatedNotice}
+          searchCriteriaLabel={searchCriteriaLabel}
+          searchCriteriaBadges={searchCriteriaBadges}
+          onClearSearch={clearSearch}
+          view={deferredMessageView}
+          listViewState={{
+            groupedMessages,
+            visibleMessages,
+            selectionStore,
+            draggingMessageIds,
+            collapsedGroups,
+            collapsedThreads,
+            pendingMessageActions,
+            supportsThreads,
+            includeThreadAcrossFolders,
+            searchScope,
+            activeFolderId,
+            messageById: listMessageById,
+            messageTopicsById,
+            suggestedThreadIds,
+            pendingSuggestedThreadIds: pendingTopicSuggestionThreadIds,
+            sortDir,
+            listIsNarrow,
+            preferToDisplay,
+            activeTopic,
+            userEmail: currentAccount?.email,
+            findRecipientAlias,
+            dateFormat: accountDateFormat,
+            topicColorRows: currentAccount?.settings?.appearance?.topicColorRows ?? true,
+            senderIconsEnabled: currentAccount?.settings?.appearance?.senderIcons ?? true
+          }}
+          listViewActions={{
+            setSortKey,
+            setSortDir,
+            setCollapsedGroups,
+            setCollapsedThreads,
+            setLastSelectedIdRef,
+            handleMessageDragStart,
+            handleMessageDragEnd,
+            handleRowClick,
+            handleSelectMessage,
+            toggleMessageSelection,
+            selectRangeTo,
+            selectCollapsedThread,
+            handleDeleteMessage,
+            toggleFlaggedFlag,
+            toggleTodoFlag,
+            handleAddSuggestedThread: handleAddActiveTopicSuggestion
+          }}
+          listViewHelpers={{
+            buildThreadTree,
+            flattenThread,
+            getThreadLatestDate,
+            getGroupLabel,
+            renderUnreadDot,
+            renderSelectIndicators,
+            renderFolderBadges,
+            renderQuickActions,
+            renderMessageMenu,
+            handleShowRelated,
+            isTrashFolder
+          }}
+          listViewRefs={{ scrollRef: listPaneRef }}
+          showListLoadingState={showListLoadingState}
+          listLoading={listLoading}
+          sortedMessagesCount={sortedMessages.length}
+          filteredMessagesCount={filteredMessages.length}
+          messageListError={messageListError}
+          emptyListSyncing={emptyListSyncing}
+          activeVirtualFolderName={activeVirtualFolder?.name}
+          searchScope={searchScope}
+        />
 
         <div
           className="resizer"
