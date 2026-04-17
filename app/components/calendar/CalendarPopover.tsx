@@ -8,6 +8,14 @@ import { CalendarDays, ExternalLink, MoreVertical, PanelRight, X } from "lucide-
 import { openDetachedWindow } from "@/lib/ui/openDetachedWindow";
 import CalendarEventBrowser from "./CalendarEventBrowser";
 import styles from "./CalendarPopover.module.css";
+import {
+  computeResizedRect,
+  cursorFor,
+  isNorth,
+  isWest,
+  type ResizeHandle,
+  type Rect
+} from "./calendarPopoverResize";
 
 type Props = {
   open: boolean;
@@ -33,10 +41,27 @@ const VIEWPORT_MARGIN = 16;
 const KEYBOARD_RESIZE_STEP = 20;
 const KEYBOARD_RESIZE_STEP_LARGE = 60;
 
-function computeMaxSize(position: Position): { maxW: number; maxH: number } {
+const ALL_HANDLES: ResizeHandle[] = ["n", "s", "e", "w", "ne", "nw", "se", "sw"];
+
+/** Max size bounds for a resize, given which edges can move for `handle`. */
+function computeResizeMaxSize(handle: ResizeHandle, startRect: Rect): Size {
+  // The east edge can expand up to viewport.w - margin.
+  // If we're dragging the west edge, the east edge is anchored, so max width
+  // is determined by how far the west edge can travel (toward x = margin).
+  const maxW = isWest(handle)
+    ? Math.max(MIN_WIDTH, startRect.x + startRect.width - VIEWPORT_MARGIN)
+    : Math.max(MIN_WIDTH, window.innerWidth - startRect.x - VIEWPORT_MARGIN);
+  const maxH = isNorth(handle)
+    ? Math.max(MIN_HEIGHT, startRect.y + startRect.height - VIEWPORT_MARGIN)
+    : Math.max(MIN_HEIGHT, window.innerHeight - startRect.y - VIEWPORT_MARGIN);
+  return { width: maxW, height: maxH };
+}
+
+/** Max size bounds for keyboard-driven SE-corner resize (legacy behavior). */
+function computeKeyboardMaxSize(position: Position): Size {
   return {
-    maxW: Math.max(MIN_WIDTH, window.innerWidth - position.x - VIEWPORT_MARGIN),
-    maxH: Math.max(MIN_HEIGHT, window.innerHeight - position.y - VIEWPORT_MARGIN)
+    width: Math.max(MIN_WIDTH, window.innerWidth - position.x - VIEWPORT_MARGIN),
+    height: Math.max(MIN_HEIGHT, window.innerHeight - position.y - VIEWPORT_MARGIN)
   };
 }
 
@@ -46,6 +71,23 @@ function getInitialPosition(): Position {
     x: Math.max(8, (window.innerWidth - PANEL_WIDTH) / 2),
     y: Math.max(8, window.innerHeight - PANEL_HEIGHT - 36)
   };
+}
+
+type BodyLockToken = { prevUserSelect: string; prevCursor: string };
+
+function lockBodyForGesture(cursor: string): BodyLockToken {
+  const token: BodyLockToken = {
+    prevUserSelect: document.body.style.userSelect,
+    prevCursor: document.body.style.cursor
+  };
+  document.body.style.userSelect = "none";
+  document.body.style.cursor = cursor;
+  return token;
+}
+
+function unlockBody(token: BodyLockToken) {
+  document.body.style.userSelect = token.prevUserSelect;
+  document.body.style.cursor = token.prevCursor;
 }
 
 export default function CalendarPopover({
@@ -63,12 +105,10 @@ export default function CalendarPopover({
   const calendarRef = useRef<FullCalendar>(null);
   const [position, setPosition] = useState<Position>(getInitialPosition);
   const [size, setSize] = useState<Size>({ width: PANEL_WIDTH, height: PANEL_HEIGHT });
-  const dragStateRef = useRef({ active: false, startX: 0, startY: 0, posX: 0, posY: 0 });
-  const resizeStateRef = useRef({ active: false, startX: 0, startY: 0, startWidth: 0, startHeight: 0 });
   // Tracks the teardown for whichever pointer gesture is currently active
-  // (drag or resize). Cleared when the gesture ends via mouseup. The
-  // component-unmount effect below calls this to avoid leaked document-level
-  // listeners and stale setState calls if the popover closes mid-gesture.
+  // (drag or resize). Cleared when the gesture ends. The component-unmount
+  // effect calls this to avoid leaked listeners / a stuck body lock if the
+  // popover closes mid-gesture.
   const activeGestureCleanupRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
@@ -80,67 +120,129 @@ export default function CalendarPopover({
     };
   }, []);
 
-  // Drag handling
-  const handleDragStart = (e: React.MouseEvent<HTMLDivElement>) => {
+  // Drag handling (move the whole panel).
+  const handleDragStart = (e: React.PointerEvent<HTMLDivElement>) => {
     if ((e.target as HTMLElement).closest("button, [role=button]")) return;
+    // Only primary button.
+    if (e.button !== 0) return;
+    // Ignore secondary pointers (multi-touch second-finger, pen + mouse, etc.).
+    // Without this, each gesture saves its own snapshot of the body's cursor
+    // and user-select — so the second pointer captures the ALREADY-LOCKED
+    // state as "original" and restores to that locked state on cleanup,
+    // stranding the body in a permanent resize/grabbing cursor.
+    if (!e.isPrimary) return;
+    // If another gesture is mid-flight, drop this one rather than racing.
+    // The active gesture's cleanup will fire on its own pointerup/cancel.
+    if (activeGestureCleanupRef.current) return;
     e.preventDefault();
-    const ds = dragStateRef.current;
-    ds.active = true;
-    ds.startX = e.clientX;
-    ds.startY = e.clientY;
-    ds.posX = position?.x ?? 0;
-    ds.posY = position?.y ?? 0;
 
-    const onMove = (ev: MouseEvent) => {
-      if (!ds.active) return;
+    const startClientX = e.clientX;
+    const startClientY = e.clientY;
+    const startPosX = position.x;
+    const startPosY = position.y;
+
+    const target = e.currentTarget;
+    const pointerId = e.pointerId;
+    try {
+      target.setPointerCapture(pointerId);
+    } catch {
+      // setPointerCapture can throw if the target is detached; harmless.
+    }
+    const lock = lockBodyForGesture("grabbing");
+
+    const onMove = (ev: PointerEvent) => {
       setPosition({
-        x: ds.posX + (ev.clientX - ds.startX),
-        y: ds.posY + (ev.clientY - ds.startY)
+        x: startPosX + (ev.clientX - startClientX),
+        y: startPosY + (ev.clientY - startClientY)
       });
     };
     const cleanup = () => {
-      ds.active = false;
-      document.removeEventListener("mousemove", onMove);
-      document.removeEventListener("mouseup", cleanup);
-      activeGestureCleanupRef.current = null;
+      target.removeEventListener("pointermove", onMove);
+      target.removeEventListener("pointerup", cleanup);
+      target.removeEventListener("pointercancel", cleanup);
+      try {
+        target.releasePointerCapture(pointerId);
+      } catch {
+        // Already released; ignore.
+      }
+      unlockBody(lock);
+      if (activeGestureCleanupRef.current === cleanup) {
+        activeGestureCleanupRef.current = null;
+      }
     };
-    document.addEventListener("mousemove", onMove);
-    document.addEventListener("mouseup", cleanup);
+    target.addEventListener("pointermove", onMove);
+    target.addEventListener("pointerup", cleanup);
+    target.addEventListener("pointercancel", cleanup);
     activeGestureCleanupRef.current = cleanup;
   };
 
-  // Resize handling (bottom-right grip)
-  const handleResizeStart = (e: React.MouseEvent<HTMLButtonElement>) => {
+  // Resize handling (all 8 edge/corner handles).
+  const handleResizeStart = (handle: ResizeHandle) => (e: React.PointerEvent<HTMLElement>) => {
+    if (e.button !== 0) return;
+    // See `handleDragStart` for the rationale behind the multi-pointer /
+    // active-gesture guards — same body-lock restoration hazard applies.
+    if (!e.isPrimary) return;
+    if (activeGestureCleanupRef.current) return;
     e.preventDefault();
     e.stopPropagation();
-    const rs = resizeStateRef.current;
-    rs.active = true;
-    rs.startX = e.clientX;
-    rs.startY = e.clientY;
-    rs.startWidth = size.width;
-    rs.startHeight = size.height;
 
-    const onMove = (ev: MouseEvent) => {
-      if (!rs.active) return;
-      const { maxW, maxH } = computeMaxSize(position);
-      setSize({
-        width: Math.min(maxW, Math.max(MIN_WIDTH, rs.startWidth + (ev.clientX - rs.startX))),
-        height: Math.min(maxH, Math.max(MIN_HEIGHT, rs.startHeight + (ev.clientY - rs.startY)))
+    const startClientX = e.clientX;
+    const startClientY = e.clientY;
+    const startRect: Rect = {
+      x: position.x,
+      y: position.y,
+      width: size.width,
+      height: size.height
+    };
+    const max = computeResizeMaxSize(handle, startRect);
+    const min = { width: MIN_WIDTH, height: MIN_HEIGHT };
+
+    const target = e.currentTarget;
+    const pointerId = e.pointerId;
+    try {
+      target.setPointerCapture(pointerId);
+    } catch {
+      // ignore
+    }
+    const cursor = cursorFor(handle);
+    const lock = lockBodyForGesture(cursor);
+
+    const onMove = (ev: PointerEvent) => {
+      const rect = computeResizedRect({
+        handle,
+        start: startRect,
+        delta: { x: ev.clientX - startClientX, y: ev.clientY - startClientY },
+        min,
+        max
       });
+      setSize({ width: rect.width, height: rect.height });
+      if (rect.x !== startRect.x || rect.y !== startRect.y) {
+        setPosition({ x: rect.x, y: rect.y });
+      }
     };
     const cleanup = () => {
-      rs.active = false;
-      document.removeEventListener("mousemove", onMove);
-      document.removeEventListener("mouseup", cleanup);
-      activeGestureCleanupRef.current = null;
+      target.removeEventListener("pointermove", onMove);
+      target.removeEventListener("pointerup", cleanup);
+      target.removeEventListener("pointercancel", cleanup);
+      try {
+        target.releasePointerCapture(pointerId);
+      } catch {
+        // ignore
+      }
+      unlockBody(lock);
+      if (activeGestureCleanupRef.current === cleanup) {
+        activeGestureCleanupRef.current = null;
+      }
     };
-    document.addEventListener("mousemove", onMove);
-    document.addEventListener("mouseup", cleanup);
+    target.addEventListener("pointermove", onMove);
+    target.addEventListener("pointerup", cleanup);
+    target.addEventListener("pointercancel", cleanup);
     activeGestureCleanupRef.current = cleanup;
   };
 
-  // Keyboard resize: focus the grip and use arrow keys (shift = larger step).
-  const handleResizeKeyDown = (e: React.KeyboardEvent<HTMLButtonElement>) => {
+  // Keyboard resize on the SE grip: arrow keys (shift = larger step).
+  // Preserved from the original implementation for accessibility.
+  const handleResizeKeyDown = (e: React.KeyboardEvent<HTMLElement>) => {
     const step = e.shiftKey ? KEYBOARD_RESIZE_STEP_LARGE : KEYBOARD_RESIZE_STEP;
     let deltaW = 0;
     let deltaH = 0;
@@ -152,10 +254,10 @@ export default function CalendarPopover({
       default: return;
     }
     e.preventDefault();
-    const { maxW, maxH } = computeMaxSize(position);
+    const max = computeKeyboardMaxSize(position);
     setSize((prev) => ({
-      width: Math.min(maxW, Math.max(MIN_WIDTH, prev.width + deltaW)),
-      height: Math.min(maxH, Math.max(MIN_HEIGHT, prev.height + deltaH))
+      width: Math.min(max.width, Math.max(MIN_WIDTH, prev.width + deltaW)),
+      height: Math.min(max.height, Math.max(MIN_HEIGHT, prev.height + deltaH))
     }));
   };
 
@@ -180,7 +282,7 @@ export default function CalendarPopover({
       className={styles.floatingPanel}
       style={{ left: position.x, top: position.y, width: size.width, height: size.height }}
     >
-      <Flex align="center" justify="between" className={styles.header} onMouseDown={handleDragStart}>
+      <Flex align="center" justify="between" className={styles.header} onPointerDown={handleDragStart}>
         <Flex align="center" gap="2">
           <CalendarDays size={14} />
           <Heading size="3">Calendar</Heading>
@@ -229,14 +331,40 @@ export default function CalendarPopover({
         />
       </div>
 
-      <button
-        type="button"
-        className={styles.resizeHandle}
-        onMouseDown={handleResizeStart}
-        onKeyDown={handleResizeKeyDown}
-        aria-label="Resize calendar panel (use arrow keys; hold shift for larger step)"
-        title="Resize"
-      />
+      {ALL_HANDLES.map((handle) =>
+        // The SE corner is the "real" keyboard-accessible resize control —
+        // it's focusable, supports arrow-key resize, and has an aria-label
+        // that tells screen-reader users what it does. It's rendered as a
+        // `<button>` so assistive tech announces it as an interactive
+        // control.
+        //
+        // The other 7 handles are pure pointer affordances (transparent
+        // edge/corner strips) — they duplicate functionality the SE handle
+        // already exposes to keyboard users, so they're marked
+        // `aria-hidden` to keep them out of the accessibility tree rather
+        // than cluttering it with 7 "Resize" nodes that don't add any new
+        // capability. `role="separator"` (the previous choice) is for
+        // non-interactive dividers and was confusing for AT on an
+        // interactive control.
+        handle === "se" ? (
+          <button
+            key={handle}
+            type="button"
+            className={`${styles.resizeHandle} ${styles[`handle_${handle}`]}`}
+            onPointerDown={handleResizeStart(handle)}
+            onKeyDown={handleResizeKeyDown}
+            aria-label="Resize calendar panel (use arrow keys; hold shift for larger step)"
+            title="Resize"
+          />
+        ) : (
+          <div
+            key={handle}
+            className={`${styles.resizeHandle} ${styles[`handle_${handle}`]}`}
+            onPointerDown={handleResizeStart(handle)}
+            aria-hidden="true"
+          />
+        )
+      )}
     </div>
   ) : null;
 

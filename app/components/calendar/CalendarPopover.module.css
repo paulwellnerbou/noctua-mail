@@ -40,32 +40,106 @@
   user-select: text;
 }
 
+/* Base resize handle — positioning/size/cursor set per-direction below. */
 .resizeHandle {
   position: absolute;
-  right: 2px;
-  bottom: 2px;
+  z-index: 1;
+  background: transparent;
+  /* Touch targets large enough to grab without being visually intrusive. */
+  touch-action: none;
+  /* The SE corner is a real <button> (for keyboard-accessible resize) while
+     the other 7 are non-interactive <div>s. Reset the user-agent button
+     chrome so both render identically as transparent pointer affordances. */
+  border: 0;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  appearance: none;
+}
+
+/* --- Edge handles (thin strips along each side) --- */
+
+.handle_n {
+  top: 0;
+  left: 8px;
+  right: 8px;
+  height: 6px;
+  cursor: ns-resize;
+}
+
+.handle_s {
+  bottom: 0;
+  left: 8px;
+  right: 8px;
+  height: 6px;
+  cursor: ns-resize;
+}
+
+.handle_e {
+  top: 8px;
+  bottom: 8px;
+  right: 0;
+  width: 6px;
+  cursor: ew-resize;
+}
+
+.handle_w {
+  top: 8px;
+  bottom: 8px;
+  left: 0;
+  width: 6px;
+  cursor: ew-resize;
+}
+
+/* --- Corner handles (small squares that win hit-test over the edges) --- */
+
+.handle_nw {
+  top: 0;
+  left: 0;
+  width: 10px;
+  height: 10px;
+  cursor: nwse-resize;
+  z-index: 2;
+}
+
+.handle_ne {
+  top: 0;
+  right: 0;
+  width: 10px;
+  height: 10px;
+  cursor: nesw-resize;
+  z-index: 2;
+}
+
+.handle_sw {
+  bottom: 0;
+  left: 0;
+  width: 10px;
+  height: 10px;
+  cursor: nesw-resize;
+  z-index: 2;
+}
+
+/* SE corner keeps the original visible grip (two diagonal lines).
+   Slightly larger hit target, rendered grip inside via background-image. */
+.handle_se {
+  right: 0;
+  bottom: 0;
   width: 14px;
   height: 14px;
   cursor: nwse-resize;
-  z-index: 1;
-  /* Neutralize default <button> chrome so the grip looks like before. */
-  appearance: none;
-  border: none;
-  padding: 0;
-  background-color: transparent;
-  color: inherit;
-  font: inherit;
-  /* Two diagonal lines forming a subtle grip */
+  z-index: 2;
   background-image:
     linear-gradient(135deg, transparent 0, transparent 5px, var(--border) 5px, var(--border) 6px, transparent 6px, transparent 9px, var(--border) 9px, var(--border) 10px, transparent 10px);
   opacity: 0.8;
 }
 
-.resizeHandle:hover {
+.handle_se:hover {
   opacity: 1;
 }
 
-.resizeHandle:focus-visible {
+.handle_se:focus-visible {
   outline: 2px solid var(--accent-9, #3b82f6);
   outline-offset: 2px;
   opacity: 1;
