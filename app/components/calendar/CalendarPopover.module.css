@@ -47,6 +47,15 @@
   background: transparent;
   /* Touch targets large enough to grab without being visually intrusive. */
   touch-action: none;
+  /* The SE corner is a real <button> (for keyboard-accessible resize) while
+     the other 7 are non-interactive <div>s. Reset the user-agent button
+     chrome so both render identically as transparent pointer affordances. */
+  border: 0;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: inherit;
+  appearance: none;
 }
 
 /* --- Edge handles (thin strips along each side) --- */

@@ -11,9 +11,7 @@ import styles from "./CalendarPopover.module.css";
 import {
   computeResizedRect,
   cursorFor,
-  isEast,
   isNorth,
-  isSouth,
   isWest,
   type ResizeHandle,
   type Rect
@@ -127,6 +125,15 @@ export default function CalendarPopover({
     if ((e.target as HTMLElement).closest("button, [role=button]")) return;
     // Only primary button.
     if (e.button !== 0) return;
+    // Ignore secondary pointers (multi-touch second-finger, pen + mouse, etc.).
+    // Without this, each gesture saves its own snapshot of the body's cursor
+    // and user-select — so the second pointer captures the ALREADY-LOCKED
+    // state as "original" and restores to that locked state on cleanup,
+    // stranding the body in a permanent resize/grabbing cursor.
+    if (!e.isPrimary) return;
+    // If another gesture is mid-flight, drop this one rather than racing.
+    // The active gesture's cleanup will fire on its own pointerup/cancel.
+    if (activeGestureCleanupRef.current) return;
     e.preventDefault();
 
     const startClientX = e.clientX;
@@ -170,8 +177,12 @@ export default function CalendarPopover({
   };
 
   // Resize handling (all 8 edge/corner handles).
-  const handleResizeStart = (handle: ResizeHandle) => (e: React.PointerEvent<HTMLDivElement>) => {
+  const handleResizeStart = (handle: ResizeHandle) => (e: React.PointerEvent<HTMLElement>) => {
     if (e.button !== 0) return;
+    // See `handleDragStart` for the rationale behind the multi-pointer /
+    // active-gesture guards — same body-lock restoration hazard applies.
+    if (!e.isPrimary) return;
+    if (activeGestureCleanupRef.current) return;
     e.preventDefault();
     e.stopPropagation();
 
@@ -231,7 +242,7 @@ export default function CalendarPopover({
 
   // Keyboard resize on the SE grip: arrow keys (shift = larger step).
   // Preserved from the original implementation for accessibility.
-  const handleResizeKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+  const handleResizeKeyDown = (e: React.KeyboardEvent<HTMLElement>) => {
     const step = e.shiftKey ? KEYBOARD_RESIZE_STEP_LARGE : KEYBOARD_RESIZE_STEP;
     let deltaW = 0;
     let deltaH = 0;
@@ -320,23 +331,40 @@ export default function CalendarPopover({
         />
       </div>
 
-      {ALL_HANDLES.map((handle) => (
-        <div
-          key={handle}
-          className={`${styles.resizeHandle} ${styles[`handle_${handle}`]}`}
-          onPointerDown={handleResizeStart(handle)}
-          onKeyDown={handle === "se" ? handleResizeKeyDown : undefined}
-          role="separator"
-          aria-orientation={handle === "n" || handle === "s" ? "horizontal" : "vertical"}
-          aria-label={
-            handle === "se"
-              ? "Resize calendar panel (use arrow keys; hold shift for larger step)"
-              : `Resize ${handle}`
-          }
-          tabIndex={handle === "se" ? 0 : -1}
-          title={handle === "se" ? "Resize" : undefined}
-        />
-      ))}
+      {ALL_HANDLES.map((handle) =>
+        // The SE corner is the "real" keyboard-accessible resize control —
+        // it's focusable, supports arrow-key resize, and has an aria-label
+        // that tells screen-reader users what it does. It's rendered as a
+        // `<button>` so assistive tech announces it as an interactive
+        // control.
+        //
+        // The other 7 handles are pure pointer affordances (transparent
+        // edge/corner strips) — they duplicate functionality the SE handle
+        // already exposes to keyboard users, so they're marked
+        // `aria-hidden` to keep them out of the accessibility tree rather
+        // than cluttering it with 7 "Resize" nodes that don't add any new
+        // capability. `role="separator"` (the previous choice) is for
+        // non-interactive dividers and was confusing for AT on an
+        // interactive control.
+        handle === "se" ? (
+          <button
+            key={handle}
+            type="button"
+            className={`${styles.resizeHandle} ${styles[`handle_${handle}`]}`}
+            onPointerDown={handleResizeStart(handle)}
+            onKeyDown={handleResizeKeyDown}
+            aria-label="Resize calendar panel (use arrow keys; hold shift for larger step)"
+            title="Resize"
+          />
+        ) : (
+          <div
+            key={handle}
+            className={`${styles.resizeHandle} ${styles[`handle_${handle}`]}`}
+            onPointerDown={handleResizeStart(handle)}
+            aria-hidden="true"
+          />
+        )
+      )}
     </div>
   ) : null;
 
