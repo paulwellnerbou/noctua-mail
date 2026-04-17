@@ -126,6 +126,7 @@ import {
   buildAccountRecipientAliasesPath,
   buildAccountComposeRecipientsPath,
   buildAccountDraftDiscardPath,
+  buildAccountDraftSendPath,
   buildAccountFoldersPath,
   buildAccountMessageTopicSuggestionExplainPath,
   buildAccountMessageTopicsPath,
@@ -2586,6 +2587,81 @@ export default function MailClient({
     },
     [evictMessageCaches, setMessages, viewMessage?.id]
   );
+
+  const handleSendDraft = useCallback(
+    async (message: Message) => {
+      if (!activeAccountId) return;
+      const draftId = message.id;
+      setPendingMessageActions((prev) => {
+        if (prev.has(draftId)) return prev;
+        const next = new Set(prev);
+        next.add(draftId);
+        return next;
+      });
+      try {
+        const res = await apiFetch(buildAccountDraftSendPath(activeAccountId, draftId), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({})
+        });
+        if (!res.ok) {
+          const errMsg = await readErrorMessage(res);
+          reportError(errMsg || "Failed to send draft.");
+          return;
+        }
+        // Same UI-cleanup sequence as the compose-editor send flow, so the
+        // draft row disappears from the list immediately and the
+        // deletion-reconciler doesn't fire a misleading "draft gone on
+        // server" tombstone notice.
+        suppressDraftDeleteReconcile(draftId);
+        removeDraftFromUi(draftId);
+        pushNotice({
+          type: "success",
+          title: "Draft sent.",
+          description: message.subject?.trim()
+            ? message.subject.trim().slice(0, 180)
+            : undefined
+        });
+        // Mailbox refresh is best-effort: a failure here does NOT mean
+        // the send failed (the server already confirmed success above).
+        // Surfacing a "send failed" error after a successful send would
+        // prompt the user to retry and send the message twice. Instead,
+        // fail soft with a warning notice.
+        try {
+          await refreshFolders();
+          await refreshMailboxDataRef.current();
+        } catch (refreshErr) {
+          pushNotice({
+            type: "warning",
+            title: "Draft sent, but mailbox refresh failed.",
+            description:
+              (refreshErr as Error)?.message ||
+              "Refresh the mailbox manually to see the updated state."
+          });
+        }
+      } catch (err) {
+        reportError((err as Error)?.message || "Failed to send draft.");
+      } finally {
+        setPendingMessageActions((prev) => {
+          if (!prev.has(draftId)) return prev;
+          const next = new Set(prev);
+          next.delete(draftId);
+          return next;
+        });
+      }
+    },
+    [
+      activeAccountId,
+      apiFetch,
+      pushNotice,
+      readErrorMessage,
+      refreshFolders,
+      removeDraftFromUi,
+      reportError,
+      setPendingMessageActions,
+      suppressDraftDeleteReconcile
+    ]
+  );
   const {
     threadScopeMessages,
     groupedMessages,
@@ -3588,6 +3664,7 @@ export default function MailClient({
     handleShowRelated,
     isDraftItem,
     isTrashFolder,
+    handleSendDraft,
     iconSize,
     origin
   );
@@ -3625,6 +3702,7 @@ export default function MailClient({
     isDraftItem,
     isTrashFolder,
     isSpamFolder,
+    handleSendDraft,
     origin,
     onOpenChange
   );

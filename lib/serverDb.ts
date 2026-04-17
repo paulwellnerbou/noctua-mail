@@ -104,3 +104,10 @@ export async function upsertMessages(...args: Parameters<ServerDbModule["upsertM
   const db = await loadServerDb();
   return db.upsertMessages(...args);
 }
+
+export async function getAttachmentIds(
+  ...args: Parameters<ServerDbModule["getAttachmentIds"]>
+) {
+  const db = await loadServerDb();
+  return db.getAttachmentIds(...args);
+}

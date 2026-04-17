@@ -1,10 +1,17 @@
 import type React from "react";
-import { Edit3, Forward, Reply, ReplyAll, Search, Trash2 } from "lucide-react";
+import { Edit3, Forward, Reply, ReplyAll, Search, Send, Trash2 } from "lucide-react";
 import { IconButton } from "@radix-ui/themes";
 import type { Message } from "@/lib/data";
 
 type ComposeMode = "new" | "reply" | "replyAll" | "forward" | "edit" | "editAsNew";
-type MessageQuickAction = "editDraft" | "reply" | "replyAll" | "forward" | "showRelated" | "delete";
+type MessageQuickAction =
+  | "editDraft"
+  | "sendDraft"
+  | "reply"
+  | "replyAll"
+  | "forward"
+  | "showRelated"
+  | "delete";
 
 type MessageQuickActionsProps = {
   message: Message;
@@ -16,6 +23,7 @@ type MessageQuickActionsProps = {
   openCompose: (mode: ComposeMode, message?: Message, asNew?: boolean) => void;
   handleDeleteMessage: (message: Message, options?: { allowThreadDeletion?: boolean }) => void;
   onShowRelated: (message: Message) => void;
+  onSendDraft?: (message: Message) => void | Promise<void>;
   isTrashFolder: (folderId?: string) => boolean;
 };
 
@@ -29,6 +37,7 @@ export default function MessageQuickActions({
   openCompose,
   handleDeleteMessage,
   onShowRelated,
+  onSendDraft,
   isTrashFolder
 }: MessageQuickActionsProps) {
   const allowThreadDeletion = origin !== "thread";
@@ -53,6 +62,27 @@ export default function MessageQuickActions({
             }}
           >
             <Edit3 size={iconSize} />
+          </IconButton>
+        ) : null}
+        {isVisible("sendDraft") && onSendDraft ? (
+          <IconButton
+            size={buttonSize}
+            variant="ghost"
+            color="gray"
+            title="Send draft"
+            aria-label="Send draft"
+            disabled={pendingMessageActions.has(message.id)}
+            onClick={(event) => {
+              event.stopPropagation();
+              // `onSendDraft` may return a promise (the orchestrator wires
+              // it to an async handler). We explicitly `void` it so the
+              // floating promise doesn't become an unhandled rejection
+              // warning; the handler itself owns error surfacing via
+              // the notice system.
+              void onSendDraft(message);
+            }}
+          >
+            <Send size={iconSize} />
           </IconButton>
         ) : null}
         {isVisible("showRelated") ? (
