@@ -1,3 +1,0 @@
-It should be possible to send drafts even if they are not in edit mode.
-
-Right now, when I go to my draft folder (or wherever I have a message with IMAP label `Draft`), I have to click on the message to open it in edit mode, and only then I can click on "Send". This is not very efficient. I want to be able to select one or more messages with the `Draft` label, and click "Send" without opening them in edit mode.
