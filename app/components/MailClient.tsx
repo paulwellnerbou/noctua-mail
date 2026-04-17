@@ -58,12 +58,14 @@ import {
   renderMarkdownPanel as renderMarkdownPanelHelper,
   folderSpecialIcon
 } from "./mailclient/RenderHelpers";
-import MessageListOrchestrator from "./mailclient/messagelist/MessageListOrchestrator";
+import MessageListOrchestrator, {
+  type MessageListHandle
+} from "./mailclient/messagelist/MessageListOrchestrator";
 import {
   dedupeAccountMessages,
   sortMessages
 } from "./mailclient/messagelist/sortAndDedupeMessages";
-import { createSelectionStore } from "./mailclient/messagelist/selectionStore";
+import type { SelectionStore } from "./mailclient/messagelist/selectionStore";
 import { useMessageListDerivedState } from "./mailclient/messagelist/listState";
 import {
   logListDebug,
@@ -190,9 +192,7 @@ import {
 import TopBar from "./mailclient/TopBar";
 import BottomStatusBar from "./mailclient/status/BottomStatusBar";
 import CalendarSidebarPanel from "./calendar/CalendarSidebarPanel";
-import { useMessageDeleteActions } from "./mailclient/useMessageDeleteActions";
-import { useMessageMoveActions, type UndoMoveTarget } from "./mailclient/useMessageMoveActions";
-import { useMessageMutations } from "./mailclient/useMessageMutations";
+import { type UndoMoveTarget } from "./mailclient/useMessageMoveActions";
 import type {
   Account,
   Folder,
@@ -534,12 +534,53 @@ export default function MailClient({
     useState<ThreadDateSource>(DEFAULT_THREAD_DATE_SOURCE);
   const [collapsedThreads, setCollapsedThreads] = useState<Record<string, boolean>>({});
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
-  const selectionStoreRef = useRef<ReturnType<typeof createSelectionStore> | null>(null);
-  if (!selectionStoreRef.current) {
-    selectionStoreRef.current = createSelectionStore(activeMessageId || null);
-  }
-  const selectionStore = selectionStoreRef.current!;
-  const lastSelectedIdRef = useRef<string | null>(null);
+  // Selection state moved into `MessageListOrchestrator` in phase 4c.
+  // MailClient-level consumers (keyboard shortcuts, the drag hook,
+  // renderMessageMenu closures) reach it through `listHandleRef`.
+  const listHandleRef = useRef<MessageListHandle | null>(null);
+  // Shim exposed to MailClient-level code (drag hook, render helpers,
+  // effects) so they can call through the handle without checking
+  // `.current` every time. The real store — owned by the orchestrator —
+  // is stable across renders, so reading `listHandleRef.current` lazily
+  // inside each method is safe. Methods invoked before first commit
+  // fall back to no-ops / empty selection to keep the types honest.
+  const selectionStore: SelectionStore = useMemo(
+    () => ({
+      getSnapshot: () =>
+        listHandleRef.current?.selectionStore.getSnapshot() ?? {
+          ids: new Set<string>(),
+          activeId: null
+        },
+      subscribe: (listener) =>
+        listHandleRef.current?.selectionStore.subscribe(listener) ?? (() => {}),
+      setSelection: (ids, activeId) =>
+        listHandleRef.current?.selectionStore.setSelection(ids, activeId),
+      toggle: (id, replace, setActive) =>
+        listHandleRef.current?.selectionStore.toggle(id, replace, setActive),
+      clearSelection: () => listHandleRef.current?.selectionStore.clearSelection(),
+      setActiveId: (id) => listHandleRef.current?.selectionStore.setActiveId(id),
+      getIds: () => listHandleRef.current?.selectionStore.getIds() ?? new Set<string>(),
+      getActiveId: () => listHandleRef.current?.selectionStore.getActiveId() ?? null
+    }),
+    []
+  );
+  // Proxy MutableRefObject delegating to the orchestrator-owned
+  // `lastSelectedIdRef` via the handle. Callers (the selection
+  // controller, the select-all keyboard shortcut) read / write
+  // `.current` normally; before the orchestrator commits, the shim
+  // swallows writes and returns null.
+  const lastSelectedIdRef = useMemo<React.MutableRefObject<string | null>>(
+    () => ({
+      get current() {
+        return listHandleRef.current?.lastSelectedIdRef.current ?? null;
+      },
+      set current(value: string | null) {
+        const inner = listHandleRef.current?.lastSelectedIdRef;
+        if (inner) inner.current = value;
+      }
+    }),
+    []
+  );
   const [draggingMessageIds, setDraggingMessageIds] = useState<Set<string>>(new Set());
   const [threadsEnabled, setThreadsEnabled] = useState(true);
   const [showJson, setShowJson] = useState(false);
@@ -3409,112 +3450,104 @@ export default function MailClient({
     ]
   );
 
-  const { handleMoveMessages, moveMessagesToFolder } = useMessageMoveActions({
-    activeAccountId,
-    activeMessageId,
-    activeFolderId,
-    searchScope,
-    includeThreadAcrossFoldersForList,
-    messages,
-    selectionStore,
-    folderById,
-    lastSelectedIdRef,
-    setFolders,
-    setMessages,
-    shouldKeepMessageInResults: shouldKeepMessageInCurrentResults,
-    setPendingMessageActions,
-    setActiveMessageId,
-    setViewMessage,
-    apiFetch,
-    readErrorMessage,
-    reportError,
-    pushNotice,
-    undoMoveOperation,
-    noticeSuccessTimeout: NOTICE_TIMEOUTS.success,
-    onMoveComplete: (messageIds) => {
-      evictMessageCaches(messageIds);
-      reconcileActiveTopicSuggestionRemovals(messageIds);
+  // Phase 4c: the three mutation hooks (move / delete / mutations) now
+  // run inside `MessageListOrchestrator`. MailClient reaches them
+  // through `listHandleRef`. These shims give the existing MailClient
+  // code paths (render helpers, keyboard shortcuts, undo, compose-send)
+  // stable function identities that delegate through the handle. The
+  // handle is wired up by `useImperativeHandle` in the orchestrator on
+  // first commit; until then the shims no-op / return no-op promises,
+  // which matches the pre-mount behavior (no list to mutate yet).
+  const handleArchiveMessage = useCallback(
+    (message: Message) =>
+      listHandleRef.current?.handleArchiveMessage(message) ?? Promise.resolve(),
+    []
+  );
+  const handleUnsubscribe = useCallback(
+    (message: Message) =>
+      listHandleRef.current?.handleUnsubscribe(message) ?? Promise.resolve(),
+    []
+  );
+  const handleDeleteMessage = useCallback(
+    (message: Message, options?: { allowThreadDeletion?: boolean }) =>
+      listHandleRef.current?.handleDeleteMessage(message, options) ?? Promise.resolve(),
+    []
+  );
+  const handleDeleteMessagesByIds = useCallback(
+    (ids: string[]) =>
+      listHandleRef.current?.handleDeleteMessagesByIds(ids) ?? Promise.resolve(),
+    []
+  );
+  const handleMoveMessages = useCallback(
+    (destinationFolderId: string, messageIds?: string[]) => {
+      listHandleRef.current?.handleMoveMessages(destinationFolderId, messageIds);
     },
-    markMessagesMutated,
-    applyDeleteReconcileSuppression
-  });
-
-  const { handleDeleteMessage, handleDeleteMessagesByIds } = useMessageDeleteActions({
-    activeAccountId,
-    activeMessageId,
-    supportsThreads,
-    collapsedThreads,
-    includeFlaggedGroup: !(searchScope === "folder" && isTrashFolder(activeFolderId)),
-    searchScope,
-    activeFolderId,
-    includeThreadAcrossFoldersForList,
-    folders,
-    messages,
-    threadScopeMessages,
-    visibleMessages,
-    sortedMessages,
-    isFlaggedMessage,
-    isTrashFolder,
-    moveMessagesToFolder,
-    selectionStore,
-    lastSelectedIdRef,
-    setMessages,
-    shouldKeepMessageInResults: shouldKeepMessageInCurrentResults,
-    setPendingMessageActions,
-    setActiveMessageId,
-    setViewMessage,
-    refreshFolders: () => refreshFolders(),
-    apiFetch,
-    readErrorMessage,
-    reportError,
-    pushNotice,
-    confirmDelete,
-    undoMoveOperation,
-    noticeSuccessTimeout: NOTICE_TIMEOUTS.success,
-    onMessagesRemoved: (messageIds) => {
-      evictMessageCaches(messageIds);
-      reconcileActiveTopicSuggestionRemovals(messageIds);
-    },
-    markMessagesMutated,
-    markDeleteReconcileSuppression
-  });
-
-
-  const {
-    handleArchiveMessage,
-    handleUnsubscribe,
-    handleMarkSpam,
-    handleMarkNotSpam,
-    updateFlagState,
-    updateKeywordFlag,
-    handleSetCategory,
-    transitionTodoState,
-    clearTodoFlag,
-    toggleTodoFlag,
-    toggleFlaggedFlag
-  } = useMessageMutations({
-    activeAccountId,
-    searchScope,
-    viewMessage,
-    hasFilteredSearchCriteria,
-    apiFetch,
-    readErrorMessage,
-    reportError,
-    pushNotice,
-    updateMessagesWithCurrentResultPrune,
-    setViewMessage,
-    setActiveMessageId,
-    setFolders,
-    setPendingMessageActions,
-    evictMessageCaches,
-    shouldKeepMessageInCurrentResults,
-    undoMoveOperation,
-    confirmUnsubscribe,
-    applyMoveReconcileSuppression,
-    updateThreadCacheWithFlags,
-    updateThreadCacheWithCategory,
-    queueFilteredSearchRefresh
-  });
+    []
+  );
+  const moveMessagesToFolder: import("./mailclient/useMessageMoveActions").MoveMessagesToFolder =
+    useCallback(
+      (destinationFolderId, options) =>
+        listHandleRef.current?.moveMessagesToFolder(destinationFolderId, options) ??
+        Promise.resolve(null),
+      []
+    );
+  const handleMarkSpam = useCallback(
+    (message: Message) =>
+      listHandleRef.current?.handleMarkSpam(message) ?? Promise.resolve(),
+    []
+  );
+  const handleMarkNotSpam = useCallback(
+    (message: Message) =>
+      listHandleRef.current?.handleMarkNotSpam(message) ?? Promise.resolve(),
+    []
+  );
+  const handleSetCategory = useCallback(
+    (
+      message: Message,
+      category: "newsletter" | "notification" | "transactional" | null
+    ) =>
+      listHandleRef.current?.handleSetCategory(message, category) ?? Promise.resolve(),
+    []
+  );
+  const updateFlagState = useCallback(
+    (
+      message: Message,
+      flag: "seen" | "answered" | "flagged" | "draft" | "deleted",
+      value: boolean
+    ) =>
+      listHandleRef.current?.updateFlagState(message, flag, value) ?? Promise.resolve(),
+    []
+  );
+  const updateKeywordFlag = useCallback(
+    (message: Message, keyword: string, value: boolean) =>
+      listHandleRef.current?.updateKeywordFlag(message, keyword, value) ??
+      Promise.resolve(),
+    []
+  );
+  const toggleFlaggedFlag = useCallback(
+    (message: Message, collapsedThreadMessages?: Message[]) =>
+      listHandleRef.current?.toggleFlaggedFlag(message, collapsedThreadMessages) ??
+      Promise.resolve(),
+    []
+  );
+  const toggleTodoFlag = useCallback(
+    (
+      message: Message,
+      collapsedThreadMessages?: Message[],
+      clickedBadge?: "todo" | "done"
+    ) =>
+      listHandleRef.current?.toggleTodoFlag(
+        message,
+        collapsedThreadMessages,
+        clickedBadge
+      ) ?? Promise.resolve(),
+    []
+  );
+  const clearTodoFlag = useCallback(
+    (message: Message) =>
+      listHandleRef.current?.clearTodoFlag(message) ?? Promise.resolve(),
+    []
+  );
 
   const isDraftItem = (message: Message) =>
     isDraftMessage(message) || Boolean(message.draft);
@@ -5481,6 +5514,7 @@ export default function MailClient({
         <MessageListOrchestrator
           listWidth={listWidth}
           scrollRef={listPaneRef}
+          listHandleRef={listHandleRef}
           defaultMessageView={currentAccount?.settings?.layout?.defaultView}
           header={{
             state: {
@@ -5518,7 +5552,6 @@ export default function MailClient({
           listViewState={{
             groupedMessages,
             visibleMessages,
-            selectionStore,
             draggingMessageIds,
             collapsedGroups,
             collapsedThreads,
@@ -5554,9 +5587,6 @@ export default function MailClient({
             toggleMessageSelection,
             selectRangeTo,
             selectCollapsedThread,
-            handleDeleteMessage,
-            toggleFlaggedFlag,
-            toggleTodoFlag,
             handleAddSuggestedThread: handleAddActiveTopicSuggestion
           }}
           listViewHelpers={{
@@ -5580,6 +5610,50 @@ export default function MailClient({
           emptyListSyncing={emptyListSyncing}
           activeVirtualFolderName={activeVirtualFolder?.name}
           searchScope={searchScope}
+          mutationInputs={{
+            activeAccountId,
+            activeMessageId,
+            activeFolderId,
+            searchScope,
+            includeThreadAcrossFoldersForList,
+            supportsThreads,
+            folders,
+            folderById,
+            messages,
+            threadScopeMessages,
+            visibleMessages,
+            sortedMessages,
+            collapsedThreads,
+            hasFilteredSearchCriteria,
+            viewMessage,
+            isFlaggedMessage,
+            isTrashFolder,
+            shouldKeepMessageInCurrentResults,
+            setFolders,
+            setMessages,
+            setActiveMessageId,
+            setViewMessage,
+            setPendingMessageActions,
+            refreshFolders,
+            apiFetch,
+            readErrorMessage,
+            reportError,
+            pushNotice,
+            confirmDelete,
+            confirmUnsubscribe,
+            undoMoveOperation,
+            noticeSuccessTimeout: NOTICE_TIMEOUTS.success,
+            evictMessageCaches,
+            reconcileActiveTopicSuggestionRemovals,
+            updateMessagesWithCurrentResultPrune,
+            applyMoveReconcileSuppression,
+            applyDeleteReconcileSuppression,
+            markDeleteReconcileSuppression,
+            markMessagesMutated,
+            updateThreadCacheWithFlags,
+            updateThreadCacheWithCategory,
+            queueFilteredSearchRefresh
+          }}
         />
 
         <div
