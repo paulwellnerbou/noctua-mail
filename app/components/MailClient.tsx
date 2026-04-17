@@ -345,10 +345,6 @@ export default function MailClient({
   const dragImageRef = useRef<HTMLDivElement | null>(null);
   const [sortKey, setSortKey] = useState<"date" | "from" | "subject">("date");
   const [sortDir, setSortDir] = useState<"desc" | "asc">("desc");
-  // NOTE (P1-12 Phase 4b): `messageView` state + the `deferredMessageView`
-  // derivation + the preferred-default-view effect all live inside
-  // `MessageListOrchestrator` now. MailClient just passes the preferred
-  // value in as `defaultMessageView`.
   const [threadViewMode, setThreadViewMode] = useState<"full" | "compact">("compact");
   const [messageTopicsById, setMessageTopicsById] = useState<Map<string, Topic[]>>(new Map());
   const [topicPickerOpen, setTopicPickerOpen] = useState(false);

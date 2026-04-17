@@ -25,31 +25,30 @@ function isValidMessageViewMode(value: unknown): value is MessageViewMode {
 }
 
 /**
- * Composes `<MessageListPane>` + `<MessageListHeader>` + search card +
- * loading/empty states + `<MessageListView>` into one component, so
- * `MailClient.tsx` renders a single `<MessageListOrchestrator {...} />`
- * instead of carrying ~180 lines of inline JSX.
+ * The message-list pane: header + search banner + loading/empty states +
+ * the virtualized list view, composed into one component so the parent
+ * renders a single `<MessageListOrchestrator {...} />` rather than
+ * assembling the subtree inline.
  *
- * ## State the orchestrator owns (expanded over time)
+ * Owns the view-mode state (`messageView` / the derived
+ * `deferredMessageView` and `isCompactView`) because it's the only
+ * consumer — the header toggles it, the list view renders against it,
+ * and the pane wrapper reacts to it for compact-layout CSS. The
+ * `defaultMessageView` prop lets the parent seed / override the choice
+ * from user account settings.
  *
- * - **Phase 4a ([PR #48]):** pure JSX skeleton — no state moved yet.
- *   Every value still flows in as props.
- * - **Phase 4b (this PR):** owns the **view-mode** cluster —
- *   `messageView` / `deferredMessageView` / the derived `isCompactView`,
- *   plus the effect that picks up the user's preferred default view
- *   from account settings. `MailClient.tsx` no longer carries those
- *   identifiers at all.
- * - **Later (4c/4d/…):** sort / selection / mutation hooks move in
- *   the same shape. `sortKey`/`groupBy`/`threadDateSource` don't move
- *   yet because they feed cross-cutting memos (sortedMessages,
- *   useMessageData, sync keys) that live above the orchestrator.
+ * Sort / group / thread-date state stays with the parent: those values
+ * flow into cross-cutting data-fetch memos (`sortedMessages`,
+ * `useMessageData`, `useSyncController` cache keys) that live above
+ * this component.
  */
 
 /**
- * Header state fields that MailClient still owns. Compared to
- * `MessageListHeaderProps["state"]`, this drops `messageView` because
- * the orchestrator now owns it internally and feeds it into the header
- * at render time.
+ * Header state fields the caller must supply. The `messageView` slot
+ * from the canonical `MessageListHeaderProps["state"]` is omitted
+ * because it's owned inside this component and merged in at render
+ * time, so requiring it from the caller would create two sources of
+ * truth.
  */
 export type MessageListOrchestratorHeaderState = Omit<
   MessageListHeaderProps["state"],
@@ -57,8 +56,9 @@ export type MessageListOrchestratorHeaderState = Omit<
 >;
 
 /**
- * Header actions MailClient still owns. Drops `setMessageView` for the
- * same reason.
+ * Header actions the caller must supply. `setMessageView` is omitted
+ * for the same reason as `messageView` in the state type above —
+ * toggles originate inside this component.
  */
 export type MessageListOrchestratorHeaderActions = Omit<
   MessageListHeaderProps["actions"],
@@ -77,15 +77,15 @@ export type MessageListOrchestratorProps = {
   // props that could diverge.
   scrollRef: React.RefObject<HTMLDivElement | null>;
 
-  // The user's preferred default view, read from account settings by
-  // `MailClient`. When it changes (e.g. user edits their layout
-  // preference), the orchestrator resets its internal `messageView`
-  // to match. `null` / `undefined` / any other value leaves the
-  // current view unchanged.
+  // User's preferred default view — typically sourced from account
+  // settings. The internal `messageView` state syncs to this whenever
+  // it changes to a recognized value; unrecognized values (`null`,
+  // `undefined`, a stored setting we don't know about) leave the
+  // current view alone.
   defaultMessageView?: MessageViewMode | string | null;
 
-  // Header (state + actions), minus the view-mode slice that the
-  // orchestrator now owns.
+  // Header state + actions minus the view-mode slice, which this
+  // component owns and injects at render time.
   header: {
     state: MessageListOrchestratorHeaderState;
     actions: MessageListOrchestratorHeaderActions;
@@ -99,9 +99,9 @@ export type MessageListOrchestratorProps = {
   searchCriteriaBadges: Array<{ key: string; label: string }>;
   onClearSearch: () => void;
 
-  // List-view state / actions / helpers. The concrete `view` mode is
-  // derived internally from `messageView` — MailClient no longer passes
-  // it in.
+  // List-view state / actions / helpers. The concrete `view` mode
+  // (card / table / compact / threads) is supplied internally from
+  // `messageView`, so the caller does not pass it as a separate prop.
   listViewState: MessageListViewState;
   listViewActions: MessageListViewActions;
   listViewHelpers: MessageListViewHelpers;
@@ -140,13 +140,12 @@ export default function MessageListOrchestrator({
   activeVirtualFolderName,
   searchScope
 }: MessageListOrchestratorProps) {
-  // View-mode state the orchestrator now owns (P1-12 Phase 4b).
   const [messageView, setMessageView] = useState<MessageViewMode>("threads");
-  // Sync to the user's preferred default view when it arrives / changes.
-  // We use a useEffect rather than deriving `useState(() => defaultMessageView)`
-  // because the preferred-view setting is loaded asynchronously (it comes
-  // from the account settings once the account is resolved) and may change
-  // at runtime when the user edits their layout preferences.
+  // `defaultMessageView` arrives asynchronously (it's resolved from the
+  // user's account settings after the component first renders) and can
+  // change at runtime when the user edits their layout preference — so
+  // a lazy `useState` initializer would miss the first value and all
+  // subsequent changes. An effect subscribes instead.
   useEffect(() => {
     if (isValidMessageViewMode(defaultMessageView)) {
       setMessageView(defaultMessageView);
