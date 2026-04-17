@@ -118,10 +118,14 @@ describe("createSyncProgressTracker", () => {
     expect(seen.map((p) => p.updatedAt)).toEqual([1000, 2000, 3000]);
   });
 
-  test("caller fields win over context when both name the same key (defensive)", () => {
-    // Partial cannot carry accountId/folderId/mailboxPath/mode per the
-    // type, but retry-phase partials spread onto `...progress` after
-    // the context in the source code — documenting the spread order.
+  test("retry-phase fields from the caller are forwarded to emitted progress", () => {
+    // The emitted partial cannot carry the context keys (`accountId`,
+    // `folderId`, `mailboxPath`, `mode`) — those are excluded by
+    // `SyncProgressEmitter`'s type — so this isn't a caller-overrides
+    // test, it's a "retry-phase-specific fields survive the context
+    // stamp" test. Documenting the spread order (partial after
+    // context) still matters because it's the guarantee that keeps
+    // these fields intact.
     const seen: SyncOperationProgress[] = [];
     const { emit } = createSyncProgressTracker(
       context,
@@ -129,6 +133,7 @@ describe("createSyncProgressTracker", () => {
       () => 1
     );
     emit({ phase: "retrying", processed: 0, retryAttempt: 2, maxRetries: 3 });
+    expect(seen[0].phase).toBe("retrying");
     expect(seen[0].retryAttempt).toBe(2);
     expect(seen[0].maxRetries).toBe(3);
   });

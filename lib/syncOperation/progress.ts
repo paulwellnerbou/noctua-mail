@@ -14,8 +14,14 @@ import type {
  * Compute a percent value (0–100, one decimal place) for a sync in
  * progress.
  *
- * - `estimatedTotal` is undefined / non-finite → `undefined` (caller
- *   omits the `percent` field entirely in the progress event).
+ * - `estimatedTotal` is undefined / non-finite → returns `undefined`.
+ *   Note that today's callers spread the return value into a partial
+ *   progress event (`percent: calculateProgressPercent(...)`), which
+ *   means the `percent` key is still *present* on the event with the
+ *   value `undefined`. That's fine for the existing consumers (they
+ *   treat `percent === undefined` and "no `percent` key" identically),
+ *   but a caller that wants the key fully omitted has to conditionally
+ *   include it themselves.
  * - `estimatedTotal <= 0` → 100 (there's nothing to do, so we're done).
  * - Otherwise → `min(100, round(processed / estimatedTotal * 1000) / 10)`.
  *   Clamp to 100 because `processed` can overshoot an earlier estimate
