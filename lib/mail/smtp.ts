@@ -102,3 +102,40 @@ export async function sendSmtpMessage(account: Account, mail: MailPayload) {
   const info = await transporter.sendMail(mailOptions);
   return { messageId: (info as any)?.messageId ?? null, raw };
 }
+
+/**
+ * Send a message from a pre-built raw MIME blob — used by draft-send so a
+ * previously-saved draft (with its original headers, attachments, and
+ * `Message-ID`) goes out byte-for-byte, no re-compose round-trip.
+ *
+ * The SMTP envelope (MAIL FROM / RCPT TO) is supplied separately because
+ * `nodemailer` cannot reliably parse envelope recipients from an opaque
+ * raw buffer — the caller already has `to`/`cc`/`bcc` parsed on the draft
+ * `Message`, so we feed them in directly. `bcc` recipients go into the
+ * envelope but are intentionally excluded from the `raw` blob's headers
+ * (drafts we produce with `keepBcc: true` already include them there).
+ */
+export async function sendRawSmtpMessage(
+  account: Account,
+  raw: Buffer | string,
+  envelope: { from: string; to: string[] }
+) {
+  const transporter = nodemailer.createTransport({
+    host: account.smtp.host,
+    port: account.smtp.port,
+    secure: account.smtp.secure,
+    auth: {
+      user: account.smtp.user,
+      pass: account.smtp.password
+    }
+  });
+
+  const info = await transporter.sendMail({
+    envelope: {
+      from: envelope.from,
+      to: envelope.to
+    },
+    raw
+  });
+  return { messageId: (info as any)?.messageId ?? null };
+}

@@ -22,6 +22,7 @@ import {
   RefreshCw,
   Reply,
   ReplyAll,
+  Send,
   Shield,
   ShieldOff,
   Square,
@@ -38,6 +39,7 @@ import TopicBadge from "../TopicBadge";
 type ComposeMode = "new" | "reply" | "replyAll" | "forward" | "edit" | "editAsNew";
 type MessageMenuAction =
   | "editDraft"
+  | "sendDraft"
   | "reply"
   | "replyAll"
   | "forward"
@@ -91,6 +93,7 @@ type MessageMenuProps = {
   handleOpenHtmlInNewWindow: (message: Message) => void;
   onShowRelated: (message: Message) => void;
   onShowThread: (message: Message) => void;
+  onSendDraft?: (message: Message) => void;
   allTopics: Topic[];
   onFetchSuggestions: (message: Message) => Promise<Topic[]>;
   onAssignTopics: (message: Message) => void;
@@ -126,6 +129,7 @@ export default function MessageMenu({
   handleOpenHtmlInNewWindow,
   onShowRelated,
   onShowThread,
+  onSendDraft,
   allTopics,
   onFetchSuggestions,
   onAssignTopics,
@@ -234,6 +238,11 @@ export default function MessageMenu({
                   openCompose("edit", message)
                   )
                 : null
+              : null,
+            isDraft && onSendDraft && isVisible("sendDraft")
+              ? buildItem("sendDraft", "Send draft", <Send size={14} />, () =>
+                  onSendDraft(message)
+                )
               : null,
             isVisible("reply")
               ? buildItem("reply", "Reply", <Reply size={14} />, () =>

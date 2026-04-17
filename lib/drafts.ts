@@ -8,14 +8,19 @@ import {
   resolveThreadingForAccountMessages,
   upsertMessages
 } from "./serverDb";
+import { getMessageSource } from "@/lib/storage";
 import { parseComposeAttachments, resolveComposeHtml } from "@/lib/mail/composePayload";
 import { appendImapMessage, deleteImapMessage, syncImapMessage } from "./serverImap";
-import { buildRawMessage } from "./serverSmtp";
+import { buildRawMessage, sendRawSmtpMessage } from "./serverSmtp";
 import { sanitizeSyncedMessage } from "@/lib/mail/syncMessageSanitizer";
 import { folderMailboxPath } from "@/lib/mailboxPaths";
 import { splitRecipientEntries } from "@/lib/recipientLists";
 import { buildReplyThreadHeaders } from "@/lib/replyThreadHeaders";
-import { findDraftsFolder } from "@/lib/specialFolders";
+import { findDraftsFolder, findSentFolder } from "@/lib/specialFolders";
+import {
+  buildDraftSendEnvelopeRecipients,
+  draftHasSendableRecipients
+} from "@/lib/draftSendEnvelope";
 
 export type DraftAttachmentInput = {
   filename: string;
@@ -75,6 +80,22 @@ export class DraftSaveError extends Error {
     this.status = status;
   }
 }
+
+export class DraftSendError extends Error {
+  readonly status: number;
+
+  constructor(status: number, message: string) {
+    super(message);
+    this.name = "DraftSendError";
+    this.status = status;
+  }
+}
+
+export type SendDraftResult = {
+  sentFolderId: string | null;
+  sentMessageUid: number | null;
+  messageId: string | null;
+};
 
 function normalizeEmail(value: string) {
   return value.trim().toLowerCase();
@@ -248,4 +269,85 @@ export async function saveDraftForAccount(params: {
   }
 
   return { draftId, message: savedMessage };
+}
+
+/**
+ * Send a previously-saved draft without re-opening it in compose.
+ *
+ * The draft is relayed byte-for-byte from its stored raw MIME source,
+ * so attachments, `Content-ID`s, the compose-invite header, and the
+ * original `Message-ID` are preserved exactly as the user left them.
+ * The SMTP envelope is built from the draft's parsed `to`/`cc`/`bcc`
+ * — we don't re-parse the raw blob for recipients.
+ *
+ * On success the draft is removed from both the IMAP Drafts mailbox
+ * and the local message store, and a copy is appended to the Sent
+ * folder (best-effort; append failures are swallowed to match the
+ * compose-editor send path).
+ */
+export async function sendDraftForAccount(params: {
+  account: Account;
+  accountId: string;
+  clientId: string;
+  draftId: string;
+}): Promise<SendDraftResult> {
+  const { account, accountId, clientId, draftId } = params;
+  const draft = await getMessageById(accountId, draftId);
+  if (!draft) {
+    throw new DraftSendError(404, "Draft not found");
+  }
+  if (!draftHasSendableRecipients(draft)) {
+    throw new DraftSendError(400, "Please add at least one recipient before sending.");
+  }
+  const rawSource = (await getMessageSource(accountId, draft.id)) ?? draft.source ?? null;
+  if (!rawSource) {
+    throw new DraftSendError(
+      409,
+      "Draft source is not cached locally. Open the draft in compose to send it."
+    );
+  }
+
+  const envelopeRecipients = buildDraftSendEnvelopeRecipients(draft);
+  await sendRawSmtpMessage(account, rawSource, {
+    from: account.email,
+    to: envelopeRecipients
+  });
+
+  // Append to Sent (best-effort — mirror `/api/accounts/[accountId]/smtp/send`).
+  const folders = await getFolders(account.id);
+  const sentFolder = findSentFolder(folders, account.id);
+  const sentMailbox = sentFolder ? folderMailboxPath(sentFolder, account.id) : null;
+  let sentMessageUid: number | null = null;
+  if (sentMailbox) {
+    try {
+      sentMessageUid = await appendImapMessage(
+        account,
+        sentMailbox,
+        Buffer.from(rawSource),
+        ["\\Seen"],
+        clientId
+      );
+    } catch {
+      // ignore append failure; caller still sees ok:true
+    }
+  }
+
+  // Discard the draft — IMAP first, then local store. An IMAP delete
+  // failure fails the whole operation so the UI doesn't end up with a
+  // phantom-sent draft that's still sitting in the server's Drafts.
+  if (draft.mailboxPath && typeof draft.imapUid === "number") {
+    try {
+      await deleteImapMessage(account, draft.mailboxPath, draft.imapUid, clientId);
+    } catch {
+      // Non-fatal: the send itself succeeded. The draft may re-appear on
+      // next sync but won't break subsequent operations.
+    }
+  }
+  await deleteMessageById(accountId, draft.id);
+
+  return {
+    sentFolderId: sentFolder?.id ?? null,
+    sentMessageUid,
+    messageId: draft.messageId ?? null
+  };
 }

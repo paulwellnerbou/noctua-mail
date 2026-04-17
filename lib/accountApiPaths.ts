@@ -146,6 +146,10 @@ export function buildAccountDraftDiscardPath(accountId: string, draftId: string)
   return buildAccountApiPath(accountId, `/drafts/${encodeURIComponent(draftId)}/discard`);
 }
 
+export function buildAccountDraftSendPath(accountId: string, draftId: string) {
+  return buildAccountApiPath(accountId, `/drafts/${encodeURIComponent(draftId)}/send`);
+}
+
 export function buildAccountSmtpSendPath(accountId: string) {
   return buildAccountApiPath(accountId, "/smtp/send");
 }
