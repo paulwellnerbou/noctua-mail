@@ -392,27 +392,46 @@ export async function sendDraftForAccount(params: {
     }
   }
 
-  // Discard the draft on the server (best-effort — see note) and in the
-  // local store, then drop its cached source + attachment files so
-  // sending a draft doesn't leak storage the way the compose-editor
-  // send + discard pair doesn't either.
+  // Everything past this point is post-send cleanup. The message has
+  // already been relayed to the SMTP server; if any cleanup step
+  // throws, we must NOT surface it as a send failure — the client
+  // would display "Failed to send draft", prompting the user to retry
+  // and send the message twice.
   //
-  // IMAP delete is non-fatal: if it fails (network blip, server
-  // rejection, etc.), the send has already gone through — we don't
-  // want to surface an error the user would read as "send failed".
-  // The draft will re-appear on next sync, at which point the user
-  // can delete it manually. Surfacing this as a soft "sent, but couldn't
-  // remove server-side draft" notice is a future UX polish.
-  const attachmentIds = await getAttachmentIds(accountId, draft.id);
-  if (draft.mailboxPath && typeof draft.imapUid === "number") {
-    try {
-      await deleteImapMessage(account, draft.mailboxPath, draft.imapUid, clientId);
-    } catch {
-      // Non-fatal — see block comment above.
+  // Individually:
+  //   - IMAP delete is non-fatal on its own already (wrapped below).
+  //     Failure just means the draft re-appears on next sync.
+  //   - `getAttachmentIds` can throw on DB issues.
+  //   - `deleteMessageById` + `deleteMessageFiles` can fail on DB /
+  //     filesystem issues.
+  //
+  // All of these are logged as warnings and swallowed. The endpoint
+  // still returns success. Storage leak and stale draft rows in this
+  // path are real but non-urgent; the alternative (user-visible
+  // duplicate send) is worse. Surfacing these as a soft warning on
+  // the client is a future UX polish.
+  try {
+    const attachmentIds = await getAttachmentIds(accountId, draft.id);
+    if (draft.mailboxPath && typeof draft.imapUid === "number") {
+      try {
+        await deleteImapMessage(account, draft.mailboxPath, draft.imapUid, clientId);
+      } catch (error) {
+        console.warn("[draft-send] IMAP delete failed after send", {
+          accountId,
+          draftId: draft.id,
+          error
+        });
+      }
     }
+    await deleteMessageById(accountId, draft.id);
+    await deleteMessageFiles(accountId, draft.id, attachmentIds);
+  } catch (error) {
+    console.warn("[draft-send] post-send cleanup failed", {
+      accountId,
+      draftId: draft.id,
+      error
+    });
   }
-  await deleteMessageById(accountId, draft.id);
-  await deleteMessageFiles(accountId, draft.id, attachmentIds);
 
   return {
     sentFolderId: sentFolder?.id ?? null,

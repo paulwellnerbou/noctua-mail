@@ -2622,8 +2622,23 @@ export default function MailClient({
             ? message.subject.trim().slice(0, 180)
             : undefined
         });
-        await refreshFolders();
-        await refreshMailboxDataRef.current();
+        // Mailbox refresh is best-effort: a failure here does NOT mean
+        // the send failed (the server already confirmed success above).
+        // Surfacing a "send failed" error after a successful send would
+        // prompt the user to retry and send the message twice. Instead,
+        // fail soft with a warning notice.
+        try {
+          await refreshFolders();
+          await refreshMailboxDataRef.current();
+        } catch (refreshErr) {
+          pushNotice({
+            type: "warning",
+            title: "Draft sent, but mailbox refresh failed.",
+            description:
+              (refreshErr as Error)?.message ||
+              "Refresh the mailbox manually to see the updated state."
+          });
+        }
       } catch (err) {
         reportError((err as Error)?.message || "Failed to send draft.");
       } finally {
