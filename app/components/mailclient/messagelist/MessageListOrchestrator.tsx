@@ -23,9 +23,9 @@ import {
   type MessageViewMode
 } from "./messageListViewTypes";
 import { createSelectionStore, type SelectionStore } from "./selectionStore";
-import type { MessageGroup, VisibleMessageEntry } from "./listModel";
+import type { VisibleMessageEntry } from "./listModel";
 import type { Folder, Message } from "@/lib/data";
-import type { DeleteConfirmAction, DeleteConfirmState } from "../types";
+import type { DeleteConfirmAction, DeleteConfirmState, NoticeInput } from "../types";
 import {
   useMessageMoveActions,
   type MoveMessagesToFolder,
@@ -177,13 +177,12 @@ export type MessageListOrchestratorListViewActions = Omit<
 /**
  * Inputs for the three mutation hooks now owned by the orchestrator.
  *
- * NOTE (phase 4c / temporary): several of these fields —
- * `messages`, `setMessages`, `collapsedThreads`, `threadScopeMessages`,
- * `visibleMessages`, `sortedMessages` — are state that still lives in
- * MailClient and is being threaded through here so the moved hooks
- * can keep functioning. Phase 4d moves `useMessageData`,
- * `collapsedThreads`, and the derived-state pipeline into the
- * orchestrator, at which point these props disappear.
+ * Several of these fields — `messages`, `setMessages`,
+ * `collapsedThreads`, `threadScopeMessages`, `visibleMessages`, and
+ * `sortedMessages` — still live in `MailClient` and are threaded
+ * through here so the orchestrator-owned hooks can operate on the
+ * caller's message and derived list state. This wider prop surface is
+ * intentional in the current design.
  */
 export type MessageListOrchestratorMutationInputs = {
   activeAccountId: string;
@@ -213,7 +212,7 @@ export type MessageListOrchestratorMutationInputs = {
   apiFetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
   readErrorMessage: (res: Response) => Promise<string>;
   reportError: (message: string) => void;
-  pushNotice: (input: any) => void;
+  pushNotice: (input: NoticeInput) => void;
   confirmDelete: (input: DeleteConfirmState) => Promise<DeleteConfirmAction>;
   confirmUnsubscribe: (sender: string, listId?: string) => Promise<boolean>;
   undoMoveOperation: (
