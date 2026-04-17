@@ -3,10 +3,26 @@ import { EventEmitter } from "node:events";
 import type { ImapFlow } from "imapflow";
 import type { Account } from "@/lib/data";
 
-// We mock the two dependencies the pool reaches into. `connectImapClient` is
+// We mock two dependencies the pool reaches into. `connectImapClient` is
 // replaced with a fake that returns a fresh `EventEmitter`-based stub per
 // call so we can observe connect count, inspect listeners, and simulate
 // `error` / `close`. `safeLogoutImapClient` is stubbed to record calls.
+//
+// IMPORTANT: the mock factories below spread the real modules first and
+// then override only the symbols we actually want to stub. An earlier
+// version of this file returned a bare `{ connectImapClient }` /
+// `{ buildImapIdentityKey, safeLogoutImapClient }` object from the
+// factories, which silently dropped every other export from those
+// modules (`buildLogContext`, `buildFolderId`, `normalizeImapInternalDate`,
+// `resetImapConnectFailureState`, etc.). `bun:test` keeps mocks installed
+// across files during a `test:stress` run, so later files re-importing
+// any of those dropped symbols crashed with
+// `SyntaxError: Export named "…" not found in module`.
+
+// Import the real modules BEFORE installing the mocks so we can forward
+// everything we don't care about.
+import * as realShared from "./_shared";
+import * as realImapClientOptions from "@/lib/mail/imapClientOptions";
 
 type StubClient = ImapFlow & { __logoutCount: number };
 let connectCount = 0;
@@ -22,6 +38,7 @@ function createStubClient(): StubClient {
 }
 
 mock.module("./_shared", () => ({
+  ...realShared,
   connectImapClient: async () => {
     connectCount += 1;
     lastCreatedStub = createStubClient();
@@ -30,8 +47,11 @@ mock.module("./_shared", () => ({
 }));
 
 mock.module("@/lib/mail/imapClientOptions", () => ({
-  buildImapIdentityKey: (account: Account) =>
-    JSON.stringify([account.id, account.imap.host, account.imap.port, account.imap.secure]),
+  ...realImapClientOptions,
+  // `buildImapIdentityKey` is forwarded from the real module (no override).
+  // We only need to stub `safeLogoutImapClient` because the real impl calls
+  // `client.logout()` and `logImapOp(...)`, and our stub `ImapFlow` is a
+  // plain EventEmitter.
   safeLogoutImapClient: async (client: StubClient | null | undefined) => {
     if (client) {
       client.__logoutCount += 1;
