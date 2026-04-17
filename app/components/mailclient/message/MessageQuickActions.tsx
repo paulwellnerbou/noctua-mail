@@ -23,7 +23,7 @@ type MessageQuickActionsProps = {
   openCompose: (mode: ComposeMode, message?: Message, asNew?: boolean) => void;
   handleDeleteMessage: (message: Message, options?: { allowThreadDeletion?: boolean }) => void;
   onShowRelated: (message: Message) => void;
-  onSendDraft?: (message: Message) => void;
+  onSendDraft?: (message: Message) => void | Promise<void>;
   isTrashFolder: (folderId?: string) => boolean;
 };
 
@@ -74,7 +74,12 @@ export default function MessageQuickActions({
             disabled={pendingMessageActions.has(message.id)}
             onClick={(event) => {
               event.stopPropagation();
-              onSendDraft(message);
+              // `onSendDraft` may return a promise (the orchestrator wires
+              // it to an async handler). We explicitly `void` it so the
+              // floating promise doesn't become an unhandled rejection
+              // warning; the handler itself owns error surfacing via
+              // the notice system.
+              void onSendDraft(message);
             }}
           >
             <Send size={iconSize} />

@@ -13,6 +13,7 @@ import { deleteMessageFiles, getMessageSource } from "@/lib/storage";
 import { parseComposeAttachments, resolveComposeHtml } from "@/lib/mail/composePayload";
 import { appendImapMessage, deleteImapMessage, syncImapMessage } from "./serverImap";
 import { buildRawMessage, sendRawSmtpMessage } from "./serverSmtp";
+import { hasMessageFlag } from "@/lib/messageFlags";
 import {
   injectUndisclosedRecipientsToHeader,
   stripBccHeader
@@ -313,6 +314,32 @@ export async function sendDraftForAccount(params: {
   if (!draft) {
     throw new DraftSendError(404, "Draft not found");
   }
+
+  // SECURITY GUARD. Without this check, any message with a cached raw
+  // source and parseable recipients could be relayed via SMTP —
+  // including *received* messages whose `From:` header is someone else,
+  // which would let this endpoint be used as an abuse/spoofing vector.
+  // A "real" draft is one that either:
+  //   (a) carries the IMAP `\Draft` flag (how the compose editor
+  //       tags its saves — see `saveDraftForAccount`), or
+  //   (b) lives in the account's Drafts folder.
+  // We require at least one of the two; otherwise we refuse. This does
+  // not replace SMTP-level `From:` authorization (that's the SMTP
+  // server's job — it will reject an unauthorized sender address), it
+  // just keeps us from even trying.
+  const folders = await getFolders(account.id);
+  const draftsFolder = findDraftsFolder(folders, account.id);
+  const hasDraftFlag = hasMessageFlag(draft.flags, "\\Draft");
+  const isInDraftsFolder = Boolean(
+    draftsFolder && draft.folderId && draft.folderId === draftsFolder.id
+  );
+  if (!hasDraftFlag && !isInDraftsFolder) {
+    throw new DraftSendError(
+      403,
+      "Only drafts can be sent via this endpoint."
+    );
+  }
+
   if (!draftHasSendableRecipients(draft)) {
     throw new DraftSendError(400, "Please add at least one recipient before sending.");
   }
@@ -347,7 +374,7 @@ export async function sendDraftForAccount(params: {
   // Append to Sent (best-effort — mirror `/api/accounts/[accountId]/smtp/send`).
   // Uses the ORIGINAL rawSource, keeping the Bcc header intact so the
   // user can still see whom they bcc'd when they look at their Sent copy.
-  const folders = await getFolders(account.id);
+  // (`folders` is already fetched above for the draft-status guard.)
   const sentFolder = findSentFolder(folders, account.id);
   const sentMailbox = sentFolder ? folderMailboxPath(sentFolder, account.id) : null;
   let sentMessageUid: number | null = null;

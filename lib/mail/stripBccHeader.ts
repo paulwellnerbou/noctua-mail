@@ -123,7 +123,7 @@ function isBccHeaderLine(line: string): boolean {
  * already handles this case the same way (see the `outboundTo` fallback
  * in that route); this helper mirrors the behavior for draft-send.
  *
- * No-op when the input already has a `To:` or `Cc:` header (only bucks
+ * No-op when the input already has a `To:` or `Cc:` header (only kicks
  * in when there truly are no recipient headers). Line terminator of the
  * inserted header is `\r\n` regardless of the rest of the blob's line
  * style — RFC 5322 uses CRLF, and mixing within a header block is fine.

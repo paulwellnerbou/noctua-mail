@@ -24,9 +24,18 @@ export type DraftSendEnvelopeInput = {
 };
 
 /**
- * Build the SMTP envelope recipient list (unique, lowercased, combining
- * `to` + `cc` + `bcc`). Returns an empty array if no address is parseable
- * — the caller is expected to reject the send in that case.
+ * Build the SMTP envelope recipient list (unique, combining `to` + `cc`
+ * + `bcc`). Returns an empty array if no address is parseable — the
+ * caller is expected to reject the send in that case.
+ *
+ * Dedup is case-insensitive (so `User@x.com` and `USER@x.com` don't
+ * both end up in the envelope), but the original casing of the first
+ * occurrence is preserved. Per RFC 5321 §4.1.2 only the domain part is
+ * required to be case-insensitive; local-parts are technically case-
+ * sensitive, and some SMTP servers (including a handful of enterprise
+ * mail systems) treat them that way. Lowercasing here would change the
+ * actual `RCPT TO` address, which could bounce a message that would
+ * have delivered with the user's original casing.
  */
 export function buildDraftSendEnvelopeRecipients(
   draft: DraftSendEnvelopeInput
@@ -36,11 +45,14 @@ export function buildDraftSendEnvelopeRecipients(
     ...extractEmails(draft.cc),
     ...extractEmails(draft.bcc)
   ];
-  const dedup = new Set<string>();
+  const byLowercase = new Map<string, string>();
   for (const address of merged) {
-    dedup.add(address.toLowerCase());
+    const key = address.toLowerCase();
+    if (!byLowercase.has(key)) {
+      byLowercase.set(key, address);
+    }
   }
-  return Array.from(dedup);
+  return Array.from(byLowercase.values());
 }
 
 /**

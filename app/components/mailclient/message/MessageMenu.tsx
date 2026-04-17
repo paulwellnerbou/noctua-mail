@@ -93,7 +93,7 @@ type MessageMenuProps = {
   handleOpenHtmlInNewWindow: (message: Message) => void;
   onShowRelated: (message: Message) => void;
   onShowThread: (message: Message) => void;
-  onSendDraft?: (message: Message) => void;
+  onSendDraft?: (message: Message) => void | Promise<void>;
   allTopics: Topic[];
   onFetchSuggestions: (message: Message) => Promise<Topic[]>;
   onAssignTopics: (message: Message) => void;
@@ -241,7 +241,12 @@ export default function MessageMenu({
               : null,
             isDraft && onSendDraft && isVisible("sendDraft")
               ? buildItem("sendDraft", "Send draft", <Send size={14} />, () =>
-                  onSendDraft(message)
+                  // `onSendDraft` may return a Promise (the orchestrator wires
+                  // it to an async handler). `void` keeps this call
+                  // fire-and-forget without producing an unhandled-rejection
+                  // warning — the handler itself surfaces errors via the
+                  // notice system.
+                  void onSendDraft(message)
                 )
               : null,
             isVisible("reply")
