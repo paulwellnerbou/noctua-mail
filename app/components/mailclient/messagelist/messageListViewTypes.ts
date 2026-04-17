@@ -5,6 +5,14 @@ import type { SelectionStore } from "./selectionStore";
 
 export type SortKey = "date" | "from" | "subject";
 
+/**
+ * The four layouts the message list can render in. Adding a new layout
+ * requires touching only this list — the derived `MessageViewMode` type
+ * and the orchestrator's runtime validator both read from it.
+ */
+export const MESSAGE_VIEW_MODES = ["card", "table", "compact", "threads"] as const;
+export type MessageViewMode = (typeof MESSAGE_VIEW_MODES)[number];
+
 export type MessageListViewState = {
   groupedMessages: MessageGroup[];
   visibleMessages: VisibleMessageEntry[];
@@ -93,7 +101,7 @@ export type MessageListViewHelpers = {
 };
 
 export type MessageListViewProps = {
-  view: "card" | "table" | "compact" | "threads";
+  view: MessageViewMode;
   state: MessageListViewState;
   refs: MessageListViewRefs;
   actions: MessageListViewActions;

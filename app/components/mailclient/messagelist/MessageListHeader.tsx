@@ -4,6 +4,7 @@ import { ChevronsDown, ChevronsUp, GitBranch, RefreshCw } from "lucide-react";
 import { IconButton, SegmentedControl, Select, Text } from "@radix-ui/themes";
 import type { ThreadDateSource } from "@/lib/threadDate";
 import type { MessageGroup } from "./listModel";
+import type { MessageViewMode } from "./messageListViewTypes";
 import styles from "./MessageListHeader.module.css";
 
 export type MessageListHeaderProps = {
@@ -17,7 +18,7 @@ export type MessageListHeaderProps = {
     listLoading: boolean;
     loadingMessages: boolean;
     hasMoreMessages: boolean;
-    messageView: "card" | "table" | "compact" | "threads";
+    messageView: MessageViewMode;
     groupBy: "none" | "date" | "week" | "sender" | "domain" | "year" | "folder" | "event";
     eventGroupingAvailable: boolean;
     threadDateSource: ThreadDateSource;
@@ -28,7 +29,7 @@ export type MessageListHeaderProps = {
   };
   actions: {
     setMessagesPage: React.Dispatch<React.SetStateAction<number>>;
-    setMessageView: React.Dispatch<React.SetStateAction<"card" | "table" | "compact" | "threads">>;
+    setMessageView: React.Dispatch<React.SetStateAction<MessageViewMode>>;
     setGroupBy: React.Dispatch<
       React.SetStateAction<"none" | "date" | "week" | "sender" | "domain" | "year" | "folder" | "event">
     >;
@@ -94,7 +95,7 @@ export default function MessageListHeader({ state, actions }: MessageListHeaderP
   };
 
   const handleViewChange = (value: string) => {
-    const next = value as "card" | "table" | "compact" | "threads";
+    const next = value as MessageViewMode;
     setLocalView(next);
     scheduleCommit(viewFrameRef, () => setMessageView(next));
   };

@@ -9,25 +9,18 @@ import listPaneStyles from "./MessageListPane.module.css";
 import MessageListHeader, { type MessageListHeaderProps } from "./MessageListHeader";
 import MessageListPane from "./MessageListPane";
 import MessageListView from "./MessageListView";
-import type {
-  MessageListViewActions,
-  MessageListViewHelpers,
-  MessageListViewState
+import {
+  MESSAGE_VIEW_MODES,
+  type MessageListViewActions,
+  type MessageListViewHelpers,
+  type MessageListViewState,
+  type MessageViewMode
 } from "./messageListViewTypes";
-
-export type MessageViewMode = "card" | "table" | "compact" | "threads";
-
-const VALID_VIEW_MODES: readonly MessageViewMode[] = [
-  "card",
-  "table",
-  "compact",
-  "threads"
-];
 
 function isValidMessageViewMode(value: unknown): value is MessageViewMode {
   return (
     typeof value === "string" &&
-    (VALID_VIEW_MODES as readonly string[]).includes(value)
+    (MESSAGE_VIEW_MODES as readonly string[]).includes(value)
   );
 }
 
