@@ -1314,15 +1314,12 @@ export default function MailClient({
   const accountMessages = useMemo(() => {
     const { deduped, duplicates } = dedupeAccountMessages(messages, activeAccountId);
     if (duplicates.length > 0) {
-      // Rebuild the original-message sample for the debug payload; the
-      // helper only reports ids, but the logger wants the richer shape
-      // so we resolve each reassignedId back to its source message.
-      const duplicatedMessages = deduped.filter((msg) =>
-        duplicates.some((dup) => dup.reassignedId === msg.id)
-      );
-      const sample = duplicatedMessages
+      // Summarize each duplicate's PRE-reassignment message so the log
+      // payload reports the original colliding id (e.g. "m1"), not the
+      // synthetic `m1-3` that went into `deduped`.
+      const sample = duplicates
         .slice(0, LIST_DEBUG_SAMPLE_LIMIT)
-        .map((msg) => summarizeMessageForListDebug(msg));
+        .map((dup) => summarizeMessageForListDebug(dup.message));
       const fingerprint = `${activeAccountId}|${duplicates.length}|${sample
         .map((entry) => entry?.id ?? "")
         .join(",")}`;

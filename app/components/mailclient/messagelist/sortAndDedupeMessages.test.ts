@@ -53,26 +53,36 @@ describe("dedupeAccountMessages", () => {
   test("first occurrence of an id keeps its id; later get synthetic ids", () => {
     const messages = [
       makeMessage({ id: "m1" }),
-      makeMessage({ id: "m1" }),
+      makeMessage({ id: "m1", subject: "second" }),
       makeMessage({ id: "m2" })
     ];
     const result = dedupeAccountMessages(messages, "acc");
     expect(result.deduped.map((m) => m.id)).toEqual(["m1", "m1-1", "m2"]);
-    expect(result.duplicates).toEqual([{ originalId: "m1", reassignedId: "m1-1" }]);
+    expect(result.duplicates).toHaveLength(1);
+    expect(result.duplicates[0]!.originalId).toBe("m1");
+    expect(result.duplicates[0]!.reassignedId).toBe("m1-1");
+    // `message` is the ORIGINAL input message, pre-id-rewrite — so its id
+    // is still the colliding "m1", not the synthetic "m1-1".
+    expect(result.duplicates[0]!.message.id).toBe("m1");
+    expect(result.duplicates[0]!.message.subject).toBe("second");
   });
 
   test("three copies of the same id each get distinct reassigned ids", () => {
     const messages = [
-      makeMessage({ id: "m1" }),
-      makeMessage({ id: "m1" }),
-      makeMessage({ id: "m1" })
+      makeMessage({ id: "m1", subject: "first" }),
+      makeMessage({ id: "m1", subject: "second" }),
+      makeMessage({ id: "m1", subject: "third" })
     ];
     const result = dedupeAccountMessages(messages, "acc");
     expect(result.deduped.map((m) => m.id)).toEqual(["m1", "m1-1", "m1-2"]);
-    expect(result.duplicates).toEqual([
-      { originalId: "m1", reassignedId: "m1-1" },
-      { originalId: "m1", reassignedId: "m1-2" }
-    ]);
+    expect(result.duplicates).toHaveLength(2);
+    expect(result.duplicates.map((d) => d.reassignedId)).toEqual(["m1-1", "m1-2"]);
+    // Each captured `message` is the pre-rewrite input at its original
+    // index — `subject` tells us which one.
+    expect(result.duplicates[0]!.message.subject).toBe("second");
+    expect(result.duplicates[1]!.message.subject).toBe("third");
+    // Both `message.id` values are still the colliding original.
+    expect(result.duplicates.every((d) => d.message.id === "m1")).toBe(true);
   });
 
   test("synthetic ids use index in the filtered array, not the full input", () => {

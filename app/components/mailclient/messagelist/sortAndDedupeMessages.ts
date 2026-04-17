@@ -15,6 +15,13 @@ export type MessageDedupeDuplicate = {
   originalId: string;
   /** The synthetic id assigned to the duplicate in `deduped` output. */
   reassignedId: string;
+  /**
+   * The original duplicate `Message`, captured BEFORE the id was
+   * rewritten. Consumers that want to log the pre-patch shape should
+   * read this; reading from `deduped` instead would report the
+   * synthetic (`<id>-<index>`) id.
+   */
+  message: Message;
 };
 
 export type MessageDedupeResult = {
@@ -52,7 +59,7 @@ export function dedupeAccountMessages(
     let nextId = msg.id;
     if (seen.has(nextId)) {
       const reassignedId = `${msg.id}-${index}`;
-      duplicates.push({ originalId: msg.id, reassignedId });
+      duplicates.push({ originalId: msg.id, reassignedId, message: msg });
       nextId = reassignedId;
     }
     seen.add(nextId);
