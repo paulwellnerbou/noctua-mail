@@ -97,7 +97,7 @@ export type ComposeOrchestratorHandle = {
 
 export type ComposeOrchestratorProps = {
   // Account context
-  activeAccountId: string | null;
+  activeAccountId: string;
   currentAccount: Account | null;
   accountDateFormat: AccountDateFormat;
   defaultSignatureId: string;
@@ -630,7 +630,7 @@ function ComposeOrchestratorImpl(
         composeReplyMessage,
         accountFromValue: fromValue
       });
-      const res = await apiFetch(buildAccountSmtpSendPath(activeAccountId ?? ""), {
+      const res = await apiFetch(buildAccountSmtpSendPath(activeAccountId), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(smtpPayload)
