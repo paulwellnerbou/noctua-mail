@@ -20,7 +20,11 @@ import { mapInviteRow } from "./rowParsers";
 const calendarReminderSchemaSignatureByDb = new WeakMap<object, string>();
 const messageCalendarEventSchemaSignatureByDb = new WeakMap<object, string>();
 const threadSchemaSignatureByDb = new WeakMap<object, string>();
-const calendarEventRuntimeSignatureByDb = new WeakMap<object, string>();
+// Keyed on (db, accountId) so a shard shared by multiple accounts still
+// back-fills each one separately. Under today's one-dbPath-per-account
+// deployment the inner map has exactly one entry; this is defense in depth
+// against future multi-account shards.
+const calendarEventRuntimeSignatureByDb = new WeakMap<object, Map<string, string>>();
 const topicSchemaSignatureByDb = new WeakMap<object, string>();
 
 const CALENDAR_REMINDER_SCHEMA_SIGNATURE = [
@@ -507,17 +511,23 @@ function backfillEmailCalendarEventStatuses(db: any) {
   runUpdate(updates);
 }
 
-function backfillEmailCalendarEventParticipation(db: any, accountEmail?: string | null) {
+function backfillEmailCalendarEventParticipation(
+  db: any,
+  accountId: string,
+  accountEmail?: string | null
+) {
+  const normalizedAccountId = accountId?.trim();
   const normalizedAccountEmail = accountEmail?.trim();
-  if (!normalizedAccountEmail) return;
+  if (!normalizedAccountId || !normalizedAccountEmail) return;
   const rows = db
     .prepare(
       `SELECT id, eventUid, attendees, myPartstat, myPartstatUpdatedAtMs, myAttendeeEmail, replyRequested, rawIcs
        FROM calendar_events
-       WHERE deletedAtMs IS NULL
+       WHERE accountId = ?
+         AND deletedAtMs IS NULL
          AND COALESCE(rawIcs, '') <> ''`
     )
-    .all() as Array<{
+    .all(normalizedAccountId) as Array<{
     id?: string | null;
     eventUid?: string | null;
     attendees?: string | null;
@@ -607,7 +617,8 @@ function backfillEmailCalendarEventParticipation(db: any, accountEmail?: string 
 }
 
 export async function ensureCalendarEventRuntimeData(db: any, accountId: string) {
-  if (calendarEventRuntimeSignatureByDb.get(db) === CALENDAR_EVENT_RUNTIME_SIGNATURE) {
+  const perAccount = calendarEventRuntimeSignatureByDb.get(db);
+  if (perAccount?.get(accountId) === CALENDAR_EVENT_RUNTIME_SIGNATURE) {
     return;
   }
   ensureCalendarEventOptionalColumns(db);
@@ -616,13 +627,15 @@ export async function ensureCalendarEventRuntimeData(db: any, accountId: string)
   // lib/db.ts (which re-exports this module).
   const { getAccountById } = await import("../db");
   const account = await getAccountById(accountId);
-  backfillEmailCalendarEventParticipation(db, account?.email);
+  backfillEmailCalendarEventParticipation(db, accountId, account?.email);
   // MIGRATION-CLEANUP: one-off back-fill for the source email snapshot
   // columns (Topic 2). Remove alongside backfillCalendarEventSourceSnapshots
   // after the adoption window — tracked in
   // https://github.com/paulwellnerbou/noctua-mail/issues/38.
   backfillCalendarEventSourceSnapshots(db);
-  calendarEventRuntimeSignatureByDb.set(db, CALENDAR_EVENT_RUNTIME_SIGNATURE);
+  const nextPerAccount = perAccount ?? new Map<string, string>();
+  nextPerAccount.set(accountId, CALENDAR_EVENT_RUNTIME_SIGNATURE);
+  if (!perAccount) calendarEventRuntimeSignatureByDb.set(db, nextPerAccount);
 }
 
 function createAdminInvite(db: any): InviteCode {
