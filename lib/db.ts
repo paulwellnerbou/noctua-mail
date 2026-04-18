@@ -264,6 +264,14 @@ async function rebuildAllThreadSignalsForAccount(db: any, accountId: string) {
   rebuildAllThreadSignalsForAccountInternal(db, accountId, accountEmail);
 }
 
+/**
+ * @internal
+ *
+ * Called only by `lib/db/connection.ts#getAccountDb` via a dynamic barrel
+ * import (cycle break — the body reaches `rebuildAllThreadSignalsForAccount`
+ * which is not part of the public API). Not part of the public `@/lib/db`
+ * surface; consumer code must not call this directly.
+ */
 export async function ensureThreadSignalRuntimeData(db: any, accountId: string) {
   const hasThreadSignals = db
     .prepare(`SELECT 1 FROM thread_signals WHERE accountId = ? LIMIT 1`)
@@ -441,6 +449,14 @@ export function upsertTopicLearningSignalsForThreadIds(
   }
 }
 
+/**
+ * @internal
+ *
+ * Called only by `lib/db/connection.ts#getAccountDb` via a dynamic barrel
+ * import (same cycle-break rationale as `ensureThreadSignalRuntimeData`).
+ * Not part of the public `@/lib/db` surface; consumer code must not call
+ * this directly.
+ */
 export function ensureTopicLearningRuntimeData(db: any, accountId: string) {
   const hasTopicLearningSignals = db
     .prepare(`SELECT 1 FROM topic_learning_signals WHERE accountId = ? LIMIT 1`)
