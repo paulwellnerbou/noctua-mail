@@ -1,20 +1,14 @@
-import type React from "react";
 import { Maximize2, X } from "lucide-react";
+import { useComposeContext } from "./ComposeContext";
 import styles from "./Compose.module.css";
 
 type ComposeMinimizedProps = {
   open: boolean;
-  composeSubject: string;
-  setComposeView: React.Dispatch<React.SetStateAction<"inline" | "modal" | "minimized">>;
-  setComposeOpen: React.Dispatch<React.SetStateAction<boolean>>;
 };
 
-export default function ComposeMinimized({
-  open,
-  composeSubject,
-  setComposeView,
-  setComposeOpen
-}: ComposeMinimizedProps) {
+export default function ComposeMinimized({ open }: ComposeMinimizedProps) {
+  const { composeSubject, setComposeView, setComposeOpen } = useComposeContext();
+
   if (!open) return null;
 
   return (

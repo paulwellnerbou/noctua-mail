@@ -1,82 +1,14 @@
-import type React from "react";
 import { ArrowUpRight } from "lucide-react";
 import { Badge, Card, IconButton } from "@radix-ui/themes";
 import { badgeColors } from "@/lib/ui/badgeColors";
-import type { Message, RecipientSuggestion } from "@/lib/data";
 import ComposeFields from "./ComposeFields";
 import ComposeActions from "./ComposeActions";
+import { useComposeContext } from "./ComposeContext";
 import threadStyles from "../message/ThreadMessageCard.module.css";
 import styles from "./ComposeInlineCard.module.css";
 import composeStyles from "./Compose.module.css";
 
-type ComposeMode = "new" | "reply" | "replyAll" | "forward" | "edit" | "editAsNew";
-
-type ComposeInlineCardProps = {
-  state: {
-    composeMode: ComposeMode;
-    composeSubject: string;
-    composeTo: string;
-    composeCc: string;
-    composeBcc: string;
-    composeShowBcc: boolean;
-    activeAccountId: string | null;
-    composeDraftId: string | null;
-    composeOpen: boolean;
-    composeFieldsReset: number;
-    canSaveDraft: boolean;
-    draftSaving: boolean;
-    draftSaveError: string | null;
-    draftSavedAt: number | null;
-    sendingMail: boolean;
-    discardingDraft: boolean;
-    composeDragActive: boolean;
-    fromValue: string;
-    inReplyToMessage: Message | null;
-  };
-  ui: {
-    composeMessageField: React.ReactNode;
-  };
-  actions: {
-    popOutCompose: () => void;
-    setComposeSubject: React.Dispatch<React.SetStateAction<string>>;
-    setComposeTo: React.Dispatch<React.SetStateAction<string>>;
-    setComposeCc: React.Dispatch<React.SetStateAction<string>>;
-    setComposeBcc: React.Dispatch<React.SetStateAction<string>>;
-    setComposeShowBcc: React.Dispatch<React.SetStateAction<boolean>>;
-    setComposeOpen: React.Dispatch<React.SetStateAction<boolean>>;
-    setComposeView: React.Dispatch<React.SetStateAction<"inline" | "modal" | "minimized">>;
-    handleSendMail: () => void;
-    handleDiscardDraft: () => void;
-    handleSaveDraft: () => void;
-    applyRecipientSelection: (
-      current: string,
-      selection: RecipientSuggestion,
-      setter: React.Dispatch<React.SetStateAction<string>>,
-      focusAfter?: "to" | "cc" | "bcc" | null
-    ) => string;
-    loadRecipientOptions: (query: string, signal: AbortSignal) => Promise<RecipientSuggestion[]>;
-    markComposeDirty: () => void;
-    jumpToMessage: (messageId: string) => void;
-  };
-  helpers: {
-    getComposeToken: (value: string) => string;
-    formatRelativeTime: (timestamp: number | null) => string;
-  };
-  dragHandlers: {
-    handleComposeDragEnter: (event: React.DragEvent) => void;
-    handleComposeDragLeave: (event: React.DragEvent) => void;
-    handleComposeDragOver: (event: React.DragEvent) => void;
-    handleComposeDrop: (event: React.DragEvent) => void;
-  };
-};
-
-export default function ComposeInlineCard({
-  state,
-  ui,
-  actions,
-  helpers,
-  dragHandlers
-}: ComposeInlineCardProps) {
+export default function ComposeInlineCard() {
   const {
     composeMode,
     composeSubject,
@@ -96,9 +28,7 @@ export default function ComposeInlineCard({
     discardingDraft,
     composeDragActive,
     fromValue,
-    inReplyToMessage
-  } = state;
-  const {
+    inReplyToMessage,
     popOutCompose,
     setComposeSubject,
     setComposeTo,
@@ -113,11 +43,15 @@ export default function ComposeInlineCard({
     applyRecipientSelection,
     loadRecipientOptions,
     markComposeDirty,
-    jumpToMessage
-  } = actions;
-  const { getComposeToken, formatRelativeTime } = helpers;
-  const { handleComposeDragEnter, handleComposeDragLeave, handleComposeDragOver, handleComposeDrop } =
-    dragHandlers;
+    jumpToMessage,
+    getComposeToken,
+    formatRelativeTime,
+    handleComposeDragEnter,
+    handleComposeDragLeave,
+    handleComposeDragOver,
+    handleComposeDrop,
+    composeMessageField
+  } = useComposeContext();
 
   const composeModeLabel =
     composeMode === "reply"
@@ -192,7 +126,7 @@ export default function ComposeInlineCard({
             />
           </div>
         </div>
-        <div className={`${composeStyles.composeBody} ${styles.body}`}>{ui.composeMessageField}</div>
+        <div className={`${composeStyles.composeBody} ${styles.body}`}>{composeMessageField}</div>
         <ComposeActions
           composeDraftId={composeDraftId}
           composeOpen={composeOpen}
