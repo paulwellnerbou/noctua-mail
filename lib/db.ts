@@ -1,14 +1,5 @@
-const sqliteModulePromise = () => import("bun:sqlite" /* webpackIgnore: true */);
-let DatabaseCtor: any | null = null;
-import path from "path";
-import { mkdirSync, promises as fs } from "fs";
 import { simpleParser } from "mailparser";
-import {
-  getAttachmentsAccountDir,
-  getDefaultAccountDbPath,
-  getMainDbPath,
-  getSourcesAccountDir
-} from "./runtimePaths";
+import { getMainDbPath } from "./runtimePaths";
 import { buildAccountAttachmentPath } from "./accountApiPaths";
 import type {
   Account,
@@ -44,15 +35,20 @@ import {
   type StoredMcpTokenRow
 } from "./db/rowParsers";
 import {
-  ensureCalendarEventRuntimeData,
-  ensureCalendarReminderRuntimeSchema,
-  ensureMessageCalendarEventOptionalColumns,
-  ensureMessageCalendarEventRuntimeSchema,
-  ensureThreadRuntimeSchema,
-  ensureTopicRuntimeSchema,
-  initAccountSchema,
-  initMasterSchema
+  ensureMessageCalendarEventOptionalColumns
 } from "./db/schema";
+import {
+  areEquivalentDbPaths,
+  cleanupAccountLifecycleArtifacts,
+  closeAccountDbConnection,
+  getAccountDb,
+  getDb
+} from "./db/connection";
+export {
+  closeAllDbConnections,
+  initializeMasterDb,
+  withAccountDb
+} from "./db/connection";
 import {
   CALENDAR_FILENAME_EXTENSIONS,
   CALENDAR_INVITE_FLAG,
@@ -125,19 +121,6 @@ import {
 import type { CategoryLearningDebugSnapshot } from "./mail/categorization/debugTypes";
 import type { CategoryClassificationInput } from "./mail/categorization";
 
-let masterDbInstance: any | null = null;
-let masterInitialized = false;
-const accountDbInstances = new Map<string, any>();
-const accountDbInitialized = new Set<string>();
-const accountDbIdleTimers = new Map<string, ReturnType<typeof setTimeout>>();
-const ACCOUNT_DB_IDLE_MS = (() => {
-  const raw = process.env.ACCOUNT_DB_IDLE_MS?.trim();
-  if (!raw) return 5 * 60 * 1000; // 5 minutes: releases SQLite page cache sooner after syncs
-  const parsed = Number.parseInt(raw, 10);
-  if (!Number.isFinite(parsed) || parsed < 0) return 5 * 60 * 1000;
-  return parsed;
-})();
-let shutdownHooksRegistered = false;
 
 function hydrateAttachment(
   accountId: string,
@@ -160,128 +143,6 @@ function hydrateAttachment(
     cid: row.cid ?? undefined,
     url: buildAccountAttachmentPath(accountId, messageId, row.id)
   };
-}
-
-
-async function ensureDatabaseCtor() {
-  if (DatabaseCtor) return;
-  try {
-    const sqliteModule = await sqliteModulePromise();
-    DatabaseCtor = sqliteModule.Database as any;
-  } catch {
-    throw new Error("bun:sqlite is unavailable in this runtime. Run the app with Bun (not Node).");
-  }
-}
-
-function configureDb(db: any) {
-  db.exec("PRAGMA journal_mode = WAL;");
-  db.exec("PRAGMA busy_timeout = 15000;");
-  db.exec("PRAGMA foreign_keys = ON;");
-}
-
-function ensureDbParentDir(dbPath: string) {
-  mkdirSync(path.dirname(dbPath), { recursive: true });
-}
-
-function clearAccountDbIdleTimer(dbPath: string) {
-  const timer = accountDbIdleTimers.get(dbPath);
-  if (timer) {
-    clearTimeout(timer);
-    accountDbIdleTimers.delete(dbPath);
-  }
-}
-
-function closeAccountDbConnection(dbPath: string) {
-  clearAccountDbIdleTimer(dbPath);
-  const db = accountDbInstances.get(dbPath);
-  if (!db) return;
-  try {
-    db.close();
-  } catch {
-    // ignore close failures during shutdown/eviction
-  }
-  accountDbInstances.delete(dbPath);
-  accountDbInitialized.delete(dbPath);
-}
-
-async function unlinkIfExists(filePath: string) {
-  try {
-    await fs.unlink(filePath);
-  } catch (error) {
-    const code =
-      error && typeof error === "object" && "code" in error
-        ? String((error as { code?: unknown }).code ?? "")
-        : "";
-    if (code !== "ENOENT") {
-      console.warn("[account-lifecycle] failed to delete file", { filePath, error });
-    }
-  }
-}
-
-async function areEquivalentDbPaths(leftPath: string, rightPath: string) {
-  try {
-    const [leftRealPath, rightRealPath] = await Promise.all([
-      fs.realpath(leftPath),
-      fs.realpath(rightPath)
-    ]);
-    return leftRealPath === rightRealPath;
-  } catch {
-    return leftPath === rightPath;
-  }
-}
-
-async function cleanupAccountLifecycleArtifacts(
-  accountId: string,
-  dbPath: string,
-  deleteShardFile: boolean
-) {
-  await Promise.all([
-    fs.rm(getSourcesAccountDir(accountId), { recursive: true, force: true }).catch((error) => {
-      console.warn("[account-lifecycle] failed to delete source cache dir", { accountId, error });
-    }),
-    fs.rm(getAttachmentsAccountDir(accountId), { recursive: true, force: true }).catch((error) => {
-      console.warn("[account-lifecycle] failed to delete attachment cache dir", { accountId, error });
-    })
-  ]);
-
-  if (!deleteShardFile) return;
-  await Promise.all([
-    unlinkIfExists(dbPath),
-    unlinkIfExists(`${dbPath}-wal`),
-    unlinkIfExists(`${dbPath}-shm`)
-  ]);
-}
-
-function scheduleAccountDbIdleClose(dbPath: string) {
-  if (ACCOUNT_DB_IDLE_MS <= 0) return;
-  clearAccountDbIdleTimer(dbPath);
-  const timer = setTimeout(() => {
-    closeAccountDbConnection(dbPath);
-  }, ACCOUNT_DB_IDLE_MS);
-  timer.unref?.();
-  accountDbIdleTimers.set(dbPath, timer);
-}
-
-export function closeAllDbConnections() {
-  const accountPaths = Array.from(accountDbInstances.keys());
-  accountPaths.forEach((dbPath) => closeAccountDbConnection(dbPath));
-  if (masterDbInstance) {
-    try {
-      masterDbInstance.close();
-    } catch {
-      // ignore close failures during shutdown
-    }
-    masterDbInstance = null;
-    masterInitialized = false;
-  }
-}
-
-function registerDbShutdownHooks() {
-  if (shutdownHooksRegistered) return;
-  shutdownHooksRegistered = true;
-  process.once("SIGINT", closeAllDbConnections);
-  process.once("SIGTERM", closeAllDbConnections);
-  process.once("beforeExit", closeAllDbConnections);
 }
 
 
@@ -403,7 +264,7 @@ async function rebuildAllThreadSignalsForAccount(db: any, accountId: string) {
   rebuildAllThreadSignalsForAccountInternal(db, accountId, accountEmail);
 }
 
-async function ensureThreadSignalRuntimeData(db: any, accountId: string) {
+export async function ensureThreadSignalRuntimeData(db: any, accountId: string) {
   const hasThreadSignals = db
     .prepare(`SELECT 1 FROM thread_signals WHERE accountId = ? LIMIT 1`)
     .get(accountId);
@@ -580,7 +441,7 @@ export function upsertTopicLearningSignalsForThreadIds(
   }
 }
 
-function ensureTopicLearningRuntimeData(db: any, accountId: string) {
+export function ensureTopicLearningRuntimeData(db: any, accountId: string) {
   const hasTopicLearningSignals = db
     .prepare(`SELECT 1 FROM topic_learning_signals WHERE accountId = ? LIMIT 1`)
     .get(accountId);
@@ -621,73 +482,7 @@ function pruneThreadTopicsWithoutMessages(db: any, accountId: string, threadIds:
   }
 }
 
-async function getDb() {
-  registerDbShutdownHooks();
-  if (!masterDbInstance) {
-    await ensureDatabaseCtor();
-    const dbPath = getMainDbPath();
-    ensureDbParentDir(dbPath);
-    masterDbInstance = new DatabaseCtor(dbPath);
-    configureDb(masterDbInstance);
-  }
-  if (!masterInitialized && masterDbInstance) {
-    initMasterSchema(masterDbInstance);
-    masterInitialized = true;
-  }
-  return masterDbInstance;
-}
-
-export async function initializeMasterDb() {
-  await getDb();
-}
-
-async function resolveAccountDbPath(accountId: string) {
-  const master = await getDb();
-  const row = master
-    .prepare(`SELECT id, dbPath FROM accounts WHERE id = ?`)
-    .get(accountId) as { id?: string; dbPath?: string | null } | undefined;
-  const defaultPath = getDefaultAccountDbPath(accountId);
-  if (!row?.id) {
-    return defaultPath;
-  }
-  if (row.dbPath && row.dbPath.trim().length > 0) {
-    return row.dbPath;
-  }
-  master.prepare(`UPDATE accounts SET dbPath = ? WHERE id = ?`).run(defaultPath, accountId);
-  return defaultPath;
-}
-
-async function getAccountDb(accountId: string) {
-  const dbPath = await resolveAccountDbPath(accountId);
-  if (!accountDbInstances.has(dbPath)) {
-    await ensureDatabaseCtor();
-    ensureDbParentDir(dbPath);
-    const accountDb = new DatabaseCtor(dbPath);
-    configureDb(accountDb);
-    accountDbInstances.set(dbPath, accountDb);
-  }
-  const accountDb = accountDbInstances.get(dbPath)!;
-  if (!accountDbInitialized.has(dbPath)) {
-    initAccountSchema(accountDb);
-    accountDbInitialized.add(dbPath);
-  }
-  ensureThreadRuntimeSchema(accountDb);
-  ensureTopicRuntimeSchema(accountDb);
-  ensureMessageCalendarEventRuntimeSchema(accountDb);
-  ensureCalendarReminderRuntimeSchema(accountDb);
-  await ensureCalendarEventRuntimeData(accountDb, accountId);
-  await ensureThreadSignalRuntimeData(accountDb, accountId);
-  ensureTopicLearningRuntimeData(accountDb, accountId);
-  scheduleAccountDbIdleClose(dbPath);
-  return accountDb;
-}
-
 export type GroupMeta = { key: string; label: string; count: number };
-
-export async function withAccountDb<T>(accountId: string, fn: (db: any) => T | Promise<T>): Promise<T> {
-  const db = await getAccountDb(accountId);
-  return fn(db);
-}
 
 export async function getAccounts() {
   const db = await getDb();
