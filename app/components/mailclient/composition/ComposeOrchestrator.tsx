@@ -9,18 +9,28 @@ import {
   useRef
 } from "react";
 import type React from "react";
-import type { Account, AccountDateFormat, Attachment, Message, RecipientSuggestion } from "@/lib/data";
+import type { Account, AccountDateFormat, Attachment, Folder, Message, RecipientSuggestion } from "@/lib/data";
 import {
+  buildComposeInvitePayload,
   normalizeComposeInviteDraft,
   createDefaultComposeInviteDraft,
   type ComposeInviteDraft
 } from "@/lib/composeInvite";
+import { extractComposeInviteDraftFromSource } from "@/lib/composeInviteMetadata";
+import {
+  buildAccountDraftDiscardPath,
+  buildAccountMessageSourcePath,
+  buildAccountSmtpSendPath
+} from "@/lib/accountApiPaths";
+import { hasHtmlContent } from "@/lib/ui/messageView";
+import { decidePostSendSentSync, type SyncMode } from "@/lib/syncPolicy";
+import { logSyncPolicyCall } from "@/lib/syncPolicyLogging";
+import { buildSendPayload } from "./buildSendPayload";
 import ComposeInlineCard from "./ComposeInlineCard";
 import ComposeMessageField from "./ComposeMessageField";
 import ComposeMinimized from "./ComposeMinimized";
 import ComposeModal from "./ComposeModal";
 import { ComposeContextProvider, type ComposeContextValue } from "./ComposeContext";
-import type { ComposePayload } from "./composeContentBuilder";
 import { getDraftChangeState } from "./draftSaveUtils";
 import { normalizeHtmlDerivedText } from "./composeTextNormalization";
 import { resetComposeSession } from "./resetComposeSession";
@@ -28,22 +38,43 @@ import { useComposeController } from "./useComposeController";
 import { useComposeDraftAutoSave } from "./useComposeDraftAutoSave";
 import {
   pruneUnreferencedInlineAttachments,
+  restoreComposeMessageAttachmentDataUrls,
   useComposeHandlers
 } from "./useComposeHandlers";
 import { useComposeState } from "./useComposeState";
 import { useComposeViewEffects } from "./useComposeViewEffects";
 import { useDraftManager } from "./useDraftManager";
-import type {
-  ComposeMode,
-  ComposeReplyHeaders,
-  ComposeTab
-} from "./composeTypes";
+import type { ComposeMode } from "./composeTypes";
 
 type Signature = {
   id: string;
   name: string;
   body: string;
 };
+
+type SyncFolderWithBackground = (
+  folderId: string,
+  allowRefresh?: boolean,
+  mode?: SyncMode,
+  options?: {
+    backfillUids?: number[];
+    fullSyncReason?: string;
+    triggerId?: string;
+    [key: string]: unknown;
+  }
+) => Promise<unknown> | unknown;
+
+type PushNoticeInput = {
+  type: "info" | "success" | "warning" | "error";
+  icon?: "mail";
+  title: string;
+  description?: string;
+  messageId?: string;
+  ids?: string[];
+  durationMs?: number;
+};
+
+type ComposeMessageTabs = Record<string, "html" | "text" | "markdown" | "source">;
 
 export type ComposeOrchestratorHandle = {
   /**
@@ -55,48 +86,13 @@ export type ComposeOrchestratorHandle = {
   /** Reset all compose state — used when the active account changes. */
   resetSession: () => void;
   /**
-   * The underlying `openCompose` from the controller. MailClient still owns the
-   * wrapper that hydrates attachments and decides preferred tab.
+   * Open the compose surface. Hydrates attachments for edit/forward modes and
+   * picks the preferred tab from the per-message tab state before handing off
+   * to the underlying controller.
    */
-  openComposeInternal: (
-    mode: ComposeMode,
-    message?: Message,
-    asNew?: boolean,
-    options?: { preferredComposeTab?: ComposeTab }
-  ) => void;
-  setComposeAttachments: React.Dispatch<React.SetStateAction<Attachment[]>>;
-  hydrateComposeAttachments: (
-    message: Message,
-    options?: { filter?: (attachment: Attachment) => boolean }
-  ) => Promise<Attachment[]>;
-  loadForwardAttachments: (
-    message: Message
-  ) => Promise<{ attachments: Attachment[]; message: Message }>;
-  buildComposePayload: (options?: { preferText?: boolean }) => ComposePayload;
-  /** Snapshot of the compose state used by MailClient's `handleSendMail`. */
-  getSnapshot: () => {
-    composeOpen: boolean;
-    composeView: "inline" | "modal" | "minimized";
-    composeTo: string;
-    composeCc: string;
-    composeBcc: string;
-    composeSubject: string;
-    composeMode: ComposeMode;
-    composeIncludeInvite: boolean;
-    composeReplyMessage: Message | null;
-    composeReplyHeaders: ComposeReplyHeaders | null;
-    composeDraftId: string | null;
-    composeInviteDraft: ComposeInviteDraft | null;
-  };
+  openCompose: (mode: ComposeMode, message?: Message, asNew?: boolean) => void;
   /** Imperative setter used by MailClient's list selection auto-minimize. */
   setComposeView: React.Dispatch<React.SetStateAction<"inline" | "modal" | "minimized">>;
-  /** Cancel any pending auto-save timers and bump the session version. */
-  cancelDraftAutoSave: () => void;
-  /**
-   * Tear down compose state after a successful send (replicates the post-send
-   * reset block that previously lived inline in `handleSendMail`).
-   */
-  resetAfterSend: () => void;
 };
 
 export type ComposeOrchestratorProps = {
@@ -126,8 +122,26 @@ export type ComposeOrchestratorProps = {
   refreshFolders: () => Promise<unknown>;
   refreshMailboxData: () => Promise<unknown>;
 
-  // Send handler lives in MailClient this phase
-  handleSendMail: () => void;
+  // Send-path collaborators
+  pushNotice: (input: PushNoticeInput) => void;
+  evictThreadCache: (threadId: string) => void;
+  updateFlagState: (
+    message: Message,
+    flag: "seen" | "answered" | "flagged" | "draft" | "deleted",
+    value: boolean
+  ) => Promise<unknown> | unknown;
+  updateKeywordFlag: (message: Message, keyword: string, value: boolean) => Promise<unknown> | unknown;
+  accountFolders: Folder[];
+  findSentFolder: () => Folder | null;
+  syncFolderWithBackgroundRef: React.RefObject<SyncFolderWithBackground>;
+
+  // openCompose wrapper collaborators
+  messageTabs: ComposeMessageTabs;
+  isDraftMessage: (message: Message) => boolean;
+  ensureMessageContent: (
+    message: Message,
+    options?: { manual?: boolean }
+  ) => Promise<Message | null | undefined>;
 
   // Recipient / formatting helpers
   applyRecipientSelection: (
@@ -203,7 +217,16 @@ function ComposeOrchestratorImpl(
     reconcileSavedDraftInUi,
     refreshFolders,
     refreshMailboxData,
-    handleSendMail,
+    pushNotice,
+    evictThreadCache,
+    updateFlagState,
+    updateKeywordFlag,
+    accountFolders,
+    findSentFolder,
+    syncFolderWithBackgroundRef,
+    messageTabs,
+    isDraftMessage,
+    ensureMessageContent,
     applyRecipientSelection,
     loadRecipientOptions,
     getComposeToken,
@@ -543,6 +566,259 @@ function ComposeOrchestratorImpl(
     saveDraft
   });
 
+  const cancelDraftAutoSave = useCallback(() => {
+    if (draftSaveTimerRef.current !== null) {
+      clearTimeout(draftSaveTimerRef.current);
+      draftSaveTimerRef.current = null;
+    }
+    pendingDraftSaveRef.current = null;
+    composeSessionVersionRef.current += 1;
+    setDraftSaving(false);
+  }, [
+    composeSessionVersionRef,
+    draftSaveTimerRef,
+    pendingDraftSaveRef,
+    setDraftSaving
+  ]);
+
+  const resetAfterSend = useCallback(() => {
+    setComposeOpen(false);
+    setComposeDraftId(null);
+    setComposeAttachments([]);
+    lastDraftHashRef.current = "";
+    currentDraftHashRef.current = "";
+    composeBaselineHashRef.current = null;
+    setComposeView("inline");
+  }, [
+    composeBaselineHashRef,
+    currentDraftHashRef,
+    lastDraftHashRef,
+    setComposeAttachments,
+    setComposeDraftId,
+    setComposeOpen,
+    setComposeView
+  ]);
+
+  const handleSendMail = async () => {
+    const composeInviteDraft = currentComposeInviteDraft;
+    if (!composeTo.trim() && !composeCc.trim() && !composeBcc.trim()) {
+      reportError("Please add at least one recipient.");
+      return;
+    }
+    const invitePayload =
+      composeIncludeInvite ? buildComposeInvitePayload(composeInviteDraft) : undefined;
+    if (composeIncludeInvite && !invitePayload) {
+      reportError("Please complete the event invitation details before sending.");
+      return;
+    }
+    cancelDraftAutoSave();
+    setSendingMail(true);
+    try {
+      const { text, html, markdown, attachments, composeFormat } = buildComposePayload();
+      const smtpPayload = buildSendPayload(composeMode, {
+        composeTo,
+        composeCc,
+        composeBcc,
+        composeSubject,
+        text,
+        markdown,
+        html,
+        attachments,
+        invite: invitePayload ?? undefined,
+        composeFormat,
+        composeReplyHeaders,
+        composeReplyMessage,
+        accountFromValue: fromValue
+      });
+      const res = await apiFetch(buildAccountSmtpSendPath(activeAccountId ?? ""), {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(smtpPayload)
+      });
+      if (res.ok) {
+        const sendResult = (await res.json().catch(() => null)) as
+          | {
+              ok?: boolean;
+              sentFolderId?: string | null;
+              sentMessageUid?: number | null;
+              messageId?: string | null;
+              inviteScheduled?: boolean;
+              inviteEventId?: string | null;
+              inviteWarning?: string | null;
+            }
+          | null;
+        if (composeReplyMessage) {
+          const threadId =
+            composeReplyMessage.threadId ??
+            composeReplyMessage.messageId ??
+            composeReplyMessage.id;
+          evictThreadCache(threadId);
+        }
+        if (composeDraftId && activeAccountId) {
+          suppressDraftDeleteReconcile(composeDraftId);
+          removeDraftFromUi(composeDraftId);
+          try {
+            await apiFetch(buildAccountDraftDiscardPath(activeAccountId, composeDraftId), {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({})
+            });
+          } catch {
+            // ignore draft cleanup errors
+          }
+        }
+        resetAfterSend();
+        if (
+          (composeMode === "reply" || composeMode === "replyAll") &&
+          composeReplyMessage
+        ) {
+          updateFlagState(composeReplyMessage, "answered", true);
+        }
+        if (composeMode === "forward" && composeReplyMessage) {
+          updateKeywordFlag(composeReplyMessage, "$Forwarded", true);
+        }
+        const sentFolder =
+          accountFolders.find((folder) => folder.id === sendResult?.sentFolderId) ?? findSentFolder();
+        const sentSyncDecision = decidePostSendSentSync({
+          sentFolderId: sentFolder?.id ?? null
+        });
+        const sentSyncTriggerId = logSyncPolicyCall({
+          caller: "post-send-sent-refresh",
+          policy: "decidePostSendSentSync",
+          accountId: activeAccountId,
+          folderId: sentFolder?.id ?? null,
+          input: {
+            sentFolderId: sentFolder?.id ?? null
+          },
+          decision: sentSyncDecision
+        });
+        if (sentSyncDecision.kind === "folder") {
+          const sentMessageUid =
+            typeof sendResult?.sentMessageUid === "number" && Number.isFinite(sendResult.sentMessageUid)
+              ? sendResult.sentMessageUid
+              : null;
+          await syncFolderWithBackgroundRef.current?.(
+            sentSyncDecision.folderId,
+            false,
+            sentMessageUid !== null ? "new" : sentSyncDecision.mode,
+            {
+              backfillUids: sentMessageUid !== null ? [sentMessageUid] : undefined,
+              fullSyncReason: sentSyncDecision.reason,
+              triggerId: sentSyncTriggerId
+            }
+          );
+        }
+        await refreshFolders();
+        if (sentFolder && activeFolderId === sentFolder.id && searchScope === "folder") {
+          await refreshMailboxData();
+        }
+        if (
+          composeReplyMessage &&
+          (!sentFolder || activeFolderId !== sentFolder.id || searchScope !== "folder")
+        ) {
+          await refreshMailboxData();
+        }
+        pushNotice({
+          type: "success",
+          title: "Email sent.",
+          description: composeSubject.trim() ? composeSubject.trim().slice(0, 180) : undefined
+        });
+        if (sendResult?.inviteWarning) {
+          pushNotice({
+            type: "warning",
+            title: "Invitation email sent",
+            description: sendResult.inviteWarning
+          });
+        }
+      } else {
+        reportError(await readErrorMessage(res));
+      }
+    } catch {
+      reportError("Failed to send email.");
+    } finally {
+      setSendingMail(false);
+    }
+  };
+
+  const openCompose = (mode: ComposeMode, message?: Message, asNew = false) => {
+    if (!message) {
+      openComposeInternal(mode, undefined, asNew);
+      return;
+    }
+
+    const preferredComposeTab = (() => {
+      const tab = messageTabs[message.id];
+      return tab === "html" || tab === "markdown" || tab === "text" ? tab : undefined;
+    })();
+
+    const getComposeSourceMessage = (clickedMessage: Message) => {
+      const cachedMessage = messageById.get(clickedMessage.id);
+      if (!cachedMessage) return clickedMessage;
+
+      const scoreMessage = (candidate: Message) =>
+        (hasHtmlContent(candidate.htmlBody) ? 2 : 0) +
+        ((candidate.body ?? "").trim().length > 0 ? 1 : 0);
+
+      return scoreMessage(clickedMessage) >= scoreMessage(cachedMessage)
+        ? clickedMessage
+        : cachedMessage;
+    };
+
+    const hydrateDraftComposeMetadata = async (msg: Message) => {
+      if (!isDraftMessage(msg)) return msg;
+      if (msg.draftInvite) return msg;
+      const source = msg.source ?? (msg.hasSource
+        ? await apiFetch(buildAccountMessageSourcePath(msg.accountId, msg.id))
+            .then(async (response) => {
+              if (!response.ok) return "";
+              const data = (await response.json().catch(() => null)) as { source?: string } | null;
+              return data?.source ?? "";
+            })
+            .catch(() => "")
+        : "");
+      const draftInvite = source ? extractComposeInviteDraftFromSource(source) : null;
+      return draftInvite ? { ...msg, source, draftInvite } : msg;
+    };
+
+    const afterOpen = async (msg: Message) => {
+      const messageWithDraftMetadata = await hydrateDraftComposeMetadata(msg);
+      if (mode === "edit" && (msg.attachments?.length ?? 0) > 0) {
+        const attachments = await hydrateComposeAttachments(messageWithDraftMetadata);
+        const hydratedMessage = restoreComposeMessageAttachmentDataUrls(
+          messageWithDraftMetadata,
+          attachments
+        );
+        openComposeInternal(mode, hydratedMessage, asNew, { preferredComposeTab });
+        setComposeAttachments(attachments);
+        return;
+      }
+
+      if (mode === "forward") {
+        const { attachments, message: hydratedForwardMessage } = await loadForwardAttachments(
+          messageWithDraftMetadata
+        );
+        openComposeInternal(mode, hydratedForwardMessage, asNew, { preferredComposeTab });
+        setComposeAttachments(attachments);
+        return;
+      }
+
+      openComposeInternal(mode, messageWithDraftMetadata, asNew, { preferredComposeTab });
+    };
+
+    const resolved = getComposeSourceMessage(message);
+    const hasText = Boolean((resolved.body ?? "").trim());
+    const hasHtml = hasHtmlContent(resolved.htmlBody);
+    if (hasText || hasHtml) {
+      void afterOpen(resolved);
+      return;
+    }
+
+    void (async () => {
+      const hydrated = await ensureMessageContent(resolved, { manual: true });
+      await afterOpen(hydrated ?? resolved);
+    })();
+  };
+
   const canSaveCurrentDraft = (() => {
     if (!composeOpen || !composeDraftId) return false;
     const preferText = composeTab === "html" && composeLastEditedRef.current === "text";
@@ -751,74 +1027,13 @@ function ComposeOrchestratorImpl(
       resetSession: () => {
         resetComposeSession(composeRef.current);
       },
-      openComposeInternal,
-      setComposeAttachments,
-      hydrateComposeAttachments,
-      loadForwardAttachments,
-      buildComposePayload,
-      getSnapshot: () => ({
-        composeOpen,
-        composeView,
-        composeTo,
-        composeCc,
-        composeBcc,
-        composeSubject,
-        composeMode,
-        composeIncludeInvite,
-        composeReplyMessage,
-        composeReplyHeaders,
-        composeDraftId,
-        composeInviteDraft: currentComposeInviteDraft
-      }),
-      setComposeView,
-      cancelDraftAutoSave: () => {
-        if (draftSaveTimerRef.current !== null) {
-          clearTimeout(draftSaveTimerRef.current);
-          draftSaveTimerRef.current = null;
-        }
-        pendingDraftSaveRef.current = null;
-        composeSessionVersionRef.current += 1;
-        setDraftSaving(false);
-      },
-      resetAfterSend: () => {
-        setComposeOpen(false);
-        setComposeDraftId(null);
-        setComposeAttachments([]);
-        lastDraftHashRef.current = "";
-        currentDraftHashRef.current = "";
-        composeBaselineHashRef.current = null;
-        setComposeView("inline");
-      }
+      openCompose,
+      setComposeView
     }),
     [
       inlineContextValue,
       composeCardRef,
-      openComposeInternal,
-      setComposeAttachments,
-      hydrateComposeAttachments,
-      loadForwardAttachments,
-      buildComposePayload,
-      composeOpen,
-      composeView,
-      composeTo,
-      composeCc,
-      composeBcc,
-      composeSubject,
-      composeMode,
-      composeIncludeInvite,
-      composeReplyMessage,
-      composeReplyHeaders,
-      composeDraftId,
-      currentComposeInviteDraft,
-      draftSaveTimerRef,
-      pendingDraftSaveRef,
-      composeSessionVersionRef,
-      setDraftSaving,
-      setComposeOpen,
-      setComposeDraftId,
-      lastDraftHashRef,
-      currentDraftHashRef,
-      composeBaselineHashRef,
+      openCompose,
       setComposeView
     ]
   );
