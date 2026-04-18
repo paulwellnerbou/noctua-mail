@@ -28,28 +28,17 @@ import MoveToDialog, { recordRecentMoveFolder, getRecentMoveFolderIds } from "./
 import InAppNoticeStack, { type InAppNotice } from "./mailclient/InAppNoticeStack";
 import DialogsHost from "./mailclient/dialogs/DialogsHost";
 import { useConfirmDialogs } from "./mailclient/dialogs/useConfirmDialogs";
-import ComposeInlineCard from "./mailclient/composition/ComposeInlineCard";
-import ComposeMinimized from "./mailclient/composition/ComposeMinimized";
-import ComposeMessageField from "./mailclient/composition/ComposeMessageField";
-import ComposeModal from "./mailclient/composition/ComposeModal";
+import ComposeOrchestrator, {
+  type ComposeMirror,
+  type ComposeOrchestratorHandle
+} from "./mailclient/composition/ComposeOrchestrator";
+import type { ComposeMode } from "./mailclient/composition/composeTypes";
 import {
   buildSavedDraftListMessage,
   reconcileSavedDraftMessages
 } from "./mailclient/composition/draftListState";
-import { getDraftChangeState } from "./mailclient/composition/draftSaveUtils";
-import { resetComposeSession } from "./mailclient/composition/resetComposeSession";
-import { useComposeController } from "./mailclient/composition/useComposeController";
-import { useComposeState } from "./mailclient/composition/useComposeState";
-import { useComposeViewEffects } from "./mailclient/composition/useComposeViewEffects";
 import { buildSendPayload } from "./mailclient/composition/buildSendPayload";
-import { useComposeDraftAutoSave } from "./mailclient/composition/useComposeDraftAutoSave";
-import { useDraftManager } from "./mailclient/composition/useDraftManager";
-import { normalizeHtmlDerivedText } from "./mailclient/composition/composeTextNormalization";
-import {
-  pruneUnreferencedInlineAttachments,
-  restoreComposeMessageAttachmentDataUrls,
-  useComposeHandlers
-} from "./mailclient/composition/useComposeHandlers";
+import { restoreComposeMessageAttachmentDataUrls } from "./mailclient/composition/useComposeHandlers";
 import { useMessageDragDrop } from "./mailclient/useMessageDragDrop";
 import {
   renderQuickActions as renderQuickActionsHelper,
@@ -110,13 +99,7 @@ import {
   DEFAULT_THREAD_DATE_SOURCE,
   type ThreadDateSource
 } from "@/lib/threadDate";
-import { createComposeAttachment } from "@/lib/mail/composeAttachment";
-import {
-  buildComposeInvitePayload,
-  createDefaultComposeInviteDraft,
-  normalizeComposeInviteDraft,
-  type ComposeInviteDraft
-} from "@/lib/composeInvite";
+import { buildComposeInvitePayload } from "@/lib/composeInvite";
 import { extractComposeInviteDraftFromSource } from "@/lib/composeInviteMetadata";
 import { stripHtmlToText } from "@/lib/html";
 import {
@@ -605,111 +588,30 @@ export default function MailClient({
   // searchScope moved to useSearchState hook
   const [includeSentInEverywhere, setIncludeSentInEverywhere] = useState(false);
   const [lastFolderId, setLastFolderId] = useState("");
-  const compose = useComposeState();
+  // Mirror of the compose state slices that MailClient still consumes
+  // reactively (layout, selection, thread auto-collapse). The orchestrator
+  // pushes updates via `onComposeMirrorChange`; MailClient imperatives (send,
+  // openCompose wrapper, reset on account switch) go through `composeHandleRef`.
+  const composeHandleRef = useRef<ComposeOrchestratorHandle | null>(null);
+  const [composeMirror, setComposeMirror] = useState<ComposeMirror>({
+    composeOpen: false,
+    composeView: "inline",
+    composeMode: "new",
+    composeDraftId: null,
+    composeReplyMessage: null
+  });
   const {
     composeOpen,
-    setComposeOpen,
     composeView,
-    setComposeView,
-    composeDraftId,
-    setComposeDraftId,
     composeMode,
-    composeTo,
-    setComposeTo,
-    composeCc,
-    setComposeCc,
-    composeBcc,
-    setComposeBcc,
-    composeSubject,
-    setComposeSubject,
-    composeBody,
-    setComposeBody,
-    composeBodyDebounceRef,
-    composeBodyLastUpdateRef,
-    composeIncludeInvite,
-    setComposeIncludeInvite,
-    composeInviteLocation,
-    setComposeInviteLocation,
-    composeInviteStart,
-    setComposeInviteStart,
-    composeInviteEnd,
-    setComposeInviteEnd,
-    composeInviteAllDay,
-    setComposeInviteAllDay,
-    composeInviteRecurrenceRule,
-    setComposeInviteRecurrenceRule,
-    composeHtml,
-    setComposeHtml,
-    composeHtmlText,
-    setComposeHtmlText,
-    composeMarkdown,
-    setComposeMarkdown,
-    composeOpenedAt,
-    composeSignatureId,
-    setComposeSignatureId,
-    signatureMenuOpen,
-    setSignatureMenuOpen,
-    composeReplyMessage,
-    composeTab,
-    setComposeTab,
-    composeShowBcc,
-    setComposeShowBcc,
-    composeStripImages,
-    setComposeStripImages,
-    composeIncludeOriginal,
-    setComposeIncludeOriginal,
-    composeQuoteHtml,
-    setComposeQuoteHtml,
-    composeQuotedHtml,
-    setComposeQuotedHtml,
-    composeQuotedText,
-    setComposeQuotedText,
-    composeReplyHeaders,
-    composeAttachments,
-    setComposeAttachments,
-    composeDragActive,
-    setComposeDragActive,
-    composeEditorReset,
-    setComposeEditorReset,
-    composeQuotedParts,
-    setComposeQuotedParts,
-    composeQuotedHtmlEdited,
-    recipientCacheRef,
-    composeSize,
-    setComposeSize,
-    composeResizing,
-    setComposeResizing,
-    composeResizeRef,
-    composeModalRef,
-    composeTextRef,
-    composeSelectionRef,
-    composeDragDepthRef,
-    composeAttachmentInputRef,
-    composeCardRef,
-    sendingMail,
-    setSendingMail,
-    draftSaving,
-    setDraftSaving,
-    draftSavedAt,
-    setDraftSavedAt,
-    draftSaveError,
-    setDraftSaveError,
-    discardingDraft,
-    setDiscardingDraft,
-    draftSaveTimerRef,
-    draftSaveInFlightRef,
-    pendingDraftSaveRef,
-    composeSessionVersionRef,
-    composeDraftIdRef,
-    lastDraftHashRef,
-    currentDraftHashRef,
-    composeBaselineHashRef,
-    composeDirtyRef,
-    composeEditorInitRef,
-    composeLastEditedRef
-  } = compose;
-  const composeRef = useRef(compose);
-  composeRef.current = compose;
+    composeDraftId,
+    composeReplyMessage
+  } = composeMirror;
+  // Separate mirror so the draft-save relative-time interval can still drive
+  // MailClient re-renders while a saved draft exists.
+  const [draftSavedAt, setDraftSavedAt] = useState<number | null>(null);
+  // Recipient suggestion cache (previously lived inside `useComposeState`).
+  const recipientCacheRef = useRef<Record<string, RecipientSuggestion[]>>({});
   const messageRefs = useRef<Map<string, HTMLElement>>(new Map());
   const listPaneRef = useRef<HTMLDivElement | null>(null);
   const [noticePaneRightOffset, setNoticePaneRightOffset] = useState(16);
@@ -1081,16 +983,9 @@ export default function MailClient({
   const hasFilteredSearchCriteria =
     isRelatedSearch || trimmedQuery.length > 0 || effectiveSearchBadges.length > 0;
 
-  // Cleanup debounce timer on unmount
-  useEffect(() => {
-    return () => {
-      if (composeBodyDebounceRef.current) {
-        clearTimeout(composeBodyDebounceRef.current);
-      }
-    };
-  }, [composeBodyDebounceRef]);
-
-  // Update relative time display every second
+  // Update relative time display every second while a saved draft exists.
+  // Driven by a `draftSavedAt` mirror pushed from the orchestrator so the
+  // status bar's relative-time displays keep ticking alongside compose's.
   useEffect(() => {
     if (!draftSavedAt) return;
     const interval = setInterval(() => {
@@ -1098,10 +993,6 @@ export default function MailClient({
     }, 1000);
     return () => clearInterval(interval);
   }, [draftSavedAt]);
-
-  useEffect(() => {
-    composeDraftIdRef.current = composeDraftId;
-  }, [composeDraftId, composeDraftIdRef]);
 
   const selectedSearchFields = useMemo(() => {
     const fields = Object.entries(searchFields)
@@ -1805,42 +1696,6 @@ export default function MailClient({
     []
   );
 
-  const {
-    addComposeFiles,
-    removeComposeAttachment,
-    handleInlineImage,
-    handleComposeDragEnter,
-    handleComposeDragLeave,
-    handleComposeDragOver,
-    handleComposeDrop,
-    handleComposeAttachmentPick,
-    hydrateComposeAttachments,
-    loadForwardAttachments
-  } = useComposeHandlers({
-    composeDirtyRef,
-    composeDragDepthRef,
-    setComposeDragActive,
-    setComposeAttachments,
-    apiFetch
-  });
-
-  useEffect(() => {
-    if (composeTab !== "html") return;
-    const referencedHtml = `${composeHtml}${
-      composeIncludeOriginal && !composeQuotedHtmlEdited ? composeQuotedHtml : ""
-    }`;
-    setComposeAttachments((prev) => {
-      return pruneUnreferencedInlineAttachments(prev, referencedHtml);
-    });
-  }, [
-    composeHtml,
-    composeIncludeOriginal,
-    composeQuotedHtml,
-    composeQuotedHtmlEdited,
-    composeTab,
-    setComposeAttachments
-  ]);
-
   const isDraftMessage = (message: Message) => {
     const folder = folders.find((item) => item.id === message.folderId);
     const name = folder?.name ?? message.folderId ?? "";
@@ -1848,27 +1703,6 @@ export default function MailClient({
   };
 
   const stripHtml = stripHtmlToText;
-
-  const currentComposeInviteDraft = useMemo<ComposeInviteDraft | null>(
-    () =>
-      composeIncludeInvite
-        ? normalizeComposeInviteDraft({
-            location: composeInviteLocation,
-            start: composeInviteStart,
-            end: composeInviteEnd,
-            allDay: composeInviteAllDay,
-            recurrenceRule: composeInviteRecurrenceRule
-          })
-        : null,
-    [
-      composeIncludeInvite,
-      composeInviteAllDay,
-      composeInviteEnd,
-      composeInviteLocation,
-      composeInviteRecurrenceRule,
-      composeInviteStart
-    ]
-  );
 
   const currentAccount = accounts.find((account) => account.id === activeAccountId) ?? null;
   const reloginAccount = accounts.find((account) => account.id === reloginAccountId) ?? null;
@@ -1927,43 +1761,21 @@ export default function MailClient({
   const calendarFirstDay: 0 | 1 = currentAccount?.settings?.calendar?.weekStartsOn === "sunday" ? 0 : 1;
   const accountSignatures = currentAccount?.settings?.signatures ?? [];
   const defaultSignatureId = currentAccount?.settings?.defaultSignatureId ?? "";
-  const selectedSignature =
-    accountSignatures.find((signature) => signature.id === composeSignatureId) ?? null;
   const includeThreadAcrossFolders =
     currentAccount?.settings?.threading?.includeAcrossFolders ?? true;
   const accountDateFormat = normalizeAccountDateFormat(
     currentAccount?.settings?.appearance?.dateFormat
   );
-  const {
-    applySignatureToCompose,
-    buildComposePayload,
-    openCompose: openComposeInternal,
-    popOutCompose,
-    popInCompose,
-    minimizeCompose
-  } = useComposeController({
-    compose,
-    currentAccount,
-    defaultSignatureId,
-    accountDateFormat,
-    stripHtml,
-    normalizeHtmlDerivedText,
-    setDraftSaving,
-    setDraftSavedAt,
-    setDraftSaveError,
-    findMessageByMessageId: (messageId: string) => {
-      // Search in the active thread for the original message
-      return activeThread.find((msg) => msg.messageId === messageId);
-    }
-  });
 
   const openCompose = (
-    mode: Parameters<typeof openComposeInternal>[0],
+    mode: ComposeMode,
     message?: Message,
     asNew = false
   ) => {
+    const handle = composeHandleRef.current;
+    if (!handle) return;
     if (!message) {
-      openComposeInternal(mode, undefined, asNew);
+      handle.openComposeInternal(mode, undefined, asNew);
       return;
     }
 
@@ -2004,26 +1816,26 @@ export default function MailClient({
     const afterOpen = async (msg: Message) => {
       const messageWithDraftMetadata = await hydrateDraftComposeMetadata(msg);
       if (mode === "edit" && (msg.attachments?.length ?? 0) > 0) {
-        const attachments = await hydrateComposeAttachments(messageWithDraftMetadata);
+        const attachments = await handle.hydrateComposeAttachments(messageWithDraftMetadata);
         const hydratedMessage = restoreComposeMessageAttachmentDataUrls(
           messageWithDraftMetadata,
           attachments
         );
-        openComposeInternal(mode, hydratedMessage, asNew, { preferredComposeTab });
-        setComposeAttachments(attachments);
+        handle.openComposeInternal(mode, hydratedMessage, asNew, { preferredComposeTab });
+        handle.setComposeAttachments(attachments);
         return;
       }
 
       if (mode === "forward") {
-        const { attachments, message: hydratedForwardMessage } = await loadForwardAttachments(
+        const { attachments, message: hydratedForwardMessage } = await handle.loadForwardAttachments(
           messageWithDraftMetadata
         );
-        openComposeInternal(mode, hydratedForwardMessage, asNew, { preferredComposeTab });
-        setComposeAttachments(attachments);
+        handle.openComposeInternal(mode, hydratedForwardMessage, asNew, { preferredComposeTab });
+        handle.setComposeAttachments(attachments);
         return;
       }
 
-      openComposeInternal(mode, messageWithDraftMetadata, asNew, { preferredComposeTab });
+      handle.openComposeInternal(mode, messageWithDraftMetadata, asNew, { preferredComposeTab });
     };
 
     const resolved = getComposeSourceMessage(message);
@@ -2744,7 +2556,7 @@ export default function MailClient({
         (composeMode === "new" || composeMode === "reply" || composeMode === "replyAll") &&
         nextThreadKey !== currentThreadKey;
       if (shouldAutoMinimizeComposer) {
-        setComposeView("minimized");
+        composeHandleRef.current?.setComposeView("minimized");
       }
       setViewMessage(nextMessage);
     },
@@ -2755,7 +2567,6 @@ export default function MailClient({
       composeOpen,
       composeView,
       searchScope,
-      setComposeView,
       setPendingSelectionCollapseMessageId,
       setPendingSelectionScrollMessageId,
       setViewMessage
@@ -2882,23 +2693,6 @@ export default function MailClient({
     return `${activeMessage.accountId}|${selectedMessageIdentity}|${threadId}`;
   })();
 
-  useComposeViewEffects({
-    showComposeInline,
-    composeReplyMessageId: composeReplyMessage?.id ?? null,
-    composeCardRef,
-    composeTab,
-    composeOpen,
-    composeView,
-    composeMode,
-    activeFolderId,
-    composeModalRef,
-    composeTextRef,
-    composeResizeRef,
-    composeResizing,
-    setComposeOpen,
-    setComposeSize,
-    setComposeResizing
-  });
   const threadForest = useMemo(() => buildThreadTree(threadScopeMessages), [threadScopeMessages]);
   const activeLocalThread = useMemo(() => {
     if (!activeMessage || !supportsThreads) return [];
@@ -2976,119 +2770,38 @@ export default function MailClient({
     [activeMessage, composeDraftId, composeReplyMessage, showComposeInline]
   );
 
-  const visibleComposeAttachments = composeAttachments.filter((item) => !item.inline);
-  const composeMessageField = (
-    <ComposeMessageField
-      darkMode={darkMode}
-      composeMode={composeMode}
-      composeTab={composeTab}
-      composeBody={composeBody}
-      composeHtml={composeHtml}
-      composeHtmlText={composeHtmlText}
-      composeMarkdown={composeMarkdown}
-      composeInvite={currentComposeInviteDraft}
-      composeIncludeOriginal={composeIncludeOriginal}
-      composeQuoteHtml={composeQuoteHtml}
-      composeQuotedHtml={composeQuotedHtml}
-      composeQuotedText={composeQuotedText}
-      composeQuotedParts={composeQuotedParts}
-      composeStripImages={composeStripImages}
-      composeEditorReset={composeEditorReset}
-      visibleComposeAttachments={visibleComposeAttachments}
-      composeSignatureId={composeSignatureId}
-      signatureMenuOpen={signatureMenuOpen}
-      selectedSignature={selectedSignature}
-      accountSignatures={accountSignatures}
-      composeTextRef={composeTextRef}
-      composeAttachmentInputRef={composeAttachmentInputRef}
-      composeBodyDebounceRef={composeBodyDebounceRef}
-      composeBodyLastUpdateRef={composeBodyLastUpdateRef}
-      composeDirtyRef={composeDirtyRef}
-      composeEditorInitRef={composeEditorInitRef}
-      composeLastEditedRef={composeLastEditedRef}
-      stripHtml={stripHtml}
-      setComposeBody={setComposeBody}
-      setComposeHtml={setComposeHtml}
-      setComposeHtmlText={setComposeHtmlText}
-      setComposeMarkdown={setComposeMarkdown}
-      setComposeInviteEnabled={(enabled) => {
-        setComposeIncludeInvite(enabled);
-        if (!enabled) {
-          setComposeInviteLocation("");
-          setComposeInviteStart("");
-          setComposeInviteEnd("");
-          setComposeInviteAllDay(false);
-          setComposeInviteRecurrenceRule("");
-          composeDirtyRef.current = true;
-          return;
-        }
-        const nextDraft = createDefaultComposeInviteDraft();
-        setComposeInviteLocation(nextDraft.location ?? "");
-        setComposeInviteStart(nextDraft.start);
-        setComposeInviteEnd(nextDraft.end);
-        setComposeInviteAllDay(nextDraft.allDay);
-        setComposeInviteRecurrenceRule(nextDraft.recurrenceRule ?? "");
-        composeDirtyRef.current = true;
-      }}
-      setComposeInviteLocation={(value) => {
-        setComposeInviteLocation(value);
-        composeDirtyRef.current = true;
-      }}
-      setComposeInviteStart={(value) => {
-        setComposeInviteStart(value);
-        composeDirtyRef.current = true;
-      }}
-      setComposeInviteEnd={(value) => {
-        setComposeInviteEnd(value);
-        composeDirtyRef.current = true;
-      }}
-      setComposeInviteAllDay={(value) => {
-        setComposeInviteAllDay(value);
-        composeDirtyRef.current = true;
-      }}
-      setComposeInviteRecurrenceRule={(value) => {
-        setComposeInviteRecurrenceRule(value);
-        composeDirtyRef.current = true;
-      }}
-      setComposeTab={setComposeTab}
-      setComposeEditorReset={setComposeEditorReset}
-      setComposeIncludeOriginal={setComposeIncludeOriginal}
-      setComposeQuoteHtml={setComposeQuoteHtml}
-      setComposeQuotedHtml={setComposeQuotedHtml}
-      setComposeQuotedText={setComposeQuotedText}
-      setComposeQuotedHtmlEdited={compose.setComposeQuotedHtmlEdited}
-      setComposeQuotedParts={setComposeQuotedParts}
-      setComposeStripImages={setComposeStripImages}
-      setComposeSignatureId={setComposeSignatureId}
-      setSignatureMenuOpen={setSignatureMenuOpen}
-      applySignatureToCompose={applySignatureToCompose}
-      handleInlineImage={handleInlineImage}
-      handleComposeAttachmentPick={handleComposeAttachmentPick}
-      removeComposeAttachment={removeComposeAttachment}
-    />
-  );
+  const [sendingMail, setSendingMail] = useState(false);
 
   const handleSendMail = async () => {
+    const handle = composeHandleRef.current;
+    if (!handle) return;
+    const snapshot = handle.getSnapshot();
+    const {
+      composeTo,
+      composeCc,
+      composeBcc,
+      composeSubject,
+      composeMode,
+      composeIncludeInvite,
+      composeReplyMessage,
+      composeReplyHeaders,
+      composeDraftId,
+      composeInviteDraft
+    } = snapshot;
     if (!composeTo.trim() && !composeCc.trim() && !composeBcc.trim()) {
       reportError("Please add at least one recipient.");
       return;
     }
     const invitePayload =
-      composeIncludeInvite ? buildComposeInvitePayload(currentComposeInviteDraft) : undefined;
+      composeIncludeInvite ? buildComposeInvitePayload(composeInviteDraft) : undefined;
     if (composeIncludeInvite && !invitePayload) {
       reportError("Please complete the event invitation details before sending.");
       return;
     }
-    if (draftSaveTimerRef.current !== null) {
-      clearTimeout(draftSaveTimerRef.current);
-      draftSaveTimerRef.current = null;
-    }
-    pendingDraftSaveRef.current = null;
-    composeSessionVersionRef.current += 1;
-    setDraftSaving(false);
+    handle.cancelDraftAutoSave();
     setSendingMail(true);
     try {
-      const { text, html, markdown, attachments, composeFormat } = buildComposePayload();
+      const { text, html, markdown, attachments, composeFormat } = handle.buildComposePayload();
       const smtpPayload = buildSendPayload(composeMode, {
         composeTo,
         composeCc,
@@ -3141,13 +2854,7 @@ export default function MailClient({
             // ignore draft cleanup errors
           }
         }
-        setComposeOpen(false);
-        setComposeDraftId(null);
-        setComposeAttachments([]);
-        lastDraftHashRef.current = "";
-        currentDraftHashRef.current = "";
-        composeBaselineHashRef.current = null;
-        setComposeView("inline");
+        handle.resetAfterSend();
         if (
           (composeMode === "reply" || composeMode === "replyAll") &&
           composeReplyMessage
@@ -4766,7 +4473,7 @@ export default function MailClient({
   useEffect(() => {
     if (prevAccountIdRef.current !== activeAccountId) {
       prevAccountIdRef.current = activeAccountId;
-      resetComposeSession(composeRef.current);
+      composeHandleRef.current?.resetSession();
       if (searchScope === "all") {
         setActiveFolderId("");
       } else {
@@ -5111,102 +4818,6 @@ export default function MailClient({
       window.removeEventListener("storage", handleDetachedMessageDelete);
     };
   }, [activeAccountId, activeMessageId, evictMessageCaches, refreshFolders, viewMessage?.id]);
-  const { saveDraft, handleDiscardDraft, handleSaveDraft } = useDraftManager({
-    activeAccountId,
-    composeOpen,
-    composeTab,
-    composeTo,
-    composeCc,
-    composeBcc,
-    composeSubject,
-    composeInvite: currentComposeInviteDraft,
-    composeQuotedHtmlEdited,
-    composeReplyHeaders,
-    composeDraftId,
-    setComposeDraftId,
-    setDraftSaving,
-    setDraftSavedAt,
-    setDraftSaveError,
-    setDiscardingDraft,
-    setComposeOpen,
-    setComposeView,
-    composeDraftIdRef,
-    lastDraftHashRef,
-    currentDraftHashRef,
-    composeBaselineHashRef,
-    composeDirtyRef,
-    composeLastEditedRef,
-    composeTextRef,
-    composeSelectionRef,
-    pendingDraftSaveRef,
-    draftSaveInFlightRef,
-    composeSessionVersionRef,
-    viewMessage,
-    setMessages,
-    setViewMessage,
-    setActiveMessageId,
-    searchScope,
-    activeFolderId,
-    isDraftsFolder,
-    suppressDraftDeleteReconcile,
-    removeDraftFromUi,
-    reconcileSavedDraftInUi,
-    refreshFolders,
-    refreshMailboxData,
-    apiFetch,
-    reportError,
-    readErrorMessage,
-    buildComposePayload
-  });
-
-  useComposeDraftAutoSave({
-    composeOpen,
-    sendingMail,
-    composeTo,
-    composeCc,
-    composeBcc,
-    composeSubject,
-    composeInvite: currentComposeInviteDraft,
-    composeBody,
-    composeHtml,
-    composeHtmlText,
-    composeMarkdown,
-    composeQuotedHtml,
-    composeIncludeOriginal,
-    composeStripImages,
-    composeQuotedHtmlEdited,
-    composeTab,
-    composeDraftId,
-    composeReplyHeaders,
-    composeAttachments,
-    lastDraftHashRef,
-    currentDraftHashRef,
-    composeBaselineHashRef,
-    composeDirtyRef,
-    composeLastEditedRef,
-    draftSaveTimerRef,
-    buildComposePayload,
-    saveDraft
-  });
-
-  const canSaveCurrentDraft = (() => {
-    if (!composeOpen || !composeDraftId) return false;
-    const preferText = composeTab === "html" && composeLastEditedRef.current === "text";
-    const composePayload = buildComposePayload({ preferText });
-    return getDraftChangeState({
-      draftId: composeDraftId,
-      lastSavedHash: lastDraftHashRef.current,
-      to: composeTo,
-      cc: composeCc,
-      bcc: composeBcc,
-      subject: composeSubject,
-      text: composePayload.text,
-      html: composePayload.html,
-      attachments: composePayload.attachments,
-      invite: currentComposeInviteDraft
-    }).canManualSave;
-  })();
-
   // Auto-repair empty folders: if a folder shows no messages after loading,
   // check if raw messages exist in DB (threading issue → recompute) or not (missing → sync).
   useEffect(() => {
@@ -5735,68 +5346,10 @@ export default function MailClient({
           }
         >
             {(() => {
-              // Render function for ComposeInlineCard with ref
-              const renderComposeCard = (wrapperClassName?: string) => (
-                <div ref={composeCardRef} className={wrapperClassName}>
-                  <ComposeInlineCard
-                    state={{
-                      composeMode,
-                      composeSubject,
-                      composeTo,
-                      composeCc,
-                      composeBcc,
-                      composeShowBcc,
-                      activeAccountId,
-                      composeDraftId,
-                      composeOpen,
-                      composeFieldsReset: composeEditorReset,
-                      canSaveDraft: canSaveCurrentDraft,
-                      draftSaving,
-                      draftSaveError,
-                      draftSavedAt,
-                      sendingMail,
-                      discardingDraft,
-                      composeDragActive,
-                      fromValue: getAccountFromValue(currentAccount),
-                      inReplyToMessage: composeReplyMessage
-                    }}
-                    ui={{ composeMessageField }}
-                    actions={{
-                      popOutCompose,
-                      setComposeSubject,
-                      setComposeTo,
-                      setComposeCc,
-                      setComposeBcc,
-                      setComposeShowBcc,
-                      setComposeOpen,
-                      setComposeView,
-                      handleSendMail,
-                      handleDiscardDraft,
-                      handleSaveDraft,
-                      applyRecipientSelection,
-                      loadRecipientOptions,
-                      markComposeDirty: () => {
-                        composeDirtyRef.current = true;
-                      },
-                      jumpToMessage: (messageId: string) => {
-                        const msg = messageById.get(messageId) ?? null;
-                        setViewMessage(msg);
-                        setActiveMessageId(messageId);
-                      }
-                    }}
-                    dragHandlers={{
-                      handleComposeDragEnter,
-                      handleComposeDragLeave,
-                      handleComposeDragOver,
-                      handleComposeDrop
-                    }}
-                    helpers={{
-                      getComposeToken,
-                      formatRelativeTime
-                    }}
-                  />
-                </div>
-              );
+              // The orchestrator owns the inline card; MailClient just asks it
+              // to render at the appropriate slots.
+              const renderComposeCard = (wrapperClassName?: string) =>
+                composeHandleRef.current?.renderInlineCard(wrapperClassName) ?? null;
 
               // Enhance messageByMessageId with messages from activeThread
               // (so "In Reply To" links work when viewing from any folder, e.g., Drafts)
@@ -5965,76 +5518,43 @@ export default function MailClient({
         onDeleteAlias={deleteRecipientAliasForAccount}
       />
 
-      <ComposeModal
-        open={showComposeModal}
-        state={{
-          composeMode,
-          composeTo,
-          composeCc,
-          composeBcc,
-          composeSubject,
-          composeShowBcc,
-          composeOpenedAt,
-          activeAccountId,
-          composeDraftId,
-          composeOpen,
-          composeFieldsReset: composeEditorReset,
-          canSaveDraft: canSaveCurrentDraft,
-          draftSaving,
-          draftSaveError,
-          draftSavedAt,
-          sendingMail,
-          discardingDraft,
-          composeDragActive,
-          fromValue: getAccountFromValue(currentAccount),
-          composeSize,
-          inReplyToMessage: composeReplyMessage
-        }}
-        ui={{ composeMessageField }}
-        refs={{ composeModalRef, composeResizeRef }}
-        actions={{
-          setComposeTo,
-          setComposeCc,
-          setComposeBcc,
-          setComposeSubject,
-          setComposeShowBcc,
-          setComposeOpen,
-          setComposeView,
-          setComposeResizing,
-          handleSendMail,
-          handleDiscardDraft,
-          handleSaveDraft,
-          applyRecipientSelection,
-          loadRecipientOptions,
-          markComposeDirty: () => {
-            composeDirtyRef.current = true;
-          },
-          popInCompose,
-          minimizeCompose,
-          jumpToMessage: (messageId: string) => {
-            const msg = messageById.get(messageId) ?? null;
-            setViewMessage(msg);
-            setActiveMessageId(messageId);
-            setComposeView("inline");
-          }
-        }}
-        helpers={{
-          getComposeToken,
-          formatRelativeTime
-        }}
-        dragHandlers={{
-          handleComposeDragEnter,
-          handleComposeDragLeave,
-          handleComposeDragOver,
-          handleComposeDrop
-        }}
-      />
-
-      <ComposeMinimized
-        open={showComposeMinimized}
-        composeSubject={composeSubject}
-        setComposeView={setComposeView}
-        setComposeOpen={setComposeOpen}
+      <ComposeOrchestrator
+        ref={composeHandleRef}
+        activeAccountId={activeAccountId}
+        currentAccount={currentAccount}
+        accountDateFormat={accountDateFormat}
+        defaultSignatureId={defaultSignatureId}
+        accountSignatures={accountSignatures}
+        darkMode={darkMode}
+        activeThread={activeThread}
+        messageById={messageById}
+        viewMessage={viewMessage}
+        searchScope={searchScope}
+        activeFolderId={activeFolderId}
+        isDraftsFolder={isDraftsFolder}
+        setMessages={setMessages}
+        setViewMessage={setViewMessage}
+        setActiveMessageId={setActiveMessageId}
+        suppressDraftDeleteReconcile={suppressDraftDeleteReconcile}
+        removeDraftFromUi={removeDraftFromUi}
+        reconcileSavedDraftInUi={reconcileSavedDraftInUi}
+        refreshFolders={refreshFolders}
+        refreshMailboxData={refreshMailboxData}
+        handleSendMail={handleSendMail}
+        applyRecipientSelection={applyRecipientSelection}
+        loadRecipientOptions={loadRecipientOptions}
+        getComposeToken={getComposeToken}
+        formatRelativeTime={formatRelativeTime}
+        fromValue={getAccountFromValue(currentAccount)}
+        apiFetch={apiFetch}
+        reportError={reportError}
+        readErrorMessage={readErrorMessage}
+        stripHtml={stripHtml}
+        showComposeInline={showComposeInline}
+        showComposeModal={showComposeModal}
+        showComposeMinimized={showComposeMinimized}
+        onDraftSavedAtChange={setDraftSavedAt}
+        onComposeMirrorChange={setComposeMirror}
       />
 
       <ThreadJsonModal

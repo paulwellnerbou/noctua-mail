@@ -1,98 +1,16 @@
-import type React from "react";
 import { X } from "lucide-react";
 import { MinusIcon, RowsIcon } from "@radix-ui/react-icons";
-import type { Message, RecipientSuggestion } from "@/lib/data";
 import ComposeFields from "./ComposeFields";
 import ComposeActions from "./ComposeActions";
 import { Heading, IconButton, Text } from "@radix-ui/themes";
+import { useComposeContext } from "./ComposeContext";
 import styles from "./Compose.module.css";
-
-type ComposeMode = "new" | "reply" | "replyAll" | "forward" | "edit" | "editAsNew";
 
 type ComposeModalProps = {
   open: boolean;
-  state: {
-    composeMode: ComposeMode;
-    composeTo: string;
-    composeCc: string;
-    composeBcc: string;
-    composeSubject: string;
-    composeShowBcc: boolean;
-    composeOpenedAt: string;
-    activeAccountId: string | null;
-    composeDraftId: string | null;
-    composeOpen: boolean;
-    composeFieldsReset: number;
-    canSaveDraft: boolean;
-    draftSaving: boolean;
-    draftSaveError: string | null;
-    draftSavedAt: number | null;
-    sendingMail: boolean;
-    discardingDraft: boolean;
-    composeDragActive: boolean;
-    fromValue: string;
-    composeSize: { width: number; height: number | null };
-    inReplyToMessage: Message | null;
-  };
-  ui: {
-    composeMessageField: React.ReactNode;
-  };
-  refs: {
-    composeModalRef: React.RefObject<HTMLDivElement | null>;
-    composeResizeRef: React.MutableRefObject<{
-      startX: number;
-      startY: number;
-      startWidth: number;
-      startHeight: number;
-    } | null>;
-  };
-  actions: {
-    setComposeTo: React.Dispatch<React.SetStateAction<string>>;
-    setComposeCc: React.Dispatch<React.SetStateAction<string>>;
-    setComposeBcc: React.Dispatch<React.SetStateAction<string>>;
-    setComposeSubject: React.Dispatch<React.SetStateAction<string>>;
-    setComposeShowBcc: React.Dispatch<React.SetStateAction<boolean>>;
-    setComposeOpen: React.Dispatch<React.SetStateAction<boolean>>;
-    setComposeView: React.Dispatch<React.SetStateAction<"inline" | "modal" | "minimized">>;
-    setComposeResizing: React.Dispatch<React.SetStateAction<boolean>>;
-    handleSendMail: () => void;
-    handleDiscardDraft: () => void;
-    handleSaveDraft: () => void;
-    applyRecipientSelection: (
-      current: string,
-      selection: RecipientSuggestion,
-      setter: React.Dispatch<React.SetStateAction<string>>,
-      focusAfter?: "to" | "cc" | "bcc" | null
-    ) => string;
-    loadRecipientOptions: (query: string, signal: AbortSignal) => Promise<RecipientSuggestion[]>;
-    markComposeDirty: () => void;
-    popInCompose: () => void;
-    minimizeCompose: () => void;
-    jumpToMessage: (messageId: string) => void;
-  };
-  helpers: {
-    getComposeToken: (value: string) => string;
-    formatRelativeTime: (timestamp: number | null) => string;
-  };
-  dragHandlers: {
-    handleComposeDragEnter: (event: React.DragEvent) => void;
-    handleComposeDragLeave: (event: React.DragEvent) => void;
-    handleComposeDragOver: (event: React.DragEvent) => void;
-    handleComposeDrop: (event: React.DragEvent) => void;
-  };
 };
 
-export default function ComposeModal({
-  open,
-  state,
-  ui,
-  refs,
-  actions,
-  helpers,
-  dragHandlers
-}: ComposeModalProps) {
-  if (!open) return null;
-
+export default function ComposeModal({ open }: ComposeModalProps) {
   const {
     composeMode,
     composeTo,
@@ -114,10 +32,9 @@ export default function ComposeModal({
     composeDragActive,
     fromValue,
     composeSize,
-    inReplyToMessage
-  } = state;
-  const { composeModalRef, composeResizeRef } = refs;
-  const {
+    inReplyToMessage,
+    composeModalRef,
+    composeResizeRef,
     setComposeTo,
     setComposeCc,
     setComposeBcc,
@@ -134,11 +51,17 @@ export default function ComposeModal({
     markComposeDirty,
     popInCompose,
     minimizeCompose,
-    jumpToMessage
-  } = actions;
-  const { getComposeToken, formatRelativeTime } = helpers;
-  const { handleComposeDragEnter, handleComposeDragLeave, handleComposeDragOver, handleComposeDrop } =
-    dragHandlers;
+    jumpToMessage,
+    getComposeToken,
+    formatRelativeTime,
+    handleComposeDragEnter,
+    handleComposeDragLeave,
+    handleComposeDragOver,
+    handleComposeDrop,
+    composeMessageField
+  } = useComposeContext();
+
+  if (!open) return null;
 
   const composeTitle =
     composeMode === "edit"
@@ -243,7 +166,7 @@ export default function ComposeModal({
             getComposeToken={getComposeToken}
             markComposeDirty={markComposeDirty}
           />
-          {ui.composeMessageField}
+          {composeMessageField}
         </div>
         <ComposeActions
           composeDraftId={composeDraftId}
