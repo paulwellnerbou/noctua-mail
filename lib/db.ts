@@ -21,8 +21,6 @@ import type {
   McpTokenMetadata,
   User
 } from "./data";
-import { normalizeAccountSettings } from "./accountSettings";
-import { decodeSecret, encodeSecret, shouldStorePasswordInDb } from "./secret";
 import { applyCachedCredentials } from "./credentials";
 import {
   mapAccountRow,

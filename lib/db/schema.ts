@@ -90,7 +90,16 @@ export function ensureCalendarReminderTableSchema(db: any) {
   `);
 }
 
-export function getDbTableColumns(db: any, tableName: string) {
+// PRAGMA doesn't accept bound parameters for identifiers, so the table
+// name has to be interpolated. Keep the helper private and assert the
+// identifier shape defensively — every caller in this file passes a
+// constant string literal, but the guard rules out the injection footgun
+// if that ever slips.
+const TABLE_NAME_PATTERN = /^[A-Za-z_][A-Za-z0-9_]*$/;
+function getDbTableColumns(db: any, tableName: string) {
+  if (!TABLE_NAME_PATTERN.test(tableName)) {
+    throw new Error(`Invalid SQLite table name: ${tableName}`);
+  }
   return new Set(
     (db.prepare(`PRAGMA table_info(${tableName})`).all() as Array<{ name?: string }>).map((row) =>
       String(row.name ?? "")
