@@ -222,19 +222,30 @@ export default function MessageViewOrchestrator({
   );
 
   useEffect(() => {
-    // Close the popover when the active thread changes. Also invalidate
-    // the in-flight fetch key so any pending response bails before
-    // writing state, and clear loading/error so a bailed response can't
-    // leave a stuck spinner or a stale error message behind. The cached
-    // explanation itself (`topicSuggestionExplanation` +
-    // `topicSuggestionExplanationThreadId`) is preserved so reopening
-    // the popover on a previously-explained thread can short-circuit via
-    // the dedupe guard in `handleLoadTopicSuggestionExplanation`.
+    // Close the popover when the active thread or account changes.
+    // Also invalidate the in-flight fetch key so any pending response
+    // bails before writing state, and clear loading/error so a bailed
+    // response can't leave a stuck spinner or a stale error message
+    // behind. The cached explanation
+    // (`topicSuggestionExplanation` + `topicSuggestionExplanationThreadId`)
+    // is preserved across thread switches within the same account so
+    // reopening the popover on a previously-explained thread can
+    // short-circuit via the dedupe guard in
+    // `handleLoadTopicSuggestionExplanation`.
     explanationRequestThreadIdRef.current = "";
     setTopicSuggestionExplanationOpen(false);
     setTopicSuggestionExplanationLoading(false);
     setTopicSuggestionExplanationError("");
-  }, [activeMessage?.threadId]);
+  }, [activeMessage?.threadId, activeAccountId]);
+
+  useEffect(() => {
+    // Thread ids are only unique within an account. On account change,
+    // wipe the cached explanation and its threadId so the dedupe guard
+    // can't short-circuit on a coincidental thread-id match and show one
+    // account's explanation under another account's thread.
+    setTopicSuggestionExplanation(null);
+    setTopicSuggestionExplanationThreadId("");
+  }, [activeAccountId]);
 
   return (
     <MessageViewPane
