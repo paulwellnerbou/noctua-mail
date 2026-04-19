@@ -15,9 +15,26 @@ import {
   initAccountSchema,
   initMasterSchema
 } from "./schema";
+import { ensureTopicLearningRuntimeData } from "./topics";
 
 const sqliteModulePromise = () => import("bun:sqlite" /* webpackIgnore: true */);
 let DatabaseCtor: any | null = null;
+
+// Memoized so `getAccountDb` doesn't allocate a new promise + pay the
+// await hop on every call. The module itself is cached by the runtime;
+// this caches the promise that resolves to it. On rejection the memo
+// is cleared so a transient failure (e.g. bundler hiccup) doesn't
+// permanently poison every subsequent `getAccountDb` call.
+let threadsModulePromise: Promise<typeof import("./threads")> | null = null;
+function loadThreadsModule() {
+  if (!threadsModulePromise) {
+    threadsModulePromise = import("./threads").catch((err) => {
+      threadsModulePromise = null;
+      throw err;
+    });
+  }
+  return threadsModulePromise;
+}
 
 let masterDbInstance: any | null = null;
 let masterInitialized = false;
@@ -209,12 +226,13 @@ export async function getAccountDb(accountId: string) {
   ensureMessageCalendarEventRuntimeSchema(accountDb);
   ensureCalendarReminderRuntimeSchema(accountDb);
   await ensureCalendarEventRuntimeData(accountDb, accountId);
-  // The two remaining runtime-data ensures reach into domain query
-  // helpers that still live in lib/db.ts. Lazy-import via the barrel
-  // to sidestep a hard module cycle at load time.
-  const dbModule = await import("../db");
-  await dbModule.ensureThreadSignalRuntimeData(accountDb, accountId);
-  dbModule.ensureTopicLearningRuntimeData(accountDb, accountId);
+  // `./threads` imports `./accounts`, which imports this module, so its
+  // runtime-data ensure has to be loaded via a deferred import to break
+  // the load-time cycle. `./topics` has no such dependency and is
+  // imported statically at the top.
+  const threadsModule = await loadThreadsModule();
+  await threadsModule.ensureThreadSignalRuntimeData(accountDb, accountId);
+  ensureTopicLearningRuntimeData(accountDb, accountId);
   scheduleAccountDbIdleClose(dbPath);
   return accountDb;
 }
