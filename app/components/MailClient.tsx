@@ -80,16 +80,14 @@ import {
   Card,
   Flex,
   IconButton,
-  SegmentedControl,
   Text
 } from "@radix-ui/themes";
 import MessageMenu from "./mailclient/message/MessageMenu";
 import MessageQuickActions from "./mailclient/message/MessageQuickActions";
-import MessageViewPane from "./mailclient/message/MessageViewPane";
+import MessageViewOrchestrator from "./mailclient/message/MessageViewOrchestrator";
+import type { TopicSuggestionExplanation } from "./mailclient/message/types";
 import MarkdownPanel from "./mailclient/message/MarkdownPanel";
 import MessageSourcePanel from "./mailclient/message/MessageSourcePanel";
-import ThreadTopicSuggestionsRow from "./mailclient/message/ThreadTopicSuggestionsRow";
-import threadViewStyles from "./mailclient/message/ThreadView.module.css";
 import { TODO_FLAG, DONE_FLAG } from "@/lib/messageFlags";
 import { mergeLocalOnlyMessageState } from "@/lib/messageLocalState";
 import { EVENT_GROUP_BY, INVITE_DECK_GROUP_BY } from "@/lib/messageGrouping";
@@ -144,7 +142,6 @@ import { useTopics } from "./mailclient/useTopics";
 import { useRecipientAliases } from "./mailclient/useRecipientAliases";
 import { useAccountController } from "./mailclient/useAccountController";
 import ThreadJsonModal from "./mailclient/message/ThreadJsonModal";
-import ThreadView from "./mailclient/message/ThreadView";
 import {
   doesCachedThreadCoverMessages,
   getComposeThreadFocusMessageId,
@@ -273,21 +270,6 @@ type RecipientAliasDialogState = {
   aliasId?: string | null;
 };
 
-type TopicSuggestionExplanation = {
-  signals: Array<{ type: string; value: string; weight: number }>;
-  topics: Array<{
-    topic: Topic;
-    suggestionScore: number;
-    matchCount: number;
-    matchedSignals: Array<{ type: string; value: string; weight: number }>;
-    matchedThreads: Array<{
-      threadId: string;
-      score: number;
-      signals: Array<{ type: string; value: string; weight: number }>;
-    }>;
-  }>;
-};
-
 type ActiveTopicSuggestionsResponse = {
   ok?: boolean;
   suggestions?: TopicThreadSuggestion[];
@@ -319,7 +301,6 @@ export default function MailClient({
   const dragImageRef = useRef<HTMLDivElement | null>(null);
   const [sortKey, setSortKey] = useState<"date" | "from" | "subject">("date");
   const [sortDir, setSortDir] = useState<"desc" | "asc">("desc");
-  const [threadViewMode, setThreadViewMode] = useState<"full" | "compact">("compact");
   const [messageTopicsById, setMessageTopicsById] = useState<Map<string, Topic[]>>(new Map());
   const [topicPickerOpen, setTopicPickerOpen] = useState(false);
   const [topicPickerMessage, setTopicPickerMessage] = useState<Message | null>(null);
@@ -5028,161 +5009,83 @@ export default function MailClient({
           }}
         />
 
-        <MessageViewPane
+        <MessageViewOrchestrator
           onShowJson={() => setShowJson(true)}
           onEvictThreadCache={() => {
             console.info("[noctua] evict thread cache");
             resetThreadCache();
           }}
-          header={activeMessage ? (() => {
-                  const rootSubject =
-                    activeThread[0]?.subject ?? activeMessage?.subject ?? "";
-                  const threadTopics = getAssignedThreadTopics(activeMessage);
-                  const threadSuggestions =
-                    threadTopics.length > 0
-                      ? []
-                      : activeThread.find(
-                          (item) =>
-                            item.threadId === activeMessage.threadId &&
-                            (item.topicSuggestions?.length ?? 0) > 0
-                        )?.topicSuggestions ??
-                        activeMessage.topicSuggestions ??
-                        [];
-                  const visibleThreadSuggestions = threadSuggestions.filter(
-                    (topic) =>
-                      typeof topic?.id === "string" &&
-                      topic.id.trim().length > 0 &&
-                      typeof topic?.name === "string" &&
-                      topic.name.trim().length > 0
-                  );
-                  const explanationThreadId = activeMessage.threadId ?? "";
-                  return (
-                    <Flex direction="column" gap="2" style={{ flex: 1, minWidth: 0 }}>
-                      <Flex align="center" gap="3">
-                        <span style={{ flex: 1, minWidth: 0, fontWeight: 600, fontSize: 16, lineHeight: 1.4, wordBreak: "break-word", overflowWrap: "anywhere", color: "var(--gray-12)" }}>
-                          {rootSubject || "(no subject)"}
-                        </span>
-                        <SegmentedControl.Root
-                          size="1"
-                          value={threadViewMode}
-                          onValueChange={(v) => setThreadViewMode(v as "full" | "compact")}
-                          style={{ flexShrink: 0 }}
-                        >
-                          <SegmentedControl.Item value="compact">Compact</SegmentedControl.Item>
-                          <SegmentedControl.Item value="full">Full</SegmentedControl.Item>
-                        </SegmentedControl.Root>
-                      </Flex>
-                      {threadTopics.length > 0 && (
-                        <Flex gap="1" wrap="wrap" justify="end">
-                          {threadTopics.map((topic) => (
-                            <TopicBadge key={topic.id} topic={topic} size="1" />
-                          ))}
-                        </Flex>
-                      )}
-                      <ThreadTopicSuggestionsRow
-                        threadId={explanationThreadId}
-                        hasAssignedTopics={threadTopics.length > 0}
-                        suggestions={visibleThreadSuggestions}
-                        explanationOpen={topicSuggestionExplanationOpen}
-                        explanationLoading={topicSuggestionExplanationLoading}
-                        explanationError={topicSuggestionExplanationError}
-                        explanation={topicSuggestionExplanation}
-                        onExplanationOpenChange={setTopicSuggestionExplanationOpen}
-                        onLoadExplanation={(threadId) => {
-                          void handleLoadTopicSuggestionExplanation(threadId);
-                        }}
-                        onToggleTopic={handleToggleActiveMessageTopic}
-                      />
-                    </Flex>
-                  );
-                })() : undefined
-          }
-        >
-            {(() => {
-              // The orchestrator owns the inline card; MailClient just asks it
-              // to render at the appropriate slots.
-              const renderComposeCard = (wrapperClassName?: string) =>
-                composeHandleRef.current?.renderInlineCard(wrapperClassName) ?? null;
-
-              // Enhance messageByMessageId with messages from activeThread
-              // (so "In Reply To" links work when viewing from any folder, e.g., Drafts)
-              const enhancedMessageByMessageId = new Map(messageByMessageId);
-              activeThread.forEach((message) => {
-                if (message.messageId && message.accountId === activeAccountId) {
-                  enhancedMessageByMessageId.set(message.messageId, message);
-                }
-              });
-
-              return (
-                <>
-                  {inlineComposePlacement.showComposeAtTop &&
-                    renderComposeCard(activeThread.length > 0 ? threadViewStyles.threadItem : undefined)}
-                  <ThreadView
-                    showComposeInline={showComposeInline}
-                    activeMessage={activeMessage ?? null}
-                    activeThread={activeThread}
-                    supportsThreads={supportsThreads}
-                    threadContentById={threadContentById}
-                    threadContentLoading={threadContentLoading}
-                    threadContentErrorById={threadContentErrorById}
-                    composeDraftId={composeDraftId}
-                    composeReplyMessageId={inlineComposePlacement.composeReplyMessageId}
-                    renderComposeInlineCard={
-                      inlineComposePlacement.composeReplyMessageId ? renderComposeCard : null
-                    }
-                    messageCardProps={{
-                      messageRefs,
-                      pendingMessageActions,
-                      includeThreadAcrossFolders,
-                      activeFolderId,
-                      threadPathById,
-                      folderById: (folderId: string) => folderById.get(folderId),
-                      setSearchScope,
-                      setActiveFolderId,
-                      getImapFlagBadges,
-                      toggleFlaggedFlag,
-                      toggleTodoFlag,
-                      isDraftMessage,
-                      openCompose,
-                      renderQuickActions,
-                      renderMessageMenu,
-                      handleUnsubscribe,
-                      collapsedMessages,
-                      setCollapsedMessages,
-                      messageTabs,
-                      setMessageTabs,
-                      fetchSource,
-                      ensureMessageContent,
-                      messageContentLoading,
-                      setMessageFontScale,
-                      messageFontScale,
-                      adjustMessageZoom,
-                      resetMessageZoom,
-                      messageZoom,
-                      darkMode,
-                      hasHtmlContent,
-                      renderMarkdownPanel,
-                      renderSourcePanel,
-                      handleSelectMessage,
-                      messageByMessageId: enhancedMessageByMessageId,
-                      getPrimaryEmail,
-                      extractEmails,
-                      findRecipientAlias,
-                      onOpenRecipientAlias: openRecipientAliasDialog,
-                      onFindRelatedByCalendarInviteUid: handleFindRelatedByCalendarInviteUid,
-                      onInviteStateChange: handleInviteStateChange,
-                      readErrorMessage,
-                      reportError,
-                      dateFormat: accountDateFormat,
-                      threadViewMode,
-                      userEmail: currentAccount?.email,
-                      senderIconsEnabled: currentAccount?.settings?.appearance?.senderIcons ?? true
-                    }}
-                  />
-                </>
-              );
-            })()}
-        </MessageViewPane>
+          header={{
+            activeMessage: activeMessage ?? null,
+            activeThread,
+            getAssignedThreadTopics,
+            topicSuggestionExplanationOpen,
+            topicSuggestionExplanationLoading,
+            topicSuggestionExplanationError,
+            topicSuggestionExplanation,
+            setTopicSuggestionExplanationOpen,
+            handleLoadTopicSuggestionExplanation,
+            handleToggleActiveMessageTopic
+          }}
+          body={{
+            composeHandleRef,
+            inlineComposePlacement,
+            showComposeInline,
+            supportsThreads,
+            threadContentById,
+            threadContentLoading,
+            threadContentErrorById,
+            composeDraftId,
+            activeAccountId,
+            messageByMessageId,
+            messageCardProps: {
+              messageRefs,
+              pendingMessageActions,
+              includeThreadAcrossFolders,
+              activeFolderId,
+              threadPathById,
+              folderById: (folderId: string) => folderById.get(folderId),
+              setSearchScope,
+              setActiveFolderId,
+              getImapFlagBadges,
+              toggleFlaggedFlag,
+              toggleTodoFlag,
+              isDraftMessage,
+              openCompose,
+              renderQuickActions,
+              renderMessageMenu,
+              handleUnsubscribe,
+              collapsedMessages,
+              setCollapsedMessages,
+              messageTabs,
+              setMessageTabs,
+              fetchSource,
+              ensureMessageContent,
+              messageContentLoading,
+              setMessageFontScale,
+              messageFontScale,
+              adjustMessageZoom,
+              resetMessageZoom,
+              messageZoom,
+              darkMode,
+              hasHtmlContent,
+              renderMarkdownPanel,
+              renderSourcePanel,
+              handleSelectMessage,
+              getPrimaryEmail,
+              extractEmails,
+              findRecipientAlias,
+              onOpenRecipientAlias: openRecipientAliasDialog,
+              onFindRelatedByCalendarInviteUid: handleFindRelatedByCalendarInviteUid,
+              onInviteStateChange: handleInviteStateChange,
+              readErrorMessage,
+              reportError,
+              dateFormat: accountDateFormat,
+              userEmail: currentAccount?.email,
+              senderIconsEnabled: currentAccount?.settings?.appearance?.senderIcons ?? true
+            }
+          }}
+        />
 
         {calendarSidebarOpen && activeAccountId && (
           <>

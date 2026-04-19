@@ -5,20 +5,7 @@ import { QuestionMarkCircledIcon } from "@radix-ui/react-icons";
 import { Flex, IconButton, Popover, Text } from "@radix-ui/themes";
 import type { Topic } from "@/lib/data";
 import TopicBadge from "../TopicBadge";
-
-type TopicSuggestionExplanation = {
-  signals: Array<{ type: string; value: string; weight: number }>;
-  topics: Array<{
-    topic: Topic;
-    suggestionScore: number;
-    matchCount: number;
-    matchedThreads: Array<{
-      threadId: string;
-      score: number;
-      signals: Array<{ type: string; value: string; weight: number }>;
-    }>;
-  }>;
-};
+import type { TopicSuggestionExplanation } from "./types";
 
 type ThreadTopicSuggestionsRowProps = {
   threadId: string;
