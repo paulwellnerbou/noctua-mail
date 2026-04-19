@@ -112,6 +112,13 @@ export {
   updateMessageFlags
 } from "./db/messages";
 
+export {
+  getFolderIdsByMessageIds,
+  getLatestMessageDate,
+  getLatestMessageUid,
+  listRecipientSuggestions
+} from "./db/messages";
+
 import {
   addTopicSignalExclusion,
   clearTopicSignalExclusions,
@@ -1090,28 +1097,6 @@ type UpsertFileMove = {
   attachmentIds: string[];
 };
 
-export async function getFolderIdsByMessageIds(accountId: string, messageIds: string[]) {
-  if (messageIds.length === 0) return new Map<string, string>();
-  const db = await getAccountDb(accountId);
-  const rows = db
-    .prepare(
-      `SELECT id, folderId
-       FROM messages
-       WHERE accountId = ? AND id IN (${messageIds.map(() => "?").join(",")})`
-    )
-    .all(accountId, ...messageIds) as Array<{
-    id: string;
-    folderId: string;
-  }>;
-  const map = new Map<string, string>();
-  rows.forEach((row) => {
-    if (row.id && row.folderId) {
-      map.set(row.id, row.folderId);
-    }
-  });
-  return map;
-}
-
 export async function upsertMessages(
   accountId: string,
   folderId: string | null,
@@ -1678,36 +1663,6 @@ export async function upsertMessages(
 }
 
 
-export async function getLatestMessageDate(accountId: string, mailboxPath?: string) {
-  const db = await getAccountDb(accountId);
-  if (mailboxPath) {
-    const row = db
-      .prepare(`SELECT MAX(dateValue) as maxDate FROM messages WHERE accountId = ? AND mailboxPath = ?`)
-      .get(accountId, mailboxPath) as { maxDate?: number | null } | undefined;
-    return typeof row?.maxDate === "number" ? row.maxDate : null;
-  }
-  const row = db
-    .prepare(`SELECT MAX(dateValue) as maxDate FROM messages WHERE accountId = ?`)
-    .get(accountId) as { maxDate?: number | null } | undefined;
-  return typeof row?.maxDate === "number" ? row.maxDate : null;
-}
-
-export async function getLatestMessageUid(accountId: string, mailboxPath?: string) {
-  const db = await getAccountDb(accountId);
-  if (mailboxPath) {
-    const row = db
-      .prepare(
-        `SELECT MAX(imapUid) as maxUid FROM messages WHERE accountId = ? AND mailboxPath = ?`
-      )
-      .get(accountId, mailboxPath) as { maxUid?: number | null } | undefined;
-    return typeof row?.maxUid === "number" ? row.maxUid : null;
-  }
-  const row = db
-    .prepare(`SELECT MAX(imapUid) as maxUid FROM messages WHERE accountId = ?`)
-    .get(accountId) as { maxUid?: number | null } | undefined;
-  return typeof row?.maxUid === "number" ? row.maxUid : null;
-}
-
 function normalizeCategoryLinearModel(
   model: Partial<CategoryLinearModel> | null | undefined,
   options?: { touchUpdatedAt?: boolean }
@@ -2070,84 +2025,6 @@ export async function applyCategoryFeedback(
       modelExamples: model.examples
     };
   });
-}
-
-export async function listRecipientSuggestions(
-  accountId: string,
-  limit = 200,
-  query?: string | null
-) {
-  const db = await getAccountDb(accountId);
-  const rows = db
-    .prepare(
-      `SELECT toAddr, ccAddr, bccAddr
-       FROM messages
-       WHERE accountId = ?
-       ORDER BY dateValue DESC
-       LIMIT 2000`
-    )
-    .all(accountId) as Array<{
-      toAddr?: string | null;
-      ccAddr?: string | null;
-      bccAddr?: string | null;
-    }>;
-  const counts = new Map<string, number>();
-  const names = new Map<string, string>();
-  const normalizeName = (name: string) =>
-    name.replace(/^"|"$/g, "").replace(/\s+/g, " ").trim();
-  const addAddress = (emailRaw: string, nameRaw?: string) => {
-    const email = emailRaw.trim().toLowerCase();
-    if (!email) return;
-    counts.set(email, (counts.get(email) ?? 0) + 1);
-    if (nameRaw) {
-      const cleaned = normalizeName(nameRaw);
-      if (cleaned && !names.get(email)) {
-        names.set(email, cleaned);
-      }
-    }
-  };
-  const addEmails = (value?: string | null) => {
-    if (!value) return;
-    const seen = new Set<string>();
-    const pattern = /(?:"?([^"<]*)"?\s*)?<([^>]+)>/g;
-    let match = pattern.exec(value);
-    while (match) {
-      const name = match[1];
-      const email = match[2];
-      if (email) {
-        const key = email.trim().toLowerCase();
-        if (!seen.has(key)) {
-          seen.add(key);
-          addAddress(email, name);
-        }
-      }
-      match = pattern.exec(value);
-    }
-    const standalone = value.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi) ?? [];
-    standalone.forEach((entry) => {
-      const key = entry.trim().toLowerCase();
-      if (seen.has(key)) return;
-      seen.add(key);
-      addAddress(entry);
-    });
-  };
-  rows.forEach((row) => {
-    addEmails(row.toAddr);
-    addEmails(row.ccAddr);
-    addEmails(row.bccAddr);
-  });
-  const normalizedQuery = query?.trim().toLowerCase() ?? "";
-  return [...counts.entries()]
-    .sort((a, b) => b[1] - a[1])
-    .map(([email]) => {
-      const name = names.get(email);
-      return name ? `${name} <${email}>` : email;
-    })
-    .filter((value) => {
-      if (!normalizedQuery) return true;
-      return value.toLowerCase().includes(normalizedQuery);
-    })
-    .slice(0, limit);
 }
 
 export async function recomputeCategoriesForAccount(

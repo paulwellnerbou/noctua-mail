@@ -47,3 +47,10 @@ export {
   setMessageCategory,
   updateMessageFlags
 } from "./flags";
+
+export {
+  getFolderIdsByMessageIds,
+  getLatestMessageDate,
+  getLatestMessageUid,
+  listRecipientSuggestions
+} from "./utility";
