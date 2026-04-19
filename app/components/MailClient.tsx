@@ -85,7 +85,6 @@ import {
 import MessageMenu from "./mailclient/message/MessageMenu";
 import MessageQuickActions from "./mailclient/message/MessageQuickActions";
 import MessageViewOrchestrator from "./mailclient/message/MessageViewOrchestrator";
-import type { TopicSuggestionExplanation } from "./mailclient/message/types";
 import MarkdownPanel from "./mailclient/message/MarkdownPanel";
 import MessageSourcePanel from "./mailclient/message/MessageSourcePanel";
 import { TODO_FLAG, DONE_FLAG } from "@/lib/messageFlags";
@@ -105,7 +104,6 @@ import {
   buildAccountComposeRecipientsPath,
   buildAccountDraftSendPath,
   buildAccountFoldersPath,
-  buildAccountMessageTopicSuggestionExplainPath,
   buildAccountMessageTopicsPath,
   buildAccountMessageTopicSuggestionsPath,
   buildAccountMessagesActionPath,
@@ -305,12 +303,6 @@ export default function MailClient({
   const [topicPickerOpen, setTopicPickerOpen] = useState(false);
   const [topicPickerMessage, setTopicPickerMessage] = useState<Message | null>(null);
   const [topicSuggestions, setTopicSuggestions] = useState<Topic[]>([]);
-  const [topicSuggestionExplanationOpen, setTopicSuggestionExplanationOpen] = useState(false);
-  const [topicSuggestionExplanationLoading, setTopicSuggestionExplanationLoading] = useState(false);
-  const [topicSuggestionExplanationError, setTopicSuggestionExplanationError] = useState("");
-  const [topicSuggestionExplanation, setTopicSuggestionExplanation] =
-    useState<TopicSuggestionExplanation | null>(null);
-  const [topicSuggestionExplanationThreadId, setTopicSuggestionExplanationThreadId] = useState("");
   const [activeTopicSuggestions, setActiveTopicSuggestions] = useState<TopicThreadSuggestion[]>([]);
   const [activeTopicSuggestionMessages, setActiveTopicSuggestionMessages] = useState<Message[]>([]);
   const [activeTopicSuggestionsLoading, setActiveTopicSuggestionsLoading] = useState(false);
@@ -1789,47 +1781,6 @@ export default function MailClient({
     return data.ok ? (data.suggestions ?? []) : [];
   }, [activeAccountId, apiFetch, getAssignedThreadTopics]);
 
-  const handleLoadTopicSuggestionExplanation = useCallback(async (threadId: string) => {
-    const normalizedThreadId = threadId.trim();
-    if (!normalizedThreadId) return;
-    if (
-      topicSuggestionExplanationThreadId === normalizedThreadId &&
-      (topicSuggestionExplanation || topicSuggestionExplanationError || topicSuggestionExplanationLoading)
-    ) {
-      return;
-    }
-    setTopicSuggestionExplanationThreadId(normalizedThreadId);
-    setTopicSuggestionExplanationLoading(true);
-    setTopicSuggestionExplanationError("");
-    setTopicSuggestionExplanation(null);
-    try {
-      const params = new URLSearchParams({ threadId: normalizedThreadId });
-      const res = await apiFetch(
-        buildAccountMessageTopicSuggestionExplainPath(activeAccountId, params),
-        { cache: "no-store" }
-      );
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok || !data?.ok) {
-        setTopicSuggestionExplanationError(
-          typeof data?.message === "string" ? data.message : "Failed to load explanation."
-        );
-        return;
-      }
-      setTopicSuggestionExplanation((data.explanation ?? null) as TopicSuggestionExplanation | null);
-    } catch {
-      setTopicSuggestionExplanationError("Failed to load explanation.");
-    } finally {
-      setTopicSuggestionExplanationLoading(false);
-    }
-  }, [
-    activeAccountId,
-    apiFetch,
-    topicSuggestionExplanation,
-    topicSuggestionExplanationError,
-    topicSuggestionExplanationLoading,
-    topicSuggestionExplanationThreadId
-  ]);
-
   const handleCreateTopic = useCallback(async (
     name: string,
     color: TopicColor | null,
@@ -2634,13 +2585,6 @@ export default function MailClient({
   }, [activeAccountId, activeLocalThread, activeMessage, threadContentById, threadScopeMessages]);
 
   const threadMessages = useMemo(() => activeThread, [activeThread]);
-  const handleToggleActiveMessageTopic = useCallback(
-    (topicId: string) => {
-      if (!activeMessage) return;
-      void handleToggleTopic(activeMessage, topicId);
-    },
-    [activeMessage, handleToggleTopic]
-  );
   const inlineComposePlacement = useMemo(
     () =>
       getInlineComposePlacement({
@@ -4600,9 +4544,6 @@ export default function MailClient({
   ]);
 
 
-  useEffect(() => {
-    setTopicSuggestionExplanationOpen(false);
-  }, [activeMessage?.threadId]);
   const rootFolders = accountFolders.filter((folder) => !folder.parentId);
   const virtualFoldersForPane = useMemo(
     () =>
@@ -5019,13 +4960,7 @@ export default function MailClient({
             activeMessage: activeMessage ?? null,
             activeThread,
             getAssignedThreadTopics,
-            topicSuggestionExplanationOpen,
-            topicSuggestionExplanationLoading,
-            topicSuggestionExplanationError,
-            topicSuggestionExplanation,
-            setTopicSuggestionExplanationOpen,
-            handleLoadTopicSuggestionExplanation,
-            handleToggleActiveMessageTopic
+            onToggleTopic: handleToggleTopic
           }}
           body={{
             composeHandleRef,
@@ -5037,6 +4972,7 @@ export default function MailClient({
             threadContentErrorById,
             composeDraftId,
             activeAccountId,
+            apiFetch,
             messageByMessageId,
             messageCardProps: {
               messageRefs,
