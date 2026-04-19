@@ -15,6 +15,7 @@ import {
   initAccountSchema,
   initMasterSchema
 } from "./schema";
+import { ensureTopicLearningRuntimeData } from "./topics";
 
 const sqliteModulePromise = () => import("bun:sqlite" /* webpackIgnore: true */);
 let DatabaseCtor: any | null = null;
@@ -209,16 +210,13 @@ export async function getAccountDb(accountId: string) {
   ensureMessageCalendarEventRuntimeSchema(accountDb);
   ensureCalendarReminderRuntimeSchema(accountDb);
   await ensureCalendarEventRuntimeData(accountDb, accountId);
-  // Runtime-data ensures live in sibling modules that depend on this one via
-  // the account-email lookup in accounts.ts, so defer their imports to break
-  // the load-time cycle. Parallelize the two module loads — they're
-  // independent and this is on the first-account-db-open hot path.
-  const [threadsModule, topicsModule] = await Promise.all([
-    import("./threads"),
-    import("./topics")
-  ]);
+  // `./threads` imports `./accounts`, which imports this module, so its
+  // runtime-data ensure has to be loaded via a deferred import to break
+  // the load-time cycle. `./topics` has no such dependency and is
+  // imported statically at the top.
+  const threadsModule = await import("./threads");
   await threadsModule.ensureThreadSignalRuntimeData(accountDb, accountId);
-  topicsModule.ensureTopicLearningRuntimeData(accountDb, accountId);
+  ensureTopicLearningRuntimeData(accountDb, accountId);
   scheduleAccountDbIdleClose(dbPath);
   return accountDb;
 }

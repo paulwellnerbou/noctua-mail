@@ -174,10 +174,11 @@ export function upsertTopicLearningSignalsForThreadIds(
 /**
  * @internal
  *
- * Called only by `lib/db/connection.ts#getAccountDb` via a deferred
- * dynamic import of this module (same load-time-cycle rationale as
- * `ensureThreadSignalRuntimeData`). Not re-exported from the `@/lib/db`
- * barrel; consumer code must not call this directly.
+ * Called by `lib/db/connection.ts#getAccountDb` to back-fill
+ * `topic_learning_signals` from existing `thread_topics` on the first
+ * open of an account that predates the learning-signal table. Not
+ * re-exported from the `@/lib/db` barrel; consumer code must not call
+ * this directly.
  */
 export function ensureTopicLearningRuntimeData(db: any, accountId: string) {
   const hasTopicLearningSignals = db
