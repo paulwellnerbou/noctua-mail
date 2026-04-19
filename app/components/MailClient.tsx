@@ -603,7 +603,6 @@ export default function MailClient({
   const [messageTabs, setMessageTabs] = useState<
     Record<string, "html" | "text" | "markdown" | "source">
   >({});
-  const [messageZoom, setMessageZoom] = useState<Record<string, number>>({});
   const [, setRelativeTimeCounter] = useState(0);
   const listIsNarrow = listWidth < 360;
   // searchFields, searchBadges, activeVirtualFolderId, and virtual folder counts moved to useSearchState hook
@@ -2147,18 +2146,7 @@ export default function MailClient({
         });
         return changed ? next : prev;
       });
-      messageViewHandleRef.current?.evictFontScale(unique);
-      setMessageZoom((prev) => {
-        let changed = false;
-        const next = { ...prev };
-        unique.forEach((id) => {
-          if (id in next) {
-            delete next[id];
-            changed = true;
-          }
-        });
-        return changed ? next : prev;
-      });
+      messageViewHandleRef.current?.evictZoomAndFontScale(unique);
       setCollapsedMessages((prev) => {
         let changed = false;
         const next = { ...prev };
@@ -3119,22 +3107,6 @@ export default function MailClient({
     setDragOverFolderId,
     dragImageRef
   });
-
-  const adjustMessageZoom = (messageId: string, delta: number) => {
-    setMessageZoom((prev) => {
-      const current = prev[messageId] ?? 1;
-      const next = Math.min(1.8, Math.max(0.6, Number((current + delta).toFixed(2))));
-      return { ...prev, [messageId]: next };
-    });
-  };
-
-  const resetMessageZoom = (messageId: string) => {
-    setMessageZoom((prev) => {
-      if (!(messageId in prev)) return prev;
-      const { [messageId]: _omit, ...rest } = prev;
-      return rest;
-    });
-  };
 
   const folderSpecialIconFn = (folder: Folder) => folderSpecialIcon(folder);
 
@@ -4988,9 +4960,6 @@ export default function MailClient({
               fetchSource,
               ensureMessageContent,
               messageContentLoading,
-              adjustMessageZoom,
-              resetMessageZoom,
-              messageZoom,
               darkMode,
               hasHtmlContent,
               renderSourcePanel,
