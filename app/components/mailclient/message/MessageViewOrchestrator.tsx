@@ -1,7 +1,14 @@
 "use client";
 
 import type React from "react";
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  forwardRef,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useRef,
+  useState
+} from "react";
 import { Flex, SegmentedControl } from "@radix-ui/themes";
 import type { Message, Topic } from "@/lib/data";
 
@@ -11,6 +18,7 @@ import type { ThreadMessageCardProps } from "./ThreadMessageCard";
 import ThreadTopicSuggestionsRow from "./ThreadTopicSuggestionsRow";
 import TopicBadge from "../TopicBadge";
 import threadViewStyles from "./ThreadView.module.css";
+import { renderMarkdownPanel as renderMarkdownPanelHelper } from "../RenderHelpers";
 import type { ComposeOrchestratorHandle } from "../composition/ComposeOrchestrator";
 import type { TopicSuggestionExplanation } from "./types";
 import { buildAccountMessageTopicSuggestionExplainPath } from "@/lib/accountApiPaths";
@@ -35,6 +43,17 @@ import { buildAccountMessageTopicSuggestionExplainPath } from "@/lib/accountApiP
  * `activeAccountId` as inputs (both shell-owned singletons) to hit the
  * explain endpoint without depending on the shell's callback identity.
  *
+ * Owns the per-message `messageFontScale` and `messageZoom` maps along
+ * with the `adjustMessageZoom` / `resetMessageZoom` setters. The maps
+ * are read and mutated only by `ThreadMessageCard` rows rendered in
+ * this subtree, so the orchestrator merges them and their setters into
+ * `messageCardProps` alongside `threadViewMode`. It also builds the
+ * `renderMarkdownPanel` closure locally because the closure's only
+ * input is `messageFontScale` and its only consumer is the same card.
+ * The shell-level `evictMessageCaches` helper clears per-id entries
+ * from both maps via the `evictZoomAndFontScale` method exposed on
+ * `MessageViewOrchestratorHandle`.
+ *
  * The rest of the message-view-ish state lives at the MailClient shell
  * because each piece has consumers outside this pane:
  *   - `messageTabs` — `ComposeOrchestrator` reads it to pick a preferred
@@ -43,10 +62,6 @@ import { buildAccountMessageTopicSuggestionExplainPath } from "@/lib/accountApiP
  *     on compose-thread-focus change, and `scheduleActiveMessageScroll`
  *     reads `collapsedMessagesRef` to decide whether to settle the
  *     layout before scrolling.
- *   - `messageFontScale` — captured by value in `renderMarkdownPanel`,
- *     which is assembled at the shell.
- *   - `messageZoom` and its setters — `evictMessageCaches` (shell-level,
- *     cross-pane) resets the zoom.
  *   - Thread-topic assignment (`onToggleTopic`) — mutates
  *     `messageTopicsById` at the shell and refreshes active-topic-mode
  *     results; the orchestrator calls it with the active message to
@@ -57,6 +72,14 @@ import { buildAccountMessageTopicSuggestionExplainPath } from "@/lib/accountApiP
  *     `renderInlineCard(...)` through the handle when assembling the
  *     thread subtree and consumes the resolved placement as input.
  */
+
+export type MessageViewOrchestratorHandle = {
+  // Clears per-id entries from the orchestrator-local `messageFontScale`
+  // and `messageZoom` maps. Called by the shell's cross-pane
+  // `evictMessageCaches` helper when a message is moved/deleted/
+  // refetched so stale per-id overrides don't outlive the message.
+  evictZoomAndFontScale: (messageIds: string[]) => void;
+};
 
 export type MessageViewOrchestratorHeaderInputs = {
   // Used to compute thread topics / fallback thread-subject source and
@@ -103,10 +126,19 @@ export type MessageViewOrchestratorBodyInputs = {
   // pass it; `messageByMessageId` is merged in too — the orchestrator
   // enhances the base map supplied above with entries from
   // `activeThread` so "In Reply To" links resolve when viewing from any
-  // folder (e.g. Drafts).
+  // folder (e.g. Drafts); the font-scale / zoom / markdown-render props
+  // are merged in from orchestrator-local state.
   messageCardProps: Omit<
     ThreadMessageCardProps,
-    "message" | "threadViewMode" | "messageByMessageId"
+    | "message"
+    | "threadViewMode"
+    | "messageByMessageId"
+    | "messageFontScale"
+    | "setMessageFontScale"
+    | "messageZoom"
+    | "adjustMessageZoom"
+    | "resetMessageZoom"
+    | "renderMarkdownPanel"
   >;
 };
 
@@ -121,13 +153,60 @@ export type MessageViewOrchestratorProps = {
   body: MessageViewOrchestratorBodyInputs;
 };
 
-export default function MessageViewOrchestrator({
-  onShowJson,
-  onEvictThreadCache,
-  header,
-  body
-}: MessageViewOrchestratorProps) {
+function MessageViewOrchestratorImpl(
+  { onShowJson, onEvictThreadCache, header, body }: MessageViewOrchestratorProps,
+  ref: React.ForwardedRef<MessageViewOrchestratorHandle>
+) {
   const [threadViewMode, setThreadViewMode] = useState<"full" | "compact">("compact");
+  const [messageFontScale, setMessageFontScale] = useState<Record<string, number>>({});
+  const [messageZoom, setMessageZoom] = useState<Record<string, number>>({});
+
+  const renderMarkdownPanel = useCallback(
+    (markdownBody: string | undefined, messageId: string) =>
+      renderMarkdownPanelHelper(markdownBody, messageId, messageFontScale),
+    [messageFontScale]
+  );
+
+  const adjustMessageZoom = useCallback((messageId: string, delta: number) => {
+    setMessageZoom((prev) => {
+      const current = prev[messageId] ?? 1;
+      const next = Math.min(1.8, Math.max(0.6, Number((current + delta).toFixed(2))));
+      return { ...prev, [messageId]: next };
+    });
+  }, []);
+
+  const resetMessageZoom = useCallback((messageId: string) => {
+    setMessageZoom((prev) => {
+      if (!(messageId in prev)) return prev;
+      const { [messageId]: _omit, ...rest } = prev;
+      return rest;
+    });
+  }, []);
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      evictZoomAndFontScale: (messageIds: string[]) => {
+        if (messageIds.length === 0) return;
+        const idSet = new Set(messageIds);
+        const evict = (prev: Record<string, number>) => {
+          // Lazily allocate the new map only if at least one id is
+          // actually present, so no-op evictions don't churn memory.
+          let next: Record<string, number> | undefined;
+          idSet.forEach((id) => {
+            if (id in prev) {
+              next ??= { ...prev };
+              delete next[id];
+            }
+          });
+          return next ?? prev;
+        };
+        setMessageFontScale(evict);
+        setMessageZoom(evict);
+      }
+    }),
+    []
+  );
 
   const {
     activeMessage,
@@ -245,6 +324,11 @@ export default function MessageViewOrchestrator({
     // account's explanation under another account's thread.
     setTopicSuggestionExplanation(null);
     setTopicSuggestionExplanationThreadId("");
+    // Message ids are only unique within an account, so clear per-message
+    // font + zoom overrides to prevent one account's UI settings from
+    // leaking onto a coincidentally-matching id in another account.
+    setMessageFontScale({});
+    setMessageZoom({});
   }, [activeAccountId]);
 
   return (
@@ -350,7 +434,13 @@ export default function MessageViewOrchestrator({
                 messageCardProps={{
                   ...messageCardProps,
                   messageByMessageId: enhancedMessageByMessageId,
-                  threadViewMode
+                  threadViewMode,
+                  messageFontScale,
+                  setMessageFontScale,
+                  messageZoom,
+                  adjustMessageZoom,
+                  resetMessageZoom,
+                  renderMarkdownPanel
                 }}
               />
             </>
@@ -359,3 +449,11 @@ export default function MessageViewOrchestrator({
     </MessageViewPane>
   );
 }
+
+const MessageViewOrchestrator = forwardRef<
+  MessageViewOrchestratorHandle,
+  MessageViewOrchestratorProps
+>(MessageViewOrchestratorImpl);
+MessageViewOrchestrator.displayName = "MessageViewOrchestrator";
+
+export default MessageViewOrchestrator;

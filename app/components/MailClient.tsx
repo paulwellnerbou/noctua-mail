@@ -42,7 +42,6 @@ import {
   renderQuickActions as renderQuickActionsHelper,
   renderMessageMenu as renderMessageMenuHelper,
   renderSourcePanel as renderSourcePanelHelper,
-  renderMarkdownPanel as renderMarkdownPanelHelper,
   folderSpecialIcon
 } from "./mailclient/RenderHelpers";
 import MessageListOrchestrator, {
@@ -82,11 +81,9 @@ import {
   IconButton,
   Text
 } from "@radix-ui/themes";
-import MessageMenu from "./mailclient/message/MessageMenu";
-import MessageQuickActions from "./mailclient/message/MessageQuickActions";
-import MessageViewOrchestrator from "./mailclient/message/MessageViewOrchestrator";
-import MarkdownPanel from "./mailclient/message/MarkdownPanel";
-import MessageSourcePanel from "./mailclient/message/MessageSourcePanel";
+import MessageViewOrchestrator, {
+  type MessageViewOrchestratorHandle
+} from "./mailclient/message/MessageViewOrchestrator";
 import { TODO_FLAG, DONE_FLAG } from "@/lib/messageFlags";
 import { mergeLocalOnlyMessageState } from "@/lib/messageLocalState";
 import { EVENT_GROUP_BY, INVITE_DECK_GROUP_BY } from "@/lib/messageGrouping";
@@ -534,7 +531,7 @@ export default function MailClient({
   const [omitBody, setOmitBody] = useState(true);
   const [moveToDialogState, setMoveToDialogState] = useState<MoveToDialogState | null>(null);
   const [collapsedMessages, setCollapsedMessages] = useState<Record<string, boolean>>({});
-  const [messageFontScale, setMessageFontScale] = useState<Record<string, number>>({});
+  const messageViewHandleRef = useRef<MessageViewOrchestratorHandle | null>(null);
   const [appEnvironmentLabel, setAppEnvironmentLabel] = useState("");
   const [authState, setAuthState] = useState<"loading" | "ok" | "unauth">("loading");
   const [currentUser, setCurrentUser] = useState<User | null>(null);
@@ -602,7 +599,6 @@ export default function MailClient({
   const [messageTabs, setMessageTabs] = useState<
     Record<string, "html" | "text" | "markdown" | "source">
   >({});
-  const [messageZoom, setMessageZoom] = useState<Record<string, number>>({});
   const [, setRelativeTimeCounter] = useState(0);
   const listIsNarrow = listWidth < 360;
   // searchFields, searchBadges, activeVirtualFolderId, and virtual folder counts moved to useSearchState hook
@@ -2146,28 +2142,7 @@ export default function MailClient({
         });
         return changed ? next : prev;
       });
-      setMessageFontScale((prev) => {
-        let changed = false;
-        const next = { ...prev };
-        unique.forEach((id) => {
-          if (id in next) {
-            delete next[id];
-            changed = true;
-          }
-        });
-        return changed ? next : prev;
-      });
-      setMessageZoom((prev) => {
-        let changed = false;
-        const next = { ...prev };
-        unique.forEach((id) => {
-          if (id in next) {
-            delete next[id];
-            changed = true;
-          }
-        });
-        return changed ? next : prev;
-      });
+      messageViewHandleRef.current?.evictZoomAndFontScale(unique);
       setCollapsedMessages((prev) => {
         let changed = false;
         const next = { ...prev };
@@ -3129,22 +3104,6 @@ export default function MailClient({
     dragImageRef
   });
 
-  const adjustMessageZoom = (messageId: string, delta: number) => {
-    setMessageZoom((prev) => {
-      const current = prev[messageId] ?? 1;
-      const next = Math.min(1.8, Math.max(0.6, Number((current + delta).toFixed(2))));
-      return { ...prev, [messageId]: next };
-    });
-  };
-
-  const resetMessageZoom = (messageId: string) => {
-    setMessageZoom((prev) => {
-      if (!(messageId in prev)) return prev;
-      const { [messageId]: _omit, ...rest } = prev;
-      return rest;
-    });
-  };
-
   const folderSpecialIconFn = (folder: Folder) => folderSpecialIcon(folder);
 
   useEffect(() => {
@@ -3295,7 +3254,6 @@ export default function MailClient({
   };
 
   const renderSourcePanel = (messageId: string) => renderSourcePanelHelper(messageId, fetchSource, scrubSource);
-  const renderMarkdownPanel = (body: string | undefined, messageId: string) => renderMarkdownPanelHelper(body, messageId, messageFontScale);
 
   const jsonPayload = useMemo(() => {
     const base = omitBody
@@ -4215,7 +4173,6 @@ export default function MailClient({
     sourceFetchRef.current = new Map();
     autoHydrationAttemptAtRef.current = {};
     setMessageTabs({});
-    setMessageFontScale({});
   }, [
     activeFolderId,
     activeAccountId,
@@ -4951,6 +4908,7 @@ export default function MailClient({
         />
 
         <MessageViewOrchestrator
+          ref={messageViewHandleRef}
           onShowJson={() => setShowJson(true)}
           onEvictThreadCache={() => {
             console.info("[noctua] evict thread cache");
@@ -4998,14 +4956,8 @@ export default function MailClient({
               fetchSource,
               ensureMessageContent,
               messageContentLoading,
-              setMessageFontScale,
-              messageFontScale,
-              adjustMessageZoom,
-              resetMessageZoom,
-              messageZoom,
               darkMode,
               hasHtmlContent,
-              renderMarkdownPanel,
               renderSourcePanel,
               handleSelectMessage,
               getPrimaryEmail,
