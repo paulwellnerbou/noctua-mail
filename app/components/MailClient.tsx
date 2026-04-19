@@ -85,6 +85,7 @@ import {
 import MessageMenu from "./mailclient/message/MessageMenu";
 import MessageQuickActions from "./mailclient/message/MessageQuickActions";
 import MessageViewOrchestrator from "./mailclient/message/MessageViewOrchestrator";
+import type { TopicSuggestionExplanation } from "./mailclient/message/types";
 import MarkdownPanel from "./mailclient/message/MarkdownPanel";
 import MessageSourcePanel from "./mailclient/message/MessageSourcePanel";
 import { TODO_FLAG, DONE_FLAG } from "@/lib/messageFlags";
@@ -267,21 +268,6 @@ type RecipientAliasDialogState = {
   fieldLabel: "To" | "Cc";
   recipients: string;
   aliasId?: string | null;
-};
-
-type TopicSuggestionExplanation = {
-  signals: Array<{ type: string; value: string; weight: number }>;
-  topics: Array<{
-    topic: Topic;
-    suggestionScore: number;
-    matchCount: number;
-    matchedSignals: Array<{ type: string; value: string; weight: number }>;
-    matchedThreads: Array<{
-      threadId: string;
-      score: number;
-      signals: Array<{ type: string; value: string; weight: number }>;
-    }>;
-  }>;
 };
 
 type ActiveTopicSuggestionsResponse = {
@@ -5050,8 +5036,6 @@ export default function MailClient({
             threadContentLoading,
             threadContentErrorById,
             composeDraftId,
-            activeMessage: activeMessage ?? null,
-            activeThread,
             activeAccountId,
             messageByMessageId,
             messageCardProps: {

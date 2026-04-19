@@ -12,6 +12,7 @@ import ThreadTopicSuggestionsRow from "./ThreadTopicSuggestionsRow";
 import TopicBadge from "../TopicBadge";
 import threadViewStyles from "./ThreadView.module.css";
 import type { ComposeOrchestratorHandle } from "../composition/ComposeOrchestrator";
+import type { TopicSuggestionExplanation } from "./types";
 
 /**
  * The message-view pane: toolbar + optional thread-subject/topic header +
@@ -42,29 +43,18 @@ import type { ComposeOrchestratorHandle } from "../composition/ComposeOrchestrat
  *     `handleLoadTopicSuggestionExplanation`,
  *     `handleToggleActiveMessageTopic`) are a substantial API surface
  *     and move in a later sub-phase.
- *   - Inline compose placement (the `inlineComposePlacement` memo and the
- *     `composeHandleRef.current?.renderInlineCard(...)` piping) stays in
- *     MailClient. It depends on `ComposeOrchestratorHandle`, which sits
- *     at the shell. Later sub-phase.
+ *   - Inline compose placement still depends on the shell-level
+ *     `ComposeOrchestratorHandle`, so the handle ref stays owned by
+ *     MailClient. This orchestrator calls `renderInlineCard(...)`
+ *     through that ref (via the local `renderComposeCard` closure)
+ *     when assembling the thread subtree, and consumes the resolved
+ *     `inlineComposePlacement` as input. The placement memo itself
+ *     moves in a later sub-phase once the compose mirror isn't needed
+ *     at the shell for other reasons.
  *
  * Everything else is threaded in as props for phase 5a so the extract is
  * a pure JSX relocation with no behavior change.
  */
-
-type TopicSuggestionExplanation = {
-  signals: Array<{ type: string; value: string; weight: number }>;
-  topics: Array<{
-    topic: Topic;
-    suggestionScore: number;
-    matchCount: number;
-    matchedSignals: Array<{ type: string; value: string; weight: number }>;
-    matchedThreads: Array<{
-      threadId: string;
-      score: number;
-      signals: Array<{ type: string; value: string; weight: number }>;
-    }>;
-  }>;
-};
 
 export type MessageViewOrchestratorHeaderInputs = {
   // Used to compute thread topics / fallback thread-subject source.
@@ -100,8 +90,6 @@ export type MessageViewOrchestratorBodyInputs = {
   threadContentLoading: string | null;
   threadContentErrorById: Record<string, string>;
   composeDraftId: string | null;
-  activeMessage: Message | null;
-  activeThread: Message[];
   activeAccountId: string;
   // The base message-id -> message map. The orchestrator enhances this
   // locally with the active thread (so "In Reply To" links resolve when
