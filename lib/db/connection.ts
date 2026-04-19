@@ -209,9 +209,8 @@ export async function getAccountDb(accountId: string) {
   ensureMessageCalendarEventRuntimeSchema(accountDb);
   ensureCalendarReminderRuntimeSchema(accountDb);
   await ensureCalendarEventRuntimeData(accountDb, accountId);
-  // The two remaining runtime-data ensures reach into domain query
-  // helpers that still live in lib/db.ts. Lazy-import via the barrel
-  // to sidestep a hard module cycle at load time.
+  // Runtime-data ensures reach into sibling modules that depend on this one.
+  // Lazy-import via the barrel to sidestep a hard module cycle at load time.
   const dbModule = await import("../db");
   await dbModule.ensureThreadSignalRuntimeData(accountDb, accountId);
   dbModule.ensureTopicLearningRuntimeData(accountDb, accountId);

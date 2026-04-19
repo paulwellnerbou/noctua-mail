@@ -73,6 +73,21 @@ export async function getAccountById(accountId: string) {
   return applyCachedCredentials(mapAccountRow(row));
 }
 
+/**
+ * @internal
+ *
+ * Lightweight lookup used by thread-signal and message-list queries that need
+ * the account's "self" email to distinguish outbound from inbound messages.
+ * Not exported from the `@/lib/db` barrel.
+ */
+export async function getAccountEmail(accountId: string): Promise<string> {
+  const db = await getDb();
+  const row = db
+    .prepare(`SELECT email FROM accounts WHERE id = ?`)
+    .get(accountId) as { email?: string | null } | undefined;
+  return row?.email?.toLowerCase() ?? "";
+}
+
 export async function upsertAccount(account: Account) {
   return withDbWriteRetry("upsertAccount", async () => {
     const db = await getDb();
