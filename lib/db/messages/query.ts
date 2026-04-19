@@ -1174,7 +1174,12 @@ async function getGroupCounts(params: {
         folderId,
         query: query ?? undefined,
         fields,
-        excludedFolderIds
+        badges,
+        attachmentsOnly,
+        excludedFolderIds,
+        from,
+        recipients,
+        participants
       })
     }
   ];
