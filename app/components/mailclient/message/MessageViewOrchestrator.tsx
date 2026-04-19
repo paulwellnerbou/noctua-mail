@@ -15,45 +15,35 @@ import type { ComposeOrchestratorHandle } from "../composition/ComposeOrchestrat
 import type { TopicSuggestionExplanation } from "./types";
 
 /**
- * The message-view pane: toolbar + optional thread-subject/topic header +
- * the `ThreadView` tree that renders the active message / thread. This
- * component composes the subtree so MailClient renders a single
- * `<MessageViewOrchestrator {...} />` rather than assembling the block
- * inline alongside its own top-level state.
+ * The message-view pane: toolbar + optional thread-subject/topic header
+ * + the `ThreadView` subtree that renders the active message or thread.
  *
- * Owns `threadViewMode` ("compact" | "full") because it's the only
- * consumer — the Compact/Full SegmentedControl in the header toggles it,
- * and the ThreadView subtree reads it through `messageCardProps`. The
- * default stays "compact" to match pre-split behavior.
+ * Owns `threadViewMode` ("compact" | "full") because the Compact/Full
+ * SegmentedControl in the header toggles it and the `ThreadView`
+ * subtree reads it through `messageCardProps` — no consumer outside
+ * this component. Default "compact".
  *
- * DEVIATION (phase 5a — intentional temporary scope):
- *   - `messageTabs` stays in MailClient. `ComposeOrchestrator` reads it
- *     when selecting a preferred compose tab, so it's cross-pane.
- *   - `collapsedMessages` stays in MailClient. A MailClient-level effect
- *     auto-collapses siblings when the compose-thread-focus message
- *     changes, and `scheduleActiveMessageScroll` reads
- *     `collapsedMessagesRef` to decide whether to settle before
- *     scrolling. Both tie it to compose placement and list selection.
- *   - `messageFontScale` stays in MailClient. The `renderMarkdownPanel`
- *     helper (assembled at MailClient level) captures it by value.
- *   - `messageZoom` / `adjustMessageZoom` / `resetMessageZoom` stay in
- *     MailClient. The setter is called from `evictMessageCaches`, which
- *     is MailClient-level and cross-pane.
- *   - Topic-explanation state / handlers (`topicSuggestionExplanation*`,
- *     `handleLoadTopicSuggestionExplanation`,
- *     `handleToggleActiveMessageTopic`) are a substantial API surface
- *     and move in a later sub-phase.
- *   - Inline compose placement still depends on the shell-level
- *     `ComposeOrchestratorHandle`, so the handle ref stays owned by
- *     MailClient. This orchestrator calls `renderInlineCard(...)`
- *     through that ref (via the local `renderComposeCard` closure)
- *     when assembling the thread subtree, and consumes the resolved
- *     `inlineComposePlacement` as input. The placement memo itself
- *     moves in a later sub-phase once the compose mirror isn't needed
- *     at the shell for other reasons.
- *
- * Everything else is threaded in as props for phase 5a so the extract is
- * a pure JSX relocation with no behavior change.
+ * The rest of the message-view-ish state lives at the MailClient shell
+ * because each piece has consumers outside this pane:
+ *   - `messageTabs` — `ComposeOrchestrator` reads it to pick a preferred
+ *     compose tab.
+ *   - `collapsedMessages` — a shell-level effect auto-collapses siblings
+ *     on compose-thread-focus change, and `scheduleActiveMessageScroll`
+ *     reads `collapsedMessagesRef` to decide whether to settle the
+ *     layout before scrolling.
+ *   - `messageFontScale` — captured by value in `renderMarkdownPanel`,
+ *     which is assembled at the shell.
+ *   - `messageZoom` and its setters — `evictMessageCaches` (shell-level,
+ *     cross-pane) resets the zoom.
+ *   - Topic-explanation state and handlers — the API surface spans the
+ *     shell's `handleLoadTopicSuggestionExplanation` and
+ *     `handleToggleActiveMessageTopic`, which touch data fetchers and
+ *     active-message state the shell owns.
+ *   - `inlineComposePlacement` and the `ComposeOrchestratorHandle` that
+ *     services it — the handle ref sits at the shell and the placement
+ *     memo depends on the compose mirror there. This orchestrator calls
+ *     `renderInlineCard(...)` through the handle when assembling the
+ *     thread subtree and consumes the resolved placement as input.
  */
 
 export type MessageViewOrchestratorHeaderInputs = {
