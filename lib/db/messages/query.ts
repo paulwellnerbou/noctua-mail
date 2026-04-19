@@ -1409,10 +1409,12 @@ export async function listRelatedMessages(params: {
 
   const accountEmail = await getAccountEmail(accountId);
 
+  // Message-Id equality is case-insensitive by RFC-5322 convention, and
+  // `getMessageById` already does case-insensitive lookups — match that.
   const findTarget = (id: string) =>
     db
       .prepare(
-        `SELECT * FROM messages WHERE accountId = ? AND (id = ? OR messageId = ?) LIMIT 1`
+        `SELECT * FROM messages WHERE accountId = ? AND (id = ? OR lower(messageId) = lower(?)) LIMIT 1`
       )
       .get(accountId, id, id) as any;
   let target = findTarget(normalizedId);
@@ -1421,9 +1423,9 @@ export async function listRelatedMessages(params: {
     if (trimmed && trimmed !== normalizedId) {
       target = db
         .prepare(
-          `SELECT * FROM messages WHERE accountId = ? AND messageId LIKE ? LIMIT 1`
+          `SELECT * FROM messages WHERE accountId = ? AND lower(messageId) LIKE ? LIMIT 1`
         )
-        .get(accountId, `%${trimmed}%`) as any;
+        .get(accountId, `%${trimmed.toLowerCase()}%`) as any;
     }
   }
   if (!target) {
