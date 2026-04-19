@@ -479,21 +479,28 @@ function buildScopedFtsTokenQueries(tokens: string[], columns: string[]) {
 }
 
 function normalizeSearchFields(fields?: string[] | null) {
-  const selected = (fields ?? []).filter(Boolean);
+  const selected = (fields ?? []).map((field) => field.trim()).filter(Boolean);
   if (selected.length === 0) {
     return ["fromAddr", "toAddr", "ccAddr", "bccAddr", "subject", "body"];
   }
   const columns = new Set<string>();
+  // Accept both the in-app UI vocabulary (`sender`, `participants`, `body`)
+  // and the MCP-tool vocabulary (`from`, `to`, `cc`, `bcc`, `preview`)
+  // documented in `lib/mcpServer.ts`'s `search_messages.fields` description.
+  // Unknown tokens are ignored.
   selected.forEach((field) => {
-    if (field === "sender") columns.add("fromAddr");
+    if (field === "sender" || field === "from") columns.add("fromAddr");
     if (field === "participants") {
       columns.add("fromAddr");
       columns.add("toAddr");
       columns.add("ccAddr");
       columns.add("bccAddr");
     }
+    if (field === "to") columns.add("toAddr");
+    if (field === "cc") columns.add("ccAddr");
+    if (field === "bcc") columns.add("bccAddr");
     if (field === "subject") columns.add("subject");
-    if (field === "body") columns.add("body");
+    if (field === "body" || field === "preview") columns.add("body");
   });
   if (columns.size === 0) {
     return [];
