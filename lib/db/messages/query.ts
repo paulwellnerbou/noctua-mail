@@ -2603,8 +2603,12 @@ export async function listThreadMessages(params: {
     groupBy = "date",
     threadDateSource = DEFAULT_THREAD_DATE_SOURCE
   } = params;
-  const uniqueThreads = Array.from(new Set(threadIds.filter(Boolean)));
-  const uniqueMessages = Array.from(new Set(messageIds.filter(Boolean)));
+  const uniqueThreads = Array.from(
+    new Set(threadIds.map((value) => value.trim()).filter(Boolean))
+  );
+  const uniqueMessages = Array.from(
+    new Set(messageIds.map((value) => value.trim()).filter(Boolean))
+  );
   if (uniqueThreads.length === 0 && uniqueMessages.length === 0) {
     return { items: [] as Message[] };
   }
