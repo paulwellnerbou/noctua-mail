@@ -4,11 +4,11 @@
  * Covers the four list/search entry points (`listMessages`, `listThreads`,
  * `listThreadMessages`, `listRelatedMessages`) and their filter/group
  * machinery. Upsert, flag, move, and delete operations live elsewhere.
- * Every function in this module reads only — no writes — so
- * `getAccountDb` can be safely reused across concurrent read calls.
- * Runtime-data backfills that feed these queries (e.g.
- * `ensureThreadLatestReceivedDateValues`) run inside `getAccountDb`
- * itself, not on the read path.
+ * Every function in this module reads only and does not issue writes
+ * itself. `getAccountDb` may still run idempotent runtime-data ensure /
+ * backfill steps (e.g. `ensureThreadLatestReceivedDateValues`) before
+ * returning the connection; those writes, if any, happen inside
+ * `getAccountDb`, not in this module's query logic.
  */
 import { simpleParser } from "mailparser";
 import type { Attachment, Message } from "../../data";
@@ -500,7 +500,8 @@ function normalizeSearchFields(fields?: string[] | null) {
     if (field === "cc") columns.add("ccAddr");
     if (field === "bcc") columns.add("bccAddr");
     if (field === "subject") columns.add("subject");
-    if (field === "body" || field === "preview") columns.add("body");
+    if (field === "body") columns.add("body");
+    if (field === "preview") columns.add("preview");
   });
   if (columns.size === 0) {
     return [];
@@ -1731,7 +1732,7 @@ export async function listRelatedMessages(params: {
       listUnsubscribe: row.listUnsubscribe ?? undefined,
       listId: row.listId ?? undefined
     };
-    (message as any).groupKey =
+    message.groupKey =
       eventGroupsByMessageId.get(message.id)?.key ??
       inviteDeckGroupsByMessageId.get(message.id) ??
       buildGroupKey(message, groupBy);
@@ -2037,7 +2038,7 @@ export async function listMessages(params: {
       listUnsubscribe: row.listUnsubscribe ?? undefined,
       listId: row.listId ?? undefined
     };
-    (message as any).groupKey =
+    message.groupKey =
       eventGroupsByMessageId.get(message.id)?.key ??
       inviteDeckGroupsByMessageId.get(message.id) ??
       buildGroupKey(message, groupBy);
@@ -2546,7 +2547,7 @@ export async function listThreads(params: {
     };
     const threadDateValue = threadDateValueByThreadId.get(message.threadId);
     message.threadSortDateValue = threadDateValue ?? message.dateValue;
-    (message as any).groupKey =
+    message.groupKey =
       eventGroupsByMessageId.get(message.id)?.key ??
       inviteDeckThreadGroupsByMessageId.get(message.id) ??
       buildGroupKey(
@@ -2758,7 +2759,7 @@ export async function listThreadMessages(params: {
     };
     const threadDateValue = threadDateValueByThreadId.get(message.threadId);
     message.threadSortDateValue = threadDateValue ?? message.dateValue;
-    (message as any).groupKey =
+    message.groupKey =
       eventGroupsByMessageId.get(message.id)?.key ??
       inviteDeckThreadMessageGroupsByMessageId.get(message.id) ??
       buildGroupKey(
