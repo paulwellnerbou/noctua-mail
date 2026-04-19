@@ -209,11 +209,13 @@ export async function getAccountDb(accountId: string) {
   ensureMessageCalendarEventRuntimeSchema(accountDb);
   ensureCalendarReminderRuntimeSchema(accountDb);
   await ensureCalendarEventRuntimeData(accountDb, accountId);
-  // Runtime-data ensures reach into sibling modules that depend on this one.
-  // Lazy-import via the barrel to sidestep a hard module cycle at load time.
-  const dbModule = await import("../db");
-  await dbModule.ensureThreadSignalRuntimeData(accountDb, accountId);
-  dbModule.ensureTopicLearningRuntimeData(accountDb, accountId);
+  // Runtime-data ensures live in sibling modules that depend on this one via
+  // the account-email lookup in accounts.ts, so defer their imports to break
+  // the load-time cycle.
+  const threadsModule = await import("./threads");
+  const topicsModule = await import("./topics");
+  await threadsModule.ensureThreadSignalRuntimeData(accountDb, accountId);
+  topicsModule.ensureTopicLearningRuntimeData(accountDb, accountId);
   scheduleAccountDbIdleClose(dbPath);
   return accountDb;
 }

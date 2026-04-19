@@ -3,6 +3,10 @@ import { collectThreadReferenceIds, resolveThreadingForItems } from "../threadin
 import { collectTopicSignalEntries, type TopicSignalSource } from "../topicSignals";
 import { getAccountDb } from "./connection";
 import { getAccountEmail } from "./accounts";
+import {
+  deleteTopicLearningSignals,
+  upsertTopicLearningSignalsForThreadIds
+} from "./topics";
 
 type ThreadSignalSourceRow = TopicSignalSource & {
   threadId?: string | null;
@@ -343,14 +347,10 @@ export async function recomputeThreadsForAccount(accountId: string, threadIds?: 
   return withDbWriteRetry("recomputeThreadsForAccount", async () => {
     await recomputeThreadsForAccountInternal(accountId, threadIds);
     const db = await getAccountDb(accountId);
-    // Topic-learning upkeep lives in `lib/db/topics.ts`; lazy-import via the
-    // barrel so threads.ts does not take a hard dependency on topics.ts and
-    // thus sidestep a sibling-module cycle at load time.
-    const dbModule = await import("../db");
     if (threadIds && threadIds.length > 0) {
       await rebuildThreadSignalsForThreadIds(db, accountId, threadIds);
-      dbModule.deleteTopicLearningSignals(db, accountId, { threadIds });
-      dbModule.upsertTopicLearningSignalsForThreadIds(db, accountId, threadIds);
+      deleteTopicLearningSignals(db, accountId, { threadIds });
+      upsertTopicLearningSignalsForThreadIds(db, accountId, threadIds);
       return;
     }
     await rebuildAllThreadSignalsForAccount(db, accountId);
@@ -362,7 +362,7 @@ export async function recomputeThreadsForAccount(accountId: string, threadIds?: 
          WHERE accountId = ?`
       )
       .all(accountId) as Array<{ threadId?: string | null }>;
-    dbModule.upsertTopicLearningSignalsForThreadIds(
+    upsertTopicLearningSignalsForThreadIds(
       db,
       accountId,
       threadRows.map((row) => row.threadId ?? "")
