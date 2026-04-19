@@ -275,36 +275,45 @@ async function getEventGroupInfoByMessageId(
   if (uniqueMessageIds.length === 0) {
     return new Map<string, { key: string; label: string }>();
   }
-  const rows = db
-    .prepare(
-      `
-      SELECT
-        m.id AS messageId,
-        COALESCE(
-          MIN(NULLIF(${buildCalendarEventUidMatchSql("mce")}, '')),
-          'Other'
-        ) AS groupKey,
-        COALESCE(
-          MIN(NULLIF(trim(COALESCE(ce.summary, '')), '')),
-          MIN(NULLIF(trim(COALESCE(m.subject, '')), '')),
-          MIN(NULLIF(trim(COALESCE(mce.eventUid, '')), '')),
-          MIN(NULLIF(${buildCalendarEventUidMatchSql("mce")}, '')),
-          'Other'
-        ) AS groupLabel
-      FROM messages m
-      LEFT JOIN message_calendar_events mce
-        ON mce.accountId = m.accountId
-       AND mce.messageId = m.id
-      LEFT JOIN calendar_events ce
-        ON ce.accountId = mce.accountId
-       AND ce.deletedAtMs IS NULL
-       AND lower(COALESCE(ce.eventUid, '')) = lower(COALESCE(mce.eventUid, ''))
-      WHERE m.accountId = ?
-        AND m.id IN (${uniqueMessageIds.map(() => "?").join(",")})
-      GROUP BY m.id
-      `
-    )
-    .all(accountId, ...uniqueMessageIds) as EventGroupRow[];
+
+  // `listThreads` under EVENT_GROUP_BY can pass more ids than SQLite's
+  // 999-parameter limit. Chunk with the shared QUERY_BATCH_SIZE.
+  const QUERY_BATCH_SIZE = 400;
+  const rows: EventGroupRow[] = [];
+  for (let start = 0; start < uniqueMessageIds.length; start += QUERY_BATCH_SIZE) {
+    const chunk = uniqueMessageIds.slice(start, start + QUERY_BATCH_SIZE);
+    const batchRows = db
+      .prepare(
+        `
+        SELECT
+          m.id AS messageId,
+          COALESCE(
+            MIN(NULLIF(${buildCalendarEventUidMatchSql("mce")}, '')),
+            'Other'
+          ) AS groupKey,
+          COALESCE(
+            MIN(NULLIF(trim(COALESCE(ce.summary, '')), '')),
+            MIN(NULLIF(trim(COALESCE(m.subject, '')), '')),
+            MIN(NULLIF(trim(COALESCE(mce.eventUid, '')), '')),
+            MIN(NULLIF(${buildCalendarEventUidMatchSql("mce")}, '')),
+            'Other'
+          ) AS groupLabel
+        FROM messages m
+        LEFT JOIN message_calendar_events mce
+          ON mce.accountId = m.accountId
+         AND mce.messageId = m.id
+        LEFT JOIN calendar_events ce
+          ON ce.accountId = mce.accountId
+         AND ce.deletedAtMs IS NULL
+         AND lower(COALESCE(ce.eventUid, '')) = lower(COALESCE(mce.eventUid, ''))
+        WHERE m.accountId = ?
+          AND m.id IN (${chunk.map(() => "?").join(",")})
+        GROUP BY m.id
+        `
+      )
+      .all(accountId, ...chunk) as EventGroupRow[];
+    rows.push(...batchRows);
+  }
   return new Map(
     rows
       .map(normalizeEventGroupInfo)
@@ -2587,25 +2596,39 @@ export async function listThreadMessages(params: {
   const db = await getAccountDb(accountId);
   const normalizedThreadDateSource = normalizeThreadDateSource(threadDateSource);
   const threadDateColumn = getThreadDateColumn(groupBy, normalizedThreadDateSource);
-  const clauses: string[] = [];
-  const args: any[] = [accountId];
-  if (uniqueThreads.length > 0) {
-    clauses.push(`m.threadId IN (${uniqueThreads.map(() => "?").join(",")})`);
-    args.push(...uniqueThreads);
-  }
-  if (uniqueMessages.length > 0) {
-    clauses.push(`m.id IN (${uniqueMessages.map(() => "?").join(",")})`);
-    args.push(...uniqueMessages);
-  }
-  const rows = db
-    .prepare(
-      `
-      SELECT DISTINCT m.*
-      FROM messages m
-      WHERE m.accountId = ? AND (${clauses.join(" OR ")}) AND COALESCE(m.deleted, 0) = 0
-    `
-    )
-    .all(...args) as any[];
+
+  // All three IN (...) predicates below can receive caller-sized id
+  // lists that exceed SQLite's default 999-parameter limit. Chunk each
+  // at the shared QUERY_BATCH_SIZE used by other bulk queries in this
+  // module.
+  const QUERY_BATCH_SIZE = 400;
+
+  const rowsById = new Map<string, any>();
+  const loadRowsBy = (column: "threadId" | "id", values: string[]) => {
+    for (let start = 0; start < values.length; start += QUERY_BATCH_SIZE) {
+      const chunk = values.slice(start, start + QUERY_BATCH_SIZE);
+      const batchRows = db
+        .prepare(
+          `
+          SELECT m.*
+          FROM messages m
+          WHERE m.accountId = ?
+            AND m.${column} IN (${chunk.map(() => "?").join(",")})
+            AND COALESCE(m.deleted, 0) = 0
+          `
+        )
+        .all(accountId, ...chunk) as any[];
+      batchRows.forEach((row) => {
+        // Dedup across the two queries (and any duplicates inside a
+        // chunk) keyed by message id — replaces the prior SELECT DISTINCT.
+        rowsById.set(String(row.id), row);
+      });
+    }
+  };
+  if (uniqueThreads.length > 0) loadRowsBy("threadId", uniqueThreads);
+  if (uniqueMessages.length > 0) loadRowsBy("id", uniqueMessages);
+  const rows = Array.from(rowsById.values());
+
   const rowThreadIds = Array.from(
     new Set(
       rows
@@ -2613,46 +2636,45 @@ export async function listThreadMessages(params: {
         .filter(Boolean)
     )
   );
-  const threadDateValueByThreadId =
-    rowThreadIds.length > 0
-      ? new Map(
-          (
-            db
-              .prepare(
-                `
-                SELECT threadId, ${threadDateColumn} as threadDateValue, latestDateValue
-                FROM threads
-                WHERE accountId = ? AND threadId IN (${rowThreadIds.map(() => "?").join(",")})
-              `
-              )
-              .all(accountId, ...rowThreadIds) as Array<{
-              threadId?: string | null;
-              threadDateValue?: number | null;
-              latestDateValue?: number | null;
-            }>
-          )
-            .flatMap((row): Array<[string, number]> => {
-              const threadId = String(row.threadId ?? "").trim();
-              if (!threadId) return [];
-              const threadDateValue = Number.isFinite(Number(row.threadDateValue))
-                ? Number(row.threadDateValue)
-                : Number.isFinite(Number(row.latestDateValue))
-                  ? Number(row.latestDateValue)
-                  : 0;
-              return [[threadId, threadDateValue]];
-            })
-        )
-      : new Map<string, number>();
+  const threadDateValueByThreadId = new Map<string, number>();
+  for (let start = 0; start < rowThreadIds.length; start += QUERY_BATCH_SIZE) {
+    const chunk = rowThreadIds.slice(start, start + QUERY_BATCH_SIZE);
+    const batchRows = db
+      .prepare(
+        `
+        SELECT threadId, ${threadDateColumn} as threadDateValue, latestDateValue
+        FROM threads
+        WHERE accountId = ? AND threadId IN (${chunk.map(() => "?").join(",")})
+        `
+      )
+      .all(accountId, ...chunk) as Array<{
+      threadId?: string | null;
+      threadDateValue?: number | null;
+      latestDateValue?: number | null;
+    }>;
+    batchRows.forEach((row) => {
+      const threadId = String(row.threadId ?? "").trim();
+      if (!threadId) return;
+      const threadDateValue = Number.isFinite(Number(row.threadDateValue))
+        ? Number(row.threadDateValue)
+        : Number.isFinite(Number(row.latestDateValue))
+          ? Number(row.latestDateValue)
+          : 0;
+      threadDateValueByThreadId.set(threadId, threadDateValue);
+    });
+  }
 
   const ids = rows.map((row) => row.id);
-  const attachmentRows =
-    ids.length > 0
-      ? (db
-          .prepare(
-            `SELECT * FROM attachments WHERE messageId IN (${ids.map(() => "?").join(",")})`
-          )
-          .all(...ids) as any[])
-      : [];
+  const attachmentRows: any[] = [];
+  for (let start = 0; start < ids.length; start += QUERY_BATCH_SIZE) {
+    const chunk = ids.slice(start, start + QUERY_BATCH_SIZE);
+    const batchRows = db
+      .prepare(
+        `SELECT * FROM attachments WHERE messageId IN (${chunk.map(() => "?").join(",")})`
+      )
+      .all(...chunk) as any[];
+    attachmentRows.push(...batchRows);
+  }
   const calendarInviteDataByMessageId = await getMessageCalendarInviteDataByMessageId(
     db,
     accountId,
