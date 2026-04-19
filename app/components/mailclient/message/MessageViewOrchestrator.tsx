@@ -1,7 +1,7 @@
 "use client";
 
 import type React from "react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Flex, SegmentedControl } from "@radix-ui/themes";
 import type { Message, Topic } from "@/lib/data";
 
@@ -157,16 +157,24 @@ export default function MessageViewOrchestrator({
   const [topicSuggestionExplanation, setTopicSuggestionExplanation] =
     useState<TopicSuggestionExplanation | null>(null);
   const [topicSuggestionExplanationThreadId, setTopicSuggestionExplanationThreadId] = useState("");
+  // Tracks the most recently requested thread-id so responses arriving
+  // out of order (user switched threads mid-fetch) can bail before
+  // overwriting explanation state with a stale result.
+  const explanationRequestThreadIdRef = useRef("");
 
   const handleLoadTopicSuggestionExplanation = useCallback(async (threadId: string) => {
     const normalizedThreadId = threadId.trim();
     if (!normalizedThreadId) return;
+    // Dedupe only when the same thread already has a result cached or a
+    // request in flight. An error from a prior attempt must NOT block a
+    // retry — the user needs a way to recover from transient failures.
     if (
       topicSuggestionExplanationThreadId === normalizedThreadId &&
-      (topicSuggestionExplanation || topicSuggestionExplanationError || topicSuggestionExplanationLoading)
+      (topicSuggestionExplanation || topicSuggestionExplanationLoading)
     ) {
       return;
     }
+    explanationRequestThreadIdRef.current = normalizedThreadId;
     setTopicSuggestionExplanationThreadId(normalizedThreadId);
     setTopicSuggestionExplanationLoading(true);
     setTopicSuggestionExplanationError("");
@@ -178,6 +186,10 @@ export default function MessageViewOrchestrator({
         { cache: "no-store" }
       );
       const data = await res.json().catch(() => ({}));
+      // Bail if the user has switched to a different thread while we were
+      // awaiting the response; writing state now would clobber the
+      // newer request.
+      if (explanationRequestThreadIdRef.current !== normalizedThreadId) return;
       if (!res.ok || !data?.ok) {
         setTopicSuggestionExplanationError(
           typeof data?.message === "string" ? data.message : "Failed to load explanation."
@@ -186,15 +198,17 @@ export default function MessageViewOrchestrator({
       }
       setTopicSuggestionExplanation((data.explanation ?? null) as TopicSuggestionExplanation | null);
     } catch {
+      if (explanationRequestThreadIdRef.current !== normalizedThreadId) return;
       setTopicSuggestionExplanationError("Failed to load explanation.");
     } finally {
-      setTopicSuggestionExplanationLoading(false);
+      if (explanationRequestThreadIdRef.current === normalizedThreadId) {
+        setTopicSuggestionExplanationLoading(false);
+      }
     }
   }, [
     activeAccountId,
     apiFetch,
     topicSuggestionExplanation,
-    topicSuggestionExplanationError,
     topicSuggestionExplanationLoading,
     topicSuggestionExplanationThreadId
   ]);
