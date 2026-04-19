@@ -135,10 +135,11 @@ export async function rebuildAllThreadSignalsForAccount(db: any, accountId: stri
 /**
  * @internal
  *
- * Called only by `lib/db/connection.ts#getAccountDb` via a dynamic barrel
- * import (cycle break — the body reaches `rebuildAllThreadSignalsForAccount`
- * which is not part of the public API). Not part of the public `@/lib/db`
- * surface; consumer code must not call this directly.
+ * Called only by `lib/db/connection.ts#getAccountDb` via a deferred
+ * dynamic import of this module, which breaks the load-time cycle with
+ * `./accounts` (used for the account-email lookup inside
+ * `rebuildAllThreadSignalsForAccount`). Not re-exported from the
+ * `@/lib/db` barrel; consumer code must not call this directly.
  */
 export async function ensureThreadSignalRuntimeData(db: any, accountId: string) {
   const hasThreadSignals = db
@@ -212,7 +213,7 @@ export async function ensureThreadLatestReceivedDateValues(
   accountId: string,
   threadIds?: string[]
 ) {
-  const unique = Array.from(new Set((threadIds ?? []).filter(Boolean)));
+  const unique = normalizeThreadIds(threadIds);
   const hasMissingRows =
     unique.length > 0
       ? (db
@@ -270,7 +271,7 @@ export async function recomputeThreadsForAccountInternal(accountId: string, thre
   const latestReceivedDateSql = buildThreadLatestReceivedDateSql("m", accountEmail);
   const latestReceivedDateArgs = getThreadLatestReceivedDateArgs(accountEmail);
   if (threadIds && threadIds.length > 0) {
-    const unique = Array.from(new Set(threadIds.filter(Boolean)));
+    const unique = normalizeThreadIds(threadIds);
     if (unique.length === 0) return;
     const placeholders = unique.map(() => "?").join(", ");
     db.prepare(

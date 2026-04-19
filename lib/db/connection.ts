@@ -211,9 +211,12 @@ export async function getAccountDb(accountId: string) {
   await ensureCalendarEventRuntimeData(accountDb, accountId);
   // Runtime-data ensures live in sibling modules that depend on this one via
   // the account-email lookup in accounts.ts, so defer their imports to break
-  // the load-time cycle.
-  const threadsModule = await import("./threads");
-  const topicsModule = await import("./topics");
+  // the load-time cycle. Parallelize the two module loads — they're
+  // independent and this is on the first-account-db-open hot path.
+  const [threadsModule, topicsModule] = await Promise.all([
+    import("./threads"),
+    import("./topics")
+  ]);
   await threadsModule.ensureThreadSignalRuntimeData(accountDb, accountId);
   topicsModule.ensureTopicLearningRuntimeData(accountDb, accountId);
   scheduleAccountDbIdleClose(dbPath);

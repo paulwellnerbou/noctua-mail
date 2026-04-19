@@ -128,7 +128,6 @@ export {
   addTopicSignalExclusion,
   clearTopicSignalExclusions,
   deleteTopicLearningSignals,
-  ensureTopicLearningRuntimeData,
   upsertTopicLearningSignalsForThreadIds
 } from "./db/topics";
 
@@ -182,7 +181,6 @@ export {
 } from "./db/folders";
 
 export {
-  ensureThreadSignalRuntimeData,
   getThreadIdsByMessageIds,
   getMessageIdsByMessageIds,
   getThreadMessageIdsForMove,
