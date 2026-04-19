@@ -190,15 +190,16 @@ function MessageViewOrchestratorImpl(
         if (messageIds.length === 0) return;
         const idSet = new Set(messageIds);
         const evict = (prev: Record<string, number>) => {
-          let changed = false;
-          const next = { ...prev };
+          // Lazily allocate the new map only if at least one id is
+          // actually present, so no-op evictions don't churn memory.
+          let next: Record<string, number> | undefined;
           idSet.forEach((id) => {
-            if (id in next) {
+            if (id in prev) {
+              next ??= { ...prev };
               delete next[id];
-              changed = true;
             }
           });
-          return changed ? next : prev;
+          return next ?? prev;
         };
         setMessageFontScale(evict);
         setMessageZoom(evict);
@@ -324,9 +325,10 @@ function MessageViewOrchestratorImpl(
     setTopicSuggestionExplanation(null);
     setTopicSuggestionExplanationThreadId("");
     // Message ids are only unique within an account, so clear per-message
-    // font overrides to prevent one account's font choices from leaking
-    // onto a coincidentally-matching id in another account.
+    // font + zoom overrides to prevent one account's UI settings from
+    // leaking onto a coincidentally-matching id in another account.
     setMessageFontScale({});
+    setMessageZoom({});
   }, [activeAccountId]);
 
   return (
