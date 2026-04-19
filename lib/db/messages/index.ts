@@ -54,3 +54,5 @@ export {
   getLatestMessageUid,
   listRecipientSuggestions
 } from "./utility";
+
+export { upsertMessages } from "./upsert";
