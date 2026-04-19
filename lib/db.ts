@@ -35,7 +35,6 @@ import {
 import { isSameMailboxMessageCopy } from "./messageCopies";
 import { deleteMessageFiles } from "./storage";
 import {
-  CATEGORY_KEYS,
   createSeededLinearModel,
   extractLinearFeatures,
   trainLinearModelNegative,
@@ -46,8 +45,11 @@ import {
 import type { CategoryLearningDebugSnapshot } from "./mail/categorization/debugTypes";
 import type { CategoryClassificationInput } from "./mail/categorization";
 import {
+  type CategoryManualState,
+  deriveSystemFlagState,
   itemsFromUniqueInviteStates,
   normalizeCalendarInviteActionType,
+  normalizeCategory,
   normalizeReminderEventUidKey,
   normalizeReminderRecurrenceRule,
   normalizeReminderTimezone,
@@ -1037,14 +1039,6 @@ export async function listCalendarInviteSourceMessagesByEventUid(
     .filter((row): row is { messageId: string; dateValue: number } => Boolean(row));
 }
 
-function normalizeCategory(value?: string | null): CategoryKey | null {
-  if (!value) return null;
-  const normalized = value.trim().toLowerCase();
-  return CATEGORY_KEYS.includes(normalized as CategoryKey)
-    ? (normalized as CategoryKey)
-    : null;
-}
-
 function normalizeCategoryManualState(value?: string | null): CategoryManualState | null {
   if (!value) return null;
   const normalized = value.trim().toLowerCase();
@@ -1067,38 +1061,11 @@ function buildMessageCollisionVariantId(
   return `${baseId}-${suffix}`;
 }
 
-type MessageSystemFlagState = {
-  seen: number;
-  answered: number;
-  flagged: number;
-  deleted: number;
-  draft: number;
-  recent: number;
-  unread: number;
-};
-
-type CategoryManualState = "cleared";
-
 type UpsertFileMove = {
   previousMessageId: string;
   nextMessageId: string;
   attachmentIds: string[];
 };
-
-function deriveSystemFlagState(flags: string[]): MessageSystemFlagState {
-  const hasFlag = (flag: string) =>
-    flags.some((value) => value.toLowerCase() === flag.toLowerCase());
-  const seen = hasFlag("\\Seen");
-  return {
-    seen: seen ? 1 : 0,
-    answered: hasFlag("\\Answered") ? 1 : 0,
-    flagged: hasFlag("\\Flagged") ? 1 : 0,
-    deleted: hasFlag("\\Deleted") ? 1 : 0,
-    draft: hasFlag("\\Draft") ? 1 : 0,
-    recent: hasFlag("\\Recent") ? 1 : 0,
-    unread: seen ? 0 : 1
-  };
-}
 
 export async function getFolderIdsByMessageIds(accountId: string, messageIds: string[]) {
   if (messageIds.length === 0) return new Map<string, string>();

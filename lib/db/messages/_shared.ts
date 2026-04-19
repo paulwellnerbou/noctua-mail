@@ -20,6 +20,7 @@ import {
   normalizeCalendarEventUidKey
 } from "../../calendarEventUids";
 import type { CalendarInviteActionType } from "../../calendarInviteProcessing";
+import { CATEGORY_KEYS, type CategoryKey } from "../../mail/categorization/linearModel";
 
 /** Safe JSON.parse that returns fallback (default undefined) on malformed data instead of throwing. */
 export function safeParseJson<T = unknown>(
@@ -253,4 +254,55 @@ export function parseReminderDateListJson(value: unknown): number[] | undefined 
 
 export function normalizeReminderEventUidKey(uid?: string | null) {
   return normalizeCalendarEventUidKey(uid);
+}
+
+/**
+ * Flat projection of the IMAP system flags onto integer columns.
+ * The DB schema stores each canonical system flag as its own column so
+ * filtering on them stays index-friendly and doesn't require JSON parsing.
+ */
+export type MessageSystemFlagState = {
+  seen: number;
+  answered: number;
+  flagged: number;
+  deleted: number;
+  draft: number;
+  recent: number;
+  unread: number;
+};
+
+/**
+ * Derives the system-flag bitset (seen/answered/flagged/…/unread) from a
+ * normalized flag string list. `unread` is the complement of `\Seen` so the
+ * read column stays in sync with the source of truth.
+ */
+export function deriveSystemFlagState(flags: string[]): MessageSystemFlagState {
+  const hasFlag = (flag: string) =>
+    flags.some((value) => value.toLowerCase() === flag.toLowerCase());
+  const seen = hasFlag("\\Seen");
+  return {
+    seen: seen ? 1 : 0,
+    answered: hasFlag("\\Answered") ? 1 : 0,
+    flagged: hasFlag("\\Flagged") ? 1 : 0,
+    deleted: hasFlag("\\Deleted") ? 1 : 0,
+    draft: hasFlag("\\Draft") ? 1 : 0,
+    recent: hasFlag("\\Recent") ? 1 : 0,
+    unread: seen ? 0 : 1
+  };
+}
+
+/**
+ * Only "cleared" is tracked today: it encodes an explicit user opt-out so
+ * automatic recategorization won't re-tag the message. Additional states
+ * would extend the union.
+ */
+export type CategoryManualState = "cleared";
+
+/** Narrows a free-form category string to a known `CategoryKey` or null. */
+export function normalizeCategory(value?: string | null): CategoryKey | null {
+  if (!value) return null;
+  const normalized = value.trim().toLowerCase();
+  return CATEGORY_KEYS.includes(normalized as CategoryKey)
+    ? (normalized as CategoryKey)
+    : null;
 }
