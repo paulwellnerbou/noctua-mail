@@ -95,9 +95,29 @@ export {
   hasPendingMovesForFolder,
   relocateMovedMessage,
   stageMessageMoves,
-  updateMessageFolder,
   updateMessagesFolderPrefix
 } from "./db/messages";
+import { updateMessageFolder as _updateMessageFolderImpl } from "./db/messages";
+
+/**
+ * Thin wrapper that delegates to the extracted implementation. Defined
+ * as a concrete function binding on the public `@/lib/db` namespace so
+ * that tests using Bun's `mock.module("@/lib/db", …)` can override the
+ * symbol in isolation; Bun's mock registry persists for the lifetime of
+ * the worker and mutates the target namespace's live bindings in place,
+ * so the alternative — a plain re-export — leaves every sibling module
+ * importing from `./db/messages/move` through the same live binding
+ * vulnerable to cross-file mock leakage.
+ */
+export function updateMessageFolder(
+  accountId: string,
+  messageId: string,
+  folderId: string,
+  mailboxPath: string,
+  imapUid?: number | null
+) {
+  return _updateMessageFolderImpl(accountId, messageId, folderId, mailboxPath, imapUid);
+}
 
 export {
   bulkUpdateMessageFlags,
