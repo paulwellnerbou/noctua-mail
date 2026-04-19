@@ -81,13 +81,9 @@ import {
   IconButton,
   Text
 } from "@radix-ui/themes";
-import MessageMenu from "./mailclient/message/MessageMenu";
-import MessageQuickActions from "./mailclient/message/MessageQuickActions";
 import MessageViewOrchestrator, {
   type MessageViewOrchestratorHandle
 } from "./mailclient/message/MessageViewOrchestrator";
-import MarkdownPanel from "./mailclient/message/MarkdownPanel";
-import MessageSourcePanel from "./mailclient/message/MessageSourcePanel";
 import { TODO_FLAG, DONE_FLAG } from "@/lib/messageFlags";
 import { mergeLocalOnlyMessageState } from "@/lib/messageLocalState";
 import { EVENT_GROUP_BY, INVITE_DECK_GROUP_BY } from "@/lib/messageGrouping";
