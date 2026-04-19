@@ -22,3 +22,11 @@ export {
   listMessageFileRefs,
   listMessageFileRefsByMessageIds
 } from "./retrieval";
+
+export {
+  deleteMessageByFolderUid,
+  deleteMessageById,
+  deleteMessagesByFolderPrefix,
+  deleteMessagesByIds,
+  deleteMessagesWithFilesByIds
+} from "./delete";
