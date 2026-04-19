@@ -54,10 +54,19 @@ import { buildAccountMessageTopicSuggestionExplainPath } from "@/lib/accountApiP
  * from both maps via the `evictZoomAndFontScale` method exposed on
  * `MessageViewOrchestratorHandle`.
  *
+ * Owns the per-message `messageTabs` map (which body panel — html /
+ * text / markdown / source — is currently selected for each message).
+ * The primary writer is `ThreadMessageCard`, which receives the map
+ * and its setter through `messageCardProps`. `ComposeOrchestrator`
+ * also reads the selection when opening a reply / forward to carry
+ * the user's preferred rendering across to the compose editor; that
+ * cross-pane read is exposed as `getMessageTab` on the handle and
+ * returns the normalized editor-eligible value (excluding "source") or
+ * undefined. `evictMessageTabs` on the handle clears per-id entries
+ * from the shell's `evictMessageCaches` helper.
+ *
  * The rest of the message-view-ish state lives at the MailClient shell
  * because each piece has consumers outside this pane:
- *   - `messageTabs` — `ComposeOrchestrator` reads it to pick a preferred
- *     compose tab.
  *   - `collapsedMessages` — a shell-level effect auto-collapses siblings
  *     on compose-thread-focus change, and `scheduleActiveMessageScroll`
  *     reads `collapsedMessagesRef` to decide whether to settle the
@@ -79,6 +88,19 @@ export type MessageViewOrchestratorHandle = {
   // `evictMessageCaches` helper when a message is moved/deleted/
   // refetched so stale per-id overrides don't outlive the message.
   evictZoomAndFontScale: (messageIds: string[]) => void;
+  // Clears per-id entries from the orchestrator-local `messageTabs` map.
+  // Separate from `evictZoomAndFontScale` because `messageTabs` tracks
+  // the user's selected body panel (a semantic choice) while the zoom
+  // and font-scale maps track visual overrides — the shell's
+  // `evictMessageCaches` helper fans out to both.
+  evictMessageTabs: (messageIds: string[]) => void;
+  // Returns the currently selected body panel for `messageId` if it is
+  // one of the editor-eligible values ("html", "text", "markdown") —
+  // "source" and "unset" both collapse to undefined because they do
+  // not translate into a compose-editor preference. Consumed by
+  // `ComposeOrchestrator` when opening a reply / forward so the compose
+  // surface can match the rendering the user was just looking at.
+  getMessageTab: (messageId: string) => "html" | "text" | "markdown" | undefined;
 };
 
 export type MessageViewOrchestratorHeaderInputs = {
@@ -139,6 +161,8 @@ export type MessageViewOrchestratorBodyInputs = {
     | "adjustMessageZoom"
     | "resetMessageZoom"
     | "renderMarkdownPanel"
+    | "messageTabs"
+    | "setMessageTabs"
   >;
 };
 
@@ -160,6 +184,14 @@ function MessageViewOrchestratorImpl(
   const [threadViewMode, setThreadViewMode] = useState<"full" | "compact">("compact");
   const [messageFontScale, setMessageFontScale] = useState<Record<string, number>>({});
   const [messageZoom, setMessageZoom] = useState<Record<string, number>>({});
+  const [messageTabs, setMessageTabs] = useState<
+    Record<string, "html" | "text" | "markdown" | "source">
+  >({});
+  // Ref mirror of `messageTabs` so the stable `getMessageTab` handle
+  // method (created with empty deps) reads the latest map without
+  // rebuilding the handle object on every tab change.
+  const messageTabsRef = useRef(messageTabs);
+  messageTabsRef.current = messageTabs;
 
   const renderMarkdownPanel = useCallback(
     (markdownBody: string | undefined, messageId: string) =>
@@ -203,6 +235,26 @@ function MessageViewOrchestratorImpl(
         };
         setMessageFontScale(evict);
         setMessageZoom(evict);
+      },
+      evictMessageTabs: (messageIds: string[]) => {
+        if (messageIds.length === 0) return;
+        const idSet = new Set(messageIds);
+        setMessageTabs((prev) => {
+          // Lazily allocate the new map only if at least one id is
+          // actually present, so no-op evictions don't churn memory.
+          let next: Record<string, "html" | "text" | "markdown" | "source"> | undefined;
+          idSet.forEach((id) => {
+            if (id in prev) {
+              next ??= { ...prev };
+              delete next[id];
+            }
+          });
+          return next ?? prev;
+        });
+      },
+      getMessageTab: (messageId: string) => {
+        const tab = messageTabsRef.current[messageId];
+        return tab === "html" || tab === "markdown" || tab === "text" ? tab : undefined;
       }
     }),
     []
@@ -325,10 +377,12 @@ function MessageViewOrchestratorImpl(
     setTopicSuggestionExplanation(null);
     setTopicSuggestionExplanationThreadId("");
     // Message ids are only unique within an account, so clear per-message
-    // font + zoom overrides to prevent one account's UI settings from
-    // leaking onto a coincidentally-matching id in another account.
+    // font + zoom overrides and the selected body-panel map to prevent
+    // one account's UI settings from leaking onto a coincidentally-
+    // matching id in another account.
     setMessageFontScale({});
     setMessageZoom({});
+    setMessageTabs({});
   }, [activeAccountId]);
 
   return (
@@ -440,7 +494,9 @@ function MessageViewOrchestratorImpl(
                   messageZoom,
                   adjustMessageZoom,
                   resetMessageZoom,
-                  renderMarkdownPanel
+                  renderMarkdownPanel,
+                  messageTabs,
+                  setMessageTabs
                 }}
               />
             </>
