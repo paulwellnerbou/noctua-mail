@@ -1,7 +1,7 @@
 "use client";
 
 import type React from "react";
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Flex, SegmentedControl } from "@radix-ui/themes";
 import type { Message, Topic } from "@/lib/data";
 
@@ -13,6 +13,7 @@ import TopicBadge from "../TopicBadge";
 import threadViewStyles from "./ThreadView.module.css";
 import type { ComposeOrchestratorHandle } from "../composition/ComposeOrchestrator";
 import type { TopicSuggestionExplanation } from "./types";
+import { buildAccountMessageTopicSuggestionExplainPath } from "@/lib/accountApiPaths";
 
 /**
  * The message-view pane: toolbar + optional thread-subject/topic header
@@ -22,6 +23,17 @@ import type { TopicSuggestionExplanation } from "./types";
  * SegmentedControl in the header toggles it and the `ThreadView`
  * subtree reads it through `messageCardProps` — no consumer outside
  * this component. Default "compact".
+ *
+ * Owns the topic-suggestion explanation popover state (`open`,
+ * `loading`, `error`, `explanation`, and the in-flight `threadId` used
+ * to dedupe reloads) because the popover only appears inside the
+ * thread-subject header rendered here, and the only writer is the
+ * `handleLoadTopicSuggestionExplanation` callback also defined here.
+ * The popover resets whenever `activeMessage?.threadId` changes, via a
+ * local effect — the `activeMessage` arrives through `header`.
+ * `handleLoadTopicSuggestionExplanation` takes `apiFetch` and
+ * `activeAccountId` as inputs (both shell-owned singletons) to hit the
+ * explain endpoint without depending on the shell's callback identity.
  *
  * The rest of the message-view-ish state lives at the MailClient shell
  * because each piece has consumers outside this pane:
@@ -35,10 +47,10 @@ import type { TopicSuggestionExplanation } from "./types";
  *     which is assembled at the shell.
  *   - `messageZoom` and its setters — `evictMessageCaches` (shell-level,
  *     cross-pane) resets the zoom.
- *   - Topic-explanation state and handlers — the API surface spans the
- *     shell's `handleLoadTopicSuggestionExplanation` and
- *     `handleToggleActiveMessageTopic`, which touch data fetchers and
- *     active-message state the shell owns.
+ *   - Thread-topic assignment (`onToggleTopic`) — mutates
+ *     `messageTopicsById` at the shell and refreshes active-topic-mode
+ *     results; the orchestrator calls it with the active message to
+ *     toggle a topic.
  *   - `inlineComposePlacement` and the `ComposeOrchestratorHandle` that
  *     services it — the handle ref sits at the shell and the placement
  *     memo depends on the compose mirror there. This orchestrator calls
@@ -47,27 +59,23 @@ import type { TopicSuggestionExplanation } from "./types";
  */
 
 export type MessageViewOrchestratorHeaderInputs = {
-  // Used to compute thread topics / fallback thread-subject source.
+  // Used to compute thread topics / fallback thread-subject source and
+  // also to reset the topic-explanation popover on active-thread change.
   activeMessage: Message | null;
   // The visible thread messages — drives root-subject resolution and the
   // visible-topic-suggestions fallback chain.
   activeThread: Message[];
   getAssignedThreadTopics: (message: Message) => Topic[];
-  // Topic-explanation popover state. Still owned by MailClient for phase
-  // 5a — see the class-level deviation note.
-  topicSuggestionExplanationOpen: boolean;
-  topicSuggestionExplanationLoading: boolean;
-  topicSuggestionExplanationError: string;
-  topicSuggestionExplanation: TopicSuggestionExplanation | null;
-  setTopicSuggestionExplanationOpen: React.Dispatch<React.SetStateAction<boolean>>;
-  handleLoadTopicSuggestionExplanation: (threadId: string) => Promise<void> | void;
-  handleToggleActiveMessageTopic: (topicId: string) => void;
+  // Thread-topic toggle callback. The orchestrator binds it to the
+  // active message; MailClient owns the underlying `messageTopicsById`
+  // map and the refresh of active-topic-mode results.
+  onToggleTopic: (message: Message, topicId: string) => void | Promise<void>;
 };
 
 export type MessageViewOrchestratorBodyInputs = {
   // Inline-compose placement is computed in MailClient (depends on the
-  // compose handle ref and compose mirror). For phase 5a the orchestrator
-  // just consumes the resolved placement.
+  // compose handle ref and compose mirror). The orchestrator consumes
+  // the resolved placement.
   composeHandleRef: React.MutableRefObject<ComposeOrchestratorHandle | null>;
   inlineComposePlacement: {
     showComposeAtTop: boolean;
@@ -81,9 +89,13 @@ export type MessageViewOrchestratorBodyInputs = {
   threadContentErrorById: Record<string, string>;
   composeDraftId: string | null;
   activeAccountId: string;
+  // Client-id-injecting fetch wrapper owned by MailClient; used here by
+  // the topic-suggestion-explanation loader to hit the per-account
+  // explain endpoint.
+  apiFetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
   // The base message-id -> message map. The orchestrator enhances this
-  // locally with the active thread (so "In Reply To" links resolve when
-  // viewing from Drafts etc.), mirroring the pre-split behavior.
+  // locally with the active thread so "In Reply To" links resolve when
+  // viewing from any folder (e.g. Drafts).
   messageByMessageId: Map<string, Message>;
   // Everything else needed by ThreadMessageCard — threaded through
   // unchanged. `message` is injected per-row by ThreadView;
@@ -121,13 +133,7 @@ export default function MessageViewOrchestrator({
     activeMessage,
     activeThread,
     getAssignedThreadTopics,
-    topicSuggestionExplanationOpen,
-    topicSuggestionExplanationLoading,
-    topicSuggestionExplanationError,
-    topicSuggestionExplanation,
-    setTopicSuggestionExplanationOpen,
-    handleLoadTopicSuggestionExplanation,
-    handleToggleActiveMessageTopic
+    onToggleTopic
   } = header;
 
   const {
@@ -140,9 +146,106 @@ export default function MessageViewOrchestrator({
     threadContentErrorById,
     composeDraftId,
     activeAccountId,
+    apiFetch,
     messageByMessageId,
     messageCardProps
   } = body;
+
+  const [topicSuggestionExplanationOpen, setTopicSuggestionExplanationOpen] = useState(false);
+  const [topicSuggestionExplanationLoading, setTopicSuggestionExplanationLoading] = useState(false);
+  const [topicSuggestionExplanationError, setTopicSuggestionExplanationError] = useState("");
+  const [topicSuggestionExplanation, setTopicSuggestionExplanation] =
+    useState<TopicSuggestionExplanation | null>(null);
+  const [topicSuggestionExplanationThreadId, setTopicSuggestionExplanationThreadId] = useState("");
+  // Tracks the most recently requested thread-id so responses arriving
+  // out of order (user switched threads mid-fetch) can bail before
+  // overwriting explanation state with a stale result.
+  const explanationRequestThreadIdRef = useRef("");
+
+  const handleLoadTopicSuggestionExplanation = useCallback(async (threadId: string) => {
+    const normalizedThreadId = threadId.trim();
+    if (!normalizedThreadId) return;
+    // Dedupe only when the same thread already has a result cached or a
+    // request in flight. An error from a prior attempt must NOT block a
+    // retry — the user needs a way to recover from transient failures.
+    if (
+      topicSuggestionExplanationThreadId === normalizedThreadId &&
+      (topicSuggestionExplanation || topicSuggestionExplanationLoading)
+    ) {
+      return;
+    }
+    explanationRequestThreadIdRef.current = normalizedThreadId;
+    setTopicSuggestionExplanationThreadId(normalizedThreadId);
+    setTopicSuggestionExplanationLoading(true);
+    setTopicSuggestionExplanationError("");
+    setTopicSuggestionExplanation(null);
+    try {
+      const params = new URLSearchParams({ threadId: normalizedThreadId });
+      const res = await apiFetch(
+        buildAccountMessageTopicSuggestionExplainPath(activeAccountId, params),
+        { cache: "no-store" }
+      );
+      const data = await res.json().catch(() => ({}));
+      // Bail if the user has switched to a different thread while we were
+      // awaiting the response; writing state now would clobber the
+      // newer request.
+      if (explanationRequestThreadIdRef.current !== normalizedThreadId) return;
+      if (!res.ok || !data?.ok) {
+        setTopicSuggestionExplanationError(
+          typeof data?.message === "string" ? data.message : "Failed to load explanation."
+        );
+        return;
+      }
+      setTopicSuggestionExplanation((data.explanation ?? null) as TopicSuggestionExplanation | null);
+    } catch {
+      if (explanationRequestThreadIdRef.current !== normalizedThreadId) return;
+      setTopicSuggestionExplanationError("Failed to load explanation.");
+    } finally {
+      if (explanationRequestThreadIdRef.current === normalizedThreadId) {
+        setTopicSuggestionExplanationLoading(false);
+      }
+    }
+  }, [
+    activeAccountId,
+    apiFetch,
+    topicSuggestionExplanation,
+    topicSuggestionExplanationLoading,
+    topicSuggestionExplanationThreadId
+  ]);
+
+  const handleToggleActiveMessageTopic = useCallback(
+    (topicId: string) => {
+      if (!activeMessage) return;
+      void onToggleTopic(activeMessage, topicId);
+    },
+    [activeMessage, onToggleTopic]
+  );
+
+  useEffect(() => {
+    // Close the popover when the active thread or account changes.
+    // Also invalidate the in-flight fetch key so any pending response
+    // bails before writing state, and clear loading/error so a bailed
+    // response can't leave a stuck spinner or a stale error message
+    // behind. The cached explanation
+    // (`topicSuggestionExplanation` + `topicSuggestionExplanationThreadId`)
+    // is preserved across thread switches within the same account so
+    // reopening the popover on a previously-explained thread can
+    // short-circuit via the dedupe guard in
+    // `handleLoadTopicSuggestionExplanation`.
+    explanationRequestThreadIdRef.current = "";
+    setTopicSuggestionExplanationOpen(false);
+    setTopicSuggestionExplanationLoading(false);
+    setTopicSuggestionExplanationError("");
+  }, [activeMessage?.threadId, activeAccountId]);
+
+  useEffect(() => {
+    // Thread ids are only unique within an account. On account change,
+    // wipe the cached explanation and its threadId so the dedupe guard
+    // can't short-circuit on a coincidental thread-id match and show one
+    // account's explanation under another account's thread.
+    setTopicSuggestionExplanation(null);
+    setTopicSuggestionExplanationThreadId("");
+  }, [activeAccountId]);
 
   return (
     <MessageViewPane
