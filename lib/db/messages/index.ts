@@ -30,3 +30,14 @@ export {
   deleteMessagesByIds,
   deleteMessagesWithFilesByIds
 } from "./delete";
+
+export {
+  type RelocateMovedMessageResult,
+  type StagedMessageMove,
+  getPendingMoveSourceUids,
+  hasPendingMovesForFolder,
+  relocateMovedMessage,
+  stageMessageMoves,
+  updateMessageFolder,
+  updateMessagesFolderPrefix
+} from "./move";

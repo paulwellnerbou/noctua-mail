@@ -96,6 +96,17 @@ export {
   deleteMessagesWithFilesByIds
 } from "./db/messages";
 
+export {
+  type RelocateMovedMessageResult,
+  type StagedMessageMove,
+  getPendingMoveSourceUids,
+  hasPendingMovesForFolder,
+  relocateMovedMessage,
+  stageMessageMoves,
+  updateMessageFolder,
+  updateMessagesFolderPrefix
+} from "./db/messages";
+
 import {
   addTopicSignalExclusion,
   clearTopicSignalExclusions,
@@ -1733,274 +1744,6 @@ export async function getLatestMessageUid(accountId: string, mailboxPath?: strin
   return typeof row?.maxUid === "number" ? row.maxUid : null;
 }
 
-export async function getPendingMoveSourceUids(accountId: string, sourceFolderId: string) {
-  const normalizedSourceFolderId = sourceFolderId.trim();
-  if (!normalizedSourceFolderId) return new Set<number>();
-  const db = await getAccountDb(accountId);
-  const rows = db
-    .prepare(
-      `SELECT pendingMoveSourceUid
-       FROM messages
-       WHERE accountId = ?
-         AND pendingMoveSourceFolderId = ?
-         AND pendingMoveSourceUid IS NOT NULL`
-    )
-    .all(accountId, normalizedSourceFolderId) as Array<{
-    pendingMoveSourceUid?: number | null;
-  }>;
-  return new Set(
-    rows
-      .map((row) => row.pendingMoveSourceUid)
-      .filter((uid): uid is number => typeof uid === "number" && Number.isFinite(uid))
-  );
-}
-
-export async function hasPendingMovesForFolder(accountId: string, folderId: string) {
-  const normalizedFolderId = folderId.trim();
-  if (!normalizedFolderId) return false;
-  const db = await getAccountDb(accountId);
-  const row = db
-    .prepare(
-      `SELECT 1
-       FROM messages
-       WHERE accountId = ?
-         AND (
-           pendingMoveSourceFolderId = ?
-           OR (folderId = ? AND pendingMoveSourceFolderId IS NOT NULL)
-         )
-       LIMIT 1`
-    )
-    .get(accountId, normalizedFolderId, normalizedFolderId) as
-    | { 1?: number }
-    | undefined;
-  return Boolean(row);
-}
-
-export async function updateMessageFolder(
-  accountId: string,
-  messageId: string,
-  folderId: string,
-  mailboxPath: string,
-  imapUid?: number | null
-) {
-  return withDbWriteRetry("updateMessageFolder", async () => {
-    const db = await getAccountDb(accountId);
-    if (imapUid === null) {
-      db.prepare(
-        `UPDATE messages
-         SET folderId = ?,
-             mailboxPath = ?,
-             imapUid = NULL,
-             pendingMoveSourceFolderId = NULL,
-             pendingMoveSourceMailboxPath = NULL,
-             pendingMoveSourceUid = NULL,
-             pendingMoveStartedAt = NULL
-         WHERE accountId = ? AND id = ?`
-      ).run(folderId, mailboxPath, accountId, messageId);
-      return;
-    }
-    if (typeof imapUid === "number" && Number.isFinite(imapUid)) {
-      db.prepare(
-        `UPDATE messages
-         SET folderId = ?,
-             mailboxPath = ?,
-             imapUid = ?,
-             pendingMoveSourceFolderId = NULL,
-             pendingMoveSourceMailboxPath = NULL,
-             pendingMoveSourceUid = NULL,
-             pendingMoveStartedAt = NULL
-         WHERE accountId = ? AND id = ?`
-      ).run(folderId, mailboxPath, imapUid, accountId, messageId);
-      return;
-    }
-    db.prepare(
-      `UPDATE messages
-       SET folderId = ?,
-           mailboxPath = ?,
-           pendingMoveSourceFolderId = NULL,
-           pendingMoveSourceMailboxPath = NULL,
-           pendingMoveSourceUid = NULL,
-           pendingMoveStartedAt = NULL
-       WHERE accountId = ? AND id = ?`
-    ).run(folderId, mailboxPath, accountId, messageId);
-  });
-}
-
-export type StagedMessageMove = {
-  messageId: string;
-  sourceFolderId: string;
-  sourceMailboxPath: string;
-  sourceUid: number;
-  destinationFolderId: string;
-  destinationMailboxPath: string;
-};
-
-export async function stageMessageMoves(params: {
-  accountId: string;
-  messageIds: string[];
-  destinationFolderId: string;
-  destinationMailboxPath: string;
-}) {
-  const { accountId, messageIds, destinationFolderId, destinationMailboxPath } = params;
-  const uniqueIds = Array.from(new Set(messageIds.map((id) => id.trim()).filter(Boolean)));
-  if (uniqueIds.length === 0) return [] as StagedMessageMove[];
-  return withDbWriteRetry("stageMessageMoves", async () => {
-    const db = await getAccountDb(accountId);
-    const pendingMoveStartedAt = Date.now();
-    const rows = db
-      .prepare(
-        `SELECT id, folderId, mailboxPath, imapUid, pendingMoveSourceFolderId
-         FROM messages
-         WHERE accountId = ? AND id IN (${uniqueIds.map(() => "?").join(",")})`
-      )
-      .all(accountId, ...uniqueIds) as Array<{
-      id: string;
-      folderId: string;
-      mailboxPath?: string | null;
-      imapUid?: number | null;
-      pendingMoveSourceFolderId?: string | null;
-    }>;
-    const updateMessage = db.prepare(
-      `UPDATE messages
-       SET folderId = ?,
-           mailboxPath = ?,
-           imapUid = NULL,
-           pendingMoveSourceFolderId = ?,
-           pendingMoveSourceMailboxPath = ?,
-           pendingMoveSourceUid = ?,
-           pendingMoveStartedAt = ?
-       WHERE accountId = ? AND id = ?`
-    );
-    const staged: StagedMessageMove[] = [];
-    db.transaction(() => {
-      rows.forEach((row) => {
-        if (
-          typeof row.imapUid !== "number" ||
-          !Number.isFinite(row.imapUid) ||
-          !row.mailboxPath ||
-          !row.folderId
-        ) {
-          return;
-        }
-        if (
-          row.folderId === destinationFolderId &&
-          row.mailboxPath === destinationMailboxPath
-        ) {
-          return;
-        }
-        if (row.pendingMoveSourceFolderId) {
-          return;
-        }
-        updateMessage.run(
-          destinationFolderId,
-          destinationMailboxPath,
-          row.folderId,
-          row.mailboxPath,
-          row.imapUid,
-          pendingMoveStartedAt,
-          accountId,
-          row.id
-        );
-        staged.push({
-          messageId: row.id,
-          sourceFolderId: row.folderId,
-          sourceMailboxPath: row.mailboxPath,
-          sourceUid: row.imapUid,
-          destinationFolderId,
-          destinationMailboxPath
-        });
-      });
-    })();
-    return staged;
-  });
-}
-
-export type RelocateMovedMessageResult = {
-  previousId: string;
-  nextId: string;
-  attachmentIds: string[];
-  changed: boolean;
-};
-
-export async function relocateMovedMessage(params: {
-  accountId: string;
-  previousId: string;
-  destinationFolderId: string;
-  destinationMailboxPath: string;
-  destinationUid?: number | null;
-}) {
-  const {
-    accountId,
-    previousId,
-    destinationFolderId,
-    destinationMailboxPath,
-    destinationUid
-  } = params;
-  return withDbWriteRetry("relocateMovedMessage", async () => {
-    const db = await getAccountDb(accountId);
-    const normalizedPreviousId = previousId.trim();
-    const existing = db
-      .prepare(`SELECT id FROM messages WHERE accountId = ? AND id = ?`)
-      .get(accountId, normalizedPreviousId) as { id: string } | undefined;
-    if (!existing) return null;
-
-    const attachmentIds = (db
-      .prepare(`SELECT id FROM attachments WHERE messageId = ?`)
-      .all(normalizedPreviousId) as Array<{ id?: string | null }>)
-      .map((row) => (row.id ? String(row.id) : ""))
-      .filter(Boolean);
-    if (destinationUid === null) {
-      db.prepare(
-        `UPDATE messages
-         SET folderId = ?,
-             mailboxPath = ?,
-             imapUid = NULL,
-             pendingMoveSourceFolderId = NULL,
-             pendingMoveSourceMailboxPath = NULL,
-             pendingMoveSourceUid = NULL,
-             pendingMoveStartedAt = NULL
-         WHERE accountId = ? AND id = ?`
-      ).run(destinationFolderId, destinationMailboxPath, accountId, normalizedPreviousId);
-    } else if (typeof destinationUid === "number" && Number.isFinite(destinationUid)) {
-      db.prepare(
-        `UPDATE messages
-         SET folderId = ?,
-             mailboxPath = ?,
-             imapUid = ?,
-             pendingMoveSourceFolderId = NULL,
-             pendingMoveSourceMailboxPath = NULL,
-             pendingMoveSourceUid = NULL,
-             pendingMoveStartedAt = NULL
-         WHERE accountId = ? AND id = ?`
-      ).run(
-        destinationFolderId,
-        destinationMailboxPath,
-        destinationUid,
-        accountId,
-        normalizedPreviousId
-      );
-    } else {
-      db.prepare(
-        `UPDATE messages
-         SET folderId = ?,
-             mailboxPath = ?,
-             pendingMoveSourceFolderId = NULL,
-             pendingMoveSourceMailboxPath = NULL,
-             pendingMoveSourceUid = NULL,
-             pendingMoveStartedAt = NULL
-         WHERE accountId = ? AND id = ?`
-      ).run(destinationFolderId, destinationMailboxPath, accountId, normalizedPreviousId);
-    }
-
-    return {
-      previousId: normalizedPreviousId,
-      nextId: normalizedPreviousId,
-      attachmentIds,
-      changed: false
-    } satisfies RelocateMovedMessageResult;
-  });
-}
-
 export async function updateMessageFlags(
   accountId: string,
   messageId: string,
@@ -2505,24 +2248,6 @@ export async function listRecipientSuggestions(
       return value.toLowerCase().includes(normalizedQuery);
     })
     .slice(0, limit);
-}
-
-export async function updateMessagesFolderPrefix(
-  accountId: string,
-  oldPrefix: string,
-  newPrefix: string
-) {
-  return withDbWriteRetry("updateMessagesFolderPrefix", async () => {
-    const db = await getAccountDb(accountId);
-    const oldFull = `${accountId}:${oldPrefix}`;
-    const newFull = `${accountId}:${newPrefix}`;
-    db.prepare(
-      `UPDATE messages
-       SET folderId = REPLACE(folderId, ?, ?),
-           mailboxPath = REPLACE(mailboxPath, ?, ?)
-       WHERE accountId = ? AND folderId LIKE ?`
-    ).run(oldFull, newFull, oldPrefix, newPrefix, accountId, `${oldFull}%`);
-  });
 }
 
 export async function recomputeCategoriesForAccount(
