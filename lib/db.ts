@@ -1,8 +1,6 @@
 import { simpleParser } from "mailparser";
-import { getMainDbPath } from "./runtimePaths";
 import { buildAccountAttachmentPath } from "./accountApiPaths";
 import type {
-  Account,
   AccountSettings,
   Attachment,
   CalendarEvent,
@@ -12,36 +10,18 @@ import type {
   CalendarEventSourceType,
   MessageCalendarInviteState,
   CalendarReminder,
-  Folder,
-  InviteCode,
-  MailboxState,
   Message,
   Topic,
-  TopicColor,
-  McpTokenMetadata,
-  User
+  TopicColor
 } from "./data";
-import { applyCachedCredentials } from "./credentials";
-import {
-  mapAccountRow,
-  mapInviteRow,
-  mapMcpTokenRow,
-  mapUserRow,
-  mergeAccount,
-  persistAccountRow,
-  resolveAccountDbPathForPersist,
-  type StoredMcpTokenRow
-} from "./db/rowParsers";
 import {
   ensureMessageCalendarEventOptionalColumns
 } from "./db/schema";
 import {
-  areEquivalentDbPaths,
-  cleanupAccountLifecycleArtifacts,
-  closeAccountDbConnection,
   getAccountDb,
   getDb
 } from "./db/connection";
+import { getAccountById } from "./db/accounts";
 export {
   closeAllDbConnections,
   initializeMasterDb,
@@ -498,379 +478,41 @@ function pruneThreadTopicsWithoutMessages(db: any, accountId: string, threadIds:
 
 export type GroupMeta = { key: string; label: string; count: number };
 
-export async function getAccounts() {
-  const db = await getDb();
-  const rows = db.prepare(`SELECT * FROM accounts`).all() as any[];
-  return rows.map((row) => applyCachedCredentials(mapAccountRow(row))) as Account[];
-}
+export {
+  deleteAccountControlPlane,
+  getAccountById,
+  getAccounts,
+  getAccountsForUser,
+  patchAccount,
+  saveAccounts,
+  upsertAccount
+} from "./db/accounts";
 
-export async function getAccountsForUser(userId: string) {
-  const db = await getDb();
-  const rows = db
-    .prepare(
-      `SELECT DISTINCT a.*
-       FROM accounts a
-       LEFT JOIN user_accounts ua ON ua.accountId = a.id
-       WHERE ua.userId = ? OR a.ownerUserId = ?
-       ORDER BY a.id ASC`
-    )
-    .all(userId, userId) as any[];
-  return rows.map((row) => applyCachedCredentials(mapAccountRow(row))) as Account[];
-}
+export {
+  addUserAccountLink,
+  getUserAccounts,
+  getUserById,
+  getUsers,
+  listAccessibleAccountIdsForUser,
+  saveUserAccounts,
+  saveUsers
+} from "./db/users";
 
-export async function saveAccounts(nextAccounts: Account[]) {
-  return withDbWriteRetry("saveAccounts", async () => {
-    const db = await getDb();
-    const existingPaths = new Map<string, string | null>(
-      (
-        db.prepare(`SELECT id, dbPath FROM accounts`).all() as Array<{
-          id: string;
-          dbPath?: string | null;
-        }>
-      ).map((row) => [row.id, row.dbPath ?? null])
-    );
-    db.transaction(() => {
-      db.exec(`DELETE FROM accounts`);
-      nextAccounts.forEach((account) => {
-        persistAccountRow(db, account, existingPaths.get(account.id));
-      });
-    })();
-    const newAccountIds = nextAccounts
-      .map((account) => account.id)
-      .filter((accountId) => !existingPaths.has(accountId));
-    await Promise.all(newAccountIds.map((accountId) => getCategoryLinearModel(accountId)));
-  });
-}
+export {
+  deleteMcpToken,
+  getMcpTokenByHash,
+  insertMcpToken,
+  listMcpTokens,
+  touchMcpTokenLastUsed,
+  type StoredMcpTokenRecord
+} from "./db/mcpTokens";
 
-export async function getAccountById(accountId: string) {
-  const db = await getDb();
-  const row = db.prepare(`SELECT * FROM accounts WHERE id = ?`).get(accountId) as any;
-  if (!row) return null;
-  return applyCachedCredentials(mapAccountRow(row));
-}
-
-export async function upsertAccount(account: Account) {
-  return withDbWriteRetry("upsertAccount", async () => {
-    const db = await getDb();
-    const existing = db
-      .prepare(`SELECT dbPath FROM accounts WHERE id = ?`)
-      .get(account.id) as { dbPath?: string | null } | undefined;
-    db.transaction(() => {
-      persistAccountRow(db, account, existing?.dbPath ?? null);
-    })();
-    if (!existing) {
-      await getCategoryLinearModel(account.id);
-    }
-    return applyCachedCredentials(account);
-  });
-}
-
-export async function patchAccount(accountId: string, payload: Partial<Account>) {
-  return withDbWriteRetry("patchAccount", async () => {
-    const db = await getDb();
-    const row = db.prepare(`SELECT * FROM accounts WHERE id = ?`).get(accountId) as any;
-    if (!row) return null;
-    const current = mapAccountRow(row);
-    const next = mergeAccount(current, payload);
-    db.transaction(() => {
-      persistAccountRow(db, next, row.dbPath ?? null);
-    })();
-    return applyCachedCredentials(next);
-  });
-}
-
-export async function deleteAccountControlPlane(accountId: string) {
-  return withDbWriteRetry("deleteAccountControlPlane", async () => {
-    const db = await getDb();
-    const row = db
-      .prepare(`SELECT id, dbPath FROM accounts WHERE id = ?`)
-      .get(accountId) as { id?: string; dbPath?: string | null } | undefined;
-    if (!row?.id) return false;
-
-    const dbPath = resolveAccountDbPathForPersist(accountId, row.dbPath ?? null);
-    const sharedPathRow = db
-      .prepare(`SELECT COUNT(*) as count FROM accounts WHERE id <> ? AND dbPath = ?`)
-      .get(accountId, dbPath) as { count: number } | undefined;
-    const mainDbPath = getMainDbPath();
-    const deleteShardFile =
-      (sharedPathRow?.count ?? 0) === 0 && !(await areEquivalentDbPaths(dbPath, mainDbPath));
-
-    closeAccountDbConnection(dbPath);
-
-    db.transaction(() => {
-      db.prepare(`DELETE FROM user_accounts WHERE accountId = ?`).run(accountId);
-      db.prepare(`DELETE FROM mcp_tokens WHERE accountId = ?`).run(accountId);
-      db.prepare(`DELETE FROM accounts WHERE id = ?`).run(accountId);
-    })();
-
-    await cleanupAccountLifecycleArtifacts(accountId, dbPath, deleteShardFile);
-    return true;
-  });
-}
-
-// Users
-export async function getUsers() {
-  const db = await getDb();
-  const rows = db.prepare(`SELECT * FROM users`).all() as any[];
-  return rows.map(mapUserRow);
-}
-
-export async function getUserById(userId: string) {
-  const db = await getDb();
-  const row = db.prepare(`SELECT * FROM users WHERE id = ?`).get(userId) as any;
-  if (!row) return null;
-  return mapUserRow(row);
-}
-
-export async function saveUsers(users: User[]) {
-  return withDbWriteRetry("saveUsers", async () => {
-    const db = await getDb();
-    const insert = db.prepare(
-      `INSERT OR REPLACE INTO users (id, email, role, createdAt) VALUES (?, ?, ?, ?)`
-    );
-    db.transaction(() => {
-      db.exec(`DELETE FROM users`);
-      users.forEach((u) => insert.run(u.id, u.email, u.role, u.createdAt));
-    })();
-  });
-}
-
-export async function getUserAccounts() {
-  const db = await getDb();
-  const rows = db.prepare(`SELECT * FROM user_accounts`).all() as any[];
-  return rows as { userId: string; accountId: string }[];
-}
-
-export async function listAccessibleAccountIdsForUser(userId: string) {
-  const db = await getDb();
-  const rows = db
-    .prepare(
-      `SELECT DISTINCT a.id as id
-       FROM accounts a
-       LEFT JOIN user_accounts ua ON ua.accountId = a.id
-       WHERE ua.userId = ? OR a.ownerUserId = ?
-       ORDER BY a.id ASC`
-    )
-    .all(userId, userId) as Array<{ id?: string | null }>;
-  return rows
-    .map((row) => String(row.id ?? "").trim())
-    .filter(Boolean);
-}
-
-export async function saveUserAccounts(items: { userId: string; accountId: string }[]) {
-  return withDbWriteRetry("saveUserAccounts", async () => {
-    const db = await getDb();
-    const insert = db.prepare(
-      `INSERT OR REPLACE INTO user_accounts (userId, accountId) VALUES (?, ?)`
-    );
-    db.transaction(() => {
-      db.exec(`DELETE FROM user_accounts`);
-      items.forEach((it) => insert.run(it.userId, it.accountId));
-    })();
-  });
-}
-
-export async function addUserAccountLink(userId: string, accountId: string) {
-  return withDbWriteRetry("addUserAccountLink", async () => {
-    const db = await getDb();
-    db.prepare(`INSERT OR REPLACE INTO user_accounts (userId, accountId) VALUES (?, ?)`).run(
-      userId,
-      accountId
-    );
-  });
-}
-
-export type StoredMcpTokenRecord = McpTokenMetadata & {
-  tokenHash: string;
-};
-
-export async function listMcpTokens(accountId: string) {
-  const db = await getDb();
-  const rows = db
-    .prepare(
-      `SELECT id, accountId, createdByUserId, label, tokenSuffix, createdAt, expiresAt, lastUsedAt
-       FROM mcp_tokens
-       WHERE accountId = ?
-       ORDER BY createdAt DESC, id ASC`
-    )
-    .all(accountId) as StoredMcpTokenRow[];
-  return rows.map(mapMcpTokenRow);
-}
-
-export async function getMcpTokenByHash(tokenHash: string): Promise<StoredMcpTokenRecord | null> {
-  const db = await getDb();
-  const row = db
-    .prepare(
-      `SELECT id, accountId, createdByUserId, label, tokenHash, tokenSuffix, createdAt, expiresAt, lastUsedAt
-       FROM mcp_tokens
-       WHERE tokenHash = ?
-       LIMIT 1`
-    )
-    .get(tokenHash) as StoredMcpTokenRow | undefined;
-  if (!row) return null;
-  return {
-    ...mapMcpTokenRow(row),
-    tokenHash: String(row.tokenHash ?? "")
-  };
-}
-
-export async function insertMcpToken(params: {
-  id: string;
-  accountId: string;
-  createdByUserId: string;
-  label: string;
-  tokenHash: string;
-  tokenSuffix: string;
-  createdAt: number;
-  expiresAt: number | null;
-}) {
-  return withDbWriteRetry("insertMcpToken", async () => {
-    const db = await getDb();
-    db.prepare(
-      `INSERT INTO mcp_tokens
-       (id, accountId, createdByUserId, label, tokenHash, tokenSuffix, createdAt, expiresAt, lastUsedAt)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)`
-    ).run(
-      params.id,
-      params.accountId,
-      params.createdByUserId,
-      params.label,
-      params.tokenHash,
-      params.tokenSuffix,
-      params.createdAt,
-      params.expiresAt
-    );
-    return {
-      id: params.id,
-      accountId: params.accountId,
-      createdByUserId: params.createdByUserId,
-      label: params.label,
-      tokenSuffix: params.tokenSuffix,
-      createdAt: params.createdAt,
-      expiresAt: params.expiresAt,
-      lastUsedAt: null
-    } satisfies McpTokenMetadata;
-  });
-}
-
-export async function deleteMcpToken(accountId: string, tokenId: string) {
-  return withDbWriteRetry("deleteMcpToken", async () => {
-    const db = await getDb();
-    const result = db
-      .prepare(`DELETE FROM mcp_tokens WHERE accountId = ? AND id = ?`)
-      .run(accountId, tokenId) as { changes?: number };
-    return Number(result?.changes ?? 0) > 0;
-  });
-}
-
-export async function touchMcpTokenLastUsed(tokenId: string, lastUsedAt = Date.now()) {
-  return withDbWriteRetry("touchMcpTokenLastUsed", async () => {
-    const db = await getDb();
-    db.prepare(`UPDATE mcp_tokens SET lastUsedAt = ? WHERE id = ?`).run(lastUsedAt, tokenId);
-  });
-}
-
-export async function getInviteCodes() {
-  const db = await getDb();
-  const rows = db.prepare(`SELECT * FROM invite_codes`).all() as any[];
-  return rows.map(mapInviteRow);
-}
-
-export async function createInviteCode(options?: {
-  role?: InviteCode["role"];
-  maxUses?: number | null;
-  expiresAt?: number | null;
-}) {
-  return withDbWriteRetry("createInviteCode", async () => {
-    const db = await getDb();
-    const maxUses =
-      options?.maxUses === undefined
-        ? 1
-        : options.maxUses === null
-          ? null
-          : Math.max(1, Math.floor(options.maxUses));
-    const expiresAt =
-      typeof options?.expiresAt === "number" && Number.isFinite(options.expiresAt)
-        ? Math.floor(options.expiresAt)
-        : null;
-    const invite: InviteCode = {
-      code: randomUUID(),
-      role: options?.role === "admin" ? "admin" : "user",
-      maxUses,
-      uses: 0,
-      expiresAt,
-      createdAt: Date.now(),
-      usedByUserId: null
-    };
-    db.prepare(
-      `INSERT INTO invite_codes (code, role, maxUses, uses, expiresAt, createdAt, usedByUserId)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`
-    ).run(
-      invite.code,
-      invite.role,
-      invite.maxUses,
-      invite.uses,
-      invite.expiresAt,
-      invite.createdAt,
-      invite.usedByUserId
-    );
-    return invite;
-  });
-}
-
-export async function saveInviteCodes(items: InviteCode[]) {
-  return withDbWriteRetry("saveInviteCodes", async () => {
-    const db = await getDb();
-    const insert = db.prepare(
-      `INSERT OR REPLACE INTO invite_codes
-       (code, role, maxUses, uses, expiresAt, createdAt, usedByUserId)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`
-    );
-    db.transaction(() => {
-      db.exec(`DELETE FROM invite_codes`);
-      items.forEach((it) =>
-        insert.run(
-          it.code,
-          it.role,
-          it.maxUses,
-          it.uses,
-          it.expiresAt,
-          Number.isFinite(it.createdAt) ? Math.floor(it.createdAt) : 0,
-          it.usedByUserId ?? null
-        )
-      );
-    })();
-  });
-}
-
-/**
- * Atomically claim one use of an invite code.
- * Returns the updated invite row if successful, or null if the code is
- * invalid, expired, or already at max uses.
- */
-export async function claimInviteCode(code: string, userId: string): Promise<InviteCode | null> {
-  return withDbWriteRetry("claimInviteCode", async () => {
-    const db = await getDb();
-    const now = Date.now();
-    const result = db.prepare(
-      `UPDATE invite_codes
-       SET uses = uses + 1,
-           usedByUserId = COALESCE(usedByUserId, ?)
-       WHERE code = ?
-         AND (maxUses IS NULL OR uses < maxUses)
-         AND (expiresAt IS NULL OR expiresAt >= ?)`
-    ).run(userId, code, now);
-    if (result.changes === 0) return null;
-    const row = db.prepare(`SELECT * FROM invite_codes WHERE code = ?`).get(code) as any;
-    return row ? mapInviteRow(row) : null;
-  });
-}
-
-async function listAccountIdsFromMaster() {
-  const db = await getDb();
-  const rows = db.prepare(`SELECT id FROM accounts ORDER BY id ASC`).all() as Array<{ id: string }>;
-  return rows.map((row) => row.id).filter(Boolean);
-}
+export {
+  claimInviteCode,
+  createInviteCode,
+  getInviteCodes,
+  saveInviteCodes
+} from "./db/inviteCodes";
 
 async function getAccountEmail(accountId: string) {
   const db = await getDb();
@@ -880,73 +522,10 @@ async function getAccountEmail(accountId: string) {
   return row?.email?.toLowerCase() ?? "";
 }
 
-async function getFoldersForAccount(accountId: string) {
-  const db = await getAccountDb(accountId);
-  const rows = db.prepare(`SELECT * FROM folders WHERE accountId = ?`).all(accountId) as any[];
-  const messageCounts = db
-    .prepare(
-      `SELECT folderId,
-              COUNT(*) as total,
-              SUM(CASE WHEN unread = 1 THEN 1 ELSE 0 END) as unreadCount
-       FROM messages
-       WHERE accountId = ?
-       GROUP BY folderId`
-    )
-    .all(accountId) as Array<{ folderId: string; total: number; unreadCount: number }>;
-  const countMap = new Map<string, number>();
-  const totalMap = new Map<string, number>();
-  messageCounts.forEach((row) => {
-    if (row.folderId) {
-      totalMap.set(row.folderId, row.total ?? 0);
-      countMap.set(row.folderId, row.unreadCount ?? 0);
-    }
-  });
-  return rows.map((row) => ({
-    id: row.id,
-    name: row.name,
-    parentId: row.parentId ?? undefined,
-    accountId: row.accountId,
-    count: totalMap.get(row.id) ?? row.count ?? 0,
-    specialUse: row.specialUse ?? undefined,
-    flags: safeParseJson<string[]>(row.flags),
-    delimiter: row.delimiter ?? undefined,
-    unreadCount: countMap.get(row.id) ?? 0
-  })) as Folder[];
-}
-
-export async function getFolders(accountId?: string) {
-  if (accountId) {
-    return getFoldersForAccount(accountId);
-  }
-  const accountIds = await listAccountIdsFromMaster();
-  const folderSets = await Promise.all(accountIds.map((id) => getFoldersForAccount(id)));
-  return folderSets.flat();
-}
-
-export async function saveFoldersForAccount(accountId: string, nextFolders: Folder[]) {
-  return withDbWriteRetry("saveFoldersForAccount", async () => {
-    const db = await getAccountDb(accountId);
-    const insert = db.prepare(
-      `INSERT OR REPLACE INTO folders (id, name, parentId, accountId, count, specialUse, flags, delimiter) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-    );
-    const deleteForAccount = db.prepare(`DELETE FROM folders WHERE accountId = ?`);
-    db.transaction(() => {
-      deleteForAccount.run(accountId);
-      nextFolders.forEach((folder) => {
-        insert.run(
-          folder.id,
-          folder.name,
-          folder.parentId ?? null,
-          accountId,
-          folder.count,
-          folder.specialUse ?? null,
-          folder.flags ? JSON.stringify(folder.flags) : null,
-          folder.delimiter ?? null
-        );
-      });
-    })();
-  });
-}
+export {
+  getFolders,
+  saveFoldersForAccount
+} from "./db/folders";
 
 async function recomputeThreadsForAccountInternal(accountId: string, threadIds?: string[]) {
   const db = await getAccountDb(accountId);
@@ -1155,75 +734,11 @@ export async function recomputeThreadIdsForAccount(accountId: string) {
   });
 }
 
-export async function getMailboxState(accountId: string, folderId: string) {
-  const db = await getAccountDb(accountId);
-  const row = db
-    .prepare(
-      `SELECT accountId, folderId, mailboxPath, uidValidity, highestModSeq, highestUid, supportsQresync FROM mailbox_state WHERE accountId = ? AND folderId = ?`
-    )
-    .get(accountId, folderId) as
-    | {
-        accountId: string;
-        folderId: string;
-        mailboxPath: string;
-        uidValidity: string | null;
-        highestModSeq: string | null;
-        highestUid: number | null;
-        supportsQresync: number | null;
-      }
-    | undefined;
-  if (!row) return null;
-  return {
-    accountId: row.accountId,
-    folderId: row.folderId,
-    mailboxPath: row.mailboxPath,
-    uidValidity: row.uidValidity,
-    highestModSeq: row.highestModSeq,
-    highestUid: row.highestUid,
-    supportsQresync: row.supportsQresync === null ? null : Boolean(row.supportsQresync)
-  };
-}
-
-export async function saveMailboxState(state: MailboxState) {
-  return withDbWriteRetry("saveMailboxState", async () => {
-    const db = await getAccountDb(state.accountId);
-    const insert = db.prepare(`
-      INSERT OR REPLACE INTO mailbox_state
-      (folderId, accountId, mailboxPath, uidValidity, highestModSeq, highestUid, supportsQresync)
-      VALUES (?, ?, ?, ?, ?, ?, ?)
-    `);
-    insert.run(
-      state.folderId,
-      state.accountId,
-      state.mailboxPath,
-      state.uidValidity ?? null,
-      state.highestModSeq ?? null,
-      state.highestUid ?? null,
-      state.supportsQresync == null ? null : state.supportsQresync ? 1 : 0
-    );
-  });
-}
-
-/**
- * Lightweight update of just the highestUid column in mailbox_state.
- * Used to persist sync progress after each batch so a killed worker can resume.
- * Only updates if the row already exists and the new UID is higher than the stored one.
- */
-export async function updateMailboxHighestUid(
-  accountId: string,
-  folderId: string,
-  highestUid: number
-) {
-  return withDbWriteRetry("updateMailboxHighestUid", async () => {
-    const db = await getAccountDb(accountId);
-    db.prepare(
-      `UPDATE mailbox_state
-       SET highestUid = ?
-       WHERE accountId = ? AND folderId = ?
-         AND (highestUid IS NULL OR highestUid < ?)`
-    ).run(highestUid, accountId, folderId, highestUid);
-  });
-}
+export {
+  getMailboxState,
+  saveMailboxState,
+  updateMailboxHighestUid
+} from "./db/folders";
 
 type UpsertCalendarReminderInput = {
   id?: string;
