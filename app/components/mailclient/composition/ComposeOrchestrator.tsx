@@ -173,8 +173,9 @@ export type ComposeOrchestratorProps = {
 
   /**
    * Fires whenever `draftSavedAt` changes so MailClient can drive its
-   * second-by-second relative-time refresh. Preserves the pre-extraction
-   * behavior where the whole tree re-rendered while a saved draft existed.
+   * second-by-second relative-time refresh. MailClient renders the
+   * "saved N seconds ago" indicator and needs to re-render on every
+   * tick while a saved draft exists.
    */
   onDraftSavedAtChange?: (timestamp: number | null) => void;
 
@@ -369,8 +370,8 @@ function ComposeOrchestratorImpl(
     composeDraftIdRef.current = composeDraftId;
   }, [composeDraftId, composeDraftIdRef]);
 
-  // Propagate `draftSavedAt` changes so MailClient can drive its relative-time
-  // refresh (preserves the pre-extraction re-render cadence).
+  // Propagate `draftSavedAt` changes so MailClient can drive its
+  // "saved N seconds ago" relative-time indicator.
   useEffect(() => {
     onDraftSavedAtChange?.(draftSavedAt);
   }, [draftSavedAt, onDraftSavedAtChange]);
