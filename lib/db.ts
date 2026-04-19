@@ -38,7 +38,6 @@ import {
   extractLinearFeatures,
   trainLinearModelNegative,
   trainLinearModelPositive,
-  type CategoryKey,
   type CategoryLinearModel
 } from "./mail/categorization/linearModel";
 import type { CategoryLearningDebugSnapshot } from "./mail/categorization/debugTypes";
@@ -105,6 +104,12 @@ export {
   stageMessageMoves,
   updateMessageFolder,
   updateMessagesFolderPrefix
+} from "./db/messages";
+
+export {
+  bulkUpdateMessageFlags,
+  setMessageCategory,
+  updateMessageFlags
 } from "./db/messages";
 
 import {
@@ -1672,47 +1677,6 @@ export async function upsertMessages(
   });
 }
 
-export async function bulkUpdateMessageFlags(
-  accountId: string,
-  updates: Array<{ id: string; flags: string[] }>
-) {
-  if (updates.length === 0) return;
-  return withDbWriteRetry("bulkUpdateMessageFlags", async () => {
-    const db = await getAccountDb(accountId);
-    const stmt = db.prepare(
-      `UPDATE messages
-       SET flags = ?,
-           seen = ?,
-           answered = ?,
-           flagged = ?,
-           deleted = ?,
-           draft = ?,
-           recent = ?,
-           unread = ?
-       WHERE accountId = ? AND id = ?`
-    );
-    const tx = db.transaction(() => {
-      for (const update of updates) {
-        const normalized = normalizeImapFlags(update.flags);
-        const system = deriveSystemFlagState(normalized);
-        stmt.run(
-          JSON.stringify(normalized),
-          system.seen,
-          system.answered,
-          system.flagged,
-          system.deleted,
-          system.draft,
-          system.recent,
-          system.unread,
-          accountId,
-          update.id
-        );
-      }
-    });
-    tx();
-  });
-}
-
 
 export async function getLatestMessageDate(accountId: string, mailboxPath?: string) {
   const db = await getAccountDb(accountId);
@@ -1742,47 +1706,6 @@ export async function getLatestMessageUid(accountId: string, mailboxPath?: strin
     .prepare(`SELECT MAX(imapUid) as maxUid FROM messages WHERE accountId = ?`)
     .get(accountId) as { maxUid?: number | null } | undefined;
   return typeof row?.maxUid === "number" ? row.maxUid : null;
-}
-
-export async function updateMessageFlags(
-  accountId: string,
-  messageId: string,
-  flags: string[]
-) {
-  return withDbWriteRetry("updateMessageFlags", async () => {
-    const db = await getAccountDb(accountId);
-    const normalizedFlags = normalizeImapFlags(flags);
-    const system = deriveSystemFlagState(normalizedFlags);
-    db.prepare(
-      `UPDATE messages
-       SET flags = ?,
-           seen = ?,
-           answered = ?,
-           flagged = ?,
-           deleted = ?,
-           draft = ?,
-           recent = ?,
-           unread = ?
-       WHERE accountId = ? AND id = ?`
-    ).run(
-      JSON.stringify(normalizedFlags),
-      system.seen,
-      system.answered,
-      system.flagged,
-      system.deleted,
-      system.draft,
-      system.recent,
-      system.unread,
-      accountId,
-      messageId
-    );
-    const row = db
-      .prepare(`SELECT threadId FROM messages WHERE accountId = ? AND id = ?`)
-      .get(accountId, messageId) as { threadId?: string | null } | undefined;
-    if (row?.threadId) {
-      await recomputeThreadsForAccountInternal(accountId, [row.threadId]);
-    }
-  });
 }
 
 function normalizeCategoryLinearModel(
@@ -2016,29 +1939,6 @@ export async function getCategoryLearningDebugSnapshot(
     categoryCounts,
     manualCategorizedCount: Number(manualCategorizedCountRow?.count ?? 0)
   };
-}
-
-export async function setMessageCategory(
-  accountId: string,
-  messageId: string,
-  category: CategoryKey | null,
-  categoryScore: number | null,
-  categorySignals: string[]
-) {
-  return withDbWriteRetry("setMessageCategory", async () => {
-    const db = await getAccountDb(accountId);
-    db.prepare(
-      `UPDATE messages
-       SET category = ?, categoryScore = ?, categorySignals = ?, categoryManualState = NULL
-       WHERE accountId = ? AND id = ?`
-    ).run(
-      category,
-      typeof categoryScore === "number" ? categoryScore : null,
-      JSON.stringify(categorySignals ?? []),
-      accountId,
-      messageId
-    );
-  });
 }
 
 function buildFallbackParsedMessageForFeedback(

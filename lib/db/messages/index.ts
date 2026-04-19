@@ -41,3 +41,9 @@ export {
   updateMessageFolder,
   updateMessagesFolderPrefix
 } from "./move";
+
+export {
+  bulkUpdateMessageFlags,
+  setMessageCategory,
+  updateMessageFlags
+} from "./flags";
