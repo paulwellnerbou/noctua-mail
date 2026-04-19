@@ -3,9 +3,12 @@
  *
  * Covers the four list/search entry points (`listMessages`, `listThreads`,
  * `listThreadMessages`, `listRelatedMessages`) and their filter/group
- * machinery. Upsert, flag, move, and delete operations live elsewhere — this
- * module must stay write-free so that `getAccountDb` can be safely reused
- * across concurrent read calls.
+ * machinery. Upsert, flag, move, and delete operations live elsewhere.
+ * Every function in this module reads only — no writes — so
+ * `getAccountDb` can be safely reused across concurrent read calls.
+ * Runtime-data backfills that feed these queries (e.g.
+ * `ensureThreadLatestReceivedDateValues`) run inside `getAccountDb`
+ * itself, not on the read path.
  */
 import { simpleParser } from "mailparser";
 import type { Attachment, Message } from "../../data";
@@ -43,7 +46,6 @@ import { deriveInviteDeckEventBounds } from "../../inviteDeckEventBounds";
 import { normalizeCalendarEventUidKeys } from "../../calendarEventUids";
 import { getAttachmentContentBuffer } from "../../mail/syncMessageSanitizer";
 import { getMessageSource } from "../../storage";
-import { ensureThreadLatestReceivedDateValues } from "../threads";
 import {
   buildCalendarEventUidMatchSql,
   getMessageCalendarInviteDataByMessageId,
@@ -2076,7 +2078,6 @@ export async function listThreads(params: {
     participants
   } = params;
   const db = await getAccountDb(accountId);
-  await ensureThreadLatestReceivedDateValues(db, accountId);
   const offset = (page - 1) * pageSize;
   const accountEmail = await getAccountEmail(accountId);
   const normalizedThreadDateSource = normalizeThreadDateSource(threadDateSource);

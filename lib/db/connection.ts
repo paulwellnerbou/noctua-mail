@@ -232,6 +232,7 @@ export async function getAccountDb(accountId: string) {
   // imported statically at the top.
   const threadsModule = await loadThreadsModule();
   await threadsModule.ensureThreadSignalRuntimeData(accountDb, accountId);
+  await threadsModule.ensureThreadLatestReceivedDateValues(accountDb, accountId);
   ensureTopicLearningRuntimeData(accountDb, accountId);
   scheduleAccountDbIdleClose(dbPath);
   return accountDb;
