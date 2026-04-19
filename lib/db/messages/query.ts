@@ -159,31 +159,42 @@ async function getInviteDeckGroupKeysByMessageId(
   if (uniqueMessageIds.length === 0) {
     return new Map<string, string>();
   }
-  const rows = db
-    .prepare(
-      `
-      SELECT
-        mce.messageId AS messageId,
-        mce.eventUid AS eventUid,
-        mce.eventFirstStartAtMs AS eventFirstStartAtMs,
-        mce.eventLastEndAtMs AS eventLastEndAtMs,
-        ce.startAtMs AS startAtMs,
-        ce.endAtMs AS endAtMs,
-        ce.startTimezone AS startTimezone,
-        ce.recurrenceRule AS recurrenceRule,
-        ce.recurrenceDates AS recurrenceDates,
-        ce.excludedDates AS excludedDates
-      FROM message_calendar_events mce
-      LEFT JOIN calendar_events ce
-        ON ce.accountId = mce.accountId
-       AND lower(ce.eventUid) = lower(mce.eventUid)
-      WHERE mce.accountId = ?
-        AND mce.messageId IN (${uniqueMessageIds.map(() => "?").join(",")})
-        AND ce.deletedAtMs IS NULL
-        AND (ce.sourceType = 'email' OR ce.eventUid IS NULL)
-      `
-    )
-    .all(accountId, ...uniqueMessageIds) as InviteDeckEventRow[];
+
+  // Callers (notably `getInviteDeckGroupSummary`) can pass the full
+  // message-id set for a mailbox, which may exceed SQLite's default
+  // 999 bound-variable limit. Batch the IN (...) predicate using the
+  // same chunk size other bulk queries in this module use.
+  const QUERY_BATCH_SIZE = 400;
+  const rows: InviteDeckEventRow[] = [];
+  for (let start = 0; start < uniqueMessageIds.length; start += QUERY_BATCH_SIZE) {
+    const chunk = uniqueMessageIds.slice(start, start + QUERY_BATCH_SIZE);
+    const batchRows = db
+      .prepare(
+        `
+        SELECT
+          mce.messageId AS messageId,
+          mce.eventUid AS eventUid,
+          mce.eventFirstStartAtMs AS eventFirstStartAtMs,
+          mce.eventLastEndAtMs AS eventLastEndAtMs,
+          ce.startAtMs AS startAtMs,
+          ce.endAtMs AS endAtMs,
+          ce.startTimezone AS startTimezone,
+          ce.recurrenceRule AS recurrenceRule,
+          ce.recurrenceDates AS recurrenceDates,
+          ce.excludedDates AS excludedDates
+        FROM message_calendar_events mce
+        LEFT JOIN calendar_events ce
+          ON ce.accountId = mce.accountId
+         AND lower(ce.eventUid) = lower(mce.eventUid)
+        WHERE mce.accountId = ?
+          AND mce.messageId IN (${chunk.map(() => "?").join(",")})
+          AND ce.deletedAtMs IS NULL
+          AND (ce.sourceType = 'email' OR ce.eventUid IS NULL)
+        `
+      )
+      .all(accountId, ...chunk) as InviteDeckEventRow[];
+    rows.push(...batchRows);
+  }
 
   const groupsByMessageId = new Map<string, string>();
   const missingEventUidsByMessageId = new Map<string, Set<string>>();

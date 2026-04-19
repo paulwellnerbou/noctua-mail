@@ -197,27 +197,36 @@ export async function listMessageFileRefsByMessageIds(accountId: string, message
   const uniqueIds = Array.from(new Set(messageIds.map((id) => id.trim()).filter(Boolean)));
   if (uniqueIds.length === 0) return [] as Array<{ messageId: string; attachmentIds: string[] }>;
   const db = await getAccountDb(accountId);
-  const rows = db
-    .prepare(
-      `SELECT m.id as messageId, a.id as attachmentId
-       FROM messages m
-       LEFT JOIN attachments a ON a.messageId = m.id
-       WHERE m.accountId = ? AND m.id IN (${uniqueIds.map(() => "?").join(",")})`
-    )
-    .all(accountId, ...uniqueIds) as Array<{ messageId: string; attachmentId: string | null }>;
 
   const refs = new Map<string, string[]>();
   uniqueIds.forEach((id) => {
     refs.set(id, []);
   });
-  rows.forEach((row) => {
-    if (!refs.has(row.messageId)) {
-      refs.set(row.messageId, []);
-    }
-    if (row.attachmentId) {
-      refs.get(row.messageId)!.push(row.attachmentId);
-    }
-  });
+
+  // Callers (e.g. `deleteMessagesWithFilesByIds` during full-sync
+  // stale-message cleanup) can pass arrays larger than SQLite's default
+  // 999 bound-variable limit. Batch the IN (...) predicate using the
+  // same chunk size other bulk queries in this module use.
+  const QUERY_BATCH_SIZE = 400;
+  for (let start = 0; start < uniqueIds.length; start += QUERY_BATCH_SIZE) {
+    const chunk = uniqueIds.slice(start, start + QUERY_BATCH_SIZE);
+    const rows = db
+      .prepare(
+        `SELECT m.id as messageId, a.id as attachmentId
+         FROM messages m
+         LEFT JOIN attachments a ON a.messageId = m.id
+         WHERE m.accountId = ? AND m.id IN (${chunk.map(() => "?").join(",")})`
+      )
+      .all(accountId, ...chunk) as Array<{ messageId: string; attachmentId: string | null }>;
+    rows.forEach((row) => {
+      if (!refs.has(row.messageId)) {
+        refs.set(row.messageId, []);
+      }
+      if (row.attachmentId) {
+        refs.get(row.messageId)!.push(row.attachmentId);
+      }
+    });
+  }
 
   return Array.from(refs.entries()).map(([messageId, attachmentIds]) => ({
     messageId,
