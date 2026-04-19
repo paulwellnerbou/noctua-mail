@@ -22,10 +22,18 @@ let DatabaseCtor: any | null = null;
 
 // Memoized so `getAccountDb` doesn't allocate a new promise + pay the
 // await hop on every call. The module itself is cached by the runtime;
-// this just caches the promise that resolves to it.
+// this caches the promise that resolves to it. On rejection the memo
+// is cleared so a transient failure (e.g. bundler hiccup) doesn't
+// permanently poison every subsequent `getAccountDb` call.
 let threadsModulePromise: Promise<typeof import("./threads")> | null = null;
 function loadThreadsModule() {
-  return (threadsModulePromise ??= import("./threads"));
+  if (!threadsModulePromise) {
+    threadsModulePromise = import("./threads").catch((err) => {
+      threadsModulePromise = null;
+      throw err;
+    });
+  }
+  return threadsModulePromise;
 }
 
 let masterDbInstance: any | null = null;

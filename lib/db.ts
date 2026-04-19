@@ -124,17 +124,19 @@ function hydrateAttachment(
 
 export type GroupMeta = { key: string; label: string; count: number };
 
-export {
+import {
   addTopicSignalExclusion,
   clearTopicSignalExclusions,
   deleteTopicLearningSignals,
   upsertTopicLearningSignalsForThreadIds
 } from "./db/topics";
 
-import {
+export {
+  addTopicSignalExclusion,
+  clearTopicSignalExclusions,
   deleteTopicLearningSignals,
   upsertTopicLearningSignalsForThreadIds
-} from "./db/topics";
+};
 
 export {
   deleteAccountControlPlane,
