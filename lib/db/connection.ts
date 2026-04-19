@@ -20,6 +20,14 @@ import { ensureTopicLearningRuntimeData } from "./topics";
 const sqliteModulePromise = () => import("bun:sqlite" /* webpackIgnore: true */);
 let DatabaseCtor: any | null = null;
 
+// Memoized so `getAccountDb` doesn't allocate a new promise + pay the
+// await hop on every call. The module itself is cached by the runtime;
+// this just caches the promise that resolves to it.
+let threadsModulePromise: Promise<typeof import("./threads")> | null = null;
+function loadThreadsModule() {
+  return (threadsModulePromise ??= import("./threads"));
+}
+
 let masterDbInstance: any | null = null;
 let masterInitialized = false;
 const accountDbInstances = new Map<string, any>();
@@ -214,7 +222,7 @@ export async function getAccountDb(accountId: string) {
   // runtime-data ensure has to be loaded via a deferred import to break
   // the load-time cycle. `./topics` has no such dependency and is
   // imported statically at the top.
-  const threadsModule = await import("./threads");
+  const threadsModule = await loadThreadsModule();
   await threadsModule.ensureThreadSignalRuntimeData(accountDb, accountId);
   ensureTopicLearningRuntimeData(accountDb, accountId);
   scheduleAccountDbIdleClose(dbPath);
