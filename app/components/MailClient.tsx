@@ -596,9 +596,6 @@ export default function MailClient({
   const activeVirtualFolderIdRef = useRef("");
   const threadMessagesRef = useRef<Message[]>([]);
   const currentKeyRef = useRef("");
-  const [messageTabs, setMessageTabs] = useState<
-    Record<string, "html" | "text" | "markdown" | "source">
-  >({});
   const [, setRelativeTimeCounter] = useState(0);
   const listIsNarrow = listWidth < 360;
   // searchFields, searchBadges, activeVirtualFolderId, and virtual folder counts moved to useSearchState hook
@@ -2131,17 +2128,7 @@ export default function MailClient({
       sourceFetchRef.current = new Map(
         Array.from(sourceFetchRef.current.entries()).filter(([id]) => !idSet.has(id))
       );
-      setMessageTabs((prev) => {
-        let changed = false;
-        const next = { ...prev };
-        unique.forEach((id) => {
-          if (id in next) {
-            delete next[id];
-            changed = true;
-          }
-        });
-        return changed ? next : prev;
-      });
+      messageViewHandleRef.current?.evictMessageTabs(unique);
       messageViewHandleRef.current?.evictZoomAndFontScale(unique);
       setCollapsedMessages((prev) => {
         let changed = false;
@@ -4172,7 +4159,6 @@ export default function MailClient({
     setMessageContentLoading({});
     sourceFetchRef.current = new Map();
     autoHydrationAttemptAtRef.current = {};
-    setMessageTabs({});
   }, [
     activeFolderId,
     activeAccountId,
@@ -4951,8 +4937,6 @@ export default function MailClient({
               handleUnsubscribe,
               collapsedMessages,
               setCollapsedMessages,
-              messageTabs,
-              setMessageTabs,
               fetchSource,
               ensureMessageContent,
               messageContentLoading,
@@ -5091,7 +5075,9 @@ export default function MailClient({
         accountFolders={accountFolders}
         findSentFolder={findSentFolder}
         syncFolderWithBackgroundRef={syncFolderWithBackgroundRef}
-        messageTabs={messageTabs}
+        getPreferredComposeTab={(messageId) =>
+          messageViewHandleRef.current?.getMessageTab(messageId)
+        }
         isDraftMessage={isDraftMessage}
         ensureMessageContent={ensureMessageContent}
         applyRecipientSelection={applyRecipientSelection}

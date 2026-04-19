@@ -74,8 +74,6 @@ type PushNoticeInput = {
   durationMs?: number;
 };
 
-type ComposeMessageTabs = Record<string, "html" | "text" | "markdown" | "source">;
-
 export type ComposeOrchestratorHandle = {
   /**
    * Render the inline compose card. Returned from the handle so MailClient can
@@ -136,7 +134,14 @@ export type ComposeOrchestratorProps = {
   syncFolderWithBackgroundRef: React.RefObject<SyncFolderWithBackground>;
 
   // openCompose wrapper collaborators
-  messageTabs: ComposeMessageTabs;
+  //
+  // Returns the editor-eligible body panel the user has selected for
+  // `messageId` in the message-view pane ("html" / "text" / "markdown"),
+  // or undefined if no selection has been made or the selection is
+  // "source" (which has no compose-editor analogue). Used so the
+  // compose surface matches the rendering the user was just looking
+  // at. The underlying map lives in `MessageViewOrchestrator`.
+  getPreferredComposeTab: (messageId: string) => "html" | "text" | "markdown" | undefined;
   isDraftMessage: (message: Message) => boolean;
   ensureMessageContent: (
     message: Message,
@@ -168,8 +173,9 @@ export type ComposeOrchestratorProps = {
 
   /**
    * Fires whenever `draftSavedAt` changes so MailClient can drive its
-   * second-by-second relative-time refresh. Preserves the pre-extraction
-   * behavior where the whole tree re-rendered while a saved draft existed.
+   * second-by-second relative-time refresh. MailClient renders the
+   * "saved N seconds ago" indicator and needs to re-render on every
+   * tick while a saved draft exists.
    */
   onDraftSavedAtChange?: (timestamp: number | null) => void;
 
@@ -224,7 +230,7 @@ function ComposeOrchestratorImpl(
     accountFolders,
     findSentFolder,
     syncFolderWithBackgroundRef,
-    messageTabs,
+    getPreferredComposeTab,
     isDraftMessage,
     ensureMessageContent,
     applyRecipientSelection,
@@ -364,8 +370,8 @@ function ComposeOrchestratorImpl(
     composeDraftIdRef.current = composeDraftId;
   }, [composeDraftId, composeDraftIdRef]);
 
-  // Propagate `draftSavedAt` changes so MailClient can drive its relative-time
-  // refresh (preserves the pre-extraction re-render cadence).
+  // Propagate `draftSavedAt` changes so MailClient can drive its
+  // "saved N seconds ago" relative-time indicator.
   useEffect(() => {
     onDraftSavedAtChange?.(draftSavedAt);
   }, [draftSavedAt, onDraftSavedAtChange]);
@@ -746,10 +752,7 @@ function ComposeOrchestratorImpl(
       return;
     }
 
-    const preferredComposeTab = (() => {
-      const tab = messageTabs[message.id];
-      return tab === "html" || tab === "markdown" || tab === "text" ? tab : undefined;
-    })();
+    const preferredComposeTab = getPreferredComposeTab(message.id);
 
     const getComposeSourceMessage = (clickedMessage: Message) => {
       const cachedMessage = messageById.get(clickedMessage.id);
