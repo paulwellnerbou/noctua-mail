@@ -208,6 +208,17 @@ export function getThreadLatestReceivedDateArgs(accountEmail: string) {
   return [accountEmail, accountEmail];
 }
 
+/**
+ * @internal
+ *
+ * Idempotent backfill for the `threads.latestReceivedDateValue` column.
+ * Called from `lib/db/connection.ts#getAccountDb` alongside the other
+ * runtime-data ensures so read queries (`listThreads`, etc.) never have
+ * to trigger a write on their own path. Short-circuits with a single
+ * `SELECT 1 ... WHERE latestReceivedDateValue IS NULL LIMIT 1` when
+ * nothing needs updating. Accepts an optional `threadIds` scope for
+ * targeted backfills after thread mutations.
+ */
 export async function ensureThreadLatestReceivedDateValues(
   db: any,
   accountId: string,
