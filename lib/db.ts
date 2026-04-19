@@ -14,7 +14,10 @@ import {
 import { getAccountDb } from "./db/connection";
 import { getAccountById } from "./db/accounts";
 export {
+  cleanupAccountLifecycleArtifacts,
   closeAllDbConnections,
+  getAccountDb,
+  getDb,
   initializeMasterDb,
   withAccountDb
 } from "./db/connection";
