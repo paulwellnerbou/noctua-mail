@@ -4,5 +4,6 @@
  * import from `@/lib/db/calendar` without reaching into individual sibling
  * files.
  */
+export * from "./events";
 export * from "./inviteStates";
 export * from "./reminders";
