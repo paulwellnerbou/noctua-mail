@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { AlarmClock, AlarmClockPlus, Clock, Mail, MapPin, Repeat, Trash2, User, Users } from "lucide-react";
-import { AlertDialog, Badge, Button, Flex, Text } from "@radix-ui/themes";
+import { Badge, Button, Text } from "@radix-ui/themes";
 import { buildCalendarRecurrenceSummary, formatCalendarEventRange } from "@/lib/calendar";
 import type { CalendarInviteActionType } from "@/lib/calendarInviteProcessing";
 import { formatAccountDateValue, formatAccountMediumDateTime } from "@/lib/dateFormatting";
@@ -38,9 +38,9 @@ import {
   upsertCalendarReminder,
   type CalendarReminder
 } from "@/app/components/mailclient/utils/calendarReminders";
-import AlertDialogContent from "@/app/components/mailclient/message/AlertDialogContent";
 import { dispatchCalendarEventsUpdatedEvent } from "./calendarEventsClient";
 import CalendarEventEmailSnapshot from "./CalendarEventEmailSnapshot";
+import EventDeleteScopeDialog from "./EventDeleteScopeDialog";
 import EventReminderDialog from "./EventReminderDialog";
 import EventResponseDialog from "./EventResponseDialog";
 import styles from "./EventDetailView.module.css";
@@ -872,53 +872,16 @@ export default function EventDetailView({
         />
       )}
 
-      <AlertDialog.Root
+      <EventDeleteScopeDialog
         open={deleteScopeDialogOpen}
-        onOpenChange={(open) => {
-          if (!deletingEvent) {
-            setDeleteScopeDialogOpen(open);
-          }
-        }}
-      >
-        <AlertDialogContent size="2">
-          <AlertDialog.Title size="3">Delete recurring event?</AlertDialog.Title>
-          <AlertDialog.Description>
-            Choose whether to remove only {responseOccurrenceLabel.toLowerCase()} or delete the whole series.
-          </AlertDialog.Description>
-          <div className={styles.responseSummary}>
-            <Text size="2" weight="medium">{title || "Untitled Event"}</Text>
-            {timeRange && (
-              <Text size="1" color="gray">{responseTargetLabel}</Text>
-            )}
-          </div>
-          <Flex gap="3" mt="4" justify="end" wrap="wrap">
-            <AlertDialog.Cancel>
-              <Button variant="soft" color="gray" disabled={deletingEvent}>
-                Cancel
-              </Button>
-            </AlertDialog.Cancel>
-            <AlertDialog.Action>
-              <Button
-                variant="soft"
-                color="gray"
-                disabled={deletingEvent}
-                onClick={() => void performDeleteEvent("occurrence")}
-              >
-                {responseOccurrenceLabel}
-              </Button>
-            </AlertDialog.Action>
-            <AlertDialog.Action>
-              <Button
-                color="red"
-                disabled={deletingEvent}
-                onClick={() => void performDeleteEvent("series")}
-              >
-                Whole series
-              </Button>
-            </AlertDialog.Action>
-          </Flex>
-        </AlertDialogContent>
-      </AlertDialog.Root>
+        onOpenChange={setDeleteScopeDialogOpen}
+        title={title}
+        timeRange={timeRange}
+        responseOccurrenceLabel={responseOccurrenceLabel}
+        responseTargetLabel={responseTargetLabel}
+        deletingEvent={deletingEvent}
+        onDelete={performDeleteEvent}
+      />
 
       <EventResponseDialog
         open={responseDialogOpen}
