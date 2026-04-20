@@ -1,8 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { AlarmClock, AlarmClockPlus, Mail, Trash2 } from "lucide-react";
-import { Button } from "@radix-ui/themes";
 import { buildCalendarRecurrenceSummary, formatCalendarEventRange } from "@/lib/calendar";
 import type { CalendarInviteActionType } from "@/lib/calendarInviteProcessing";
 import { formatAccountDateValue, formatAccountMediumDateTime } from "@/lib/dateFormatting";
@@ -34,6 +32,7 @@ import {
 import { dispatchCalendarEventsUpdatedEvent } from "./calendarEventsClient";
 import CalendarEventEmailSnapshot from "./CalendarEventEmailSnapshot";
 import EventDeleteScopeDialog from "./EventDeleteScopeDialog";
+import EventDetailActions from "./EventDetailActions";
 import EventDetailBadges from "./EventDetailBadges";
 import EventDetailDescription from "./EventDetailDescription";
 import EventDetailMeta from "./EventDetailMeta";
@@ -147,11 +146,6 @@ function getReplyActionLabel(status?: CalendarParticipationStatus) {
   if (status === "DECLINED") return "Decline";
   if (status === "TENTATIVE") return "Mark tentative";
   return "Respond";
-}
-
-function getOccurrenceInviteActionLabel(actionType?: CalendarInviteActionType) {
-  if (actionType === "cancellation") return "RSVP: Cancel";
-  return "RSVP";
 }
 
 function getInviteActionLabel(actionType: CalendarInviteActionType) {
@@ -646,89 +640,28 @@ export default function EventDetailView({
         <p className={styles.scopeNote}>Your RSVP applies to: {currentScopeLabel}</p>
       )}
 
-      {/* Reminder controls */}
-      {canonicalStartMs && (
-        <div className={styles.actions}>
-          {hasOccurrenceCancellationAction && !inviteProcessing?.processed && (
-            <Button
-              size="1"
-              variant="soft"
-              color={inviteProcessing?.actionType === "cancellation" ? "red" : "indigo"}
-              disabled={Boolean(inviteProcessing?.processing)}
-              onClick={() => void inviteProcessing?.onProcess?.()}
-            >
-              {inviteProcessing?.processing
-                ? inviteProcessing.actionType === "cancellation"
-                  ? "Cancelling..."
-                  : "Updating..."
-                : getOccurrenceInviteActionLabel(inviteProcessing?.actionType)}
-            </Button>
-          )}
-          {eventId && canRespond && !hasOccurrenceCancellationAction && (
-            <Button
-              size="1"
-              variant="soft"
-              color={currentParticipationColor}
-              disabled={submittingResponse}
-              onClick={openResponseDialog}
-            >
-              RSVP: {currentParticipationLabel}
-            </Button>
-          )}
-          <Button
-            size="1"
-            variant="soft"
-            color="indigo"
-            disabled={!canScheduleReminder && !existingReminder}
-            title={!canScheduleReminder && !existingReminder ? "Past events cannot be scheduled" : undefined}
-            onClick={() => setReminderModalOpen(true)}
-          >
-            {existingReminder ? <AlarmClock size={14} /> : <AlarmClockPlus size={14} />}
-            {existingReminder ? "Modify Reminder" : "Schedule Reminder"}
-          </Button>
-          {existingReminder && (
-            <Button
-              size="1"
-              variant="soft"
-              color="gray"
-              disabled={deletingReminder}
-              onClick={() => void handleDeleteReminder()}
-            >
-              <Trash2 size={14} />
-              {deletingReminder ? "Removing…" : "Remove reminder"}
-            </Button>
-          )}
-          {occurrenceMessageId && onOpenMessage && (
-            <Button
-              size="1"
-              variant="soft"
-              color="gray"
-              onClick={() => onOpenMessage(occurrenceMessageId)}
-            >
-              <Mail size={12} />
-              Open occurrence email
-            </Button>
-          )}
-          {messageId && onOpenMessage && (
-            <Button size="1" variant="soft" color="gray" onClick={() => onOpenMessage(messageId)}>
-              <Mail size={12} />
-              {occurrenceMessageId ? "Open series email" : "Open email"}
-            </Button>
-          )}
-          {eventId && onEventDeleted && (
-            <Button
-              size="1"
-              variant="soft"
-              color="red"
-              disabled={deletingEvent}
-              onClick={handleDeleteEvent}
-            >
-              <Trash2 size={14} />
-              {deletingEvent ? "Removing…" : "Delete event"}
-            </Button>
-          )}
-        </div>
-      )}
+      <EventDetailActions
+        show={Boolean(canonicalStartMs)}
+        hasOccurrenceCancellationAction={hasOccurrenceCancellationAction}
+        inviteProcessing={inviteProcessing}
+        eventId={eventId}
+        canRespond={canRespond}
+        currentParticipationColor={currentParticipationColor}
+        currentParticipationLabel={currentParticipationLabel}
+        submittingResponse={submittingResponse}
+        onOpenResponseDialog={openResponseDialog}
+        canScheduleReminder={canScheduleReminder}
+        existingReminder={existingReminder}
+        onOpenReminderDialog={() => setReminderModalOpen(true)}
+        deletingReminder={deletingReminder}
+        onDeleteReminder={handleDeleteReminder}
+        occurrenceMessageId={occurrenceMessageId}
+        messageId={messageId}
+        onOpenMessage={onOpenMessage}
+        canDeleteEvent={Boolean(onEventDeleted)}
+        deletingEvent={deletingEvent}
+        onDeleteEvent={handleDeleteEvent}
+      />
 
       {replyRequested === false && currentMyPartstat && (
         <p className={styles.notice}>The organizer did not request a reply.</p>
