@@ -15,11 +15,12 @@ import {
   resolveAccountDbPathForPersist
 } from "./rowParsers";
 
-// Category-linear-model seeding lives in lib/db.ts; lazy-import via the
-// barrel to sidestep a cycle with modules that still depend on db.ts.
+// Category-linear-model seeding is lazy-imported because `./categories`
+// pulls in `getAccountById` from this module; a top-level import would
+// introduce an eager cycle.
 async function ensureCategoryLinearModelForAccount(accountId: string) {
-  const dbModule = await import("../db");
-  await dbModule.getCategoryLinearModel(accountId);
+  const { getCategoryLinearModel } = await import("./categories");
+  await getCategoryLinearModel(accountId);
 }
 
 export async function getAccounts() {
