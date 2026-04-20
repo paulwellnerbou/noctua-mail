@@ -158,70 +158,87 @@ export async function listDeleteCalendarAssociations(
   }
 
   const db = await getAccountDb(accountId);
-  const reminderClauses: string[] = [];
-  const reminderArgs: Array<string> = [accountId, userId];
+  // Batch each IN predicate independently so a caller passing more ids
+  // than SQLite's default 999-parameter limit can't blow up the query.
+  const QUERY_BATCH_SIZE = 400;
 
+  type ReminderRow = {
+    id?: string | null;
+    messageId?: string | null;
+    eventUid?: string | null;
+  };
+  const reminderRowsById = new Map<string, ReminderRow>();
+  const loadReminderRows = (clause: string, values: string[]) => {
+    for (let start = 0; start < values.length; start += QUERY_BATCH_SIZE) {
+      const chunk = values.slice(start, start + QUERY_BATCH_SIZE);
+      const placeholders = chunk.map(() => "?").join(", ");
+      const rows = db
+        .prepare(
+          `SELECT id, messageId, eventUid
+           FROM calendar_reminders
+           WHERE accountId = ? AND userId = ? AND deletedAtMs IS NULL
+             AND ${clause.replace("@PLACEHOLDERS@", placeholders)}`
+        )
+        .all(accountId, userId, ...chunk) as ReminderRow[];
+      rows.forEach((row) => {
+        const id = row.id?.trim();
+        if (id) reminderRowsById.set(id, row);
+      });
+    }
+  };
   if (uniqueMessageIds.length > 0) {
-    const placeholders = uniqueMessageIds.map(() => "?").join(", ");
-    reminderClauses.push(`messageId IN (${placeholders})`);
-    reminderArgs.push(...uniqueMessageIds);
+    loadReminderRows("messageId IN (@PLACEHOLDERS@)", uniqueMessageIds);
   }
-
   if (uniqueEventUidKeys.length > 0) {
-    const placeholders = uniqueEventUidKeys.map(() => "?").join(", ");
-    reminderClauses.push(`lower(COALESCE(eventUidKey, eventUid, '')) IN (${placeholders})`);
-    reminderArgs.push(...uniqueEventUidKeys);
+    loadReminderRows(
+      "lower(COALESCE(eventUidKey, eventUid, '')) IN (@PLACEHOLDERS@)",
+      uniqueEventUidKeys
+    );
   }
+  const reminderRows = Array.from(reminderRowsById.values());
 
-  const reminderRows =
-    reminderClauses.length > 0
-      ? (db
-          .prepare(
-            `SELECT id, messageId, eventUid
-             FROM calendar_reminders
-             WHERE accountId = ? AND userId = ? AND deletedAtMs IS NULL
-               AND (${reminderClauses.join(" OR ")})`
-          )
-          .all(...reminderArgs) as Array<{
-          id?: string | null;
-          messageId?: string | null;
-          eventUid?: string | null;
-        }>)
-      : [];
-
-  const eventRows =
-    uniqueMessageIds.length > 0 || uniqueEventUidKeys.length > 0
-      ? (db
-          .prepare(
-            `SELECT DISTINCT ce.id, ce.eventUid
-             FROM calendar_events ce
-             WHERE ce.accountId = ? AND ce.deletedAtMs IS NULL
-               AND (
-                 ${
-                   uniqueMessageIds.length > 0
-                     ? `EXISTS (
-                         SELECT 1
-                         FROM message_calendar_events mce
-                         WHERE mce.accountId = ce.accountId
-                           AND mce.messageId IN (${uniqueMessageIds.map(() => "?").join(", ")})
-                           AND lower(COALESCE(mce.eventUidKey, mce.eventUid, '')) = lower(COALESCE(ce.eventUid, ''))
-                       )`
-                     : "0"
-                 }
-                 ${
-                   uniqueEventUidKeys.length > 0
-                     ? `OR lower(COALESCE(ce.eventUid, '')) IN (${uniqueEventUidKeys
-                         .map(() => "?")
-                         .join(", ")})`
-                     : ""
-                 }
-               )`
-          )
-          .all(accountId, ...uniqueMessageIds, ...uniqueEventUidKeys) as Array<{
-          id?: string | null;
-          eventUid?: string | null;
-        }>)
-      : [];
+  type EventRow = {
+    id?: string | null;
+    eventUid?: string | null;
+  };
+  const eventRowsById = new Map<string, EventRow>();
+  for (let start = 0; start < uniqueMessageIds.length; start += QUERY_BATCH_SIZE) {
+    const chunk = uniqueMessageIds.slice(start, start + QUERY_BATCH_SIZE);
+    const rows = db
+      .prepare(
+        `SELECT DISTINCT ce.id, ce.eventUid
+         FROM calendar_events ce
+         WHERE ce.accountId = ? AND ce.deletedAtMs IS NULL
+           AND EXISTS (
+             SELECT 1
+             FROM message_calendar_events mce
+             WHERE mce.accountId = ce.accountId
+               AND mce.messageId IN (${chunk.map(() => "?").join(", ")})
+               AND lower(COALESCE(mce.eventUidKey, mce.eventUid, '')) = lower(COALESCE(ce.eventUid, ''))
+           )`
+      )
+      .all(accountId, ...chunk) as EventRow[];
+    rows.forEach((row) => {
+      const id = row.id?.trim();
+      if (id) eventRowsById.set(id, row);
+    });
+  }
+  for (let start = 0; start < uniqueEventUidKeys.length; start += QUERY_BATCH_SIZE) {
+    const chunk = uniqueEventUidKeys.slice(start, start + QUERY_BATCH_SIZE);
+    const rows = db
+      .prepare(
+        `SELECT DISTINCT ce.id, ce.eventUid
+         FROM calendar_events ce
+         WHERE ce.accountId = ? AND ce.deletedAtMs IS NULL
+           AND lower(COALESCE(ce.eventUid, '')) IN (${chunk.map(() => "?").join(", ")})`
+      )
+      .all(accountId, ...chunk) as EventRow[];
+    rows.forEach((row) => {
+      const id = row.id?.trim();
+      if (id) eventRowsById.set(id, row);
+    });
+  }
+  const eventRows = Array.from(eventRowsById.values());
 
   return {
     reminders: reminderRows

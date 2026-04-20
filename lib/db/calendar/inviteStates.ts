@@ -8,7 +8,6 @@
  * independently so the messages layer never has to touch invite writes.
  */
 import { getAccountDb } from "../connection";
-import { ensureMessageCalendarEventOptionalColumns } from "../schema";
 import { withDbWriteRetry } from "../../dbWriteRetry";
 import { type CalendarInviteActionType } from "../../calendarInviteProcessing";
 import {
@@ -33,7 +32,6 @@ export async function upsertMessageCalendarInviteStates(
 ) {
   return withDbWriteRetry("upsertMessageCalendarInviteStates", async () => {
     const db = await getAccountDb(accountId);
-    ensureMessageCalendarEventOptionalColumns(db);
     const insert = db.prepare(
       `INSERT INTO message_calendar_events (
          accountId,
@@ -109,7 +107,6 @@ export async function markMessageCalendarInviteStatesProcessed(
 ) {
   return withDbWriteRetry("markMessageCalendarInviteStatesProcessed", async () => {
     const db = await getAccountDb(accountId);
-    ensureMessageCalendarEventOptionalColumns(db);
     const normalizedEventUids = normalizeCalendarEventUids(eventUids);
     if (normalizedEventUids.length === 0) return 0;
     const processedAtMs =
@@ -126,23 +123,32 @@ export async function markMessageCalendarInviteStatesProcessed(
       typeof options?.processedAutomatically === "boolean"
         ? (options.processedAutomatically ? 1 : 0)
         : null;
-    const result = db
-      .prepare(
-        `UPDATE message_calendar_events
-         SET processedAtMs = ?, processedByUserId = ?, processedAutomatically = ?
-         WHERE accountId = ?
-           AND messageId = ?
-           AND eventUid IN (${normalizedEventUids.map(() => "?").join(",")})`
-      )
-      .run(
-        processedAtMs,
-        processedByUserId,
-        processedAutomatically,
-        accountId,
-        messageId,
-        ...normalizedEventUids
-      ) as { changes?: number };
-    return result?.changes ?? 0;
+    // Callers can pass more eventUids than SQLite's default 999-parameter
+    // limit allows in a single statement. Chunk at the shared
+    // QUERY_BATCH_SIZE used by the messages domain.
+    const QUERY_BATCH_SIZE = 400;
+    let totalChanges = 0;
+    for (let start = 0; start < normalizedEventUids.length; start += QUERY_BATCH_SIZE) {
+      const chunk = normalizedEventUids.slice(start, start + QUERY_BATCH_SIZE);
+      const result = db
+        .prepare(
+          `UPDATE message_calendar_events
+           SET processedAtMs = ?, processedByUserId = ?, processedAutomatically = ?
+           WHERE accountId = ?
+             AND messageId = ?
+             AND eventUid IN (${chunk.map(() => "?").join(",")})`
+        )
+        .run(
+          processedAtMs,
+          processedByUserId,
+          processedAutomatically,
+          accountId,
+          messageId,
+          ...chunk
+        ) as { changes?: number };
+      totalChanges += result?.changes ?? 0;
+    }
+    return totalChanges;
   });
 }
 
@@ -152,7 +158,6 @@ export async function clearMessageCalendarInviteStatesProcessedByEventUid(
 ) {
   return withDbWriteRetry("clearMessageCalendarInviteStatesProcessedByEventUid", async () => {
     const db = await getAccountDb(accountId);
-    ensureMessageCalendarEventOptionalColumns(db);
     const normalizedEventUid = normalizeCalendarEventUid(eventUid);
     if (!normalizedEventUid) return 0;
     const result = db
@@ -171,7 +176,6 @@ export async function listFullyProcessedCalendarInviteMessageIds(
   messageIds: string[]
 ): Promise<string[]> {
   const db = await getAccountDb(accountId);
-  ensureMessageCalendarEventOptionalColumns(db);
   const normalizedMessageIds = Array.from(
     new Set(
       messageIds
@@ -236,7 +240,6 @@ export async function listCalendarInviteSourceMessagesByEventUid(
   }>
 > {
   const db = await getAccountDb(accountId);
-  ensureMessageCalendarEventOptionalColumns(db);
   const normalizedEventUid = normalizeCalendarEventUid(eventUid);
   if (!normalizedEventUid) return [];
   const excludedMessageId =
