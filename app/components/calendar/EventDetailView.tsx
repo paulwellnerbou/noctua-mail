@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { AlarmClock, AlarmClockPlus, Clock, Mail, MapPin, Repeat, Trash2, User, Users } from "lucide-react";
-import { AlertDialog, Badge, Button, Dialog, Flex, Select, Switch, Text } from "@radix-ui/themes";
+import { AlertDialog, Badge, Button, Flex, Text } from "@radix-ui/themes";
 import { buildCalendarRecurrenceSummary, formatCalendarEventRange } from "@/lib/calendar";
 import type { CalendarInviteActionType } from "@/lib/calendarInviteProcessing";
 import { formatAccountDateValue, formatAccountMediumDateTime } from "@/lib/dateFormatting";
@@ -42,6 +42,7 @@ import AlertDialogContent from "@/app/components/mailclient/message/AlertDialogC
 import { dispatchCalendarEventsUpdatedEvent } from "./calendarEventsClient";
 import CalendarEventEmailSnapshot from "./CalendarEventEmailSnapshot";
 import EventReminderDialog from "./EventReminderDialog";
+import EventResponseDialog from "./EventResponseDialog";
 import styles from "./EventDetailView.module.css";
 
 export type CalendarEventDeleteScope = "series" | "occurrence";
@@ -919,115 +920,27 @@ export default function EventDetailView({
         </AlertDialogContent>
       </AlertDialog.Root>
 
-      <Dialog.Root
+      <EventResponseDialog
         open={responseDialogOpen}
-        onOpenChange={(open) => {
-          if (!open && !submittingResponse) setResponseDialogOpen(false);
-        }}
-      >
-        <Dialog.Content size="2" className={styles.responseDialog}>
-          <Flex direction="column" gap="3">
-            <Dialog.Title size="4">Respond to invitation</Dialog.Title>
-
-            <div className={styles.responseSummary}>
-              <Text size="2" weight="medium">{title || "Untitled Event"}</Text>
-              {timeRange && (
-                <Text size="1" color="gray">{responseTargetLabel}</Text>
-              )}
-              {organizer && (
-                <Text size="1" color="gray">Organizer: {organizer}</Text>
-              )}
-            </div>
-
-            <Flex direction="column" gap="2">
-              <Text size="2" weight="medium">Your response</Text>
-              <Flex gap="2" wrap="wrap">
-                <Button
-                  size="1"
-                  variant={draftPartstat === "ACCEPTED" ? "solid" : "soft"}
-                  color="green"
-                  onClick={() => setDraftPartstat("ACCEPTED")}
-                >
-                  Accept
-                </Button>
-                <Button
-                  size="1"
-                  variant={draftPartstat === "TENTATIVE" ? "solid" : "soft"}
-                  color="orange"
-                  onClick={() => setDraftPartstat("TENTATIVE")}
-                >
-                  Tentative
-                </Button>
-                <Button
-                  size="1"
-                  variant={draftPartstat === "DECLINED" ? "solid" : "soft"}
-                  color="red"
-                  onClick={() => setDraftPartstat("DECLINED")}
-                >
-                  Decline
-                </Button>
-              </Flex>
-            </Flex>
-
-            {canChooseOccurrenceScope && (
-              <Flex direction="column" gap="2">
-                <Text size="2" weight="medium">Apply to</Text>
-                <Select.Root
-                  value={draftScope}
-                  onValueChange={(value) => setDraftScope(value as CalendarParticipationScope)}
-                >
-                  <Select.Trigger />
-                  <Select.Content position="popper">
-                    <Select.Item value="occurrence">{responseOccurrenceLabel}</Select.Item>
-                    <Select.Item value="series">Whole series</Select.Item>
-                  </Select.Content>
-                </Select.Root>
-              </Flex>
-            )}
-
-            <Flex direction="column" gap="2">
-              <Text size="2" weight="medium">Notify organizer</Text>
-              <Flex align="center" justify="between" gap="3" className={styles.responseToggleRow}>
-                <div className={styles.responseToggleText}>
-                  <Text size="2">Send reply email</Text>
-                  {replyRequested === false && (
-                    <Text size="1" color="gray">
-                      The organizer did not request a reply. You can still send one.
-                    </Text>
-                  )}
-                </div>
-                <Switch
-                  checked={sendReply}
-                  onCheckedChange={setSendReply}
-                  disabled={submittingResponse}
-                  aria-label="Send reply to organizer"
-                />
-              </Flex>
-            </Flex>
-
-            <Flex justify="end" gap="2">
-              <Button
-                variant="soft"
-                color="gray"
-                disabled={submittingResponse}
-                onClick={() => setResponseDialogOpen(false)}
-              >
-                Cancel
-              </Button>
-              <Button
-                disabled={submittingResponse || !isReplyChoice(draftPartstat)}
-                onClick={() => void handleRespond()}
-              >
-                {submittingResponse
-                  ? "Saving..."
-                  : sendReply
-                    ? `${replyActionLabel} and send response`
-                    : `${replyActionLabel} and save without sending response`}
-              </Button>
-            </Flex>
-          </Flex>
-        </Dialog.Content>
-      </Dialog.Root>
+        onOpenChange={setResponseDialogOpen}
+        title={title}
+        timeRange={timeRange}
+        responseTargetLabel={responseTargetLabel}
+        organizer={organizer}
+        draftPartstat={draftPartstat}
+        onDraftPartstatChange={setDraftPartstat}
+        draftScope={draftScope}
+        onDraftScopeChange={setDraftScope}
+        canChooseOccurrenceScope={canChooseOccurrenceScope}
+        responseOccurrenceLabel={responseOccurrenceLabel}
+        sendReply={sendReply}
+        onSendReplyChange={setSendReply}
+        replyRequested={replyRequested}
+        submittingResponse={submittingResponse}
+        onSubmit={handleRespond}
+        replyActionLabel={replyActionLabel}
+        isReplyChoice={isReplyChoice}
+      />
 
       <EventReminderDialog
         open={reminderModalOpen}
