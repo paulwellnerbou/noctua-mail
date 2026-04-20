@@ -18,24 +18,35 @@ import { getAccountDb } from "../connection";
  * an IMAP operation against the current folder.
  */
 export async function getFolderIdsByMessageIds(accountId: string, messageIds: string[]) {
-  if (messageIds.length === 0) return new Map<string, string>();
+  const uniqueIds = Array.from(
+    new Set(messageIds.map((id) => id.trim()).filter(Boolean))
+  );
+  if (uniqueIds.length === 0) return new Map<string, string>();
   const db = await getAccountDb(accountId);
-  const rows = db
-    .prepare(
-      `SELECT id, folderId
-       FROM messages
-       WHERE accountId = ? AND id IN (${messageIds.map(() => "?").join(",")})`
-    )
-    .all(accountId, ...messageIds) as Array<{
-    id: string;
-    folderId: string;
-  }>;
   const map = new Map<string, string>();
-  rows.forEach((row) => {
-    if (row.id && row.folderId) {
-      map.set(row.id, row.folderId);
-    }
-  });
+
+  // Callers (e.g. full-sync orphan reconciliation in `syncOperation.ts`)
+  // can pass arrays larger than SQLite's default 999-parameter limit.
+  // Chunk at the shared QUERY_BATCH_SIZE used by other bulk queries.
+  const QUERY_BATCH_SIZE = 400;
+  for (let start = 0; start < uniqueIds.length; start += QUERY_BATCH_SIZE) {
+    const chunk = uniqueIds.slice(start, start + QUERY_BATCH_SIZE);
+    const rows = db
+      .prepare(
+        `SELECT id, folderId
+         FROM messages
+         WHERE accountId = ? AND id IN (${chunk.map(() => "?").join(",")})`
+      )
+      .all(accountId, ...chunk) as Array<{
+      id: string;
+      folderId: string;
+    }>;
+    rows.forEach((row) => {
+      if (row.id && row.folderId) {
+        map.set(row.id, row.folderId);
+      }
+    });
+  }
   return map;
 }
 

@@ -149,19 +149,29 @@ export async function stageMessageMoves(params: {
   return withDbWriteRetry("stageMessageMoves", async () => {
     const db = await getAccountDb(accountId);
     const pendingMoveStartedAt = Date.now();
-    const rows = db
-      .prepare(
-        `SELECT id, folderId, mailboxPath, imapUid, pendingMoveSourceFolderId
-         FROM messages
-         WHERE accountId = ? AND id IN (${uniqueIds.map(() => "?").join(",")})`
-      )
-      .all(accountId, ...uniqueIds) as Array<{
+    // Whole-thread moves can pass arrays larger than SQLite's default
+    // 999-parameter limit. Chunk the SELECT at the shared
+    // QUERY_BATCH_SIZE.
+    const QUERY_BATCH_SIZE = 400;
+    type Row = {
       id: string;
       folderId: string;
       mailboxPath?: string | null;
       imapUid?: number | null;
       pendingMoveSourceFolderId?: string | null;
-    }>;
+    };
+    const rows: Row[] = [];
+    for (let start = 0; start < uniqueIds.length; start += QUERY_BATCH_SIZE) {
+      const chunk = uniqueIds.slice(start, start + QUERY_BATCH_SIZE);
+      const batchRows = db
+        .prepare(
+          `SELECT id, folderId, mailboxPath, imapUid, pendingMoveSourceFolderId
+           FROM messages
+           WHERE accountId = ? AND id IN (${chunk.map(() => "?").join(",")})`
+        )
+        .all(accountId, ...chunk) as Row[];
+      rows.push(...batchRows);
+    }
     const updateMessage = db.prepare(
       `UPDATE messages
        SET folderId = ?,
@@ -310,10 +320,29 @@ export async function relocateMovedMessage(params: {
 }
 
 /**
+ * SQLite LIKE treats `_` as a single-char wildcard and `%` as multi-char.
+ * Mailbox paths can contain both (e.g. `Archive_2024`), so any LIKE
+ * pattern built from a user-supplied folder name must escape them —
+ * otherwise the pattern matches unrelated folders and the UPDATE can
+ * touch rows it shouldn't.
+ */
+function escapeLikePattern(value: string) {
+  return value.replace(/[\\%_]/g, (ch) => `\\${ch}`);
+}
+
+/**
  * Rewrites folderId and mailboxPath in bulk when a folder subtree is
  * renamed. The two columns are stored denormalized, so both must be
  * patched together to keep the invariant `folderId == accountId + ":" +
  * mailboxPath` intact.
+ *
+ * The rewrite uses prefix-only surgery (`? || substr(column, prefixLen + 1)`)
+ * rather than `REPLACE`. `REPLACE` substitutes every occurrence of the
+ * needle in the haystack, which corrupts paths like `Foo/FooBar` when
+ * renaming `Foo` → `Bar` (the inner `Foo` would also be rewritten). The
+ * `LIKE ... ESCAPE` guard scopes the UPDATE to rows whose folderId
+ * actually starts with the old prefix and escapes `%` / `_` / `\` so
+ * folder names containing those characters match literally.
  */
 export async function updateMessagesFolderPrefix(
   accountId: string,
@@ -326,9 +355,16 @@ export async function updateMessagesFolderPrefix(
     const newFull = `${accountId}:${newPrefix}`;
     db.prepare(
       `UPDATE messages
-       SET folderId = REPLACE(folderId, ?, ?),
-           mailboxPath = REPLACE(mailboxPath, ?, ?)
-       WHERE accountId = ? AND folderId LIKE ?`
-    ).run(oldFull, newFull, oldPrefix, newPrefix, accountId, `${oldFull}%`);
+       SET folderId = ? || substr(folderId, length(?) + 1),
+           mailboxPath = ? || substr(mailboxPath, length(?) + 1)
+       WHERE accountId = ? AND folderId LIKE ? ESCAPE '\\'`
+    ).run(
+      newFull,
+      oldFull,
+      newPrefix,
+      oldPrefix,
+      accountId,
+      `${escapeLikePattern(oldFull)}%`
+    );
   });
 }

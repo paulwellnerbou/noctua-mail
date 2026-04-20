@@ -105,34 +105,49 @@ export async function deleteMessagesByIds(accountId: string, messageIds: string[
   if (uniqueIds.length === 0) return;
   return withDbWriteRetry("deleteMessagesByIds", async () => {
     const db = await getAccountDb(accountId);
-    const placeholders = uniqueIds.map(() => "?").join(",");
-    const threadRows = db
-      .prepare(
-        `SELECT DISTINCT threadId
-         FROM messages
-         WHERE accountId = ? AND id IN (${placeholders}) AND threadId IS NOT NULL`
-      )
-      .all(accountId, ...uniqueIds) as Array<{ threadId: string }>;
-    const threadIds = threadRows.map((row) => row.threadId).filter(Boolean);
+    // Full-sync orphan cleanup can pass arrays larger than SQLite's
+    // default 999-parameter limit. Chunk the IN (...) predicates at
+    // the shared QUERY_BATCH_SIZE.
+    const QUERY_BATCH_SIZE = 400;
+    const threadIdSet = new Set<string>();
+    for (let start = 0; start < uniqueIds.length; start += QUERY_BATCH_SIZE) {
+      const chunk = uniqueIds.slice(start, start + QUERY_BATCH_SIZE);
+      const placeholders = chunk.map(() => "?").join(",");
+      const threadRows = db
+        .prepare(
+          `SELECT DISTINCT threadId
+           FROM messages
+           WHERE accountId = ? AND id IN (${placeholders}) AND threadId IS NOT NULL`
+        )
+        .all(accountId, ...chunk) as Array<{ threadId: string }>;
+      threadRows.forEach((row) => {
+        if (row.threadId) threadIdSet.add(row.threadId);
+      });
+    }
+    const threadIds = Array.from(threadIdSet);
     db.transaction(() => {
-      db.prepare(
-        `DELETE FROM attachments
-         WHERE messageId IN (
-           SELECT id FROM messages
-           WHERE accountId = ? AND id IN (${placeholders})
-         )`
-      ).run(accountId, ...uniqueIds);
-      db.prepare(
-        `DELETE FROM message_fts
-         WHERE messageId IN (
-           SELECT id FROM messages
-           WHERE accountId = ? AND id IN (${placeholders})
-         )`
-      ).run(accountId, ...uniqueIds);
-      db.prepare(`DELETE FROM messages WHERE accountId = ? AND id IN (${placeholders})`).run(
-        accountId,
-        ...uniqueIds
-      );
+      for (let start = 0; start < uniqueIds.length; start += QUERY_BATCH_SIZE) {
+        const chunk = uniqueIds.slice(start, start + QUERY_BATCH_SIZE);
+        const placeholders = chunk.map(() => "?").join(",");
+        db.prepare(
+          `DELETE FROM attachments
+           WHERE messageId IN (
+             SELECT id FROM messages
+             WHERE accountId = ? AND id IN (${placeholders})
+           )`
+        ).run(accountId, ...chunk);
+        db.prepare(
+          `DELETE FROM message_fts
+           WHERE messageId IN (
+             SELECT id FROM messages
+             WHERE accountId = ? AND id IN (${placeholders})
+           )`
+        ).run(accountId, ...chunk);
+        db.prepare(`DELETE FROM messages WHERE accountId = ? AND id IN (${placeholders})`).run(
+          accountId,
+          ...chunk
+        );
+      }
     })();
     if (threadIds.length > 0) {
       await recomputeThreadsForAccountInternal(accountId, threadIds);
