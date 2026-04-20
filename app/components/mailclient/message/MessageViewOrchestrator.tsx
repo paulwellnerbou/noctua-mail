@@ -448,12 +448,13 @@ function MessageViewOrchestratorImpl(
     setTopicSuggestionExplanation(null);
     setTopicSuggestionExplanationThreadId("");
     // Message ids are only unique within an account, so clear per-message
-    // font + zoom overrides and the selected body-panel map to prevent
-    // one account's UI settings from leaking onto a coincidentally-
-    // matching id in another account.
+    // font + zoom overrides, the selected body-panel map, and the
+    // collapse/expand map to prevent one account's UI state from leaking
+    // onto a coincidentally-matching id in another account.
     setMessageFontScale({});
     setMessageZoom({});
     setMessageTabs({});
+    setCollapsedMessages({});
   }, [activeAccountId]);
 
   // Collapse all messages in the active thread except the selected one when
