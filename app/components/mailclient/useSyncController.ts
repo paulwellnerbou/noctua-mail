@@ -30,6 +30,13 @@ import type {
   SyncNotificationMessage,
   SyncTriggerOptions
 } from "./types";
+import {
+  FullSyncDebugCancelledError,
+  isFullSyncDebugCancelledError,
+  type InternalSyncTriggerOptions,
+  type NewSyncFolderDecision,
+  type SyncJobRequest
+} from "./syncJobTypes";
 import { applyFlagsToMessage } from "./utils/messageHelpers";
 import { prioritizeFolderIds, prioritizeFolders } from "./utils/folderHelpers";
 import { withCalendarInviteFlag } from "@/lib/messageFlags";
@@ -84,47 +91,6 @@ export type UseSyncControllerParams = {
   inboxFolder: Folder | null;
   currentKeyRef: React.MutableRefObject<string>;
 };
-
-type NewSyncFolderDecision = {
-  folderId: string;
-  mailboxPath: string;
-  uidNext: number | null;
-  skip: boolean;
-  reason:
-    | "baseline-unsynced-folder"
-    | "no-new-uids"
-    | "has-new-uids"
-    | "missing-uid-next"
-    | "status-error";
-};
-
-type SyncJobRequest = {
-  accountId: string;
-  folderId?: string;
-  fullSync?: boolean;
-  mode?: SyncMode;
-  recategorizeFolder?: boolean;
-  backfillUids?: number[];
-  fullSyncReason?: string;
-  triggerId?: string;
-  skipFullSyncConfirm?: boolean;
-};
-
-type InternalSyncTriggerOptions = SyncTriggerOptions & {
-  backfillUids?: number[];
-  skipFullSyncConfirm?: boolean;
-};
-
-class FullSyncDebugCancelledError extends Error {
-  constructor(reason: string) {
-    super(`Full sync cancelled before start. Reason: ${reason}`);
-    this.name = "FullSyncDebugCancelledError";
-  }
-}
-
-function isFullSyncDebugCancelledError(error: unknown): error is FullSyncDebugCancelledError {
-  return error instanceof Error && error.name === "FullSyncDebugCancelledError";
-}
 
 export function useSyncController({
   activeAccountId,
