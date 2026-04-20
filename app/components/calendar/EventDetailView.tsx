@@ -20,14 +20,7 @@ import type {
 import { formatCalendarParticipationLabel } from "@/lib/calendarParticipation";
 import { formatCalendarTimeZoneShortLabel } from "@/lib/calendarTimezones";
 import { selectCalendarEventEmailSnapshot } from "@/lib/calendarEventEmailSnapshot";
-import {
-  enforceSafeLinks,
-  linkifyHtmlTextNodes,
-  sanitizeHtmlForDisplay,
-  stripStyleTags
-} from "@/lib/html";
 import { resolveNextReminderOccurrence } from "@/lib/reminderRecurrence";
-import { linkifyText } from "@/app/components/LinkifiedText";
 import {
   CALENDAR_REMINDER_LEAD_OPTIONS,
   deleteCalendarReminder,
@@ -41,6 +34,7 @@ import {
 import { dispatchCalendarEventsUpdatedEvent } from "./calendarEventsClient";
 import CalendarEventEmailSnapshot from "./CalendarEventEmailSnapshot";
 import EventDeleteScopeDialog from "./EventDeleteScopeDialog";
+import EventDetailDescription from "./EventDetailDescription";
 import EventDetailMeta from "./EventDetailMeta";
 import EventInviteStatusRow from "./EventInviteStatusRow";
 import EventReminderDialog from "./EventReminderDialog";
@@ -117,14 +111,6 @@ function parseHttpUrl(value?: string): string | null {
   } catch {
     return null;
   }
-}
-
-function looksLikeHtml(value: string) {
-  return /<\s*\/?\s*[a-z][\w:-]*(\s[^>]*?)?>/i.test(value);
-}
-
-function sanitizeDescriptionHtml(value: string) {
-  return enforceSafeLinks(linkifyHtmlTextNodes(sanitizeHtmlForDisplay(stripStyleTags(value))));
 }
 
 function formatTriggerDate(date: Date, dateFormat?: AccountDateFormat) {
@@ -253,13 +239,6 @@ export default function EventDetailView({
         excludedDates: (excludedDates ?? []).map((ms) => new Date(ms))
       })
     : null;
-
-  // Description
-  const trimmedDescription = description?.trim() ?? "";
-  const descriptionHtml = trimmedDescription && looksLikeHtml(trimmedDescription)
-    ? sanitizeDescriptionHtml(trimmedDescription)
-    : "";
-  const useHtmlDescription = Boolean(descriptionHtml);
 
   // Location URL
   const locationUrl = parseHttpUrl(location);
@@ -667,19 +646,7 @@ export default function EventDetailView({
         attendees={attendees}
       />
 
-      {/* Description */}
-      {trimmedDescription && (
-        <div className={styles.description}>
-          <span className={styles.descriptionLabel}>Description</span>
-          {useHtmlDescription ? (
-            <div className={styles.descriptionText} dangerouslySetInnerHTML={{ __html: descriptionHtml }} />
-          ) : (
-            <span className={styles.descriptionText}>
-              {linkifyText(trimmedDescription, styles.descriptionLink)}
-            </span>
-          )}
-        </div>
-      )}
+      <EventDetailDescription description={description} />
 
       {/* Badges */}
       {(status || currentMyPartstat || sourceType) && (
