@@ -123,6 +123,11 @@ export async function startRecomputeJob(input: StartRecomputeJobInput): Promise<
     // Another recompute superseded us — stop silently.
     if (handles.jobIdRef.current !== jobId) return;
     handles.pollInFlightRef.current = true;
+    // Terminal resolution from the status poll, if any. Recorded inside
+    // the try/catch but acted on afterwards so an `onSuccess` rejection
+    // doesn't get misreported as a status-check failure.
+    let resolution: "done" | "failed" | "error" | null = null;
+    let failedErrorMessage: string | null = null;
     try {
       const statusRes = await apiFetch(
         buildAccountApiPath(accountId, `${statusPath}?jobId=${encodeURIComponent(jobId)}`)
@@ -136,25 +141,40 @@ export async function startRecomputeJob(input: StartRecomputeJobInput): Promise<
       const statusData = (await statusRes.json()) as JobStatusResponse;
       const status = statusData?.job?.status;
       if (status === "done") {
-        stopPoll();
-        setRunning(false);
-        await onSuccess();
-        return;
-      }
-      if (status === "failed") {
-        reportError(statusData?.job?.error || `${jobLabel} recompute failed.`);
-        stopPoll();
-        setRunning(false);
-        return;
+        resolution = "done";
+      } else if (status === "failed") {
+        resolution = "failed";
+        failedErrorMessage = statusData?.job?.error || `${jobLabel} recompute failed.`;
       }
     } catch {
+      resolution = "error";
+    } finally {
+      handles.pollInFlightRef.current = false;
+    }
+
+    if (resolution === "done") {
+      stopPoll();
+      setRunning(false);
+      try {
+        await onSuccess();
+      } catch {
+        reportError(`${jobLabel} recompute finished, but the post-recompute refresh failed.`);
+      }
+      return;
+    }
+    if (resolution === "failed") {
+      reportError(failedErrorMessage ?? `${jobLabel} recompute failed.`);
+      stopPoll();
+      setRunning(false);
+      return;
+    }
+    if (resolution === "error") {
       reportError(`Failed to check ${jobLabel.toLowerCase()} recompute status.`);
       stopPoll();
       setRunning(false);
       return;
-    } finally {
-      handles.pollInFlightRef.current = false;
     }
+
     handles.pollTimerRef.current = scheduleNextPoll(() => {
       void pollOnce();
     }, pollIntervalMs);

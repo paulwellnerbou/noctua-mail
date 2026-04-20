@@ -15,9 +15,9 @@
  *
  * Kept pure so the caller is responsible for the observable side effects:
  * writing localStorage, calling `showNotification`, mutating the keys set.
- * This lets us unit-test the tricky ordering rules (e.g. "update
- * lastNotifiedUid even when everything was filtered out") without mocking
- * browser APIs.
+ * This lets us unit-test the tricky ordering and high-water-mark rules
+ * (e.g. when `lastNotifiedUid` should advance for acknowledged new mail)
+ * without mocking browser APIs.
  */
 
 import { extractEmails } from "./utils/clientHelpers";

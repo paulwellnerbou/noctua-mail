@@ -22,7 +22,11 @@ export type DetectSyncEscalationInput = {
 
 /**
  * True when this progress sample is the first observation that the
- * server escalated the job to a stronger mode than we requested.
+ * server is running the job in a different mode than we requested.
+ * Treated as an escalation because the server only changes the mode
+ * upward in practice (e.g. `recent` → `repair` / `full` when a gap is
+ * detected); any future "downgrade" path would need its own logging
+ * story.
  */
 export function detectSyncEscalation(input: DetectSyncEscalationInput): boolean {
   const { requestedMode, progressMode, alreadyLogged } = input;

@@ -3,10 +3,12 @@
  * controller.
  *
  * These live outside the hook because:
- *   - `FullSyncDebugCancelledError` is a named sentinel we want to detect
- *     via instanceof in both the sync launcher and the error reporter.
- *     Keeping its constructor in one place guarantees the same class
- *     identity.
+ *   - `FullSyncDebugCancelledError` is a named sentinel detected via the
+ *     exported guard in both the sync launcher and the error reporter.
+ *     The guard checks for an `Error` with the
+ *     `FullSyncDebugCancelledError` name so detection still works across
+ *     realms (e.g. errors that cross a worker boundary and lose their
+ *     prototype chain).
  *   - The request / trigger types are reused across several non-React
  *     helpers (policy decision executors, newly-detected folder sync).
  */
