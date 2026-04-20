@@ -13,9 +13,9 @@ import next from "eslint-config-next/core-web-vitals";
 //   Rule 4 (externalBarrelOnly)             — external code uses the barrel
 //   Rule 5 (routeNoRoute)                   — route.ts cannot import route.ts
 //
-// Rule 1: lib/db/** cannot import from app/**.
+// Rule 1: the DB layer (barrel + subtree) cannot import from app/**.
 const dbBoundaryNoApp = {
-  files: ["lib/db/**/*.ts"],
+  files: ["lib/db.ts", "lib/db/**/*.ts"],
   rules: {
     "no-restricted-imports": ["error", {
       patterns: [{
