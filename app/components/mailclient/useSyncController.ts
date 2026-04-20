@@ -32,6 +32,10 @@ import {
   shouldSkipDeleteReconcile
 } from "./syncReconcileGuards";
 import { startRecomputeJob } from "./recomputeJobRunner";
+import {
+  detectSyncEscalation,
+  normalizeSyncJobProgress
+} from "./syncJobProgress";
 import type {
   FullSyncConfirmState,
   SyncJobProgress,
@@ -265,10 +269,11 @@ export function useSyncController({
         const progress = data.job?.progress;
         if (progress) {
           if (
-            !loggedEscalation &&
-            requestedMode &&
-            progress.mode &&
-            progress.mode !== requestedMode
+            detectSyncEscalation({
+              requestedMode,
+              progressMode: progress.mode,
+              alreadyLogged: loggedEscalation
+            })
           ) {
             loggedEscalation = true;
             console.warn("[noctua][sync] sync escalated", {
@@ -279,11 +284,7 @@ export function useSyncController({
               escalatedTo: progress.mode
             });
           }
-          const nextProgress: SyncJobProgress = {
-            ...progress,
-            jobId,
-            updatedAt: typeof progress.updatedAt === "number" ? progress.updatedAt : Date.now()
-          };
+          const nextProgress = normalizeSyncJobProgress({ progress, jobId });
           setSyncProgressByJobId((prev) => ({ ...prev, [jobId]: nextProgress }));
         }
         const status = data.job?.status;
