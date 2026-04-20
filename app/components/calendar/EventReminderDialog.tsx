@@ -34,7 +34,12 @@ export default function EventReminderDialog({
   savingReminder
 }: EventReminderDialogProps) {
   return (
-    <Dialog.Root open={open} onOpenChange={(next) => { if (!next) onOpenChange(false); }}>
+    <Dialog.Root
+      open={open}
+      onOpenChange={(next) => {
+        if (!next && !savingReminder) onOpenChange(false);
+      }}
+    >
       <Dialog.Content size="2" className={styles.reminderDialog}>
         <Flex direction="column" gap="3">
           <Dialog.Title size="4">{existingReminder ? "Modify Reminder" : "Schedule Reminder"}</Dialog.Title>
