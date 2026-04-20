@@ -70,15 +70,11 @@ export async function upsertMessageCalendarInviteStates(
               ? Math.round(item.eventFirstStartAtMs)
               : null;
           const eventLastEndAtMs =
-            item.eventLastEndAtMs === null
-              ? null
-              : typeof item.eventLastEndAtMs === "number" &&
-                  Number.isFinite(item.eventLastEndAtMs) &&
-                  item.eventLastEndAtMs > 0
-                ? Math.round(item.eventLastEndAtMs)
-                : eventFirstStartAtMs
-                  ? null
-                  : null;
+            typeof item.eventLastEndAtMs === "number" &&
+            Number.isFinite(item.eventLastEndAtMs) &&
+            item.eventLastEndAtMs > 0
+              ? Math.round(item.eventLastEndAtMs)
+              : null;
           insert.run(
             accountId,
             messageId,

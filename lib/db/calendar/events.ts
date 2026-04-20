@@ -127,11 +127,16 @@ export async function upsertCalendarParticipationOverride(
 ): Promise<CalendarParticipationOverrideRow> {
   const db = await getAccountDb(accountId);
   const now = Date.now();
-  const existing = await getCalendarParticipationOverrideForOccurrence(
-    accountId,
-    input.eventUid,
-    input.occurrenceStartAtMs
-  );
+  // Inline the existence check instead of delegating to the async
+  // helper — `getCalendarParticipationOverrideForOccurrence` would
+  // call `getAccountDb` again for a handle we already hold.
+  const existingRow = db
+    .prepare(
+      `SELECT * FROM calendar_participation_overrides
+       WHERE accountId = ? AND eventUid = ? AND occurrenceStartAtMs = ?`
+    )
+    .get(accountId, input.eventUid, input.occurrenceStartAtMs) as any;
+  const existing = existingRow ? rowToCalendarParticipationOverride(existingRow) : null;
   const row: CalendarParticipationOverrideRow = {
     id: existing?.id ?? `calp-${crypto.randomUUID()}`,
     accountId,
