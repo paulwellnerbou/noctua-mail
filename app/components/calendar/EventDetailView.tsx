@@ -1,9 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { buildCalendarRecurrenceSummary, formatCalendarEventRange } from "@/lib/calendar";
 import type { CalendarInviteActionType } from "@/lib/calendarInviteProcessing";
-import { formatAccountDateValue, formatAccountMediumDateTime } from "@/lib/dateFormatting";
+import { formatAccountDateValue } from "@/lib/dateFormatting";
 import {
   buildAccountCalendarEventPath,
   buildAccountCalendarEventRespondPath,
@@ -18,17 +18,7 @@ import type {
 import { formatCalendarParticipationLabel } from "@/lib/calendarParticipation";
 import { formatCalendarTimeZoneShortLabel } from "@/lib/calendarTimezones";
 import { selectCalendarEventEmailSnapshot } from "@/lib/calendarEventEmailSnapshot";
-import { resolveNextReminderOccurrence } from "@/lib/reminderRecurrence";
-import {
-  CALENDAR_REMINDER_LEAD_OPTIONS,
-  deleteCalendarReminder,
-  fetchCalendarReminders,
-  findActiveCalendarReminderForEvent,
-  getCalendarReminderLeadOption,
-  dispatchCalendarRemindersUpdatedEvent,
-  upsertCalendarReminder,
-  type CalendarReminder
-} from "@/app/components/mailclient/utils/calendarReminders";
+import { dispatchCalendarRemindersUpdatedEvent } from "@/app/components/mailclient/utils/calendarReminders";
 import { dispatchCalendarEventsUpdatedEvent } from "./calendarEventsClient";
 import CalendarEventEmailSnapshot from "./CalendarEventEmailSnapshot";
 import EventDeleteScopeDialog from "./EventDeleteScopeDialog";
@@ -39,6 +29,7 @@ import EventDetailMeta from "./EventDetailMeta";
 import EventInviteStatusRow from "./EventInviteStatusRow";
 import EventReminderDialog from "./EventReminderDialog";
 import EventResponseDialog from "./EventResponseDialog";
+import { useEventReminderState } from "./useEventReminderState";
 import styles from "./EventDetailView.module.css";
 
 export type CalendarEventDeleteScope = "series" | "occurrence";
@@ -111,10 +102,6 @@ function parseHttpUrl(value?: string): string | null {
   } catch {
     return null;
   }
-}
-
-function formatTriggerDate(date: Date, dateFormat?: AccountDateFormat) {
-  return formatAccountMediumDateTime(date.getTime(), dateFormat) ?? "";
 }
 
 function buildOccurrenceExcludedDates(excludedDates: number[] | undefined, occurrenceStartAtMs: number) {
@@ -224,14 +211,36 @@ export default function EventDetailView({
   // Location URL
   const locationUrl = parseHttpUrl(location);
 
-  // Reminder state
   const canonicalStartMs = eventStartAtMs ?? resolvedStartMs;
-  const [existingReminder, setExistingReminder] = useState<CalendarReminder | null>(null);
-  const [reminderModalOpen, setReminderModalOpen] = useState(false);
-  const [leadOptionValue, setLeadOptionValue] = useState(CALENDAR_REMINDER_LEAD_OPTIONS[3]?.value ?? "15");
-  const [savingReminder, setSavingReminder] = useState(false);
-  const [deletingReminder, setDeletingReminder] = useState(false);
   const [reminderNotice, setReminderNotice] = useState<string | null>(null);
+
+  const {
+    existingReminder,
+    reminderModalOpen,
+    setReminderModalOpen,
+    leadOptionValue,
+    setLeadOptionValue,
+    savingReminder,
+    deletingReminder,
+    canScheduleReminder,
+    handleScheduleReminder,
+    handleDeleteReminder
+  } = useEventReminderState({
+    accountId,
+    eventUid,
+    title,
+    location,
+    description,
+    messageId,
+    startTimezone,
+    recurrenceRule,
+    recurrenceDates,
+    excludedDates,
+    canonicalStartMs,
+    eventEndAtMs,
+    dateFormat,
+    onNotice: setReminderNotice
+  });
   const [currentMyPartstat, setCurrentMyPartstat] = useState(myPartstat);
   const [currentParticipationScope, setCurrentParticipationScope] =
     useState<CalendarParticipationScope>("series");
@@ -257,43 +266,6 @@ export default function EventDetailView({
   useEffect(() => {
     setSendReply(replyRequested !== false);
   }, [replyRequested]);
-
-  const canScheduleReminder = (() => {
-    if (!canonicalStartMs) return false;
-    const nowMs = Date.now();
-    if (!recurrenceRule?.trim()) return canonicalStartMs > nowMs;
-    const next = resolveNextReminderOccurrence({
-      eventStartAtMs: canonicalStartMs,
-      eventEndAtMs: eventEndAtMs,
-      leadMinutes: 0,
-      recurrenceRule,
-      recurrenceDates,
-      excludedDates
-    }, nowMs);
-    return Boolean(next && next.eventStartAtMs > nowMs);
-  })();
-
-  const refreshReminder = useCallback(async () => {
-    if (!accountId || !canonicalStartMs) return;
-    try {
-      const reminders = await fetchCalendarReminders(accountId);
-      const found = findActiveCalendarReminderForEvent(reminders, {
-        eventUid,
-        eventTitle: title,
-        eventStartAtMs: canonicalStartMs
-      });
-      setExistingReminder(found);
-      if (found) {
-        const val = String(found.leadMinutes);
-        const has = CALENDAR_REMINDER_LEAD_OPTIONS.some((o) => o.value === val);
-        setLeadOptionValue(has ? val : (CALENDAR_REMINDER_LEAD_OPTIONS[3]?.value ?? "15"));
-      }
-    } catch {
-      // ignore
-    }
-  }, [accountId, eventUid, title, canonicalStartMs]);
-
-  useEffect(() => { void refreshReminder(); }, [refreshReminder]);
 
   useEffect(() => {
     if (!reminderNotice) return;
@@ -371,55 +343,6 @@ export default function EventDetailView({
     );
     setSendReply(replyRequested !== false);
     setResponseDialogOpen(true);
-  };
-
-  const handleScheduleReminder = async () => {
-    if (!accountId || !canonicalStartMs) return;
-    setSavingReminder(true);
-    try {
-      const option = getCalendarReminderLeadOption(leadOptionValue);
-      const stored = await upsertCalendarReminder(accountId, {
-        eventUid,
-        eventTitle: title,
-        eventLocation: location,
-        eventDescription: description,
-        eventStartAtMs: canonicalStartMs,
-        eventEndAtMs: eventEndAtMs,
-        messageId,
-        startTimezone,
-        recurrenceRule,
-        recurrenceDates,
-        excludedDates,
-        leadMinutes: option.minutes,
-        leadLabel: option.label
-      });
-      const triggerDate = new Date(stored.reminder.triggerAtMs > Date.now() ? stored.reminder.triggerAtMs : Date.now());
-      setReminderNotice(
-        stored.replaced
-          ? `Reminder updated for ${formatTriggerDate(triggerDate, dateFormat)}.`
-          : `Reminder scheduled for ${formatTriggerDate(triggerDate, dateFormat)}.`
-      );
-      setReminderModalOpen(false);
-      await refreshReminder();
-    } catch {
-      setReminderNotice("Failed to save reminder.");
-    } finally {
-      setSavingReminder(false);
-    }
-  };
-
-  const handleDeleteReminder = async () => {
-    if (!accountId || !existingReminder) return;
-    setDeletingReminder(true);
-    try {
-      await deleteCalendarReminder(accountId, existingReminder.id);
-      setExistingReminder(null);
-      setReminderNotice("Reminder removed.");
-    } catch {
-      setReminderNotice("Failed to remove reminder.");
-    } finally {
-      setDeletingReminder(false);
-    }
   };
 
   const performDeleteEvent = async (scope: CalendarEventDeleteScope) => {
