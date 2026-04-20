@@ -6,8 +6,9 @@
  *   - **Row identity under mailbox collision.** When the same Message-Id
  *     appears in two different mailboxes, a deterministic variant id
  *     (`buildMessageCollisionVariantId`) is minted so both copies can
- *     coexist. Attachment file paths are migrated on disk via
- *     `moveMessageFiles`.
+ *     coexist. The incoming (colliding) row is assigned the variant id;
+ *     the pre-existing row keeps its base id and its on-disk
+ *     source/attachment files untouched.
  *   - **Same-mailbox duplicate purge.** If a message arrives with a
  *     Message-Id that already exists in the same folder but under a
  *     different row id (sync delta, for example), the older row plus
@@ -84,17 +85,6 @@ function normalizeCategoryManualState(value?: string | null): CategoryManualStat
   return null;
 }
 
-/**
- * One pending attachment-file migration captured during a batch; applied
- * after the DB transaction commits so on-disk state follows the row-id
- * rewrite.
- */
-type UpsertFileMove = {
-  previousMessageId: string;
-  nextMessageId: string;
-  attachmentIds: string[];
-};
-
 export async function upsertMessages(
   accountId: string,
   folderId: string | null,
@@ -103,7 +93,6 @@ export async function upsertMessages(
   options: { recomputeThreads?: boolean } = {}
 ) {
   return withDbWriteRetry("upsertMessages", async () => {
-    const { moveMessageFiles } = await import("../../storage");
     const shouldRecomputeThreads = options.recomputeThreads ?? true;
     const UPSERT_BATCH_SIZE = 200;
     const yieldToEventLoop = () =>
@@ -283,8 +272,7 @@ export async function upsertMessages(
     }
     const dedupedThreadIds = new Set<string>();
     const upsertBatch = db.transaction(
-      (batch: Message[], shouldDeleteAttachments: boolean): UpsertFileMove[] => {
-      const fileMoves: UpsertFileMove[] = [];
+      (batch: Message[], shouldDeleteAttachments: boolean) => {
       batch.forEach((message) => {
         let rowId = message.id;
         const existingById = findMessageById.get(accountId, rowId) as
@@ -302,14 +290,14 @@ export async function upsertMessages(
             message.mailboxPath ?? message.folderId,
             message.imapUid ?? null
           );
-          const attachmentIds = Array.from(
-            new Set((message.attachments ?? []).map((attachment) => attachment.id).filter(Boolean))
-          );
-          fileMoves.push({
-            previousMessageId: message.id,
-            nextMessageId: rowId,
-            attachmentIds
-          });
+          // Keep any existing on-disk blobs attached to the base message id.
+          // The existing database row remains at `message.id`, so moving
+          // files from the base id to the collision variant would orphan
+          // the base row's source / attachment paths. Variant rows already
+          // fall back to the base id during lookup (see
+          // `buildMessageRowIdLookupCandidates`); the reverse direction is
+          // not guaranteed. The newly-assigned variant row is fresh and
+          // will fetch its own source/attachments on first access.
         }
         if (message.messageId) {
           const duplicates = findFolderMessageDuplicates.all(
@@ -551,7 +539,6 @@ export async function upsertMessages(
           );
         });
       });
-      return fileMoves;
     });
 
     if (replaceExisting) {
@@ -571,34 +558,7 @@ export async function upsertMessages(
     for (let start = 0; start < nextMessages.length; start += UPSERT_BATCH_SIZE) {
       const batch = nextMessages.slice(start, start + UPSERT_BATCH_SIZE);
       if (batch.length === 0) continue;
-      const fileMoves = upsertBatch(batch, shouldDeleteAttachments);
-      if (fileMoves.length > 0) {
-        const dedupedMoves = new Map<
-          string,
-          { previousMessageId: string; nextMessageId: string; attachmentIds: Set<string> }
-        >();
-        fileMoves.forEach((move: UpsertFileMove) => {
-          const key = `${move.previousMessageId}->${move.nextMessageId}`;
-          const existing = dedupedMoves.get(key);
-          if (existing) {
-            move.attachmentIds.forEach((attachmentId) => existing.attachmentIds.add(attachmentId));
-            return;
-          }
-          dedupedMoves.set(key, {
-            previousMessageId: move.previousMessageId,
-            nextMessageId: move.nextMessageId,
-            attachmentIds: new Set(move.attachmentIds)
-          });
-        });
-        for (const move of dedupedMoves.values()) {
-          await moveMessageFiles(
-            accountId,
-            move.previousMessageId,
-            move.nextMessageId,
-            Array.from(move.attachmentIds)
-          );
-        }
-      }
+      upsertBatch(batch, shouldDeleteAttachments);
       if (start + UPSERT_BATCH_SIZE < nextMessages.length) {
         await yieldToEventLoop();
       }
