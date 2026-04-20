@@ -38,9 +38,14 @@ export function detectSyncEscalation(input: DetectSyncEscalationInput): boolean 
 /**
  * Normalise a server progress blob by stamping the jobId and, if the
  * server forgot to set `updatedAt`, filling it with the current clock.
+ *
+ * `progress.updatedAt` is typed as optional here because server blobs
+ * legitimately omit it and the function defends against that; the
+ * full `SyncJobProgress` type requires it because downstream consumers
+ * rely on the normalization having run.
  */
 export function normalizeSyncJobProgress(input: {
-  progress: Omit<SyncJobProgress, "jobId">;
+  progress: Omit<SyncJobProgress, "jobId" | "updatedAt"> & { updatedAt?: number };
   jobId: string;
   now?: number;
 }): SyncJobProgress {
