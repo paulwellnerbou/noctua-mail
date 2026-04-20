@@ -4,10 +4,6 @@ import { useEffect, useState } from "react";
 import { buildCalendarRecurrenceSummary, formatCalendarEventRange } from "@/lib/calendar";
 import type { CalendarInviteActionType } from "@/lib/calendarInviteProcessing";
 import { formatAccountDateValue } from "@/lib/dateFormatting";
-import {
-  buildAccountCalendarEventRespondPath,
-  buildAccountCalendarParticipationPath
-} from "@/lib/accountApiPaths";
 import type {
   AccountDateFormat,
   CalendarEvent,
@@ -17,7 +13,6 @@ import type {
 import { formatCalendarParticipationLabel } from "@/lib/calendarParticipation";
 import { formatCalendarTimeZoneShortLabel } from "@/lib/calendarTimezones";
 import { selectCalendarEventEmailSnapshot } from "@/lib/calendarEventEmailSnapshot";
-import { dispatchCalendarEventsUpdatedEvent } from "./calendarEventsClient";
 import CalendarEventEmailSnapshot from "./CalendarEventEmailSnapshot";
 import EventDeleteScopeDialog from "./EventDeleteScopeDialog";
 import EventDetailActions from "./EventDetailActions";
@@ -29,6 +24,7 @@ import EventReminderDialog from "./EventReminderDialog";
 import EventResponseDialog from "./EventResponseDialog";
 import { useEventDeleteState } from "./useEventDeleteState";
 import { useEventReminderState } from "./useEventReminderState";
+import { isReplyChoice, useEventResponseState } from "./useEventResponseState";
 import styles from "./EventDetailView.module.css";
 
 export type CalendarEventDeleteScope = "series" | "occurrence";
@@ -110,10 +106,6 @@ function getParticipationColor(
   if (status === "DECLINED") return "red";
   if (status === "TENTATIVE") return "orange";
   return "gray";
-}
-
-function isReplyChoice(status?: CalendarParticipationStatus) {
-  return status === "ACCEPTED" || status === "DECLINED" || status === "TENTATIVE";
 }
 
 function getReplyActionLabel(status?: CalendarParticipationStatus) {
@@ -229,15 +221,6 @@ export default function EventDetailView({
     dateFormat,
     onNotice: setReminderNotice
   });
-  const [currentMyPartstat, setCurrentMyPartstat] = useState(myPartstat);
-  const [currentParticipationScope, setCurrentParticipationScope] =
-    useState<CalendarParticipationScope>("series");
-  const [isRecurringParticipation, setIsRecurringParticipation] = useState(Boolean(recurrenceRule?.trim()));
-  const [responseDialogOpen, setResponseDialogOpen] = useState(false);
-  const [draftPartstat, setDraftPartstat] = useState<CalendarParticipationStatus>("NEEDS-ACTION");
-  const [draftScope, setDraftScope] = useState<CalendarParticipationScope>("series");
-  const [sendReply, setSendReply] = useState(replyRequested !== false);
-  const [submittingResponse, setSubmittingResponse] = useState(false);
   const resolvedOccurrenceStartAtMs =
     typeof resolvedStartMs === "number" && Number.isFinite(resolvedStartMs)
       ? resolvedStartMs
@@ -259,15 +242,36 @@ export default function EventDetailView({
     onNotice: setReminderNotice
   });
 
-  useEffect(() => {
-    setCurrentMyPartstat(myPartstat);
-    setCurrentParticipationScope(forceOccurrenceResponse ? "occurrence" : "series");
-    setIsRecurringParticipation(Boolean(recurrenceRule?.trim()));
-  }, [eventId, resolvedStartMs, myPartstat, recurrenceRule, forceOccurrenceResponse]);
-
-  useEffect(() => {
-    setSendReply(replyRequested !== false);
-  }, [replyRequested]);
+  const {
+    currentMyPartstat,
+    canChooseOccurrenceScope,
+    currentParticipationScope,
+    responseDialogOpen,
+    setResponseDialogOpen,
+    draftPartstat,
+    setDraftPartstat,
+    draftScope,
+    setDraftScope,
+    sendReply,
+    setSendReply,
+    submittingResponse,
+    openResponseDialog,
+    handleRespond
+  } = useEventResponseState({
+    accountId,
+    eventId,
+    eventUid,
+    myPartstat,
+    replyRequested,
+    canRespond,
+    forceOccurrenceResponse,
+    recurrenceRule,
+    resolvedStartMs,
+    responseOccurrenceLabel,
+    onEventUpdated,
+    onInviteProcessed,
+    onNotice: setReminderNotice
+  });
 
   useEffect(() => {
     if (!reminderNotice) return;
@@ -275,52 +279,6 @@ export default function EventDetailView({
     return () => window.clearTimeout(t);
   }, [reminderNotice]);
 
-  useEffect(() => {
-    let active = true;
-    if (!accountId || !eventId || !canRespond) return;
-    const loadParticipation = async () => {
-      try {
-        const params = new URLSearchParams({ eventId });
-        if (Number.isFinite(resolvedStartMs)) {
-          params.set("occurrenceStartAtMs", String(resolvedStartMs));
-        }
-        const res = await fetch(buildAccountCalendarParticipationPath(accountId, params), {
-          cache: "no-store"
-        });
-        const payload = (await res.json().catch(() => null)) as
-          | {
-              ok?: boolean;
-              participation?: {
-                partstat?: CalendarParticipationStatus;
-                scope?: CalendarParticipationScope;
-                isRecurring?: boolean;
-              };
-            }
-          | null;
-        if (!active || !res.ok || payload?.ok !== true || !payload.participation) return;
-        setCurrentMyPartstat(payload.participation.partstat);
-        setCurrentParticipationScope(
-          forceOccurrenceResponse
-            ? "occurrence"
-            : payload.participation.scope === "occurrence"
-              ? "occurrence"
-              : "series"
-        );
-        setIsRecurringParticipation(Boolean(payload.participation.isRecurring));
-      } catch {
-        // ignore
-      }
-    };
-    void loadParticipation();
-    return () => {
-      active = false;
-    };
-  }, [accountId, canRespond, eventId, resolvedStartMs, forceOccurrenceResponse]);
-
-  const canChooseOccurrenceScope =
-    !forceOccurrenceResponse && isRecurringParticipation && Number.isFinite(resolvedStartMs);
-  const effectiveResponseScope: CalendarParticipationScope =
-    forceOccurrenceResponse && Number.isFinite(resolvedStartMs) ? "occurrence" : draftScope;
   const hasOccurrenceCancellationAction =
     forceOccurrenceResponse &&
     Boolean(inviteProcessing?.onProcess) &&
@@ -329,104 +287,6 @@ export default function EventDetailView({
     ? responseOccurrenceLabel
     : "Whole series";
   const responseTargetLabel = `${responseOccurrenceLabel}: ${timeRange || "Selected event"}`;
-
-  const openResponseDialog = () => {
-    setDraftPartstat(
-      isReplyChoice(currentMyPartstat)
-        ? currentMyPartstat
-        : "NEEDS-ACTION"
-    );
-    setDraftScope(
-      forceOccurrenceResponse && Number.isFinite(resolvedStartMs)
-        ? "occurrence"
-        : canChooseOccurrenceScope
-          ? currentParticipationScope
-          : "series"
-    );
-    setSendReply(replyRequested !== false);
-    setResponseDialogOpen(true);
-  };
-
-  const handleRespond = async () => {
-    if (!accountId || !eventId) return;
-    if (!isReplyChoice(draftPartstat)) {
-      setReminderNotice("Choose a response first.");
-      return;
-    }
-    setSubmittingResponse(true);
-    try {
-      const res = await fetch(buildAccountCalendarEventRespondPath(accountId, eventId), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          partstat: draftPartstat,
-          scope: effectiveResponseScope,
-          sendReply,
-          occurrenceStartAtMs:
-            effectiveResponseScope === "occurrence" && Number.isFinite(resolvedStartMs)
-              ? resolvedStartMs
-              : undefined
-        })
-      });
-      const payload = (await res.json().catch(() => null)) as
-        | {
-            ok?: boolean;
-            message?: string;
-            event?: CalendarEvent;
-            participation?: {
-              partstat?: CalendarParticipationStatus;
-              scope?: CalendarParticipationScope;
-            };
-            inviteProcessing?: {
-              processedAtMs?: number;
-              processedAutomatically?: boolean;
-            };
-          }
-        | null;
-      if (!res.ok || payload?.ok !== true || !payload.event || !payload.participation) {
-        setReminderNotice(payload?.message || "Failed to update RSVP response.");
-        return;
-      }
-      setCurrentMyPartstat(payload.participation.partstat);
-      setCurrentParticipationScope(
-        forceOccurrenceResponse
-          ? "occurrence"
-          : payload.participation.scope === "occurrence"
-            ? "occurrence"
-            : "series"
-      );
-      onEventUpdated?.(payload.event);
-      if (eventUid?.trim()) {
-        onInviteProcessed?.(eventUid.trim(), {
-          processedAtMs:
-            typeof payload.inviteProcessing?.processedAtMs === "number" &&
-            Number.isFinite(payload.inviteProcessing.processedAtMs)
-              ? payload.inviteProcessing.processedAtMs
-              : undefined,
-          processedAutomatically:
-            typeof payload.inviteProcessing?.processedAutomatically === "boolean"
-              ? payload.inviteProcessing.processedAutomatically
-              : undefined
-        });
-      }
-      setResponseDialogOpen(false);
-      dispatchCalendarEventsUpdatedEvent();
-      const savedLabel = formatCalendarParticipationLabel(payload.participation.partstat);
-      const appliedLabel =
-        (forceOccurrenceResponse ? "occurrence" : payload.participation.scope) === "occurrence"
-          ? responseOccurrenceLabel.toLowerCase()
-          : "whole series";
-      setReminderNotice(
-        sendReply
-          ? `Response sent: ${savedLabel} (${appliedLabel}).`
-          : `Response saved locally: ${savedLabel} (${appliedLabel}).`
-      );
-    } catch {
-      setReminderNotice("Failed to update RSVP response.");
-    } finally {
-      setSubmittingResponse(false);
-    }
-  };
 
   const currentParticipationColor = getParticipationColor(currentMyPartstat);
   const currentParticipationLabel = formatCalendarParticipationLabel(currentMyPartstat) || "Needs action";
