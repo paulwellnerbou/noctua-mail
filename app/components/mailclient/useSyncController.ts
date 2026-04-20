@@ -23,6 +23,10 @@ import {
   getResolvedRemoteMailboxFingerprint,
   type FolderConsistencyResponse
 } from "./syncFingerprint";
+import {
+  planNewMailNotifications,
+  type IncomingMailItem
+} from "./syncNotificationFilter";
 import type {
   FullSyncConfirmState,
   SyncJobProgress,
@@ -40,7 +44,6 @@ import {
 import { applyFlagsToMessage } from "./utils/messageHelpers";
 import { prioritizeFolderIds, prioritizeFolders } from "./utils/folderHelpers";
 import { withCalendarInviteFlag } from "@/lib/messageFlags";
-import { extractEmails } from "./utils/clientHelpers";
 import { SYNC_STATUS_POLL_INTERVAL_MS, SYNC_STATUS_RUNNING_POLL_INTERVAL_MS } from "./constants";
 
 type ApiFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
@@ -929,108 +932,57 @@ export function useSyncController({
     };
 
     const notifyNewMessages = async (
-      items:
-        | Array<{
-            uid: number;
-            subject?: string;
-            from?: string;
-            messageId?: string | null;
-            folderId?: string;
-            category?: string | null;
-          }>
-        | null
-        | undefined
+      items: IncomingMailItem[] | null | undefined
     ) => {
       if (!items || items.length === 0) return;
-      const normalized = items.filter(
-        (
-          item
-        ): item is {
-          uid: number;
-          subject?: string;
-          from?: string;
-          messageId?: string | null;
-          folderId?: string;
-          category?: string | null;
-        } => Boolean(item) && typeof item.uid === "number"
-      );
-      if (normalized.length === 0) return;
-      const eligible = normalized.filter(
-        (item) => !item.folderId || !isNotificationSuppressedFolder(item.folderId)
-      );
-      if (eligible.length === 0) return;
-      const lastNotified = lastNotifiedUidRef.current[activeAccountId] ?? null;
-      const maxUid = Math.max(...normalized.map((item) => item.uid));
-      if (lastNotified == null) {
-        lastNotifiedUidRef.current[activeAccountId] = maxUid;
-        localStorage.setItem(`noctua:lastNotifiedUid:${activeAccountId}`, String(maxUid));
-        return;
-      }
-      const eligibleByUid = eligible.filter((item) => item.uid > lastNotified);
-      if (eligibleByUid.length === 0) {
-        if (maxUid > lastNotified) {
-          lastNotifiedUidRef.current[activeAccountId] = maxUid;
-          localStorage.setItem(`noctua:lastNotifiedUid:${activeAccountId}`, String(maxUid));
-        }
-        return;
-      }
-      const accountEmail = currentAccountEmail?.toLowerCase() ?? "";
-      const notFromMe = eligibleByUid.filter((item) => {
-        if (!accountEmail) return true;
-        const fromEmails = extractEmails(item.from);
-        return !fromEmails.some((email) => email.toLowerCase() === accountEmail);
+      const plan = planNewMailNotifications({
+        items,
+        lastNotifiedUid: lastNotifiedUidRef.current[activeAccountId] ?? null,
+        notifiedKeys: notifiedKeysRef.current,
+        isNotificationSuppressedFolder,
+        accountEmail: currentAccountEmail
       });
-      const notNewsletter = notFromMe.filter((item) => item.category !== "newsletter");
-      const unique = notNewsletter.filter((item) => {
-        const key = item.messageId || `uid:${item.uid}`;
-        if (notifiedKeysRef.current.has(key)) return false;
+
+      // Commit the dedup-ring changes before dispatching so a slow
+      // showNotification call can't race another batch into duplicating us.
+      for (const key of plan.keysToAdd) {
         notifiedKeysRef.current.add(key);
-        return true;
-      });
-      if (notifiedKeysRef.current.size > 200) {
-        const iterator = notifiedKeysRef.current.values();
-        for (let i = 0; i < 50; i += 1) {
-          const next = iterator.next();
-          if (next.done) break;
-          notifiedKeysRef.current.delete(next.value);
-        }
       }
-      if (maxUid > lastNotified) {
-        lastNotifiedUidRef.current[activeAccountId] = maxUid;
-        localStorage.setItem(`noctua:lastNotifiedUid:${activeAccountId}`, String(maxUid));
+      for (const key of plan.keysToEvict) {
+        notifiedKeysRef.current.delete(key);
+      }
+      if (plan.nextLastNotifiedUid != null) {
+        lastNotifiedUidRef.current[activeAccountId] = plan.nextLastNotifiedUid;
+        localStorage.setItem(
+          `noctua:lastNotifiedUid:${activeAccountId}`,
+          String(plan.nextLastNotifiedUid)
+        );
       }
 
-      if (unique.length === 1) {
-        const message = unique[0];
-        const title = message.subject || "(no subject)";
-        const body = message.from ? `From: ${message.from}` : "New message received";
-        console.info("[noctua] new mail", message);
-        await showNotification(title, body, `mail-${message.messageId ?? message.uid}`, {
-          messageId: message.messageId ?? null,
+      const dispatch = plan.dispatch;
+      if (dispatch.kind === "single") {
+        console.info("[noctua] new mail", dispatch.item);
+        await showNotification(dispatch.title, dispatch.body, dispatch.tag, {
+          messageId: dispatch.messageId,
           accountId: activeAccountId
         });
         pushNotice({
           type: "info",
           icon: "mail",
-          title,
-          description: body,
-          messageId: message.messageId ?? undefined,
+          title: dispatch.title,
+          description: dispatch.body,
+          messageId: dispatch.messageId ?? undefined,
           durationMs: 12000
         });
-      } else if (unique.length > 1) {
-        const title = `${unique.length} new messages`;
-        const preview = unique
-          .slice(0, 3)
-          .map((item) => item.subject || "(no subject)")
-          .join(" • ");
-        console.info("[noctua] new mail batch", unique);
-        await showNotification(title, preview, "mail-batch", { url: "/" });
+      } else if (dispatch.kind === "batch") {
+        console.info("[noctua] new mail batch", dispatch.items);
+        await showNotification(dispatch.title, dispatch.body, dispatch.tag, { url: "/" });
         pushNotice({
           type: "info",
           icon: "mail",
-          title,
-          description: preview,
-          ids: unique.map((item) => item.messageId ?? undefined).filter(Boolean) as string[],
+          title: dispatch.title,
+          description: dispatch.body,
+          ids: dispatch.ids,
           durationMs: 12000
         });
       }
