@@ -32,4 +32,16 @@ describe("FullSyncDebugCancelledError", () => {
     expect(isFullSyncDebugCancelledError(null)).toBe(false);
     expect(isFullSyncDebugCancelledError(undefined)).toBe(false);
   });
+
+  test("rejects a bare object with the right name but no message string", () => {
+    // The guard narrows to `FullSyncDebugCancelledError` (an `Error`,
+    // which has `message`), so consumers can safely access
+    // `error.message` after the check. Without a `message` check the
+    // guard would approve name-only plain objects and leave that
+    // downstream access reading `undefined`.
+    expect(isFullSyncDebugCancelledError({ name: "FullSyncDebugCancelledError" })).toBe(false);
+    expect(
+      isFullSyncDebugCancelledError({ name: "FullSyncDebugCancelledError", message: 42 })
+    ).toBe(false);
+  });
 });
