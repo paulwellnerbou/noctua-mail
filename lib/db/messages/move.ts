@@ -11,6 +11,7 @@
  */
 import { withDbWriteRetry } from "../../dbWriteRetry";
 import { getAccountDb } from "../connection";
+import { escapeLikePattern } from "./_shared";
 
 /**
  * Returns every `pendingMoveSourceUid` currently staged against the given
@@ -320,29 +321,25 @@ export async function relocateMovedMessage(params: {
 }
 
 /**
- * SQLite LIKE treats `_` as a single-char wildcard and `%` as multi-char.
- * Mailbox paths can contain both (e.g. `Archive_2024`), so any LIKE
- * pattern built from a user-supplied folder name must escape them —
- * otherwise the pattern matches unrelated folders and the UPDATE can
- * touch rows it shouldn't.
- */
-function escapeLikePattern(value: string) {
-  return value.replace(/[\\%_]/g, (ch) => `\\${ch}`);
-}
-
-/**
  * Rewrites folderId and mailboxPath in bulk when a folder subtree is
  * renamed. The two columns are stored denormalized, so both must be
  * patched together to keep the invariant `folderId == accountId + ":" +
  * mailboxPath` intact.
  *
  * The rewrite uses prefix-only surgery (`? || substr(column, prefixLen + 1)`)
- * rather than `REPLACE`. `REPLACE` substitutes every occurrence of the
- * needle in the haystack, which corrupts paths like `Foo/FooBar` when
- * renaming `Foo` → `Bar` (the inner `Foo` would also be rewritten). The
- * `LIKE ... ESCAPE` guard scopes the UPDATE to rows whose folderId
- * actually starts with the old prefix and escapes `%` / `_` / `\` so
- * folder names containing those characters match literally.
+ * rather than `REPLACE`, which substitutes every occurrence of the
+ * needle in the haystack and corrupts paths like `Foo/FooBar` when
+ * renaming `Foo` → `Bar`.
+ *
+ * Scoping is delimiter-aware. The UPDATE matches two cases:
+ *   1. `folderId = oldFull` — the renamed folder itself.
+ *   2. `folderId LIKE oldFull || <delimiter> || '%'` — only descendants,
+ *      never siblings. Without the delimiter guard, renaming `Foo`
+ *      would also match the sibling `FooBar` and turn it into `BarBar`.
+ *
+ * The delimiter is read from the `folders` table for the renamed
+ * folder; falls back to `/` if the row is missing (e.g. the rename
+ * caller has already updated the folders table).
  */
 export async function updateMessagesFolderPrefix(
   accountId: string,
@@ -353,18 +350,27 @@ export async function updateMessagesFolderPrefix(
     const db = await getAccountDb(accountId);
     const oldFull = `${accountId}:${oldPrefix}`;
     const newFull = `${accountId}:${newPrefix}`;
+    const folderRow = db
+      .prepare(
+        `SELECT delimiter FROM folders WHERE accountId = ? AND id = ? LIMIT 1`
+      )
+      .get(accountId, oldFull) as { delimiter?: string | null } | undefined;
+    const delimiter = folderRow?.delimiter || "/";
+    const childPattern = `${escapeLikePattern(oldFull)}${escapeLikePattern(delimiter)}%`;
     db.prepare(
       `UPDATE messages
        SET folderId = ? || substr(folderId, length(?) + 1),
            mailboxPath = ? || substr(mailboxPath, length(?) + 1)
-       WHERE accountId = ? AND folderId LIKE ? ESCAPE '\\'`
+       WHERE accountId = ?
+         AND (folderId = ? OR folderId LIKE ? ESCAPE '\\')`
     ).run(
       newFull,
       oldFull,
       newPrefix,
       oldPrefix,
       accountId,
-      `${escapeLikePattern(oldFull)}%`
+      oldFull,
+      childPattern
     );
   });
 }

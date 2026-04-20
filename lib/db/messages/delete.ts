@@ -17,6 +17,7 @@ import {
   recomputeThreadsForAccountInternal
 } from "../threads";
 import { upsertTopicLearningSignalsForThreadIds } from "../topics";
+import { escapeLikePattern } from "./_shared";
 import { listMessageFileRefsByMessageIds } from "./retrieval";
 
 /**
@@ -159,37 +160,63 @@ export async function deleteMessagesByIds(accountId: string, messageIds: string[
 }
 
 /**
- * Deletes every message whose folderId starts with `accountId:folderPrefix`.
- * Used when a folder subtree is renamed/removed on the server and the
- * caller wants to drop all local traces without enumerating individual
- * messages.
+ * Deletes every message stored under the given folder or any of its
+ * descendants. Used when a folder subtree is renamed/removed on the
+ * server and the caller wants to drop all local traces without
+ * enumerating individual messages.
+ *
+ * Scoping is delimiter-aware: the predicate matches the folder itself
+ * plus paths joined by the folder's delimiter. Without that guard, a
+ * raw `folderId LIKE '${prefix}%'` would also match sibling folders
+ * that merely share the prefix (deleting `Foo` would also match
+ * `FooBar`). The delimiter is read from the `folders` row; falls back
+ * to `/` if the row is missing. `escapeLikePattern` defuses `%` / `_`
+ * / `\` in the folder name so names like `Archive_2024` can't match
+ * unrelated folders via the single-char `_` wildcard.
  */
 export async function deleteMessagesByFolderPrefix(accountId: string, folderPrefix: string) {
   return withDbWriteRetry("deleteMessagesByFolderPrefix", async () => {
     const db = await getAccountDb(accountId);
     const prefix = `${accountId}:${folderPrefix}`;
+    const folderRow = db
+      .prepare(
+        `SELECT delimiter FROM folders WHERE accountId = ? AND id = ? LIMIT 1`
+      )
+      .get(accountId, prefix) as { delimiter?: string | null } | undefined;
+    const delimiter = folderRow?.delimiter || "/";
+    const childPattern = `${escapeLikePattern(prefix)}${escapeLikePattern(delimiter)}%`;
     const threadRows = db
       .prepare(
         `SELECT DISTINCT threadId
          FROM messages
-         WHERE accountId = ? AND folderId LIKE ? AND threadId IS NOT NULL`
+         WHERE accountId = ?
+           AND (folderId = ? OR folderId LIKE ? ESCAPE '\\')
+           AND threadId IS NOT NULL`
       )
-      .all(accountId, `${prefix}%`) as Array<{ threadId: string }>;
+      .all(accountId, prefix, childPattern) as Array<{ threadId: string }>;
     if (threadRows.length === 0) {
       return;
     }
     const threadIds = threadRows.map((row) => row.threadId).filter(Boolean);
     db.transaction(() => {
       db.prepare(
-        `DELETE FROM attachments WHERE messageId IN (SELECT id FROM messages WHERE accountId = ? AND folderId LIKE ?)`
-      ).run(accountId, `${prefix}%`);
+        `DELETE FROM attachments
+         WHERE messageId IN (
+           SELECT id FROM messages
+           WHERE accountId = ? AND (folderId = ? OR folderId LIKE ? ESCAPE '\\')
+         )`
+      ).run(accountId, prefix, childPattern);
       db.prepare(
-        `DELETE FROM message_fts WHERE messageId IN (SELECT id FROM messages WHERE accountId = ? AND folderId LIKE ?)`
-      ).run(accountId, `${prefix}%`);
-      db.prepare(`DELETE FROM messages WHERE accountId = ? AND folderId LIKE ?`).run(
-        accountId,
-        `${prefix}%`
-      );
+        `DELETE FROM message_fts
+         WHERE messageId IN (
+           SELECT id FROM messages
+           WHERE accountId = ? AND (folderId = ? OR folderId LIKE ? ESCAPE '\\')
+         )`
+      ).run(accountId, prefix, childPattern);
+      db.prepare(
+        `DELETE FROM messages
+         WHERE accountId = ? AND (folderId = ? OR folderId LIKE ? ESCAPE '\\')`
+      ).run(accountId, prefix, childPattern);
     })();
     if (threadIds.length > 0) {
       await recomputeThreadsForAccountInternal(accountId, threadIds);
