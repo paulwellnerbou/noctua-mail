@@ -218,4 +218,70 @@ describe("startRecomputeJob", () => {
     expect(errors).toEqual(["db died"]);
     expect(successCount).toBe(0);
   });
+
+  test("a slow earlier call does not overwrite the newer call's jobId", async () => {
+    // Two concurrent `startRecomputeJob` calls: the first one's POST is
+    // held open until after the second one's POST has completed. Without
+    // supersession tokens, the slow first call would write its jobId
+    // into `jobIdRef` and start polling its own job, clobbering the
+    // second call's in-flight state. The supersession check in
+    // `startRecomputeJob` should make the slow call no-op instead.
+    const handles = mkHandles();
+    const firstPostGate = deferred();
+    const firstFetches: Response[] = [mkResponse({ jobId: "slow-job" })];
+    const secondFetches: Response[] = [
+      mkResponse({ jobId: "fast-job" }),
+      mkResponse({ job: { status: "queued" } })
+    ];
+
+    const slowPromise = startRecomputeJob({
+      accountId: "acct",
+      startPath: "/threads/recompute",
+      statusPath: "/threads/recompute/status",
+      jobLabel: "Thread",
+      apiFetch: async () => {
+        await firstPostGate.promise;
+        return firstFetches.shift() ?? mkResponse({});
+      },
+      readErrorMessage: async () => "",
+      reportError: (m) => errors.push(m),
+      setRunning: (v) => running.push(v),
+      onSuccess: async () => {
+        successCount += 1;
+      },
+      stopPoll: () => {
+        stopCount += 1;
+      },
+      handles,
+      scheduleNextPoll: () => 0
+    });
+
+    await startRecomputeJob({
+      accountId: "acct",
+      startPath: "/threads/recompute",
+      statusPath: "/threads/recompute/status",
+      jobLabel: "Thread",
+      apiFetch: async () => secondFetches.shift() ?? mkResponse({ job: { status: "queued" } }),
+      readErrorMessage: async () => "",
+      reportError: (m) => errors.push(m),
+      setRunning: (v) => running.push(v),
+      onSuccess: async () => {
+        successCount += 1;
+      },
+      stopPoll: () => {
+        stopCount += 1;
+      },
+      handles,
+      scheduleNextPoll: () => 0
+    });
+
+    // Newer call committed.
+    expect(handles.jobIdRef.current).toBe("fast-job");
+
+    // Release the older POST; the supersession check should keep it
+    // from overwriting `jobIdRef` with `slow-job`.
+    firstPostGate.resolve();
+    await slowPromise;
+    expect(handles.jobIdRef.current).toBe("fast-job");
+  });
 });

@@ -96,6 +96,15 @@ export async function startRecomputeJob(input: StartRecomputeJobInput): Promise<
   stopPoll();
   setRunning(true);
 
+  // Supersession token installed synchronously. If a second
+  // `startRecomputeJob` call fires while this one's POST is in flight,
+  // the second call will overwrite `jobIdRef.current` with its own
+  // token; our post-POST check then detects the takeover and no-ops
+  // instead of clobbering the newer run's jobId.
+  const runToken = `pending:${Math.random().toString(36).slice(2)}`;
+  handles.jobIdRef.current = runToken;
+  const isStillActiveRun = () => handles.jobIdRef.current === runToken;
+
   let jobId: string;
   try {
     const res = await apiFetch(buildAccountApiPath(accountId, startPath), {
@@ -103,12 +112,14 @@ export async function startRecomputeJob(input: StartRecomputeJobInput): Promise<
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({})
     });
+    if (!isStillActiveRun()) return;
     if (!res.ok) {
       reportError(await readErrorMessage(res));
       setRunning(false);
       return;
     }
     const data = (await res.json()) as { jobId?: string };
+    if (!isStillActiveRun()) return;
     if (!data?.jobId) {
       reportError(`${jobLabel} recompute did not return a job id.`);
       setRunning(false);
@@ -116,11 +127,13 @@ export async function startRecomputeJob(input: StartRecomputeJobInput): Promise<
     }
     jobId = data.jobId;
   } catch {
+    if (!isStillActiveRun()) return;
     reportError(`${jobLabel} recompute failed due to a network error.`);
     setRunning(false);
     return;
   }
 
+  if (!isStillActiveRun()) return;
   handles.jobIdRef.current = jobId;
 
   const pollOnce = async () => {
