@@ -530,7 +530,6 @@ export default function MailClient({
   const [showJson, setShowJson] = useState(false);
   const [omitBody, setOmitBody] = useState(true);
   const [moveToDialogState, setMoveToDialogState] = useState<MoveToDialogState | null>(null);
-  const [collapsedMessages, setCollapsedMessages] = useState<Record<string, boolean>>({});
   const messageViewHandleRef = useRef<MessageViewOrchestratorHandle | null>(null);
   const [appEnvironmentLabel, setAppEnvironmentLabel] = useState("");
   const [authState, setAuthState] = useState<"loading" | "ok" | "unauth">("loading");
@@ -582,7 +581,6 @@ export default function MailClient({
   const [pendingSelectionScrollMessageId, setPendingSelectionScrollMessageId] = useState<
     string | null
   >(null);
-  const composeThreadCollapseKeyRef = useRef("");
   const refreshMailboxDataRef = useRef<() => Promise<boolean>>(async () => false);
   const setMessagesRef = useRef<React.Dispatch<React.SetStateAction<Message[]>>>(() => {});
   const updateMessagesRef = useRef<(updater: (message: Message) => Message | null, options?: { source?: string }) => void>(() => {});
@@ -2130,17 +2128,7 @@ export default function MailClient({
       );
       messageViewHandleRef.current?.evictMessageTabs(unique);
       messageViewHandleRef.current?.evictZoomAndFontScale(unique);
-      setCollapsedMessages((prev) => {
-        let changed = false;
-        const next = { ...prev };
-        unique.forEach((id) => {
-          if (id in next) {
-            delete next[id];
-            changed = true;
-          }
-        });
-        return changed ? next : prev;
-      });
+      messageViewHandleRef.current?.evictCollapsedMessages(unique);
     },
     [evictMessagesFromThreadCache]
   );
@@ -2376,6 +2364,10 @@ export default function MailClient({
       setViewMessage
     ]
   );
+
+  const handlePendingSelectionCollapseConsumed = useCallback((messageId: string) => {
+    setPendingSelectionCollapseMessageId((current) => (current === messageId ? null : current));
+  }, []);
 
   const {
     setLastSelectedIdRef,
@@ -3930,54 +3922,6 @@ export default function MailClient({
     })();
   }, [accounts, activeAccountId, authState, messageByMessageId, switchAccount]);
 
-  // Collapse all messages in the active thread except the selected one when
-  // that selection was triggered explicitly by the user.
-  useEffect(() => {
-    if (!activeMessage) return;
-    if (pendingSelectionCollapseMessageId !== activeMessage.id) return;
-    setCollapsedMessages((prev) => {
-      const next: Record<string, boolean> = { ...prev };
-      threadMessages.forEach((msg) => {
-        next[msg.id] = msg.id === activeMessage.id ? false : true;
-      });
-      return next;
-    });
-    setPendingSelectionCollapseMessageId((current) =>
-      current === activeMessage.id ? null : current
-    );
-  }, [activeMessage, pendingSelectionCollapseMessageId, threadMessages]);
-
-  useEffect(() => {
-    if (!showComposeInline || !composeThreadFocusMessageId) {
-      composeThreadCollapseKeyRef.current = "";
-      return;
-    }
-    if (threadMessages.length === 0) return;
-    const collapseKey = [
-      composeMode,
-      composeThreadFocusMessageId,
-      composeDraftId ?? "",
-      threadMessages.map((message) => message.id).join("|")
-    ].join("::");
-    if (composeThreadCollapseKeyRef.current === collapseKey) return;
-    composeThreadCollapseKeyRef.current = collapseKey;
-    setCollapsedMessages((prev) => {
-      const next = { ...prev };
-      threadMessages.forEach((message) => {
-        next[message.id] = message.id !== composeThreadFocusMessageId;
-      });
-      return next;
-    });
-  }, [
-    composeDraftId,
-    composeMode,
-    composeThreadFocusMessageId,
-    setCollapsedMessages,
-    showComposeInline,
-    threadMessages
-  ]);
-
-  const collapsedMessagesRef = useRef(collapsedMessages);
   const scrollActiveMessageIntoView = useCallback((behavior: ScrollBehavior) => {
     if (!activeMessageId) return false;
     const target = messageRefs.current.get(activeMessageId);
@@ -3988,8 +3932,9 @@ export default function MailClient({
   const scheduleActiveMessageScroll = useCallback(
     (behavior: ScrollBehavior) => {
       if (!activeMessageId) return () => {};
+      const collapsed = messageViewHandleRef.current?.getCollapsedMessages() ?? {};
       const hasExpandedSibling = threadMessagesRef.current.some(
-        (message) => message.id !== activeMessageId && !collapsedMessagesRef.current[message.id]
+        (message) => message.id !== activeMessageId && !collapsed[message.id]
       );
       let frame = 0;
       let settleTimer = 0;
@@ -4011,9 +3956,8 @@ export default function MailClient({
     [activeMessageId, scrollActiveMessageIntoView]
   );
   useEffect(() => {
-    collapsedMessagesRef.current = collapsedMessages;
     threadMessagesRef.current = threadMessages;
-  }, [collapsedMessages, threadMessages]);
+  }, [threadMessages]);
 
   useEffect(() => {
     if (!activeMessageId || pendingSelectionScrollMessageId !== activeMessageId) return;
@@ -4915,6 +4859,10 @@ export default function MailClient({
             threadContentLoading,
             threadContentErrorById,
             composeDraftId,
+            composeMode,
+            composeThreadFocusMessageId,
+            pendingSelectionCollapseMessageId,
+            onPendingSelectionCollapseConsumed: handlePendingSelectionCollapseConsumed,
             activeAccountId,
             apiFetch,
             messageByMessageId,
@@ -4935,8 +4883,6 @@ export default function MailClient({
               renderQuickActions,
               renderMessageMenu,
               handleUnsubscribe,
-              collapsedMessages,
-              setCollapsedMessages,
               fetchSource,
               ensureMessageContent,
               messageContentLoading,
