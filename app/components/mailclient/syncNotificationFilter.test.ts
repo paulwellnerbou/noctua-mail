@@ -168,4 +168,19 @@ describe("pickKeysToEvict", () => {
     const keys = new Set(["a", "b", "c"]);
     expect(pickKeysToEvict(keys, ["d", "e"], 3, 2)).toEqual(["a", "b"]);
   });
+
+  test("dedupes additions so duplicates don't inflate the projected size", () => {
+    const keys = new Set(["a", "b"]);
+    // Three entries but only one distinct new key → projected size 3,
+    // still within the cap of 3. A naive `additions.filter(…).length`
+    // would count 3 and start evicting.
+    expect(pickKeysToEvict(keys, ["c", "c", "c"], 3, 2)).toEqual([]);
+  });
+
+  test("ignores additions that are already present in the ring", () => {
+    const keys = new Set(["a", "b"]);
+    // `a` is already in the ring, so the addition is a no-op; projected
+    // size stays at 2, well under the cap.
+    expect(pickKeysToEvict(keys, ["a", "a"], 2, 2)).toEqual([]);
+  });
 });

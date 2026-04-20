@@ -90,7 +90,11 @@ export function pickKeysToEvict(
   maxSize: number,
   batchSize: number
 ): string[] {
-  const projectedSize = keys.size + additions.filter((key) => !keys.has(key)).length;
+  // Dedupe `additions` against itself and against `keys` — otherwise
+  // a caller that passes duplicates (or values already in the ring)
+  // would inflate `projectedSize` and trigger unnecessary evictions.
+  const uniqueNewAdditions = [...new Set(additions)].filter((key) => !keys.has(key));
+  const projectedSize = keys.size + uniqueNewAdditions.length;
   if (projectedSize <= maxSize) return [];
   const toEvict: string[] = [];
   const iterator = keys.values();
