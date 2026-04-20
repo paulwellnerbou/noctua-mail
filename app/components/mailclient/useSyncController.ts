@@ -27,6 +27,10 @@ import {
   planNewMailNotifications,
   type IncomingMailItem
 } from "./syncNotificationFilter";
+import {
+  canRunFolderReconcile,
+  shouldSkipDeleteReconcile
+} from "./syncReconcileGuards";
 import type {
   FullSyncConfirmState,
   SyncJobProgress,
@@ -1107,29 +1111,6 @@ export function useSyncController({
       }
     };
 
-    const shouldSkipDeleteReconcile = (folderId?: string, uid?: number) => {
-      if (!folderId) return false;
-      const now = Date.now();
-      const folderExpiry = localDeleteReconcileByFolderRef.current[folderId] ?? 0;
-      if (folderExpiry <= now) {
-        if (folderExpiry > 0) {
-          delete localDeleteReconcileByFolderRef.current[folderId];
-        }
-      } else {
-        return true;
-      }
-      if (typeof uid !== "number" || !Number.isFinite(uid)) return false;
-      const uidKey = `${folderId}:${uid}`;
-      const uidExpiry = localDeleteReconcileByUidRef.current[uidKey] ?? 0;
-      if (uidExpiry <= now) {
-        if (uidExpiry > 0) {
-          delete localDeleteReconcileByUidRef.current[uidKey];
-        }
-        return false;
-      }
-      return true;
-    };
-
     const requestFolderReconcileSync = (
       folderId?: string,
       mode: "repair" | "full" = "repair"
@@ -1148,10 +1129,15 @@ export function useSyncController({
       });
       if (decision.kind !== "folder") return;
       const now = Date.now();
-      const lastRun = lastDeleteReconcileAtRef.current[decision.folderId] ?? 0;
-      if (now - lastRun < 5000) return;
       const { isSyncing: syncing, syncingFolders: syncingSet } = syncStateRef.current;
-      if (syncing || syncingSet.has(decision.folderId)) return;
+      const canRun = canRunFolderReconcile({
+        folderId: decision.folderId,
+        now,
+        lastRunAt: lastDeleteReconcileAtRef.current[decision.folderId] ?? 0,
+        isSyncingAccount: syncing,
+        folderIsSyncing: syncingSet.has(decision.folderId)
+      });
+      if (!canRun) return;
       lastDeleteReconcileAtRef.current[decision.folderId] = now;
       const reconcileMode: "repair" | "full" =
         decision.mode === "full" ? "full" : "repair";
@@ -1295,7 +1281,14 @@ export function useSyncController({
               return;
             }
           }
-          if (shouldSkipDeleteReconcile(fId, data.uid)) return;
+          const skipReconcile = shouldSkipDeleteReconcile({
+            folderId: fId,
+            uid: data.uid,
+            now: Date.now(),
+            folderExpiries: localDeleteReconcileByFolderRef.current,
+            uidExpiries: localDeleteReconcileByUidRef.current
+          });
+          if (skipReconcile) return;
           requestFolderReconcileSync(fId, "repair");
         } catch {
           // ignore
