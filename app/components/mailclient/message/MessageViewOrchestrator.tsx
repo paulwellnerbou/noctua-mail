@@ -20,6 +20,7 @@ import TopicBadge from "../TopicBadge";
 import threadViewStyles from "./ThreadView.module.css";
 import { renderMarkdownPanel as renderMarkdownPanelHelper } from "../RenderHelpers";
 import type { ComposeOrchestratorHandle } from "../composition/ComposeOrchestrator";
+import type { ComposeMode } from "../composition/composeTypes";
 import type { TopicSuggestionExplanation } from "./types";
 import { buildAccountMessageTopicSuggestionExplainPath } from "@/lib/accountApiPaths";
 
@@ -65,12 +66,26 @@ import { buildAccountMessageTopicSuggestionExplainPath } from "@/lib/accountApiP
  * undefined. `evictMessageTabs` on the handle clears per-id entries
  * from the shell's `evictMessageCaches` helper.
  *
+ * Owns the per-message `collapsedMessages` map (which messages in the
+ * active thread are collapsed in the card view). The primary writer
+ * is `ThreadMessageCard`, which receives the map and its setter through
+ * `messageCardProps`. Two thread-level effects also write it from here:
+ *   - On a selection pending an auto-collapse
+ *     (`pendingSelectionCollapseMessageId` matches `activeMessage.id`),
+ *     collapse every sibling and expand the selected message. The
+ *     shell clears the pending id via `onPendingSelectionCollapseConsumed`.
+ *   - On compose-thread focus (`showComposeInline` +
+ *     `composeThreadFocusMessageId`), collapse every sibling and expand
+ *     the focused message. A key derived from mode/focus/draftId/thread
+ *     ids gates the write so a single focus change applies exactly once.
+ * The shell's `scheduleActiveMessageScroll` reads the current map via
+ * `getCollapsedMessages` on the handle to decide whether to wait for
+ * the collapse animation to settle before scrolling. The shell's
+ * `evictMessageCaches` helper clears per-id entries via
+ * `evictCollapsedMessages`.
+ *
  * The rest of the message-view-ish state lives at the MailClient shell
  * because each piece has consumers outside this pane:
- *   - `collapsedMessages` — a shell-level effect auto-collapses siblings
- *     on compose-thread-focus change, and `scheduleActiveMessageScroll`
- *     reads `collapsedMessagesRef` to decide whether to settle the
- *     layout before scrolling.
  *   - Thread-topic assignment (`onToggleTopic`) — mutates
  *     `messageTopicsById` at the shell and refreshes active-topic-mode
  *     results; the orchestrator calls it with the active message to
@@ -101,6 +116,16 @@ export type MessageViewOrchestratorHandle = {
   // `ComposeOrchestrator` when opening a reply / forward so the compose
   // surface can match the rendering the user was just looking at.
   getMessageTab: (messageId: string) => "html" | "text" | "markdown" | undefined;
+  // Clears per-id entries from the orchestrator-local `collapsedMessages`
+  // map. Called by the shell's cross-pane `evictMessageCaches` helper
+  // when a message is moved/deleted/refetched so stale per-id collapse
+  // state doesn't outlive the message.
+  evictCollapsedMessages: (messageIds: string[]) => void;
+  // Snapshot of the current `collapsedMessages` map. Consumed by the
+  // shell's `scheduleActiveMessageScroll` to decide whether there is an
+  // expanded sibling that will collapse and shift layout, in which case
+  // the scroll is deferred until after the collapse animation settles.
+  getCollapsedMessages: () => Record<string, boolean>;
 };
 
 export type MessageViewOrchestratorHeaderInputs = {
@@ -133,6 +158,19 @@ export type MessageViewOrchestratorBodyInputs = {
   threadContentLoading: string | null;
   threadContentErrorById: Record<string, string>;
   composeDraftId: string | null;
+  // Compose-mode + focus target used by the thread-auto-collapse effect
+  // that runs when the user opens a reply / forward inside the active
+  // thread. MailClient derives both values from its compose mirror and
+  // `activeMessage`; the orchestrator reacts by collapsing siblings.
+  composeMode: ComposeMode;
+  composeThreadFocusMessageId: string | null;
+  // Id of the message whose selection must trigger a one-shot
+  // auto-collapse of its thread siblings (set by the shell when the
+  // user clicks a new message). The orchestrator consumes it on the
+  // next render when `activeMessage.id` matches and then calls
+  // `onPendingSelectionCollapseConsumed` so the shell can clear it.
+  pendingSelectionCollapseMessageId: string | null;
+  onPendingSelectionCollapseConsumed: (messageId: string) => void;
   activeAccountId: string;
   // Client-id-injecting fetch wrapper owned by MailClient; used here by
   // the topic-suggestion-explanation loader to hit the per-account
@@ -163,6 +201,8 @@ export type MessageViewOrchestratorBodyInputs = {
     | "renderMarkdownPanel"
     | "messageTabs"
     | "setMessageTabs"
+    | "collapsedMessages"
+    | "setCollapsedMessages"
   >;
 };
 
@@ -187,11 +227,21 @@ function MessageViewOrchestratorImpl(
   const [messageTabs, setMessageTabs] = useState<
     Record<string, "html" | "text" | "markdown" | "source">
   >({});
+  const [collapsedMessages, setCollapsedMessages] = useState<Record<string, boolean>>({});
   // Ref mirror of `messageTabs` so the stable `getMessageTab` handle
   // method (created with empty deps) reads the latest map without
   // rebuilding the handle object on every tab change.
   const messageTabsRef = useRef(messageTabs);
   messageTabsRef.current = messageTabs;
+  // Ref mirror of `collapsedMessages` so the stable `getCollapsedMessages`
+  // handle method reads the latest map without rebuilding the handle
+  // object on every collapse/expand.
+  const collapsedMessagesRef = useRef(collapsedMessages);
+  collapsedMessagesRef.current = collapsedMessages;
+  // Dedupe key for the compose-thread-focus auto-collapse effect — one
+  // focus change applies exactly one sibling-collapse sweep even as the
+  // user expands individual siblings afterwards.
+  const composeThreadCollapseKeyRef = useRef("");
 
   const renderMarkdownPanel = useCallback(
     (markdownBody: string | undefined, messageId: string) =>
@@ -255,7 +305,24 @@ function MessageViewOrchestratorImpl(
       getMessageTab: (messageId: string) => {
         const tab = messageTabsRef.current[messageId];
         return tab === "html" || tab === "markdown" || tab === "text" ? tab : undefined;
-      }
+      },
+      evictCollapsedMessages: (messageIds: string[]) => {
+        if (messageIds.length === 0) return;
+        const idSet = new Set(messageIds);
+        setCollapsedMessages((prev) => {
+          // Lazily allocate the new map only if at least one id is
+          // actually present, so no-op evictions don't churn memory.
+          let next: Record<string, boolean> | undefined;
+          idSet.forEach((id) => {
+            if (id in prev) {
+              next ??= { ...prev };
+              delete next[id];
+            }
+          });
+          return next ?? prev;
+        });
+      },
+      getCollapsedMessages: () => collapsedMessagesRef.current
     }),
     []
   );
@@ -276,6 +343,10 @@ function MessageViewOrchestratorImpl(
     threadContentLoading,
     threadContentErrorById,
     composeDraftId,
+    composeMode,
+    composeThreadFocusMessageId,
+    pendingSelectionCollapseMessageId,
+    onPendingSelectionCollapseConsumed,
     activeAccountId,
     apiFetch,
     messageByMessageId,
@@ -377,13 +448,68 @@ function MessageViewOrchestratorImpl(
     setTopicSuggestionExplanation(null);
     setTopicSuggestionExplanationThreadId("");
     // Message ids are only unique within an account, so clear per-message
-    // font + zoom overrides and the selected body-panel map to prevent
-    // one account's UI settings from leaking onto a coincidentally-
-    // matching id in another account.
+    // font + zoom overrides, the selected body-panel map, and the
+    // collapse/expand map to prevent one account's UI state from leaking
+    // onto a coincidentally-matching id in another account.
     setMessageFontScale({});
     setMessageZoom({});
     setMessageTabs({});
+    setCollapsedMessages({});
   }, [activeAccountId]);
+
+  // Collapse all messages in the active thread except the selected one when
+  // that selection was triggered explicitly by the user.
+  useEffect(() => {
+    if (!activeMessage) return;
+    if (pendingSelectionCollapseMessageId !== activeMessage.id) return;
+    setCollapsedMessages((prev) => {
+      const next: Record<string, boolean> = { ...prev };
+      activeThread.forEach((msg) => {
+        next[msg.id] = msg.id === activeMessage.id ? false : true;
+      });
+      return next;
+    });
+    onPendingSelectionCollapseConsumed(activeMessage.id);
+  }, [
+    activeMessage,
+    activeThread,
+    onPendingSelectionCollapseConsumed,
+    pendingSelectionCollapseMessageId
+  ]);
+
+  // Collapse siblings so the compose card stays visible when the user
+  // opens a reply / forward inside the active thread. Keyed on
+  // mode/focus/draft/thread-ids so each distinct focus change applies
+  // exactly once — the user can re-expand siblings afterwards without
+  // the effect re-collapsing them on unrelated renders.
+  useEffect(() => {
+    if (!showComposeInline || !composeThreadFocusMessageId) {
+      composeThreadCollapseKeyRef.current = "";
+      return;
+    }
+    if (activeThread.length === 0) return;
+    const collapseKey = [
+      composeMode,
+      composeThreadFocusMessageId,
+      composeDraftId ?? "",
+      activeThread.map((message) => message.id).join("|")
+    ].join("::");
+    if (composeThreadCollapseKeyRef.current === collapseKey) return;
+    composeThreadCollapseKeyRef.current = collapseKey;
+    setCollapsedMessages((prev) => {
+      const next = { ...prev };
+      activeThread.forEach((message) => {
+        next[message.id] = message.id !== composeThreadFocusMessageId;
+      });
+      return next;
+    });
+  }, [
+    activeThread,
+    composeDraftId,
+    composeMode,
+    composeThreadFocusMessageId,
+    showComposeInline
+  ]);
 
   return (
     <MessageViewPane
@@ -496,7 +622,9 @@ function MessageViewOrchestratorImpl(
                   resetMessageZoom,
                   renderMarkdownPanel,
                   messageTabs,
-                  setMessageTabs
+                  setMessageTabs,
+                  collapsedMessages,
+                  setCollapsedMessages
                 }}
               />
             </>
