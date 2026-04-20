@@ -5,7 +5,6 @@ import { buildCalendarRecurrenceSummary, formatCalendarEventRange } from "@/lib/
 import type { CalendarInviteActionType } from "@/lib/calendarInviteProcessing";
 import { formatAccountDateValue } from "@/lib/dateFormatting";
 import {
-  buildAccountCalendarEventPath,
   buildAccountCalendarEventRespondPath,
   buildAccountCalendarParticipationPath
 } from "@/lib/accountApiPaths";
@@ -18,7 +17,6 @@ import type {
 import { formatCalendarParticipationLabel } from "@/lib/calendarParticipation";
 import { formatCalendarTimeZoneShortLabel } from "@/lib/calendarTimezones";
 import { selectCalendarEventEmailSnapshot } from "@/lib/calendarEventEmailSnapshot";
-import { dispatchCalendarRemindersUpdatedEvent } from "@/app/components/mailclient/utils/calendarReminders";
 import { dispatchCalendarEventsUpdatedEvent } from "./calendarEventsClient";
 import CalendarEventEmailSnapshot from "./CalendarEventEmailSnapshot";
 import EventDeleteScopeDialog from "./EventDeleteScopeDialog";
@@ -29,6 +27,7 @@ import EventDetailMeta from "./EventDetailMeta";
 import EventInviteStatusRow from "./EventInviteStatusRow";
 import EventReminderDialog from "./EventReminderDialog";
 import EventResponseDialog from "./EventResponseDialog";
+import { useEventDeleteState } from "./useEventDeleteState";
 import { useEventReminderState } from "./useEventReminderState";
 import styles from "./EventDetailView.module.css";
 
@@ -102,17 +101,6 @@ function parseHttpUrl(value?: string): string | null {
   } catch {
     return null;
   }
-}
-
-function buildOccurrenceExcludedDates(excludedDates: number[] | undefined, occurrenceStartAtMs: number) {
-  return Array.from(
-    new Set(
-      [...(excludedDates ?? []), occurrenceStartAtMs]
-        .map((value) => Number(value))
-        .filter((value) => Number.isFinite(value) && value > 0)
-        .map((value) => Math.round(value))
-    )
-  ).sort((left, right) => left - right);
 }
 
 function getParticipationColor(
@@ -250,12 +238,26 @@ export default function EventDetailView({
   const [draftScope, setDraftScope] = useState<CalendarParticipationScope>("series");
   const [sendReply, setSendReply] = useState(replyRequested !== false);
   const [submittingResponse, setSubmittingResponse] = useState(false);
-  const [deletingEvent, setDeletingEvent] = useState(false);
-  const [deleteScopeDialogOpen, setDeleteScopeDialogOpen] = useState(false);
   const resolvedOccurrenceStartAtMs =
     typeof resolvedStartMs === "number" && Number.isFinite(resolvedStartMs)
       ? resolvedStartMs
       : undefined;
+
+  const {
+    deletingEvent,
+    deleteScopeDialogOpen,
+    setDeleteScopeDialogOpen,
+    handleDeleteEvent,
+    performDeleteEvent
+  } = useEventDeleteState({
+    accountId,
+    eventId,
+    eventSnapshot,
+    recurrenceRule,
+    resolvedOccurrenceStartAtMs,
+    onEventDeleted,
+    onNotice: setReminderNotice
+  });
 
   useEffect(() => {
     setCurrentMyPartstat(myPartstat);
@@ -343,87 +345,6 @@ export default function EventDetailView({
     );
     setSendReply(replyRequested !== false);
     setResponseDialogOpen(true);
-  };
-
-  const performDeleteEvent = async (scope: CalendarEventDeleteScope) => {
-    if (!accountId || !eventId || !eventSnapshot) return;
-    setDeletingEvent(true);
-    setDeleteScopeDialogOpen(false);
-    try {
-      if (scope === "occurrence") {
-        if (resolvedOccurrenceStartAtMs === undefined) {
-          setReminderNotice("Failed to delete occurrence.");
-          return;
-        }
-        const response = await fetch(buildAccountCalendarEventPath(accountId, eventId), {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            excludedDates: buildOccurrenceExcludedDates(
-              eventSnapshot.excludedDates,
-              resolvedOccurrenceStartAtMs
-            )
-          })
-        });
-        const payload = (await response.json().catch(() => null)) as
-          | {
-              ok?: boolean;
-              event?: CalendarEvent;
-              message?: string;
-            }
-          | null;
-        if (!response.ok || payload?.ok !== true || !payload.event) {
-          setReminderNotice(payload?.message ?? "Failed to delete occurrence.");
-          return;
-        }
-        dispatchCalendarEventsUpdatedEvent();
-        dispatchCalendarRemindersUpdatedEvent();
-        onEventDeleted?.({
-          event: eventSnapshot,
-          scope,
-          occurrenceStartAtMs: resolvedOccurrenceStartAtMs
-        });
-        return;
-      }
-
-      const params = new URLSearchParams({ soft: "true" });
-      const response = await fetch(buildAccountCalendarEventPath(accountId, eventId, params), {
-        method: "DELETE"
-      });
-      const payload = (await response.json().catch(() => null)) as
-        | {
-            ok?: boolean;
-            message?: string;
-          }
-        | null;
-      if (!response.ok || payload?.ok !== true) {
-        setReminderNotice(payload?.message ?? "Failed to delete event.");
-        return;
-      }
-      dispatchCalendarEventsUpdatedEvent();
-      dispatchCalendarRemindersUpdatedEvent();
-      onEventDeleted?.({
-        event: eventSnapshot,
-        scope
-      });
-    } catch {
-      setReminderNotice(scope === "occurrence" ? "Failed to delete occurrence." : "Failed to delete event.");
-    } finally {
-      setDeletingEvent(false);
-    }
-  };
-
-  const canChooseDeleteScope =
-    Boolean(eventSnapshot) &&
-    Boolean(recurrenceRule?.trim()) &&
-    resolvedOccurrenceStartAtMs !== undefined;
-
-  const handleDeleteEvent = () => {
-    if (canChooseDeleteScope) {
-      setDeleteScopeDialogOpen(true);
-      return;
-    }
-    void performDeleteEvent("series");
   };
 
   const handleRespond = async () => {
