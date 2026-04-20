@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { AccountDateFormat } from "@/lib/data";
 import { formatAccountMediumDateTime } from "@/lib/dateFormatting";
 import { resolveNextReminderOccurrence } from "@/lib/reminderRecurrence";
@@ -74,12 +74,17 @@ export function useEventReminderState({
   const [savingReminder, setSavingReminder] = useState(false);
   const [deletingReminder, setDeletingReminder] = useState(false);
 
-  const canScheduleReminder = (() => {
-    if (!canonicalStartMs) return false;
+  // Memoized so the recurrence resolver doesn't run on every unrelated
+  // re-render (e.g. modal open/close toggles). `Date.now()` is captured
+  // by the memo; the staleness window is only a few seconds in practice
+  // — fine for a "should we show the Schedule button" flag.
+  const canScheduleReminder = useMemo(() => {
+    if (!Number.isFinite(canonicalStartMs)) return false;
+    const startMs = canonicalStartMs as number;
     const nowMs = Date.now();
-    if (!recurrenceRule?.trim()) return canonicalStartMs > nowMs;
+    if (!recurrenceRule?.trim()) return startMs > nowMs;
     const next = resolveNextReminderOccurrence({
-      eventStartAtMs: canonicalStartMs,
+      eventStartAtMs: startMs,
       eventEndAtMs: eventEndAtMs,
       leadMinutes: 0,
       recurrenceRule,
@@ -87,10 +92,16 @@ export function useEventReminderState({
       excludedDates
     }, nowMs);
     return Boolean(next && next.eventStartAtMs > nowMs);
-  })();
+  }, [canonicalStartMs, eventEndAtMs, recurrenceRule, recurrenceDates, excludedDates]);
 
   const refreshReminder = useCallback(async () => {
-    if (!accountId || !canonicalStartMs) return;
+    if (
+      !accountId ||
+      typeof canonicalStartMs !== "number" ||
+      !Number.isFinite(canonicalStartMs)
+    ) {
+      return;
+    }
     try {
       const reminders = await fetchCalendarReminders(accountId);
       const found = findActiveCalendarReminderForEvent(reminders, {
@@ -112,7 +123,13 @@ export function useEventReminderState({
   useEffect(() => { void refreshReminder(); }, [refreshReminder]);
 
   const handleScheduleReminder = async () => {
-    if (!accountId || !canonicalStartMs) return;
+    if (
+      !accountId ||
+      typeof canonicalStartMs !== "number" ||
+      !Number.isFinite(canonicalStartMs)
+    ) {
+      return;
+    }
     setSavingReminder(true);
     try {
       const option = getCalendarReminderLeadOption(leadOptionValue);

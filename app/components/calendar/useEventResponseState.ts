@@ -59,8 +59,14 @@ export type UseEventResponseStateResult = {
  * the draft fields of the response dialog, the initial fetch of the saved
  * status when the view mounts, and submission to the respond endpoint.
  *
- * Also re-syncs local state whenever the viewed event / occurrence changes
- * so navigating between events doesn't leak the previous draft.
+ * Re-syncs the saved participation state (`currentMyPartstat`,
+ * `currentParticipationScope`, `isRecurringParticipation`) whenever the
+ * viewed event or occurrence changes so the badge in the event header
+ * reflects the freshly-viewed event. Draft dialog fields
+ * (`draftPartstat`, `draftScope`, `sendReply`) are only initialized
+ * inside `openResponseDialog` — they're assumed not to outlive a dialog
+ * session, since the detail view unmounts when the user navigates away
+ * and the dialog opens scoped to the current event.
  */
 export function useEventResponseState({
   accountId,
