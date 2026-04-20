@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { AlarmClock, AlarmClockPlus, Mail, Trash2 } from "lucide-react";
-import { Badge, Button, Text } from "@radix-ui/themes";
+import { Button } from "@radix-ui/themes";
 import { buildCalendarRecurrenceSummary, formatCalendarEventRange } from "@/lib/calendar";
 import type { CalendarInviteActionType } from "@/lib/calendarInviteProcessing";
 import { formatAccountDateValue, formatAccountMediumDateTime } from "@/lib/dateFormatting";
@@ -34,6 +34,7 @@ import {
 import { dispatchCalendarEventsUpdatedEvent } from "./calendarEventsClient";
 import CalendarEventEmailSnapshot from "./CalendarEventEmailSnapshot";
 import EventDeleteScopeDialog from "./EventDeleteScopeDialog";
+import EventDetailBadges from "./EventDetailBadges";
 import EventDetailDescription from "./EventDetailDescription";
 import EventDetailMeta from "./EventDetailMeta";
 import EventInviteStatusRow from "./EventInviteStatusRow";
@@ -127,20 +128,6 @@ function buildOccurrenceExcludedDates(excludedDates: number[] | undefined, occur
     )
   ).sort((left, right) => left - right);
 }
-
-const SOURCE_COLORS: Record<string, "blue" | "green" | "indigo"> = {
-  local: "blue",
-  caldav: "green",
-  email: "indigo",
-  "sent-invite": "indigo"
-};
-
-const SOURCE_LABELS: Record<string, string> = {
-  local: "local",
-  caldav: "caldav",
-  email: "email",
-  "sent-invite": "sent invite"
-};
 
 function getParticipationColor(
   status?: CalendarParticipationStatus
@@ -648,30 +635,12 @@ export default function EventDetailView({
 
       <EventDetailDescription description={description} />
 
-      {/* Badges */}
-      {(status || currentMyPartstat || sourceType) && (
-        <div className={styles.badges}>
-          {status && (
-            <Badge size="1" color={status === "CANCELLED" ? "red" : status === "TENTATIVE" ? "orange" : "gray"} variant="soft">
-              {status}
-            </Badge>
-          )}
-          {currentMyPartstat && (
-            <Badge
-              size="1"
-              color={currentParticipationColor}
-              variant="soft"
-            >
-              You: {formatCalendarParticipationLabel(currentMyPartstat)}
-            </Badge>
-          )}
-          {sourceType && (
-            <Badge size="1" color={SOURCE_COLORS[sourceType] ?? "gray"} variant="soft">
-              {SOURCE_LABELS[sourceType] ?? sourceType}
-            </Badge>
-          )}
-        </div>
-      )}
+      <EventDetailBadges
+        status={status}
+        currentMyPartstat={currentMyPartstat}
+        participationColor={currentParticipationColor}
+        sourceType={sourceType}
+      />
 
       {currentMyPartstat && (canChooseOccurrenceScope || forceOccurrenceResponse) && !hasOccurrenceCancellationAction && (
         <p className={styles.scopeNote}>Your RSVP applies to: {currentScopeLabel}</p>
