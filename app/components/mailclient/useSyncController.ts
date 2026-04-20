@@ -235,7 +235,7 @@ export function useSyncController({
   const waitForSyncJob = async (
     accountId: string,
     jobId: string,
-    requestedMode?: string
+    requestedMode?: SyncMode
   ): Promise<SyncJobResult> => {
     const startedAt = Date.now();
     const timeoutMs = 1000 * 60 * 60;
@@ -263,7 +263,9 @@ export function useSyncController({
             status?: "queued" | "running" | "done" | "failed";
             error?: string;
             result?: SyncJobResult;
-            progress?: Omit<SyncJobProgress, "jobId">;
+            // Server blobs may omit `updatedAt`; `normalizeSyncJobProgress`
+            // back-fills it with the current clock before consumers see it.
+            progress?: Omit<SyncJobProgress, "jobId" | "updatedAt"> & { updatedAt?: number };
           };
         };
         const progress = data.job?.progress;

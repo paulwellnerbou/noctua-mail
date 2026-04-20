@@ -15,8 +15,8 @@
 import type { SyncJobProgress } from "./types";
 
 export type DetectSyncEscalationInput = {
-  requestedMode: string | undefined;
-  progressMode: string | undefined;
+  requestedMode: SyncJobProgress["mode"] | undefined;
+  progressMode: SyncJobProgress["mode"] | undefined;
   alreadyLogged: boolean;
 };
 

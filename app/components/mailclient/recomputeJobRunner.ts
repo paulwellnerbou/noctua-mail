@@ -55,12 +55,17 @@ export type StartRecomputeJobInput = {
 };
 
 const defaultScheduleNextPoll = (callback: () => void, delayMs: number): number => {
-  if (typeof window !== "undefined") {
-    return window.setTimeout(callback, delayMs);
+  if (typeof window === "undefined") {
+    // `pollTimerRef` is typed as `number | null` to match `window.clearTimeout`'s
+    // handle shape; Node's `setTimeout` returns an opaque Timeout object, so
+    // pretending it's a number would produce a handle the shell can't clear.
+    // Tests inject their own `scheduleNextPoll`; any other non-browser caller
+    // must too.
+    throw new Error(
+      "defaultScheduleNextPoll requires a browser window. Pass `scheduleNextPoll` explicitly."
+    );
   }
-  // Node / test fallback. The cast keeps the return-type contract the
-  // browser API uses (number vs NodeJS.Timeout).
-  return setTimeout(callback, delayMs) as unknown as number;
+  return window.setTimeout(callback, delayMs);
 };
 
 type JobStatusResponse = {
