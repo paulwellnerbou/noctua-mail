@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { AlarmClock, AlarmClockPlus, Clock, Mail, MapPin, Repeat, Trash2, User, Users } from "lucide-react";
+import { AlarmClock, AlarmClockPlus, Mail, Trash2 } from "lucide-react";
 import { Badge, Button, Text } from "@radix-ui/themes";
 import { buildCalendarRecurrenceSummary, formatCalendarEventRange } from "@/lib/calendar";
 import type { CalendarInviteActionType } from "@/lib/calendarInviteProcessing";
@@ -41,6 +41,7 @@ import {
 import { dispatchCalendarEventsUpdatedEvent } from "./calendarEventsClient";
 import CalendarEventEmailSnapshot from "./CalendarEventEmailSnapshot";
 import EventDeleteScopeDialog from "./EventDeleteScopeDialog";
+import EventDetailMeta from "./EventDetailMeta";
 import EventReminderDialog from "./EventReminderDialog";
 import EventResponseDialog from "./EventResponseDialog";
 import styles from "./EventDetailView.module.css";
@@ -676,56 +677,15 @@ export default function EventDetailView({
         </div>
       )}
 
-      {/* Time */}
-      {timeRange && (
-        <div className={styles.metaRow}>
-          <Clock size={12} />
-          <span>{timeRange}</span>
-          {tzLabel && <span className={styles.tzLabel}>({tzLabel})</span>}
-        </div>
-      )}
-
-      {/* Location */}
-      {location && (
-        <div className={styles.metaRow}>
-          <MapPin size={12} />
-          {locationUrl ? (
-            <a className={styles.locationLink} href={locationUrl} target="_blank" rel="noreferrer">
-              {location}
-            </a>
-          ) : (
-            <span>{location}</span>
-          )}
-        </div>
-      )}
-
-      {/* Recurrence */}
-      {recurrenceSummary && (
-        <div className={styles.metaRow}>
-          <Repeat size={12} />
-          <span>{recurrenceSummary}</span>
-        </div>
-      )}
-
-      {/* Organizer */}
-      {organizer && (
-        <div className={styles.metaRowWrap}>
-          <User size={14} className={styles.metaIcon} aria-hidden />
-          <span className={styles.metaText}>
-            <span className={styles.metaInlineLabel}>Organizer:</span> {organizer}
-          </span>
-        </div>
-      )}
-
-      {/* Attendees */}
-      {attendees && attendees.length > 0 && (
-        <div className={styles.metaRowWrap}>
-          <Users size={14} className={styles.metaIcon} aria-hidden />
-          <span className={styles.metaText}>
-            <span className={styles.metaInlineLabel}>Attendees:</span> {attendees.join(", ")}
-          </span>
-        </div>
-      )}
+      <EventDetailMeta
+        timeRange={timeRange}
+        tzLabel={tzLabel}
+        location={location}
+        locationUrl={locationUrl}
+        recurrenceSummary={recurrenceSummary}
+        organizer={organizer}
+        attendees={attendees}
+      />
 
       {/* Description */}
       {trimmedDescription && (
