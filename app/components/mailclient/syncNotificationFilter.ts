@@ -127,7 +127,12 @@ export function planNewMailNotifications(
   };
 
   const normalized = items.filter(
-    (item): item is IncomingMailItem => Boolean(item) && typeof item.uid === "number"
+    // `Number.isFinite` rules out NaN/Infinity so a single malformed
+    // item can't poison `maxUid` (`Math.max(…NaN…)` returns NaN, which
+    // then compares falsely against every numeric uid and suppresses
+    // every downstream notification + high-water-mark advance).
+    (item): item is IncomingMailItem =>
+      Boolean(item) && typeof item.uid === "number" && Number.isFinite(item.uid)
   );
   if (normalized.length === 0) return empty;
 

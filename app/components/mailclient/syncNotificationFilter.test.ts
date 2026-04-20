@@ -35,6 +35,26 @@ describe("planNewMailNotifications", () => {
     expect(result.keysToAdd).toEqual([]);
   });
 
+  test("ignores items with non-finite uids so NaN can't poison maxUid", () => {
+    // Without a Number.isFinite filter, `Math.max(...uids)` returns NaN
+    // as soon as one bad item slips in, which then fails every
+    // comparison and suppresses every subsequent notification and
+    // high-water-mark advance.
+    const result = planNewMailNotifications({
+      items: [
+        mkItem({ uid: 15 }),
+        mkItem({ uid: Number.NaN }),
+        mkItem({ uid: Number.POSITIVE_INFINITY }),
+        mkItem({ uid: 18 })
+      ],
+      lastNotifiedUid: 10,
+      notifiedKeys: new Set(),
+      isNotificationSuppressedFolder: neverSuppress
+    });
+    expect(result.nextLastNotifiedUid).toBe(18);
+    expect(result.dispatch.kind).not.toBe("none");
+  });
+
   test("skips folder-suppressed items before even consulting lastNotifiedUid", () => {
     const result = planNewMailNotifications({
       items: [mkItem({ uid: 11, folderId: "spam", subject: "x" })],
