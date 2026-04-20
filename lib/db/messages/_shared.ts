@@ -1,15 +1,17 @@
 /**
- * Internal helpers shared between the messages query and retrieval modules and
- * calendar-reminder code that still lives in `lib/db.ts`. This module is NOT
- * part of the public `@/lib/db` surface; import paths stay within `lib/db/`.
+ * Internal helpers shared between the messages query/retrieval modules and the
+ * sibling `lib/db/calendar/` modules (reminder CRUD + invite-state writers).
+ * This module is NOT part of the public `@/lib/db` surface; import paths stay
+ * within `lib/db/`. Calendar modules import from here (never vice versa) so
+ * the dependency graph stays acyclic.
  *
  * Scope:
  *   - Generic row-parse helpers (JSON columns, RFC 5322 `References`).
  *   - Attachment hydration (runs for every message returned by the domain).
  *   - Calendar-invite state + UID helpers used by read queries and the
- *     invite-state writers in `lib/db.ts`.
+ *     invite-state writers in `lib/db/calendar/inviteStates.ts`.
  *   - Small reminder value normalizers reused by the invite-deck group keys
- *     and the reminder persistence layer.
+ *     and the reminder persistence layer in `lib/db/calendar/reminders.ts`.
  */
 import type { Attachment, MessageCalendarInviteState } from "../../data";
 import { buildAccountAttachmentPath } from "../../accountApiPaths";

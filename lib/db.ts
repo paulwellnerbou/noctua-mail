@@ -1,15 +1,4 @@
 import { simpleParser } from "mailparser";
-import type {
-  CalendarEvent,
-  CalendarEventEmailSnapshotFields,
-  CalendarParticipationScope,
-  CalendarParticipationStatus,
-  CalendarEventSourceType,
-  CalendarReminder
-} from "./data";
-import {
-  ensureMessageCalendarEventOptionalColumns
-} from "./db/schema";
 import { getAccountDb } from "./db/connection";
 import { getAccountById } from "./db/accounts";
 export {
@@ -19,14 +8,6 @@ export {
 } from "./db/connection";
 import { withDbWriteRetry } from "./dbWriteRetry";
 import { randomUUID } from "crypto";
-import { normalizeReminderDateList, resolveNextReminderOccurrence } from "./reminderRecurrence";
-import { type CalendarInviteActionType } from "./calendarInviteProcessing";
-import { normalizeCalendarParticipationStatus } from "./calendarParticipation";
-import {
-  normalizeCalendarEventUid,
-  normalizeCalendarEventUidKey,
-  normalizeCalendarEventUids
-} from "./calendarEventUids";
 import {
   createSeededLinearModel,
   extractLinearFeatures,
@@ -38,16 +19,9 @@ import type { CategoryLearningDebugSnapshot } from "./mail/categorization/debugT
 import type { CategoryClassificationInput } from "./mail/categorization";
 import {
   type CategoryManualState,
-  itemsFromUniqueInviteStates,
-  normalizeCalendarInviteActionType,
   normalizeCategory,
-  normalizeReminderEventUidKey,
-  normalizeReminderRecurrenceRule,
-  normalizeReminderTimezone,
   parseReferences,
-  parseReminderDateListJson,
-  parseStringArray,
-  safeParseJson
+  parseStringArray
 } from "./db/messages/_shared";
 import {
   type GroupMeta,
@@ -194,881 +168,20 @@ export {
   resolveThreadingForAccountMessages
 } from "./db/threads";
 
-type UpsertCalendarReminderInput = {
-  id?: string;
-  messageId?: string;
-  eventUid?: string;
-  eventTitle?: string;
-  eventLocation?: string;
-  eventDescription?: string;
-  startTimezone?: string;
-  recurrenceRule?: string;
-  recurrenceDates?: number[];
-  excludedDates?: number[];
-  eventStartAtMs: number;
-  eventEndAtMs?: number;
-  leadMinutes: number;
-  leadLabel: string;
-};
-
-type MatchingCalendarReminderRow = {
-  id: string;
-  createdAtMs: number;
-  messageId?: string | null;
-};
-
-type CalendarReminderEventMatch = {
-  eventUid?: string;
-  eventTitle?: string;
-  eventStartAtMs: number;
-};
-
-function serializeReminderDateList(value?: number[]) {
-  const normalized = normalizeReminderDateList(value);
-  if (!normalized || normalized.length === 0) return null;
-  return JSON.stringify(normalized);
-}
-
-function mapCalendarReminderRow(
-  row: any,
-  options?: { nowMs?: number; allowPastFallback?: boolean }
-): CalendarReminder | null {
-  const nowMs = options?.nowMs ?? Date.now();
-  const eventStartAtMs = Number(row.eventStartAtMs ?? 0);
-  const eventEndAtMsRaw = Number(row.eventEndAtMs ?? 0);
-  const eventEndAtMs =
-    Number.isFinite(eventEndAtMsRaw) && eventEndAtMsRaw > 0 ? eventEndAtMsRaw : undefined;
-  const leadMinutes = Math.max(0, Number(row.leadMinutes ?? 0));
-  const recurrenceRule = normalizeReminderRecurrenceRule(
-    typeof row.recurrenceRule === "string" ? row.recurrenceRule : undefined
-  );
-  const recurrenceDates = parseReminderDateListJson(row.recurrenceDates);
-  const excludedDates = parseReminderDateListJson(row.excludedDates);
-  const startTimezone = normalizeReminderTimezone(
-    typeof row.startTimezone === "string" ? row.startTimezone : undefined
-  );
-  const nextOccurrence = resolveNextReminderOccurrence(
-    {
-      eventStartAtMs,
-      eventEndAtMs,
-      leadMinutes,
-      recurrenceRule: recurrenceRule ?? undefined,
-      recurrenceDates,
-      excludedDates,
-      startTimezone: startTimezone ?? undefined
-    },
-    nowMs
-  );
-  if (!nextOccurrence && !options?.allowPastFallback) return null;
-  const fallbackTriggerAtMs = eventStartAtMs - leadMinutes * 60 * 1000;
-  return {
-    id: String(row.id),
-    accountId: String(row.accountId),
-    userId: String(row.userId),
-    messageId: row.messageId ? String(row.messageId) : undefined,
-    eventUid: row.eventUid ? String(row.eventUid) : undefined,
-    eventTitle: String(row.eventTitle ?? "Calendar event"),
-    eventLocation: row.eventLocation ? String(row.eventLocation) : undefined,
-    eventDescription: row.eventDescription ? String(row.eventDescription) : undefined,
-    startTimezone: startTimezone ?? undefined,
-    recurrenceRule: recurrenceRule ?? undefined,
-    recurrenceDates,
-    excludedDates,
-    eventStartAtMs,
-    eventEndAtMs,
-    nextEventStartAtMs: nextOccurrence?.eventStartAtMs ?? eventStartAtMs,
-    leadMinutes,
-    leadLabel: String(row.leadLabel ?? ""),
-    triggerAtMs: nextOccurrence?.triggerAtMs ?? fallbackTriggerAtMs,
-    createdAtMs: Number(row.createdAtMs ?? 0),
-    updatedAtMs: Number(row.updatedAtMs ?? row.createdAtMs ?? 0)
-  };
-}
-
-function normalizeReminderEventTitle(title?: string) {
-  return (title ?? "Calendar event").trim() || "Calendar event";
-}
-
-function normalizeReminderEventUid(uid?: string) {
-  const value = uid?.trim();
-  return value ? value : null;
-}
-
-export async function listCalendarReminders(accountId: string, userId: string) {
-  const db = await getAccountDb(accountId);
-  const nowMs = Date.now();
-  const rows = db
-    .prepare(
-      `SELECT id, accountId, userId, messageId, eventUid, eventTitle, eventLocation, eventDescription, eventStartAtMs, eventEndAtMs, startTimezone, recurrenceRule, recurrenceDates, excludedDates, leadMinutes, leadLabel, createdAtMs, updatedAtMs
-       FROM calendar_reminders
-       WHERE accountId = ? AND userId = ? AND deletedAtMs IS NULL
-       ORDER BY updatedAtMs DESC, createdAtMs DESC`
-    )
-    .all(accountId, userId) as any[];
-  return rows
-    .map((row) => mapCalendarReminderRow(row, { nowMs }))
-    .filter((item): item is CalendarReminder => Boolean(item))
-    .sort((a, b) => a.triggerAtMs - b.triggerAtMs);
-}
-
-export async function listDeleteCalendarAssociations(
-  accountId: string,
-  userId: string,
-  messageIds: string[],
-  eventUids: string[]
-) {
-  const uniqueMessageIds = Array.from(
-    new Set(messageIds.map((value) => value.trim()).filter((value): value is string => Boolean(value)))
-  );
-  const uniqueEventUidKeys = Array.from(
-    new Set(
-      eventUids
-        .map((value) => normalizeReminderEventUidKey(value))
-        .filter((value): value is string => Boolean(value))
-    )
-  );
-  if (uniqueMessageIds.length === 0 && uniqueEventUidKeys.length === 0) {
-    return { reminders: [], events: [] };
-  }
-
-  const db = await getAccountDb(accountId);
-  const reminderClauses: string[] = [];
-  const reminderArgs: Array<string> = [accountId, userId];
-
-  if (uniqueMessageIds.length > 0) {
-    const placeholders = uniqueMessageIds.map(() => "?").join(", ");
-    reminderClauses.push(`messageId IN (${placeholders})`);
-    reminderArgs.push(...uniqueMessageIds);
-  }
-
-  if (uniqueEventUidKeys.length > 0) {
-    const placeholders = uniqueEventUidKeys.map(() => "?").join(", ");
-    reminderClauses.push(`lower(COALESCE(eventUidKey, eventUid, '')) IN (${placeholders})`);
-    reminderArgs.push(...uniqueEventUidKeys);
-  }
-
-  const reminderRows =
-    reminderClauses.length > 0
-      ? (db
-          .prepare(
-            `SELECT id, messageId, eventUid
-             FROM calendar_reminders
-             WHERE accountId = ? AND userId = ? AND deletedAtMs IS NULL
-               AND (${reminderClauses.join(" OR ")})`
-          )
-          .all(...reminderArgs) as Array<{
-          id?: string | null;
-          messageId?: string | null;
-          eventUid?: string | null;
-        }>)
-      : [];
-
-  const eventRows =
-    uniqueMessageIds.length > 0 || uniqueEventUidKeys.length > 0
-      ? (db
-          .prepare(
-            `SELECT DISTINCT ce.id, ce.eventUid
-             FROM calendar_events ce
-             WHERE ce.accountId = ? AND ce.deletedAtMs IS NULL
-               AND (
-                 ${
-                   uniqueMessageIds.length > 0
-                     ? `EXISTS (
-                         SELECT 1
-                         FROM message_calendar_events mce
-                         WHERE mce.accountId = ce.accountId
-                           AND mce.messageId IN (${uniqueMessageIds.map(() => "?").join(", ")})
-                           AND lower(COALESCE(mce.eventUidKey, mce.eventUid, '')) = lower(COALESCE(ce.eventUid, ''))
-                       )`
-                     : "0"
-                 }
-                 ${
-                   uniqueEventUidKeys.length > 0
-                     ? `OR lower(COALESCE(ce.eventUid, '')) IN (${uniqueEventUidKeys
-                         .map(() => "?")
-                         .join(", ")})`
-                     : ""
-                 }
-               )`
-          )
-          .all(accountId, ...uniqueMessageIds, ...uniqueEventUidKeys) as Array<{
-          id?: string | null;
-          eventUid?: string | null;
-        }>)
-      : [];
-
-  return {
-    reminders: reminderRows
-      .map((row) => ({
-        id: row.id?.trim() ?? "",
-        messageId: row.messageId?.trim() || undefined,
-        eventUid: row.eventUid?.trim() || undefined
-      }))
-      .filter((row) => Boolean(row.id)),
-    events: eventRows
-      .map((row) => ({
-        id: row.id?.trim() ?? "",
-        eventUid: row.eventUid?.trim() || undefined
-      }))
-      .filter((row) => Boolean(row.id))
-  };
-}
-
-function findMatchingCalendarReminderRows(
-  db: any,
-  accountId: string,
-  userId: string,
-  input: {
-    eventUid?: string | null;
-    eventStartAtMs: number;
-    eventTitle: string;
-  }
-) {
-  const eventUidKey = normalizeReminderEventUidKey(input.eventUid);
-  if (eventUidKey) {
-    return db
-      .prepare(
-        `SELECT id, createdAtMs, messageId
-         FROM calendar_reminders
-         WHERE accountId = ? AND userId = ? AND deletedAtMs IS NULL
-           AND (
-             lower(COALESCE(eventUidKey, eventUid, '')) = lower(?)
-             OR (
-               eventStartAtMs = ?
-               AND lower(eventTitle) = lower(?)
-             )
-           )
-         ORDER BY createdAtMs ASC`
-      )
-      .all(
-        accountId,
-        userId,
-        eventUidKey,
-        input.eventStartAtMs,
-        input.eventTitle
-      ) as MatchingCalendarReminderRow[];
-  }
-  return db
-    .prepare(
-      `SELECT id, createdAtMs, messageId
-       FROM calendar_reminders
-       WHERE accountId = ? AND userId = ? AND deletedAtMs IS NULL
-         AND eventStartAtMs = ?
-         AND lower(eventTitle) = lower(?)
-       ORDER BY createdAtMs ASC`
-    )
-    .all(accountId, userId, input.eventStartAtMs, input.eventTitle) as MatchingCalendarReminderRow[];
-}
-
-function upsertCalendarReminderWithDb(
-  db: any,
-  accountId: string,
-  userId: string,
-  input: UpsertCalendarReminderInput
-) {
-  const now = Date.now();
-  const eventUid = normalizeReminderEventUid(input.eventUid);
-  const eventUidKey = normalizeReminderEventUidKey(eventUid);
-  const inputId = input.id?.trim() || null;
-  const messageId =
-    typeof input.messageId === "string" && input.messageId.trim()
-      ? input.messageId.trim()
-      : null;
-  const eventTitle = normalizeReminderEventTitle(input.eventTitle);
-  const eventLocation = input.eventLocation?.trim() || null;
-  const eventDescription = input.eventDescription?.trim() || null;
-  const eventStartAtMs = Number(input.eventStartAtMs);
-  const eventEndAtMsRaw = Number(input.eventEndAtMs);
-  const eventEndAtMs =
-    Number.isFinite(eventEndAtMsRaw) && eventEndAtMsRaw > 0 ? Math.round(eventEndAtMsRaw) : null;
-  const startTimezone = normalizeReminderTimezone(input.startTimezone);
-  const recurrenceRule = normalizeReminderRecurrenceRule(input.recurrenceRule);
-  const recurrenceDates = normalizeReminderDateList(input.recurrenceDates);
-  const excludedDates = normalizeReminderDateList(input.excludedDates);
-  const leadMinutes = Math.max(0, Number(input.leadMinutes));
-  const leadLabel = String(input.leadLabel ?? "").trim();
-
-  if (!Number.isFinite(eventStartAtMs) || eventStartAtMs <= 0) {
-    throw new Error("Invalid eventStartAtMs");
-  }
-  if (input.eventEndAtMs !== undefined && eventEndAtMs === null) {
-    throw new Error("Invalid eventEndAtMs");
-  }
-  if (!Number.isFinite(leadMinutes)) {
-    throw new Error("Invalid leadMinutes");
-  }
-  if (!leadLabel) {
-    throw new Error("Invalid leadLabel");
-  }
-
-  const matchingRows = findMatchingCalendarReminderRows(db, accountId, userId, {
-    eventUid,
-    eventStartAtMs,
-    eventTitle
-  });
-
-  const primaryRow = matchingRows[0];
-  if (primaryRow) {
-    const nextMessageId = messageId ?? (primaryRow.messageId ? String(primaryRow.messageId) : null);
-    db.prepare(
-      `UPDATE calendar_reminders
-       SET messageId = ?, eventUid = ?, eventUidKey = ?, eventTitle = ?, eventLocation = ?, eventDescription = ?, eventStartAtMs = ?, eventEndAtMs = ?, startTimezone = ?, recurrenceRule = ?, recurrenceDates = ?, excludedDates = ?, leadMinutes = ?, leadLabel = ?, updatedAtMs = ?, deletedAtMs = NULL
-       WHERE id = ?`
-    ).run(
-      nextMessageId,
-      eventUid,
-      eventUidKey,
-      eventTitle,
-      eventLocation,
-      eventDescription,
-      eventStartAtMs,
-      eventEndAtMs,
-      startTimezone,
-      recurrenceRule,
-      serializeReminderDateList(recurrenceDates),
-      serializeReminderDateList(excludedDates),
-      leadMinutes,
-      leadLabel,
-      now,
-      primaryRow.id
-    );
-    if (matchingRows.length > 1) {
-      const duplicateIds = matchingRows.slice(1).map((row) => row.id);
-      db.prepare(
-        `UPDATE calendar_reminders
-         SET deletedAtMs = ?
-         WHERE id IN (${duplicateIds.map(() => "?").join(",")})`
-      ).run(now, ...duplicateIds);
-    }
-    const row = db
-      .prepare(
-        `SELECT id, accountId, userId, messageId, eventUid, eventTitle, eventLocation, eventDescription, eventStartAtMs, eventEndAtMs, startTimezone, recurrenceRule, recurrenceDates, excludedDates, leadMinutes, leadLabel, createdAtMs, updatedAtMs
-         FROM calendar_reminders
-         WHERE id = ?`
-      )
-      .get(primaryRow.id) as any;
-    return {
-      reminder: mapCalendarReminderRow(row, { allowPastFallback: true })!,
-      replaced: true
-    };
-  }
-
-  const id = inputId ?? randomUUID();
-  db.prepare(
-    `INSERT INTO calendar_reminders (
-       id, accountId, userId, messageId, eventUid, eventUidKey, eventTitle, eventLocation, eventDescription, eventStartAtMs, eventEndAtMs, startTimezone, recurrenceRule, recurrenceDates, excludedDates, leadMinutes, leadLabel, createdAtMs, updatedAtMs, deletedAtMs
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`
-  ).run(
-    id,
-    accountId,
-    userId,
-    messageId,
-    eventUid,
-    eventUidKey,
-    eventTitle,
-    eventLocation,
-    eventDescription,
-    eventStartAtMs,
-    eventEndAtMs,
-    startTimezone,
-    recurrenceRule,
-    serializeReminderDateList(recurrenceDates),
-    serializeReminderDateList(excludedDates),
-    leadMinutes,
-    leadLabel,
-    now,
-    now
-  );
-  const row = db
-    .prepare(
-      `SELECT id, accountId, userId, messageId, eventUid, eventTitle, eventLocation, eventDescription, eventStartAtMs, eventEndAtMs, startTimezone, recurrenceRule, recurrenceDates, excludedDates, leadMinutes, leadLabel, createdAtMs, updatedAtMs
-       FROM calendar_reminders
-       WHERE id = ?`
-    )
-    .get(id) as any;
-  return {
-    reminder: mapCalendarReminderRow(row, { allowPastFallback: true })!,
-    replaced: false
-  };
-}
-
-export async function upsertCalendarReminder(
-  accountId: string,
-  userId: string,
-  input: UpsertCalendarReminderInput
-) {
-  return withDbWriteRetry("upsertCalendarReminder", async () => {
-    const db = await getAccountDb(accountId);
-    return upsertCalendarReminderWithDb(db, accountId, userId, input);
-  });
-}
-
-export async function ensureCalendarReminder(
-  accountId: string,
-  userId: string,
-  input: UpsertCalendarReminderInput
-) {
-  return withDbWriteRetry("ensureCalendarReminder", async () => {
-    const db = await getAccountDb(accountId);
-    const eventTitle = normalizeReminderEventTitle(input.eventTitle);
-    const eventStartAtMs = Number(input.eventStartAtMs);
-    if (!Number.isFinite(eventStartAtMs) || eventStartAtMs <= 0) {
-      throw new Error("Invalid eventStartAtMs");
-    }
-    const matchingRows = findMatchingCalendarReminderRows(db, accountId, userId, {
-      eventUid: normalizeReminderEventUid(input.eventUid),
-      eventStartAtMs,
-      eventTitle
-    });
-    const existing = matchingRows[0];
-    if (!existing) {
-      const created = upsertCalendarReminderWithDb(db, accountId, userId, input);
-      return { reminder: created.reminder, created: true };
-    }
-    const row = db
-      .prepare(
-        `SELECT id, accountId, userId, messageId, eventUid, eventTitle, eventLocation, eventDescription, eventStartAtMs, eventEndAtMs, startTimezone, recurrenceRule, recurrenceDates, excludedDates, leadMinutes, leadLabel, createdAtMs, updatedAtMs
-         FROM calendar_reminders
-         WHERE id = ?`
-      )
-      .get(existing.id) as any;
-    return {
-      reminder: mapCalendarReminderRow(row, { allowPastFallback: true })!,
-      created: false
-    };
-  });
-}
-
-export async function deleteCalendarReminderById(accountId: string, userId: string, reminderId: string) {
-  return withDbWriteRetry("deleteCalendarReminderById", async () => {
-    const db = await getAccountDb(accountId);
-    const result = db
-      .prepare(
-        `UPDATE calendar_reminders
-         SET deletedAtMs = ?
-         WHERE id = ? AND accountId = ? AND userId = ? AND deletedAtMs IS NULL`
-      )
-      .run(Date.now(), reminderId, accountId, userId) as { changes?: number };
-    return (result?.changes ?? 0) > 0;
-  });
-}
-
-export async function deleteCalendarReminderByEvent(
-  accountId: string,
-  userId: string,
-  event: CalendarReminderEventMatch
-) {
-  return withDbWriteRetry("deleteCalendarReminderByEvent", async () => {
-    const db = await getAccountDb(accountId);
-    const now = Date.now();
-    const eventUid = normalizeReminderEventUid(event.eventUid);
-    const eventTitle = normalizeReminderEventTitle(event.eventTitle);
-    const eventStartAtMs = Number(event.eventStartAtMs);
-    if (!Number.isFinite(eventStartAtMs) || eventStartAtMs <= 0) {
-      throw new Error("Invalid eventStartAtMs");
-    }
-
-    const result = eventUid
-      ? (db
-          .prepare(
-            `UPDATE calendar_reminders
-             SET deletedAtMs = ?
-             WHERE accountId = ? AND userId = ? AND deletedAtMs IS NULL
-               AND (
-                 lower(COALESCE(eventUidKey, eventUid, '')) = lower(?)
-                 OR (
-                   eventStartAtMs = ?
-                   AND lower(eventTitle) = lower(?)
-                 )
-               )`
-          )
-          .run(
-            now,
-            accountId,
-            userId,
-            normalizeReminderEventUidKey(eventUid),
-            eventStartAtMs,
-            eventTitle
-          ) as { changes?: number })
-      : (db
-          .prepare(
-            `UPDATE calendar_reminders
-             SET deletedAtMs = ?
-             WHERE accountId = ? AND userId = ? AND deletedAtMs IS NULL
-               AND eventStartAtMs = ?
-               AND lower(eventTitle) = lower(?)`
-          )
-          .run(now, accountId, userId, eventStartAtMs, eventTitle) as { changes?: number });
-
-    return (result?.changes ?? 0) > 0;
-  });
-}
-
-export async function clearCalendarReminders(accountId: string, userId: string) {
-  return withDbWriteRetry("clearCalendarReminders", async () => {
-    const db = await getAccountDb(accountId);
-    const now = Date.now();
-    const result = db
-      .prepare(
-        `UPDATE calendar_reminders
-         SET deletedAtMs = ?, updatedAtMs = ?
-         WHERE accountId = ? AND userId = ? AND deletedAtMs IS NULL`
-      )
-      .run(now, now, accountId, userId) as { changes?: number };
-    return result?.changes ?? 0;
-  });
-}
-
-type CalendarReminderRescheduleByUidInput = {
-  eventTitle?: string;
-  eventLocation?: string;
-  eventDescription?: string;
-  startTimezone?: string;
-  recurrenceRule?: string;
-  recurrenceDates?: number[];
-  excludedDates?: number[];
-  eventStartAtMs: number;
-  eventEndAtMs?: number;
-  messageId?: string;
-};
-
-export async function rescheduleCalendarRemindersByEventUid(
-  accountId: string,
-  eventUid: string,
-  input: CalendarReminderRescheduleByUidInput
-) {
-  return withDbWriteRetry("rescheduleCalendarRemindersByEventUid", async () => {
-    const db = await getAccountDb(accountId);
-    const normalizedUid = eventUid.trim();
-    const normalizedUidKey = normalizeReminderEventUidKey(normalizedUid);
-    if (!normalizedUid || !normalizedUidKey) return 0;
-    const eventStartAtMs = Number(input.eventStartAtMs);
-    if (!Number.isFinite(eventStartAtMs) || eventStartAtMs <= 0) return 0;
-    const eventEndAtMsRaw = Number(input.eventEndAtMs);
-    const eventEndAtMs =
-      Number.isFinite(eventEndAtMsRaw) && eventEndAtMsRaw > 0 ? Math.round(eventEndAtMsRaw) : null;
-    if (input.eventEndAtMs !== undefined && eventEndAtMs === null) return 0;
-    const eventTitle = normalizeReminderEventTitle(input.eventTitle);
-    const eventLocation = input.eventLocation?.trim() || null;
-    const eventDescription = input.eventDescription?.trim() || null;
-    const startTimezone = normalizeReminderTimezone(input.startTimezone);
-    const recurrenceRule = normalizeReminderRecurrenceRule(input.recurrenceRule);
-    const recurrenceDates = normalizeReminderDateList(input.recurrenceDates);
-    const excludedDates = normalizeReminderDateList(input.excludedDates);
-    const messageId =
-      typeof input.messageId === "string" && input.messageId.trim()
-        ? input.messageId.trim()
-        : null;
-    const now = Date.now();
-    const result = db
-      .prepare(
-        `UPDATE calendar_reminders
-         SET eventTitle = ?,
-             eventLocation = ?,
-             eventDescription = ?,
-             eventUidKey = ?,
-             eventStartAtMs = ?,
-             eventEndAtMs = ?,
-             startTimezone = ?,
-             recurrenceRule = ?,
-             recurrenceDates = ?,
-             excludedDates = ?,
-             updatedAtMs = ?,
-             messageId = COALESCE(?, messageId)
-         WHERE accountId = ? AND deletedAtMs IS NULL
-           AND lower(COALESCE(eventUidKey, eventUid, '')) = lower(?)`
-      )
-      .run(
-        eventTitle,
-        eventLocation,
-        eventDescription,
-        normalizedUidKey,
-        eventStartAtMs,
-        eventEndAtMs,
-        startTimezone,
-        recurrenceRule,
-        serializeReminderDateList(recurrenceDates),
-        serializeReminderDateList(excludedDates),
-        now,
-        messageId,
-        accountId,
-        normalizedUidKey
-      ) as { changes?: number };
-    return result?.changes ?? 0;
-  });
-}
-
-export async function cancelCalendarRemindersByEventUid(accountId: string, eventUid: string) {
-  return withDbWriteRetry("cancelCalendarRemindersByEventUid", async () => {
-    const db = await getAccountDb(accountId);
-    const normalizedUid = eventUid.trim();
-    const normalizedUidKey = normalizeReminderEventUidKey(normalizedUid);
-    if (!normalizedUid || !normalizedUidKey) return 0;
-    const now = Date.now();
-    const result = db
-      .prepare(
-        `UPDATE calendar_reminders
-         SET deletedAtMs = ?, updatedAtMs = ?
-         WHERE accountId = ? AND deletedAtMs IS NULL
-           AND lower(COALESCE(eventUidKey, eventUid, '')) = lower(?)`
-      )
-      .run(now, now, accountId, normalizedUidKey) as { changes?: number };
-    return result?.changes ?? 0;
-  });
-}
+export {
+  clearCalendarReminders,
+  deleteCalendarReminderById,
+  deleteCalendarReminderByEvent,
+  listCalendarReminders,
+  listDeleteCalendarAssociations,
+  upsertCalendarReminder
+} from "./db/calendar";
 
 
-export async function upsertMessageCalendarInviteStates(
-  accountId: string,
-  messageId: string,
-  states: Array<{
-    eventUid: string;
-    actionType: CalendarInviteActionType;
-    eventFirstStartAtMs?: number;
-    eventLastEndAtMs?: number | null;
-  }>
-) {
-  return withDbWriteRetry("upsertMessageCalendarInviteStates", async () => {
-    const db = await getAccountDb(accountId);
-    ensureMessageCalendarEventOptionalColumns(db);
-    const insert = db.prepare(
-      `INSERT INTO message_calendar_events (
-         accountId,
-         messageId,
-         eventUid,
-         eventUidKey,
-         eventFirstStartAtMs,
-         eventLastEndAtMs,
-         inviteActionType
-       ) VALUES (?, ?, ?, ?, ?, ?, ?)
-       ON CONFLICT(accountId, messageId, eventUid)
-       DO UPDATE SET
-         eventUidKey = excluded.eventUidKey,
-         eventFirstStartAtMs = excluded.eventFirstStartAtMs,
-         eventLastEndAtMs = excluded.eventLastEndAtMs,
-         inviteActionType = excluded.inviteActionType`
-    );
-    const apply = db.transaction(
-      (
-        items: Array<{
-          eventUid: string;
-          actionType: CalendarInviteActionType;
-          eventFirstStartAtMs?: number;
-          eventLastEndAtMs?: number | null;
-        }>
-      ) => {
-        items.forEach((item) => {
-          const eventUid = normalizeCalendarEventUid(item.eventUid);
-          const eventUidKey = normalizeCalendarEventUidKey(eventUid);
-          const actionType = normalizeCalendarInviteActionType(item.actionType);
-          if (!eventUid || !actionType) return;
-          const eventFirstStartAtMs =
-            typeof item.eventFirstStartAtMs === "number" &&
-            Number.isFinite(item.eventFirstStartAtMs) &&
-            item.eventFirstStartAtMs > 0
-              ? Math.round(item.eventFirstStartAtMs)
-              : null;
-          const eventLastEndAtMs =
-            item.eventLastEndAtMs === null
-              ? null
-              : typeof item.eventLastEndAtMs === "number" &&
-                  Number.isFinite(item.eventLastEndAtMs) &&
-                  item.eventLastEndAtMs > 0
-                ? Math.round(item.eventLastEndAtMs)
-                : eventFirstStartAtMs
-                  ? null
-                  : null;
-          insert.run(
-            accountId,
-            messageId,
-            eventUid,
-            eventUidKey,
-            eventFirstStartAtMs,
-            eventLastEndAtMs,
-            actionType
-          );
-        });
-      }
-    );
-    apply(itemsFromUniqueInviteStates(states));
-  });
-}
-
-export async function markMessageCalendarInviteStatesProcessed(
-  accountId: string,
-  messageId: string,
-  eventUids: string[],
-  options?: {
-    processedAtMs?: number | null;
-    processedByUserId?: string | null;
-    processedAutomatically?: boolean | null;
-  }
-) {
-  return withDbWriteRetry("markMessageCalendarInviteStatesProcessed", async () => {
-    const db = await getAccountDb(accountId);
-    ensureMessageCalendarEventOptionalColumns(db);
-    const normalizedEventUids = normalizeCalendarEventUids(eventUids);
-    if (normalizedEventUids.length === 0) return 0;
-    const processedAtMs =
-      typeof options?.processedAtMs === "number" &&
-      Number.isFinite(options.processedAtMs) &&
-      options.processedAtMs > 0
-        ? Math.round(options.processedAtMs)
-        : Date.now();
-    const processedByUserId =
-      typeof options?.processedByUserId === "string" && options.processedByUserId.trim()
-        ? options.processedByUserId.trim()
-        : null;
-    const processedAutomatically =
-      typeof options?.processedAutomatically === "boolean"
-        ? (options.processedAutomatically ? 1 : 0)
-        : null;
-    const result = db
-      .prepare(
-        `UPDATE message_calendar_events
-         SET processedAtMs = ?, processedByUserId = ?, processedAutomatically = ?
-         WHERE accountId = ?
-           AND messageId = ?
-           AND eventUid IN (${normalizedEventUids.map(() => "?").join(",")})`
-      )
-      .run(
-        processedAtMs,
-        processedByUserId,
-        processedAutomatically,
-        accountId,
-        messageId,
-        ...normalizedEventUids
-      ) as { changes?: number };
-    return result?.changes ?? 0;
-  });
-}
-
-export async function clearMessageCalendarInviteStatesProcessedByEventUid(
-  accountId: string,
-  eventUid: string
-) {
-  return withDbWriteRetry("clearMessageCalendarInviteStatesProcessedByEventUid", async () => {
-    const db = await getAccountDb(accountId);
-    ensureMessageCalendarEventOptionalColumns(db);
-    const normalizedEventUid = normalizeCalendarEventUid(eventUid);
-    if (!normalizedEventUid) return 0;
-    const result = db
-      .prepare(
-        `UPDATE message_calendar_events
-         SET processedAtMs = NULL, processedByUserId = NULL, processedAutomatically = NULL
-         WHERE accountId = ? AND lower(eventUid) = lower(?)`
-      )
-      .run(accountId, normalizedEventUid) as { changes?: number };
-    return result?.changes ?? 0;
-  });
-}
-
-export async function listFullyProcessedCalendarInviteMessageIds(
-  accountId: string,
-  messageIds: string[]
-): Promise<string[]> {
-  const db = await getAccountDb(accountId);
-  ensureMessageCalendarEventOptionalColumns(db);
-  const normalizedMessageIds = Array.from(
-    new Set(
-      messageIds
-        .map((messageId) => String(messageId ?? "").trim())
-        .filter(Boolean)
-    )
-  );
-  if (normalizedMessageIds.length === 0) return [];
-
-  const QUERY_BATCH_SIZE = 400;
-  const processedMessageIds = new Set<string>();
-
-  for (let start = 0; start < normalizedMessageIds.length; start += QUERY_BATCH_SIZE) {
-    const chunk = normalizedMessageIds.slice(start, start + QUERY_BATCH_SIZE);
-    if (chunk.length === 0) continue;
-    const rows = db
-      .prepare(
-        `SELECT messageId
-         FROM message_calendar_events
-         WHERE accountId = ?
-           AND messageId IN (${chunk.map(() => "?").join(",")})
-         GROUP BY messageId
-         HAVING COUNT(*) > 0
-            AND SUM(CASE WHEN processedAtMs IS NULL THEN 1 ELSE 0 END) = 0`
-      )
-      .all(accountId, ...chunk) as Array<{ messageId?: string | null }>;
-    rows.forEach((row) => {
-      const messageId = String(row.messageId ?? "").trim();
-      if (messageId) {
-        processedMessageIds.add(messageId);
-      }
-    });
-  }
-
-  return Array.from(processedMessageIds);
-}
-
-export async function deleteMessageCalendarInviteStateByMessageAndEvent(
-  accountId: string,
-  messageId: string,
-  eventUid: string
-): Promise<void> {
-  const db = await getAccountDb(accountId);
-  const normalizedEventUid = normalizeCalendarEventUid(eventUid);
-  if (!normalizedEventUid) return;
-  db.prepare(
-    `DELETE FROM message_calendar_events
-     WHERE accountId = ? AND messageId = ? AND lower(eventUid) = lower(?)`
-  ).run(accountId, messageId, normalizedEventUid);
-}
-
-export async function listCalendarInviteSourceMessagesByEventUid(
-  accountId: string,
-  eventUid: string,
-  options?: {
-    excludeMessageId?: string | null;
-  }
-): Promise<
-  Array<{
-    messageId: string;
-    dateValue: number;
-  }>
-> {
-  const db = await getAccountDb(accountId);
-  ensureMessageCalendarEventOptionalColumns(db);
-  const normalizedEventUid = normalizeCalendarEventUid(eventUid);
-  if (!normalizedEventUid) return [];
-  const excludedMessageId =
-    typeof options?.excludeMessageId === "string" && options.excludeMessageId.trim()
-      ? options.excludeMessageId.trim()
-      : "";
-  const rows = db
-    .prepare(
-      `SELECT DISTINCT
-         m.id AS messageId,
-         m.dateValue AS dateValue
-       FROM message_calendar_events mce
-       JOIN messages m
-         ON m.accountId = mce.accountId
-        AND m.id = mce.messageId
-       WHERE mce.accountId = ?
-         AND lower(mce.eventUid) = lower(?)
-         AND COALESCE(m.hasSource, 0) = 1
-         AND (? = '' OR m.id <> ?)
-       ORDER BY m.dateValue ASC, m.id ASC`
-    )
-    .all(accountId, normalizedEventUid, excludedMessageId, excludedMessageId) as Array<{
-    messageId?: string | null;
-    dateValue?: number | null;
-  }>;
-  return rows
-    .map((row) => {
-      const messageId = String(row.messageId ?? "").trim();
-      const dateValue =
-        typeof row.dateValue === "number" && Number.isFinite(row.dateValue) ? row.dateValue : 0;
-      if (!messageId) return null;
-      return { messageId, dateValue };
-    })
-    .filter((row): row is { messageId: string; dateValue: number } => Boolean(row));
-}
+export {
+  deleteMessageCalendarInviteStateByMessageAndEvent,
+  listFullyProcessedCalendarInviteMessageIds
+} from "./db/calendar";
 
 
 
@@ -1609,396 +722,121 @@ export async function recomputeCategoriesForAccount(
   console.log(`Finished: ${processed}/${messages.length} processed, ${categorized} categorized`);
 }
 
-// ── Calendar Events ──────────────────────────────────────────────────────────
+export {
+  type CalendarParticipationResolution,
+  deleteCalendarParticipationOverrideForOccurrence,
+  listCalendarEvents,
+  listCalendarEventsBySource,
+  resolveCalendarParticipation,
+  updateCalendarEventMessageRelations,
+  upsertCalendarEvent,
+  upsertCalendarParticipationOverride
+} from "./db/calendar";
 
-function rowToCalendarEvent(row: any): CalendarEvent {
-  return {
-    id: row.id,
-    accountId: row.accountId,
-    calendarId: row.calendarId ?? undefined,
-    eventUid: row.eventUid,
-    summary: row.summary,
-    description: row.description ?? undefined,
-    location: row.location ?? undefined,
-    startAtMs: row.startAtMs,
-    endAtMs: row.endAtMs ?? undefined,
-    allDay: Boolean(row.allDay),
-    startTimezone: row.startTimezone ?? undefined,
-    endTimezone: row.endTimezone ?? undefined,
-    recurrenceRule: row.recurrenceRule ?? undefined,
-    recurrenceDates: safeParseJson<number[]>(row.recurrenceDates),
-    excludedDates: safeParseJson<number[]>(row.excludedDates),
-    status: row.status ?? undefined,
-    organizer: row.organizer ?? undefined,
-    attendees: row.attendees ?? undefined,
-    myPartstat: row.myPartstat ?? undefined,
-    myPartstatUpdatedAtMs: row.myPartstatUpdatedAtMs ?? undefined,
-    myAttendeeEmail: row.myAttendeeEmail ?? undefined,
-    replyRequested: row.replyRequested == null ? undefined : Boolean(row.replyRequested),
-    remoteEtag: row.remoteEtag ?? undefined,
-    remoteHref: row.remoteHref ?? undefined,
-    rawIcs: row.rawIcs ?? undefined,
-    sourceType: (row.sourceType as CalendarEventSourceType) ?? "local",
-    messageId: row.messageId ?? undefined,
-    occurrenceMessageIds: safeParseJson<Record<string, string>>(row.occurrenceMessageIds),
-    sourceSubject: row.sourceSubject ?? undefined,
-    sourceFromAddr: row.sourceFromAddr ?? undefined,
-    sourceToAddr: row.sourceToAddr ?? undefined,
-    sourceCcAddr: row.sourceCcAddr ?? undefined,
-    sourceBccAddr: row.sourceBccAddr ?? undefined,
-    sourceDateMs: typeof row.sourceDateMs === "number" ? row.sourceDateMs : undefined,
-    sourceBodyText: row.sourceBodyText ?? undefined,
-    sourceBodyHtml: row.sourceBodyHtml ?? undefined,
-    occurrenceSnapshots: safeParseJson<Record<string, CalendarEventEmailSnapshotFields>>(
-      row.occurrenceSnapshots
-    ),
-    createdAtMs: row.createdAtMs,
-    updatedAtMs: row.updatedAtMs,
-    deletedAtMs: row.deletedAtMs ?? undefined
-  };
+/*
+ * Concrete wrappers for the calendar functions that tests replace via
+ * Bun's `mock.module("@/lib/db", …)`. Bun mutates the target namespace's
+ * live bindings in place, and its `mock.restore()` does not undo that
+ * mutation — which means a plain re-export `export { foo } from "./db/calendar"`
+ * leaves every consumer (including the `./db.ts?test-harness` isolated
+ * loader) resolving `foo` through the shared source module where the
+ * mock leaked. Wrapping each mocked symbol as a concrete binding on the
+ * public `@/lib/db` namespace keeps the mock scoped to the wrapper and
+ * leaves sibling modules importing from `./db/calendar/*` untouched.
+ *
+ * See the `updateMessageFolder` wrapper higher up in this file for the
+ * same pattern and rationale.
+ */
+import {
+  cancelCalendarEventByUid as _cancelCalendarEventByUidImpl,
+  cancelCalendarRemindersByEventUid as _cancelCalendarRemindersByEventUidImpl,
+  clearMessageCalendarInviteStatesProcessedByEventUid as _clearMessageCalendarInviteStatesProcessedByEventUidImpl,
+  deleteCalendarEvent as _deleteCalendarEventImpl,
+  ensureCalendarReminder as _ensureCalendarReminderImpl,
+  getCalendarEventById as _getCalendarEventByIdImpl,
+  getCalendarEventByUid as _getCalendarEventByUidImpl,
+  listCalendarInviteSourceMessagesByEventUid as _listCalendarInviteSourceMessagesByEventUidImpl,
+  markMessageCalendarInviteStatesProcessed as _markMessageCalendarInviteStatesProcessedImpl,
+  rescheduleCalendarRemindersByEventUid as _rescheduleCalendarRemindersByEventUidImpl,
+  softDeleteCalendarEvent as _softDeleteCalendarEventImpl,
+  upsertCalendarEventByUid as _upsertCalendarEventByUidImpl,
+  upsertMessageCalendarInviteStates as _upsertMessageCalendarInviteStatesImpl
+} from "./db/calendar";
+
+export function getCalendarEventById(
+  ...args: Parameters<typeof _getCalendarEventByIdImpl>
+): ReturnType<typeof _getCalendarEventByIdImpl> {
+  return _getCalendarEventByIdImpl(...args);
 }
 
-type CalendarParticipationOverrideRow = {
-  id: string;
-  accountId: string;
-  eventUid: string;
-  occurrenceStartAtMs: number;
-  partstat: CalendarParticipationStatus;
-  attendeeEmail?: string;
-  updatedAtMs: number;
-};
-
-export type CalendarParticipationResolution = {
-  partstat?: CalendarParticipationStatus;
-  scope: CalendarParticipationScope;
-  canRespond: boolean;
-  isRecurring: boolean;
-  occurrenceStartAtMs?: number;
-};
-
-function rowToCalendarParticipationOverride(row: any): CalendarParticipationOverrideRow | null {
-  const partstat = normalizeCalendarParticipationStatus(row.partstat);
-  const occurrenceStartAtMs = Number(row.occurrenceStartAtMs);
-  const updatedAtMs = Number(row.updatedAtMs);
-  if (!partstat || !Number.isFinite(occurrenceStartAtMs) || !Number.isFinite(updatedAtMs)) {
-    return null;
-  }
-  return {
-    id: String(row.id),
-    accountId: String(row.accountId),
-    eventUid: String(row.eventUid),
-    occurrenceStartAtMs,
-    partstat,
-    attendeeEmail: row.attendeeEmail ? String(row.attendeeEmail) : undefined,
-    updatedAtMs
-  };
+export function getCalendarEventByUid(
+  ...args: Parameters<typeof _getCalendarEventByUidImpl>
+): ReturnType<typeof _getCalendarEventByUidImpl> {
+  return _getCalendarEventByUidImpl(...args);
 }
 
-async function getCalendarParticipationOverrideForOccurrence(
-  accountId: string,
-  eventUid: string,
-  occurrenceStartAtMs: number
-): Promise<CalendarParticipationOverrideRow | null> {
-  const db = await getAccountDb(accountId);
-  const row = db
-    .prepare(
-      `SELECT * FROM calendar_participation_overrides
-       WHERE accountId = ? AND eventUid = ? AND occurrenceStartAtMs = ?`
-    )
-    .get(accountId, eventUid, occurrenceStartAtMs) as any;
-  return row ? rowToCalendarParticipationOverride(row) : null;
+export function softDeleteCalendarEvent(
+  ...args: Parameters<typeof _softDeleteCalendarEventImpl>
+): ReturnType<typeof _softDeleteCalendarEventImpl> {
+  return _softDeleteCalendarEventImpl(...args);
 }
 
-export async function upsertCalendarParticipationOverride(
-  accountId: string,
-  input: {
-    eventUid: string;
-    occurrenceStartAtMs: number;
-    partstat: CalendarParticipationStatus;
-    attendeeEmail?: string;
-  }
-): Promise<CalendarParticipationOverrideRow> {
-  const db = await getAccountDb(accountId);
-  const now = Date.now();
-  const existing = await getCalendarParticipationOverrideForOccurrence(
-    accountId,
-    input.eventUid,
-    input.occurrenceStartAtMs
-  );
-  const row: CalendarParticipationOverrideRow = {
-    id: existing?.id ?? `calp-${crypto.randomUUID()}`,
-    accountId,
-    eventUid: input.eventUid,
-    occurrenceStartAtMs: input.occurrenceStartAtMs,
-    partstat: input.partstat,
-    attendeeEmail: input.attendeeEmail,
-    updatedAtMs: now
-  };
-  db.prepare(
-    `INSERT OR REPLACE INTO calendar_participation_overrides (
-      id, accountId, eventUid, occurrenceStartAtMs, partstat, attendeeEmail, updatedAtMs
-    ) VALUES (?, ?, ?, ?, ?, ?, ?)`
-  ).run(
-    row.id,
-    row.accountId,
-    row.eventUid,
-    row.occurrenceStartAtMs,
-    row.partstat,
-    row.attendeeEmail ?? null,
-    row.updatedAtMs
-  );
-  return row;
+export function deleteCalendarEvent(
+  ...args: Parameters<typeof _deleteCalendarEventImpl>
+): ReturnType<typeof _deleteCalendarEventImpl> {
+  return _deleteCalendarEventImpl(...args);
 }
 
-export async function deleteCalendarParticipationOverrideForOccurrence(
-  accountId: string,
-  eventUid: string,
-  occurrenceStartAtMs: number
-): Promise<void> {
-  const db = await getAccountDb(accountId);
-  db.prepare(
-    `DELETE FROM calendar_participation_overrides
-     WHERE accountId = ? AND eventUid = ? AND occurrenceStartAtMs = ?`
-  ).run(accountId, eventUid, occurrenceStartAtMs);
+export function cancelCalendarEventByUid(
+  ...args: Parameters<typeof _cancelCalendarEventByUidImpl>
+): ReturnType<typeof _cancelCalendarEventByUidImpl> {
+  return _cancelCalendarEventByUidImpl(...args);
 }
 
-export async function resolveCalendarParticipation(
-  accountId: string,
-  eventId: string,
-  occurrenceStartAtMs?: number
-): Promise<CalendarParticipationResolution> {
-  const event = await getCalendarEventById(accountId, eventId);
-  if (!event) {
-    return {
-      scope: "series",
-      canRespond: false,
-      isRecurring: false
-    };
-  }
-  const isRecurring = Boolean(event.recurrenceRule?.trim());
-  const canRespond = Boolean(event.rawIcs && event.myAttendeeEmail);
-  if (!canRespond || !isRecurring || !Number.isFinite(occurrenceStartAtMs)) {
-    return {
-      partstat: event.myPartstat,
-      scope: "series",
-      canRespond,
-      isRecurring
-    };
-  }
-  const occurrenceOverride = await getCalendarParticipationOverrideForOccurrence(
-    accountId,
-    event.eventUid,
-    occurrenceStartAtMs!
-  );
-  return {
-    partstat: occurrenceOverride?.partstat ?? event.myPartstat,
-    scope: occurrenceOverride ? "occurrence" : "series",
-    canRespond,
-    isRecurring,
-    occurrenceStartAtMs
-  };
+export function upsertCalendarEventByUid(
+  ...args: Parameters<typeof _upsertCalendarEventByUidImpl>
+): ReturnType<typeof _upsertCalendarEventByUidImpl> {
+  return _upsertCalendarEventByUidImpl(...args);
 }
 
-export async function listCalendarEvents(
-  accountId: string,
-  rangeStartMs: number,
-  rangeEndMs: number
-): Promise<CalendarEvent[]> {
-  const db = await getAccountDb(accountId);
-  const rows = db
-    .prepare(
-      `SELECT * FROM calendar_events
-       WHERE accountId = ?
-         AND deletedAtMs IS NULL
-         AND startAtMs < ?
-         AND (endAtMs IS NULL OR endAtMs >= ? OR (recurrenceRule IS NOT NULL AND recurrenceRule != ''))
-       ORDER BY startAtMs ASC`
-    )
-    .all(accountId, rangeEndMs, rangeStartMs) as any[];
-  return rows.map(rowToCalendarEvent);
+export function ensureCalendarReminder(
+  ...args: Parameters<typeof _ensureCalendarReminderImpl>
+): ReturnType<typeof _ensureCalendarReminderImpl> {
+  return _ensureCalendarReminderImpl(...args);
 }
 
-export async function getCalendarEventById(
-  accountId: string,
-  eventId: string
-): Promise<CalendarEvent | null> {
-  const db = await getAccountDb(accountId);
-  const row = db
-    .prepare(`SELECT * FROM calendar_events WHERE accountId = ? AND id = ?`)
-    .get(accountId, eventId) as any;
-  return row ? rowToCalendarEvent(row) : null;
+export function cancelCalendarRemindersByEventUid(
+  ...args: Parameters<typeof _cancelCalendarRemindersByEventUidImpl>
+): ReturnType<typeof _cancelCalendarRemindersByEventUidImpl> {
+  return _cancelCalendarRemindersByEventUidImpl(...args);
 }
 
-export async function getCalendarEventByUid(
-  accountId: string,
-  eventUid: string
-): Promise<CalendarEvent | null> {
-  const db = await getAccountDb(accountId);
-  const normalizedEventUid = String(eventUid ?? "").trim();
-  if (!normalizedEventUid) return null;
-  const exactRow = db
-    .prepare(
-      `SELECT * FROM calendar_events WHERE accountId = ? AND eventUid = ? AND deletedAtMs IS NULL`
-    )
-    .get(accountId, normalizedEventUid) as any;
-  if (exactRow) return rowToCalendarEvent(exactRow);
-  const foldedRow = db
-    .prepare(
-      `SELECT * FROM calendar_events
-       WHERE accountId = ?
-         AND lower(eventUid) = lower(?)
-         AND deletedAtMs IS NULL
-       ORDER BY CASE WHEN eventUid = ? THEN 0 ELSE 1 END, updatedAtMs DESC
-       LIMIT 1`
-    )
-    .get(accountId, normalizedEventUid, normalizedEventUid) as any;
-  return foldedRow ? rowToCalendarEvent(foldedRow) : null;
+export function rescheduleCalendarRemindersByEventUid(
+  ...args: Parameters<typeof _rescheduleCalendarRemindersByEventUidImpl>
+): ReturnType<typeof _rescheduleCalendarRemindersByEventUidImpl> {
+  return _rescheduleCalendarRemindersByEventUidImpl(...args);
 }
 
-export async function upsertCalendarEventByUid(
-  accountId: string,
-  fields: Omit<CalendarEvent, "id" | "accountId" | "createdAtMs" | "updatedAtMs" | "deletedAtMs">
-): Promise<CalendarEvent> {
-  const existing = await getCalendarEventByUid(accountId, fields.eventUid);
-  const now = Date.now();
-  const event: CalendarEvent = {
-    ...fields,
-    accountId,
-    id: existing?.id ?? `cal-${crypto.randomUUID()}`,
-    createdAtMs: existing?.createdAtMs ?? now,
-    updatedAtMs: now,
-    deletedAtMs: undefined
-  };
-  await upsertCalendarEvent(accountId, event);
-  return event;
+export function upsertMessageCalendarInviteStates(
+  ...args: Parameters<typeof _upsertMessageCalendarInviteStatesImpl>
+): ReturnType<typeof _upsertMessageCalendarInviteStatesImpl> {
+  return _upsertMessageCalendarInviteStatesImpl(...args);
 }
 
-export async function cancelCalendarEventByUid(
-  accountId: string,
-  eventUid: string
-): Promise<void> {
-  const existing = await getCalendarEventByUid(accountId, eventUid);
-  if (!existing) return;
-  await deleteCalendarEvent(accountId, existing.id);
+export function markMessageCalendarInviteStatesProcessed(
+  ...args: Parameters<typeof _markMessageCalendarInviteStatesProcessedImpl>
+): ReturnType<typeof _markMessageCalendarInviteStatesProcessedImpl> {
+  return _markMessageCalendarInviteStatesProcessedImpl(...args);
 }
 
-export async function upsertCalendarEvent(
-  accountId: string,
-  event: CalendarEvent
-): Promise<void> {
-  const db = await getAccountDb(accountId);
-  db.prepare(
-    `INSERT OR REPLACE INTO calendar_events (
-      id, accountId, calendarId, eventUid, summary, description, location,
-      startAtMs, endAtMs, allDay, startTimezone, endTimezone,
-      recurrenceRule, recurrenceDates, excludedDates,
-      status, organizer, attendees, myPartstat, myPartstatUpdatedAtMs, myAttendeeEmail, replyRequested,
-      remoteEtag, remoteHref, rawIcs, sourceType, messageId, occurrenceMessageIds,
-      sourceSubject, sourceFromAddr, sourceToAddr, sourceCcAddr, sourceBccAddr,
-      sourceDateMs, sourceBodyText, sourceBodyHtml, occurrenceSnapshots,
-      createdAtMs, updatedAtMs, deletedAtMs
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).run(
-    event.id,
-    event.accountId,
-    event.calendarId ?? null,
-    event.eventUid,
-    event.summary,
-    event.description ?? null,
-    event.location ?? null,
-    event.startAtMs,
-    event.endAtMs ?? null,
-    event.allDay ? 1 : 0,
-    event.startTimezone ?? null,
-    event.endTimezone ?? null,
-    event.recurrenceRule ?? null,
-    event.recurrenceDates ? JSON.stringify(event.recurrenceDates) : null,
-    event.excludedDates ? JSON.stringify(event.excludedDates) : null,
-    event.status ?? null,
-    event.organizer ?? null,
-    event.attendees ?? null,
-    event.myPartstat ?? null,
-    event.myPartstatUpdatedAtMs ?? null,
-    event.myAttendeeEmail ?? null,
-    event.replyRequested == null ? null : (event.replyRequested ? 1 : 0),
-    event.remoteEtag ?? null,
-    event.remoteHref ?? null,
-    event.rawIcs ?? null,
-    event.sourceType,
-    event.messageId ?? null,
-    event.occurrenceMessageIds && Object.keys(event.occurrenceMessageIds).length > 0
-      ? JSON.stringify(event.occurrenceMessageIds)
-      : null,
-    event.sourceSubject ?? null,
-    event.sourceFromAddr ?? null,
-    event.sourceToAddr ?? null,
-    event.sourceCcAddr ?? null,
-    event.sourceBccAddr ?? null,
-    typeof event.sourceDateMs === "number" ? event.sourceDateMs : null,
-    event.sourceBodyText ?? null,
-    event.sourceBodyHtml ?? null,
-    event.occurrenceSnapshots && Object.keys(event.occurrenceSnapshots).length > 0
-      ? JSON.stringify(event.occurrenceSnapshots)
-      : null,
-    event.createdAtMs,
-    event.updatedAtMs,
-    event.deletedAtMs ?? null
-  );
+export function clearMessageCalendarInviteStatesProcessedByEventUid(
+  ...args: Parameters<typeof _clearMessageCalendarInviteStatesProcessedByEventUidImpl>
+): ReturnType<typeof _clearMessageCalendarInviteStatesProcessedByEventUidImpl> {
+  return _clearMessageCalendarInviteStatesProcessedByEventUidImpl(...args);
 }
 
-export async function updateCalendarEventMessageRelations(
-  accountId: string,
-  eventId: string,
-  messageId: string | null,
-  occurrenceMessageIds: Record<string, string> | undefined
-): Promise<void> {
-  return withDbWriteRetry("updateCalendarEventMessageRelations", async () => {
-    const db = await getAccountDb(accountId);
-    db.prepare(
-      `UPDATE calendar_events
-       SET messageId = ?, occurrenceMessageIds = ?, updatedAtMs = ?
-       WHERE accountId = ? AND id = ?`
-    ).run(
-      messageId,
-      occurrenceMessageIds && Object.keys(occurrenceMessageIds).length > 0
-        ? JSON.stringify(occurrenceMessageIds)
-        : null,
-      Date.now(),
-      accountId,
-      eventId
-    );
-  });
-}
-
-export async function deleteCalendarEvent(
-  accountId: string,
-  eventId: string
-): Promise<void> {
-  const db = await getAccountDb(accountId);
-  db.prepare(`DELETE FROM calendar_events WHERE accountId = ? AND id = ?`).run(accountId, eventId);
-}
-
-export async function softDeleteCalendarEvent(
-  accountId: string,
-  eventId: string
-): Promise<void> {
-  const db = await getAccountDb(accountId);
-  db.prepare(
-    `UPDATE calendar_events SET deletedAtMs = ? WHERE accountId = ? AND id = ?`
-  ).run(Date.now(), accountId, eventId);
-}
-
-export async function listCalendarEventsBySource(
-  accountId: string,
-  sourceType: CalendarEventSourceType
-): Promise<CalendarEvent[]> {
-  const db = await getAccountDb(accountId);
-  const rows = db
-    .prepare(
-      `SELECT * FROM calendar_events
-       WHERE accountId = ? AND sourceType = ? AND deletedAtMs IS NULL
-       ORDER BY startAtMs ASC`
-    )
-    .all(accountId, sourceType) as any[];
-  return rows.map(rowToCalendarEvent);
+export function listCalendarInviteSourceMessagesByEventUid(
+  ...args: Parameters<typeof _listCalendarInviteSourceMessagesByEventUidImpl>
+): ReturnType<typeof _listCalendarInviteSourceMessagesByEventUidImpl> {
+  return _listCalendarInviteSourceMessagesByEventUidImpl(...args);
 }
