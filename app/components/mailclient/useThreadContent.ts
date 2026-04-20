@@ -9,7 +9,13 @@ import {
 import type { Message } from "@/lib/data";
 import { mergeLocalOnlyMessageState } from "@/lib/messageLocalState";
 import { needsMessageContentHydration } from "@/lib/ui/messageView";
-import { applyFlagsToMessage } from "./utils/messageHelpers";
+import {
+  evictMessagesFromThreadCacheMap,
+  updateThreadCacheMapWithCategory,
+  updateThreadCacheMapWithFlags,
+  updateThreadCacheWithMessageMap,
+  upsertThreadInCache
+} from "./utils/threadContentCache";
 import { THREAD_CACHE_LIMIT } from "./constants";
 
 type ApiFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
@@ -68,15 +74,15 @@ export function useThreadContent({
 
   const upsertThreadCache = useCallback((threadId: string, items: Message[]) => {
     setThreadContentById((prev) => {
-      const next = { ...prev, [threadId]: items };
-      const order = threadCacheOrderRef.current.filter((id) => id !== threadId);
-      order.push(threadId);
-      while (order.length > THREAD_CACHE_LIMIT) {
-        const evict = order.shift();
-        if (evict) delete next[evict];
-      }
-      threadCacheOrderRef.current = order;
-      return next;
+      const result = upsertThreadInCache(
+        prev,
+        threadCacheOrderRef.current,
+        threadId,
+        items,
+        THREAD_CACHE_LIMIT
+      );
+      threadCacheOrderRef.current = result.order;
+      return result.next;
     });
   }, []);
 
@@ -116,42 +122,13 @@ export function useThreadContent({
   const updateThreadCacheWithMessage = useCallback((message: Message) => {
     const threadId = message.threadId ?? message.messageId ?? message.id;
     if (!threadId) return;
-    setThreadContentById((prev) => {
-      const cached = prev[threadId];
-      if (!cached || cached.length === 0) return prev;
-      let updated = false;
-      let found = false;
-      const nextThread = cached.map((item) => {
-        if (item.id !== message.id) return item;
-        found = true;
-        updated = true;
-        return { ...item, ...message, groupKey: item.groupKey ?? message.groupKey };
-      });
-      if (!found) {
-        updated = true;
-        nextThread.push({ ...message, groupKey: message.groupKey });
-      }
-      if (!updated) return prev;
-      return { ...prev, [threadId]: nextThread };
-    });
+    setThreadContentById((prev) => updateThreadCacheWithMessageMap(prev, message));
   }, []);
 
   const evictMessagesFromThreadCache = useCallback((messageIds: string[]) => {
     if (messageIds.length === 0) return;
-    const idSet = new Set(messageIds);
     setThreadContentById((prev) => {
-      let changed = false;
-      const next: Record<string, Message[]> = { ...prev };
-      Object.entries(prev).forEach(([threadId, items]) => {
-        const filtered = items.filter((item) => !idSet.has(item.id));
-        if (filtered.length === items.length) return;
-        changed = true;
-        if (filtered.length === 0) {
-          delete next[threadId];
-        } else {
-          next[threadId] = filtered;
-        }
-      });
+      const { next, changed } = evictMessagesFromThreadCacheMap(prev, messageIds);
       if (!changed) return prev;
       threadCacheOrderRef.current = threadCacheOrderRef.current.filter((id) => id in next);
       return next;
@@ -175,20 +152,7 @@ export function useThreadContent({
   );
 
   const updateThreadCacheWithFlags = useCallback((messageId: string, flags: string[]) => {
-    setThreadContentById((prev) => {
-      let changed = false;
-      const next: Record<string, Message[]> = { ...prev };
-      Object.entries(prev).forEach(([threadId, list]) => {
-        const idx = list.findIndex((item) => item.id === messageId);
-        if (idx < 0) return;
-        const updated = applyFlagsToMessage(list[idx], flags);
-        const nextList = [...list];
-        nextList[idx] = updated;
-        next[threadId] = nextList;
-        changed = true;
-      });
-      return changed ? next : prev;
-    });
+    setThreadContentById((prev) => updateThreadCacheMapWithFlags(prev, messageId, flags));
   }, []);
 
   const updateThreadCacheWithCategory = useCallback(
@@ -198,21 +162,9 @@ export function useThreadContent({
       categoryScore: Message["categoryScore"],
       categorySignals: Message["categorySignals"]
     ) => {
-      setThreadContentById((prev) => {
-        let changed = false;
-        const next: Record<string, Message[]> = { ...prev };
-        Object.entries(prev).forEach(([threadId, list]) => {
-          const idx = list.findIndex((item) => item.id === messageId);
-          if (idx < 0) return;
-          const current = list[idx];
-          const updated = { ...current, category, categoryScore, categorySignals };
-          const nextList = [...list];
-          nextList[idx] = updated;
-          next[threadId] = nextList;
-          changed = true;
-        });
-        return changed ? next : prev;
-      });
+      setThreadContentById((prev) =>
+        updateThreadCacheMapWithCategory(prev, messageId, category, categoryScore, categorySignals)
+      );
     },
     []
   );

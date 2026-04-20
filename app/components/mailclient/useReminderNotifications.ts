@@ -12,13 +12,18 @@ import {
   CALENDAR_REMINDERS_UPDATED_EVENT,
   type CalendarReminder,
   fetchCalendarReminders,
-  getCalendarReminderEndAtMs,
   hasReminderBeenDeliveredOnClient,
   markReminderDeliveredOnClient,
   readDeliveredReminderMap,
   pruneDeliveredReminderMap
 } from "./utils/calendarReminders";
 import { buildNotificationUrl, makeClientId } from "./utils/clientHelpers";
+import {
+  buildReminderNotificationBody,
+  buildReminderServiceWorkerPayload,
+  filterUpcomingCalendarReminders,
+  selectDueUndeliveredReminders
+} from "./utils/reminderNotificationHelpers";
 import {
   BUILD_VERSION_POLL_INTERVAL_MS,
   CALENDAR_REMINDER_REFRESH_INTERVAL_MS,
@@ -27,10 +32,6 @@ import {
 import { useInAppNotices } from "./useInAppNotices";
 
 type ApiFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
-
-function filterUpcomingCalendarReminders(reminders: CalendarReminder[], nowMs = Date.now()) {
-  return reminders.filter((reminder) => getCalendarReminderEndAtMs(reminder) > nowMs);
-}
 
 export type UseReminderNotificationsParams = {
   activeAccountId: string;
@@ -55,6 +56,14 @@ export function useReminderNotifications({
 
   const swRegistrationRef = useRef<ServiceWorkerRegistration | null>(null);
   const currentBuildVersionRef = useRef(buildVersionLabel.trim());
+  // Mirror of the latest `accounts` list so callbacks that shouldn't
+  // churn on every account-list refresh (e.g. `processDueCalendarReminders`)
+  // can still read the current per-account `dateFormat` at call time
+  // without capturing a stale closure.
+  const accountsRef = useRef<Account[]>(accounts);
+  useEffect(() => {
+    accountsRef.current = accounts;
+  }, [accounts]);
 
   const reportError = useCallback(
     (message: string) => {
@@ -194,20 +203,12 @@ export function useReminderNotifications({
       if (typeof window === "undefined" || !("serviceWorker" in navigator)) return;
       const accountIds = accounts.map((account) => account.id).filter(Boolean);
       if (accountIds.length === 0 || !clientId) return;
-      const deliveredByAccount: Record<string, Record<string, number>> = {};
-      accountIds.forEach((accountId) => {
-        const map = readDeliveredReminderMap(accountId, clientId);
-        if (Object.keys(map).length > 0) {
-          deliveredByAccount[accountId] = map;
-        }
-      });
-      const payload = {
-        type: "noctua:reminder-state",
+      const payload = buildReminderServiceWorkerPayload(
         accountIds,
-        deliveredByAccount,
-        activeAccountId: activeAccountId || null,
-        activeReminderIds: reminders.map((item) => item.id)
-      };
+        activeAccountId,
+        reminders,
+        (accountId) => readDeliveredReminderMap(accountId, clientId)
+      );
       try {
         const registration =
           swRegistrationRef.current ??
@@ -229,24 +230,20 @@ export function useReminderNotifications({
       const now = Date.now();
       if (reminders.length === 0 || !clientId) return;
       pruneDeliveredReminderMap(activeAccountId, clientId, reminders);
+      const dueReminders = selectDueUndeliveredReminders(reminders, now, (reminder) =>
+        hasReminderBeenDeliveredOnClient(activeAccountId, clientId, reminder)
+      );
       let deliveredChanged = false;
-      for (let index = 0; index < reminders.length; index += 1) {
-        const reminder = reminders[index];
-        if (reminder.triggerAtMs > now) continue;
-        if (getCalendarReminderEndAtMs(reminder) <= now) continue;
-        if (hasReminderBeenDeliveredOnClient(activeAccountId, clientId, reminder)) continue;
+      const latestAccounts = accountsRef.current;
+      for (const reminder of dueReminders) {
         const reminderAccountId = reminder.accountId ?? activeAccountId;
-        const reminderAccount = accounts.find((entry) => entry.id === reminderAccountId);
+        const reminderAccount = latestAccounts.find((entry) => entry.id === reminderAccountId);
         const reminderDateFormat = reminderAccount?.settings?.appearance?.dateFormat;
         const eventDateLabel =
           formatAccountMediumDateTime(reminder.nextEventStartAtMs, reminderDateFormat) ?? "";
-        const bodyParts = [`${reminder.leadLabel} reminder`, `Starts ${eventDateLabel}`];
-        if (reminder.eventLocation) {
-          bodyParts.push(reminder.eventLocation);
-        }
         const sent = await showNotification(
           `Reminder: ${reminder.eventTitle || "Calendar event"}`,
-          bodyParts.join(" · "),
+          buildReminderNotificationBody(reminder, eventDateLabel),
           `calendar-reminder-${reminder.id}`,
           { messageId: reminder.messageId ?? null, accountId: reminder.accountId ?? activeAccountId }
         );

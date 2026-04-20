@@ -17,6 +17,13 @@ import type {
 } from "./useSearchState";
 import type { ManageTab } from "../AccountSettingsModal";
 import type { SyncJobResult, SyncMode } from "./types";
+import {
+  buildAccountSaveRequest,
+  createBlankEditAccount,
+  normalizeCaldavForSave,
+  resolveActiveAccountId,
+  resolveSwitchedAccountId
+} from "./utils/accountControllerHelpers";
 
 type ApiFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
@@ -151,23 +158,16 @@ export function useAccountController({
         let loadedFolders = false;
         if (accountsRes.ok) {
           const nextAccounts = (await accountsRes.json()) as Account[];
-          const resolvedAccountId =
-            preferredAccountId &&
-            nextAccounts.some((account) => account.id === preferredAccountId)
-              ? preferredAccountId
-              : nextAccounts.find((account) => account.id === activeAccountId)?.id ??
-                nextAccounts[0]?.id ??
-                "";
+          const resolvedAccountId = resolveActiveAccountId(
+            nextAccounts,
+            preferredAccountId,
+            activeAccountId
+          );
           setAccounts(nextAccounts);
           setActiveAccountId((prev) => {
-            if (
-              preferredAccountId &&
-              nextAccounts.some((account) => account.id === preferredAccountId)
-            ) {
-              return preferredAccountId;
-            }
-            if (nextAccounts.find((account) => account.id === prev)) return prev;
-            return nextAccounts[0]?.id ?? prev;
+            const next = resolveActiveAccountId(nextAccounts, preferredAccountId, prev);
+            // Preserve the current id when the resolver cannot find any candidate
+            return next || prev;
           });
           if (resolvedAccountId) {
             const foldersRes = await apiFetch(buildAccountFoldersPath(resolvedAccountId));
@@ -230,10 +230,7 @@ export function useAccountController({
         const payload = (await response.json().catch(() => null)) as {
           accountId?: string;
         } | null;
-        const switchedAccountId =
-          typeof payload?.accountId === "string" && payload.accountId.trim()
-            ? payload.accountId.trim()
-            : normalizedAccountId;
+        const switchedAccountId = resolveSwitchedAccountId(payload, normalizedAccountId);
         setExceptionEntries([]);
         setMessageListError(null);
         setMessages([]);
@@ -287,15 +284,12 @@ export function useAccountController({
       reportError("Email address is required");
       return;
     }
-    const exists = accounts.find((a) => a.id === account.id);
-    const isNew = !exists;
-    const accountToSave = isNew ? ({ ...account, id: undefined } as Record<string, unknown>) : account;
-    const endpoint = exists ? buildAccountApiPath(account.id, "") : "/api/accounts";
-    const method = exists ? "PUT" : "POST";
+    const exists = Boolean(accounts.find((a) => a.id === account.id));
+    const { endpoint, method, body, isNew } = buildAccountSaveRequest(account, exists);
     const saveResult = await apiFetch(endpoint, {
       method,
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(accountToSave)
+      body: JSON.stringify(body)
     });
     if (!saveResult.ok) {
       reportError(await readErrorMessage(saveResult));
@@ -336,7 +330,7 @@ export function useAccountController({
   const saveAccountSettings = async (account: Account) => {
     const exists = accounts.find((a) => a.id === account.id);
     if (!exists) return;
-    const caldav = account.caldav?.url?.trim() ? account.caldav : null;
+    const caldav = normalizeCaldavForSave(account.caldav);
     const res = await apiFetch(buildAccountApiPath(account.id, ""), {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
@@ -385,14 +379,7 @@ export function useAccountController({
 
   const startEditAccount = (account?: Account) => {
     const targetAccount: Account =
-      account ?? {
-        id: `acc-${crypto.randomUUID().slice(0, 6)}`,
-        name: "",
-        email: "",
-        avatar: "NW",
-        imap: { host: "", port: 993, secure: true, user: "", password: "" },
-        smtp: { host: "", port: 587, secure: false, user: "", password: "" }
-      };
+      account ?? createBlankEditAccount(() => crypto.randomUUID());
     setEditingAccount(targetAccount);
     setManageOpen(true);
     setManageTab("account");
