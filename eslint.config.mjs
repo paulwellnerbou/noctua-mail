@@ -1,17 +1,30 @@
 import { defineConfig, globalIgnores } from "eslint/config";
 import next from "eslint-config-next/core-web-vitals";
 
-// Module-boundary rules that lock in the lib/db.ts split (CLEANUP P2-6).
-// The DB layer was fanned out from a 9kLoC monolith into lib/db/* subtrees
-// (connection/schema/rowParsers/accounts/.../messages/*/calendar/*). These
-// rules keep that layering from regressing:
+// Module-boundary rules for the DB layer.
 //
-//   Rule 1 (dbBoundaryNoApp)                — lib/db/** cannot import app/**
-//   Rule 2 (messagesNoCalendar)             — messages/** cannot import calendar/**
-//   Rule 3 (calendarNoMessagesExceptShared) — calendar/** cannot import
-//                                             messages/** except _shared
-//   Rule 4 (externalBarrelOnly)             — external code uses the barrel
-//   Rule 5 (routeNoRoute)                   — route.ts cannot import route.ts
+// The DB layer is organized as the top-level barrel `lib/db.ts` plus
+// subtrees under `lib/db/` (`connection`, `schema`, `rowParsers`,
+// `accounts`, `folders`, `inviteCodes`, `mcpTokens`, `users`, `threads`,
+// `topics`, `categories`, `messages/`, `calendar/`). These rules enforce
+// the layering invariants:
+//
+//   Rule 1 (dbBoundaryNoApp)                — the DB layer is server-only
+//                                             and framework-agnostic; it
+//                                             must not import app/**.
+//   Rule 2 (messagesNoCalendar)             — messages/** must not import
+//                                             calendar/**.
+//   Rule 3 (calendarNoMessagesExceptShared) — calendar/** must not import
+//                                             messages/** except the
+//                                             sanctioned `_shared` seam.
+//   Rule 4 (externalBarrelOnly)             — external code must import
+//                                             from the `@/lib/db` barrel,
+//                                             not drill into subtree files.
+//   Rule 5 (routeNoRoute)                   — route.ts files must not
+//                                             import from other route.ts
+//                                             files; shared handler logic
+//                                             belongs in sibling
+//                                             `_helpers/` modules.
 //
 // Message reused by every app-boundary restriction below.
 const noAppImportsMessage =
