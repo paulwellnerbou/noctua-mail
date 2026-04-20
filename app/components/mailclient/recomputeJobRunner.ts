@@ -180,7 +180,15 @@ export async function startRecomputeJob(input: StartRecomputeJobInput): Promise<
       return;
     }
 
+    // Re-check the supersession token before touching `pollTimerRef`.
+    // A newer recompute that started while this fetch was in flight has
+    // already moved `jobIdRef.current` off our `jobId`; scheduling now
+    // would overwrite the newer run's timer handle and cause its
+    // eventual `stopPoll()` to clear the wrong timer. The inner guard
+    // is the same belt-and-braces check if the timer fires anyway.
+    if (handles.jobIdRef.current !== jobId) return;
     handles.pollTimerRef.current = scheduleNextPoll(() => {
+      if (handles.jobIdRef.current !== jobId) return;
       void pollOnce();
     }, pollIntervalMs);
   };

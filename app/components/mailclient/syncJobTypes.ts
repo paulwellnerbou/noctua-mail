@@ -5,10 +5,12 @@
  * These live outside the hook because:
  *   - `FullSyncDebugCancelledError` is a named sentinel detected via the
  *     exported guard in both the sync launcher and the error reporter.
- *     The guard duck-types on the `name` field alone — it does not
- *     require `instanceof Error` — so detection still works for
- *     errors that crossed a worker/iframe boundary and lost their
- *     prototype chain.
+ *     The guard duck-types on the `name` field and a string `message` —
+ *     it does not require `instanceof Error` — so detection still works
+ *     for errors that crossed a worker/iframe boundary and lost their
+ *     prototype chain. Both fields are checked because the guard's
+ *     return type narrows to an Error-like shape that consumers read
+ *     `error.message` from.
  *   - The request / trigger types are reused across several non-React
  *     helpers (policy decision executors, newly-detected folder sync).
  */
