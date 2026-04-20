@@ -21,6 +21,20 @@ function mkResponse(body: unknown, ok = true): Response {
 
 type CapturedCall = { url: string; init?: RequestInit };
 
+/**
+ * Returns a `{ promise, resolve }` pair. Tests use it to await an
+ * explicit signal from inside a callback (onSuccess, reportError, …)
+ * instead of sleeping for a fixed duration — the assertion is then
+ * pinned to the behavior under test rather than wall-clock timing.
+ */
+function deferred(): { promise: Promise<void>; resolve: () => void } {
+  let resolve: () => void = () => {};
+  const promise = new Promise<void>((r) => {
+    resolve = r;
+  });
+  return { promise, resolve };
+}
+
 describe("startRecomputeJob", () => {
   let errors: string[];
   let running: boolean[];
@@ -136,8 +150,9 @@ describe("startRecomputeJob", () => {
       // Swallow follow-up polls; we only care that the initial poll ran.
       scheduleNextPoll: () => 0
     });
-    // Give the fire-and-forget pollOnce a chance to settle.
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    // `jobIdRef` is written synchronously before `pollOnce` runs, so
+    // by the time `startRecomputeJob`'s promise resolves the value is
+    // already installed — no wait needed.
     expect(handles.jobIdRef.current).toBe("job-1");
     expect(errors).toEqual([]);
   });
@@ -148,6 +163,7 @@ describe("startRecomputeJob", () => {
       mkResponse({ jobId: "job-2" }),
       mkResponse({ job: { status: "done" } })
     ];
+    const finished = deferred();
     await startRecomputeJob({
       accountId: "acct",
       startPath: "/threads/recompute",
@@ -159,13 +175,14 @@ describe("startRecomputeJob", () => {
       setRunning: (v) => running.push(v),
       onSuccess: async () => {
         successCount += 1;
+        finished.resolve();
       },
       stopPoll: () => {
         stopCount += 1;
       },
       handles
     });
-    await new Promise((resolve) => setTimeout(resolve, 5));
+    await finished.promise;
     expect(successCount).toBe(1);
     expect(errors).toEqual([]);
     expect(running).toContain(false);
@@ -176,6 +193,7 @@ describe("startRecomputeJob", () => {
       mkResponse({ jobId: "job-3" }),
       mkResponse({ job: { status: "failed", error: "db died" } })
     ];
+    const reported = deferred();
     await startRecomputeJob({
       accountId: "acct",
       startPath: "/categories/recompute",
@@ -183,7 +201,10 @@ describe("startRecomputeJob", () => {
       jobLabel: "Category",
       apiFetch: async () => responses.shift() ?? mkResponse({}),
       readErrorMessage: async () => "",
-      reportError: (m) => errors.push(m),
+      reportError: (m) => {
+        errors.push(m);
+        reported.resolve();
+      },
       setRunning: (v) => running.push(v),
       onSuccess: async () => {
         successCount += 1;
@@ -193,7 +214,7 @@ describe("startRecomputeJob", () => {
       },
       handles: mkHandles()
     });
-    await new Promise((resolve) => setTimeout(resolve, 5));
+    await reported.promise;
     expect(errors).toEqual(["db died"]);
     expect(successCount).toBe(0);
   });

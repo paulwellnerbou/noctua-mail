@@ -1035,7 +1035,6 @@ export function useSyncController({
       const now = Date.now();
       const { isSyncing: syncing, syncingFolders: syncingSet } = syncStateRef.current;
       const canRun = canRunFolderReconcile({
-        folderId: decision.folderId,
         now,
         lastRunAt: lastDeleteReconcileAtRef.current[decision.folderId] ?? 0,
         isSyncingAccount: syncing,

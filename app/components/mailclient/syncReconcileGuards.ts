@@ -64,12 +64,13 @@ export function shouldSkipDeleteReconcile(input: {
 export const DEFAULT_RECONCILE_THROTTLE_MS = 5000;
 
 /**
- * True when a new reconcile sync is allowed for the given folder — i.e.
- * the last run is older than the throttle window and no sync is already
- * in flight.
+ * True when a new reconcile sync is allowed — the last run is older
+ * than the throttle window and no sync is already in flight. The
+ * caller has already resolved the per-folder `lastRunAt` /
+ * `folderIsSyncing` values before calling; this helper just applies
+ * the decision rule.
  */
 export function canRunFolderReconcile(input: {
-  folderId: string;
   now: number;
   lastRunAt: number;
   isSyncingAccount: boolean;

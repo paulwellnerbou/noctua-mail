@@ -79,7 +79,6 @@ describe("canRunFolderReconcile", () => {
   test("blocks while the account is syncing", () => {
     expect(
       canRunFolderReconcile({
-        folderId: "inbox",
         now: 10_000,
         lastRunAt: 0,
         isSyncingAccount: true,
@@ -91,7 +90,6 @@ describe("canRunFolderReconcile", () => {
   test("blocks while the folder is syncing", () => {
     expect(
       canRunFolderReconcile({
-        folderId: "inbox",
         now: 10_000,
         lastRunAt: 0,
         isSyncingAccount: false,
@@ -103,7 +101,6 @@ describe("canRunFolderReconcile", () => {
   test("blocks inside the throttle window", () => {
     expect(
       canRunFolderReconcile({
-        folderId: "inbox",
         now: 1_000,
         lastRunAt: 0,
         isSyncingAccount: false,
@@ -115,7 +112,6 @@ describe("canRunFolderReconcile", () => {
   test("allows when the throttle window has passed", () => {
     expect(
       canRunFolderReconcile({
-        folderId: "inbox",
         now: DEFAULT_RECONCILE_THROTTLE_MS + 1,
         lastRunAt: 0,
         isSyncingAccount: false,
@@ -127,7 +123,6 @@ describe("canRunFolderReconcile", () => {
   test("respects a custom throttleMs override", () => {
     expect(
       canRunFolderReconcile({
-        folderId: "inbox",
         now: 2000,
         lastRunAt: 0,
         isSyncingAccount: false,
