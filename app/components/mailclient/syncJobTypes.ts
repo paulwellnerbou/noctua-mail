@@ -56,5 +56,14 @@ export class FullSyncDebugCancelledError extends Error {
 export function isFullSyncDebugCancelledError(
   error: unknown
 ): error is FullSyncDebugCancelledError {
-  return error instanceof Error && error.name === "FullSyncDebugCancelledError";
+  // Duck-typed on `name` so the check works across realms (e.g. an
+  // error that crossed a worker boundary and lost its prototype chain
+  // would fail `instanceof Error` even though its `name` survives).
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "name" in error &&
+    typeof (error as { name: unknown }).name === "string" &&
+    (error as { name: string }).name === "FullSyncDebugCancelledError"
+  );
 }
