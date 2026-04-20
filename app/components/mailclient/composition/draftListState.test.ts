@@ -67,14 +67,15 @@ describe("reconcileSavedDraftMessages", () => {
       pruneOptions: {
         searchScope: "folder",
         activeFolderId: "account-1:INBOX",
-        includeThreadAcrossFoldersForList: true
+        includeThreadAcrossFoldersForList: true,
+        supportsThreads: true
       }
     });
 
     expect(result).toEqual([]);
   });
 
-  it("keeps cross-folder drafts when the active folder still anchors the thread", () => {
+  it("keeps cross-folder drafts in threaded folder views when the active folder still anchors the thread", () => {
     const inbox = makeMessage({
       id: "message-inbox",
       folderId: "account-1:INBOX",
@@ -94,11 +95,40 @@ describe("reconcileSavedDraftMessages", () => {
       pruneOptions: {
         searchScope: "folder",
         activeFolderId: "account-1:INBOX",
-        includeThreadAcrossFoldersForList: true
+        includeThreadAcrossFoldersForList: true,
+        supportsThreads: true
       }
     });
 
     expect(result).toEqual([inbox, saved]);
+  });
+
+  it("hides cross-folder saved drafts in flat folder views even when the thread anchor exists", () => {
+    const inbox = makeMessage({
+      id: "message-inbox",
+      folderId: "account-1:INBOX",
+      threadId: "thread-1"
+    });
+    const saved = makeMessage({
+      id: "draft-new",
+      folderId: "account-1:Drafts",
+      threadId: "thread-1"
+    });
+
+    const result = reconcileSavedDraftMessages({
+      messages: [inbox],
+      savedDraft: saved,
+      previousDraftId: null,
+      includeSavedDraft: true,
+      pruneOptions: {
+        searchScope: "folder",
+        activeFolderId: "account-1:INBOX",
+        includeThreadAcrossFoldersForList: true,
+        supportsThreads: false
+      }
+    });
+
+    expect(result).toEqual([inbox]);
   });
 
   it("preserves list identity when the saved draft is not shown in the current results", () => {

@@ -2755,7 +2755,8 @@ export default function MailClient({
           pruneOptions: {
             searchScope,
             activeFolderId,
-            includeThreadAcrossFoldersForList
+            includeThreadAcrossFoldersForList,
+            supportsThreads
           }
         })
       );
@@ -2782,6 +2783,7 @@ export default function MailClient({
       setMessages,
       setViewMessage,
       shouldKeepMessageInCurrentResults,
+      supportsThreads,
       threadContentByIdRef,
       threadDateSource,
       updateThreadCacheWithMessage,

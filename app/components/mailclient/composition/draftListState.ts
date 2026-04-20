@@ -10,6 +10,7 @@ type DraftListPruneOptions = {
   searchScope: "folder" | "all";
   activeFolderId: string;
   includeThreadAcrossFoldersForList: boolean;
+  supportsThreads: boolean;
 };
 
 function findExistingThreadSortDateValue({
@@ -84,13 +85,21 @@ export function reconcileSavedDraftMessages({
     excludedIds.add(previousDraftId);
   }
 
+  const allowCrossFolderSavedDraft =
+    !pruneOptions ||
+    pruneOptions.searchScope !== "folder" ||
+    !pruneOptions.activeFolderId ||
+    pruneOptions.supportsThreads ||
+    savedDraft.folderId === pruneOptions.activeFolderId;
+  const shouldIncludeSavedDraft = includeSavedDraft && allowCrossFolderSavedDraft;
+
   const hasExistingSavedDraft = messages.some((message) => excludedIds.has(message.id));
-  if (!hasExistingSavedDraft && !includeSavedDraft) {
+  if (!hasExistingSavedDraft && !shouldIncludeSavedDraft) {
     return messages;
   }
 
   const nextMessages = messages.filter((message) => !excludedIds.has(message.id));
-  const reconciledMessages = includeSavedDraft ? [...nextMessages, savedDraft] : nextMessages;
+  const reconciledMessages = shouldIncludeSavedDraft ? [...nextMessages, savedDraft] : nextMessages;
   if (!pruneOptions) {
     return reconciledMessages;
   }
