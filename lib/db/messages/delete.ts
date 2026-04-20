@@ -1,12 +1,18 @@
 /**
- * Write-side delete operations on the messages domain. Each function cleans
- * up the messages row, its attachment / FTS siblings, and the on-disk files
- * associated with those attachments; thread signals and topic learning state
- * for any affected threads are recomputed afterwards so that downstream
- * reads never observe a half-deleted thread.
+ * Write-side delete operations on the messages domain. Every function
+ * removes the `messages` row and its attachment / FTS siblings and
+ * recomputes thread signals + topic learning state for any affected
+ * threads, so downstream reads never observe a half-deleted thread.
  *
- * Every mutator runs inside `withDbWriteRetry` so that transient SQLite
- * BUSY/LOCKED errors do not surface as user-visible failures.
+ * Only `deleteMessagesWithFilesByIds` also removes the on-disk blobs
+ * for each attachment / source — it's used for full IMAP folder
+ * reconciliation where the storage cache would otherwise leak. The
+ * other deletes are used in contexts where the storage layer either
+ * wipes files separately (account teardown) or is expected to
+ * reconstitute them from IMAP on next access.
+ *
+ * Every mutator runs inside `withDbWriteRetry` so transient SQLite
+ * BUSY/LOCKED errors don't surface as user-visible failures.
  */
 import { withDbWriteRetry } from "../../dbWriteRetry";
 import { deleteMessageFiles } from "../../storage";

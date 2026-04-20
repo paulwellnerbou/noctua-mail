@@ -22,7 +22,6 @@ import {
 import type { CalendarInviteActionType } from "../../calendarInviteProcessing";
 import { CATEGORY_KEYS, type CategoryKey } from "../../mail/categorization/linearModel";
 
-/** Safe JSON.parse that returns fallback (default undefined) on malformed data instead of throwing. */
 /**
  * SQLite LIKE treats `_` as a single-char wildcard and `%` as multi-char.
  * Mailbox paths can contain both (e.g. `Archive_2024`), so any LIKE
@@ -35,6 +34,7 @@ export function escapeLikePattern(value: string) {
   return value.replace(/[\\%_]/g, (ch) => `\\${ch}`);
 }
 
+/** Safe JSON.parse that returns fallback (default undefined) on malformed data instead of throwing. */
 export function safeParseJson<T = unknown>(
   value: string | null | undefined,
   fallback?: T

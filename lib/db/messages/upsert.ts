@@ -569,16 +569,16 @@ export async function upsertMessages(
 
     if (replaceExisting) {
       if (folderId) {
-        const affectedThreadIds = new Set<string>([
+        const affectedThreadIdSet = new Set<string>([
           ...(existingScopeThreadIds ?? new Set<string>()),
           ...dedupedThreadIds
         ]);
         nextMessages.forEach((message) => {
           if (message.threadId) {
-            affectedThreadIds.add(message.threadId);
+            affectedThreadIdSet.add(message.threadId);
           }
         });
-        const affected = Array.from(affectedThreadIds);
+        const affected = Array.from(affectedThreadIdSet);
         if (shouldRecomputeThreads && affected.length > 0) {
           await recomputeThreadsForAccountInternal(accountId, affected);
         }
