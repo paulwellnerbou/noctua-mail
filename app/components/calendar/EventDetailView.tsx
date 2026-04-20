@@ -41,6 +41,7 @@ import {
 import AlertDialogContent from "@/app/components/mailclient/message/AlertDialogContent";
 import { dispatchCalendarEventsUpdatedEvent } from "./calendarEventsClient";
 import CalendarEventEmailSnapshot from "./CalendarEventEmailSnapshot";
+import EventReminderDialog from "./EventReminderDialog";
 import styles from "./EventDetailView.module.css";
 
 export type CalendarEventDeleteScope = "series" | "occurrence";
@@ -1028,39 +1029,16 @@ export default function EventDetailView({
         </Dialog.Content>
       </Dialog.Root>
 
-      {/* Reminder modal */}
-      <Dialog.Root open={reminderModalOpen} onOpenChange={(open) => { if (!open) setReminderModalOpen(false); }}>
-        <Dialog.Content size="2" className={styles.reminderDialog}>
-          <Flex direction="column" gap="3">
-            <Dialog.Title size="4">{existingReminder ? "Modify Reminder" : "Schedule Reminder"}</Dialog.Title>
-            <Text size="2" color="gray">{title || "Calendar event"}</Text>
-            {existingReminder && (
-              <Text size="2" color="gray">
-                Current: {existingReminder.leadLabel}
-              </Text>
-            )}
-            <Flex direction="column" gap="2">
-              <Text size="2" weight="medium">Notify me</Text>
-              <Select.Root value={leadOptionValue} onValueChange={setLeadOptionValue}>
-                <Select.Trigger />
-                <Select.Content position="popper">
-                  {CALENDAR_REMINDER_LEAD_OPTIONS.map((opt) => (
-                    <Select.Item key={opt.value} value={opt.value}>{opt.label}</Select.Item>
-                  ))}
-                </Select.Content>
-              </Select.Root>
-            </Flex>
-            <Flex justify="end" gap="2">
-              <Button variant="soft" color="gray" onClick={() => setReminderModalOpen(false)} disabled={savingReminder}>
-                Cancel
-              </Button>
-              <Button onClick={() => void handleScheduleReminder()} disabled={savingReminder}>
-                {savingReminder ? "Saving…" : existingReminder ? "Update reminder" : "Schedule reminder"}
-              </Button>
-            </Flex>
-          </Flex>
-        </Dialog.Content>
-      </Dialog.Root>
+      <EventReminderDialog
+        open={reminderModalOpen}
+        onOpenChange={setReminderModalOpen}
+        title={title}
+        existingReminder={existingReminder}
+        leadOptionValue={leadOptionValue}
+        onLeadOptionChange={setLeadOptionValue}
+        onSchedule={handleScheduleReminder}
+        savingReminder={savingReminder}
+      />
     </article>
   );
 }
