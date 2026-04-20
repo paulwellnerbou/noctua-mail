@@ -20,7 +20,7 @@ describe("FullSyncDebugCancelledError", () => {
     expect(isFullSyncDebugCancelledError(error)).toBe(true);
   });
 
-  test("is recognised even when thrown across realms by name alone", () => {
+  test("is recognised by name + message without requiring the exact class", () => {
     const imposter = new Error("Full sync cancelled");
     imposter.name = "FullSyncDebugCancelledError";
     expect(isFullSyncDebugCancelledError(imposter)).toBe(true);
