@@ -11,16 +11,18 @@ import {
 } from "@/lib/accountApiPaths";
 import type { Folder, Message } from "@/lib/data";
 import {
-  buildRemoteMailboxFingerprint,
   decideFolderConsistencySync,
   decideStreamReconcileSync,
-  type FolderConsistencyResult,
   type FolderSyncDecision,
   type SyncMode
 } from "@/lib/syncPolicy";
 import { logSyncPolicyCall } from "@/lib/syncPolicyLogging";
 import { findInboxFolder } from "@/lib/specialFolders";
 import { isRecentLocalDraftSave } from "./recentLocalDraftSaves";
+import {
+  getResolvedRemoteMailboxFingerprint,
+  type FolderConsistencyResponse
+} from "./syncFingerprint";
 import type {
   FullSyncConfirmState,
   SyncJobProgress,
@@ -112,36 +114,6 @@ type InternalSyncTriggerOptions = SyncTriggerOptions & {
   backfillUids?: number[];
   skipFullSyncConfirm?: boolean;
 };
-
-type FolderConsistencyResponse = FolderConsistencyResult & {
-  ok?: boolean;
-  remote?: {
-    count: number | null;
-    uidNext: number | null;
-    uidValidity: string | null;
-    highestModSeq: string | null;
-  };
-};
-
-export function getResolvedRemoteMailboxFingerprint(result: {
-  needsRepair: boolean;
-  remote?: {
-    count: number | null;
-    uidNext: number | null;
-    uidValidity: string | null;
-    highestModSeq: string | null;
-  } | null;
-}) {
-  if (result.needsRepair) {
-    return null;
-  }
-  return buildRemoteMailboxFingerprint({
-    count: result.remote?.count ?? null,
-    uidNext: result.remote?.uidNext ?? null,
-    uidValidity: result.remote?.uidValidity ?? null,
-    highestModSeq: result.remote?.highestModSeq ?? null
-  });
-}
 
 class FullSyncDebugCancelledError extends Error {
   constructor(reason: string) {
