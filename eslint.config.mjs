@@ -13,16 +13,31 @@ import next from "eslint-config-next/core-web-vitals";
 //   Rule 4 (externalBarrelOnly)             — external code uses the barrel
 //   Rule 5 (routeNoRoute)                   — route.ts cannot import route.ts
 //
+// Message reused by every app-boundary restriction below.
+const noAppImportsMessage =
+  "lib/db/** is server-only and framework-agnostic; it must not depend on app/** (Next.js route/component code).";
+
+// Shared patterns: block every form of `app/**` import — absolute path
+// alias, bare specifier, and any depth of relative traversal. The regex
+// handles `../app`, `../../app`, `../../../../../app`, etc. so deeper
+// subtree nesting can't slip past a hardcoded depth limit.
+const noAppImportsPatterns = [
+  {
+    group: ["@/app", "@/app/*", "@/app/**", "app", "app/*", "app/**"],
+    message: noAppImportsMessage
+  },
+  {
+    regex: "^(\\.\\./)+app(/.*)?$",
+    message: noAppImportsMessage
+  }
+];
+
 // Rule 1: the DB layer (barrel + subtree) cannot import from app/**.
 const dbBoundaryNoApp = {
   files: ["lib/db.ts", "lib/db/**/*.ts"],
   rules: {
     "no-restricted-imports": ["error", {
-      patterns: [{
-        group: ["@/app/*", "@/app/**", "app/*", "app/**", "../app/**", "../../app/**", "../../../app/**", "../../../../app/**"],
-        message:
-          "lib/db/** is server-only and framework-agnostic; it must not depend on app/** (Next.js route/component code)."
-      }]
+      patterns: noAppImportsPatterns
     }]
   }
 };
@@ -33,11 +48,7 @@ const messagesNoCalendar = {
   rules: {
     "no-restricted-imports": ["error", {
       patterns: [
-        {
-          group: ["@/app/*", "@/app/**", "app/*", "app/**", "../../../app/**", "../../../../app/**"],
-          message:
-            "lib/db/** is server-only and framework-agnostic; it must not depend on app/** (Next.js route/component code)."
-        },
+        ...noAppImportsPatterns,
         {
           // Covers both relative (`../calendar/...`) and absolute-alias
           // (`@/lib/db/calendar/...`) specifiers. Either form would cross the
@@ -65,11 +76,7 @@ const calendarNoMessagesExceptShared = {
   rules: {
     "no-restricted-imports": ["error", {
       patterns: [
-        {
-          group: ["@/app/*", "@/app/**", "app/*", "app/**", "../../../app/**", "../../../../app/**"],
-          message:
-            "lib/db/** is server-only and framework-agnostic; it must not depend on app/** (Next.js route/component code)."
-        },
+        ...noAppImportsPatterns,
         {
           // Block relative imports from the messages subtree except
           // `../messages/_shared` — the sanctioned seam both subtrees consume.
