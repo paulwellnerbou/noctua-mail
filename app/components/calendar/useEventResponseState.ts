@@ -240,7 +240,7 @@ export function useEventResponseState({
       onNotice(
         sendReply
           ? `Response sent: ${savedLabel} (${appliedLabel}).`
-          : `Response saved locally: ${savedLabel} (${appliedLabel}).`
+          : `Response saved: ${savedLabel} (${appliedLabel}).`
       );
     } catch {
       onNotice("Failed to update RSVP response.");

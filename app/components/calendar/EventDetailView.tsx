@@ -163,7 +163,7 @@ export default function EventDetailView({
     : null;
 
   const canonicalStartMs = eventStartAtMs ?? resolvedStartMs;
-  const [reminderNotice, setReminderNotice] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
   const {
     existingReminder,
@@ -190,7 +190,7 @@ export default function EventDetailView({
     canonicalStartMs,
     eventEndAtMs,
     dateFormat,
-    onNotice: setReminderNotice
+    onNotice: setNotice
   });
   const resolvedOccurrenceStartAtMs =
     typeof resolvedStartMs === "number" && Number.isFinite(resolvedStartMs)
@@ -210,7 +210,7 @@ export default function EventDetailView({
     recurrenceRule,
     resolvedOccurrenceStartAtMs,
     onEventDeleted,
-    onNotice: setReminderNotice
+    onNotice: setNotice
   });
 
   const {
@@ -241,14 +241,14 @@ export default function EventDetailView({
     responseOccurrenceLabel,
     onEventUpdated,
     onInviteProcessed,
-    onNotice: setReminderNotice
+    onNotice: setNotice
   });
 
   useEffect(() => {
-    if (!reminderNotice) return;
-    const t = window.setTimeout(() => setReminderNotice(null), 3000);
+    if (!notice) return;
+    const t = window.setTimeout(() => setNotice(null), 3000);
     return () => window.clearTimeout(t);
-  }, [reminderNotice]);
+  }, [notice]);
 
   const hasOccurrenceCancellationAction =
     forceOccurrenceResponse &&
@@ -323,8 +323,8 @@ export default function EventDetailView({
         <p className={styles.notice}>The organizer did not request a reply.</p>
       )}
 
-      {reminderNotice && (
-        <p className={styles.notice}>{reminderNotice}</p>
+      {notice && (
+        <p className={styles.notice}>{notice}</p>
       )}
 
       {eventSnapshot && (
