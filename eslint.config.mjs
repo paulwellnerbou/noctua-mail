@@ -150,11 +150,20 @@ const routeNoRoute = {
       patterns: [
         externalBarrelOnlyPattern,
         {
-          // Match only relative specifiers ending in `route` or `route.ts`
+          // Match relative specifiers ending in `route` or `route.ts`
           // — e.g. `./route`, `../route`, `./sub/route`. Bare/scoped
           // third-party specifiers that happen to end in `/route`
           // (`some-lib/route`) are legitimate external imports.
           regex: "^(?:\\.{1,2}/)+(?:.*?/)?route(?:\\.ts)?$",
+          message:
+            "route.ts files must not import from other route.ts files. Extract shared logic into a sibling `_helpers/` module."
+        },
+        {
+          // Also block app-rooted aliased/bare specifiers so the rule
+          // can't be bypassed by switching import style. Scoped to the
+          // `app/` prefix so unrelated packages like `some-lib/route`
+          // aren't caught.
+          regex: "^(?:@/app|app)(?:/.*)?/route(?:\\.ts)?$",
           message:
             "route.ts files must not import from other route.ts files. Extract shared logic into a sibling `_helpers/` module."
         }
