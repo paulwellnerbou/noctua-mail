@@ -22,3 +22,37 @@ export {
   listMessageFileRefs,
   listMessageFileRefsByMessageIds
 } from "./retrieval";
+
+export {
+  deleteMessageByFolderUid,
+  deleteMessageById,
+  deleteMessagesByFolderPrefix,
+  deleteMessagesByIds,
+  deleteMessagesWithFilesByIds
+} from "./delete";
+
+export {
+  type RelocateMovedMessageResult,
+  type StagedMessageMove,
+  getPendingMoveSourceUids,
+  hasPendingMovesForFolder,
+  relocateMovedMessage,
+  stageMessageMoves,
+  updateMessageFolder,
+  updateMessagesFolderPrefix
+} from "./move";
+
+export {
+  bulkUpdateMessageFlags,
+  setMessageCategory,
+  updateMessageFlags
+} from "./flags";
+
+export {
+  getFolderIdsByMessageIds,
+  getLatestMessageDate,
+  getLatestMessageUid,
+  listRecipientSuggestions
+} from "./utility";
+
+export { upsertMessages } from "./upsert";
