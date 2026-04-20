@@ -42,6 +42,7 @@ import { dispatchCalendarEventsUpdatedEvent } from "./calendarEventsClient";
 import CalendarEventEmailSnapshot from "./CalendarEventEmailSnapshot";
 import EventDeleteScopeDialog from "./EventDeleteScopeDialog";
 import EventDetailMeta from "./EventDetailMeta";
+import EventInviteStatusRow from "./EventInviteStatusRow";
 import EventReminderDialog from "./EventReminderDialog";
 import EventResponseDialog from "./EventResponseDialog";
 import styles from "./EventDetailView.module.css";
@@ -184,14 +185,6 @@ function getInviteActionLabel(actionType: CalendarInviteActionType) {
   if (actionType === "cancellation") return "Cancellation";
   if (actionType === "update") return "Update";
   return "Invitation";
-}
-
-function getInviteProcessButtonLabel(processed?: boolean) {
-  return processed ? "Reprocess" : "Process";
-}
-
-function getInviteProcessButtonPendingLabel(processed?: boolean) {
-  return processed ? "Reprocessing…" : "Processing…";
 }
 
 export default function EventDetailView({
@@ -657,24 +650,11 @@ export default function EventDetailView({
       <h5 className={styles.eventTitle}>{title || "Untitled Event"}</h5>
 
       {inviteProcessing && (
-        <div className={styles.inviteStatusRow}>
-          <Text size="1" color={inviteProcessing.processed ? "green" : "gray"}>
-            {inviteStatusText}
-          </Text>
-          {inviteProcessing.onProcess && !hasOccurrenceCancellationAction && (
-            <Button
-              size="1"
-              variant="soft"
-              color="indigo"
-              disabled={inviteProcessing.processing}
-              onClick={() => void inviteProcessing.onProcess?.()}
-            >
-              {inviteProcessing.processing
-                ? getInviteProcessButtonPendingLabel(inviteProcessing.processed)
-                : getInviteProcessButtonLabel(inviteProcessing.processed)}
-            </Button>
-          )}
-        </div>
+        <EventInviteStatusRow
+          inviteProcessing={inviteProcessing}
+          inviteStatusText={inviteStatusText}
+          hasOccurrenceCancellationAction={hasOccurrenceCancellationAction}
+        />
       )}
 
       <EventDetailMeta
