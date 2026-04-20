@@ -11,16 +11,31 @@ import {
 } from "@/lib/accountApiPaths";
 import type { Folder, Message } from "@/lib/data";
 import {
-  buildRemoteMailboxFingerprint,
   decideFolderConsistencySync,
   decideStreamReconcileSync,
-  type FolderConsistencyResult,
   type FolderSyncDecision,
   type SyncMode
 } from "@/lib/syncPolicy";
 import { logSyncPolicyCall } from "@/lib/syncPolicyLogging";
 import { findInboxFolder } from "@/lib/specialFolders";
 import { isRecentLocalDraftSave } from "./recentLocalDraftSaves";
+import {
+  getResolvedRemoteMailboxFingerprint,
+  type FolderConsistencyResponse
+} from "./syncFingerprint";
+import {
+  planNewMailNotifications,
+  type IncomingMailItem
+} from "./syncNotificationFilter";
+import {
+  canRunFolderReconcile,
+  shouldSkipDeleteReconcile
+} from "./syncReconcileGuards";
+import { startRecomputeJob } from "./recomputeJobRunner";
+import {
+  detectSyncEscalation,
+  normalizeSyncJobProgress
+} from "./syncJobProgress";
 import type {
   FullSyncConfirmState,
   SyncJobProgress,
@@ -28,10 +43,16 @@ import type {
   SyncNotificationMessage,
   SyncTriggerOptions
 } from "./types";
+import {
+  FullSyncDebugCancelledError,
+  isFullSyncDebugCancelledError,
+  type InternalSyncTriggerOptions,
+  type NewSyncFolderDecision,
+  type SyncJobRequest
+} from "./syncJobTypes";
 import { applyFlagsToMessage } from "./utils/messageHelpers";
 import { prioritizeFolderIds, prioritizeFolders } from "./utils/folderHelpers";
 import { withCalendarInviteFlag } from "@/lib/messageFlags";
-import { extractEmails } from "./utils/clientHelpers";
 import { SYNC_STATUS_POLL_INTERVAL_MS, SYNC_STATUS_RUNNING_POLL_INTERVAL_MS } from "./constants";
 
 type ApiFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
@@ -82,77 +103,6 @@ export type UseSyncControllerParams = {
   inboxFolder: Folder | null;
   currentKeyRef: React.MutableRefObject<string>;
 };
-
-type NewSyncFolderDecision = {
-  folderId: string;
-  mailboxPath: string;
-  uidNext: number | null;
-  skip: boolean;
-  reason:
-    | "baseline-unsynced-folder"
-    | "no-new-uids"
-    | "has-new-uids"
-    | "missing-uid-next"
-    | "status-error";
-};
-
-type SyncJobRequest = {
-  accountId: string;
-  folderId?: string;
-  fullSync?: boolean;
-  mode?: SyncMode;
-  recategorizeFolder?: boolean;
-  backfillUids?: number[];
-  fullSyncReason?: string;
-  triggerId?: string;
-  skipFullSyncConfirm?: boolean;
-};
-
-type InternalSyncTriggerOptions = SyncTriggerOptions & {
-  backfillUids?: number[];
-  skipFullSyncConfirm?: boolean;
-};
-
-type FolderConsistencyResponse = FolderConsistencyResult & {
-  ok?: boolean;
-  remote?: {
-    count: number | null;
-    uidNext: number | null;
-    uidValidity: string | null;
-    highestModSeq: string | null;
-  };
-};
-
-export function getResolvedRemoteMailboxFingerprint(result: {
-  needsRepair: boolean;
-  remote?: {
-    count: number | null;
-    uidNext: number | null;
-    uidValidity: string | null;
-    highestModSeq: string | null;
-  } | null;
-}) {
-  if (result.needsRepair) {
-    return null;
-  }
-  return buildRemoteMailboxFingerprint({
-    count: result.remote?.count ?? null,
-    uidNext: result.remote?.uidNext ?? null,
-    uidValidity: result.remote?.uidValidity ?? null,
-    highestModSeq: result.remote?.highestModSeq ?? null
-  });
-}
-
-class FullSyncDebugCancelledError extends Error {
-  constructor(reason: string) {
-    super(`Full sync cancelled before start. Reason: ${reason}`);
-    this.name = "FullSyncDebugCancelledError";
-  }
-}
-
-function isFullSyncDebugCancelledError(error: unknown): error is FullSyncDebugCancelledError {
-  return error instanceof Error && error.name === "FullSyncDebugCancelledError";
-}
 
 export function useSyncController({
   activeAccountId,
@@ -285,7 +235,7 @@ export function useSyncController({
   const waitForSyncJob = async (
     accountId: string,
     jobId: string,
-    requestedMode?: string
+    requestedMode?: SyncMode
   ): Promise<SyncJobResult> => {
     const startedAt = Date.now();
     const timeoutMs = 1000 * 60 * 60;
@@ -313,16 +263,19 @@ export function useSyncController({
             status?: "queued" | "running" | "done" | "failed";
             error?: string;
             result?: SyncJobResult;
-            progress?: Omit<SyncJobProgress, "jobId">;
+            // Server blobs may omit `updatedAt`; `normalizeSyncJobProgress`
+            // back-fills it with the current clock before consumers see it.
+            progress?: Omit<SyncJobProgress, "jobId" | "updatedAt"> & { updatedAt?: number };
           };
         };
         const progress = data.job?.progress;
         if (progress) {
           if (
-            !loggedEscalation &&
-            requestedMode &&
-            progress.mode &&
-            progress.mode !== requestedMode
+            detectSyncEscalation({
+              requestedMode,
+              progressMode: progress.mode,
+              alreadyLogged: loggedEscalation
+            })
           ) {
             loggedEscalation = true;
             console.warn("[noctua][sync] sync escalated", {
@@ -333,11 +286,7 @@ export function useSyncController({
               escalatedTo: progress.mode
             });
           }
-          const nextProgress: SyncJobProgress = {
-            ...progress,
-            jobId,
-            updatedAt: typeof progress.updatedAt === "number" ? progress.updatedAt : Date.now()
-          };
+          const nextProgress = normalizeSyncJobProgress({ progress, jobId });
           setSyncProgressByJobId((prev) => ({ ...prev, [jobId]: nextProgress }));
         }
         const status = data.job?.status;
@@ -831,149 +780,49 @@ export function useSyncController({
 
   const recomputeThreads = async () => {
     if (!activeAccountId) return;
-    const accountId = activeAccountId;
-    stopRecomputePoll();
-    setIsRecomputingThreads(true);
-    try {
-      const res = await apiFetch(buildAccountApiPath(accountId, "/threads/recompute"), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({})
-      });
-      if (!res.ok) {
-        reportError(await readErrorMessage(res));
-        setIsRecomputingThreads(false);
-        return;
+    await startRecomputeJob({
+      accountId: activeAccountId,
+      startPath: "/threads/recompute",
+      statusPath: "/threads/recompute/status",
+      jobLabel: "Thread",
+      apiFetch,
+      readErrorMessage,
+      reportError,
+      setRunning: setIsRecomputingThreads,
+      onSuccess: async () => {
+        await refreshMailboxData();
+      },
+      stopPoll: stopRecomputePoll,
+      handles: {
+        pollTimerRef: recomputePollTimerRef,
+        pollInFlightRef: recomputePollInFlightRef,
+        jobIdRef: recomputeJobIdRef
       }
-      const data = (await res.json()) as { jobId?: string };
-      if (!data?.jobId) {
-        reportError("Thread recompute did not return a job id.");
-        setIsRecomputingThreads(false);
-        return;
-      }
-      const jobId = data.jobId;
-      recomputeJobIdRef.current = jobId;
-
-      const pollOnce = async () => {
-        if (recomputePollInFlightRef.current) return;
-        if (recomputeJobIdRef.current !== jobId) return;
-        recomputePollInFlightRef.current = true;
-        try {
-          const statusRes = await apiFetch(
-            buildAccountApiPath(accountId, `/threads/recompute/status?jobId=${encodeURIComponent(jobId)}`)
-          );
-          if (!statusRes.ok) {
-            reportError(await readErrorMessage(statusRes));
-            stopRecomputePoll();
-            setIsRecomputingThreads(false);
-            return;
-          }
-          const statusData = (await statusRes.json()) as {
-            job?: { status?: string; error?: string };
-          };
-          const status = statusData?.job?.status;
-          if (status === "done") {
-            stopRecomputePoll();
-            setIsRecomputingThreads(false);
-            await refreshMailboxData();
-            return;
-          }
-          if (status === "failed") {
-            reportError(statusData?.job?.error || "Thread recompute failed.");
-            stopRecomputePoll();
-            setIsRecomputingThreads(false);
-            return;
-          }
-        } catch {
-          reportError("Failed to check thread recompute status.");
-          stopRecomputePoll();
-          setIsRecomputingThreads(false);
-          return;
-        } finally {
-          recomputePollInFlightRef.current = false;
-        }
-        recomputePollTimerRef.current = window.setTimeout(pollOnce, 1000);
-      };
-
-      void pollOnce();
-    } catch {
-      reportError("Thread recompute failed due to a network error.");
-      setIsRecomputingThreads(false);
-    }
+    });
   };
   recomputeThreadsRef.current = recomputeThreads;
 
   const recomputeCategories = async () => {
     if (!activeAccountId) return;
-    const accountId = activeAccountId;
-    stopCategoryRecomputePoll();
-    setIsRecomputingCategories(true);
-    try {
-      const res = await apiFetch(buildAccountApiPath(accountId, "/categories/recompute"), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({})
-      });
-      if (!res.ok) {
-        reportError(await readErrorMessage(res));
-        setIsRecomputingCategories(false);
-        return;
+    await startRecomputeJob({
+      accountId: activeAccountId,
+      startPath: "/categories/recompute",
+      statusPath: "/categories/recompute/status",
+      jobLabel: "Category",
+      apiFetch,
+      readErrorMessage,
+      reportError,
+      setRunning: setIsRecomputingCategories,
+      onSuccess: async () => {
+        await refreshMailboxData();
+      },
+      stopPoll: stopCategoryRecomputePoll,
+      handles: {
+        pollTimerRef: categoryRecomputePollTimerRef,
+        pollInFlightRef: categoryRecomputePollInFlightRef,
+        jobIdRef: categoryRecomputeJobIdRef
       }
-      const data = (await res.json()) as { jobId?: string };
-      if (!data?.jobId) {
-        reportError("Category recompute did not return a job id.");
-        setIsRecomputingCategories(false);
-        return;
-      }
-      const jobId = data.jobId;
-      categoryRecomputeJobIdRef.current = jobId;
-
-      const pollOnce = async () => {
-        if (categoryRecomputePollInFlightRef.current) return;
-        if (categoryRecomputeJobIdRef.current !== jobId) return;
-        categoryRecomputePollInFlightRef.current = true;
-        try {
-          const statusRes = await apiFetch(
-            buildAccountApiPath(accountId, `/categories/recompute/status?jobId=${encodeURIComponent(jobId)}`)
-          );
-          if (!statusRes.ok) {
-            reportError(await readErrorMessage(statusRes));
-            stopCategoryRecomputePoll();
-            setIsRecomputingCategories(false);
-            return;
-          }
-          const statusData = (await statusRes.json()) as {
-            job?: { status?: string; error?: string };
-          };
-          const status = statusData?.job?.status;
-          if (status === "done") {
-            stopCategoryRecomputePoll();
-            setIsRecomputingCategories(false);
-            await refreshMailboxData();
-            return;
-          }
-          if (status === "failed") {
-            reportError(statusData?.job?.error || "Category recompute failed.");
-            stopCategoryRecomputePoll();
-            setIsRecomputingCategories(false);
-            return;
-          }
-        } catch {
-          reportError("Failed to check category recompute status.");
-          stopCategoryRecomputePoll();
-          setIsRecomputingCategories(false);
-          return;
-        } finally {
-          categoryRecomputePollInFlightRef.current = false;
-        }
-        categoryRecomputePollTimerRef.current = window.setTimeout(pollOnce, 1000);
-      };
-
-      void pollOnce();
-    } catch {
-      reportError("Category recompute failed due to a network error.");
-      setIsRecomputingCategories(false);
-    }
+    });
   };
 
   // Stream / poll effect
@@ -991,108 +840,57 @@ export function useSyncController({
     };
 
     const notifyNewMessages = async (
-      items:
-        | Array<{
-            uid: number;
-            subject?: string;
-            from?: string;
-            messageId?: string | null;
-            folderId?: string;
-            category?: string | null;
-          }>
-        | null
-        | undefined
+      items: IncomingMailItem[] | null | undefined
     ) => {
       if (!items || items.length === 0) return;
-      const normalized = items.filter(
-        (
-          item
-        ): item is {
-          uid: number;
-          subject?: string;
-          from?: string;
-          messageId?: string | null;
-          folderId?: string;
-          category?: string | null;
-        } => Boolean(item) && typeof item.uid === "number"
-      );
-      if (normalized.length === 0) return;
-      const eligible = normalized.filter(
-        (item) => !item.folderId || !isNotificationSuppressedFolder(item.folderId)
-      );
-      if (eligible.length === 0) return;
-      const lastNotified = lastNotifiedUidRef.current[activeAccountId] ?? null;
-      const maxUid = Math.max(...normalized.map((item) => item.uid));
-      if (lastNotified == null) {
-        lastNotifiedUidRef.current[activeAccountId] = maxUid;
-        localStorage.setItem(`noctua:lastNotifiedUid:${activeAccountId}`, String(maxUid));
-        return;
-      }
-      const eligibleByUid = eligible.filter((item) => item.uid > lastNotified);
-      if (eligibleByUid.length === 0) {
-        if (maxUid > lastNotified) {
-          lastNotifiedUidRef.current[activeAccountId] = maxUid;
-          localStorage.setItem(`noctua:lastNotifiedUid:${activeAccountId}`, String(maxUid));
-        }
-        return;
-      }
-      const accountEmail = currentAccountEmail?.toLowerCase() ?? "";
-      const notFromMe = eligibleByUid.filter((item) => {
-        if (!accountEmail) return true;
-        const fromEmails = extractEmails(item.from);
-        return !fromEmails.some((email) => email.toLowerCase() === accountEmail);
+      const plan = planNewMailNotifications({
+        items,
+        lastNotifiedUid: lastNotifiedUidRef.current[activeAccountId] ?? null,
+        notifiedKeys: notifiedKeysRef.current,
+        isNotificationSuppressedFolder,
+        accountEmail: currentAccountEmail
       });
-      const notNewsletter = notFromMe.filter((item) => item.category !== "newsletter");
-      const unique = notNewsletter.filter((item) => {
-        const key = item.messageId || `uid:${item.uid}`;
-        if (notifiedKeysRef.current.has(key)) return false;
+
+      // Commit the dedup-ring changes before dispatching so a slow
+      // showNotification call can't race another batch into duplicating us.
+      for (const key of plan.keysToAdd) {
         notifiedKeysRef.current.add(key);
-        return true;
-      });
-      if (notifiedKeysRef.current.size > 200) {
-        const iterator = notifiedKeysRef.current.values();
-        for (let i = 0; i < 50; i += 1) {
-          const next = iterator.next();
-          if (next.done) break;
-          notifiedKeysRef.current.delete(next.value);
-        }
       }
-      if (maxUid > lastNotified) {
-        lastNotifiedUidRef.current[activeAccountId] = maxUid;
-        localStorage.setItem(`noctua:lastNotifiedUid:${activeAccountId}`, String(maxUid));
+      for (const key of plan.keysToEvict) {
+        notifiedKeysRef.current.delete(key);
+      }
+      if (plan.nextLastNotifiedUid != null) {
+        lastNotifiedUidRef.current[activeAccountId] = plan.nextLastNotifiedUid;
+        localStorage.setItem(
+          `noctua:lastNotifiedUid:${activeAccountId}`,
+          String(plan.nextLastNotifiedUid)
+        );
       }
 
-      if (unique.length === 1) {
-        const message = unique[0];
-        const title = message.subject || "(no subject)";
-        const body = message.from ? `From: ${message.from}` : "New message received";
-        console.info("[noctua] new mail", message);
-        await showNotification(title, body, `mail-${message.messageId ?? message.uid}`, {
-          messageId: message.messageId ?? null,
+      const dispatch = plan.dispatch;
+      if (dispatch.kind === "single") {
+        console.info("[noctua] new mail", dispatch.item);
+        await showNotification(dispatch.title, dispatch.body, dispatch.tag, {
+          messageId: dispatch.messageId,
           accountId: activeAccountId
         });
         pushNotice({
           type: "info",
           icon: "mail",
-          title,
-          description: body,
-          messageId: message.messageId ?? undefined,
+          title: dispatch.title,
+          description: dispatch.body,
+          messageId: dispatch.messageId ?? undefined,
           durationMs: 12000
         });
-      } else if (unique.length > 1) {
-        const title = `${unique.length} new messages`;
-        const preview = unique
-          .slice(0, 3)
-          .map((item) => item.subject || "(no subject)")
-          .join(" • ");
-        console.info("[noctua] new mail batch", unique);
-        await showNotification(title, preview, "mail-batch", { url: "/" });
+      } else if (dispatch.kind === "batch") {
+        console.info("[noctua] new mail batch", dispatch.items);
+        await showNotification(dispatch.title, dispatch.body, dispatch.tag, { url: "/" });
         pushNotice({
           type: "info",
           icon: "mail",
-          title,
-          description: preview,
-          ids: unique.map((item) => item.messageId ?? undefined).filter(Boolean) as string[],
+          title: dispatch.title,
+          description: dispatch.body,
+          ids: dispatch.ids,
           durationMs: 12000
         });
       }
@@ -1217,29 +1015,6 @@ export function useSyncController({
       }
     };
 
-    const shouldSkipDeleteReconcile = (folderId?: string, uid?: number) => {
-      if (!folderId) return false;
-      const now = Date.now();
-      const folderExpiry = localDeleteReconcileByFolderRef.current[folderId] ?? 0;
-      if (folderExpiry <= now) {
-        if (folderExpiry > 0) {
-          delete localDeleteReconcileByFolderRef.current[folderId];
-        }
-      } else {
-        return true;
-      }
-      if (typeof uid !== "number" || !Number.isFinite(uid)) return false;
-      const uidKey = `${folderId}:${uid}`;
-      const uidExpiry = localDeleteReconcileByUidRef.current[uidKey] ?? 0;
-      if (uidExpiry <= now) {
-        if (uidExpiry > 0) {
-          delete localDeleteReconcileByUidRef.current[uidKey];
-        }
-        return false;
-      }
-      return true;
-    };
-
     const requestFolderReconcileSync = (
       folderId?: string,
       mode: "repair" | "full" = "repair"
@@ -1258,10 +1033,14 @@ export function useSyncController({
       });
       if (decision.kind !== "folder") return;
       const now = Date.now();
-      const lastRun = lastDeleteReconcileAtRef.current[decision.folderId] ?? 0;
-      if (now - lastRun < 5000) return;
       const { isSyncing: syncing, syncingFolders: syncingSet } = syncStateRef.current;
-      if (syncing || syncingSet.has(decision.folderId)) return;
+      const canRun = canRunFolderReconcile({
+        now,
+        lastRunAt: lastDeleteReconcileAtRef.current[decision.folderId] ?? 0,
+        isSyncingAccount: syncing,
+        folderIsSyncing: syncingSet.has(decision.folderId)
+      });
+      if (!canRun) return;
       lastDeleteReconcileAtRef.current[decision.folderId] = now;
       const reconcileMode: "repair" | "full" =
         decision.mode === "full" ? "full" : "repair";
@@ -1405,7 +1184,14 @@ export function useSyncController({
               return;
             }
           }
-          if (shouldSkipDeleteReconcile(fId, data.uid)) return;
+          const skipReconcile = shouldSkipDeleteReconcile({
+            folderId: fId,
+            uid: data.uid,
+            now: Date.now(),
+            folderExpiries: localDeleteReconcileByFolderRef.current,
+            uidExpiries: localDeleteReconcileByUidRef.current
+          });
+          if (skipReconcile) return;
           requestFolderReconcileSync(fId, "repair");
         } catch {
           // ignore
