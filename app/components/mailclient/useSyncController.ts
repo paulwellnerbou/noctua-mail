@@ -31,6 +31,7 @@ import {
   canRunFolderReconcile,
   shouldSkipDeleteReconcile
 } from "./syncReconcileGuards";
+import { startRecomputeJob } from "./recomputeJobRunner";
 import type {
   FullSyncConfirmState,
   SyncJobProgress,
@@ -776,149 +777,49 @@ export function useSyncController({
 
   const recomputeThreads = async () => {
     if (!activeAccountId) return;
-    const accountId = activeAccountId;
-    stopRecomputePoll();
-    setIsRecomputingThreads(true);
-    try {
-      const res = await apiFetch(buildAccountApiPath(accountId, "/threads/recompute"), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({})
-      });
-      if (!res.ok) {
-        reportError(await readErrorMessage(res));
-        setIsRecomputingThreads(false);
-        return;
+    await startRecomputeJob({
+      accountId: activeAccountId,
+      startPath: "/threads/recompute",
+      statusPath: "/threads/recompute/status",
+      jobLabel: "Thread",
+      apiFetch,
+      readErrorMessage,
+      reportError,
+      setRunning: setIsRecomputingThreads,
+      onSuccess: async () => {
+        await refreshMailboxData();
+      },
+      stopPoll: stopRecomputePoll,
+      handles: {
+        pollTimerRef: recomputePollTimerRef,
+        pollInFlightRef: recomputePollInFlightRef,
+        jobIdRef: recomputeJobIdRef
       }
-      const data = (await res.json()) as { jobId?: string };
-      if (!data?.jobId) {
-        reportError("Thread recompute did not return a job id.");
-        setIsRecomputingThreads(false);
-        return;
-      }
-      const jobId = data.jobId;
-      recomputeJobIdRef.current = jobId;
-
-      const pollOnce = async () => {
-        if (recomputePollInFlightRef.current) return;
-        if (recomputeJobIdRef.current !== jobId) return;
-        recomputePollInFlightRef.current = true;
-        try {
-          const statusRes = await apiFetch(
-            buildAccountApiPath(accountId, `/threads/recompute/status?jobId=${encodeURIComponent(jobId)}`)
-          );
-          if (!statusRes.ok) {
-            reportError(await readErrorMessage(statusRes));
-            stopRecomputePoll();
-            setIsRecomputingThreads(false);
-            return;
-          }
-          const statusData = (await statusRes.json()) as {
-            job?: { status?: string; error?: string };
-          };
-          const status = statusData?.job?.status;
-          if (status === "done") {
-            stopRecomputePoll();
-            setIsRecomputingThreads(false);
-            await refreshMailboxData();
-            return;
-          }
-          if (status === "failed") {
-            reportError(statusData?.job?.error || "Thread recompute failed.");
-            stopRecomputePoll();
-            setIsRecomputingThreads(false);
-            return;
-          }
-        } catch {
-          reportError("Failed to check thread recompute status.");
-          stopRecomputePoll();
-          setIsRecomputingThreads(false);
-          return;
-        } finally {
-          recomputePollInFlightRef.current = false;
-        }
-        recomputePollTimerRef.current = window.setTimeout(pollOnce, 1000);
-      };
-
-      void pollOnce();
-    } catch {
-      reportError("Thread recompute failed due to a network error.");
-      setIsRecomputingThreads(false);
-    }
+    });
   };
   recomputeThreadsRef.current = recomputeThreads;
 
   const recomputeCategories = async () => {
     if (!activeAccountId) return;
-    const accountId = activeAccountId;
-    stopCategoryRecomputePoll();
-    setIsRecomputingCategories(true);
-    try {
-      const res = await apiFetch(buildAccountApiPath(accountId, "/categories/recompute"), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({})
-      });
-      if (!res.ok) {
-        reportError(await readErrorMessage(res));
-        setIsRecomputingCategories(false);
-        return;
+    await startRecomputeJob({
+      accountId: activeAccountId,
+      startPath: "/categories/recompute",
+      statusPath: "/categories/recompute/status",
+      jobLabel: "Category",
+      apiFetch,
+      readErrorMessage,
+      reportError,
+      setRunning: setIsRecomputingCategories,
+      onSuccess: async () => {
+        await refreshMailboxData();
+      },
+      stopPoll: stopCategoryRecomputePoll,
+      handles: {
+        pollTimerRef: categoryRecomputePollTimerRef,
+        pollInFlightRef: categoryRecomputePollInFlightRef,
+        jobIdRef: categoryRecomputeJobIdRef
       }
-      const data = (await res.json()) as { jobId?: string };
-      if (!data?.jobId) {
-        reportError("Category recompute did not return a job id.");
-        setIsRecomputingCategories(false);
-        return;
-      }
-      const jobId = data.jobId;
-      categoryRecomputeJobIdRef.current = jobId;
-
-      const pollOnce = async () => {
-        if (categoryRecomputePollInFlightRef.current) return;
-        if (categoryRecomputeJobIdRef.current !== jobId) return;
-        categoryRecomputePollInFlightRef.current = true;
-        try {
-          const statusRes = await apiFetch(
-            buildAccountApiPath(accountId, `/categories/recompute/status?jobId=${encodeURIComponent(jobId)}`)
-          );
-          if (!statusRes.ok) {
-            reportError(await readErrorMessage(statusRes));
-            stopCategoryRecomputePoll();
-            setIsRecomputingCategories(false);
-            return;
-          }
-          const statusData = (await statusRes.json()) as {
-            job?: { status?: string; error?: string };
-          };
-          const status = statusData?.job?.status;
-          if (status === "done") {
-            stopCategoryRecomputePoll();
-            setIsRecomputingCategories(false);
-            await refreshMailboxData();
-            return;
-          }
-          if (status === "failed") {
-            reportError(statusData?.job?.error || "Category recompute failed.");
-            stopCategoryRecomputePoll();
-            setIsRecomputingCategories(false);
-            return;
-          }
-        } catch {
-          reportError("Failed to check category recompute status.");
-          stopCategoryRecomputePoll();
-          setIsRecomputingCategories(false);
-          return;
-        } finally {
-          categoryRecomputePollInFlightRef.current = false;
-        }
-        categoryRecomputePollTimerRef.current = window.setTimeout(pollOnce, 1000);
-      };
-
-      void pollOnce();
-    } catch {
-      reportError("Category recompute failed due to a network error.");
-      setIsRecomputingCategories(false);
-    }
+    });
   };
 
   // Stream / poll effect
