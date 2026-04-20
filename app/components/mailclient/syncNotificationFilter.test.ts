@@ -66,14 +66,14 @@ describe("planNewMailNotifications", () => {
     expect(result.nextLastNotifiedUid).toBeNull();
   });
 
-  test("advances lastNotifiedUid when all new items are filtered out by uid", () => {
+  test("leaves lastNotifiedUid untouched when every new item is below the existing high-water mark", () => {
     const result = planNewMailNotifications({
       items: [mkItem({ uid: 11 }), mkItem({ uid: 12 })],
       lastNotifiedUid: 20,
       notifiedKeys: new Set(),
       isNotificationSuppressedFolder: neverSuppress
     });
-    // maxUid (12) < lastNotified (20), so no update
+    // maxUid (12) < lastNotified (20), so no advance and no notify.
     expect(result.dispatch.kind).toBe("none");
     expect(result.nextLastNotifiedUid).toBeNull();
   });

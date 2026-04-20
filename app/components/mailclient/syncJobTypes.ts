@@ -55,15 +55,21 @@ export class FullSyncDebugCancelledError extends Error {
   }
 }
 
+/**
+ * Structural shape the duck-typed guard narrows to. The guard checks
+ * `name` and `message` only, so the predicate is honest about what's
+ * actually proven — it does NOT promise `FullSyncDebugCancelledError`
+ * class identity or an `Error` prototype (that would fail for errors
+ * that crossed a worker/iframe boundary and lost their chain).
+ */
+export type FullSyncDebugCancelledErrorLike = {
+  name: "FullSyncDebugCancelledError";
+  message: string;
+};
+
 export function isFullSyncDebugCancelledError(
   error: unknown
-): error is FullSyncDebugCancelledError {
-  // Duck-typed on `name` + `message` so the check works across realms
-  // (e.g. an error that crossed a worker boundary and lost its prototype
-  // chain would fail `instanceof Error` even though its error-like
-  // fields survive). Both are required because the return type narrows
-  // to `FullSyncDebugCancelledError` — an `Error` with `message` — and
-  // callers rely on `error.message`.
+): error is FullSyncDebugCancelledErrorLike {
   if (typeof error !== "object" || error === null) return false;
   const maybe = error as { name?: unknown; message?: unknown };
   return (
