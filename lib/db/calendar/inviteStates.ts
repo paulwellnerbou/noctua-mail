@@ -13,7 +13,7 @@ import { type CalendarInviteActionType } from "../../calendarInviteProcessing";
 import {
   normalizeCalendarEventUid,
   normalizeCalendarEventUidKey,
-  normalizeCalendarEventUids
+  normalizeCalendarEventUidKeys
 } from "../../calendarEventUids";
 import {
   itemsFromUniqueInviteStates,
@@ -103,8 +103,12 @@ export async function markMessageCalendarInviteStatesProcessed(
 ) {
   return withDbWriteRetry("markMessageCalendarInviteStatesProcessed", async () => {
     const db = await getAccountDb(accountId);
-    const normalizedEventUids = normalizeCalendarEventUids(eventUids);
-    if (normalizedEventUids.length === 0) return 0;
+    // Match by canonical UID key. A series and its individual occurrences
+    // can carry different `eventUid` values but share the same
+    // `eventUidKey`; matching bare `eventUid` would silently miss
+    // occurrence-scoped rows of the same series.
+    const normalizedEventUidKeys = normalizeCalendarEventUidKeys(eventUids);
+    if (normalizedEventUidKeys.length === 0) return 0;
     const processedAtMs =
       typeof options?.processedAtMs === "number" &&
       Number.isFinite(options.processedAtMs) &&
@@ -119,20 +123,20 @@ export async function markMessageCalendarInviteStatesProcessed(
       typeof options?.processedAutomatically === "boolean"
         ? (options.processedAutomatically ? 1 : 0)
         : null;
-    // Callers can pass more eventUids than SQLite's default 999-parameter
-    // limit allows in a single statement. Chunk at the shared
-    // QUERY_BATCH_SIZE used by the messages domain.
+    // Callers can pass more eventUidKeys than SQLite's default
+    // 999-parameter limit allows in a single statement. Chunk at the
+    // shared QUERY_BATCH_SIZE used by the messages domain.
     const QUERY_BATCH_SIZE = 400;
     let totalChanges = 0;
-    for (let start = 0; start < normalizedEventUids.length; start += QUERY_BATCH_SIZE) {
-      const chunk = normalizedEventUids.slice(start, start + QUERY_BATCH_SIZE);
+    for (let start = 0; start < normalizedEventUidKeys.length; start += QUERY_BATCH_SIZE) {
+      const chunk = normalizedEventUidKeys.slice(start, start + QUERY_BATCH_SIZE);
       const result = db
         .prepare(
           `UPDATE message_calendar_events
            SET processedAtMs = ?, processedByUserId = ?, processedAutomatically = ?
            WHERE accountId = ?
              AND messageId = ?
-             AND eventUid IN (${chunk.map(() => "?").join(",")})`
+             AND lower(COALESCE(eventUidKey, eventUid, '')) IN (${chunk.map(() => "?").join(",")})`
         )
         .run(
           processedAtMs,
@@ -154,15 +158,18 @@ export async function clearMessageCalendarInviteStatesProcessedByEventUid(
 ) {
   return withDbWriteRetry("clearMessageCalendarInviteStatesProcessedByEventUid", async () => {
     const db = await getAccountDb(accountId);
-    const normalizedEventUid = normalizeCalendarEventUid(eventUid);
-    if (!normalizedEventUid) return 0;
+    // Canonical key match — see `markMessageCalendarInviteStatesProcessed`
+    // for the rationale: series and occurrence rows share the same
+    // `eventUidKey` even when their `eventUid`s differ.
+    const normalizedEventUidKey = normalizeCalendarEventUidKey(eventUid);
+    if (!normalizedEventUidKey) return 0;
     const result = db
       .prepare(
         `UPDATE message_calendar_events
          SET processedAtMs = NULL, processedByUserId = NULL, processedAutomatically = NULL
-         WHERE accountId = ? AND lower(eventUid) = lower(?)`
+         WHERE accountId = ? AND lower(COALESCE(eventUidKey, eventUid, '')) = lower(?)`
       )
-      .run(accountId, normalizedEventUid) as { changes?: number };
+      .run(accountId, normalizedEventUidKey) as { changes?: number };
     return result?.changes ?? 0;
   });
 }
@@ -215,12 +222,14 @@ export async function deleteMessageCalendarInviteStateByMessageAndEvent(
   eventUid: string
 ): Promise<void> {
   const db = await getAccountDb(accountId);
-  const normalizedEventUid = normalizeCalendarEventUid(eventUid);
-  if (!normalizedEventUid) return;
+  // Canonical key match — occurrence-scoped rows share the series's
+  // `eventUidKey` even when their `eventUid`s differ.
+  const normalizedEventUidKey = normalizeCalendarEventUidKey(eventUid);
+  if (!normalizedEventUidKey) return;
   db.prepare(
     `DELETE FROM message_calendar_events
-     WHERE accountId = ? AND messageId = ? AND lower(eventUid) = lower(?)`
-  ).run(accountId, messageId, normalizedEventUid);
+     WHERE accountId = ? AND messageId = ? AND lower(COALESCE(eventUidKey, eventUid, '')) = lower(?)`
+  ).run(accountId, messageId, normalizedEventUidKey);
 }
 
 export async function listCalendarInviteSourceMessagesByEventUid(
@@ -236,8 +245,11 @@ export async function listCalendarInviteSourceMessagesByEventUid(
   }>
 > {
   const db = await getAccountDb(accountId);
-  const normalizedEventUid = normalizeCalendarEventUid(eventUid);
-  if (!normalizedEventUid) return [];
+  // Canonical key match — otherwise an occurrence-scoped row whose
+  // `eventUid` differs from the series UID but whose `eventUidKey`
+  // matches would be omitted from the source-message list.
+  const normalizedEventUidKey = normalizeCalendarEventUidKey(eventUid);
+  if (!normalizedEventUidKey) return [];
   const excludedMessageId =
     typeof options?.excludeMessageId === "string" && options.excludeMessageId.trim()
       ? options.excludeMessageId.trim()
@@ -252,12 +264,12 @@ export async function listCalendarInviteSourceMessagesByEventUid(
          ON m.accountId = mce.accountId
         AND m.id = mce.messageId
        WHERE mce.accountId = ?
-         AND lower(mce.eventUid) = lower(?)
+         AND lower(COALESCE(mce.eventUidKey, mce.eventUid, '')) = lower(?)
          AND COALESCE(m.hasSource, 0) = 1
          AND (? = '' OR m.id <> ?)
        ORDER BY m.dateValue ASC, m.id ASC`
     )
-    .all(accountId, normalizedEventUid, excludedMessageId, excludedMessageId) as Array<{
+    .all(accountId, normalizedEventUidKey, excludedMessageId, excludedMessageId) as Array<{
     messageId?: string | null;
     dateValue?: number | null;
   }>;

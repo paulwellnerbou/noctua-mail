@@ -15,6 +15,7 @@ import type {
 } from "../../data";
 import { getAccountDb } from "../connection";
 import { withDbWriteRetry } from "../../dbWriteRetry";
+import { normalizeCalendarEventUid } from "../../calendarEventUids";
 import { normalizeCalendarParticipationStatus } from "../../calendarParticipation";
 import { safeParseJson } from "../messages/_shared";
 
@@ -127,6 +128,36 @@ export async function upsertCalendarParticipationOverride(
 ): Promise<CalendarParticipationOverrideRow> {
   const db = await getAccountDb(accountId);
   const now = Date.now();
+  // Normalize inputs symmetrically with `rowToCalendarParticipationOverride`
+  // so reads and writes agree on what counts as a valid row. Without
+  // normalization, unparsed partstats / unnormalized UIDs / bad
+  // timestamps would slip into the table and then be silently ignored
+  // by the read path.
+  const normalizedEventUid = normalizeCalendarEventUid(input.eventUid);
+  if (!normalizedEventUid) {
+    throw new Error("upsertCalendarParticipationOverride: eventUid is required");
+  }
+  const normalizedPartstat = normalizeCalendarParticipationStatus(input.partstat);
+  if (!normalizedPartstat) {
+    throw new Error(
+      `upsertCalendarParticipationOverride: invalid partstat ${JSON.stringify(input.partstat)}`
+    );
+  }
+  const normalizedOccurrenceStartAtMs =
+    typeof input.occurrenceStartAtMs === "number" &&
+    Number.isFinite(input.occurrenceStartAtMs) &&
+    input.occurrenceStartAtMs > 0
+      ? Math.round(input.occurrenceStartAtMs)
+      : null;
+  if (normalizedOccurrenceStartAtMs === null) {
+    throw new Error(
+      `upsertCalendarParticipationOverride: invalid occurrenceStartAtMs ${JSON.stringify(input.occurrenceStartAtMs)}`
+    );
+  }
+  const normalizedAttendeeEmail =
+    typeof input.attendeeEmail === "string" && input.attendeeEmail.trim()
+      ? input.attendeeEmail.trim()
+      : undefined;
   // Inline the existence check instead of delegating to the async
   // helper — `getCalendarParticipationOverrideForOccurrence` would
   // call `getAccountDb` again for a handle we already hold.
@@ -135,15 +166,15 @@ export async function upsertCalendarParticipationOverride(
       `SELECT * FROM calendar_participation_overrides
        WHERE accountId = ? AND eventUid = ? AND occurrenceStartAtMs = ?`
     )
-    .get(accountId, input.eventUid, input.occurrenceStartAtMs) as any;
+    .get(accountId, normalizedEventUid, normalizedOccurrenceStartAtMs) as any;
   const existing = existingRow ? rowToCalendarParticipationOverride(existingRow) : null;
   const row: CalendarParticipationOverrideRow = {
     id: existing?.id ?? `calp-${crypto.randomUUID()}`,
     accountId,
-    eventUid: input.eventUid,
-    occurrenceStartAtMs: input.occurrenceStartAtMs,
-    partstat: input.partstat,
-    attendeeEmail: input.attendeeEmail,
+    eventUid: normalizedEventUid,
+    occurrenceStartAtMs: normalizedOccurrenceStartAtMs,
+    partstat: normalizedPartstat,
+    attendeeEmail: normalizedAttendeeEmail,
     updatedAtMs: now
   };
   db.prepare(
