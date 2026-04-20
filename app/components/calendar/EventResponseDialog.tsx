@@ -22,9 +22,15 @@ export type EventResponseDialogProps = {
   replyRequested?: boolean;
   submittingResponse: boolean;
   onSubmit: () => void | Promise<void>;
-  replyActionLabel: string;
   isReplyChoice: (status: CalendarParticipationStatus) => boolean;
 };
+
+function getReplyActionLabel(status?: CalendarParticipationStatus) {
+  if (status === "ACCEPTED") return "Accept";
+  if (status === "DECLINED") return "Decline";
+  if (status === "TENTATIVE") return "Mark tentative";
+  return "Respond";
+}
 
 /**
  * Modal that captures an attendee's RSVP choice, whether the RSVP applies to a
@@ -50,9 +56,9 @@ export default function EventResponseDialog({
   replyRequested,
   submittingResponse,
   onSubmit,
-  replyActionLabel,
   isReplyChoice
 }: EventResponseDialogProps) {
+  const replyActionLabel = getReplyActionLabel(draftPartstat);
   return (
     <Dialog.Root
       open={open}

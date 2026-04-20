@@ -3,11 +3,22 @@
 import { Clock, MapPin, Repeat, User, Users } from "lucide-react";
 import styles from "./EventDetailView.module.css";
 
+function parseHttpUrl(value?: string): string | null {
+  if (!value) return null;
+  const trimmed = value.trim();
+  try {
+    const parsed = new URL(trimmed);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
+    return parsed.toString();
+  } catch {
+    return null;
+  }
+}
+
 export type EventDetailMetaProps = {
   timeRange: string;
   tzLabel: string | null;
   location?: string;
-  locationUrl: string | null;
   recurrenceSummary: string | null;
   organizer?: string;
   attendees?: string[];
@@ -22,11 +33,11 @@ export default function EventDetailMeta({
   timeRange,
   tzLabel,
   location,
-  locationUrl,
   recurrenceSummary,
   organizer,
   attendees
 }: EventDetailMetaProps) {
+  const locationUrl = parseHttpUrl(location);
   return (
     <>
       {timeRange && (

@@ -2,6 +2,8 @@
 
 import { Button, Text } from "@radix-ui/themes";
 import type { CalendarInviteActionType } from "@/lib/calendarInviteProcessing";
+import type { AccountDateFormat } from "@/lib/data";
+import { formatAccountDateValue } from "@/lib/dateFormatting";
 import styles from "./EventDetailView.module.css";
 
 export type InviteProcessingState = {
@@ -15,12 +17,18 @@ export type InviteProcessingState = {
 
 export type EventInviteStatusRowProps = {
   inviteProcessing: InviteProcessingState;
-  inviteStatusText: string | null;
+  dateFormat?: AccountDateFormat;
   /** When the invite is an occurrence-scoped cancellation, the main row hides
    *  its Process button; the cancellation action then surfaces via the main
    *  action bar instead. */
   hasOccurrenceCancellationAction: boolean;
 };
+
+function getInviteActionLabel(actionType: CalendarInviteActionType) {
+  if (actionType === "cancellation") return "Cancellation";
+  if (actionType === "update") return "Update";
+  return "Invitation";
+}
 
 function getInviteProcessButtonLabel(processed?: boolean) {
   return processed ? "Reprocess" : "Process";
@@ -30,6 +38,22 @@ function getInviteProcessButtonPendingLabel(processed?: boolean) {
   return processed ? "Reprocessing…" : "Processing…";
 }
 
+function buildInviteStatusText(inviteProcessing: InviteProcessingState, dateFormat?: AccountDateFormat) {
+  const actionLabel = getInviteActionLabel(inviteProcessing.actionType);
+  if (!inviteProcessing.processed) {
+    return `${actionLabel} not processed`;
+  }
+  const processedModeLabel =
+    typeof inviteProcessing.processedAutomatically === "boolean"
+      ? ` ${inviteProcessing.processedAutomatically ? "automatically" : "manually"}`
+      : "";
+  const processedAtLabel =
+    typeof inviteProcessing.processedAtMs === "number"
+      ? formatAccountDateValue(inviteProcessing.processedAtMs, dateFormat)
+      : null;
+  return `${actionLabel} processed${processedModeLabel}${processedAtLabel ? ` on ${processedAtLabel}` : ""}`;
+}
+
 /**
  * Top-of-card status banner that summarizes whether an invitation / update /
  * cancellation has been processed and offers a single-click Process button
@@ -37,13 +61,14 @@ function getInviteProcessButtonPendingLabel(processed?: boolean) {
  */
 export default function EventInviteStatusRow({
   inviteProcessing,
-  inviteStatusText,
+  dateFormat,
   hasOccurrenceCancellationAction
 }: EventInviteStatusRowProps) {
+  const statusText = buildInviteStatusText(inviteProcessing, dateFormat);
   return (
     <div className={styles.inviteStatusRow}>
       <Text size="1" color={inviteProcessing.processed ? "green" : "gray"}>
-        {inviteStatusText}
+        {statusText}
       </Text>
       {inviteProcessing.onProcess && !hasOccurrenceCancellationAction && (
         <Button

@@ -3,7 +3,6 @@
 import { useEffect, useState } from "react";
 import { buildCalendarRecurrenceSummary, formatCalendarEventRange } from "@/lib/calendar";
 import type { CalendarInviteActionType } from "@/lib/calendarInviteProcessing";
-import { formatAccountDateValue } from "@/lib/dateFormatting";
 import type {
   AccountDateFormat,
   CalendarEvent,
@@ -87,18 +86,6 @@ export type EventDetailViewProps = {
   };
 };
 
-function parseHttpUrl(value?: string): string | null {
-  if (!value) return null;
-  const trimmed = value.trim();
-  try {
-    const parsed = new URL(trimmed);
-    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
-    return parsed.toString();
-  } catch {
-    return null;
-  }
-}
-
 function getParticipationColor(
   status?: CalendarParticipationStatus
 ): "green" | "red" | "orange" | "gray" {
@@ -106,19 +93,6 @@ function getParticipationColor(
   if (status === "DECLINED") return "red";
   if (status === "TENTATIVE") return "orange";
   return "gray";
-}
-
-function getReplyActionLabel(status?: CalendarParticipationStatus) {
-  if (status === "ACCEPTED") return "Accept";
-  if (status === "DECLINED") return "Decline";
-  if (status === "TENTATIVE") return "Mark tentative";
-  return "Respond";
-}
-
-function getInviteActionLabel(actionType: CalendarInviteActionType) {
-  if (actionType === "cancellation") return "Cancellation";
-  if (actionType === "update") return "Update";
-  return "Invitation";
 }
 
 export default function EventDetailView({
@@ -187,9 +161,6 @@ export default function EventDetailView({
         excludedDates: (excludedDates ?? []).map((ms) => new Date(ms))
       })
     : null;
-
-  // Location URL
-  const locationUrl = parseHttpUrl(location);
 
   const canonicalStartMs = eventStartAtMs ?? resolvedStartMs;
   const [reminderNotice, setReminderNotice] = useState<string | null>(null);
@@ -290,24 +261,6 @@ export default function EventDetailView({
 
   const currentParticipationColor = getParticipationColor(currentMyPartstat);
   const currentParticipationLabel = formatCalendarParticipationLabel(currentMyPartstat) || "Needs action";
-  const replyActionLabel = getReplyActionLabel(draftPartstat);
-  const inviteStatusText = inviteProcessing
-    ? (() => {
-        const actionLabel = getInviteActionLabel(inviteProcessing.actionType);
-        if (!inviteProcessing.processed) {
-          return `${actionLabel} not processed`;
-        }
-        const processedModeLabel =
-          typeof inviteProcessing.processedAutomatically === "boolean"
-            ? ` ${inviteProcessing.processedAutomatically ? "automatically" : "manually"}`
-            : "";
-        const processedAtLabel =
-          typeof inviteProcessing.processedAtMs === "number"
-            ? formatAccountDateValue(inviteProcessing.processedAtMs, dateFormat)
-            : null;
-        return `${actionLabel} processed${processedModeLabel}${processedAtLabel ? ` on ${processedAtLabel}` : ""}`;
-      })()
-    : null;
 
   return (
     <article className={styles.event}>
@@ -316,7 +269,7 @@ export default function EventDetailView({
       {inviteProcessing && (
         <EventInviteStatusRow
           inviteProcessing={inviteProcessing}
-          inviteStatusText={inviteStatusText}
+          dateFormat={dateFormat}
           hasOccurrenceCancellationAction={hasOccurrenceCancellationAction}
         />
       )}
@@ -325,7 +278,6 @@ export default function EventDetailView({
         timeRange={timeRange}
         tzLabel={tzLabel}
         location={location}
-        locationUrl={locationUrl}
         recurrenceSummary={recurrenceSummary}
         organizer={organizer}
         attendees={attendees}
@@ -414,7 +366,6 @@ export default function EventDetailView({
         replyRequested={replyRequested}
         submittingResponse={submittingResponse}
         onSubmit={handleRespond}
-        replyActionLabel={replyActionLabel}
         isReplyChoice={isReplyChoice}
       />
 
