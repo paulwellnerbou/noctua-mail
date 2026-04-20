@@ -33,12 +33,15 @@ export function upsertThreadInCache(
 }
 
 /**
- * Merge a freshly-hydrated message into every thread that already holds it.
- * If the thread does not contain the message's id the message is appended so
- * newly-arrived messages become visible without a full refetch.
+ * Merge a freshly-hydrated message into the cached thread resolved for it
+ * via `message.threadId ?? message.messageId ?? message.id`. If that
+ * cached thread does not already contain the message's id, the message
+ * is appended so newly-arrived messages become visible without a full
+ * refetch.
  *
- * Returns the previous map unchanged when no containing thread exists (callers
- * rely on reference equality to skip re-renders).
+ * Returns the previous map unchanged when no cached thread exists for
+ * the resolved key (callers rely on reference equality to skip
+ * re-renders).
  */
 export function updateThreadCacheWithMessageMap(
   prev: ThreadContentMap,

@@ -56,6 +56,14 @@ export function useReminderNotifications({
 
   const swRegistrationRef = useRef<ServiceWorkerRegistration | null>(null);
   const currentBuildVersionRef = useRef(buildVersionLabel.trim());
+  // Mirror of the latest `accounts` list so callbacks that shouldn't
+  // churn on every account-list refresh (e.g. `processDueCalendarReminders`)
+  // can still read the current per-account `dateFormat` at call time
+  // without capturing a stale closure.
+  const accountsRef = useRef<Account[]>(accounts);
+  useEffect(() => {
+    accountsRef.current = accounts;
+  }, [accounts]);
 
   const reportError = useCallback(
     (message: string) => {
@@ -226,9 +234,10 @@ export function useReminderNotifications({
         hasReminderBeenDeliveredOnClient(activeAccountId, clientId, reminder)
       );
       let deliveredChanged = false;
+      const latestAccounts = accountsRef.current;
       for (const reminder of dueReminders) {
         const reminderAccountId = reminder.accountId ?? activeAccountId;
-        const reminderAccount = accounts.find((entry) => entry.id === reminderAccountId);
+        const reminderAccount = latestAccounts.find((entry) => entry.id === reminderAccountId);
         const reminderDateFormat = reminderAccount?.settings?.appearance?.dateFormat;
         const eventDateLabel =
           formatAccountMediumDateTime(reminder.nextEventStartAtMs, reminderDateFormat) ?? "";
@@ -247,9 +256,6 @@ export function useReminderNotifications({
         await syncReminderStateToServiceWorker(reminders);
       }
     },
-    // accounts is intentionally read from closure rather than listed as a dep
-    // so the callback identity does not churn on every account list refresh.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [activeAccountId, clientId, showNotification, syncReminderStateToServiceWorker]
   );
 

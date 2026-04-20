@@ -140,7 +140,7 @@ describe("updateThreadCacheMapWithCategory", () => {
       "m2",
       "personal",
       0.9,
-      { reasons: ["reply"] } as unknown as Message["categorySignals"]
+      ["reply"]
     );
     expect(result.t1[1].category).toBe("personal");
     expect(result.t1[1].categoryScore).toBe(0.9);
