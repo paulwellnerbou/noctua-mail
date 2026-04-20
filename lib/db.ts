@@ -169,25 +169,18 @@ export {
 } from "./db/threads";
 
 export {
-  cancelCalendarRemindersByEventUid,
   clearCalendarReminders,
   deleteCalendarReminderById,
   deleteCalendarReminderByEvent,
-  ensureCalendarReminder,
   listCalendarReminders,
   listDeleteCalendarAssociations,
-  rescheduleCalendarRemindersByEventUid,
   upsertCalendarReminder
 } from "./db/calendar";
 
 
 export {
-  clearMessageCalendarInviteStatesProcessedByEventUid,
   deleteMessageCalendarInviteStateByMessageAndEvent,
-  listCalendarInviteSourceMessagesByEventUid,
-  listFullyProcessedCalendarInviteMessageIds,
-  markMessageCalendarInviteStatesProcessed,
-  upsertMessageCalendarInviteStates
+  listFullyProcessedCalendarInviteMessageIds
 } from "./db/calendar";
 
 
@@ -731,17 +724,119 @@ export async function recomputeCategoriesForAccount(
 
 export {
   type CalendarParticipationResolution,
-  cancelCalendarEventByUid,
-  deleteCalendarEvent,
   deleteCalendarParticipationOverrideForOccurrence,
-  getCalendarEventById,
-  getCalendarEventByUid,
   listCalendarEvents,
   listCalendarEventsBySource,
   resolveCalendarParticipation,
-  softDeleteCalendarEvent,
   updateCalendarEventMessageRelations,
   upsertCalendarEvent,
-  upsertCalendarEventByUid,
   upsertCalendarParticipationOverride
 } from "./db/calendar";
+
+/*
+ * Concrete wrappers for the calendar functions that tests replace via
+ * Bun's `mock.module("@/lib/db", …)`. Bun mutates the target namespace's
+ * live bindings in place, and its `mock.restore()` does not undo that
+ * mutation — which means a plain re-export `export { foo } from "./db/calendar"`
+ * leaves every consumer (including the `./db.ts?test-harness` isolated
+ * loader) resolving `foo` through the shared source module where the
+ * mock leaked. Wrapping each mocked symbol as a concrete binding on the
+ * public `@/lib/db` namespace keeps the mock scoped to the wrapper and
+ * leaves sibling modules importing from `./db/calendar/*` untouched.
+ *
+ * See the `updateMessageFolder` wrapper higher up in this file for the
+ * same pattern and rationale.
+ */
+import {
+  cancelCalendarEventByUid as _cancelCalendarEventByUidImpl,
+  cancelCalendarRemindersByEventUid as _cancelCalendarRemindersByEventUidImpl,
+  clearMessageCalendarInviteStatesProcessedByEventUid as _clearMessageCalendarInviteStatesProcessedByEventUidImpl,
+  deleteCalendarEvent as _deleteCalendarEventImpl,
+  ensureCalendarReminder as _ensureCalendarReminderImpl,
+  getCalendarEventById as _getCalendarEventByIdImpl,
+  getCalendarEventByUid as _getCalendarEventByUidImpl,
+  listCalendarInviteSourceMessagesByEventUid as _listCalendarInviteSourceMessagesByEventUidImpl,
+  markMessageCalendarInviteStatesProcessed as _markMessageCalendarInviteStatesProcessedImpl,
+  rescheduleCalendarRemindersByEventUid as _rescheduleCalendarRemindersByEventUidImpl,
+  softDeleteCalendarEvent as _softDeleteCalendarEventImpl,
+  upsertCalendarEventByUid as _upsertCalendarEventByUidImpl,
+  upsertMessageCalendarInviteStates as _upsertMessageCalendarInviteStatesImpl
+} from "./db/calendar";
+
+export function getCalendarEventById(
+  ...args: Parameters<typeof _getCalendarEventByIdImpl>
+): ReturnType<typeof _getCalendarEventByIdImpl> {
+  return _getCalendarEventByIdImpl(...args);
+}
+
+export function getCalendarEventByUid(
+  ...args: Parameters<typeof _getCalendarEventByUidImpl>
+): ReturnType<typeof _getCalendarEventByUidImpl> {
+  return _getCalendarEventByUidImpl(...args);
+}
+
+export function softDeleteCalendarEvent(
+  ...args: Parameters<typeof _softDeleteCalendarEventImpl>
+): ReturnType<typeof _softDeleteCalendarEventImpl> {
+  return _softDeleteCalendarEventImpl(...args);
+}
+
+export function deleteCalendarEvent(
+  ...args: Parameters<typeof _deleteCalendarEventImpl>
+): ReturnType<typeof _deleteCalendarEventImpl> {
+  return _deleteCalendarEventImpl(...args);
+}
+
+export function cancelCalendarEventByUid(
+  ...args: Parameters<typeof _cancelCalendarEventByUidImpl>
+): ReturnType<typeof _cancelCalendarEventByUidImpl> {
+  return _cancelCalendarEventByUidImpl(...args);
+}
+
+export function upsertCalendarEventByUid(
+  ...args: Parameters<typeof _upsertCalendarEventByUidImpl>
+): ReturnType<typeof _upsertCalendarEventByUidImpl> {
+  return _upsertCalendarEventByUidImpl(...args);
+}
+
+export function ensureCalendarReminder(
+  ...args: Parameters<typeof _ensureCalendarReminderImpl>
+): ReturnType<typeof _ensureCalendarReminderImpl> {
+  return _ensureCalendarReminderImpl(...args);
+}
+
+export function cancelCalendarRemindersByEventUid(
+  ...args: Parameters<typeof _cancelCalendarRemindersByEventUidImpl>
+): ReturnType<typeof _cancelCalendarRemindersByEventUidImpl> {
+  return _cancelCalendarRemindersByEventUidImpl(...args);
+}
+
+export function rescheduleCalendarRemindersByEventUid(
+  ...args: Parameters<typeof _rescheduleCalendarRemindersByEventUidImpl>
+): ReturnType<typeof _rescheduleCalendarRemindersByEventUidImpl> {
+  return _rescheduleCalendarRemindersByEventUidImpl(...args);
+}
+
+export function upsertMessageCalendarInviteStates(
+  ...args: Parameters<typeof _upsertMessageCalendarInviteStatesImpl>
+): ReturnType<typeof _upsertMessageCalendarInviteStatesImpl> {
+  return _upsertMessageCalendarInviteStatesImpl(...args);
+}
+
+export function markMessageCalendarInviteStatesProcessed(
+  ...args: Parameters<typeof _markMessageCalendarInviteStatesProcessedImpl>
+): ReturnType<typeof _markMessageCalendarInviteStatesProcessedImpl> {
+  return _markMessageCalendarInviteStatesProcessedImpl(...args);
+}
+
+export function clearMessageCalendarInviteStatesProcessedByEventUid(
+  ...args: Parameters<typeof _clearMessageCalendarInviteStatesProcessedByEventUidImpl>
+): ReturnType<typeof _clearMessageCalendarInviteStatesProcessedByEventUidImpl> {
+  return _clearMessageCalendarInviteStatesProcessedByEventUidImpl(...args);
+}
+
+export function listCalendarInviteSourceMessagesByEventUid(
+  ...args: Parameters<typeof _listCalendarInviteSourceMessagesByEventUidImpl>
+): ReturnType<typeof _listCalendarInviteSourceMessagesByEventUidImpl> {
+  return _listCalendarInviteSourceMessagesByEventUidImpl(...args);
+}
