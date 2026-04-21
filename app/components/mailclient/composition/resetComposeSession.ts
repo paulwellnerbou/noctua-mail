@@ -20,6 +20,7 @@ type ResettableComposeState = Pick<
   | "setComposeHtml"
   | "setComposeHtmlText"
   | "setComposeMarkdown"
+  | "composeMarkdownRef"
   | "setComposeOpenedAt"
   | "setComposeSignatureId"
   | "setSignatureMenuOpen"
@@ -85,6 +86,7 @@ export function resetComposeSession(compose: ResettableComposeState) {
   compose.composeSelectionRef.current = null;
   compose.composeDragDepthRef.current = 0;
   compose.composeResizeRef.current = null;
+  compose.composeMarkdownRef.current = "";
 
   compose.setComposeOpen(false);
   compose.setComposeView("inline");

@@ -1,4 +1,5 @@
-import { useRef, useState } from "react";
+import { useCallback, useRef, useState } from "react";
+import type { Dispatch, SetStateAction } from "react";
 import type { Attachment, Message, RecipientSuggestion } from "@/lib/data";
 import type {
   ComposeMode,
@@ -33,7 +34,16 @@ export function useComposeState() {
   const [composeInviteRecurrenceRule, setComposeInviteRecurrenceRule] = useState("");
   const [composeHtml, setComposeHtml] = useState("");
   const [composeHtmlText, setComposeHtmlText] = useState("");
-  const [composeMarkdown, setComposeMarkdown] = useState("");
+  const [composeMarkdownState, setComposeMarkdownState] = useState("");
+  const composeMarkdownRef = useRef("");
+  const setComposeMarkdown = useCallback<Dispatch<SetStateAction<string>>>((next) => {
+    setComposeMarkdownState((prev) => {
+      const value = typeof next === "function" ? next(prev) : next;
+      composeMarkdownRef.current = value;
+      return value;
+    });
+  }, []);
+  const composeMarkdown = composeMarkdownState;
   const [composeOpenedAt, setComposeOpenedAt] = useState("");
   const [composeSignatureId, setComposeSignatureId] = useState<string>("");
   const [signatureMenuOpen, setSignatureMenuOpen] = useState(false);
@@ -120,6 +130,7 @@ export function useComposeState() {
     composeHtmlText,
     setComposeHtmlText,
     composeMarkdown,
+    composeMarkdownRef,
     setComposeMarkdown,
     composeOpenedAt,
     setComposeOpenedAt,

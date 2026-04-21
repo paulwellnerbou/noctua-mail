@@ -116,7 +116,7 @@ export function useComposeController({
         composeTab: compose.composeTab,
         composeBody: compose.composeTextRef.current?.value || compose.composeBody,
         composeHtml: compose.composeHtml,
-        composeMarkdown: compose.composeMarkdown,
+        composeMarkdown: compose.composeMarkdownRef.current,
         composeQuotedHtml: compose.composeQuotedHtml,
         composeQuotedHtmlEdited: compose.composeQuotedHtmlEdited,
         composeIncludeOriginal: compose.composeIncludeOriginal,

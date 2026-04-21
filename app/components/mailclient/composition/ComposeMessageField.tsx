@@ -69,6 +69,7 @@ type ComposeMessageFieldProps = {
   composeAttachmentInputRef: React.RefObject<HTMLInputElement | null>;
   composeBodyDebounceRef: React.MutableRefObject<NodeJS.Timeout | null>;
   composeBodyLastUpdateRef: React.MutableRefObject<number>;
+  composeMarkdownRef: React.MutableRefObject<string>;
   composeDirtyRef: React.MutableRefObject<boolean>;
   composeEditorInitRef: React.MutableRefObject<boolean>;
   composeLastEditedRef: React.MutableRefObject<ComposeTab>;
@@ -125,6 +126,7 @@ export default function ComposeMessageField({
   composeAttachmentInputRef,
   composeBodyDebounceRef,
   composeBodyLastUpdateRef,
+  composeMarkdownRef,
   composeDirtyRef,
   composeEditorInitRef,
   composeLastEditedRef,
@@ -160,12 +162,13 @@ export default function ComposeMessageField({
   const switchComposeTab = (nextTab: ComposeTab) => {
     if (nextTab === composeTab) return;
     const lastEdited = composeLastEditedRef.current;
+    const currentMarkdown = composeMarkdownRef.current;
 
     if (nextTab === "html") {
       composeEditorInitRef.current = false;
       const currentBody = composeTextRef.current?.value || composeBody;
       const result = computeHtmlOnSwitchToHtml(
-        { lastEdited, composeBody: currentBody, composeMarkdown },
+        { lastEdited, composeBody: currentBody, composeMarkdown: currentMarkdown },
         { stripHtml }
       );
       if (result) {
@@ -187,7 +190,7 @@ export default function ComposeMessageField({
           lastEdited,
           composeHtml,
           composeHtmlText,
-          composeMarkdown,
+          composeMarkdown: currentMarkdown,
           composeQuotedParts,
           composeQuotedHtml,
           composeIncludeOriginal
@@ -422,9 +425,11 @@ export default function ComposeMessageField({
       {composeTab === "markdown" && (
         <div className={`${styles.composeWriting} ${styles.composeWritingMarkdown}`}>
           <ComposeMarkdownEditor
+            key={`markdown-body-${composeEditorReset}`}
             value={composeMarkdown}
             resetKey={composeEditorReset}
             onChange={(nextMd) => {
+              composeMarkdownRef.current = nextMd;
               composeDirtyRef.current = true;
               composeLastEditedRef.current = "markdown";
 

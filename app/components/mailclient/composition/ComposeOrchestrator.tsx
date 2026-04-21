@@ -288,6 +288,7 @@ function ComposeOrchestratorImpl(
     composeHtmlText,
     setComposeHtmlText,
     composeMarkdown,
+    composeMarkdownRef,
     setComposeMarkdown,
     composeOpenedAt,
     composeSignatureId,
@@ -545,6 +546,7 @@ function ComposeOrchestratorImpl(
   useComposeDraftAutoSave({
     composeOpen,
     sendingMail,
+    draftSaving,
     composeTo,
     composeCc,
     composeBcc,
@@ -889,6 +891,7 @@ function ComposeOrchestratorImpl(
       composeAttachmentInputRef={composeAttachmentInputRef}
       composeBodyDebounceRef={composeBodyDebounceRef}
       composeBodyLastUpdateRef={composeBodyLastUpdateRef}
+      composeMarkdownRef={composeMarkdownRef}
       composeDirtyRef={composeDirtyRef}
       composeEditorInitRef={composeEditorInitRef}
       composeLastEditedRef={composeLastEditedRef}

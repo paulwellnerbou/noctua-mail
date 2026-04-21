@@ -73,6 +73,7 @@ describe("resetComposeSession", () => {
       setComposeHtml: createSetter({ get value() { return state.composeHtml; }, set value(value) { state.composeHtml = value as string; } }),
       setComposeHtmlText: createSetter({ get value() { return state.composeHtmlText; }, set value(value) { state.composeHtmlText = value as string; } }),
       setComposeMarkdown: createSetter({ get value() { return state.composeMarkdown; }, set value(value) { state.composeMarkdown = value as string; } }),
+      composeMarkdownRef: { current: "**Body**" },
       setComposeOpenedAt: createSetter({ get value() { return state.composeOpenedAt; }, set value(value) { state.composeOpenedAt = value as string; } }),
       setComposeSignatureId: createSetter({ get value() { return state.composeSignatureId; }, set value(value) { state.composeSignatureId = value as string; } }),
       setSignatureMenuOpen: createSetter({ get value() { return state.signatureMenuOpen; }, set value(value) { state.signatureMenuOpen = value as boolean; } }),
@@ -174,5 +175,6 @@ describe("resetComposeSession", () => {
     expect(compose.composeSelectionRef.current).toBeNull();
     expect(compose.composeDragDepthRef.current).toBe(0);
     expect(compose.composeResizeRef.current).toBeNull();
+    expect(compose.composeMarkdownRef.current).toBe("");
   });
 });

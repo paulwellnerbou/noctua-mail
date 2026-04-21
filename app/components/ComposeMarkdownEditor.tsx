@@ -30,10 +30,6 @@ export default function ComposeMarkdownEditor({
   const containerRef = useRef<HTMLDivElement | null>(null);
   const [localValue, setLocalValue] = useState(value);
 
-  useEffect(() => {
-    setLocalValue(value);
-  }, [value]);
-
   // Detect dark mode from Radix theme
   useEffect(() => {
     const updateColorMode = () => {

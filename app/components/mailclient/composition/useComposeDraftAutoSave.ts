@@ -2,12 +2,14 @@ import { useEffect, useRef } from "react";
 import type { ComposeInviteDraft } from "@/lib/composeInvite";
 import type { Attachment } from "@/lib/data";
 import type { ComposePayload } from "./composeContentBuilder";
+import { getDraftAutoSaveState } from "./draftAutoSaveState";
 import { buildDraftSavePayload, getDraftChangeState } from "./draftSaveUtils";
 import type { ComposeReplyHeaders, ComposeTab, DraftSavePayload } from "./composeTypes";
 
 export type UseComposeDraftAutoSaveParams = {
   composeOpen: boolean;
   sendingMail: boolean;
+  draftSaving: boolean;
   composeTo: string;
   composeCc: string;
   composeBcc: string;
@@ -38,6 +40,7 @@ export type UseComposeDraftAutoSaveParams = {
 export function useComposeDraftAutoSave({
   composeOpen,
   sendingMail,
+  draftSaving,
   composeTo,
   composeCc,
   composeBcc,
@@ -76,12 +79,17 @@ export function useComposeDraftAutoSave({
     buildComposePayloadRef.current = buildComposePayload;
   }, [buildComposePayload]);
 
+  const previousDraftSavingRef = useRef(false);
+
   useEffect(() => {
+    const previousDraftSaving = previousDraftSavingRef.current;
+    previousDraftSavingRef.current = draftSaving;
+
     if (!composeOpen || sendingMail) return;
     const preferText = composeTab === "html" && composeLastEditedRef.current === "text";
     const composePayload = buildComposePayloadRef.current({ preferText });
     const { text, html, attachments } = composePayload;
-    const { hash, canAutoSave } = getDraftChangeState({
+    const draftChangeState = getDraftChangeState({
       draftId: composeDraftId,
       lastSavedHash: lastDraftHashRef.current,
       to: composeTo,
@@ -93,27 +101,57 @@ export function useComposeDraftAutoSave({
       attachments,
       invite: composeInvite
     });
-    currentDraftHashRef.current = hash;
-    if (!canAutoSave) {
-      if (hash === lastDraftHashRef.current) {
-        composeDirtyRef.current = false;
+    currentDraftHashRef.current = draftChangeState.hash;
+
+    const autoSaveState = getDraftAutoSaveState({
+      baselineHash: composeBaselineHashRef.current,
+      composeDraftId,
+      composeDirty: composeDirtyRef.current,
+      previousDraftSaving,
+      draftSaving,
+      hash: draftChangeState.hash,
+      lastSavedHash: lastDraftHashRef.current,
+      canAutoSave: draftChangeState.canAutoSave
+    });
+
+    if (autoSaveState.initializeBaseline) {
+      composeBaselineHashRef.current = draftChangeState.hash;
+      if (autoSaveState.syncLastSavedHashToCurrent) {
+        lastDraftHashRef.current = draftChangeState.hash;
       }
       return;
     }
-    if (composeBaselineHashRef.current === null) {
-      composeBaselineHashRef.current = hash;
-      if (composeDraftId && !composeDirtyRef.current) {
-        lastDraftHashRef.current = hash;
-      }
+
+    composeDirtyRef.current = autoSaveState.nextComposeDirty;
+    if (autoSaveState.shouldClearDirty || !autoSaveState.shouldScheduleSave) {
       return;
     }
-    if (!composeDirtyRef.current) {
-      return;
-    }
+
     if (draftSaveTimerRef.current) {
       window.clearTimeout(draftSaveTimerRef.current);
     }
     draftSaveTimerRef.current = window.setTimeout(() => {
+      const nextPreferText = composeTab === "html" && composeLastEditedRef.current === "text";
+      const nextComposePayload = buildComposePayloadRef.current({ preferText: nextPreferText });
+      const nextDraftChangeState = getDraftChangeState({
+        draftId: composeDraftId,
+        lastSavedHash: lastDraftHashRef.current,
+        to: composeTo,
+        cc: composeCc,
+        bcc: composeBcc,
+        subject: composeSubject,
+        text: nextComposePayload.text,
+        html: nextComposePayload.html,
+        attachments: nextComposePayload.attachments,
+        invite: composeInvite
+      });
+      currentDraftHashRef.current = nextDraftChangeState.hash;
+      if (!nextDraftChangeState.canAutoSave) {
+        if (nextDraftChangeState.hash === lastDraftHashRef.current) {
+          composeDirtyRef.current = false;
+        }
+        return;
+      }
       saveDraftRef.current(
         buildDraftSavePayload(
           {
@@ -125,10 +163,10 @@ export function useComposeDraftAutoSave({
             composeReplyHeaders,
             invite: composeInvite
           },
-          composePayload,
+          nextComposePayload,
           { preserveUndefinedHtml: true }
         ),
-        hash
+        nextDraftChangeState.hash
       );
     }, 2000);
     return () => {
@@ -139,6 +177,7 @@ export function useComposeDraftAutoSave({
   }, [
     composeOpen,
     sendingMail,
+    draftSaving,
     composeTo,
     composeCc,
     composeBcc,
