@@ -32,4 +32,14 @@ describe("splitTextWithUrls", () => {
       value: "\n\nPlease do not edit this section."
     });
   });
+
+  it("does not absorb following prose after a single line break", () => {
+    const text = "https://meet.google.com/err-sosa-trk\nOr join by phone";
+
+    expect(getUrls(text)).toEqual(["https://meet.google.com/err-sosa-trk"]);
+    expect(splitTextWithUrls(text)).toContainEqual({
+      type: "text",
+      value: "\nOr join by phone"
+    });
+  });
 });

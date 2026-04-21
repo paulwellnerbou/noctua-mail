@@ -4,9 +4,14 @@ export type LinkifiedSegment =
 
 const urlStartPattern = /https?:\/\//gi;
 const urlCharacterPattern = /[A-Za-z0-9\-._~:/?#[\]@!$&'()*+,;=%]/;
+const urlContinuationBoundaryPattern = /[\-._~:/?#[\]@!$&'()*+,;=%]/;
 
 function isUrlCharacter(value: string) {
   return urlCharacterPattern.test(value);
+}
+
+function isUrlContinuationBoundary(value: string) {
+  return urlContinuationBoundaryPattern.test(value);
 }
 
 function getSingleLineBreakEnd(text: string, index: number) {
@@ -19,12 +24,33 @@ function getSingleLineBreakEnd(text: string, index: number) {
   return null;
 }
 
+function hasUrlContinuationBoundaryAhead(text: string, start: number) {
+  let index = start;
+  while (index < text.length) {
+    const char = text[index] ?? "";
+    if (char === "\n" || char === "\r" || /\s/.test(char) || !isUrlCharacter(char)) {
+      return false;
+    }
+    if (isUrlContinuationBoundary(char)) {
+      return true;
+    }
+    index += 1;
+  }
+  return false;
+}
+
 function isSoftUrlBreak(text: string, index: number) {
   const lineBreakEnd = getSingleLineBreakEnd(text, index);
   if (lineBreakEnd === null) return false;
-  if (index === 0 || !isUrlCharacter(text[index - 1] ?? "")) return false;
-  if (text[lineBreakEnd] === "\n" || text[lineBreakEnd] === "\r") return false;
-  return isUrlCharacter(text[lineBreakEnd] ?? "");
+  const previousChar = text[index - 1] ?? "";
+  const nextChar = text[lineBreakEnd] ?? "";
+  if (index === 0 || !isUrlCharacter(previousChar)) return false;
+  if (nextChar === "\n" || nextChar === "\r") return false;
+  if (!isUrlCharacter(nextChar)) return false;
+  if (isUrlContinuationBoundary(previousChar) || isUrlContinuationBoundary(nextChar)) {
+    return true;
+  }
+  return hasUrlContinuationBoundaryAhead(text, lineBreakEnd);
 }
 
 function readUrl(text: string, start: number) {
