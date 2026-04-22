@@ -1,13 +1,16 @@
 import { describe, expect, it } from "bun:test";
-import { createElement } from "react";
+import { createElement, type ComponentProps } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import CalendarEventEmailSnapshot, {
   type CalendarEventEmailSnapshotData
 } from "./CalendarEventEmailSnapshot";
 
-function render(snapshot: CalendarEventEmailSnapshotData): string {
+function render(
+  snapshot: CalendarEventEmailSnapshotData,
+  extraProps?: Partial<ComponentProps<typeof CalendarEventEmailSnapshot>>
+): string {
   // renderToStaticMarkup returns "" for components that render null.
-  return renderToStaticMarkup(createElement(CalendarEventEmailSnapshot, { snapshot }));
+  return renderToStaticMarkup(createElement(CalendarEventEmailSnapshot, { snapshot, ...extraProps }));
 }
 
 describe("CalendarEventEmailSnapshot", () => {
@@ -33,8 +36,8 @@ describe("CalendarEventEmailSnapshot", () => {
     expect(html).toContain("Invite: Kickoff");
     expect(html).toContain("alice@example.test");
     expect(html).toContain("From");
-    // The label "Original email" is always shown when the card renders.
-    expect(html).toContain("Original email");
+    // The shell label is always shown when the preview renders.
+    expect(html).toContain("Original Email");
   });
 
   it("renders To/Cc/Bcc when present", () => {
@@ -50,6 +53,36 @@ describe("CalendarEventEmailSnapshot", () => {
     expect(html).toContain("To");
     expect(html).toContain("Cc");
     expect(html).toContain("Bcc");
+  });
+
+  it("renders the open-email button in the header when a message target is available", () => {
+    const html = render(
+      {
+        sourceSubject: "Invite: Kickoff",
+        sourceFromAddr: "alice@example.test"
+      },
+      {
+        openMessageId: "msg-1",
+        onOpenMessage: () => undefined
+      }
+    );
+    expect(html).toContain("Open Email");
+  });
+
+  it("renders a separate series-email button when both occurrence and series targets exist", () => {
+    const html = render(
+      {
+        sourceSubject: "Invite: Kickoff",
+        sourceFromAddr: "alice@example.test"
+      },
+      {
+        openMessageId: "msg-occurrence",
+        openSeriesMessageId: "msg-series",
+        onOpenMessage: () => undefined
+      }
+    );
+    expect(html).toContain("Open Email");
+    expect(html).toContain("Open Series Email");
   });
 
   it("prefers the HTML body over plain text", () => {

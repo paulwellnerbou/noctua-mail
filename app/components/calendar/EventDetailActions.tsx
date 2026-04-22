@@ -1,6 +1,6 @@
 "use client";
 
-import { AlarmClock, AlarmClockPlus, Mail, Trash2 } from "lucide-react";
+import { AlarmClock, AlarmClockPlus, Trash2 } from "lucide-react";
 import { Button } from "@radix-ui/themes";
 import type { CalendarInviteActionType } from "@/lib/calendarInviteProcessing";
 import type { CalendarReminder } from "@/app/components/mailclient/utils/calendarReminders";
@@ -28,9 +28,6 @@ export type EventDetailActionsProps = {
   onOpenReminderDialog: () => void;
   deletingReminder: boolean;
   onDeleteReminder: () => void | Promise<void>;
-  occurrenceMessageId?: string;
-  messageId?: string;
-  onOpenMessage?: (messageId: string) => void;
   /** Presence indicates the parent handles event deletion; the delete button
    *  hides when omitted. */
   canDeleteEvent: boolean;
@@ -45,8 +42,8 @@ function getOccurrenceInviteActionLabel(actionType?: CalendarInviteActionType) {
 
 /**
  * Horizontal button strip rendered below the event body: RSVP, reminder
- * scheduling, open-email cross-links, and the delete button. Each button
- * renders only when the corresponding handler and state make it meaningful.
+ * scheduling, and the delete button. The email cross-link lives in the
+ * "Original Email" snapshot header so it sits next to the content it opens.
  */
 export default function EventDetailActions({
   show,
@@ -63,9 +60,6 @@ export default function EventDetailActions({
   onOpenReminderDialog,
   deletingReminder,
   onDeleteReminder,
-  occurrenceMessageId,
-  messageId,
-  onOpenMessage,
   canDeleteEvent,
   deletingEvent,
   onDeleteEvent
@@ -121,23 +115,6 @@ export default function EventDetailActions({
         >
           <Trash2 size={14} />
           {deletingReminder ? "Removing…" : "Remove reminder"}
-        </Button>
-      )}
-      {occurrenceMessageId && onOpenMessage && (
-        <Button
-          size="1"
-          variant="soft"
-          color="gray"
-          onClick={() => onOpenMessage(occurrenceMessageId)}
-        >
-          <Mail size={12} />
-          Open occurrence email
-        </Button>
-      )}
-      {messageId && onOpenMessage && (
-        <Button size="1" variant="soft" color="gray" onClick={() => onOpenMessage(messageId)}>
-          <Mail size={12} />
-          {occurrenceMessageId ? "Open series email" : "Open email"}
         </Button>
       )}
       {eventId && canDeleteEvent && (

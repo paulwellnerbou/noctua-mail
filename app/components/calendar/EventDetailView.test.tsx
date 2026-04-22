@@ -36,9 +36,11 @@ function render(showEmailSnapshot?: boolean): string {
       sourceType: eventSnapshot.sourceType,
       eventId: eventSnapshot.id,
       eventSnapshot,
+      messageId: "msg-1",
       eventStartAtMs: eventSnapshot.startAtMs,
       eventEndAtMs: eventSnapshot.endAtMs,
-      showEmailSnapshot
+      showEmailSnapshot,
+      onOpenMessage: () => undefined
     })
   );
 }
@@ -46,13 +48,14 @@ function render(showEmailSnapshot?: boolean): string {
 describe("EventDetailView", () => {
   it("renders the saved email snapshot by default", () => {
     const html = render();
-    expect(html).toContain("Original email");
+    expect(html).toContain("Original Email");
     expect(html).toContain("Invite: Kickoff");
+    expect(html).toContain("Open Email");
   });
 
   it("can suppress the saved email snapshot when embedded in the source mail view", () => {
     const html = render(false);
-    expect(html).not.toContain("Original email");
+    expect(html).not.toContain("Original Email");
     expect(html).not.toContain("Invite: Kickoff");
   });
 });

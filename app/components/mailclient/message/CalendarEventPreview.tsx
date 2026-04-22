@@ -26,6 +26,7 @@ import { groupItemsByRelativeTime } from "../utils/relativeTimeGroups";
 import type { InviteProcessingStatePatch } from "../utils/calendarInviteState";
 import EventDetailView from "@/app/components/calendar/EventDetailView";
 import InviteAttachmentControls from "@/app/components/calendar/InviteAttachmentControls";
+import shellStyles from "../../calendar/EmbeddedPreviewShell.module.css";
 import styles from "./CalendarEventPreview.module.css";
 
 type InviteProcessingOverride = {
@@ -345,9 +346,9 @@ export default function CalendarEventPreview({
   })();
 
   return (
-    <section className={styles.preview}>
-      <div className={styles.header}>
-        <div className={styles.title}>
+    <section className={shellStyles.preview}>
+      <div className={shellStyles.header}>
+        <div className={shellStyles.title}>
           <CalendarDays size={14} />
           <span>Calendar Event</span>
         </div>

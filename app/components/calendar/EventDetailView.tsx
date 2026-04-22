@@ -313,9 +313,6 @@ export default function EventDetailView({
         onOpenReminderDialog={() => setReminderModalOpen(true)}
         deletingReminder={deletingReminder}
         onDeleteReminder={handleDeleteReminder}
-        occurrenceMessageId={occurrenceMessageId}
-        messageId={messageId}
-        onOpenMessage={onOpenMessage}
         canDeleteEvent={Boolean(onEventDeleted)}
         deletingEvent={deletingEvent}
         onDeleteEvent={handleDeleteEvent}
@@ -336,6 +333,13 @@ export default function EventDetailView({
           // fall back to the series-level snapshot on the event row.
           snapshot={selectCalendarEventEmailSnapshot(eventSnapshot, resolvedStartMs)}
           dateFormat={dateFormat}
+          openMessageId={occurrenceMessageId ?? messageId}
+          openSeriesMessageId={
+            occurrenceMessageId && messageId && occurrenceMessageId !== messageId
+              ? messageId
+              : undefined
+          }
+          onOpenMessage={onOpenMessage}
         />
       )}
 
