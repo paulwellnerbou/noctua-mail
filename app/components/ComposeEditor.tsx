@@ -19,6 +19,7 @@ import {
   ListX,
   Minus,
   Plus,
+  RemoveFormatting as RemoveFormattingIcon,
   Rows3,
   Strikethrough as StrikethroughIcon,
   Table2 as TableIcon,
@@ -52,7 +53,12 @@ import {
 } from "lexical";
 import { $generateHtmlFromNodes, $generateNodesFromDOM } from "@lexical/html";
 import { TRANSFORMERS } from "@lexical/markdown";
-import { $getSelectionStyleValueForProperty, $patchStyleText } from "@lexical/selection";
+import {
+  $forEachSelectedTextNode,
+  $getSelectionStyleValueForProperty,
+  $patchStyleText,
+  $setBlocksType
+} from "@lexical/selection";
 import {
   ListItemNode,
   ListNode,
@@ -123,6 +129,15 @@ function getNextFontSize(current: number, direction: "increase" | "decrease") {
   return previous ?? FONT_SIZE_STEPS[0];
 }
 
+function selectionTouchesTable(selection: ReturnType<typeof $getSelection>) {
+  if ($isTableSelection(selection)) return true;
+  if (!$isRangeSelection(selection)) return false;
+  return Boolean(
+    $getTableCellNodeFromLexicalNode(selection.anchor.getNode()) ||
+      $getTableCellNodeFromLexicalNode(selection.focus.getNode())
+  );
+}
+
 type ToolbarBadgePosition = "top-right" | "bottom-right" | "top-left" | "bottom-left";
 
 function ComposeToolbarIcon({
@@ -170,15 +185,7 @@ function ComposeToolbar({
 
   const syncTableFocusState = useCallback(() => {
     const selection = $getSelection();
-    let nextFocused = false;
-    if ($isTableSelection(selection)) {
-      nextFocused = true;
-    } else if ($isRangeSelection(selection)) {
-      nextFocused = Boolean(
-        $getTableCellNodeFromLexicalNode(selection.anchor.getNode()) ||
-          $getTableCellNodeFromLexicalNode(selection.focus.getNode())
-      );
-    }
+    const nextFocused = selectionTouchesTable(selection);
     if (isTableFocusedRef.current === nextFocused) return;
     isTableFocusedRef.current = nextFocused;
     setIsTableFocused(nextFocused);
@@ -239,6 +246,43 @@ function ComposeToolbar({
     });
   };
 
+  const clearFormatting = () => {
+    const shouldResetBlocks = editor.getEditorState().read(() => {
+      const selection = $getSelection();
+      return !selectionTouchesTable(selection);
+    });
+
+    editor.dispatchCommand(TOGGLE_LINK_COMMAND, null);
+    if (shouldResetBlocks) {
+      editor.dispatchCommand(REMOVE_LIST_COMMAND, undefined);
+    }
+
+    editor.update(() => {
+      const selection = $getSelection();
+      if (!$isRangeSelection(selection)) return;
+
+      selection.setFormat(0);
+      selection.setStyle("");
+      $patchStyleText(selection, { "font-size": null });
+      $forEachSelectedTextNode((textNode) => {
+        textNode.setFormat(0);
+        textNode.setStyle("");
+      });
+
+      if (!shouldResetBlocks) return;
+
+      $setBlocksType(
+        selection,
+        () => $createParagraphNode(),
+        (_prevNode, nextNode) => {
+          nextNode.setFormat("");
+          nextNode.setIndent(0);
+          nextNode.setStyle("");
+        }
+      );
+    });
+  };
+
   const insertTable = () => {
     editor.dispatchCommand(INSERT_TABLE_COMMAND, {
       rows: "2",
@@ -293,6 +337,11 @@ function ComposeToolbar({
       title: "Decrease text size",
       icon: <ComposeToolbarIcon base={<AArrowDown size={14} />} />,
       onClick: () => adjustTextSize("decrease")
+    },
+    {
+      title: "Clear formatting",
+      icon: <ComposeToolbarIcon base={<RemoveFormattingIcon size={14} />} />,
+      onClick: clearFormatting
     },
     {
       title: "Bulleted list",

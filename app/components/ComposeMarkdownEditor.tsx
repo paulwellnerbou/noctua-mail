@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import "@uiw/react-md-editor/markdown-editor.css";
 import "@uiw/react-markdown-preview/markdown.css";
+import remarkBreaks from "remark-breaks";
 import styles from "./ComposeMarkdownEditor.module.css";
 
 const MDEditor = dynamic(
@@ -89,6 +90,13 @@ export default function ComposeMarkdownEditor({
           onChange(nextVal);
         }}
         preview="live"
+        previewOptions={{
+          // Mail compose treats single newlines as intentional line breaks.
+          pluginsFilter(type, plugins) {
+            if (type !== "remark") return plugins;
+            return [...plugins, remarkBreaks];
+          }
+        }}
         height={editorHeight}
         visibleDragbar={false}
         key={resetKey}

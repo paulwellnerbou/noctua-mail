@@ -13,9 +13,27 @@ const MARKDOWN_PREVIEW_CSS_PATH = join(
 
 let markdownPreviewCss: string | null = null;
 
+function stripPreviewLinkPresentation(css: string) {
+  return css.replace(/\.wmde-markdown a\{([^}]*)\}/g, (rule, declarations: string) => {
+    const keptDeclarations = declarations
+      .split(";")
+      .map((declaration) => declaration.trim())
+      .filter(Boolean)
+      .filter((declaration) => {
+        const property = declaration.split(":")[0]?.trim().toLowerCase();
+        return property !== "color" && property !== "text-decoration";
+      });
+
+    if (keptDeclarations.length === 0) return "";
+    return `.wmde-markdown a{${keptDeclarations.join(";")}}`;
+  });
+}
+
 function getMarkdownPreviewCss() {
   if (markdownPreviewCss !== null) return markdownPreviewCss;
-  markdownPreviewCss = readFileSync(MARKDOWN_PREVIEW_CSS_PATH, "utf8");
+  markdownPreviewCss = stripPreviewLinkPresentation(
+    readFileSync(MARKDOWN_PREVIEW_CSS_PATH, "utf8")
+  );
   return markdownPreviewCss;
 }
 

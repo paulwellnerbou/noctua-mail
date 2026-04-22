@@ -17,6 +17,13 @@ describe("markdownToEmailHtml", () => {
     expect(result).toContain("const");
   });
 
+  it("does not inline preview-only link color and underline resets", async () => {
+    const result = await markdownToEmailHtml("[Example](https://example.com)");
+    const linkRule = result.match(/\.wmde-markdown a\{([^}]*)\}/)?.[0] ?? "";
+    expect(result).toContain('<a href="https://example.com">Example</a>');
+    expect(linkRule).toBe(".wmde-markdown a{background-color:transparent}");
+  });
+
   it("returns empty string for empty input", async () => {
     expect(await markdownToEmailHtml("")).toBe("");
     expect(await markdownToEmailHtml("   ")).toBe("");

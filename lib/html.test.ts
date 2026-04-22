@@ -13,6 +13,7 @@ import {
   stripHtmlToText,
   stripConditionalComments
 } from "./html";
+import { markdownToEmailHtml } from "./markdownEmail";
 
 describe("sanitizeHtmlForDisplay", () => {
   it("strips quoted inline event handlers", () => {
@@ -487,6 +488,21 @@ describe("assembleQuotedHtml", () => {
     expect(result).toContain('<div class="noctua-quoted-email-body"><p>Quoted</p></div>');
     expect(result).toContain("<p>Header</p>");
     expect(result).not.toContain("<blockquote");
+  });
+
+  it("preserves standard link presentation when quoting markdown-generated html mail", async () => {
+    const markdownHtml = await markdownToEmailHtml("[Example](https://example.com)");
+    const parts = buildQuotedHtmlPartsFromHtml(markdownHtml, "Header", false);
+
+    const result = assembleQuotedHtml(parts, true);
+    const linkRule =
+      result.match(
+        /#noctua-quoted-html \.noctua-quoted-email-body \.wmde-markdown a\{([^}]*)\}/
+      )?.[0] ?? "";
+
+    expect(linkRule).toBe(
+      "#noctua-quoted-html .noctua-quoted-email-body .wmde-markdown a{background-color:transparent}"
+    );
   });
 });
 
