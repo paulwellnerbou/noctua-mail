@@ -61,7 +61,7 @@ import {
   REMOVE_LIST_COMMAND
 } from "@lexical/list";
 import { HeadingNode, QuoteNode } from "@lexical/rich-text";
-import { CodeHighlightNode, CodeNode } from "@lexical/code";
+import { CodeHighlightNode, CodeNode } from "@lexical/code-core";
 import { AutoLinkNode, LinkNode, TOGGLE_LINK_COMMAND } from "@lexical/link";
 import {
   $deleteTableColumnAtSelection,
