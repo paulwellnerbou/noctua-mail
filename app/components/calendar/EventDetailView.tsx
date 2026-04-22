@@ -76,6 +76,7 @@ export type EventDetailViewProps = {
   responseOccurrenceLabel?: string;
   forceOccurrenceResponse?: boolean;
   dateFormat?: AccountDateFormat;
+  showEmailSnapshot?: boolean;
   inviteProcessing?: {
     actionType: CalendarInviteActionType;
     processed: boolean;
@@ -129,6 +130,7 @@ export default function EventDetailView({
   responseOccurrenceLabel = "This occurrence",
   forceOccurrenceResponse = false,
   dateFormat,
+  showEmailSnapshot = true,
   inviteProcessing
 }: EventDetailViewProps) {
   const resolvedStartMs = startMs ?? eventStartAtMs;
@@ -327,7 +329,7 @@ export default function EventDetailView({
         <p className={styles.notice}>{notice}</p>
       )}
 
-      {eventSnapshot && (
+      {showEmailSnapshot && eventSnapshot && (
         <CalendarEventEmailSnapshot
           // Prefer the per-occurrence snapshot (populated by occurrence-only
           // invite updates) when viewing a specific occurrence; otherwise

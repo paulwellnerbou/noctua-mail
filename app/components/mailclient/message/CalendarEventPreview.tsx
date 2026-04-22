@@ -442,6 +442,7 @@ export default function CalendarEventPreview({
                       }}
                       responseOccurrenceLabel={forceOccurrenceResponse ? "This occurrence" : "Next occurrence"}
                       forceOccurrenceResponse={forceOccurrenceResponse}
+                      showEmailSnapshot={false}
                       inviteProcessing={(() => {
                         const eventUid = event.uid?.trim().toLowerCase() ?? "";
                         if (!eventUid) return undefined;
