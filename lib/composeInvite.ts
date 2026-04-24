@@ -61,6 +61,27 @@ export function toggleAllDayInputValue(
   return value.includes("T") ? value : `${value}T${fallbackTime}`;
 }
 
+export function addMinutesToInviteInput(value: string, minutes: number, allDay: boolean): string {
+  const startAtMs = inviteInputToMs(value, allDay);
+  if (!Number.isFinite(startAtMs)) return value;
+  if (allDay) return msToDateLocal(startAtMs + minutes * 60 * 1000);
+  return msToDateTimeLocal(startAtMs + minutes * 60 * 1000);
+}
+
+export function getEndValueAfterStartChange(
+  startValue: string,
+  endValue: string,
+  allDay: boolean,
+  minimumDurationMinutes = 30
+): string {
+  if (!startValue || !endValue) return endValue;
+  const startAtMs = inviteInputToMs(startValue, allDay);
+  const endAtMs = inviteInputToMs(endValue, allDay);
+  if (!Number.isFinite(startAtMs) || !Number.isFinite(endAtMs)) return endValue;
+  if (endAtMs >= startAtMs) return endValue;
+  return addMinutesToInviteInput(startValue, minimumDurationMinutes, allDay);
+}
+
 export function rruleToOption(rule?: string): RecurrenceOption {
   const upper = rule?.trim().toUpperCase() ?? "";
   if (!upper) return "none";
