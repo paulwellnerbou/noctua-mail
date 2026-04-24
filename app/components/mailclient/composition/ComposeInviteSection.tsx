@@ -56,8 +56,9 @@ export default function ComposeInviteSection({
     if (waitingForParentEchoRef.current && latestLocalDraft) {
       if (composeInviteDraftsEqual(inviteDraft, latestLocalDraft)) {
         waitingForParentEchoRef.current = false;
+        return;
       }
-      return;
+      waitingForParentEchoRef.current = false;
     }
     latestLocalDraftRef.current = inviteDraft;
     // External draft opens can load a different invite; mirror that into the local input cache.

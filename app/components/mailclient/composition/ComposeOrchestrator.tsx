@@ -14,7 +14,6 @@ import {
   buildComposeInvitePayload,
   normalizeComposeInviteDraft,
   createDefaultComposeInviteDraft,
-  getEndValueAfterStartChange,
   type ComposeInviteDraft
 } from "@/lib/composeInvite";
 import { extractComposeInviteDraftFromSource } from "@/lib/composeInviteMetadata";
@@ -926,9 +925,6 @@ function ComposeOrchestratorImpl(
       }}
       setComposeInviteStart={(value) => {
         setComposeInviteStart(value);
-        setComposeInviteEnd((prevEnd) =>
-          getEndValueAfterStartChange(value, prevEnd, composeInviteAllDay)
-        );
         composeDirtyRef.current = true;
       }}
       setComposeInviteEnd={(value) => {
