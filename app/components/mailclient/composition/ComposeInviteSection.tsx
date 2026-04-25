@@ -81,7 +81,7 @@ export default function ComposeInviteSection({
   const commitInviteChange = (commit: () => void) => {
     const nextDraft = latestLocalDraftRef.current;
     if (nextDraft) {
-      pendingParentEchoDraftsRef.current = [...pendingParentEchoDraftsRef.current, nextDraft];
+      pendingParentEchoDraftsRef.current.push(nextDraft);
     }
     startTransition(commit);
   };
