@@ -79,11 +79,11 @@ type ComposeMessageFieldProps = {
   setComposeHtmlText: React.Dispatch<React.SetStateAction<string>>;
   setComposeMarkdown: React.Dispatch<React.SetStateAction<string>>;
   setComposeInviteEnabled: (enabled: boolean) => void;
-  setComposeInviteLocation: React.Dispatch<React.SetStateAction<string>>;
-  setComposeInviteStart: React.Dispatch<React.SetStateAction<string>>;
-  setComposeInviteEnd: React.Dispatch<React.SetStateAction<string>>;
-  setComposeInviteAllDay: React.Dispatch<React.SetStateAction<boolean>>;
-  setComposeInviteRecurrenceRule: React.Dispatch<React.SetStateAction<string>>;
+  setComposeInviteLocation: (value: string) => void;
+  setComposeInviteStart: (value: string) => void;
+  setComposeInviteEnd: (value: string) => void;
+  setComposeInviteAllDay: (value: boolean) => void;
+  setComposeInviteRecurrenceRule: (value: string) => void;
   setComposeTab: React.Dispatch<React.SetStateAction<ComposeTab>>;
   setComposeEditorReset: React.Dispatch<React.SetStateAction<number>>;
   setComposeIncludeOriginal: React.Dispatch<React.SetStateAction<boolean>>;
