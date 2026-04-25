@@ -17,6 +17,12 @@ describe("composeInvite", () => {
     ).toBe("2026-03-26T14:00");
   });
 
+  it("clamps the end date to the start date for all-day events when the existing end is before start", () => {
+    expect(getEndValueAfterStartChange("2026-03-27", "2026-03-26", true)).toBe(
+      "2026-03-27"
+    );
+  });
+
   it("does not rewrite incomplete values", () => {
     expect(getEndValueAfterStartChange("", "2026-03-26T12:00", false)).toBe(
       "2026-03-26T12:00"

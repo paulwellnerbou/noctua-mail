@@ -39,6 +39,7 @@ export default function ComposeInviteSection({
 }: Props) {
   const enabled = Boolean(inviteDraft);
   const [localDraft, setLocalDraft] = useState<ComposeInviteDraft | null>(inviteDraft);
+  const displayedDraft = localDraft ?? inviteDraft;
   const latestLocalDraftRef = useRef<ComposeInviteDraft | null>(inviteDraft);
   const pendingParentEchoDraftsRef = useRef<ComposeInviteDraft[]>([]);
   const [, startTransition] = useTransition();
@@ -80,7 +81,7 @@ export default function ComposeInviteSection({
   const commitInviteChange = (commit: () => void) => {
     const nextDraft = latestLocalDraftRef.current;
     if (nextDraft) {
-      pendingParentEchoDraftsRef.current = [...pendingParentEchoDraftsRef.current, nextDraft].slice(-10);
+      pendingParentEchoDraftsRef.current = [...pendingParentEchoDraftsRef.current, nextDraft];
     }
     startTransition(commit);
   };
@@ -152,14 +153,14 @@ export default function ComposeInviteSection({
         </Button>
       </Flex>
 
-      {enabled && localDraft ? (
+      {enabled && displayedDraft ? (
         <div className={styles.composeInviteFields}>
           <CalendarEventScheduleFields
-            startValue={localDraft.start}
-            endValue={localDraft.end}
-            allDay={localDraft.allDay}
-            recurrenceRule={localDraft.recurrenceRule}
-            location={localDraft.location ?? ""}
+            startValue={displayedDraft.start}
+            endValue={displayedDraft.end}
+            allDay={displayedDraft.allDay}
+            recurrenceRule={displayedDraft.recurrenceRule}
+            location={displayedDraft.location ?? ""}
             disabled={disabled}
             onStartValueChange={handleStartChange}
             onEndValueChange={handleEndChange}
