@@ -40,12 +40,12 @@ export default function ComposeInviteSection({
   const enabled = Boolean(inviteDraft);
   const [localDraft, setLocalDraft] = useState<ComposeInviteDraft | null>(inviteDraft);
   const latestLocalDraftRef = useRef<ComposeInviteDraft | null>(inviteDraft);
-  const waitingForParentEchoRef = useRef(false);
+  const pendingParentEchoDraftsRef = useRef<ComposeInviteDraft[]>([]);
   const [, startTransition] = useTransition();
 
   useEffect(() => {
     if (!inviteDraft) {
-      waitingForParentEchoRef.current = false;
+      pendingParentEchoDraftsRef.current = [];
       latestLocalDraftRef.current = null;
       // External compose resets replace the invite draft; mirror that into the local input cache.
       // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -53,12 +53,16 @@ export default function ComposeInviteSection({
       return;
     }
     const latestLocalDraft = latestLocalDraftRef.current;
-    if (waitingForParentEchoRef.current && latestLocalDraft) {
-      if (composeInviteDraftsEqual(inviteDraft, latestLocalDraft)) {
-        waitingForParentEchoRef.current = false;
+    const pendingEchoDrafts = pendingParentEchoDraftsRef.current;
+    if (pendingEchoDrafts.length > 0 && latestLocalDraft) {
+      const matchingPendingIndex = pendingEchoDrafts.findIndex((pendingDraft) =>
+        composeInviteDraftsEqual(inviteDraft, pendingDraft)
+      );
+      if (matchingPendingIndex >= 0) {
+        pendingParentEchoDraftsRef.current = pendingEchoDrafts.slice(matchingPendingIndex + 1);
         return;
       }
-      waitingForParentEchoRef.current = false;
+      pendingParentEchoDraftsRef.current = [];
     }
     latestLocalDraftRef.current = inviteDraft;
     // External draft opens can load a different invite; mirror that into the local input cache.
@@ -74,7 +78,10 @@ export default function ComposeInviteSection({
   };
 
   const commitInviteChange = (commit: () => void) => {
-    waitingForParentEchoRef.current = true;
+    const nextDraft = latestLocalDraftRef.current;
+    if (nextDraft) {
+      pendingParentEchoDraftsRef.current = [...pendingParentEchoDraftsRef.current, nextDraft].slice(-10);
+    }
     startTransition(commit);
   };
 
@@ -134,6 +141,7 @@ export default function ComposeInviteSection({
           disabled={disabled}
           onClick={() => {
             if (enabled) {
+              pendingParentEchoDraftsRef.current = [];
               latestLocalDraftRef.current = null;
               setLocalDraft(null);
             }
