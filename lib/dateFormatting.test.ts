@@ -64,6 +64,23 @@ describe("dateFormatting helpers", () => {
     expect(formatAccountUpcomingDateLabel(tomorrowMs, "ymd", nowMs)).toBe("Tomorrow");
   });
 
+  test("formatAccountUpcomingDateLabel handles tomorrow across DST boundaries", () => {
+    const previousTz = process.env.TZ;
+    process.env.TZ = "Europe/Berlin";
+    try {
+      const nowMs = new Date(2026, 2, 29, 9, 0, 0).getTime();
+      const tomorrowMs = new Date(2026, 2, 30, 10, 0, 0).getTime();
+
+      expect(formatAccountUpcomingDateLabel(tomorrowMs, "ymd", nowMs)).toBe("Tomorrow");
+    } finally {
+      if (previousTz === undefined) {
+        delete process.env.TZ;
+      } else {
+        process.env.TZ = previousTz;
+      }
+    }
+  });
+
   test("formatAccountUpcomingDateLabel falls back to account-formatted dates", () => {
     const nowMs = new Date(2026, 3, 15, 9, 0, 0).getTime();
     const laterMs = new Date(2026, 3, 20, 10, 0, 0).getTime();

@@ -125,8 +125,8 @@ function formatDate(date: Date, format: AccountDateFormat, includeSeconds: boole
   return formatIntl(date, FORMAT_LOCALE_BY_PRESET[format], includeSeconds);
 }
 
-function getLocalDayStartMs(date: Date) {
-  return new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+function getLocalCalendarDayNumber(date: Date) {
+  return Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()) / (24 * 60 * 60 * 1000);
 }
 
 export function formatAccountDateValue(
@@ -280,9 +280,7 @@ export function formatAccountUpcomingDateLabel(
   const now = new Date(nowMs);
   if (Number.isNaN(now.getTime())) return formatAccountMediumDate(dateValue, preferredFormat);
 
-  const dayOffset = Math.floor(
-    (getLocalDayStartMs(parsed) - getLocalDayStartMs(now)) / (24 * 60 * 60 * 1000)
-  );
+  const dayOffset = getLocalCalendarDayNumber(parsed) - getLocalCalendarDayNumber(now);
   if (dayOffset === 0) return "Today";
   if (dayOffset === 1) return "Tomorrow";
   return formatAccountMediumDate(dateValue, preferredFormat);
