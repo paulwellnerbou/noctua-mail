@@ -1,9 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import {
   formatAccountDateValue,
+  formatAccountMediumDate,
   formatAccountMediumDateTime,
   formatAccountShortTime,
-  formatAccountTimestampLabel
+  formatAccountTimestampLabel,
+  formatAccountUpcomingDateLabel
 } from "./dateFormatting";
 
 // A stable timestamp (2026-04-15 15:45:00 local). We use getTime() from a
@@ -47,6 +49,26 @@ describe("dateFormatting helpers", () => {
     expect(mdy).not.toBe(dmy);
     expect(mdy).toContain("2026");
     expect(dmy).toContain("2026");
+  });
+
+  test("formatAccountMediumDate honors ymd preset without adding time", () => {
+    expect(formatAccountMediumDate(SAMPLE_MS, "ymd")).toBe("2026-04-15");
+  });
+
+  test("formatAccountUpcomingDateLabel uses relative labels for today and tomorrow", () => {
+    const nowMs = new Date(2026, 3, 15, 9, 0, 0).getTime();
+    const todayMs = new Date(2026, 3, 15, 15, 45, 0).getTime();
+    const tomorrowMs = new Date(2026, 3, 16, 10, 0, 0).getTime();
+
+    expect(formatAccountUpcomingDateLabel(todayMs, "ymd", nowMs)).toBe("Today");
+    expect(formatAccountUpcomingDateLabel(tomorrowMs, "ymd", nowMs)).toBe("Tomorrow");
+  });
+
+  test("formatAccountUpcomingDateLabel falls back to account-formatted dates", () => {
+    const nowMs = new Date(2026, 3, 15, 9, 0, 0).getTime();
+    const laterMs = new Date(2026, 3, 20, 10, 0, 0).getTime();
+
+    expect(formatAccountUpcomingDateLabel(laterMs, "ymd", nowMs)).toBe("2026-04-20");
   });
 
   test("formatAccountShortTime returns a non-empty label", () => {

@@ -34,6 +34,10 @@ const MEDIUM_DATE_TIME_OPTIONS: Intl.DateTimeFormatOptions = {
   timeStyle: "short"
 };
 
+const MEDIUM_DATE_OPTIONS: Intl.DateTimeFormatOptions = {
+  dateStyle: "medium"
+};
+
 const SHORT_TIME_OPTIONS: Intl.DateTimeFormatOptions = {
   timeStyle: "short"
 };
@@ -119,6 +123,10 @@ function formatDate(date: Date, format: AccountDateFormat, includeSeconds: boole
     return formatIntl(date, undefined, includeSeconds);
   }
   return formatIntl(date, FORMAT_LOCALE_BY_PRESET[format], includeSeconds);
+}
+
+function getLocalDayStartMs(date: Date) {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
 }
 
 export function formatAccountDateValue(
@@ -241,6 +249,43 @@ export function formatAccountMediumDateTime(
   const parsed = new Date(dateValue);
   if (Number.isNaN(parsed.getTime())) return null;
   return formatStyled(parsed, preferredFormat, MEDIUM_DATE_TIME_OPTIONS, "medium-date-time");
+}
+
+/**
+ * Formats a timestamp as a medium date label (e.g. "Apr 15, 2026" in en-US).
+ * Honors the account's preferred date format when provided.
+ */
+export function formatAccountMediumDate(
+  dateValue: number,
+  preferredFormat?: AccountDateFormat
+): string | null {
+  if (!Number.isFinite(dateValue)) return null;
+  const parsed = new Date(dateValue);
+  if (Number.isNaN(parsed.getTime())) return null;
+  return formatStyled(parsed, preferredFormat, MEDIUM_DATE_OPTIONS, "medium-date");
+}
+
+/**
+ * Formats a date label for upcoming items: "Today", "Tomorrow", or the
+ * account-formatted date for later days.
+ */
+export function formatAccountUpcomingDateLabel(
+  dateValue: number,
+  preferredFormat?: AccountDateFormat,
+  nowMs = Date.now()
+): string | null {
+  if (!Number.isFinite(dateValue)) return null;
+  const parsed = new Date(dateValue);
+  if (Number.isNaN(parsed.getTime())) return null;
+  const now = new Date(nowMs);
+  if (Number.isNaN(now.getTime())) return formatAccountMediumDate(dateValue, preferredFormat);
+
+  const dayOffset = Math.floor(
+    (getLocalDayStartMs(parsed) - getLocalDayStartMs(now)) / (24 * 60 * 60 * 1000)
+  );
+  if (dayOffset === 0) return "Today";
+  if (dayOffset === 1) return "Tomorrow";
+  return formatAccountMediumDate(dateValue, preferredFormat);
 }
 
 /**
