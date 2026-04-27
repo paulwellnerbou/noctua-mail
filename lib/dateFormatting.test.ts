@@ -13,6 +13,27 @@ import {
 // machine's timezone.
 const SAMPLE_MS = new Date(2026, 3, 15, 15, 45, 0).getTime();
 
+function formatUpcomingDateLabelInSubprocess(timeZone: string) {
+  const evalSource = `
+    import { formatAccountUpcomingDateLabel } from "./lib/dateFormatting";
+    const nowMs = new Date(2026, 2, 29, 9, 0, 0).getTime();
+    const tomorrowMs = new Date(2026, 2, 30, 10, 0, 0).getTime();
+    process.stdout.write(formatAccountUpcomingDateLabel(tomorrowMs, "ymd", nowMs) ?? "");
+  `;
+  const result = Bun.spawnSync({
+    cmd: ["bun", "-e", evalSource],
+    cwd: process.cwd(),
+    env: { ...process.env, TZ: timeZone },
+    stdout: "pipe",
+    stderr: "pipe"
+  });
+  return {
+    exitCode: result.exitCode,
+    stdout: Buffer.from(result.stdout).toString("utf8").trim(),
+    stderr: Buffer.from(result.stderr).toString("utf8").trim()
+  };
+}
+
 describe("dateFormatting helpers", () => {
   test("formatAccountDateValue honors ymd preset", () => {
     expect(formatAccountDateValue(SAMPLE_MS, "ymd")).toBe("2026-04-15 15:45");
@@ -65,20 +86,11 @@ describe("dateFormatting helpers", () => {
   });
 
   test("formatAccountUpcomingDateLabel handles tomorrow across DST boundaries", () => {
-    const previousTz = process.env.TZ;
-    process.env.TZ = "Europe/Berlin";
-    try {
-      const nowMs = new Date(2026, 2, 29, 9, 0, 0).getTime();
-      const tomorrowMs = new Date(2026, 2, 30, 10, 0, 0).getTime();
+    const result = formatUpcomingDateLabelInSubprocess("Europe/Berlin");
 
-      expect(formatAccountUpcomingDateLabel(tomorrowMs, "ymd", nowMs)).toBe("Tomorrow");
-    } finally {
-      if (previousTz === undefined) {
-        delete process.env.TZ;
-      } else {
-        process.env.TZ = previousTz;
-      }
-    }
+    expect(result.exitCode).toBe(0);
+    expect(result.stderr).toBe("");
+    expect(result.stdout).toBe("Tomorrow");
   });
 
   test("formatAccountUpcomingDateLabel falls back to account-formatted dates", () => {
