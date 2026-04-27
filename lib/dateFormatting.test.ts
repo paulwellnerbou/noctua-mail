@@ -1,15 +1,38 @@
 import { describe, expect, test } from "bun:test";
 import {
   formatAccountDateValue,
+  formatAccountMediumDate,
   formatAccountMediumDateTime,
   formatAccountShortTime,
-  formatAccountTimestampLabel
+  formatAccountTimestampLabel,
+  formatAccountUpcomingDateLabel
 } from "./dateFormatting";
 
 // A stable timestamp (2026-04-15 15:45:00 local). We use getTime() from a
 // locally-constructed Date so these assertions pass regardless of the CI
 // machine's timezone.
 const SAMPLE_MS = new Date(2026, 3, 15, 15, 45, 0).getTime();
+
+function formatUpcomingDateLabelInSubprocess(timeZone: string) {
+  const evalSource = `
+    import { formatAccountUpcomingDateLabel } from "./lib/dateFormatting";
+    const nowMs = new Date(2026, 2, 29, 9, 0, 0).getTime();
+    const tomorrowMs = new Date(2026, 2, 30, 10, 0, 0).getTime();
+    process.stdout.write(formatAccountUpcomingDateLabel(tomorrowMs, "ymd", nowMs) ?? "");
+  `;
+  const result = Bun.spawnSync({
+    cmd: ["bun", "-e", evalSource],
+    cwd: process.cwd(),
+    env: { ...process.env, TZ: timeZone },
+    stdout: "pipe",
+    stderr: "pipe"
+  });
+  return {
+    exitCode: result.exitCode,
+    stdout: Buffer.from(result.stdout).toString("utf8").trim(),
+    stderr: Buffer.from(result.stderr).toString("utf8").trim()
+  };
+}
 
 describe("dateFormatting helpers", () => {
   test("formatAccountDateValue honors ymd preset", () => {
@@ -47,6 +70,34 @@ describe("dateFormatting helpers", () => {
     expect(mdy).not.toBe(dmy);
     expect(mdy).toContain("2026");
     expect(dmy).toContain("2026");
+  });
+
+  test("formatAccountMediumDate honors ymd preset without adding time", () => {
+    expect(formatAccountMediumDate(SAMPLE_MS, "ymd")).toBe("2026-04-15");
+  });
+
+  test("formatAccountUpcomingDateLabel uses relative labels for today and tomorrow", () => {
+    const nowMs = new Date(2026, 3, 15, 9, 0, 0).getTime();
+    const todayMs = new Date(2026, 3, 15, 15, 45, 0).getTime();
+    const tomorrowMs = new Date(2026, 3, 16, 10, 0, 0).getTime();
+
+    expect(formatAccountUpcomingDateLabel(todayMs, "ymd", nowMs)).toBe("Today");
+    expect(formatAccountUpcomingDateLabel(tomorrowMs, "ymd", nowMs)).toBe("Tomorrow");
+  });
+
+  test("formatAccountUpcomingDateLabel handles tomorrow across DST boundaries", () => {
+    const result = formatUpcomingDateLabelInSubprocess("Europe/Berlin");
+
+    expect(result.exitCode).toBe(0);
+    expect(result.stderr).toBe("");
+    expect(result.stdout).toBe("Tomorrow");
+  });
+
+  test("formatAccountUpcomingDateLabel falls back to account-formatted dates", () => {
+    const nowMs = new Date(2026, 3, 15, 9, 0, 0).getTime();
+    const laterMs = new Date(2026, 3, 20, 10, 0, 0).getTime();
+
+    expect(formatAccountUpcomingDateLabel(laterMs, "ymd", nowMs)).toBe("2026-04-20");
   });
 
   test("formatAccountShortTime returns a non-empty label", () => {

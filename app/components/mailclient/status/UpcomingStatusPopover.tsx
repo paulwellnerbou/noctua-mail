@@ -18,7 +18,10 @@ import {
 } from "@/lib/calendar";
 import { formatCalendarTimeZoneShortLabel } from "@/lib/calendarTimezones";
 import type { AccountDateFormat, CalendarEvent } from "@/lib/data";
-import { formatAccountShortTime } from "@/lib/dateFormatting";
+import {
+  formatAccountShortTime,
+  formatAccountUpcomingDateLabel
+} from "@/lib/dateFormatting";
 import {
   deleteCalendarReminder,
   type CalendarReminder
@@ -124,6 +127,16 @@ function getEntryDisplayUid(entry: UpcomingEntry) {
   return reminderEventUid || "";
 }
 
+function formatUpcomingStatusDateTime(
+  startAtMs: number,
+  accountDateFormat?: AccountDateFormat
+) {
+  const date = formatAccountUpcomingDateLabel(startAtMs, accountDateFormat) ?? "";
+  const time = formatAccountShortTime(startAtMs, accountDateFormat) ?? "";
+  if (date && time) return `${date} ${time}`;
+  return date || time;
+}
+
 export default function UpcomingStatusPopover({
   open,
   onOpenChange,
@@ -143,8 +156,11 @@ export default function UpcomingStatusPopover({
   const nextEntry = upcomingEntries[0] ?? null;
   const upcomingStatusValue = (() => {
     if (!nextEntry) return "None";
-    const time = formatAccountShortTime(nextEntry.startAtMs, accountDateFormat) ?? "";
-    return `${mergedCount} · ${nextEntry.title} @ ${time}`;
+    const dateTime = formatUpcomingStatusDateTime(
+      nextEntry.startAtMs,
+      accountDateFormat
+    );
+    return `${mergedCount} · ${nextEntry.title} @ ${dateTime}`;
   })();
   const upcomingStatusTone: BottomStatusTone = mergedCount > 0 ? "normal" : "muted";
   const groupedEntries = useMemo(
