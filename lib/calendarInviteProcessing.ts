@@ -1,6 +1,7 @@
 import { parseIcsInvite, type CalendarEventPreview } from "./calendar";
 
 export type CalendarInviteActionType = "invitation" | "update" | "cancellation";
+export type CalendarInviteUnprocessedReason = "event_series_not_found";
 
 export type CalendarInviteMutationGroup = {
   eventUid: string;

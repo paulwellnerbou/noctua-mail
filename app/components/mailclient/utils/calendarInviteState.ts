@@ -3,9 +3,11 @@ import type { Message, MessageCalendarInviteState } from "@/lib/data";
 export type InviteProcessingStatePatch = {
   eventUid: string;
   actionType?: MessageCalendarInviteState["actionType"];
+  processed?: boolean;
   processedAtMs?: number;
   processedAutomatically?: boolean;
   processedByUserId?: string;
+  unprocessedReason?: MessageCalendarInviteState["unprocessedReason"];
 };
 
 function normalizeInviteProcessingStatePatch(patch: InviteProcessingStatePatch) {
@@ -15,6 +17,7 @@ function normalizeInviteProcessingStatePatch(patch: InviteProcessingStatePatch) 
     eventUid,
     eventUidKey: eventUid.toLowerCase(),
     actionType: patch.actionType,
+    processed: typeof patch.processed === "boolean" ? patch.processed : undefined,
     processedAtMs:
       typeof patch.processedAtMs === "number" && Number.isFinite(patch.processedAtMs)
         ? patch.processedAtMs
@@ -24,7 +27,8 @@ function normalizeInviteProcessingStatePatch(patch: InviteProcessingStatePatch) 
     processedByUserId:
       typeof patch.processedByUserId === "string" && patch.processedByUserId.trim()
         ? patch.processedByUserId.trim()
-        : undefined
+        : undefined,
+    unprocessedReason: patch.unprocessedReason
   };
 }
 
@@ -37,7 +41,8 @@ function inviteStatesEqual(
     left?.actionType === right.actionType &&
     left?.processedAtMs === right.processedAtMs &&
     left?.processedAutomatically === right.processedAutomatically &&
-    left?.processedByUserId === right.processedByUserId
+    left?.processedByUserId === right.processedByUserId &&
+    left?.unprocessedReason === right.unprocessedReason
   );
 }
 
@@ -64,12 +69,25 @@ export function mergeMessageInviteStatePatches(
     const existing = existingIndex >= 0 ? nextStates[existingIndex] : undefined;
     const actionType = patch.actionType ?? existing?.actionType;
     if (!actionType) return;
+    const marksProcessed =
+      patch.processed === true ||
+      typeof patch.processedAtMs === "number" ||
+      typeof patch.processedAutomatically === "boolean" ||
+      typeof patch.processedByUserId === "string";
+    const marksUnprocessed = patch.processed === false;
     const nextState: MessageCalendarInviteState = {
       eventUid: existing?.eventUid ?? patch.eventUid,
       actionType,
-      processedAtMs: patch.processedAtMs ?? existing?.processedAtMs,
-      processedAutomatically: patch.processedAutomatically ?? existing?.processedAutomatically,
-      processedByUserId: patch.processedByUserId ?? existing?.processedByUserId
+      processedAtMs: marksUnprocessed ? undefined : patch.processedAtMs ?? existing?.processedAtMs,
+      processedAutomatically: marksUnprocessed
+        ? undefined
+        : patch.processedAutomatically ?? existing?.processedAutomatically,
+      processedByUserId: marksUnprocessed
+        ? undefined
+        : patch.processedByUserId ?? existing?.processedByUserId,
+      unprocessedReason: marksProcessed
+        ? undefined
+        : patch.unprocessedReason ?? existing?.unprocessedReason
     };
     if (inviteStatesEqual(existing, nextState)) return;
     changed = true;

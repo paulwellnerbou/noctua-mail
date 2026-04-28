@@ -21,7 +21,10 @@ import {
   normalizeCalendarEventUid,
   normalizeCalendarEventUidKey
 } from "../../calendarEventUids";
-import type { CalendarInviteActionType } from "../../calendarInviteProcessing";
+import type {
+  CalendarInviteActionType,
+  CalendarInviteUnprocessedReason
+} from "../../calendarInviteProcessing";
 import { CATEGORY_KEYS, type CategoryKey } from "../../mail/categorization/linearModel";
 
 /**
@@ -113,16 +116,25 @@ export function normalizeCalendarInviteActionType(
   return null;
 }
 
+export function normalizeCalendarInviteUnprocessedReason(
+  value?: string | null
+): CalendarInviteUnprocessedReason | null {
+  if (value === "event_series_not_found") return value;
+  return null;
+}
+
 export function mapMessageCalendarInviteStateRow(row: {
   eventUid?: string | null;
   inviteActionType?: string | null;
   processedAtMs?: number | null;
   processedByUserId?: string | null;
   processedAutomatically?: number | boolean | null;
+  unprocessedReason?: string | null;
 }): MessageCalendarInviteState | null {
   const eventUid = normalizeCalendarEventUid(row.eventUid);
   const actionType = normalizeCalendarInviteActionType(row.inviteActionType);
   if (!eventUid || !actionType) return null;
+  const unprocessedReason = normalizeCalendarInviteUnprocessedReason(row.unprocessedReason);
   return {
     eventUid,
     actionType,
@@ -139,7 +151,8 @@ export function mapMessageCalendarInviteStateRow(row: {
         ? row.processedAutomatically
         : typeof row.processedAutomatically === "number"
           ? row.processedAutomatically !== 0
-          : undefined
+          : undefined,
+    ...(unprocessedReason ? { unprocessedReason } : {})
   };
 }
 
@@ -169,7 +182,8 @@ export async function getMessageCalendarInviteDataByMessageId(
            inviteActionType,
            processedAtMs,
            processedByUserId,
-           processedAutomatically
+           processedAutomatically,
+           unprocessedReason
          FROM message_calendar_events
          WHERE accountId = ?
            AND messageId IN (${chunk.map(() => "?").join(",")})
@@ -182,6 +196,7 @@ export async function getMessageCalendarInviteDataByMessageId(
       processedAtMs?: number | null;
       processedByUserId?: string | null;
       processedAutomatically?: number | boolean | null;
+      unprocessedReason?: string | null;
     }>;
     rows.forEach((row) => {
       const messageId = String(row.messageId ?? "").trim();

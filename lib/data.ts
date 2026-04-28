@@ -1,4 +1,7 @@
-import type { CalendarInviteActionType } from "./calendarInviteProcessing";
+import type {
+  CalendarInviteActionType,
+  CalendarInviteUnprocessedReason
+} from "./calendarInviteProcessing";
 import type { ComposeInviteDraft } from "./composeInvite";
 
 export type CaldavConfig = {
@@ -351,6 +354,7 @@ export type MessageCalendarInviteState = {
   processedAtMs?: number;
   processedByUserId?: string;
   processedAutomatically?: boolean;
+  unprocessedReason?: CalendarInviteUnprocessedReason;
 };
 
 export type User = {

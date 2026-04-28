@@ -3,6 +3,7 @@ import { mkdirSync, promises as fs } from "fs";
 import {
   getAttachmentsAccountDir,
   getDefaultAccountDbPath,
+  getDataDir,
   getMainDbPath,
   getSourcesAccountDir
 } from "../runtimePaths";
@@ -19,6 +20,7 @@ import { ensureTopicLearningRuntimeData } from "./topics";
 
 const sqliteModulePromise = () => import("bun:sqlite" /* webpackIgnore: true */);
 let DatabaseCtor: any | null = null;
+let startupStoragePathLogged = false;
 
 // Memoized so `getAccountDb` doesn't allocate a new promise + pay the
 // await hop on every call. The module itself is cached by the runtime;
@@ -179,6 +181,13 @@ export async function getDb() {
     ensureDbParentDir(dbPath);
     masterDbInstance = new DatabaseCtor(dbPath);
     configureDb(masterDbInstance);
+    if (!startupStoragePathLogged) {
+      console.info("[startup] opened storage", {
+        dataDir: getDataDir(),
+        dbPath
+      });
+      startupStoragePathLogged = true;
+    }
   }
   if (!masterInitialized && masterDbInstance) {
     initMasterSchema(masterDbInstance);

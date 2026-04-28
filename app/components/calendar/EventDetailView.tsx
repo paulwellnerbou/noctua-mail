@@ -2,7 +2,10 @@
 
 import { useEffect, useState } from "react";
 import { buildCalendarRecurrenceSummary, formatCalendarEventRange } from "@/lib/calendar";
-import type { CalendarInviteActionType } from "@/lib/calendarInviteProcessing";
+import type {
+  CalendarInviteActionType,
+  CalendarInviteUnprocessedReason
+} from "@/lib/calendarInviteProcessing";
 import type {
   AccountDateFormat,
   CalendarEvent,
@@ -75,6 +78,7 @@ export type EventDetailViewProps = {
   ) => void;
   responseOccurrenceLabel?: string;
   forceOccurrenceResponse?: boolean;
+  inviteScopeLabel?: string;
   dateFormat?: AccountDateFormat;
   showEmailSnapshot?: boolean;
   inviteProcessing?: {
@@ -82,6 +86,7 @@ export type EventDetailViewProps = {
     processed: boolean;
     processedAtMs?: number;
     processedAutomatically?: boolean;
+    unprocessedReason?: CalendarInviteUnprocessedReason;
     processing?: boolean;
     onProcess?: () => void | Promise<void>;
   };
@@ -129,6 +134,7 @@ export default function EventDetailView({
   onInviteProcessed,
   responseOccurrenceLabel = "This occurrence",
   forceOccurrenceResponse = false,
+  inviteScopeLabel,
   dateFormat,
   showEmailSnapshot = true,
   inviteProcessing
@@ -292,6 +298,7 @@ export default function EventDetailView({
         currentMyPartstat={currentMyPartstat}
         participationColor={currentParticipationColor}
         sourceType={sourceType}
+        inviteScopeLabel={inviteScopeLabel}
       />
 
       {currentMyPartstat && (canChooseOccurrenceScope || forceOccurrenceResponse) && !hasOccurrenceCancellationAction && (

@@ -6,6 +6,7 @@ import {
   getCalendarEventByUid,
   listCalendarInviteSourceMessagesByEventUid,
   markMessageCalendarInviteStatesProcessed,
+  markMessageCalendarInviteStatesUnprocessed,
   rescheduleCalendarRemindersByEventUid,
   upsertCalendarEventByUid,
   upsertMessageCalendarInviteStates
@@ -16,7 +17,8 @@ import {
   inferCalendarInviteActionType,
   inferCalendarInviteMessageActionType,
   type CalendarInviteActionType,
-  type CalendarInviteMutationGroup
+  type CalendarInviteMutationGroup,
+  type CalendarInviteUnprocessedReason
 } from "@/lib/calendarInviteProcessing";
 import { parseIcsInvite } from "@/lib/calendar";
 import {
@@ -175,9 +177,12 @@ export type ProcessCalendarInviteForMessageResult = {
   states: Array<{
     eventUid: string;
     actionType: CalendarInviteActionType;
+    eventFirstStartAtMs?: number;
+    eventLastEndAtMs?: number | null;
     processed: boolean;
     processedAtMs?: number;
     processedAutomatically?: boolean;
+    unprocessedReason?: CalendarInviteUnprocessedReason;
   }>;
 };
 
@@ -220,6 +225,7 @@ export async function processCalendarInviteForMessage({
 
   const processedEventUids: string[] = [];
   const processedStateByUid = new Map<string, boolean>();
+  const unprocessedReasonByUid = new Map<string, CalendarInviteUnprocessedReason>();
   let processedAtMs: number | undefined;
 
   for (const group of groups) {
@@ -244,6 +250,8 @@ export async function processCalendarInviteForMessage({
         );
         existingEventsByUid.set(group.eventUid, existingEvent);
       }
+      const missingSeriesForOccurrenceChange =
+        !existingEvent && !group.baseEvent && group.hasInstanceChanges;
 
       const mergedEvent = buildMergedCalendarEventFields(
         group,
@@ -254,6 +262,9 @@ export async function processCalendarInviteForMessage({
       );
       if (!mergedEvent) {
         processedStateByUid.set(group.eventUid, false);
+        if (missingSeriesForOccurrenceChange) {
+          unprocessedReasonByUid.set(group.eventUid, "event_series_not_found");
+        }
         continue;
       }
 
@@ -360,6 +371,17 @@ export async function processCalendarInviteForMessage({
       }
     );
   }
+  const eventSeriesNotFoundUids = Array.from(unprocessedReasonByUid.entries())
+    .filter(([, reason]) => reason === "event_series_not_found")
+    .map(([eventUid]) => eventUid);
+  if (eventSeriesNotFoundUids.length > 0) {
+    await markMessageCalendarInviteStatesUnprocessed(
+      accountId,
+      messageId,
+      eventSeriesNotFoundUids,
+      "event_series_not_found"
+    );
+  }
 
   return {
     states: inviteStates.map((state) => {
@@ -370,6 +392,9 @@ export async function processCalendarInviteForMessage({
         ...(processed && typeof processedAtMs === "number" ? { processedAtMs } : {}),
         ...(processed && typeof processedAutomatically === "boolean"
           ? { processedAutomatically }
+          : {}),
+        ...(!processed && unprocessedReasonByUid.has(state.eventUid)
+          ? { unprocessedReason: unprocessedReasonByUid.get(state.eventUid) }
           : {})
       };
     })

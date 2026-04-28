@@ -133,7 +133,8 @@ export async function upsertMessages(
          inviteActionType,
          processedAtMs,
          processedByUserId,
-         processedAutomatically
+         processedAutomatically,
+         unprocessedReason
        FROM message_calendar_events
        WHERE accountId = ? AND messageId = ?`
     );
@@ -170,8 +171,9 @@ export async function upsertMessages(
          inviteActionType,
          processedAtMs,
          processedByUserId,
-         processedAutomatically
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+         processedAutomatically,
+         unprocessedReason
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     );
 
     const insertMessage = db.prepare(`
@@ -339,6 +341,7 @@ export async function upsertMessages(
               processedAtMs?: number | null;
               processedByUserId?: string | null;
               processedAutomatically?: number | boolean | null;
+              unprocessedReason?: string | null;
             }>
           )
             .map((row) => {
@@ -379,7 +382,11 @@ export async function upsertMessages(
                       ? row.processedAutomatically
                       : typeof row.processedAutomatically === "number"
                         ? row.processedAutomatically !== 0
-                        : null
+                        : null,
+                  unprocessedReason:
+                    typeof row.unprocessedReason === "string" && row.unprocessedReason.trim()
+                      ? row.unprocessedReason.trim()
+                      : null
                 }
               ] as const;
             })
@@ -396,6 +403,7 @@ export async function upsertMessages(
                   processedAtMs: number | null;
                   processedByUserId: string | null;
                   processedAutomatically: boolean | null;
+                  unprocessedReason: string | null;
                 }
               ] => Boolean(entry)
             )
@@ -523,7 +531,8 @@ export async function upsertMessages(
             existing?.processedByUserId ?? null,
             typeof existing?.processedAutomatically === "boolean"
               ? (existing.processedAutomatically ? 1 : 0)
-              : null
+              : null,
+            existing?.unprocessedReason ?? null
           );
         });
         (message.attachments ?? []).forEach((att) => {

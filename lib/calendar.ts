@@ -24,6 +24,7 @@ export type CalendarEventPreview = {
   recurrenceRule?: string;
   recurrenceId?: Date;
   recurrenceIdTimezone?: string;
+  recurrenceIdRange?: string;
   recurrenceDates?: Date[];
   excludedDates?: Date[];
   attendeeDetails?: CalendarAttendeePreview[];
@@ -51,6 +52,7 @@ type ParsedLine = {
 type PendingCalendarDateValue = {
   value: string;
   tzid?: string;
+  range?: string;
 };
 
 type CalendarEventDateFormatInput = {
@@ -393,6 +395,7 @@ export function parseIcsInvite(source: string): ParsedCalendarInvite {
           );
           event.recurrenceId = parsedDate.date;
           event.recurrenceIdTimezone = parsedDate.tzid;
+          event.recurrenceIdRange = pendingDates.recurrenceId.range;
         }
         if (pendingDates && pendingDates.excludedDates.length > 0) {
           const dates = pendingDates.excludedDates
@@ -463,7 +466,8 @@ export function parseIcsInvite(source: string): ParsedCalendarInvite {
     if (parsed.name === "RECURRENCE-ID") {
       pendingDates!.recurrenceId = {
         value: parsed.value,
-        tzid: parsed.params.TZID
+        tzid: parsed.params.TZID,
+        range: parsed.params.RANGE?.trim().toUpperCase() || undefined
       };
     }
     if (parsed.name === "DTSTART") {

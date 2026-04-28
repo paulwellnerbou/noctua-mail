@@ -206,6 +206,7 @@ import {
   getCalendarEventByUid as _getCalendarEventByUidImpl,
   listCalendarInviteSourceMessagesByEventUid as _listCalendarInviteSourceMessagesByEventUidImpl,
   markMessageCalendarInviteStatesProcessed as _markMessageCalendarInviteStatesProcessedImpl,
+  markMessageCalendarInviteStatesUnprocessed as _markMessageCalendarInviteStatesUnprocessedImpl,
   rescheduleCalendarRemindersByEventUid as _rescheduleCalendarRemindersByEventUidImpl,
   softDeleteCalendarEvent as _softDeleteCalendarEventImpl,
   upsertCalendarEventByUid as _upsertCalendarEventByUidImpl,
@@ -276,6 +277,12 @@ export function markMessageCalendarInviteStatesProcessed(
   ...args: Parameters<typeof _markMessageCalendarInviteStatesProcessedImpl>
 ): ReturnType<typeof _markMessageCalendarInviteStatesProcessedImpl> {
   return _markMessageCalendarInviteStatesProcessedImpl(...args);
+}
+
+export function markMessageCalendarInviteStatesUnprocessed(
+  ...args: Parameters<typeof _markMessageCalendarInviteStatesUnprocessedImpl>
+): ReturnType<typeof _markMessageCalendarInviteStatesUnprocessedImpl> {
+  return _markMessageCalendarInviteStatesUnprocessedImpl(...args);
 }
 
 export function clearMessageCalendarInviteStatesProcessedByEventUid(

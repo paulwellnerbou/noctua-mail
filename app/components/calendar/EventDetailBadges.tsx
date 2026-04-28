@@ -24,6 +24,7 @@ export type EventDetailBadgesProps = {
   currentMyPartstat?: CalendarParticipationStatus;
   participationColor: "green" | "red" | "orange" | "gray";
   sourceType?: string;
+  inviteScopeLabel?: string;
 };
 
 /**
@@ -35,12 +36,18 @@ export default function EventDetailBadges({
   status,
   currentMyPartstat,
   participationColor,
-  sourceType
+  sourceType,
+  inviteScopeLabel
 }: EventDetailBadgesProps) {
-  if (!status && !currentMyPartstat && !sourceType) return null;
+  if (!status && !currentMyPartstat && !sourceType && !inviteScopeLabel) return null;
 
   return (
     <div className={styles.badges}>
+      {inviteScopeLabel && (
+        <Badge size="1" color="gray" variant="soft">
+          {inviteScopeLabel}
+        </Badge>
+      )}
       {status && (
         <Badge
           size="1"

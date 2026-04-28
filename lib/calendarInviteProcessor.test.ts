@@ -22,6 +22,7 @@ const upsertCalendarEventByUid = mock(
 );
 const upsertMessageCalendarInviteStates = mock(() => Promise.resolve());
 const markMessageCalendarInviteStatesProcessed = mock(() => Promise.resolve(1));
+const markMessageCalendarInviteStatesUnprocessed = mock(() => Promise.resolve(1));
 const rescheduleCalendarRemindersByEventUid = mock(() => Promise.resolve(0));
 const ensureCalendarReminder = mock(() => Promise.resolve(null));
 const cancelCalendarEventByUid = mock(() => Promise.resolve());
@@ -35,6 +36,7 @@ mock.module("@/lib/db", () => ({
   upsertCalendarEventByUid,
   upsertMessageCalendarInviteStates,
   markMessageCalendarInviteStatesProcessed,
+  markMessageCalendarInviteStatesUnprocessed,
   rescheduleCalendarRemindersByEventUid,
   ensureCalendarReminder,
   cancelCalendarEventByUid,
@@ -108,6 +110,7 @@ beforeEach(() => {
   upsertCalendarEventByUid.mockClear();
   upsertMessageCalendarInviteStates.mockClear();
   markMessageCalendarInviteStatesProcessed.mockClear();
+  markMessageCalendarInviteStatesUnprocessed.mockClear();
   rescheduleCalendarRemindersByEventUid.mockClear();
   ensureCalendarReminder.mockClear();
   cancelCalendarEventByUid.mockClear();
@@ -348,6 +351,50 @@ describe("processCalendarInviteForMessage", () => {
     // Series-level messageId must still point to the original invite,
     // so "Open series email" keeps working.
     expect(fields.messageId).toBe("msg-series-invite");
+  });
+
+  test("records a reason when an occurrence update has no recoverable series event", async () => {
+    const rescheduleIcs = makeIcs([
+      "METHOD:REQUEST",
+      "BEGIN:VEVENT",
+      "UID:series-uid@example.test",
+      "RECURRENCE-ID:20260608T100000Z",
+      "DTSTART:20260608T160000Z",
+      "DTEND:20260608T163000Z",
+      "SUMMARY:Weekly standup",
+      "SEQUENCE:2",
+      "END:VEVENT"
+    ]);
+
+    const result = await processCalendarInviteForMessage({
+      accountId: "acc-1",
+      messageId: "msg-reschedule",
+      icsSource: rescheduleIcs,
+      process: true,
+      accountEmail: "paul@example.test",
+      reminderUserId: "user-1",
+      processedByUserId: "user-1",
+      processedAutomatically: true
+    });
+
+    expect(result.states).toEqual([
+      {
+        eventUid: "series-uid@example.test",
+        actionType: "update",
+        eventFirstStartAtMs: Date.UTC(2026, 5, 8, 16, 0, 0),
+        eventLastEndAtMs: Date.UTC(2026, 5, 8, 16, 30, 0),
+        processed: false,
+        unprocessedReason: "event_series_not_found"
+      }
+    ]);
+    expect(markMessageCalendarInviteStatesUnprocessed).toHaveBeenCalledWith(
+      "acc-1",
+      "msg-reschedule",
+      ["series-uid@example.test"],
+      "event_series_not_found"
+    );
+    expect(markMessageCalendarInviteStatesProcessed).not.toHaveBeenCalled();
+    expect(upsertCalendarEventByUid).not.toHaveBeenCalled();
   });
 
   test("skips occurrenceSnapshots for a plain series REQUEST (no RECURRENCE-ID)", async () => {

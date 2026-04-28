@@ -1,7 +1,10 @@
 "use client";
 
 import { Button, Text } from "@radix-ui/themes";
-import type { CalendarInviteActionType } from "@/lib/calendarInviteProcessing";
+import type {
+  CalendarInviteActionType,
+  CalendarInviteUnprocessedReason
+} from "@/lib/calendarInviteProcessing";
 import type { AccountDateFormat } from "@/lib/data";
 import { formatAccountDateValue } from "@/lib/dateFormatting";
 import styles from "./EventDetailView.module.css";
@@ -11,6 +14,7 @@ export type InviteProcessingState = {
   processed: boolean;
   processedAtMs?: number;
   processedAutomatically?: boolean;
+  unprocessedReason?: CalendarInviteUnprocessedReason;
   processing?: boolean;
   onProcess?: () => void | Promise<void>;
 };
@@ -38,10 +42,19 @@ function getInviteProcessButtonPendingLabel(processed?: boolean) {
   return processed ? "Reprocessing…" : "Processing…";
 }
 
-function buildInviteStatusText(inviteProcessing: InviteProcessingState, dateFormat?: AccountDateFormat) {
+function getInviteUnprocessedReasonLabel(reason?: CalendarInviteUnprocessedReason) {
+  if (reason === "event_series_not_found") return "event series not found";
+  return "";
+}
+
+export function buildInviteStatusText(
+  inviteProcessing: InviteProcessingState,
+  dateFormat?: AccountDateFormat
+) {
   const actionLabel = getInviteActionLabel(inviteProcessing.actionType);
   if (!inviteProcessing.processed) {
-    return `${actionLabel} not processed`;
+    const reasonLabel = getInviteUnprocessedReasonLabel(inviteProcessing.unprocessedReason);
+    return `${actionLabel} not processed${reasonLabel ? ` (${reasonLabel})` : ""}`;
   }
   const processedModeLabel =
     typeof inviteProcessing.processedAutomatically === "boolean"

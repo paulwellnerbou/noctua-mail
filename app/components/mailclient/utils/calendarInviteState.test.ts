@@ -52,6 +52,36 @@ describe("mergeMessageInviteStatePatches", () => {
     expect(result.calendarEventUids).toEqual(["event-1"]);
   });
 
+  test("stores an unprocessed reason and clears stale processed fields", () => {
+    const message = buildMessage({
+      calendarEventUids: ["event-1"],
+      calendarInviteStates: [
+        {
+          eventUid: "event-1",
+          actionType: "update",
+          processedAtMs: 1234,
+          processedAutomatically: true
+        }
+      ]
+    });
+
+    const result = mergeMessageInviteStatePatches(message, [
+      {
+        eventUid: "event-1",
+        processed: false,
+        unprocessedReason: "event_series_not_found"
+      }
+    ]);
+
+    expect(result.calendarInviteStates).toEqual([
+      {
+        eventUid: "event-1",
+        actionType: "update",
+        unprocessedReason: "event_series_not_found"
+      }
+    ]);
+  });
+
   test("appends a new invite state when the action type is provided", () => {
     const message = buildMessage();
     const patches: InviteProcessingStatePatch[] = [

@@ -12,8 +12,11 @@ import {
 } from "@/lib/calendar";
 import {
   collectCalendarInviteMutationGroups,
-  inferCalendarInviteMessageActionType
+  inferCalendarInviteMessageActionType,
+  type CalendarInviteMutationGroup,
+  type CalendarInviteUnprocessedReason
 } from "@/lib/calendarInviteProcessing";
+import { getCalendarInviteScopeInfo } from "@/lib/calendarInviteScope";
 import {
   buildAccountCalendarEventsPath,
   buildAccountCalendarInvitesProcessPath
@@ -33,6 +36,7 @@ type InviteProcessingOverride = {
   processed: boolean;
   processedAtMs?: number;
   processedAutomatically?: boolean;
+  unprocessedReason?: CalendarInviteUnprocessedReason;
 };
 
 function readDataUrl(dataUrl: string) {
@@ -125,6 +129,7 @@ export default function CalendarEventPreview({
   const [processingInviteUid, setProcessingInviteUid] = useState<string | null>(null);
   const [inviteStateOverrides, setInviteStateOverrides] = useState<Record<string, InviteProcessingOverride>>({});
   const [storedEventsByUid, setStoredEventsByUid] = useState<Record<string, CalendarEvent>>({});
+  const [storedEventsLoaded, setStoredEventsLoaded] = useState(false);
 
   // Trigger refresh when reminders change (so EventDetailView re-fetches)
   const [reminderVersion, setReminderVersion] = useState(0);
@@ -186,14 +191,22 @@ export default function CalendarEventPreview({
     return groupItemsByRelativeTime(entries, (e) => e.displayStartAtMs, nowMs);
   }, [hasCurrentResult, result.events, mountTime]);
 
-  const inviteActionTypeByUid = useMemo(() => {
-    const map = new Map<string, ReturnType<typeof inferCalendarInviteMessageActionType>>();
+  const inviteMutationGroupByUid = useMemo(() => {
+    const map = new Map<string, CalendarInviteMutationGroup>();
     if (!rawSource.trim()) return map;
     collectCalendarInviteMutationGroups(rawSource).forEach((group) => {
-      map.set(group.eventUid.trim().toLowerCase(), inferCalendarInviteMessageActionType(group));
+      map.set(group.eventUid.trim().toLowerCase(), group);
     });
     return map;
   }, [rawSource]);
+
+  const inviteActionTypeByUid = useMemo(() => {
+    const map = new Map<string, ReturnType<typeof inferCalendarInviteMessageActionType>>();
+    inviteMutationGroupByUid.forEach((group, uid) => {
+      map.set(uid, inferCalendarInviteMessageActionType(group));
+    });
+    return map;
+  }, [inviteMutationGroupByUid]);
 
   const inviteStateByUid = useMemo(() => {
     const map = new Map<string, MessageCalendarInviteState>();
@@ -218,9 +231,15 @@ export default function CalendarEventPreview({
   );
 
   const refreshStoredEvents = useCallback(async () => {
-    if (!accountId.trim()) return;
+    setStoredEventsLoaded(false);
+    if (!accountId.trim()) {
+      setStoredEventsByUid({});
+      setStoredEventsLoaded(true);
+      return;
+    }
     if (eventUids.length === 0) {
       setStoredEventsByUid({});
+      setStoredEventsLoaded(true);
       return;
     }
     try {
@@ -241,6 +260,8 @@ export default function CalendarEventPreview({
       setStoredEventsByUid(next);
     } catch {
       // ignore
+    } finally {
+      setStoredEventsLoaded(true);
     }
   }, [accountId, eventUids]);
 
@@ -269,9 +290,11 @@ export default function CalendarEventPreview({
         const payload = (await res.json()) as {
           states?: Array<{
             eventUid?: string;
+            actionType?: MessageCalendarInviteState["actionType"];
             processed?: boolean;
             processedAtMs?: number;
             processedAutomatically?: boolean;
+            unprocessedReason?: CalendarInviteUnprocessedReason;
           }>;
         };
         const nextOverrides: Record<string, InviteProcessingOverride> = {};
@@ -287,32 +310,40 @@ export default function CalendarEventPreview({
             processedAutomatically:
               typeof state.processedAutomatically === "boolean"
                 ? state.processedAutomatically
-                : undefined
+                : undefined,
+            unprocessedReason: state.unprocessedReason
           };
         });
-        const processedPatches = (payload.states ?? [])
+        const statePatches = (payload.states ?? [])
           .flatMap((state): InviteProcessingStatePatch[] => {
             const uid = state.eventUid?.trim();
             const normalizedUid = uid?.toLowerCase() ?? "";
-            if (!uid || !Boolean(state.processed)) return [];
+            if (!uid) return [];
             const actionType =
-              inviteActionTypeByUid.get(normalizedUid) ?? inviteStateByUid.get(normalizedUid)?.actionType;
+              state.actionType ??
+              inviteActionTypeByUid.get(normalizedUid) ??
+              inviteStateByUid.get(normalizedUid)?.actionType;
+            if (!Boolean(state.processed) && !state.unprocessedReason) return [];
             return [{
               eventUid: uid,
               actionType,
+              processed: Boolean(state.processed),
               processedAtMs:
-                typeof state.processedAtMs === "number" && Number.isFinite(state.processedAtMs)
+                Boolean(state.processed) &&
+                typeof state.processedAtMs === "number" &&
+                Number.isFinite(state.processedAtMs)
                   ? state.processedAtMs
                   : undefined,
               processedAutomatically:
-                typeof state.processedAutomatically === "boolean"
+                Boolean(state.processed) && typeof state.processedAutomatically === "boolean"
                   ? state.processedAutomatically
-                  : undefined
+                  : undefined,
+              unprocessedReason: !Boolean(state.processed) ? state.unprocessedReason : undefined
             }];
           });
         setInviteStateOverrides((prev) => ({ ...prev, ...nextOverrides }));
-        if (processedPatches.length > 0) {
-          onInviteStateChange?.(processedPatches);
+        if (statePatches.length > 0) {
+          onInviteStateChange?.(statePatches);
         }
         await refreshStoredEvents();
         window.dispatchEvent(new Event(CALENDAR_REMINDERS_UPDATED_EVENT));
@@ -387,6 +418,13 @@ export default function CalendarEventPreview({
                     event.recurrenceId &&
                     (inviteActionType === "update" || inviteActionType === "cancellation")
                   );
+                  const mutationGroup =
+                    inviteMutationGroupByUid.get(event.uid?.trim().toLowerCase() ?? "") ?? null;
+                  const inviteScopeLabel = getCalendarInviteScopeInfo({
+                    event,
+                    mutationGroup,
+                    storedEvent
+                  }).label;
                   return (
                     <EventDetailView
                       key={`${reminderKey}-${reminderVersion}`}
@@ -429,13 +467,15 @@ export default function CalendarEventPreview({
                           [normalizedUid]: {
                             processed: true,
                             processedAtMs: processedState?.processedAtMs,
-                            processedAutomatically: processedState?.processedAutomatically
+                            processedAutomatically: processedState?.processedAutomatically,
+                            unprocessedReason: undefined
                           }
                         }));
                         onInviteStateChange?.([
                           {
                             eventUid: processedEventUid,
                             actionType,
+                            processed: true,
                             processedAtMs: processedState?.processedAtMs,
                             processedAutomatically: processedState?.processedAutomatically
                           }
@@ -443,19 +483,34 @@ export default function CalendarEventPreview({
                       }}
                       responseOccurrenceLabel={forceOccurrenceResponse ? "This occurrence" : "Next occurrence"}
                       forceOccurrenceResponse={forceOccurrenceResponse}
+                      inviteScopeLabel={inviteScopeLabel}
                       showEmailSnapshot={false}
                       inviteProcessing={(() => {
                         const eventUid = event.uid?.trim().toLowerCase() ?? "";
                         if (!eventUid) return undefined;
                         const inviteState = inviteStateByUid.get(eventUid);
                         const inviteStateOverride = inviteStateOverrides[eventUid];
+                        const processed =
+                          inviteStateOverride?.processed ?? Boolean(inviteState?.processedAtMs);
+                        const derivedUnprocessedReason: CalendarInviteUnprocessedReason | undefined =
+                          !processed &&
+                          storedEventsLoaded &&
+                          !storedEvent &&
+                          mutationGroup?.hasInstanceChanges &&
+                          !mutationGroup.baseEvent
+                            ? "event_series_not_found"
+                            : undefined;
                         return {
                           actionType: inviteActionType ?? "invitation",
-                          processed: inviteStateOverride?.processed ?? Boolean(inviteState?.processedAtMs),
+                          processed,
                           processedAtMs:
                             inviteStateOverride?.processedAtMs ?? inviteState?.processedAtMs,
                           processedAutomatically:
                             inviteStateOverride?.processedAutomatically ?? inviteState?.processedAutomatically,
+                          unprocessedReason:
+                            inviteStateOverride?.unprocessedReason ??
+                            inviteState?.unprocessedReason ??
+                            derivedUnprocessedReason,
                           processing: processingInviteUid === eventUid || processingInviteUid === "__all__",
                           onProcess: () => handleProcessInvite(event.uid)
                         };

@@ -9,7 +9,10 @@
  */
 import { getAccountDb } from "../connection";
 import { withDbWriteRetry } from "../../dbWriteRetry";
-import { type CalendarInviteActionType } from "../../calendarInviteProcessing";
+import {
+  type CalendarInviteActionType,
+  type CalendarInviteUnprocessedReason
+} from "../../calendarInviteProcessing";
 import {
   normalizeCalendarEventUid,
   normalizeCalendarEventUidKey,
@@ -17,7 +20,8 @@ import {
 } from "../../calendarEventUids";
 import {
   itemsFromUniqueInviteStates,
-  normalizeCalendarInviteActionType
+  normalizeCalendarInviteActionType,
+  normalizeCalendarInviteUnprocessedReason
 } from "../messages/_shared";
 
 export async function upsertMessageCalendarInviteStates(
@@ -133,7 +137,10 @@ export async function markMessageCalendarInviteStatesProcessed(
       const result = db
         .prepare(
           `UPDATE message_calendar_events
-           SET processedAtMs = ?, processedByUserId = ?, processedAutomatically = ?
+           SET processedAtMs = ?,
+               processedByUserId = ?,
+               processedAutomatically = ?,
+               unprocessedReason = NULL
            WHERE accountId = ?
              AND messageId = ?
              AND lower(COALESCE(eventUidKey, eventUid, '')) IN (${chunk.map(() => "?").join(",")})`
@@ -146,6 +153,40 @@ export async function markMessageCalendarInviteStatesProcessed(
           messageId,
           ...chunk
         ) as { changes?: number };
+      totalChanges += result?.changes ?? 0;
+    }
+    return totalChanges;
+  });
+}
+
+export async function markMessageCalendarInviteStatesUnprocessed(
+  accountId: string,
+  messageId: string,
+  eventUids: string[],
+  reason: CalendarInviteUnprocessedReason
+) {
+  return withDbWriteRetry("markMessageCalendarInviteStatesUnprocessed", async () => {
+    const normalizedReason = normalizeCalendarInviteUnprocessedReason(reason);
+    if (!normalizedReason) return 0;
+    const db = await getAccountDb(accountId);
+    const normalizedEventUidKeys = normalizeCalendarEventUidKeys(eventUids);
+    if (normalizedEventUidKeys.length === 0) return 0;
+    const QUERY_BATCH_SIZE = 400;
+    let totalChanges = 0;
+    for (let start = 0; start < normalizedEventUidKeys.length; start += QUERY_BATCH_SIZE) {
+      const chunk = normalizedEventUidKeys.slice(start, start + QUERY_BATCH_SIZE);
+      const result = db
+        .prepare(
+          `UPDATE message_calendar_events
+           SET processedAtMs = NULL,
+               processedByUserId = NULL,
+               processedAutomatically = NULL,
+               unprocessedReason = ?
+           WHERE accountId = ?
+             AND messageId = ?
+             AND lower(COALESCE(eventUidKey, eventUid, '')) IN (${chunk.map(() => "?").join(",")})`
+        )
+        .run(normalizedReason, accountId, messageId, ...chunk) as { changes?: number };
       totalChanges += result?.changes ?? 0;
     }
     return totalChanges;
@@ -166,7 +207,10 @@ export async function clearMessageCalendarInviteStatesProcessedByEventUid(
     const result = db
       .prepare(
         `UPDATE message_calendar_events
-         SET processedAtMs = NULL, processedByUserId = NULL, processedAutomatically = NULL
+         SET processedAtMs = NULL,
+             processedByUserId = NULL,
+             processedAutomatically = NULL,
+             unprocessedReason = NULL
          WHERE accountId = ? AND lower(COALESCE(eventUidKey, eventUid, '')) = lower(?)`
       )
       .run(accountId, normalizedEventUidKey) as { changes?: number };
