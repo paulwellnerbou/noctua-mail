@@ -1,5 +1,5 @@
-import { X } from "lucide-react";
-import { MinusIcon, RowsIcon } from "@radix-ui/react-icons";
+import { Dock, X } from "lucide-react";
+import { MinusIcon } from "@radix-ui/react-icons";
 import ComposeFields from "./ComposeFields";
 import ComposeActions from "./ComposeActions";
 import { Heading, IconButton, Text } from "@radix-ui/themes";
@@ -118,7 +118,7 @@ export default function ComposeModal({ open }: ComposeModalProps) {
               aria-label="Dock in thread view"
               onClick={popInCompose}
             >
-              <RowsIcon width={16} height={16} />
+              <Dock size={16} />
             </IconButton>
             <IconButton
               variant="ghost"
