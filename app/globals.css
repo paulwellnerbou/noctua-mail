@@ -609,8 +609,8 @@ a {
 }
 
 .attachment-icon {
+  width: 16px;
   flex-shrink: 0;
-  color: var(--muted);
 }
 
 .attachment-image-preview {
