@@ -1,10 +1,10 @@
 import { startTransition, useEffect, useRef, useState } from "react";
 import type React from "react";
-import { ChevronsDown, ChevronsUp, GitBranch, RefreshCw } from "lucide-react";
+import { ChevronsDown, ChevronsUp, Folder, GitBranch, RefreshCw } from "lucide-react";
 import { IconButton, SegmentedControl, Select, Text } from "@radix-ui/themes";
 import type { ThreadDateSource } from "@/lib/threadDate";
 import type { MessageGroup } from "./listModel";
-import type { MessageViewMode } from "./messageListViewTypes";
+import type { MessageViewMode, ThreadsMode } from "./messageListViewTypes";
 import styles from "./MessageListHeader.module.css";
 
 export type MessageListHeaderProps = {
@@ -22,7 +22,7 @@ export type MessageListHeaderProps = {
     groupBy: "none" | "date" | "week" | "sender" | "domain" | "year" | "folder" | "event";
     eventGroupingAvailable: boolean;
     threadDateSource: ThreadDateSource;
-    threadsEnabled: boolean;
+    threadsMode: ThreadsMode;
     threadsAllowed: boolean;
     groupedMessages: MessageGroup[];
     collapsedGroups: Record<string, boolean>;
@@ -34,7 +34,7 @@ export type MessageListHeaderProps = {
       React.SetStateAction<"none" | "date" | "week" | "sender" | "domain" | "year" | "folder" | "event">
     >;
     setThreadDateSource: React.Dispatch<React.SetStateAction<ThreadDateSource>>;
-    setThreadsEnabled: React.Dispatch<React.SetStateAction<boolean>>;
+    setThreadsMode: React.Dispatch<React.SetStateAction<ThreadsMode>>;
     toggleAllGroups: () => void;
   };
 };
@@ -54,7 +54,7 @@ export default function MessageListHeader({ state, actions }: MessageListHeaderP
     groupBy,
     eventGroupingAvailable,
     threadDateSource,
-    threadsEnabled,
+    threadsMode,
     threadsAllowed,
     groupedMessages,
     collapsedGroups
@@ -64,7 +64,7 @@ export default function MessageListHeader({ state, actions }: MessageListHeaderP
     setMessageView,
     setGroupBy,
     setThreadDateSource,
-    setThreadsEnabled,
+    setThreadsMode,
     toggleAllGroups
   } = actions;
   const [localView, setLocalView] = useState(messageView);
@@ -114,7 +114,13 @@ export default function MessageListHeader({ state, actions }: MessageListHeaderP
 
   const handleThreadsToggle = () => {
     if (!threadsAllowed) return;
-    startTransition(() => setThreadsEnabled((value) => !value));
+    startTransition(() =>
+      setThreadsMode((current) => {
+        if (current === "off") return searchScope === "all" ? "on" : "scope";
+        if (current === "scope") return "on";
+        return "off";
+      })
+    );
   };
 
   const handleToggleGroups = () => {
@@ -125,6 +131,23 @@ export default function MessageListHeader({ state, actions }: MessageListHeaderP
     activeVirtualFolderName?.trim() ||
     (searchScope === "folder" ? activeFolderName?.trim() || "Everything" : "Everything");
   const showThreadDateSelect = ["date", "week", "year"].includes(localGroupBy);
+
+  const threadsScopeInactive = threadsMode === "scope" && searchScope === "all";
+  const threadsButtonColor: "gray" | "blue" | "indigo" =
+    !threadsAllowed || threadsMode === "off" || threadsScopeInactive
+      ? "gray"
+      : threadsMode === "scope"
+        ? "blue"
+        : "indigo";
+  const threadsButtonTitle = !threadsAllowed
+    ? "Threads require Date/Week/Year grouping"
+    : threadsMode === "off"
+      ? "Threads off"
+      : threadsMode === "on"
+        ? "Threads on"
+        : threadsScopeInactive
+          ? "Threads on (folder only) – inactive while searching everywhere"
+          : "Threads on (folder only)";
 
   return (
     <div className={styles.header}>
@@ -221,12 +244,14 @@ export default function MessageListHeader({ state, actions }: MessageListHeaderP
           <IconButton
             size="2"
             variant="soft"
-            color={threadsEnabled ? "indigo" : "gray"}
+            color={threadsButtonColor}
             onClick={handleThreadsToggle}
-            title={threadsAllowed ? "Toggle threads" : "Threads are available for Date/Week/Year"}
+            title={threadsButtonTitle}
             disabled={!threadsAllowed}
+            className={threadsMode === "scope" ? styles.threadsToggle : undefined}
           >
             <GitBranch size={14} />
+            {threadsMode === "scope" && <Folder size={10} className={styles.threadsScopeIcon} />}
           </IconButton>
           <IconButton
             size="2"

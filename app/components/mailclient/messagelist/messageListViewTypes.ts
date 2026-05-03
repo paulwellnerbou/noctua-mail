@@ -18,6 +18,9 @@ export type SortKey = "date" | "from" | "subject";
 export const MESSAGE_VIEW_MODES = ["card", "table", "compact", "threads"] as const;
 export type MessageViewMode = (typeof MESSAGE_VIEW_MODES)[number];
 
+/** "on" = threads always; "scope" = threads only when in a folder/topic (not everywhere); "off" = never */
+export type ThreadsMode = "on" | "scope" | "off";
+
 export type MessageListViewState = {
   groupedMessages: MessageGroup[];
   visibleMessages: VisibleMessageEntry[];

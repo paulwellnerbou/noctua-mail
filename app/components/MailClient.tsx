@@ -72,6 +72,7 @@ import {
   type InviteProcessingStatePatch
 } from "./mailclient/utils/calendarInviteState";
 import type { MessageGroup } from "./mailclient/messagelist/listModel";
+import type { ThreadsMode } from "./mailclient/messagelist/messageListViewTypes";
 import {
   AlertDialog,
   Badge,
@@ -526,7 +527,7 @@ export default function MailClient({
     []
   );
   const [draggingMessageIds, setDraggingMessageIds] = useState<Set<string>>(new Set());
-  const [threadsEnabled, setThreadsEnabled] = useState(true);
+  const [threadsMode, setThreadsMode] = useState<ThreadsMode>("on");
   const [showJson, setShowJson] = useState(false);
   const [omitBody, setOmitBody] = useState(true);
   const [moveToDialogState, setMoveToDialogState] = useState<MoveToDialogState | null>(null);
@@ -612,7 +613,7 @@ export default function MailClient({
   >(null);
   const duplicateMessageIdLogFingerprintRef = useRef("");
   const activeVisibilityLogFingerprintRef = useRef("");
-  const threadPreferenceByFolderRef = useRef<Record<string, boolean>>({});
+  const threadPreferenceByFolderRef = useRef<Record<string, ThreadsMode>>({});
   const inboxFolderRef = useRef<Folder | null>(null);
   const relatedRestoreRef = useRef<{
     queryId: string;
@@ -846,7 +847,7 @@ export default function MailClient({
   );
   const messagesKey = useMemo(
     () =>
-      `${activeAccountId}|${searchScope}|${everywhereExclusionKey}|${activeFolderId}|${activeVirtualFolder?.id ?? ""}|${trimmedQuery}|${groupBy}|${threadDateSource}|${threadsEnabled ? "threads-on" : "threads-off"}|${searchFieldKey}|${Object.entries(searchBadges)
+      `${activeAccountId}|${searchScope}|${everywhereExclusionKey}|${activeFolderId}|${activeVirtualFolder?.id ?? ""}|${trimmedQuery}|${groupBy}|${threadDateSource}|threads-${threadsMode}|${searchFieldKey}|${Object.entries(searchBadges)
         .filter(([, enabled]) => enabled)
         .map(([key]) => key)
         .join(",")}`,
@@ -858,7 +859,7 @@ export default function MailClient({
       groupBy,
       threadDateSource,
       trimmedQuery,
-      threadsEnabled,
+      threadsMode,
       searchFieldKey,
       searchBadges,
       searchScope
@@ -1145,7 +1146,9 @@ export default function MailClient({
     ["date", "week", "year"].includes(groupBy) &&
     !isDraftsFolder(activeFolderId) &&
     !checkIsThreadExcludedFolder(activeFolderId);
-  const supportsThreads = threadsEnabled && threadsAllowed;
+  const supportsThreads =
+    threadsAllowed &&
+    (threadsMode === "on" || (threadsMode === "scope" && searchScope === "folder"));
 
   // useMessageData: manages message list state, loading, and refresh
   const {
@@ -4065,8 +4068,8 @@ export default function MailClient({
     const folder = folders.find((item) => item.id === activeFolderId);
     const special = (folder?.specialUse ?? "").toLowerCase();
     if (special === "\\sent") return;
-    threadPreferenceByFolderRef.current[activeFolderId] = threadsEnabled;
-  }, [activeFolderId, folders, searchScope, threadsEnabled]);
+    threadPreferenceByFolderRef.current[activeFolderId] = threadsMode;
+  }, [activeFolderId, folders, searchScope, threadsMode]);
 
   useEffect(() => {
     const selectionKey = `${searchScope}:${activeFolderId}`;
@@ -4076,16 +4079,16 @@ export default function MailClient({
     const folder = folders.find((item) => item.id === activeFolderId);
     const special = (folder?.specialUse ?? "").toLowerCase();
     if (special === "\\sent") {
-      if (threadsEnabled) {
-        setThreadsEnabled(false);
+      if (threadsMode !== "off") {
+        setThreadsMode("off");
       }
       return;
     }
     const savedPreference = threadPreferenceByFolderRef.current[activeFolderId];
-    if (typeof savedPreference === "boolean" && savedPreference !== threadsEnabled) {
-      setThreadsEnabled(savedPreference);
+    if (savedPreference !== undefined && savedPreference !== threadsMode) {
+      setThreadsMode(savedPreference);
     }
-  }, [activeFolderId, searchScope, threadsEnabled, folders]);
+  }, [activeFolderId, searchScope, threadsMode, folders]);
 
   useEffect(() => {
     clearSelection();
@@ -4705,7 +4708,7 @@ export default function MailClient({
               groupBy,
               eventGroupingAvailable: isCalendarGroupByAvailable,
               threadDateSource,
-              threadsEnabled,
+              threadsMode,
               threadsAllowed,
               groupedMessages,
               collapsedGroups
@@ -4714,7 +4717,7 @@ export default function MailClient({
               setMessagesPage,
               setGroupBy,
               setThreadDateSource,
-              setThreadsEnabled,
+              setThreadsMode,
               toggleAllGroups
             }
           }}

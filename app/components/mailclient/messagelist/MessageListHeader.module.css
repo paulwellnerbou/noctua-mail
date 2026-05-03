@@ -59,6 +59,16 @@
   min-width: 108px;
 }
 
+.threadsToggle {
+  width: auto;
+  min-width: var(--space-6);
+  padding-inline: 6px;
+}
+
+.threadsScopeIcon {
+  margin-left: 2px;
+}
+
 @media (max-width: 760px) {
   .infoRow,
   .actionsRow,
