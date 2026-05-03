@@ -1,7 +1,9 @@
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { Check, Copy, List } from "lucide-react";
 import { IconButton } from "@radix-ui/themes";
 import styles from "./ThreadMessageCard.module.css";
+import EmailAddressMenu, { type EmailAddressMenuAction } from "./EmailAddressMenu";
+import { parseAddressList } from "../utils/parseAddressList";
 
 type MessageRecipientMetaFieldProps = {
   label: "From" | "To" | "Cc" | "Bcc";
@@ -15,6 +17,7 @@ type MessageRecipientMetaFieldProps = {
   hideWhenEmpty?: boolean;
   expandable?: boolean;
   expandThreshold?: number;
+  onSearchByAddress?: (action: EmailAddressMenuAction, email: string) => void;
 };
 
 export default function MessageRecipientMetaField({
@@ -28,7 +31,8 @@ export default function MessageRecipientMetaField({
   className,
   hideWhenEmpty = false,
   expandable = false,
-  expandThreshold = 120
+  expandThreshold = 120,
+  onSearchByAddress
 }: MessageRecipientMetaFieldProps) {
   const [expanded, setExpanded] = useState(false);
   const [copyOk, setCopyOk] = useState(false);
@@ -102,6 +106,9 @@ export default function MessageRecipientMetaField({
     }
   };
 
+  const parsed = onSearchByAddress ? parseAddressList(text) : [];
+  const renderAddresses = parsed.length > 0;
+
   const valueNode = (
     <span
       ref={valueRef}
@@ -114,7 +121,22 @@ export default function MessageRecipientMetaField({
         .join(" ")}
     >
       {aliasName && <span className={styles.aliasPrefix}>{`${aliasName}: `}</span>}
-      {text}
+      {renderAddresses && onSearchByAddress
+        ? parsed.map((addr, idx) => (
+            <Fragment key={`${addr.raw}-${idx}`}>
+              {idx > 0 && <span className={styles.addressSeparator}>, </span>}
+              {addr.email ? (
+                <EmailAddressMenu
+                  displayName={addr.displayName}
+                  email={addr.email}
+                  onSearchByAddress={onSearchByAddress}
+                />
+              ) : (
+                <span title={addr.raw}>{addr.raw}</span>
+              )}
+            </Fragment>
+          ))
+        : text}
       {hasCopy && (
         <IconButton
           size="1"
