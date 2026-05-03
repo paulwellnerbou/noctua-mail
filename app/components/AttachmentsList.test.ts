@@ -4,6 +4,7 @@ import {
   canPreviewAttachment,
   getAttachmentDownloadHref,
   getAttachmentPreviewHref,
+  getIconExtension,
   getVisibleAttachments
 } from "./AttachmentsList";
 
@@ -67,6 +68,34 @@ describe("getAttachmentDownloadHref", () => {
     expect(
       getAttachmentDownloadHref(makeAttachment({ dataUrl: "data:text/plain;base64,SGVsbG8=" }))
     ).toBe("data:text/plain;base64,SGVsbG8=");
+  });
+});
+
+describe("getIconExtension", () => {
+  it("uses the filename extension when react-file-icon supports it", () => {
+    expect(getIconExtension("application/pdf", "invoice.pdf")).toBe("pdf");
+    expect(getIconExtension(undefined, "photo.png")).toBe("png");
+  });
+
+  it("aliases .7z to the 7zip icon key", () => {
+    expect(getIconExtension(undefined, "archive.7z")).toBe("7zip");
+  });
+
+  it("falls back to the MIME type when the filename has no usable extension", () => {
+    expect(getIconExtension("application/pdf", "invoice")).toBe("pdf");
+    expect(getIconExtension("application/vnd.openxmlformats-officedocument.wordprocessingml.document", "report")).toBe("docx");
+  });
+
+  it("falls back to a broad MIME prefix for unknown types", () => {
+    expect(getIconExtension("image/x-unknown", "weird")).toBe("jpg");
+    expect(getIconExtension("audio/x-unknown", undefined)).toBe("mp3");
+    expect(getIconExtension("video/x-unknown", undefined)).toBe("mp4");
+    expect(getIconExtension("text/x-unknown", undefined)).toBe("txt");
+  });
+
+  it("returns an empty string when nothing matches", () => {
+    expect(getIconExtension(undefined, undefined)).toBe("");
+    expect(getIconExtension("application/octet-stream", undefined)).toBe("");
   });
 });
 

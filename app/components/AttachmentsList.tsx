@@ -98,6 +98,10 @@ const isImage = (contentType?: string) => {
   return contentType?.toLowerCase().startsWith("image/") ?? false;
 };
 
+const EXT_ALIAS: Record<string, string> = {
+  "7z": "7zip",
+};
+
 const MIME_TO_EXT: Record<string, string> = {
   "application/pdf": "pdf",
   "application/msword": "doc",
@@ -114,6 +118,7 @@ const MIME_TO_EXT: Record<string, string> = {
   "application/gzip": "gz",
   "application/json": "json",
   "application/javascript": "js",
+  "application/x-javascript": "js",
   "text/javascript": "js",
   "text/html": "html",
   "text/css": "css",
@@ -121,6 +126,7 @@ const MIME_TO_EXT: Record<string, string> = {
   "text/plain": "txt",
   "text/markdown": "md",
   "image/jpeg": "jpg",
+  "image/jpg": "jpg",
   "image/png": "png",
   "image/gif": "gif",
   "image/svg+xml": "svg",
@@ -142,13 +148,13 @@ const MIME_TO_EXT: Record<string, string> = {
   "video/webm": "webm",
 };
 
-const getIconExtension = (contentType?: string, filename?: string): string => {
+export const getIconExtension = (contentType?: string, filename?: string): string => {
   const ext = getFileExtension(filename);
   if (ext && ext in defaultStyles) return ext;
-  if (ext === "7z") return "7zip";
+  if (ext && ext in EXT_ALIAS) return EXT_ALIAS[ext];
 
   const lower = normalizeMimeType(contentType);
-  if (lower && lower in MIME_TO_EXT) {
+  if (lower in MIME_TO_EXT) {
     const mapped = MIME_TO_EXT[lower];
     if (mapped in defaultStyles) return mapped;
   }
@@ -158,7 +164,7 @@ const getIconExtension = (contentType?: string, filename?: string): string => {
   if (lower.startsWith("video/")) return "mp4";
   if (lower.startsWith("text/")) return "txt";
 
-  return ext || "";
+  return ext;
 };
 
 type HoveredImagePreview = {
