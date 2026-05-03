@@ -132,6 +132,23 @@ export default function MessageListHeader({ state, actions }: MessageListHeaderP
     (searchScope === "folder" ? activeFolderName?.trim() || "Everything" : "Everything");
   const showThreadDateSelect = ["date", "week", "year"].includes(localGroupBy);
 
+  const threadsScopeInactive = threadsMode === "scope" && searchScope === "all";
+  const threadsButtonColor: "gray" | "blue" | "indigo" =
+    !threadsAllowed || threadsMode === "off" || threadsScopeInactive
+      ? "gray"
+      : threadsMode === "scope"
+        ? "blue"
+        : "indigo";
+  const threadsButtonTitle = !threadsAllowed
+    ? "Threads require Date/Week/Year grouping"
+    : threadsMode === "off"
+      ? "Threads off"
+      : threadsMode === "on"
+        ? "Threads on"
+        : threadsScopeInactive
+          ? "Threads on (folder only) – inactive while searching everywhere"
+          : "Threads on (folder only)";
+
   return (
     <div className={styles.header}>
       <div className={styles.infoRow}>
@@ -227,30 +244,14 @@ export default function MessageListHeader({ state, actions }: MessageListHeaderP
           <IconButton
             size="2"
             variant="soft"
-            color={
-              !threadsAllowed || threadsMode === "off" || (threadsMode === "scope" && searchScope === "all")
-                ? "gray"
-                : threadsMode === "scope"
-                  ? "blue"
-                  : "indigo"
-            }
+            color={threadsButtonColor}
             onClick={handleThreadsToggle}
-            title={
-              !threadsAllowed
-                ? "Threads require Date/Week/Year grouping"
-                : threadsMode === "off"
-                  ? "Threads off"
-                  : threadsMode === "scope"
-                    ? searchScope === "all"
-                      ? "Threads on (folder only) – inactive while searching everywhere"
-                      : "Threads on (folder only)"
-                    : "Threads on"
-            }
+            title={threadsButtonTitle}
             disabled={!threadsAllowed}
-            style={threadsMode === "scope" ? { width: "auto", paddingInline: 6 } : undefined}
+            className={threadsMode === "scope" ? styles.threadsToggle : undefined}
           >
             <GitBranch size={14} />
-            {threadsMode === "scope" && <Folder size={10} style={{ marginLeft: 2 }} />}
+            {threadsMode === "scope" && <Folder size={10} className={styles.threadsScopeIcon} />}
           </IconButton>
           <IconButton
             size="2"
