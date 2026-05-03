@@ -608,9 +608,23 @@ function parseSearchInput(
     return lead ? " " : "";
   });
 
+  // Extract "with:" terms (searches in From, To, Cc, and Bcc fields — i.e. any participant)
+  const withTerms: string[] = [];
+  const withoutWith = withoutTo.replace(/(^|\s)with:("([^"]+)"|\S+)/gi, (match, lead, term) => {
+    const cleaned = term.replace(/^"|"$/g, "").trim();
+    if (cleaned) {
+      if (cleaned.toLowerCase() === "me" && accountEmail) {
+        withTerms.push(accountEmail);
+      } else {
+        withTerms.push(cleaned);
+      }
+    }
+    return lead ? " " : "";
+  });
+
   // Extract "in:" terms (searches in folder names)
   const inTerms: string[] = [];
-  const withoutIn = withoutTo.replace(/(^|\s)in:("([^"]+)"|\S+)/gi, (match, lead, term) => {
+  const withoutIn = withoutWith.replace(/(^|\s)in:("([^"]+)"|\S+)/gi, (match, lead, term) => {
     const cleaned = term.replace(/^"|"$/g, "").trim();
     if (cleaned) inTerms.push(cleaned);
     return lead ? " " : "";
@@ -661,6 +675,7 @@ function parseSearchInput(
     ftsTokenQueries,
     fromTerms,
     toTerms,
+    withTerms,
     inTerms,
     inviteUidTerms,
     threadTerms,
@@ -986,6 +1001,7 @@ async function getGroupCounts(params: {
     ftsTokenQueries,
     fromTerms,
     toTerms,
+    withTerms,
     inTerms,
     inviteUidTerms,
     threadTerms,
@@ -1000,7 +1016,7 @@ async function getGroupCounts(params: {
   const addressFilters = {
     fromTerms: [...fromTerms, ...normalizeSearchTermList(from)],
     recipientTerms: [...toTerms, ...normalizeSearchTermList(recipients)],
-    participantTerms: normalizeSearchTermList(participants)
+    participantTerms: [...withTerms, ...normalizeSearchTermList(participants)]
   };
   const baseWhere = `m.accountId = ? ${folderId ? "AND m.folderId = ?" : ""}`;
   const args: any[] = [accountId];
@@ -1225,6 +1241,7 @@ async function getTotalCount(params: {
     ftsTokenQueries,
     fromTerms,
     toTerms,
+    withTerms,
     inTerms,
     inviteUidTerms,
     threadTerms,
@@ -1239,7 +1256,7 @@ async function getTotalCount(params: {
   const addressFilters = {
     fromTerms: [...fromTerms, ...normalizeSearchTermList(from)],
     recipientTerms: [...toTerms, ...normalizeSearchTermList(recipients)],
-    participantTerms: normalizeSearchTermList(participants)
+    participantTerms: [...withTerms, ...normalizeSearchTermList(participants)]
   };
   const baseWhere = `m.accountId = ? ${folderId ? "AND m.folderId = ?" : ""}`;
   const args: any[] = [accountId];
@@ -1841,6 +1858,7 @@ export async function listMessages(params: {
     ftsTokenQueries,
     fromTerms,
     toTerms,
+    withTerms,
     inTerms,
     inviteUidTerms,
     threadTerms,
@@ -1855,7 +1873,7 @@ export async function listMessages(params: {
   const addressFilters = {
     fromTerms: [...fromTerms, ...normalizeSearchTermList(from)],
     recipientTerms: [...toTerms, ...normalizeSearchTermList(recipients)],
-    participantTerms: normalizeSearchTermList(participants)
+    participantTerms: [...withTerms, ...normalizeSearchTermList(participants)]
   };
   const hasInviteUidQuery = inviteUidTerms.length > 0;
   const baseWhere = `m.accountId = ? ${folderId ? "AND m.folderId = ?" : ""}`;
@@ -2122,6 +2140,7 @@ export async function listThreads(params: {
     ftsTokenQueries,
     fromTerms,
     toTerms,
+    withTerms,
     inTerms,
     inviteUidTerms,
     threadTerms,
@@ -2136,7 +2155,7 @@ export async function listThreads(params: {
   const addressFilters = {
     fromTerms: [...fromTerms, ...normalizeSearchTermList(from)],
     recipientTerms: [...toTerms, ...normalizeSearchTermList(recipients)],
-    participantTerms: normalizeSearchTermList(participants)
+    participantTerms: [...withTerms, ...normalizeSearchTermList(participants)]
   };
   const hasInviteUidQuery = inviteUidTerms.length > 0;
   const baseWhere = `m.accountId = ? ${folderId ? "AND m.folderId = ?" : ""}`;

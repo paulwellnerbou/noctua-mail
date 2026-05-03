@@ -2909,6 +2909,15 @@ export default function MailClient({
     setActiveFolderId("");
     setQuery(`related:${message.id}`);
   };
+  const handleSearchByAddress = (action: "with" | "from" | "to", email: string) => {
+    const trimmed = email.trim();
+    if (!trimmed) return;
+    const needsQuotes = /\s/.test(trimmed);
+    const term = needsQuotes ? `"${trimmed}"` : trimmed;
+    setSearchScope("all");
+    setActiveFolderId("");
+    setQuery(`${action}:${term}`);
+  };
   const handleShowThread = (message: Message) => {
     const threadId = message.threadId ?? message.messageId ?? message.id;
     if (!threadId) return;
@@ -4905,7 +4914,8 @@ export default function MailClient({
               reportError,
               dateFormat: accountDateFormat,
               userEmail: currentAccount?.email,
-              senderIconsEnabled: currentAccount?.settings?.appearance?.senderIcons ?? true
+              senderIconsEnabled: currentAccount?.settings?.appearance?.senderIcons ?? true,
+              onSearchByAddress: handleSearchByAddress
             }
           }}
         />
