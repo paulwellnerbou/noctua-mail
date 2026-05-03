@@ -1,17 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import {
-  X,
-  Download,
-  FileText,
-  FileImage,
-  FileVideo,
-  FileAudio,
-  FileArchive,
-  FileSpreadsheet,
-  FileCode,
-  File
-} from "lucide-react";
+import { X, Download } from "lucide-react";
+import { FileIcon, defaultStyles } from "react-file-icon";
 import type { Attachment } from "@/lib/data";
 import { openDetachedWindow } from "@/lib/ui/openDetachedWindow";
 import { shouldHideAttachmentFromList } from "@/lib/messageFlags";
@@ -108,44 +98,73 @@ const isImage = (contentType?: string) => {
   return contentType?.toLowerCase().startsWith("image/") ?? false;
 };
 
-const getFileIcon = (contentType?: string, filename?: string) => {
-  if (!contentType && !filename) return File;
+const EXT_ALIAS: Record<string, string> = {
+  "7z": "7zip",
+};
+
+const MIME_TO_EXT: Record<string, string> = {
+  "application/pdf": "pdf",
+  "application/msword": "doc",
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx",
+  "application/vnd.ms-excel": "xls",
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": "xlsx",
+  "application/vnd.ms-powerpoint": "ppt",
+  "application/vnd.openxmlformats-officedocument.presentationml.presentation": "pptx",
+  "application/zip": "zip",
+  "application/x-zip-compressed": "zip",
+  "application/x-rar-compressed": "rar",
+  "application/x-7z-compressed": "7zip",
+  "application/x-tar": "tar",
+  "application/gzip": "gz",
+  "application/json": "json",
+  "application/javascript": "js",
+  "application/x-javascript": "js",
+  "text/javascript": "js",
+  "text/html": "html",
+  "text/css": "css",
+  "text/csv": "csv",
+  "text/plain": "txt",
+  "text/markdown": "md",
+  "image/jpeg": "jpg",
+  "image/jpg": "jpg",
+  "image/png": "png",
+  "image/gif": "gif",
+  "image/svg+xml": "svg",
+  "image/webp": "webp",
+  "image/heic": "heic",
+  "image/bmp": "bmp",
+  "image/tiff": "tiff",
+  "audio/mpeg": "mp3",
+  "audio/mp3": "mp3",
+  "audio/wav": "wav",
+  "audio/ogg": "ogg",
+  "audio/flac": "flac",
+  "audio/mp4": "m4a",
+  "video/mp4": "mp4",
+  "video/mpeg": "mpeg",
+  "video/x-msvideo": "avi",
+  "video/quicktime": "mov",
+  "video/x-matroska": "mkv",
+  "video/webm": "webm",
+};
+
+export const getIconExtension = (contentType?: string, filename?: string): string => {
+  const ext = getFileExtension(filename);
+  if (ext && ext in defaultStyles) return ext;
+  if (ext && ext in EXT_ALIAS) return EXT_ALIAS[ext];
 
   const lower = normalizeMimeType(contentType);
-  const ext = getFileExtension(filename);
+  if (lower in MIME_TO_EXT) {
+    const mapped = MIME_TO_EXT[lower];
+    if (mapped in defaultStyles) return mapped;
+  }
 
-  // Images
-  if (lower.startsWith("image/")) return FileImage;
+  if (lower.startsWith("image/")) return "jpg";
+  if (lower.startsWith("audio/")) return "mp3";
+  if (lower.startsWith("video/")) return "mp4";
+  if (lower.startsWith("text/")) return "txt";
 
-  // PDFs and Documents
-  if (isPdfAttachment(contentType, filename) || ext === "pdf") return FileText;
-  if (lower.includes("word") || lower.includes("document") ||
-      ["doc", "docx", "odt", "rtf"].includes(ext)) return FileText;
-
-  // Spreadsheets
-  if (lower.includes("spreadsheet") || lower.includes("excel") ||
-      ["xls", "xlsx", "ods", "csv"].includes(ext)) return FileSpreadsheet;
-
-  // Archives
-  if (lower.includes("zip") || lower.includes("archive") ||
-      ["zip", "rar", "7z", "tar", "gz", "bz2"].includes(ext)) return FileArchive;
-
-  // Audio
-  if (lower.startsWith("audio/") ||
-      ["mp3", "wav", "ogg", "flac", "m4a"].includes(ext)) return FileAudio;
-
-  // Video
-  if (lower.startsWith("video/") ||
-      ["mp4", "avi", "mov", "mkv", "webm"].includes(ext)) return FileVideo;
-
-  // Code
-  if (lower.includes("javascript") || lower.includes("json") ||
-      ["js", "ts", "jsx", "tsx", "json", "html", "css", "py", "java", "c", "cpp"].includes(ext)) return FileCode;
-
-  // Text files
-  if (lower.startsWith("text/") || ["txt", "md"].includes(ext)) return FileText;
-
-  return File;
+  return ext;
 };
 
 type HoveredImagePreview = {
@@ -267,7 +286,8 @@ export default function AttachmentsList({
         </div>
         <div className="attachment-list">
           {visibleAttachments.map((file) => {
-            const FileIcon = getFileIcon(file.contentType, file.filename);
+            const ext = getIconExtension(file.contentType, file.filename);
+            const iconStyle = ext in defaultStyles ? defaultStyles[ext] : {};
             const showImagePreview = isImage(file.contentType) && (file.url || file.dataUrl);
             const previewHref = getAttachmentPreviewHref(file);
             const downloadHref = getAttachmentDownloadHref(file);
@@ -291,7 +311,9 @@ export default function AttachmentsList({
                     );
                   }}
                 >
-                  <FileIcon size={16} className="attachment-icon" />
+                  <div className="attachment-icon">
+                    <FileIcon extension={ext} {...iconStyle} />
+                  </div>
                 </div>
                 <a
                   className="attachment-link"
