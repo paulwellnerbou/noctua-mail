@@ -51,10 +51,7 @@ const CALENDAR_EVENT_RUNTIME_SIGNATURE = [
   "replyRequested",
   "occurrenceMessageIds",
   "emailStatusBackfillV1",
-  "emailParticipationBackfillV1",
-  "sourceEmailSnapshotColumnsV1",
-  "sourceEmailSnapshotBackfillV1",
-  "occurrenceSnapshotsColumnV1"
+  "emailParticipationBackfillV1"
 ].join("|");
 
 export function ensureCalendarReminderTableSchema(db: any) {
@@ -310,176 +307,6 @@ export function ensureCalendarEventOptionalColumns(db: any) {
   }
 }
 
-// MIGRATION-CLEANUP:
-// This back-fill is an idempotent migration. It populates the new source
-// email snapshot columns on `calendar_events` rows created before the
-// Topic 2 feature landed (Calendar-Improvements.md, Apr 2026). It handles
-// BOTH the series-level `source*` columns (from `messageId`) and the
-// per-occurrence `occurrenceSnapshots` JSON (from `occurrenceMessageIds`).
-// Execution is gated by CALENDAR_EVENT_RUNTIME_SIGNATURE
-// (sourceEmailSnapshotBackfillV1) only for the current runtime / DB
-// connection (`calendarEventRuntimeSignatureByDb` is an in-process
-// WeakMap and is not persisted per DB file), so this function may run
-// again after a process restart or DB reopen. Re-runs are no-ops because
-// the SELECT statements below only match rows still missing snapshot
-// data. After a reasonable adoption window — once every running
-// deployment has passed this runtime signature at least once — both this
-// function and its call site in `ensureCalendarEventRuntimeData` should
-// be deleted. Cleanup is tracked in
-// https://github.com/paulwellnerbou/noctua-mail/issues/38.
-function backfillCalendarEventSourceSnapshots(db: any) {
-  const calendarEventColumns = getDbTableColumns(db, "calendar_events");
-  if (calendarEventColumns.size === 0) return;
-  if (
-    !calendarEventColumns.has("sourceSubject") ||
-    !calendarEventColumns.has("sourceFromAddr") ||
-    !calendarEventColumns.has("sourceBodyText") ||
-    !calendarEventColumns.has("occurrenceSnapshots")
-  ) {
-    return;
-  }
-
-  const selectMessage = db.prepare(
-    `SELECT subject, fromAddr, toAddr, ccAddr, bccAddr, dateValue, body, htmlBody
-     FROM messages
-     WHERE id = ?`
-  );
-
-  // --- Step 1: back-fill series-level snapshot columns ---
-  // Only touch rows that have a messageId but no series snapshot yet.
-  const seriesRows = db
-    .prepare(
-      `SELECT id, messageId
-       FROM calendar_events
-       WHERE messageId IS NOT NULL
-         AND TRIM(messageId) <> ''
-         AND sourceSubject IS NULL
-         AND sourceFromAddr IS NULL
-         AND sourceToAddr IS NULL
-         AND sourceCcAddr IS NULL
-         AND sourceBccAddr IS NULL
-         AND sourceDateMs IS NULL
-         AND sourceBodyText IS NULL
-         AND sourceBodyHtml IS NULL`
-    )
-    .all() as Array<{ id?: string | null; messageId?: string | null }>;
-
-  const updateSeriesSnapshot = db.prepare(
-    `UPDATE calendar_events
-     SET sourceSubject = ?,
-         sourceFromAddr = ?,
-         sourceToAddr = ?,
-         sourceCcAddr = ?,
-         sourceBccAddr = ?,
-         sourceDateMs = ?,
-         sourceBodyText = ?,
-         sourceBodyHtml = ?,
-         updatedAtMs = ?
-     WHERE id = ?`
-  );
-
-  // --- Step 2: back-fill per-occurrence snapshots JSON ---
-  // Touch rows that have occurrenceMessageIds but no occurrenceSnapshots yet.
-  const occurrenceRows = db
-    .prepare(
-      `SELECT id, occurrenceMessageIds
-       FROM calendar_events
-       WHERE occurrenceMessageIds IS NOT NULL
-         AND TRIM(occurrenceMessageIds) <> ''
-         AND occurrenceSnapshots IS NULL`
-    )
-    .all() as Array<{ id?: string | null; occurrenceMessageIds?: string | null }>;
-
-  const updateOccurrenceSnapshots = db.prepare(
-    `UPDATE calendar_events
-     SET occurrenceSnapshots = ?,
-         updatedAtMs = ?
-     WHERE id = ?`
-  );
-
-  if (seriesRows.length === 0 && occurrenceRows.length === 0) return;
-
-  const now = Date.now();
-
-  type MessageRow = {
-    subject?: string | null;
-    fromAddr?: string | null;
-    toAddr?: string | null;
-    ccAddr?: string | null;
-    bccAddr?: string | null;
-    dateValue?: number | null;
-    body?: string | null;
-    htmlBody?: string | null;
-  };
-
-  function messageRowToSnapshotJson(msg: MessageRow): Record<string, unknown> {
-    const snap: Record<string, unknown> = {};
-    if (msg.subject != null) snap.sourceSubject = msg.subject;
-    if (msg.fromAddr != null) snap.sourceFromAddr = msg.fromAddr;
-    if (msg.toAddr != null) snap.sourceToAddr = msg.toAddr;
-    if (msg.ccAddr != null) snap.sourceCcAddr = msg.ccAddr;
-    if (msg.bccAddr != null) snap.sourceBccAddr = msg.bccAddr;
-    if (typeof msg.dateValue === "number") snap.sourceDateMs = msg.dateValue;
-    if (msg.body != null) snap.sourceBodyText = msg.body;
-    if (msg.htmlBody != null) snap.sourceBodyHtml = msg.htmlBody;
-    return snap;
-  }
-
-  const runBackfill = db.transaction(() => {
-    // Step 1: series rows
-    for (const row of seriesRows) {
-      const id = String(row.id ?? "").trim();
-      const messageId = String(row.messageId ?? "").trim();
-      if (!id || !messageId) continue;
-      const msg = selectMessage.get(messageId) as MessageRow | undefined;
-      if (!msg) continue; // message no longer present — leave columns null
-      updateSeriesSnapshot.run(
-        msg.subject ?? null,
-        msg.fromAddr ?? null,
-        msg.toAddr ?? null,
-        msg.ccAddr ?? null,
-        msg.bccAddr ?? null,
-        typeof msg.dateValue === "number" ? msg.dateValue : null,
-        msg.body ?? null,
-        msg.htmlBody ?? null,
-        now,
-        id
-      );
-    }
-    // Step 2: per-occurrence snapshots
-    for (const row of occurrenceRows) {
-      const id = String(row.id ?? "").trim();
-      const raw = String(row.occurrenceMessageIds ?? "").trim();
-      if (!id || !raw) continue;
-      let parsed: Record<string, unknown> | null = null;
-      try {
-        const candidate = JSON.parse(raw);
-        if (candidate && typeof candidate === "object" && !Array.isArray(candidate)) {
-          parsed = candidate as Record<string, unknown>;
-        }
-      } catch {
-        parsed = null;
-      }
-      if (!parsed) continue;
-      const snapshots: Record<string, Record<string, unknown>> = {};
-      for (const [occKey, messageIdRaw] of Object.entries(parsed)) {
-        const messageId = typeof messageIdRaw === "string" ? messageIdRaw.trim() : "";
-        if (!messageId) continue;
-        const msg = selectMessage.get(messageId) as MessageRow | undefined;
-        if (!msg) continue; // source message purged — skip this occurrence
-        const snap = messageRowToSnapshotJson(msg);
-        if (Object.keys(snap).length > 0) {
-          snapshots[occKey] = snap;
-        }
-      }
-      if (Object.keys(snapshots).length === 0) continue;
-      updateOccurrenceSnapshots.run(JSON.stringify(snapshots), now, id);
-    }
-  });
-
-  runBackfill();
-}
-
 function backfillEmailCalendarEventStatuses(db: any) {
   const rows = db
     .prepare(
@@ -641,11 +468,6 @@ export async function ensureCalendarEventRuntimeData(db: any, accountId: string)
   const { getAccountById } = await import("../db");
   const account = await getAccountById(accountId);
   backfillEmailCalendarEventParticipation(db, accountId, account?.email);
-  // MIGRATION-CLEANUP: one-off back-fill for the source email snapshot
-  // columns (Topic 2). Remove alongside backfillCalendarEventSourceSnapshots
-  // after the adoption window — tracked in
-  // https://github.com/paulwellnerbou/noctua-mail/issues/38.
-  backfillCalendarEventSourceSnapshots(db);
   const nextPerAccount = perAccount ?? new Map<string, string>();
   nextPerAccount.set(accountId, CALENDAR_EVENT_RUNTIME_SIGNATURE);
   if (!perAccount) calendarEventRuntimeSignatureByDb.set(db, nextPerAccount);
