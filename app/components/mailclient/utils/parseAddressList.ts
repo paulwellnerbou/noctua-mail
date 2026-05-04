@@ -19,6 +19,11 @@ export function splitAddressList(value: string | null | undefined): string[] {
   let inAngles = false;
   for (let i = 0; i < text.length; i++) {
     const ch = text[i];
+    if (inQuotes && ch === "\\" && i + 1 < text.length) {
+      buf += ch + text[i + 1];
+      i += 1;
+      continue;
+    }
     if (ch === '"' && !inAngles) {
       inQuotes = !inQuotes;
       buf += ch;

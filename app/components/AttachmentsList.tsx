@@ -15,7 +15,9 @@ const PREVIEW_MIME_TYPES = new Set([
 ]);
 
 const getFileExtension = (filename?: string) => {
-  return filename?.split(".").pop()?.toLowerCase() ?? "";
+  const lastDotIndex = filename?.lastIndexOf(".") ?? -1;
+  if (!filename || lastDotIndex <= 0 || lastDotIndex === filename.length - 1) return "";
+  return filename.slice(lastDotIndex + 1).toLowerCase();
 };
 
 const normalizeMimeType = (contentType?: string) => {

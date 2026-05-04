@@ -19,6 +19,13 @@ describe("splitAddressList", () => {
     ]);
   });
 
+  test("does not split on commas after escaped quotes inside quoted display names", () => {
+    expect(splitAddressList(`"O\\"Connor, Anne" <anne@example.test>, bob@example.test`)).toEqual([
+      `"O\\"Connor, Anne" <anne@example.test>`,
+      "bob@example.test"
+    ]);
+  });
+
   test("preserves angle-bracketed addresses", () => {
     expect(splitAddressList("Alice <a@x.com>, Bob <b@y.com>")).toEqual([
       "Alice <a@x.com>",

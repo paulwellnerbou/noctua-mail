@@ -96,6 +96,7 @@ describe("getIconExtension", () => {
   it("returns an empty string when nothing matches", () => {
     expect(getIconExtension(undefined, undefined)).toBe("");
     expect(getIconExtension("application/octet-stream", undefined)).toBe("");
+    expect(getIconExtension("application/octet-stream", "README")).toBe("");
   });
 });
 

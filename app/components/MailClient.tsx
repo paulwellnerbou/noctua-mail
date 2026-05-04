@@ -72,7 +72,10 @@ import {
   type InviteProcessingStatePatch
 } from "./mailclient/utils/calendarInviteState";
 import type { MessageGroup } from "./mailclient/messagelist/listModel";
-import type { ThreadsMode } from "./mailclient/messagelist/messageListViewTypes";
+import {
+  isThreadsScopeAvailable,
+  type ThreadsMode
+} from "./mailclient/messagelist/messageListViewTypes";
 import {
   AlertDialog,
   Badge,
@@ -1146,9 +1149,14 @@ export default function MailClient({
     ["date", "week", "year"].includes(groupBy) &&
     !isDraftsFolder(activeFolderId) &&
     !checkIsThreadExcludedFolder(activeFolderId);
+  const threadsScopeAvailable = isThreadsScopeAvailable({
+    searchScope,
+    activeTopicId,
+    activeVirtualFolderId: activeVirtualFolder?.id
+  });
   const supportsThreads =
     threadsAllowed &&
-    (threadsMode === "on" || (threadsMode === "scope" && searchScope === "folder"));
+    (threadsMode === "on" || (threadsMode === "scope" && threadsScopeAvailable));
 
   // useMessageData: manages message list state, loading, and refresh
   const {
@@ -4718,6 +4726,7 @@ export default function MailClient({
               eventGroupingAvailable: isCalendarGroupByAvailable,
               threadDateSource,
               threadsMode,
+              threadsScopeAvailable,
               threadsAllowed,
               groupedMessages,
               collapsedGroups

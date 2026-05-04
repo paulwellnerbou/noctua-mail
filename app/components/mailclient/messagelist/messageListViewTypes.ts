@@ -18,8 +18,22 @@ export type SortKey = "date" | "from" | "subject";
 export const MESSAGE_VIEW_MODES = ["card", "table", "compact", "threads"] as const;
 export type MessageViewMode = (typeof MESSAGE_VIEW_MODES)[number];
 
-/** "on" = threads always; "scope" = threads only when in a folder/topic (not everywhere); "off" = never */
+/** "on" = threads always; "scope" = threads only in a scoped view; "off" = never */
 export type ThreadsMode = "on" | "scope" | "off";
+
+export type ThreadsScopeContext = {
+  searchScope: "folder" | "all";
+  activeTopicId?: string | null;
+  activeVirtualFolderId?: string | null;
+};
+
+export function isThreadsScopeAvailable({
+  searchScope,
+  activeTopicId,
+  activeVirtualFolderId
+}: ThreadsScopeContext): boolean {
+  return searchScope === "folder" || Boolean(activeTopicId) || Boolean(activeVirtualFolderId);
+}
 
 export type MessageListViewState = {
   groupedMessages: MessageGroup[];

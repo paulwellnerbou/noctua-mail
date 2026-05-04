@@ -23,6 +23,7 @@ export type MessageListHeaderProps = {
     eventGroupingAvailable: boolean;
     threadDateSource: ThreadDateSource;
     threadsMode: ThreadsMode;
+    threadsScopeAvailable: boolean;
     threadsAllowed: boolean;
     groupedMessages: MessageGroup[];
     collapsedGroups: Record<string, boolean>;
@@ -55,6 +56,7 @@ export default function MessageListHeader({ state, actions }: MessageListHeaderP
     eventGroupingAvailable,
     threadDateSource,
     threadsMode,
+    threadsScopeAvailable,
     threadsAllowed,
     groupedMessages,
     collapsedGroups
@@ -116,7 +118,7 @@ export default function MessageListHeader({ state, actions }: MessageListHeaderP
     if (!threadsAllowed) return;
     startTransition(() =>
       setThreadsMode((current) => {
-        if (current === "off") return searchScope === "all" ? "on" : "scope";
+        if (current === "off") return threadsScopeAvailable ? "scope" : "on";
         if (current === "scope") return "on";
         return "off";
       })
@@ -132,7 +134,7 @@ export default function MessageListHeader({ state, actions }: MessageListHeaderP
     (searchScope === "folder" ? activeFolderName?.trim() || "Everything" : "Everything");
   const showThreadDateSelect = ["date", "week", "year"].includes(localGroupBy);
 
-  const threadsScopeInactive = threadsMode === "scope" && searchScope === "all";
+  const threadsScopeInactive = threadsMode === "scope" && !threadsScopeAvailable;
   const threadsButtonColor: "gray" | "blue" | "indigo" =
     !threadsAllowed || threadsMode === "off" || threadsScopeInactive
       ? "gray"
@@ -146,8 +148,8 @@ export default function MessageListHeader({ state, actions }: MessageListHeaderP
       : threadsMode === "on"
         ? "Threads on"
         : threadsScopeInactive
-          ? "Threads on (folder only) – inactive while searching everywhere"
-          : "Threads on (folder only)";
+          ? "Threads on (scoped views) - inactive while searching everywhere"
+          : "Threads on (scoped views)";
 
   return (
     <div className={styles.header}>

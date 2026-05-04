@@ -609,8 +609,15 @@ a {
 }
 
 .attachment-icon {
-  width: 16px;
+  width: 13.333px;
+  height: 16px;
   flex-shrink: 0;
+}
+
+.attachment-icon svg {
+  display: block;
+  width: 100%;
+  height: 100%;
 }
 
 .attachment-image-preview {
