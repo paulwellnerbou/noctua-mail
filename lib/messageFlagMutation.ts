@@ -131,33 +131,47 @@ export async function applyFlagMutationsToMessages(params: {
   }
   if (params.targets.length === 0) return [];
 
-  for (const mutation of mutations) {
-    await updateImapFlagsBulk(
-      params.account,
-      params.targets.map((t) => ({ mailboxPath: t.mailboxPath, uid: t.imapUid })),
-      mutation.flag,
-      mutation.value,
-      params.clientId
-    );
+  // Process one mailbox group at a time and commit DB + thread recompute
+  // for that group only after every mutation has completed on the IMAP
+  // server. A failure on a later group leaves earlier groups durably
+  // persisted instead of dropping all in-flight work.
+  const groups = new Map<string, BulkFlagMutationTarget[]>();
+  for (const target of params.targets) {
+    const arr = groups.get(target.mailboxPath) ?? [];
+    arr.push(target);
+    groups.set(target.mailboxPath, arr);
   }
 
-  const results: BulkFlagMutationResult[] = params.targets.map((target) => ({
-    messageId: target.messageId,
-    flags: applyMutationsToFlagSet(target.flags ?? [], mutations)
-  }));
-  await bulkUpdateMessageFlags(
-    params.accountId,
-    results.map((r) => ({ id: r.messageId, flags: r.flags }))
-  );
-  const threadIds = Array.from(
-    new Set(
-      params.targets
-        .map((t) => t.threadId)
-        .filter((id): id is string => typeof id === "string" && id.length > 0)
-    )
-  );
-  if (threadIds.length > 0) {
-    await recomputeThreadsForAccount(params.accountId, threadIds);
+  const results: BulkFlagMutationResult[] = [];
+  for (const groupTargets of groups.values()) {
+    for (const mutation of mutations) {
+      await updateImapFlagsBulk(
+        params.account,
+        groupTargets.map((t) => ({ mailboxPath: t.mailboxPath, uid: t.imapUid })),
+        mutation.flag,
+        mutation.value,
+        params.clientId
+      );
+    }
+    const groupResults: BulkFlagMutationResult[] = groupTargets.map((target) => ({
+      messageId: target.messageId,
+      flags: applyMutationsToFlagSet(target.flags ?? [], mutations)
+    }));
+    await bulkUpdateMessageFlags(
+      params.accountId,
+      groupResults.map((r) => ({ id: r.messageId, flags: r.flags }))
+    );
+    const groupThreadIds = Array.from(
+      new Set(
+        groupTargets
+          .map((t) => t.threadId)
+          .filter((id): id is string => typeof id === "string" && id.length > 0)
+      )
+    );
+    if (groupThreadIds.length > 0) {
+      await recomputeThreadsForAccount(params.accountId, groupThreadIds);
+    }
+    results.push(...groupResults);
   }
   return results;
 }

@@ -440,19 +440,18 @@ export function useMessageMutations({
     setPendingMessageActions
   ]);
 
-  // Pass `flag = "seen"` to also adjust the per-folder unread count;
-  // any other system flag or `null` (for keywords) skips that bookkeeping.
-  // A bulk selection in cross-folder views may span multiple folders, so
-  // deltas are aggregated per folderId before the single setFolders update.
+  // The per-folder unread count tracks `seen`. Some mutations toggle that
+  // flag indirectly (e.g. `answered: true` also sets `\Seen` server-side via
+  // buildFlagMutations), so we always check the seen transition rather than
+  // gating on the requested flag. Cross-folder selections aggregate per
+  // folderId before the single setFolders update.
   const applyFlagsResults = useCallback((
     pairs: Array<{ message: Message; nextFlags: string[] }>,
-    flag: SystemFlag | null,
     source: string
   ) => {
     const unreadDeltaByFolderId = new Map<string, number>();
     for (const { message, nextFlags } of pairs) {
       const updatedMessage = reconcileMessageFlags(message, nextFlags, source);
-      if (flag !== "seen") continue;
       const previousSeen = Boolean(message.seen);
       const nextSeen = Boolean(updatedMessage.seen);
       if (previousSeen === nextSeen) continue;
@@ -480,7 +479,7 @@ export function useMessageMutations({
     try {
       const flags = await requestMessageFlagMutation(message.id, { flag, value });
       if (!flags) return;
-      applyFlagsResults([{ message, nextFlags: flags }], flag, "update-flag-state");
+      applyFlagsResults([{ message, nextFlags: flags }], "update-flag-state");
       queueFilteredSearchRefresh(hasFilteredSearchCriteria);
     } catch {
       reportError("Failed to update message flag.");
@@ -498,7 +497,7 @@ export function useMessageMutations({
     try {
       const flags = await requestMessageFlagMutation(message.id, { keyword, value });
       if (!flags) return;
-      applyFlagsResults([{ message, nextFlags: flags }], null, "update-keyword-flag");
+      applyFlagsResults([{ message, nextFlags: flags }], "update-keyword-flag");
       queueFilteredSearchRefresh(hasFilteredSearchCriteria);
     } catch {
       reportError("Failed to update message keyword.");
@@ -511,7 +510,6 @@ export function useMessageMutations({
   const applyBulkFlagResults = useCallback((
     messages: Message[],
     results: Array<{ messageId: string; flags: string[] }>,
-    flag: SystemFlag | null,
     source: string
   ) => {
     const flagsByMessageId = new Map(results.map((r) => [r.messageId, r.flags]));
@@ -521,7 +519,7 @@ export function useMessageMutations({
         return nextFlags ? { message, nextFlags } : null;
       })
       .filter((pair): pair is { message: Message; nextFlags: string[] } => pair !== null);
-    applyFlagsResults(pairs, flag, source);
+    applyFlagsResults(pairs, source);
   }, [applyFlagsResults]);
 
   const updateFlagStateBulk = useCallback(async (
@@ -533,7 +531,7 @@ export function useMessageMutations({
     try {
       const results = await requestBulkFlagMutation(messages.map((m) => m.id), { flag, value });
       if (!results) return;
-      applyBulkFlagResults(messages, results, flag, "update-flag-state-bulk");
+      applyBulkFlagResults(messages, results, "update-flag-state-bulk");
       queueFilteredSearchRefresh(hasFilteredSearchCriteria);
     } catch {
       reportError("Failed to update message flag.");
@@ -552,7 +550,7 @@ export function useMessageMutations({
     try {
       const results = await requestBulkFlagMutation(messages.map((m) => m.id), { keyword, value });
       if (!results) return;
-      applyBulkFlagResults(messages, results, null, "update-keyword-flag-bulk");
+      applyBulkFlagResults(messages, results, "update-keyword-flag-bulk");
       queueFilteredSearchRefresh(hasFilteredSearchCriteria);
     } catch {
       reportError("Failed to update message keyword.");
