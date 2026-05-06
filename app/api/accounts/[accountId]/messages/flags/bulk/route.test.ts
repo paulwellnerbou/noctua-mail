@@ -1,19 +1,42 @@
 import { randomUUID } from "crypto";
 import { beforeEach, describe, expect, mock, test } from "bun:test";
-import type { Account, Folder, Message } from "@/lib/data";
+import type { Account } from "@/lib/data";
 import { sealSession, type SessionData } from "@/lib/auth";
 import { dbModulePromise } from "@/lib/testDbHarness";
+import type { StoredMessageSummary } from "@/lib/db/messages/retrieval";
+import type {
+  BulkFlagMutationResult,
+  BulkFlagMutationTarget
+} from "@/lib/messageFlagMutation";
 
-const updateImapFlagsBulk = mock(async () => {});
+// `@/lib/db` and `@/lib/messageFlagMutation` are stubbed at the module level
+// so this test exercises the route's payload validation, target filtering,
+// and response shape without depending on the shared test DB. (Other test
+// files mock `getStoredMessagesByIds`, and Bun's `mock.restore()` does not
+// undo `mock.module` registrations, so this test would otherwise observe
+// stale stubs from those files.)
 
-const actualServerImap = await import("@/lib/serverImap");
+let storedRows: StoredMessageSummary[] = [];
+const getStoredMessagesByIds = mock(async () => storedRows);
+const applyFlagMutationsToMessages = mock(
+  async (_params: Parameters<
+    typeof import("@/lib/messageFlagMutation").applyFlagMutationsToMessages
+  >[0]): Promise<BulkFlagMutationResult[]> => []
+);
 
-mock.module("@/lib/serverImap", () => ({
-  ...actualServerImap,
-  updateImapFlagsBulk
+const actualDb = await import("@/lib/db");
+const actualMfm = await import("@/lib/messageFlagMutation");
+
+mock.module("@/lib/db", () => ({
+  ...actualDb,
+  getStoredMessagesByIds
+}));
+mock.module("@/lib/messageFlagMutation", () => ({
+  ...actualMfm,
+  applyFlagMutationsToMessages
 }));
 
-const { saveFoldersForAccount, upsertAccount, upsertMessages, getMessageById } = await dbModulePromise;
+const { upsertAccount } = await dbModulePromise;
 const { POST } = await import("./route");
 
 mock.restore();
@@ -38,51 +61,6 @@ function buildAccount(accountId: string): Account {
       user: "owner@example.test",
       password: "secret-smtp"
     }
-  };
-}
-
-function buildFolder(accountId: string): Folder {
-  return {
-    id: `${accountId}:Inbox`,
-    accountId,
-    name: "Inbox",
-    count: 0,
-    unreadCount: 0,
-    specialUse: "\\Inbox"
-  };
-}
-
-function buildMessage(params: {
-  id: string;
-  accountId: string;
-  folderId: string;
-  imapUid?: number | null;
-  mailboxPath?: string;
-  flags?: string[];
-}): Message {
-  return {
-    id: params.id,
-    accountId: params.accountId,
-    folderId: params.folderId,
-    threadId: `${params.accountId}-thread`,
-    subject: params.id,
-    from: "sender@example.test",
-    to: "owner@example.test",
-    preview: params.id,
-    date: new Date(Date.UTC(2026, 2, 25, 9, 0, 0)).toISOString(),
-    dateValue: Date.UTC(2026, 2, 25, 9, 0, 0),
-    body: "",
-    mailboxPath: params.mailboxPath ?? "INBOX",
-    imapUid: params.imapUid ?? undefined,
-    attachments: [],
-    flags: params.flags ?? [],
-    seen: false,
-    answered: false,
-    flagged: false,
-    deleted: false,
-    draft: false,
-    recent: false,
-    unread: true
   };
 }
 
@@ -114,8 +92,11 @@ async function postBulkFlags(accountId: string, body: unknown) {
 }
 
 beforeEach(() => {
-  updateImapFlagsBulk.mockReset();
-  updateImapFlagsBulk.mockResolvedValue(undefined);
+  storedRows = [];
+  getStoredMessagesByIds.mockClear();
+  getStoredMessagesByIds.mockImplementation(async () => storedRows);
+  applyFlagMutationsToMessages.mockReset();
+  applyFlagMutationsToMessages.mockResolvedValue([]);
 });
 
 describe("POST /messages/flags/bulk", () => {
@@ -155,31 +136,34 @@ describe("POST /messages/flags/bulk", () => {
   test("returns 404 when none of the message ids exist", async () => {
     const accountId = uniqueAccountId("acc-bulk-flags-missing");
     await upsertAccount(buildAccount(accountId));
-    await saveFoldersForAccount(accountId, [buildFolder(accountId)]);
+    storedRows = [];
     const response = await postBulkFlags(accountId, {
       messageIds: ["does-not-exist"],
       flag: "seen",
       value: true
     });
     expect(response.status).toBe(404);
+    expect(applyFlagMutationsToMessages).not.toHaveBeenCalled();
   });
 
   test("returns 400 with skipped list when no message has IMAP metadata", async () => {
     const accountId = uniqueAccountId("acc-bulk-flags-no-imap");
-    const folder = buildFolder(accountId);
     await upsertAccount(buildAccount(accountId));
-    await saveFoldersForAccount(accountId, [folder]);
-    const message = buildMessage({
-      id: `${accountId}-msg-1`,
-      accountId,
-      folderId: folder.id,
-      imapUid: null,
-      mailboxPath: ""
-    });
-    await upsertMessages(accountId, folder.id, [message]);
+    const messageId = `${accountId}-msg-1`;
+    storedRows = [
+      {
+        id: messageId,
+        messageId,
+        folderId: `${accountId}:Inbox`,
+        mailboxPath: null,
+        imapUid: null,
+        flags: [],
+        threadId: `${accountId}-thread`
+      }
+    ];
 
     const response = await postBulkFlags(accountId, {
-      messageIds: [message.id],
+      messageIds: [messageId],
       flag: "seen",
       value: true
     });
@@ -190,33 +174,41 @@ describe("POST /messages/flags/bulk", () => {
     };
     expect(body.ok).toBe(false);
     expect(body.skipped).toHaveLength(1);
-    expect(body.skipped[0]?.messageId).toBe(message.id);
-    expect(updateImapFlagsBulk).not.toHaveBeenCalled();
+    expect(body.skipped[0]?.messageId).toBe(messageId);
+    expect(applyFlagMutationsToMessages).not.toHaveBeenCalled();
   });
 
   test("applies flag to messages with IMAP metadata, returning skipped for those without", async () => {
     const accountId = uniqueAccountId("acc-bulk-flags-mixed");
-    const folder = buildFolder(accountId);
     await upsertAccount(buildAccount(accountId));
-    await saveFoldersForAccount(accountId, [folder]);
-    const ready = buildMessage({
-      id: `${accountId}-msg-ready`,
-      accountId,
-      folderId: folder.id,
-      imapUid: 101,
-      mailboxPath: "INBOX"
-    });
-    const stale = buildMessage({
-      id: `${accountId}-msg-stale`,
-      accountId,
-      folderId: folder.id,
-      imapUid: null,
-      mailboxPath: ""
-    });
-    await upsertMessages(accountId, folder.id, [ready, stale]);
+    const readyId = `${accountId}-msg-ready`;
+    const staleId = `${accountId}-msg-stale`;
+    storedRows = [
+      {
+        id: readyId,
+        messageId: readyId,
+        folderId: `${accountId}:Inbox`,
+        mailboxPath: "INBOX",
+        imapUid: 101,
+        flags: [],
+        threadId: `${accountId}-thread`
+      },
+      {
+        id: staleId,
+        messageId: staleId,
+        folderId: `${accountId}:Inbox`,
+        mailboxPath: null,
+        imapUid: null,
+        flags: [],
+        threadId: `${accountId}-thread`
+      }
+    ];
+    applyFlagMutationsToMessages.mockResolvedValue([
+      { messageId: readyId, flags: ["\\Seen"] }
+    ]);
 
     const response = await postBulkFlags(accountId, {
-      messageIds: [ready.id, stale.id],
+      messageIds: [readyId, staleId],
       flag: "seen",
       value: true
     });
@@ -227,48 +219,96 @@ describe("POST /messages/flags/bulk", () => {
       skipped: Array<{ messageId: string; reason: string }>;
     };
     expect(body.ok).toBe(true);
-    expect(body.results).toHaveLength(1);
-    expect(body.results[0]?.messageId).toBe(ready.id);
-    expect(body.results[0]?.flags).toContain("\\Seen");
+    expect(body.results).toEqual([{ messageId: readyId, flags: ["\\Seen"] }]);
     expect(body.skipped).toHaveLength(1);
-    expect(body.skipped[0]?.messageId).toBe(stale.id);
+    expect(body.skipped[0]?.messageId).toBe(staleId);
 
-    expect(updateImapFlagsBulk).toHaveBeenCalledTimes(1);
-    const [, bulkTargets, bulkFlag, bulkValue] = updateImapFlagsBulk.mock.calls[0]!;
-    expect(bulkFlag).toBe("\\Seen");
-    expect(bulkValue).toBe(true);
-    expect(bulkTargets).toEqual([{ mailboxPath: "INBOX", uid: 101 }]);
-
-    const persisted = await getMessageById(accountId, ready.id);
-    expect(persisted?.seen).toBe(true);
-    expect(persisted?.flags).toContain("\\Seen");
+    expect(applyFlagMutationsToMessages).toHaveBeenCalledTimes(1);
+    const [callParams] = applyFlagMutationsToMessages.mock.calls[0]!;
+    expect(callParams.flag).toBe("seen");
+    expect(callParams.value).toBe(true);
+    expect(callParams.targets).toEqual([
+      {
+        messageId: readyId,
+        mailboxPath: "INBOX",
+        imapUid: 101,
+        flags: [],
+        threadId: `${accountId}-thread`
+      } satisfies BulkFlagMutationTarget
+    ]);
   });
 
-  test("groups multiple uids in the same mailbox into a single bulk STORE", async () => {
+  test("forwards every well-formed target so the service layer can group by mailbox", async () => {
     const accountId = uniqueAccountId("acc-bulk-flags-group");
-    const folder = buildFolder(accountId);
     await upsertAccount(buildAccount(accountId));
-    await saveFoldersForAccount(accountId, [folder]);
-    const messages = [101, 102, 103].map((uid, i) =>
-      buildMessage({
-        id: `${accountId}-msg-${i}`,
-        accountId,
-        folderId: folder.id,
-        imapUid: uid,
-        mailboxPath: "INBOX"
-      })
-    );
-    await upsertMessages(accountId, folder.id, messages);
+    storedRows = [101, 102, 103].map((uid, i) => ({
+      id: `${accountId}-msg-${i}`,
+      messageId: `${accountId}-msg-${i}`,
+      folderId: `${accountId}:Inbox`,
+      mailboxPath: "INBOX",
+      imapUid: uid,
+      flags: [],
+      threadId: `${accountId}-thread`
+    }));
 
     const response = await postBulkFlags(accountId, {
-      messageIds: messages.map((m) => m.id),
+      messageIds: storedRows.map((r) => r.id),
       flag: "flagged",
       value: true
     });
     expect(response.status).toBe(200);
-    expect(updateImapFlagsBulk).toHaveBeenCalledTimes(1);
-    const [, bulkTargets] = updateImapFlagsBulk.mock.calls[0]!;
-    expect(bulkTargets).toHaveLength(3);
-    expect((bulkTargets as Array<{ uid: number }>).map((t) => t.uid).sort()).toEqual([101, 102, 103]);
+    expect(applyFlagMutationsToMessages).toHaveBeenCalledTimes(1);
+    const [callParams] = applyFlagMutationsToMessages.mock.calls[0]!;
+    expect(callParams.targets).toHaveLength(3);
+    expect(callParams.targets.map((t) => t.imapUid).sort()).toEqual([101, 102, 103]);
+    expect(callParams.targets.every((t) => t.mailboxPath === "INBOX")).toBe(true);
+  });
+
+  test("maps `Unknown flag` from the service layer to a 400", async () => {
+    const accountId = uniqueAccountId("acc-bulk-flags-unknown");
+    await upsertAccount(buildAccount(accountId));
+    storedRows = [
+      {
+        id: `${accountId}-msg-1`,
+        messageId: `${accountId}-msg-1`,
+        folderId: `${accountId}:Inbox`,
+        mailboxPath: "INBOX",
+        imapUid: 1,
+        flags: [],
+        threadId: `${accountId}-thread`
+      }
+    ];
+    applyFlagMutationsToMessages.mockRejectedValue(new Error("Unknown flag"));
+
+    const response = await postBulkFlags(accountId, {
+      messageIds: storedRows.map((r) => r.id),
+      flag: "seen",
+      value: true
+    });
+    expect(response.status).toBe(400);
+  });
+
+  test("maps unexpected service-layer errors to a 502", async () => {
+    const accountId = uniqueAccountId("acc-bulk-flags-imap-error");
+    await upsertAccount(buildAccount(accountId));
+    storedRows = [
+      {
+        id: `${accountId}-msg-1`,
+        messageId: `${accountId}-msg-1`,
+        folderId: `${accountId}:Inbox`,
+        mailboxPath: "INBOX",
+        imapUid: 1,
+        flags: [],
+        threadId: `${accountId}-thread`
+      }
+    ];
+    applyFlagMutationsToMessages.mockRejectedValue(new Error("imap connect refused"));
+
+    const response = await postBulkFlags(accountId, {
+      messageIds: storedRows.map((r) => r.id),
+      flag: "seen",
+      value: true
+    });
+    expect(response.status).toBe(502);
   });
 });
