@@ -100,6 +100,20 @@ export async function updateMessageFlags(
   return db.updateMessageFlags(...args);
 }
 
+export async function bulkUpdateMessageFlags(
+  ...args: Parameters<ServerDbModule["bulkUpdateMessageFlags"]>
+) {
+  const db = await loadServerDb();
+  return db.bulkUpdateMessageFlags(...args);
+}
+
+export async function recomputeThreadsForAccount(
+  ...args: Parameters<ServerDbModule["recomputeThreadsForAccount"]>
+) {
+  const db = await loadServerDb();
+  return db.recomputeThreadsForAccount(...args);
+}
+
 export async function upsertMessages(...args: Parameters<ServerDbModule["upsertMessages"]>) {
   const db = await loadServerDb();
   return db.upsertMessages(...args);

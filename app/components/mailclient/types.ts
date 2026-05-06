@@ -10,6 +10,8 @@ export type ExceptionEntry = {
   id: string;
   message: string;
   timestamp: number;
+  requestPath?: string;
+  status?: number;
 };
 
 export type DeleteConfirmAction = "cancel" | "delete_mail_only" | "delete_linked_and_mail";

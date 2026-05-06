@@ -96,18 +96,20 @@ export async function getMessageById(accountId: string, messageId: string) {
   } as Message;
 }
 
+export type StoredMessageSummary = {
+  id: string;
+  messageId?: string | null;
+  folderId: string;
+  mailboxPath?: string | null;
+  imapUid?: number | null;
+  flags: string[];
+  threadId?: string | null;
+};
+
 export async function getStoredMessagesByIds(
   accountId: string,
   messageIds: string[]
-): Promise<
-  Array<{
-    id: string;
-    messageId?: string | null;
-    folderId: string;
-    mailboxPath?: string | null;
-    imapUid?: number | null;
-  }>
-> {
+): Promise<StoredMessageSummary[]> {
   const uniqueIds = Array.from(new Set(messageIds.map((id) => id.trim()).filter(Boolean)));
   if (uniqueIds.length === 0) return [];
   const db = await getAccountDb(accountId);
@@ -118,13 +120,15 @@ export async function getStoredMessagesByIds(
     folderId: string;
     mailboxPath?: string | null;
     imapUid?: number | null;
+    flags?: string | null;
+    threadId?: string | null;
   }> = [];
   for (let start = 0; start < uniqueIds.length; start += QUERY_BATCH_SIZE) {
     const chunk = uniqueIds.slice(start, start + QUERY_BATCH_SIZE);
     rows.push(
       ...((db
         .prepare(
-          `SELECT id, messageId, folderId, mailboxPath, imapUid
+          `SELECT id, messageId, folderId, mailboxPath, imapUid, flags, threadId
            FROM messages
            WHERE accountId = ? AND id IN (${chunk.map(() => "?").join(",")})`
         )
@@ -134,10 +138,20 @@ export async function getStoredMessagesByIds(
         folderId: string;
         mailboxPath?: string | null;
         imapUid?: number | null;
+        flags?: string | null;
+        threadId?: string | null;
       }>))
     );
   }
-  return rows;
+  return rows.map((row) => ({
+    id: row.id,
+    messageId: row.messageId,
+    folderId: row.folderId,
+    mailboxPath: row.mailboxPath,
+    imapUid: row.imapUid,
+    flags: safeParseJson<string[]>(row.flags) ?? [],
+    threadId: row.threadId
+  }));
 }
 
 export async function getAttachmentMeta(accountId: string, messageId: string, attachmentId: string) {

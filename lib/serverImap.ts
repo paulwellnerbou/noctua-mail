@@ -33,3 +33,10 @@ export async function updateImapFlags(
   const imap = await loadServerImap();
   return imap.updateImapFlags(...args);
 }
+
+export async function updateImapFlagsBulk(
+  ...args: Parameters<ServerImapModule["updateImapFlagsBulk"]>
+) {
+  const imap = await loadServerImap();
+  return imap.updateImapFlagsBulk(...args);
+}

@@ -112,8 +112,18 @@ export type MessageListHandle = {
     flag: "seen" | "answered" | "flagged" | "draft" | "deleted",
     value: boolean
   ) => Promise<void>;
+  updateFlagStateBulk: (
+    messages: Message[],
+    flag: "seen" | "answered" | "flagged" | "draft" | "deleted",
+    value: boolean
+  ) => Promise<void>;
   updateKeywordFlag: (
     message: Message,
+    keyword: string,
+    value: boolean
+  ) => Promise<void>;
+  updateKeywordFlagBulk: (
+    messages: Message[],
     keyword: string,
     value: boolean
   ) => Promise<void>;
@@ -447,7 +457,9 @@ export default function MessageListOrchestrator({
     handleMarkSpam,
     handleMarkNotSpam,
     updateFlagState,
+    updateFlagStateBulk,
     updateKeywordFlag,
+    updateKeywordFlagBulk,
     handleSetCategory,
     clearTodoFlag,
     toggleTodoFlag,
@@ -497,7 +509,9 @@ export default function MessageListOrchestrator({
       handleMarkNotSpam,
       handleSetCategory,
       updateFlagState,
+      updateFlagStateBulk,
       updateKeywordFlag,
+      updateKeywordFlagBulk,
       toggleFlaggedFlag,
       toggleTodoFlag,
       clearTodoFlag
@@ -515,7 +529,9 @@ export default function MessageListOrchestrator({
       handleMarkNotSpam,
       handleSetCategory,
       updateFlagState,
+      updateFlagStateBulk,
       updateKeywordFlag,
+      updateKeywordFlagBulk,
       toggleFlaggedFlag,
       toggleTodoFlag,
       clearTodoFlag

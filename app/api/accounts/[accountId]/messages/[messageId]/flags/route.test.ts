@@ -20,4 +20,12 @@ describe("buildFlagMutations", () => {
       { flag: "$Forwarded", value: true }
     ]);
   });
+
+  it("returns no mutations for an unknown flag key", () => {
+    // Payloads arrive from JSON, so the `flag` field is just a string at
+    // runtime; an unknown key must funnel through the empty-mutations path
+    // so route handlers raise the standard "Unknown flag" error instead of
+    // attempting an IMAP STORE with `undefined`.
+    expect(buildFlagMutations({ flag: "bogus", value: true })).toEqual([]);
+  });
 });

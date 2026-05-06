@@ -121,6 +121,8 @@ export default function ExceptionStatusPopover({
                 <>
                   <Text size="1" color="gray" className="exception-meta">
                     {formatRelativeTime(selectedException.timestamp)}
+                    {selectedException.status !== undefined ? ` · ${selectedException.status}` : ""}
+                    {selectedException.requestPath ? ` · ${selectedException.requestPath}` : ""}
                   </Text>
                   <RawTextPanel
                     text={selectedExceptionDetail}
