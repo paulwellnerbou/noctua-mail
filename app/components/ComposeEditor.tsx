@@ -115,10 +115,6 @@ const theme = {
 // nesting compounds them (font-weight:bolder applied twice = over-bold text).
 // This unwraps the redundant inner element, moving its inline styles to the outer tag.
 function cleanLexicalHtml(html: string): string {
-  // Lexical only emits <strong>/<em> as the inner element of the affected
-  // <b><strong> / <i><em> nesting, so absence of both means there's nothing to clean.
-  // [\s>] anchors the tag end without false-matching <embed> etc.
-  if (!/<(?:strong|em)[\s>]/.test(html)) return html;
   const template = document.createElement("template");
   template.innerHTML = html;
   template.content.querySelectorAll<HTMLElement>("b > strong, i > em").forEach((inner) => {
