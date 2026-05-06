@@ -31,6 +31,8 @@ type BottomStatusBarProps = {
   onReportError: (message: string) => void;
   exceptionEntries: ExceptionEntry[];
   onClearExceptions: () => void;
+  // Bumping this counter (e.g. from a clicked toast) opens the exception popover.
+  openExceptionPanelRequest?: number;
   formatRelativeTime: (timestamp?: number | null) => string;
   onReloginAccount?: (entry: ExceptionEntry) => void;
   onOpenCalendarSidebar: () => void;
@@ -58,6 +60,7 @@ export default function BottomStatusBar({
   onReportError,
   exceptionEntries,
   onClearExceptions,
+  openExceptionPanelRequest,
   formatRelativeTime,
   onReloginAccount,
   onOpenCalendarSidebar,
@@ -71,6 +74,14 @@ export default function BottomStatusBar({
   const [exceptionPanelOpen, setExceptionPanelOpen] = useState(false);
   const [reminderPanelOpen, setReminderPanelOpen] = useState(false);
   const [calendarPanelOpen, setCalendarPanelOpen] = useState(false);
+
+  useEffect(() => {
+    if (openExceptionPanelRequest === undefined) return;
+    setExceptionPanelOpen(true);
+    setProcessPanelOpen(false);
+    setReminderPanelOpen(false);
+    setCalendarPanelOpen(false);
+  }, [openExceptionPanelRequest]);
   const [currentTimeMs, setCurrentTimeMs] = useState<number | null>(null);
 
   const currentDateTimeLabel = useMemo(

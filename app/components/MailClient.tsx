@@ -2870,9 +2870,24 @@ export default function MailClient({
       listHandleRef.current?.updateFlagState(message, flag, value) ?? Promise.resolve(),
     []
   );
+  const updateFlagStateBulk = useCallback(
+    (
+      messages: Message[],
+      flag: "seen" | "answered" | "flagged" | "draft" | "deleted",
+      value: boolean
+    ) =>
+      listHandleRef.current?.updateFlagStateBulk(messages, flag, value) ?? Promise.resolve(),
+    []
+  );
   const updateKeywordFlag = useCallback(
     (message: Message, keyword: string, value: boolean) =>
       listHandleRef.current?.updateKeywordFlag(message, keyword, value) ??
+      Promise.resolve(),
+    []
+  );
+  const updateKeywordFlagBulk = useCallback(
+    (messages: Message[], keyword: string, value: boolean) =>
+      listHandleRef.current?.updateKeywordFlagBulk(messages, keyword, value) ??
       Promise.resolve(),
     []
   );
@@ -3090,6 +3105,12 @@ export default function MailClient({
   const updateFlagStateRef = useRef(updateFlagState);
   updateFlagStateRef.current = updateFlagState;
 
+  const updateFlagStateBulkRef = useRef(updateFlagStateBulk);
+  updateFlagStateBulkRef.current = updateFlagStateBulk;
+
+  const updateKeywordFlagBulkRef = useRef(updateKeywordFlagBulk);
+  updateKeywordFlagBulkRef.current = updateKeywordFlagBulk;
+
   const toggleTodoFlagRef = useRef(toggleTodoFlag);
   toggleTodoFlagRef.current = toggleTodoFlag;
 
@@ -3119,45 +3140,47 @@ export default function MailClient({
     const resolveMessageById = (id: string) =>
       threadScopeMessages.find((item) => item.id === id) ??
       messages.find((item) => item.id === id);
+    const resolveTargets = (messageIds: string[]) => {
+      const uniqueIds = Array.from(new Set(messageIds));
+      return uniqueIds
+        .map((id) => resolveMessageById(id))
+        .filter((message): message is Message => Boolean(message));
+    };
     const updateFlagStateByIds = async (
       messageIds: string[],
       update: { flag: "seen" | "flagged"; value: boolean }
     ) => {
-      const uniqueIds = Array.from(new Set(messageIds));
-      if (uniqueIds.length === 0) return;
-      const targets = uniqueIds
-        .map((id) => resolveMessageById(id))
-        .filter((message): message is Message => Boolean(message));
+      const targets = resolveTargets(messageIds);
       if (targets.length === 0) return;
-      await Promise.all(
-        targets.map((message) =>
-          updateFlagStateRef.current(message, update.flag, update.value)
-        )
-      );
+      if (targets.length === 1) {
+        await updateFlagStateRef.current(targets[0], update.flag, update.value);
+        return;
+      }
+      await updateFlagStateBulkRef.current(targets, update.flag, update.value);
     };
     const toggleFlaggedByIds = async (messageIds: string[]) => {
-      const uniqueIds = Array.from(new Set(messageIds));
-      if (uniqueIds.length === 0) return;
-      const targets = uniqueIds
-        .map((id) => resolveMessageById(id))
-        .filter((message): message is Message => Boolean(message));
+      const targets = resolveTargets(messageIds);
       if (targets.length === 0) return;
-      await Promise.all(
-        targets.map((message) =>
-          updateFlagStateRef.current(message, "flagged", !isFlaggedMessage(message))
-        )
-      );
+      if (targets.length === 1) {
+        await updateFlagStateRef.current(
+          targets[0],
+          "flagged",
+          !isFlaggedMessage(targets[0])
+        );
+        return;
+      }
+      const anyFlagged = targets.some((m) => isFlaggedMessage(m));
+      await updateFlagStateBulkRef.current(targets, "flagged", !anyFlagged);
     };
     const toggleTodoByIds = async (messageIds: string[]) => {
-      const uniqueIds = Array.from(new Set(messageIds));
-      if (uniqueIds.length === 0) return;
-      const targets = uniqueIds
-        .map((id) => resolveMessageById(id))
-        .filter((message): message is Message => Boolean(message));
+      const targets = resolveTargets(messageIds);
       if (targets.length === 0) return;
-      await Promise.all(
-        targets.map((message) => toggleTodoFlagRef.current(message))
-      );
+      if (targets.length === 1) {
+        await toggleTodoFlagRef.current(targets[0]);
+        return;
+      }
+      const anyTodo = targets.some((m) => hasTodoFlag(m));
+      await updateKeywordFlagBulkRef.current(targets, TODO_FLAG, !anyTodo);
     };
     const handleKeyDown = (event: KeyboardEvent) => {
       const rawKey = typeof event.key === "string" ? event.key : "";
@@ -4295,10 +4318,13 @@ export default function MailClient({
     return false;
   };
 
+  const [openExceptionPanelRequest, setOpenExceptionPanelRequest] = useState<number | undefined>(undefined);
   const handleNoticeOpen = (notice: InAppNotice) => {
     const jumpTarget = notice.messageId ?? notice.ids?.[0];
     if (jumpTarget) {
       openMessageByExternalMessageId(jumpTarget, "in-app-notice");
+    } else if (notice.type === "error") {
+      setOpenExceptionPanelRequest(Date.now());
     } else {
       const inbox = inboxFolderRef.current;
       if (inbox) {
@@ -5107,6 +5133,7 @@ export default function MailClient({
         onClearExceptions={() => {
           setExceptionEntries([]);
         }}
+        openExceptionPanelRequest={openExceptionPanelRequest}
         formatRelativeTime={formatRelativeTime}
         onReloginAccount={handleOpenReloginFromException}
         onOpenCalendarSidebar={() => setCalendarSidebarOpen(true)}

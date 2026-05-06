@@ -18,6 +18,7 @@ export type InAppNotice = {
   icon?: InAppNoticeIcon;
   title: string;
   description?: string;
+  fullDetail?: string;
   messageId?: string;
   ids?: string[];
   actionLabel?: string;
@@ -110,7 +111,13 @@ export default function InAppNoticeStack({ className, style, state, actions }: I
   return (
     <div className={`inapp-notice-stack${className ? ` ${className}` : ""}`} style={style}>
       {inAppNotices.map((notice) => {
-        const openable = Boolean(notice.messageId || (notice.ids && notice.ids.length > 0));
+        const openable =
+          Boolean(notice.messageId || (notice.ids && notice.ids.length > 0)) ||
+          notice.type === "error";
+        const tooltip =
+          notice.fullDetail && notice.fullDetail !== notice.description
+            ? notice.fullDetail
+            : undefined;
         const TypeIcon = notice.icon ? ICON_BY_NAME[notice.icon] : ICON_BY_TYPE[notice.type];
         const isDismissing = dismissingIds.has(notice.id);
         return (
@@ -119,6 +126,7 @@ export default function InAppNoticeStack({ className, style, state, actions }: I
             className={`inapp-notice inapp-notice-${notice.type} ${openable ? "openable" : ""} ${isDismissing ? "dismissing" : ""}`}
             role={openable ? "button" : undefined}
             tabIndex={openable ? 0 : -1}
+            title={tooltip}
             onClick={() => {
               if (openable) {
                 onOpenNotice(notice);

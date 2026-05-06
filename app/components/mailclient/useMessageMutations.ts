@@ -1,5 +1,5 @@
 import { useCallback } from "react";
-import { buildAccountMessageActionPath } from "@/lib/accountApiPaths";
+import { buildAccountMessageActionPath, buildAccountMessagesActionPath } from "@/lib/accountApiPaths";
 import type { Message } from "@/lib/data";
 import { applyFlagsToMessage, isFlaggedMessage, hasTodoFlag, hasDoneFlag, getUnsubscribeCapability } from "./utils/messageHelpers";
 import {
@@ -18,7 +18,7 @@ type UseMessageMutationsProps = {
   hasFilteredSearchCriteria: boolean;
   apiFetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
   readErrorMessage: (res: Response) => Promise<string>;
-  reportError: (message: string) => void;
+  reportError: (message: string, meta?: { requestPath?: string; status?: number }) => void;
   pushNotice: (notice: any) => void;
   updateMessagesWithCurrentResultPrune: (
     updater: (message: Message) => Message | null,
@@ -103,6 +103,20 @@ export function useMessageMutations({
     viewMessage?.id
   ]);
 
+  const reportResponseError = useCallback(async (res: Response) => {
+    const message = await readErrorMessage(res);
+    let requestPath: string | undefined;
+    try {
+      if (res.url) {
+        const url = new URL(res.url);
+        requestPath = `${url.pathname}${url.search}`;
+      }
+    } catch {
+      // ignore
+    }
+    reportError(message, { requestPath, status: res.status });
+  }, [readErrorMessage, reportError]);
+
   const requestMessageFlagMutation = useCallback(async (
     messageId: string,
     payload: { value: boolean; flag?: SystemFlag; keyword?: string }
@@ -113,12 +127,31 @@ export function useMessageMutations({
       body: JSON.stringify(payload)
     });
     if (!res.ok) {
-      reportError(await readErrorMessage(res));
+      await reportResponseError(res);
       return null;
     }
     const data = (await res.json()) as { flags?: string[] };
     return data.flags ?? [];
-  }, [activeAccountId, apiFetch, readErrorMessage, reportError]);
+  }, [activeAccountId, apiFetch, reportResponseError]);
+
+  const requestBulkFlagMutation = useCallback(async (
+    messageIds: string[],
+    payload: { value: boolean; flag?: SystemFlag; keyword?: string }
+  ) => {
+    const res = await apiFetch(buildAccountMessagesActionPath(activeAccountId, "flags/bulk"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...payload, messageIds })
+    });
+    if (!res.ok) {
+      await reportResponseError(res);
+      return null;
+    }
+    const data = (await res.json()) as {
+      results?: Array<{ messageId: string; flags: string[] }>;
+    };
+    return data.results ?? [];
+  }, [activeAccountId, apiFetch, reportResponseError]);
 
   const reconcileMoveMutation = useCallback((
     message: Message,
@@ -389,6 +422,36 @@ export function useMessageMutations({
     setPendingMessageActions
   ]);
 
+  // Pass `flag = "seen"` to also adjust the folder unread count;
+  // any other system flag or `null` (for keywords) skips that bookkeeping.
+  const applyFlagsResults = useCallback((
+    pairs: Array<{ message: Message; nextFlags: string[] }>,
+    flag: SystemFlag | null,
+    source: string
+  ) => {
+    let unreadDelta = 0;
+    let folderId: string | undefined;
+    for (const { message, nextFlags } of pairs) {
+      const updatedMessage = reconcileMessageFlags(message, nextFlags, source);
+      if (flag !== "seen") continue;
+      const previousSeen = Boolean(message.seen);
+      const nextSeen = Boolean(updatedMessage.seen);
+      if (previousSeen === nextSeen) continue;
+      folderId = folderId ?? message.folderId;
+      unreadDelta += previousSeen ? 1 : -1;
+    }
+    if (folderId && unreadDelta !== 0) {
+      const targetFolderId = folderId;
+      setFolders((prev) =>
+        prev.map((f) =>
+          f.id === targetFolderId
+            ? { ...f, unreadCount: Math.max(0, (f.unreadCount ?? 0) + unreadDelta) }
+            : f
+        )
+      );
+    }
+  }, [reconcileMessageFlags, setFolders]);
+
   const updateFlagState = useCallback(async (
     message: Message,
     flag: SystemFlag,
@@ -397,31 +460,14 @@ export function useMessageMutations({
     try {
       const flags = await requestMessageFlagMutation(message.id, { flag, value });
       if (!flags) return;
-      const updatedMessage = reconcileMessageFlags(message, flags, "update-flag-state");
-      const previousSeen = Boolean(message.seen);
-      const nextSeen = Boolean(updatedMessage.seen);
-      if (previousSeen !== nextSeen) {
-        setFolders((prev) =>
-          prev.map((folder) => {
-            if (folder.id !== message.folderId) return folder;
-            const unreadCount = folder.unreadCount ?? 0;
-            if (previousSeen && !nextSeen) {
-              return { ...folder, unreadCount: unreadCount + 1 };
-            }
-            if (!previousSeen && nextSeen) {
-              return { ...folder, unreadCount: Math.max(0, unreadCount - 1) };
-            }
-            return folder;
-          })
-        );
-      }
+      applyFlagsResults([{ message, nextFlags: flags }], flag, "update-flag-state");
       queueFilteredSearchRefresh(hasFilteredSearchCriteria);
     } catch {
       reportError("Failed to update message flag.");
     }
   }, [
-    hasFilteredSearchCriteria, queueFilteredSearchRefresh, reconcileMessageFlags, reportError,
-    requestMessageFlagMutation, setFolders
+    applyFlagsResults, hasFilteredSearchCriteria, queueFilteredSearchRefresh, reportError,
+    requestMessageFlagMutation
   ]);
 
   const updateKeywordFlag = useCallback(async (
@@ -432,14 +478,68 @@ export function useMessageMutations({
     try {
       const flags = await requestMessageFlagMutation(message.id, { keyword, value });
       if (!flags) return;
-      reconcileMessageFlags(message, flags, "update-keyword-flag");
+      applyFlagsResults([{ message, nextFlags: flags }], null, "update-keyword-flag");
+      queueFilteredSearchRefresh(hasFilteredSearchCriteria);
+    } catch {
+      reportError("Failed to update message keyword.");
+    }
+  }, [
+    applyFlagsResults, hasFilteredSearchCriteria, queueFilteredSearchRefresh, reportError,
+    requestMessageFlagMutation
+  ]);
+
+  const applyBulkFlagResults = useCallback((
+    messages: Message[],
+    results: Array<{ messageId: string; flags: string[] }>,
+    flag: SystemFlag | null,
+    source: string
+  ) => {
+    const flagsByMessageId = new Map(results.map((r) => [r.messageId, r.flags]));
+    const pairs = messages
+      .map((message) => {
+        const nextFlags = flagsByMessageId.get(message.id);
+        return nextFlags ? { message, nextFlags } : null;
+      })
+      .filter((pair): pair is { message: Message; nextFlags: string[] } => pair !== null);
+    applyFlagsResults(pairs, flag, source);
+  }, [applyFlagsResults]);
+
+  const updateFlagStateBulk = useCallback(async (
+    messages: Message[],
+    flag: SystemFlag,
+    value: boolean
+  ) => {
+    if (messages.length === 0) return;
+    try {
+      const results = await requestBulkFlagMutation(messages.map((m) => m.id), { flag, value });
+      if (!results) return;
+      applyBulkFlagResults(messages, results, flag, "update-flag-state-bulk");
+      queueFilteredSearchRefresh(hasFilteredSearchCriteria);
+    } catch {
+      reportError("Failed to update message flag.");
+    }
+  }, [
+    applyBulkFlagResults, hasFilteredSearchCriteria, queueFilteredSearchRefresh, reportError,
+    requestBulkFlagMutation
+  ]);
+
+  const updateKeywordFlagBulk = useCallback(async (
+    messages: Message[],
+    keyword: string,
+    value: boolean
+  ) => {
+    if (messages.length === 0) return;
+    try {
+      const results = await requestBulkFlagMutation(messages.map((m) => m.id), { keyword, value });
+      if (!results) return;
+      applyBulkFlagResults(messages, results, null, "update-keyword-flag-bulk");
       queueFilteredSearchRefresh(hasFilteredSearchCriteria);
     } catch {
       reportError("Failed to update message keyword.");
     }
   }, [
     hasFilteredSearchCriteria, queueFilteredSearchRefresh, reconcileMessageFlags, reportError,
-    requestMessageFlagMutation
+    requestBulkFlagMutation
   ]);
 
   const handleSetCategory = useCallback(async (
@@ -638,7 +738,9 @@ export function useMessageMutations({
     handleMarkSpam,
     handleMarkNotSpam,
     updateFlagState,
+    updateFlagStateBulk,
     updateKeywordFlag,
+    updateKeywordFlagBulk,
     handleSetCategory,
     transitionTodoState,
     clearTodoFlag,

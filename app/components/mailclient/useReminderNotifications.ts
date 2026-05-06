@@ -66,18 +66,21 @@ export function useReminderNotifications({
   }, [accounts]);
 
   const reportError = useCallback(
-    (message: string) => {
+    (message: string, meta?: { requestPath?: string; status?: number }) => {
       const normalized = message?.trim() || "Unexpected error.";
       const entry: ExceptionEntry = {
         id: makeClientId(),
         message: normalized,
-        timestamp: Date.now()
+        timestamp: Date.now(),
+        requestPath: meta?.requestPath,
+        status: meta?.status
       };
       setExceptionEntries((prev) => [entry, ...prev].slice(0, 30));
       pushNotice({
         type: "error",
         title: "Operation failed",
         description: normalized.split("\n")[0]?.slice(0, 220),
+        fullDetail: normalized,
         durationMs: NOTICE_TIMEOUTS.error
       });
     },

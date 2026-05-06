@@ -1,7 +1,7 @@
 import type { Account, Message } from "@/lib/data";
 import { updateMessageFlags } from "@/lib/serverDb";
 import { preserveLocalOnlyMessageFlags } from "@/lib/messageFlags";
-import { updateImapFlags } from "@/lib/serverImap";
+import { updateImapFlags, updateImapFlagsBulk } from "@/lib/serverImap";
 
 export const MESSAGE_FLAG_MAP: Record<string, string> = {
   seen: "\\Seen",
@@ -30,6 +30,16 @@ export function buildFlagMutations(payload: {
     mutations.push({ flag: MESSAGE_FLAG_MAP.seen, value: true });
   }
   return mutations;
+}
+
+function applyMutationsToFlagSet(existing: string[], mutations: FlagMutation[]) {
+  const mutated = mutations.reduce((currentFlags, mutation) => {
+    if (mutation.value) {
+      return Array.from(new Set([...currentFlags, mutation.flag]));
+    }
+    return currentFlags.filter((flag) => flag.toLowerCase() !== mutation.flag.toLowerCase());
+  }, existing);
+  return preserveLocalOnlyMessageFlags(mutated, existing);
 }
 
 export async function applyFlagMutationsToMessage(params: {
@@ -65,15 +75,59 @@ export async function applyFlagMutationsToMessage(params: {
     );
   }
 
-  const existing = params.message.flags ?? [];
-  const mutated = mutations.reduce((currentFlags, mutation) => {
-    if (mutation.value) {
-      return Array.from(new Set([...currentFlags, mutation.flag]));
-    }
-    return currentFlags.filter((flag) => flag.toLowerCase() !== mutation.flag.toLowerCase());
-  }, existing);
-  const nextFlags = preserveLocalOnlyMessageFlags(mutated, existing);
-
+  const nextFlags = applyMutationsToFlagSet(params.message.flags ?? [], mutations);
   await updateMessageFlags(params.accountId, params.messageId, nextFlags);
   return nextFlags;
+}
+
+export type BulkFlagMutationTarget = {
+  messageId: string;
+  mailboxPath: string;
+  imapUid: number;
+  flags: string[];
+};
+
+export type BulkFlagMutationResult = {
+  messageId: string;
+  flags: string[];
+};
+
+// Groups by mailbox and issues one STORE per mailbox; IMAP servers throttle
+// parallel single-uid STOREs under burst load.
+export async function applyFlagMutationsToMessages(params: {
+  accountId: string;
+  account: Account;
+  flag?: keyof typeof MESSAGE_FLAG_MAP;
+  keyword?: string;
+  value: boolean;
+  targets: BulkFlagMutationTarget[];
+  clientId?: string;
+}): Promise<BulkFlagMutationResult[]> {
+  const mutations = buildFlagMutations({
+    flag: params.flag,
+    keyword: params.keyword,
+    value: params.value
+  });
+  if (mutations.length === 0) {
+    throw new Error("Unknown flag");
+  }
+  if (params.targets.length === 0) return [];
+
+  for (const mutation of mutations) {
+    await updateImapFlagsBulk(
+      params.account,
+      params.targets.map((t) => ({ mailboxPath: t.mailboxPath, uid: t.imapUid })),
+      mutation.flag,
+      mutation.value,
+      params.clientId
+    );
+  }
+
+  const results: BulkFlagMutationResult[] = [];
+  for (const target of params.targets) {
+    const nextFlags = applyMutationsToFlagSet(target.flags ?? [], mutations);
+    await updateMessageFlags(params.accountId, target.messageId, nextFlags);
+    results.push({ messageId: target.messageId, flags: nextFlags });
+  }
+  return results;
 }

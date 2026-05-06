@@ -39,13 +39,15 @@ export {
   syncImapMessage
 } from "./sync";
 
+export type { ImapFlagTarget } from "./mutations";
 export {
   appendImapMessage,
   deleteImapMessage,
   deleteImapMessages,
   moveImapMessage,
   moveImapMessages,
-  updateImapFlags
+  updateImapFlags,
+  updateImapFlagsBulk
 } from "./mutations";
 
 export {

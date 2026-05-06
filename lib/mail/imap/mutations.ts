@@ -1,7 +1,7 @@
 // IMAP message mutations: append, move, delete, flag updates.
 //
 // Public surface: appendImapMessage, moveImapMessage, moveImapMessages,
-// deleteImapMessage, deleteImapMessages, updateImapFlags.
+// deleteImapMessage, deleteImapMessages, updateImapFlags, updateImapFlagsBulk.
 //
 // All entry points run through `withPooledImapClient` so the IMAP connection
 // can be reused across back-to-back mutations for the same account. See
@@ -11,6 +11,27 @@ import type { Account } from "@/lib/data";
 import { logImapOp } from "@/lib/mail/imapLogger";
 import { buildLogContext } from "./_shared";
 import { withPooledImapClient } from "./connectionPool";
+
+type MailboxUidTarget = { mailboxPath: string; uid: number };
+
+function groupTargetsByMailbox(targets: MailboxUidTarget[]) {
+  const grouped = new Map<string, Set<number>>();
+  targets.forEach(({ mailboxPath, uid }) => {
+    const path = mailboxPath.trim();
+    if (!path) return;
+    if (!Number.isFinite(uid) || uid <= 0) return;
+    const existing = grouped.get(path);
+    if (existing) {
+      existing.add(uid);
+      return;
+    }
+    grouped.set(path, new Set([uid]));
+  });
+  return Array.from(grouped.entries()).map(([mailboxPath, uidSet]) => ({
+    mailboxPath,
+    uids: Array.from(uidSet.values())
+  }));
+}
 
 export async function appendImapMessage(
   account: Account,
@@ -85,37 +106,14 @@ export async function moveImapMessage(
   return result.get(uid) ?? null;
 }
 
-type ImapDeleteTarget = {
-  mailboxPath: string;
-  uid: number;
-};
-
-function groupDeleteTargetsByMailbox(targets: ImapDeleteTarget[]) {
-  const grouped = new Map<string, Set<number>>();
-  targets.forEach((target) => {
-    const mailboxPath = target.mailboxPath.trim();
-    const uid = target.uid;
-    if (!mailboxPath) return;
-    if (!Number.isFinite(uid) || uid <= 0) return;
-    const existing = grouped.get(mailboxPath);
-    if (existing) {
-      existing.add(uid);
-      return;
-    }
-    grouped.set(mailboxPath, new Set([uid]));
-  });
-  return Array.from(grouped.entries()).map(([mailboxPath, uidSet]) => ({
-    mailboxPath,
-    uids: Array.from(uidSet.values())
-  }));
-}
+type ImapDeleteTarget = MailboxUidTarget;
 
 export async function deleteImapMessages(
   account: Account,
   targets: ImapDeleteTarget[],
   clientId?: string
 ) {
-  const groupedTargets = groupDeleteTargetsByMailbox(targets);
+  const groupedTargets = groupTargetsByMailbox(targets);
   if (groupedTargets.length === 0) return;
   const logContext = buildLogContext(account, clientId);
   await withPooledImapClient(account, logContext, async (client) => {
@@ -149,21 +147,45 @@ export async function updateImapFlags(
   enable: boolean,
   clientId?: string
 ) {
+  await updateImapFlagsBulk(
+    account,
+    [{ mailboxPath, uid }],
+    flag,
+    enable,
+    clientId
+  );
+}
+
+export type ImapFlagTarget = MailboxUidTarget;
+
+export async function updateImapFlagsBulk(
+  account: Account,
+  targets: ImapFlagTarget[],
+  flag: string,
+  enable: boolean,
+  clientId?: string
+) {
+  const grouped = groupTargetsByMailbox(targets);
+  if (grouped.length === 0) return;
   const logContext = buildLogContext(account, clientId);
   await withPooledImapClient(account, logContext, async (client) => {
-    await logImapOp("mailboxOpen", { mailbox: mailboxPath, ...logContext }, () =>
-      client.mailboxOpen(mailboxPath)
-    );
-    if (enable) {
-      await logImapOp("flagsAdd", { mailbox: mailboxPath, uid, flag, ...logContext }, () =>
-        client.messageFlagsAdd(uid, [flag], { uid: true })
+    for (const group of grouped) {
+      await logImapOp("mailboxOpen", { mailbox: group.mailboxPath, ...logContext }, () =>
+        client.mailboxOpen(group.mailboxPath)
       );
-    } else {
-      await logImapOp(
-        "flagsRemove",
-        { mailbox: mailboxPath, uid, flag, ...logContext },
-        () => client.messageFlagsRemove(uid, [flag], { uid: true })
-      );
+      if (enable) {
+        await logImapOp(
+          "flagsAdd",
+          { mailbox: group.mailboxPath, uidCount: group.uids.length, flag, ...logContext },
+          () => client.messageFlagsAdd(group.uids, [flag], { uid: true })
+        );
+      } else {
+        await logImapOp(
+          "flagsRemove",
+          { mailbox: group.mailboxPath, uidCount: group.uids.length, flag, ...logContext },
+          () => client.messageFlagsRemove(group.uids, [flag], { uid: true })
+        );
+      }
     }
   });
 }
