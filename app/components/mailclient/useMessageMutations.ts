@@ -92,14 +92,10 @@ export function useMessageMutations({
       { source }
     );
     setActiveTopicSuggestionMessages((prev) => {
-      let changed = false;
-      const next = prev.map((item) => {
-        if (item.id !== message.id) return item;
-        const updated = applyFlagsToMessage(item, flags);
-        if (updated !== item) changed = true;
-        return updated;
-      });
-      return changed ? next : prev;
+      if (!prev.some((item) => item.id === message.id)) return prev;
+      return prev.map((item) =>
+        item.id === message.id ? applyFlagsToMessage(item, flags) : item
+      );
     });
     updateThreadCacheWithFlags(message.id, flags);
     if (viewMessage?.id === message.id && !shouldKeepUpdatedMessage) {
@@ -494,14 +490,10 @@ export function useMessageMutations({
         { source: "set-category" }
       );
       setActiveTopicSuggestionMessages((prev) => {
-        let changed = false;
-        const next = prev.map((item) => {
-          if (item.id !== message.id) return item;
-          const patched = applyCategoryPatch(item);
-          changed = true;
-          return patched;
-        });
-        return changed ? next : prev;
+        if (!prev.some((item) => item.id === message.id)) return prev;
+        return prev.map((item) =>
+          item.id === message.id ? applyCategoryPatch(item) : item
+        );
       });
       updateThreadCacheWithCategory(
         message.id,
