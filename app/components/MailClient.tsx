@@ -4405,7 +4405,9 @@ export default function MailClient({
     if (jumpTarget) {
       openMessageByExternalMessageId(jumpTarget, "in-app-notice");
     } else if (notice.type === "error") {
-      setOpenExceptionPanelRequest(Date.now());
+      // Monotonic counter so two rapid clicks always change the state value
+      // (Date.now() can repeat within the same millisecond).
+      setOpenExceptionPanelRequest((prev) => (prev ?? 0) + 1);
     } else {
       const inbox = inboxFolderRef.current;
       if (inbox) {

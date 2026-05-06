@@ -46,9 +46,13 @@ export async function POST(request: Request, { params }: Params) {
     });
     return NextResponse.json({ ok: true, flags: nextFlags });
   } catch (error) {
-    return NextResponse.json(
-      { ok: false, message: error instanceof Error ? error.message : "Unknown flag" },
-      { status: 400 }
-    );
+    const message = error instanceof Error ? error.message : "Unknown flag";
+    // Validation errors thrown by the service layer are client payload issues
+    // (mirrors the bulk route); anything else is an upstream IMAP/DB failure.
+    const status =
+      message === "Unknown flag" || message === "Message is missing IMAP metadata"
+        ? 400
+        : 502;
+    return NextResponse.json({ ok: false, message }, { status });
   }
 }
