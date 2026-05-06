@@ -121,7 +121,9 @@ export function useComposeController({
         composeQuotedHtmlEdited: compose.composeQuotedHtmlEdited,
         composeIncludeOriginal: compose.composeIncludeOriginal,
         composeStripImages: compose.composeStripImages,
-        composeAttachments: compose.composeAttachments
+        composeAttachments: compose.composeAttachments,
+        composeQuotedParts: compose.composeQuotedParts,
+        composeQuoteHtml: compose.composeQuoteHtml
       },
       { stripHtml, normalizeHtmlDerivedText },
       options

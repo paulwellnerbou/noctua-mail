@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { Button } from "@radix-ui/themes";
 import {
   AArrowDown,
@@ -83,7 +83,7 @@ import {
   TableRowNode
 } from "@lexical/table";
 import { $createImageNode, ImageNode } from "./lexical/ImageNode";
-import { HtmlBlockNode } from "./lexical/HtmlBlockNode";
+import { $createHtmlBlockNode, HtmlBlockNode } from "./lexical/HtmlBlockNode";
 import {
   ExtendedTableNode,
   ExtendedTableCellNode,
@@ -91,6 +91,10 @@ import {
 } from "./lexical/ExtendedTableNodes";
 import { CenterNode } from "./lexical/CenterNode";
 import { composeAutoLinkMatchers } from "./composeEditorAutoLink";
+
+export type ComposeEditorHandle = {
+  appendHtmlBlock: (html: string) => void;
+};
 
 type ComposeEditorProps = {
   initialHtml?: string;
@@ -657,13 +661,33 @@ function ComposerInitializer({
   return null;
 }
 
-export default function ComposeEditor({
+function AppendPlugin({ handleRef }: { handleRef: React.Ref<ComposeEditorHandle> }) {
+  const [editor] = useLexicalComposerContext();
+  useImperativeHandle(
+    handleRef,
+    () => ({
+      appendHtmlBlock(html: string) {
+        editor.update(() => {
+          const root = $getRoot();
+          if (root.getTextContent().trim().length > 0) {
+            root.append($createParagraphNode());
+          }
+          root.append($createHtmlBlockNode(html));
+        });
+      }
+    }),
+    [editor]
+  );
+  return null;
+}
+
+const ComposeEditor = forwardRef<ComposeEditorHandle, ComposeEditorProps>(function ComposeEditor({
   initialHtml,
   resetKey,
   className,
   onChange,
   onInlineImage
-}: ComposeEditorProps) {
+}, ref) {
   const toolbarRef = useRef<HTMLDivElement | null>(null);
   const [toolbarHeight, setToolbarHeight] = useState(0);
   const changeFrameRef = useRef<number | null>(null);
@@ -747,6 +771,7 @@ export default function ComposeEditor({
           onEnterSource={handleEnterSource}
           onExitSource={handleExitSource}
         />
+        <AppendPlugin handleRef={ref} />
         <ComposerInitializer initialHtml={initialHtml} resetKey={resetKey} />
         <SourceSyncPlugin html={sourceHtml} showSource={showSource} />
         <RichTextPlugin
@@ -789,4 +814,6 @@ export default function ComposeEditor({
       )}
     </div>
   );
-}
+});
+
+export default ComposeEditor;

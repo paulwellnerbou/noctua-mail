@@ -1,11 +1,13 @@
 "use client";
 
 import type React from "react";
+import { useRef, useState } from "react";
 import * as Collapsible from "@radix-ui/react-collapsible";
 import { CaretRightIcon, ChevronDownIcon } from "@radix-ui/react-icons";
 import { Button, DropdownMenu, Tabs } from "@radix-ui/themes";
 import { Paperclip } from "lucide-react";
 import dynamic from "next/dynamic";
+import type { ComposeEditorHandle } from "../../ComposeEditor";
 import type { ComposeInviteDraft } from "@/lib/composeInvite";
 import type { Attachment } from "@/lib/data";
 import { assembleQuotedHtml } from "@/lib/html";
@@ -159,6 +161,8 @@ export default function ComposeMessageField({
 }: ComposeMessageFieldProps) {
   const hasQuotedHtml = composeQuotedHtml.trim().length > 0;
   const hasQuotedParts = Boolean(composeQuotedParts);
+  const [isQuotedExpanded, setIsQuotedExpanded] = useState(true);
+  const composeEditorRef = useRef<ComposeEditorHandle | null>(null);
   const switchComposeTab = (nextTab: ComposeTab) => {
     if (nextTab === composeTab) return;
     const lastEdited = composeLastEditedRef.current;
@@ -217,64 +221,50 @@ export default function ComposeMessageField({
   };
 
   const toggleIncludeOriginal = () => {
-    setComposeIncludeOriginal((prev) => {
-      const next = !prev;
-      if (next && composeQuotedParts) {
-        const nextHtml = assembleQuotedHtml(composeQuotedParts, composeQuoteHtml);
-        setComposeQuotedHtml(nextHtml);
-        setComposeHtmlText(stripHtml(nextHtml));
-      } else if (!next && composeQuotedParts) {
-        setComposeQuotedHtml("");
-      }
-      return next;
-    });
+    const next = !composeIncludeOriginal;
+    setComposeIncludeOriginal(next);
+    setIsQuotedExpanded(next);
+    if (next && composeQuotedParts) {
+      const nextHtml = assembleQuotedHtml(composeQuotedParts, composeQuoteHtml);
+      setComposeQuotedHtml(nextHtml);
+    } else if (!next && composeQuotedParts) {
+      setComposeQuotedHtml("");
+    }
   };
 
   const handleStripImages = () => {
     if (composeStripImages) return;
     const strip = (value: string) => value.replace(/<img[\s\S]*?>/gi, "");
+    const strippedParts = composeQuotedParts
+      ? { ...composeQuotedParts, bodyHtml: strip(composeQuotedParts.bodyHtml) }
+      : null;
     setComposeStripImages(true);
     setComposeHtml((prev) => (prev ? strip(prev) : prev));
-    setComposeQuotedParts((prev) => {
-      if (!prev) return prev;
-      const next = { ...prev, bodyHtml: strip(prev.bodyHtml) };
-      const nextHtml = assembleQuotedHtml(next, composeQuoteHtml);
+    if (strippedParts) {
+      setComposeQuotedParts(strippedParts);
       if (composeIncludeOriginal) {
-        setComposeQuotedHtml(nextHtml);
-        setComposeHtmlText(stripHtml(nextHtml));
+        setComposeQuotedHtml(assembleQuotedHtml(strippedParts, composeQuoteHtml));
       }
-      return next;
-    });
+    }
   };
 
   const toggleQuoteHtml = () => {
-    setComposeQuoteHtml((prev) => {
-      const next = !prev;
-      if (composeQuotedParts && composeIncludeOriginal) {
-        const nextHtml = assembleQuotedHtml(composeQuotedParts, next);
-        setComposeQuotedHtml(nextHtml);
-        setComposeHtmlText(stripHtml(nextHtml));
-      }
-      return next;
-    });
+    const next = !composeQuoteHtml;
+    setComposeQuoteHtml(next);
+    if (composeQuotedParts && composeIncludeOriginal) {
+      setComposeQuotedHtml(assembleQuotedHtml(composeQuotedParts, next));
+    }
   };
 
   const handleEditQuotedHtml = () => {
     const quoted = composeQuotedHtml.trim();
-    if (!quoted) return;
-    const baseHtml = composeHtml.trim();
-    const glue = baseHtml ? "<p><br></p>" : "";
-    const quotedWithLine =
+    if (!quoted || !composeEditorRef.current) return;
+    const quotedBlock =
       composeQuoteHtml && !/<blockquote\b/i.test(quoted)
-        ? `<blockquote class=\"compose-quote\">${quoted}</blockquote>`
+        ? `<blockquote class="compose-quote">${quoted}</blockquote>`
         : quoted;
-    // Wrap in data-noctua-html-block div to preserve raw HTML through Lexical editor
-    const preservedQuoted = `<div data-noctua-html-block="true">${quotedWithLine}</div>`;
-    const nextHtml = `${baseHtml}${glue}${preservedQuoted}`;
-    setComposeHtml(nextHtml);
-    setComposeHtmlText(stripHtml(nextHtml));
+    composeEditorRef.current.appendHtmlBlock(quotedBlock);
     setComposeQuotedHtmlEdited(true);
-    setComposeEditorReset((prev) => prev + 1);
     setComposeIncludeOriginal(false);
     setComposeQuoteHtml(false);
     setComposeQuotedHtml("");
@@ -413,10 +403,10 @@ export default function ComposeMessageField({
                 size="1"
                 color="gray"
                 variant={composeIncludeOriginal ? "solid" : "soft"}
-                title="Toggle original message"
+                title="Include the original message as a quote in the reply"
                 onClick={toggleIncludeOriginal}
               >
-                Include original
+                Include quote
               </Button>
             </div>
           )}
@@ -462,6 +452,7 @@ export default function ComposeMessageField({
       {composeTab === "html" && (
         <div className={`${styles.composeWriting} ${styles.composeWritingHtml}`}>
           <ComposeEditor
+            ref={composeEditorRef}
             initialHtml={composeHtml}
             resetKey={composeEditorReset}
             onInlineImage={handleInlineImage}
@@ -494,19 +485,15 @@ export default function ComposeMessageField({
       {(composeTab === "html" || composeTab === "markdown") && (hasQuotedHtml || hasQuotedParts) && (
         <Collapsible.Root
           className={composeStyles.composeQuotedBlock}
-          open={composeIncludeOriginal}
-          onOpenChange={(open) => {
-            if (open !== composeIncludeOriginal) {
-              toggleIncludeOriginal();
-            }
-          }}
+          open={isQuotedExpanded}
+          onOpenChange={setIsQuotedExpanded}
         >
           <div className={composeStyles.composeQuotedSummary}>
             <Collapsible.Trigger asChild>
               <button
                 type="button"
                 className={composeStyles.composeQuotedTrigger}
-                title={composeIncludeOriginal ? "Hide quoted message" : "Show quoted message"}
+                title={isQuotedExpanded ? "Hide quoted message" : "Show quoted message"}
               >
                 <CaretRightIcon className={composeStyles.summaryCaret} />
                 <span className={composeStyles.summaryText}>
@@ -520,10 +507,10 @@ export default function ComposeMessageField({
                 size="1"
                 color="gray"
                 variant={composeIncludeOriginal ? "solid" : "soft"}
-                title="Toggle original message"
+                title="Include the original message as a quote in the reply"
                 onClick={toggleIncludeOriginal}
               >
-                Include original
+                Include quote
               </Button>
               <span className={composeStyles.quoteActions}>
                 <Button
@@ -531,11 +518,11 @@ export default function ComposeMessageField({
                   size="1"
                   variant="soft"
                   color="gray"
-                  title="Edit quoted HTML"
+                  title="Move quoted HTML into the message editor for direct editing"
                   onClick={handleEditQuotedHtml}
                   disabled={!hasQuotedHtml}
                 >
-                  Edit quoted HTML
+                  Move to editor
                 </Button>
                 <Button
                   type="button"

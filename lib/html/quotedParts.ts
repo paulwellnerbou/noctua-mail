@@ -6,7 +6,7 @@ import { extractHtmlBody } from "./extract";
 // further down are used by assembleQuotedHtml to namespace the original
 // message's <style> rules so they don't bleed into our own chrome.
 
-type QuotedHtmlParts = {
+export type QuotedHtmlParts = {
   styles: string;
   headerHtml: string;
   bodyHtml: string;

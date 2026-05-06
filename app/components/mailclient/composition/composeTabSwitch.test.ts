@@ -137,6 +137,24 @@ describe("computeBodyOnSwitchToText – from HTML", () => {
     const result = computeBodyOnSwitchToText(textParams(), stripDeps);
     expect(result).toBe("");
   });
+
+  // composeHtmlText holds the editor's body text. A toggle in ComposeMessageField
+  // followed by a switch to the Text tab must produce body-then-quoted with no
+  // duplication. If a future change overwrites composeHtmlText with the stripped
+  // quoted text inside a toggle handler, "My reply" would disappear and "Alice"
+  // would appear twice, failing this test.
+  it("toggle-then-switch preserves body and does not duplicate quoted text", () => {
+    const result = computeBodyOnSwitchToText(
+      textParams({
+        composeHtmlText: "My reply",
+        composeQuotedParts: QUOTED_PARTS
+      }),
+      stripDeps
+    );
+    expect(result.match(/My reply/g)?.length).toBe(1);
+    expect(result.match(/Alice/g)?.length).toBe(1);
+    expect(result.indexOf("My reply")).toBeLessThan(result.indexOf("Alice"));
+  });
 });
 
 describe("computeBodyOnSwitchToText – from Markdown", () => {

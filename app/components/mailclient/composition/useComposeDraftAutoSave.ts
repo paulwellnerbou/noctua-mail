@@ -20,6 +20,7 @@ export type UseComposeDraftAutoSaveParams = {
   composeHtmlText: string;
   composeMarkdown: string;
   composeQuotedHtml: string;
+  composeQuoteHtml: boolean;
   composeIncludeOriginal: boolean;
   composeStripImages: boolean;
   composeQuotedHtmlEdited: boolean;
@@ -51,6 +52,7 @@ export function useComposeDraftAutoSave({
   composeHtmlText,
   composeMarkdown,
   composeQuotedHtml,
+  composeQuoteHtml,
   composeIncludeOriginal,
   composeStripImages,
   composeQuotedHtmlEdited,
@@ -188,6 +190,7 @@ export function useComposeDraftAutoSave({
     composeHtmlText,
     composeMarkdown,
     composeQuotedHtml,
+    composeQuoteHtml,
     composeIncludeOriginal,
     composeStripImages,
     composeQuotedHtmlEdited,

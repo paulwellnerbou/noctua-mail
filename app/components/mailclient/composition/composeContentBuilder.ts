@@ -1,5 +1,6 @@
 import type { Attachment } from "@/lib/data";
-import { stripStyleTags } from "@/lib/html";
+import { assembleQuotedHtml, stripStyleTags } from "@/lib/html";
+import type { QuotedHtmlParts } from "@/lib/html";
 import { htmlToMarkdown } from "@/lib/markdownConvert";
 import type { ComposeTab } from "./composeTypes";
 
@@ -16,6 +17,10 @@ export type ComposeContentState = {
   composeIncludeOriginal: boolean;
   composeStripImages: boolean;
   composeAttachments: Attachment[];
+  /** When provided, the payload's quoted HTML is assembled from parts at build
+   *  time, so toggling composeQuoteHtml doesn't have to rewrite composeQuotedHtml. */
+  composeQuotedParts?: QuotedHtmlParts | null;
+  composeQuoteHtml?: boolean;
 };
 
 export type ComposePayload = {
@@ -77,11 +82,16 @@ export function buildComposePayload(
   const useHtml = state.composeTab === "html" && !options?.preferText;
   const useMarkdown = state.composeTab === "markdown" && !options?.preferText;
 
+  const effectiveQuotedHtml =
+    state.composeQuotedParts && !state.composeQuotedHtmlEdited
+      ? assembleQuotedHtml(state.composeQuotedParts, state.composeQuoteHtml ?? true)
+      : state.composeQuotedHtml;
+
   if (useMarkdown) {
     const currentMd = state.composeMarkdown.trim();
     const quoted =
       state.composeIncludeOriginal && !state.composeQuotedHtmlEdited
-        ? state.composeQuotedHtml.trim()
+        ? effectiveQuotedHtml.trim()
         : "";
     let html: string | undefined = quoted || undefined;
     // Strip any embedded HTML from markdown for the text/plain part, keeping markdown syntax intact
@@ -103,7 +113,7 @@ export function buildComposePayload(
     const baseHtml = state.composeHtml.trim();
     const quoted =
       state.composeIncludeOriginal && !state.composeQuotedHtmlEdited
-        ? state.composeQuotedHtml.trim()
+        ? effectiveQuotedHtml.trim()
         : "";
     html = baseHtml || quoted ? `${baseHtml}${quoted}` : undefined;
     if (state.composeStripImages && html) {
