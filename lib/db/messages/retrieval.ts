@@ -102,7 +102,7 @@ export type StoredMessageSummary = {
   folderId: string;
   mailboxPath?: string | null;
   imapUid?: number | null;
-  flags?: string[];
+  flags: string[];
   threadId?: string | null;
 };
 

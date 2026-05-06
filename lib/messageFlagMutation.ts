@@ -56,6 +56,23 @@ function applyMutationsToFlagSet(existing: string[], mutations: FlagMutation[]) 
   return preserveLocalOnlyMessageFlags(mutated, existing);
 }
 
+// Mirrors what `groupTargetsByMailbox` (lib/mail/imap/mutations.ts) treats as
+// a valid IMAP target: positive integer UID and a non-empty trimmed mailbox
+// path. Flag mutations rejected by IMAP grouping must not produce a local
+// DB write either, otherwise the row drifts away from the upstream state.
+function hasValidImapMetadata(message: {
+  mailboxPath?: string | null;
+  imapUid?: number | null;
+}) {
+  if (typeof message.imapUid !== "number" || !Number.isFinite(message.imapUid) || message.imapUid <= 0) {
+    return false;
+  }
+  if (typeof message.mailboxPath !== "string" || message.mailboxPath.trim().length === 0) {
+    return false;
+  }
+  return true;
+}
+
 export async function applyFlagMutationsToMessage(params: {
   accountId: string;
   account: Account;
@@ -74,15 +91,17 @@ export async function applyFlagMutationsToMessage(params: {
   if (mutations.length === 0) {
     throw new Error("Unknown flag");
   }
-  if (!params.message.mailboxPath || !Number.isFinite(params.message.imapUid)) {
+  if (!hasValidImapMetadata(params.message)) {
     throw new Error("Message is missing IMAP metadata");
   }
+  const mailboxPath = (params.message.mailboxPath as string).trim();
+  const imapUid = params.message.imapUid as number;
 
   for (const mutation of mutations) {
     await updateImapFlags(
       params.account,
-      params.message.mailboxPath,
-      params.message.imapUid as number,
+      mailboxPath,
+      imapUid,
       mutation.flag,
       mutation.value,
       params.clientId
@@ -130,6 +149,15 @@ export async function applyFlagMutationsToMessages(params: {
     throw new Error("Unknown flag");
   }
   if (params.targets.length === 0) return [];
+  // Callers (e.g. the bulk flags route) should already filter invalid
+  // targets into a `skipped` list. Re-check here so a stray invalid target
+  // surfaces as a hard error instead of producing a silent DB write that
+  // never hit IMAP.
+  for (const target of params.targets) {
+    if (!hasValidImapMetadata(target)) {
+      throw new Error("Message is missing IMAP metadata");
+    }
+  }
 
   // Process one mailbox group at a time and commit DB + thread recompute
   // for that group only after every mutation has completed on the IMAP
@@ -137,9 +165,10 @@ export async function applyFlagMutationsToMessages(params: {
   // persisted instead of dropping all in-flight work.
   const groups = new Map<string, BulkFlagMutationTarget[]>();
   for (const target of params.targets) {
-    const arr = groups.get(target.mailboxPath) ?? [];
-    arr.push(target);
-    groups.set(target.mailboxPath, arr);
+    const mailboxPath = target.mailboxPath.trim();
+    const arr = groups.get(mailboxPath) ?? [];
+    arr.push({ ...target, mailboxPath });
+    groups.set(mailboxPath, arr);
   }
 
   const results: BulkFlagMutationResult[] = [];
@@ -155,7 +184,7 @@ export async function applyFlagMutationsToMessages(params: {
     }
     const groupResults: BulkFlagMutationResult[] = groupTargets.map((target) => ({
       messageId: target.messageId,
-      flags: applyMutationsToFlagSet(target.flags ?? [], mutations)
+      flags: applyMutationsToFlagSet(target.flags, mutations)
     }));
     await bulkUpdateMessageFlags(
       params.accountId,

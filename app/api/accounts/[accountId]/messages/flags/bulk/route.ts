@@ -61,15 +61,26 @@ export async function POST(request: Request, { params }: AccountRouteParams) {
   const targets: BulkFlagMutationTarget[] = [];
   const skipped: Array<{ messageId: string; reason: string }> = [];
   for (const row of stored) {
-    if (typeof row.imapUid !== "number" || !Number.isFinite(row.imapUid) || !row.mailboxPath) {
+    // Match `groupTargetsByMailbox` in lib/mail/imap/mutations.ts: only
+    // positive integer UIDs and non-empty (trimmed) mailbox paths produce
+    // an actual STORE. Reject everything else here so the local DB never
+    // diverges from what IMAP actually saw.
+    const mailboxPath = row.mailboxPath?.trim() ?? "";
+    const imapUid = row.imapUid;
+    if (
+      typeof imapUid !== "number" ||
+      !Number.isFinite(imapUid) ||
+      imapUid <= 0 ||
+      mailboxPath.length === 0
+    ) {
       skipped.push({ messageId: row.id, reason: "missing IMAP metadata" });
       continue;
     }
     targets.push({
       messageId: row.id,
-      mailboxPath: row.mailboxPath,
-      imapUid: row.imapUid,
-      flags: row.flags ?? [],
+      mailboxPath,
+      imapUid,
+      flags: row.flags,
       threadId: row.threadId ?? null
     });
   }
