@@ -669,7 +669,13 @@ function AppendPlugin({ handleRef }: { handleRef: React.Ref<ComposeEditorHandle>
       appendHtmlBlock(html: string) {
         editor.update(() => {
           const root = $getRoot();
-          if (root.getTextContent().trim().length > 0) {
+          const firstChild = root.getFirstChild();
+          const onlyEmptyParagraph =
+            root.getChildrenSize() === 1 &&
+            firstChild != null &&
+            firstChild.getType() === "paragraph" &&
+            firstChild.getTextContent() === "";
+          if (!onlyEmptyParagraph) {
             root.append($createParagraphNode());
           }
           root.append($createHtmlBlockNode(html));

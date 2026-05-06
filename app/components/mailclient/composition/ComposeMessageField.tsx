@@ -1,7 +1,7 @@
 "use client";
 
 import type React from "react";
-import { useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import * as Collapsible from "@radix-ui/react-collapsible";
 import { CaretRightIcon, ChevronDownIcon } from "@radix-ui/react-icons";
 import { Button, DropdownMenu, Tabs } from "@radix-ui/themes";
@@ -161,8 +161,18 @@ export default function ComposeMessageField({
 }: ComposeMessageFieldProps) {
   const hasQuotedHtml = composeQuotedHtml.trim().length > 0;
   const hasQuotedParts = Boolean(composeQuotedParts);
+  const hasQuotedContent = hasQuotedHtml || hasQuotedParts;
   const [isQuotedExpanded, setIsQuotedExpanded] = useState(true);
   const composeEditorRef = useRef<ComposeEditorHandle | null>(null);
+  // Preview is derived from parts so toggles don't reload the iframe; the
+  // payload's actual quoted HTML is assembled in buildComposePayload using
+  // the current composeQuoteHtml flag.
+  const previewQuotedHtml = useMemo(() => {
+    if (composeQuotedParts) {
+      return assembleQuotedHtml(composeQuotedParts, true);
+    }
+    return composeQuotedHtml;
+  }, [composeQuotedParts, composeQuotedHtml]);
   const switchComposeTab = (nextTab: ComposeTab) => {
     if (nextTab === composeTab) return;
     const lastEdited = composeLastEditedRef.current;
@@ -224,45 +234,32 @@ export default function ComposeMessageField({
     const next = !composeIncludeOriginal;
     setComposeIncludeOriginal(next);
     setIsQuotedExpanded(next);
-    if (next && composeQuotedParts) {
-      const nextHtml = assembleQuotedHtml(composeQuotedParts, composeQuoteHtml);
-      setComposeQuotedHtml(nextHtml);
-    } else if (!next && composeQuotedParts) {
-      setComposeQuotedHtml("");
-    }
   };
 
   const handleStripImages = () => {
     if (composeStripImages) return;
     const strip = (value: string) => value.replace(/<img[\s\S]*?>/gi, "");
-    const strippedParts = composeQuotedParts
-      ? { ...composeQuotedParts, bodyHtml: strip(composeQuotedParts.bodyHtml) }
-      : null;
     setComposeStripImages(true);
     setComposeHtml((prev) => (prev ? strip(prev) : prev));
-    if (strippedParts) {
-      setComposeQuotedParts(strippedParts);
-      if (composeIncludeOriginal) {
-        setComposeQuotedHtml(assembleQuotedHtml(strippedParts, composeQuoteHtml));
-      }
+    if (composeQuotedParts) {
+      setComposeQuotedParts({ ...composeQuotedParts, bodyHtml: strip(composeQuotedParts.bodyHtml) });
     }
   };
 
   const toggleQuoteHtml = () => {
-    const next = !composeQuoteHtml;
-    setComposeQuoteHtml(next);
-    if (composeQuotedParts && composeIncludeOriginal) {
-      setComposeQuotedHtml(assembleQuotedHtml(composeQuotedParts, next));
-    }
+    setComposeQuoteHtml((prev) => !prev);
   };
 
   const handleEditQuotedHtml = () => {
-    const quoted = composeQuotedHtml.trim();
-    if (!quoted || !composeEditorRef.current) return;
+    if (!composeEditorRef.current) return;
+    const sourceHtml = composeQuotedParts
+      ? assembleQuotedHtml(composeQuotedParts, composeQuoteHtml)
+      : composeQuotedHtml.trim();
+    if (!sourceHtml) return;
     const quotedBlock =
-      composeQuoteHtml && !/<blockquote\b/i.test(quoted)
-        ? `<blockquote class="compose-quote">${quoted}</blockquote>`
-        : quoted;
+      composeQuoteHtml && !/<blockquote\b/i.test(sourceHtml)
+        ? `<blockquote class="compose-quote">${sourceHtml}</blockquote>`
+        : sourceHtml;
     composeEditorRef.current.appendHtmlBlock(quotedBlock);
     setComposeQuotedHtmlEdited(true);
     setComposeIncludeOriginal(false);
@@ -482,7 +479,7 @@ export default function ComposeMessageField({
           />
         </div>
       )}
-      {(composeTab === "html" || composeTab === "markdown") && (hasQuotedHtml || hasQuotedParts) && (
+      {(composeTab === "html" || composeTab === "markdown") && hasQuotedContent && (
         <Collapsible.Root
           className={composeStyles.composeQuotedBlock}
           open={isQuotedExpanded}
@@ -518,9 +515,13 @@ export default function ComposeMessageField({
                   size="1"
                   variant="soft"
                   color="gray"
-                  title="Move quoted HTML into the message editor for direct editing"
+                  title={
+                    composeTab === "markdown"
+                      ? "Switch to HTML to move the quoted message into the editor"
+                      : "Move quoted HTML into the message editor for direct editing"
+                  }
                   onClick={handleEditQuotedHtml}
-                  disabled={!hasQuotedHtml}
+                  disabled={!hasQuotedContent || !composeIncludeOriginal || composeTab !== "html"}
                 >
                   Move to editor
                 </Button>
@@ -552,7 +553,7 @@ export default function ComposeMessageField({
             </span>
           </div>
           <Collapsible.Content className={composeStyles.composeQuotedContent}>
-            <HtmlMessage html={composeQuotedHtml} darkMode={darkMode} />
+            <HtmlMessage html={previewQuotedHtml} darkMode={darkMode} />
           </Collapsible.Content>
         </Collapsible.Root>
       )}

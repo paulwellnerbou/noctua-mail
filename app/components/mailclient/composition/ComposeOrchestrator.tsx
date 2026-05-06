@@ -1031,7 +1031,11 @@ function ComposeOrchestratorImpl(
     ref,
     () => ({
       renderInlineCard: (wrapperClassName?: string) => (
-        <InlineComposeSlot wrapperClassName={wrapperClassName} setSlot={setInlineSlotEl} />
+        <InlineComposeSlot
+          wrapperClassName={wrapperClassName}
+          setSlot={setInlineSlotEl}
+          externalRef={composeCardRef}
+        />
       ),
       resetSession: () => {
         resetComposeSession(composeRef.current);
@@ -1039,7 +1043,7 @@ function ComposeOrchestratorImpl(
       openCompose,
       setComposeView
     }),
-    [openCompose, setComposeView]
+    [composeCardRef, openCompose, setComposeView]
   );
 
   return (
@@ -1049,9 +1053,7 @@ function ComposeOrchestratorImpl(
       {inlineSlotEl &&
         createPortal(
           <ComposeContextProvider value={inlineContextValue}>
-            <div ref={composeCardRef}>
-              <ComposeInlineCard />
-            </div>
+            <ComposeInlineCard />
           </ComposeContextProvider>,
           inlineSlotEl
         )}
@@ -1061,12 +1063,21 @@ function ComposeOrchestratorImpl(
 
 function InlineComposeSlot({
   wrapperClassName,
-  setSlot
+  setSlot,
+  externalRef
 }: {
   wrapperClassName?: string;
   setSlot: (el: HTMLDivElement | null) => void;
+  externalRef: React.MutableRefObject<HTMLDivElement | null>;
 }) {
-  return <div ref={setSlot} className={wrapperClassName} />;
+  const setRef = useCallback(
+    (el: HTMLDivElement | null) => {
+      externalRef.current = el;
+      setSlot(el);
+    },
+    [externalRef, setSlot]
+  );
+  return <div ref={setRef} className={wrapperClassName} />;
 }
 
 const ComposeOrchestrator = forwardRef<ComposeOrchestratorHandle, ComposeOrchestratorProps>(

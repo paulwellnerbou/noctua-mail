@@ -157,6 +157,68 @@ describe("buildComposePayload — html mode", () => {
     expect(result.html).toContain("<p>Hello</p>");
   });
 
+  it("assembles quoted html from composeQuotedParts when present (composeQuoteHtml=true wraps in blockquote)", () => {
+    const result = buildComposePayload(
+      makeState({
+        composeTab: "html",
+        composeHtml: "<p>Reply</p>",
+        composeQuotedHtml: "stale and should be ignored",
+        composeQuotedParts: {
+          styles: "",
+          headerHtml: "<p>Header line</p>",
+          bodyHtml: "<p>Original body</p>"
+        },
+        composeQuoteHtml: true
+      }),
+      deps
+    );
+    expect(result.html).toContain("<p>Reply</p>");
+    expect(result.html).toContain("Header line");
+    expect(result.html).toContain("Original body");
+    expect(result.html).toContain("<blockquote");
+    expect(result.html).not.toContain("stale and should be ignored");
+  });
+
+  it("assembles quoted html from composeQuotedParts without blockquote when composeQuoteHtml=false", () => {
+    const result = buildComposePayload(
+      makeState({
+        composeTab: "html",
+        composeHtml: "<p>Reply</p>",
+        composeQuotedParts: {
+          styles: "",
+          headerHtml: "<p>Header line</p>",
+          bodyHtml: "<p>Original body</p>"
+        },
+        composeQuoteHtml: false
+      }),
+      deps
+    );
+    expect(result.html).toContain("Original body");
+    expect(result.html).not.toContain("<blockquote");
+  });
+
+  it("falls back to composeQuotedHtml when composeQuotedHtmlEdited is true even if parts are present", () => {
+    const result = buildComposePayload(
+      makeState({
+        composeTab: "html",
+        composeHtml: "<p>Reply already contains the quote</p>",
+        composeQuotedHtml: "<blockquote>edited inline</blockquote>",
+        composeQuotedParts: {
+          styles: "",
+          headerHtml: "<p>Header</p>",
+          bodyHtml: "<p>Body</p>"
+        },
+        composeQuoteHtml: true,
+        composeQuotedHtmlEdited: true
+      }),
+      deps
+    );
+    // composeQuotedHtmlEdited=true means quoted is already inlined in composeHtml,
+    // so neither path is appended.
+    expect(result.html).toContain("<p>Reply already contains the quote</p>");
+    expect(result.html).not.toContain("<p>Body</p>");
+  });
+
   it("replaces inline attachment data URLs with cid: references", () => {
     const dataUrl = "data:image/png;base64,ABC123";
     const cid = "unique-cid@mail";
