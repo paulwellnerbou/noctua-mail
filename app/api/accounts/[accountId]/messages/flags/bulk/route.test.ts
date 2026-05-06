@@ -146,6 +146,34 @@ describe("POST /messages/flags/bulk", () => {
     expect(applyFlagMutationsToMessages).not.toHaveBeenCalled();
   });
 
+  test("returns 404 when a partial subset of message ids is missing", async () => {
+    const accountId = uniqueAccountId("acc-bulk-flags-partial");
+    await upsertAccount(buildAccount(accountId));
+    const presentId = `${accountId}-msg-present`;
+    const missingId = `${accountId}-msg-missing`;
+    storedRows = [
+      {
+        id: presentId,
+        messageId: presentId,
+        folderId: `${accountId}:Inbox`,
+        mailboxPath: "INBOX",
+        imapUid: 1,
+        flags: [],
+        threadId: `${accountId}-thread`
+      }
+    ];
+    const response = await postBulkFlags(accountId, {
+      messageIds: [presentId, missingId],
+      flag: "seen",
+      value: true
+    });
+    expect(response.status).toBe(404);
+    const body = (await response.json()) as { ok: boolean; missingIds: string[] };
+    expect(body.ok).toBe(false);
+    expect(body.missingIds).toEqual([missingId]);
+    expect(applyFlagMutationsToMessages).not.toHaveBeenCalled();
+  });
+
   test("returns 400 with skipped list when no message has IMAP metadata", async () => {
     const accountId = uniqueAccountId("acc-bulk-flags-no-imap");
     await upsertAccount(buildAccount(accountId));

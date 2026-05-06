@@ -7,27 +7,37 @@ import {
 import { preserveLocalOnlyMessageFlags } from "@/lib/messageFlags";
 import { updateImapFlags, updateImapFlagsBulk } from "@/lib/serverImap";
 
-export const MESSAGE_FLAG_MAP: Record<string, string> = {
+export const MESSAGE_FLAG_MAP = {
   seen: "\\Seen",
   answered: "\\Answered",
   flagged: "\\Flagged",
   deleted: "\\Deleted",
   draft: "\\Draft"
-};
+} as const;
+
+export type MessageFlagKey = keyof typeof MESSAGE_FLAG_MAP;
 
 type FlagMutation = {
   flag: string;
   value: boolean;
 };
 
+function isMessageFlagKey(value: unknown): value is MessageFlagKey {
+  return typeof value === "string" && Object.prototype.hasOwnProperty.call(MESSAGE_FLAG_MAP, value);
+}
+
 export function buildFlagMutations(payload: {
-  flag?: keyof typeof MESSAGE_FLAG_MAP;
+  flag?: string;
   keyword?: string;
   value: boolean;
 }): FlagMutation[] {
   const keyword = payload.keyword?.trim();
   if (keyword) return [{ flag: keyword, value: payload.value }];
   if (!payload.flag) return [];
+  // Payload arrives from JSON, so the `flag` string isn't constrained by the
+  // type system — guard against unknown keys here so the route layer surfaces
+  // a 400 "Unknown flag" instead of attempting an IMAP STORE with `undefined`.
+  if (!isMessageFlagKey(payload.flag)) return [];
 
   const mutations: FlagMutation[] = [{ flag: MESSAGE_FLAG_MAP[payload.flag], value: payload.value }];
   if (payload.flag === "answered" && payload.value) {

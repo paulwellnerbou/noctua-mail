@@ -46,9 +46,14 @@ export async function POST(request: Request, { params }: AccountRouteParams) {
   const { account, clientId } = accountContext;
 
   const stored = await getStoredMessagesByIds(accountId, normalizedMessageIds);
-  if (stored.length === 0) {
+  // Match the bulk delete route: any missing id is a 404 with the list of
+  // missing ids, so the client doesn't silently apply the change to a partial
+  // selection.
+  if (stored.length !== normalizedMessageIds.length) {
+    const foundIds = new Set(stored.map((row) => row.id));
+    const missingIds = normalizedMessageIds.filter((id) => !foundIds.has(id));
     return NextResponse.json(
-      { ok: false, message: "No messages found" },
+      { ok: false, message: "One or more messages were not found", missingIds },
       { status: 404 }
     );
   }
