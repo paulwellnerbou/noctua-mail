@@ -149,9 +149,17 @@ export function useMessageMutations({
     }
     const data = (await res.json()) as {
       results?: Array<{ messageId: string; flags: string[] }>;
+      skipped?: Array<{ messageId: string; reason: string }>;
     };
+    if (data.skipped && data.skipped.length > 0) {
+      pushNotice({
+        type: "warning",
+        title: `Skipped ${data.skipped.length} message${data.skipped.length === 1 ? "" : "s"}`,
+        description: data.skipped[0]?.reason
+      });
+    }
     return data.results ?? [];
-  }, [activeAccountId, apiFetch, reportResponseError]);
+  }, [activeAccountId, apiFetch, pushNotice, reportResponseError]);
 
   const reconcileMoveMutation = useCallback((
     message: Message,

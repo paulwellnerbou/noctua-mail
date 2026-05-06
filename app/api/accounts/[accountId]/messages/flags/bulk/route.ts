@@ -64,7 +64,8 @@ export async function POST(request: Request, { params }: AccountRouteParams) {
       messageId: row.id,
       mailboxPath: row.mailboxPath,
       imapUid: row.imapUid,
-      flags: row.flags ?? []
+      flags: row.flags ?? [],
+      threadId: row.threadId ?? null
     });
   }
 

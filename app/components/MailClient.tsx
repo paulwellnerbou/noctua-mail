@@ -3158,6 +3158,11 @@ export default function MailClient({
       }
       await updateFlagStateBulkRef.current(targets, update.flag, update.value);
     };
+    // For a multi-selection toggle, set all to the opposite of the majority
+    // state, so a mostly-unflagged selection becomes flagged (rather than
+    // wiping flags off the minority).
+    const isMajority = <T,>(items: T[], predicate: (item: T) => boolean) =>
+      items.filter(predicate).length > items.length / 2;
     const toggleFlaggedByIds = async (messageIds: string[]) => {
       const targets = resolveTargets(messageIds);
       if (targets.length === 0) return;
@@ -3169,8 +3174,11 @@ export default function MailClient({
         );
         return;
       }
-      const anyFlagged = targets.some((m) => isFlaggedMessage(m));
-      await updateFlagStateBulkRef.current(targets, "flagged", !anyFlagged);
+      await updateFlagStateBulkRef.current(
+        targets,
+        "flagged",
+        !isMajority(targets, isFlaggedMessage)
+      );
     };
     const toggleTodoByIds = async (messageIds: string[]) => {
       const targets = resolveTargets(messageIds);
@@ -3179,8 +3187,11 @@ export default function MailClient({
         await toggleTodoFlagRef.current(targets[0]);
         return;
       }
-      const anyTodo = targets.some((m) => hasTodoFlag(m));
-      await updateKeywordFlagBulkRef.current(targets, TODO_FLAG, !anyTodo);
+      await updateKeywordFlagBulkRef.current(
+        targets,
+        TODO_FLAG,
+        !isMajority(targets, hasTodoFlag)
+      );
     };
     const handleKeyDown = (event: KeyboardEvent) => {
       const rawKey = typeof event.key === "string" ? event.key : "";

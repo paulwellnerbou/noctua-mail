@@ -103,6 +103,7 @@ export type StoredMessageSummary = {
   mailboxPath?: string | null;
   imapUid?: number | null;
   flags?: string[];
+  threadId?: string | null;
 };
 
 export async function getStoredMessagesByIds(
@@ -120,13 +121,14 @@ export async function getStoredMessagesByIds(
     mailboxPath?: string | null;
     imapUid?: number | null;
     flags?: string | null;
+    threadId?: string | null;
   }> = [];
   for (let start = 0; start < uniqueIds.length; start += QUERY_BATCH_SIZE) {
     const chunk = uniqueIds.slice(start, start + QUERY_BATCH_SIZE);
     rows.push(
       ...((db
         .prepare(
-          `SELECT id, messageId, folderId, mailboxPath, imapUid, flags
+          `SELECT id, messageId, folderId, mailboxPath, imapUid, flags, threadId
            FROM messages
            WHERE accountId = ? AND id IN (${chunk.map(() => "?").join(",")})`
         )
@@ -137,6 +139,7 @@ export async function getStoredMessagesByIds(
         mailboxPath?: string | null;
         imapUid?: number | null;
         flags?: string | null;
+        threadId?: string | null;
       }>))
     );
   }
@@ -146,7 +149,8 @@ export async function getStoredMessagesByIds(
     folderId: row.folderId,
     mailboxPath: row.mailboxPath,
     imapUid: row.imapUid,
-    flags: safeParseJson<string[]>(row.flags) ?? []
+    flags: safeParseJson<string[]>(row.flags) ?? [],
+    threadId: row.threadId
   }));
 }
 

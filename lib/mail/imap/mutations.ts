@@ -173,17 +173,20 @@ export async function updateImapFlagsBulk(
       await logImapOp("mailboxOpen", { mailbox: group.mailboxPath, ...logContext }, () =>
         client.mailboxOpen(group.mailboxPath)
       );
+      const opLogContext = {
+        mailbox: group.mailboxPath,
+        uidCount: group.uids.length,
+        uidSample: group.uids.slice(0, 20),
+        flag,
+        ...logContext
+      };
       if (enable) {
-        await logImapOp(
-          "flagsAdd",
-          { mailbox: group.mailboxPath, uidCount: group.uids.length, flag, ...logContext },
-          () => client.messageFlagsAdd(group.uids, [flag], { uid: true })
+        await logImapOp("flagsAdd", opLogContext, () =>
+          client.messageFlagsAdd(group.uids, [flag], { uid: true })
         );
       } else {
-        await logImapOp(
-          "flagsRemove",
-          { mailbox: group.mailboxPath, uidCount: group.uids.length, flag, ...logContext },
-          () => client.messageFlagsRemove(group.uids, [flag], { uid: true })
+        await logImapOp("flagsRemove", opLogContext, () =>
+          client.messageFlagsRemove(group.uids, [flag], { uid: true })
         );
       }
     }

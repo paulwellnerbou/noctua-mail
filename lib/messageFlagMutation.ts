@@ -1,5 +1,9 @@
 import type { Account, Message } from "@/lib/data";
-import { updateMessageFlags } from "@/lib/serverDb";
+import {
+  bulkUpdateMessageFlags,
+  recomputeThreadsForAccount,
+  updateMessageFlags
+} from "@/lib/serverDb";
 import { preserveLocalOnlyMessageFlags } from "@/lib/messageFlags";
 import { updateImapFlags, updateImapFlagsBulk } from "@/lib/serverImap";
 
@@ -85,6 +89,7 @@ export type BulkFlagMutationTarget = {
   mailboxPath: string;
   imapUid: number;
   flags: string[];
+  threadId?: string | null;
 };
 
 export type BulkFlagMutationResult = {
@@ -93,7 +98,10 @@ export type BulkFlagMutationResult = {
 };
 
 // Groups by mailbox and issues one STORE per mailbox; IMAP servers throttle
-// parallel single-uid STOREs under burst load.
+// parallel single-uid STOREs under burst load. Local DB writes go through
+// `bulkUpdateMessageFlags` (single transaction, no per-message thread
+// recompute) followed by one targeted `recomputeThreadsForAccount` for the
+// affected threads, instead of N round trips through `updateMessageFlags`.
 export async function applyFlagMutationsToMessages(params: {
   accountId: string;
   account: Account;
@@ -123,11 +131,23 @@ export async function applyFlagMutationsToMessages(params: {
     );
   }
 
-  const results: BulkFlagMutationResult[] = [];
-  for (const target of params.targets) {
-    const nextFlags = applyMutationsToFlagSet(target.flags ?? [], mutations);
-    await updateMessageFlags(params.accountId, target.messageId, nextFlags);
-    results.push({ messageId: target.messageId, flags: nextFlags });
+  const results: BulkFlagMutationResult[] = params.targets.map((target) => ({
+    messageId: target.messageId,
+    flags: applyMutationsToFlagSet(target.flags ?? [], mutations)
+  }));
+  await bulkUpdateMessageFlags(
+    params.accountId,
+    results.map((r) => ({ id: r.messageId, flags: r.flags }))
+  );
+  const threadIds = Array.from(
+    new Set(
+      params.targets
+        .map((t) => t.threadId)
+        .filter((id): id is string => typeof id === "string" && id.length > 0)
+    )
+  );
+  if (threadIds.length > 0) {
+    await recomputeThreadsForAccount(params.accountId, threadIds);
   }
   return results;
 }
