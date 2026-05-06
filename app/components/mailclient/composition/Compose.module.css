@@ -295,12 +295,39 @@
   display: none;
 }
 
+@keyframes quotedSlideDown {
+  from {
+    height: 0;
+  }
+  to {
+    height: var(--radix-collapsible-content-height);
+  }
+}
+
+@keyframes quotedSlideUp {
+  from {
+    height: var(--radix-collapsible-content-height);
+  }
+  to {
+    height: 0;
+  }
+}
+
 .composeQuotedContent {
   margin-top: 10px;
   border-top: 1px solid var(--gray-a5);
   padding-top: 10px;
   max-height: min(260px, 30vh);
+  overflow: hidden;
+}
+
+.composeQuotedContent[data-state="open"] {
   overflow: auto;
+  animation: quotedSlideDown 180ms ease-out;
+}
+
+.composeQuotedContent[data-state="closed"] {
+  animation: quotedSlideUp 150ms ease-in forwards;
 }
 
 .composeQuotedContent :global(img) {

@@ -6,8 +6,10 @@ import {
   useEffect,
   useImperativeHandle,
   useMemo,
-  useRef
+  useRef,
+  useState
 } from "react";
+import { createPortal } from "react-dom";
 import type React from "react";
 import type { Account, AccountDateFormat, Attachment, Folder, Message, RecipientSuggestion } from "@/lib/data";
 import {
@@ -557,6 +559,7 @@ function ComposeOrchestratorImpl(
     composeHtmlText,
     composeMarkdown,
     composeQuotedHtml,
+    composeQuoteHtml,
     composeIncludeOriginal,
     composeStripImages,
     composeQuotedHtmlEdited,
@@ -1020,15 +1023,19 @@ function ComposeOrchestratorImpl(
     [contextValue, jumpToMessage]
   );
 
+  // The inline card stays in this component's render tree so state updates
+  // propagate via context; its DOM is portalled into a caller-supplied slot.
+  const [inlineSlotEl, setInlineSlotEl] = useState<HTMLDivElement | null>(null);
+
   useImperativeHandle(
     ref,
     () => ({
       renderInlineCard: (wrapperClassName?: string) => (
-        <ComposeContextProvider value={inlineContextValue}>
-          <div ref={composeCardRef} className={wrapperClassName}>
-            <ComposeInlineCard />
-          </div>
-        </ComposeContextProvider>
+        <InlineComposeSlot
+          wrapperClassName={wrapperClassName}
+          setSlot={setInlineSlotEl}
+          externalRef={composeCardRef}
+        />
       ),
       resetSession: () => {
         resetComposeSession(composeRef.current);
@@ -1036,20 +1043,41 @@ function ComposeOrchestratorImpl(
       openCompose,
       setComposeView
     }),
-    [
-      inlineContextValue,
-      composeCardRef,
-      openCompose,
-      setComposeView
-    ]
+    [composeCardRef, openCompose, setComposeView]
   );
 
   return (
     <ComposeContextProvider value={contextValue}>
       <ComposeModal open={showComposeModal} />
       <ComposeMinimized open={showComposeMinimized} />
+      {inlineSlotEl &&
+        createPortal(
+          <ComposeContextProvider value={inlineContextValue}>
+            <ComposeInlineCard />
+          </ComposeContextProvider>,
+          inlineSlotEl
+        )}
     </ComposeContextProvider>
   );
+}
+
+function InlineComposeSlot({
+  wrapperClassName,
+  setSlot,
+  externalRef
+}: {
+  wrapperClassName?: string;
+  setSlot: (el: HTMLDivElement | null) => void;
+  externalRef: React.MutableRefObject<HTMLDivElement | null>;
+}) {
+  const setRef = useCallback(
+    (el: HTMLDivElement | null) => {
+      externalRef.current = el;
+      setSlot(el);
+    },
+    [externalRef, setSlot]
+  );
+  return <div ref={setRef} className={wrapperClassName} />;
 }
 
 const ComposeOrchestrator = forwardRef<ComposeOrchestratorHandle, ComposeOrchestratorProps>(

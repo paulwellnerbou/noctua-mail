@@ -34,6 +34,7 @@ export {
   stripRedundantInlineImageFallbacks,
   appendUnreferencedInlineImages
 } from "./inlineImages";
+export type { QuotedHtmlParts } from "./quotedParts";
 export {
   buildQuotedHtmlPartsFromText,
   buildQuotedHtmlPartsFromHtml,
