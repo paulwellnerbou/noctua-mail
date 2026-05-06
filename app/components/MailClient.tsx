@@ -3187,11 +3187,19 @@ export default function MailClient({
         await toggleTodoFlagRef.current(targets[0]);
         return;
       }
-      await updateKeywordFlagBulkRef.current(
-        targets,
-        TODO_FLAG,
-        !isMajority(targets, hasTodoFlag)
-      );
+      const setTodo = !isMajority(targets, hasTodoFlag);
+      if (setTodo) {
+        // $Todo and $Done are mutually exclusive (mirrors single-message
+        // transitionTodoState). Clear $Done first so messages currently
+        // marked done don't end up with both keywords.
+        const doneTargets = targets.filter(hasDoneFlag);
+        if (doneTargets.length > 0) {
+          await updateKeywordFlagBulkRef.current(doneTargets, DONE_FLAG, false);
+        }
+        await updateKeywordFlagBulkRef.current(targets, TODO_FLAG, true);
+      } else {
+        await updateKeywordFlagBulkRef.current(targets, TODO_FLAG, false);
+      }
     };
     const handleKeyDown = (event: KeyboardEvent) => {
       const rawKey = typeof event.key === "string" ? event.key : "";
