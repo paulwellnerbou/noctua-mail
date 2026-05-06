@@ -164,15 +164,15 @@ export default function ComposeMessageField({
   const hasQuotedContent = hasQuotedHtml || hasQuotedParts;
   const [isQuotedExpanded, setIsQuotedExpanded] = useState(true);
   const composeEditorRef = useRef<ComposeEditorHandle | null>(null);
-  // Preview is derived from parts so toggles don't reload the iframe; the
-  // payload's actual quoted HTML is assembled in buildComposePayload using
-  // the current composeQuoteHtml flag.
+  // Preview mirrors the payload: assembled from parts using the current
+  // composeQuoteHtml flag, falling back to composeQuotedHtml for restored
+  // drafts where parts aren't available.
   const previewQuotedHtml = useMemo(() => {
     if (composeQuotedParts) {
-      return assembleQuotedHtml(composeQuotedParts, true);
+      return assembleQuotedHtml(composeQuotedParts, composeQuoteHtml);
     }
     return composeQuotedHtml;
-  }, [composeQuotedParts, composeQuotedHtml]);
+  }, [composeQuotedParts, composeQuotedHtml, composeQuoteHtml]);
   const switchComposeTab = (nextTab: ComposeTab) => {
     if (nextTab === composeTab) return;
     const lastEdited = composeLastEditedRef.current;
