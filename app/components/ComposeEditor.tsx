@@ -110,6 +110,27 @@ const theme = {
   }
 };
 
+// Lexical's exportDOM wraps <strong> with <b> and <em> with <i> for email client
+// compatibility. Both elements carry the same UA font-weight/font-style, so the
+// nesting compounds them (font-weight:bolder applied twice = over-bold text).
+// This unwraps the redundant inner element, moving its inline styles to the outer tag.
+function cleanLexicalHtml(html: string): string {
+  const template = document.createElement("template");
+  template.innerHTML = html;
+  template.content.querySelectorAll<HTMLElement>("b > strong, i > em").forEach((inner) => {
+    const outer = inner.parentElement;
+    if (!outer) return;
+    if (inner.style.cssText) {
+      outer.style.cssText = outer.style.cssText
+        ? `${outer.style.cssText};${inner.style.cssText}`
+        : inner.style.cssText;
+    }
+    while (inner.firstChild) outer.insertBefore(inner.firstChild, inner);
+    outer.removeChild(inner);
+  });
+  return template.innerHTML;
+}
+
 const FONT_SIZE_STEPS = [10, 11, 12, 13, 14, 16, 18, 20, 24, 28, 32, 36, 42, 48, 56, 64, 72];
 const DEFAULT_FONT_SIZE = 14;
 
@@ -296,7 +317,7 @@ function ComposeToolbar({
       onExitSource();
     } else {
       editor.getEditorState().read(() => {
-        const html = $generateHtmlFromNodes(editor, null);
+        const html = cleanLexicalHtml($generateHtmlFromNodes(editor, null));
         onEnterSource(html);
       });
     }
@@ -763,7 +784,7 @@ export default function ComposeEditor({
         <OnChangePlugin
           onChange={(editorState, editor) => {
             editorState.read(() => {
-              const html = $generateHtmlFromNodes(editor, null);
+              const html = cleanLexicalHtml($generateHtmlFromNodes(editor, null));
               const text = $getRoot().getTextContent();
               pendingChangeRef.current = { html, text };
               if (changeFrameRef.current !== null) return;
