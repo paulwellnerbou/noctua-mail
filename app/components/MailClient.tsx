@@ -4903,6 +4903,7 @@ export default function MailClient({
             noticeSuccessTimeout: NOTICE_TIMEOUTS.success,
             evictMessageCaches,
             reconcileActiveTopicSuggestionRemovals,
+            setActiveTopicSuggestionMessages,
             updateMessagesWithCurrentResultPrune,
             applyMoveReconcileSuppression,
             applyDeleteReconcileSuppression,

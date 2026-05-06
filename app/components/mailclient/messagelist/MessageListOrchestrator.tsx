@@ -223,6 +223,7 @@ export type MessageListOrchestratorMutationInputs = {
   noticeSuccessTimeout: number;
   evictMessageCaches: (messageIds: string[]) => void;
   reconcileActiveTopicSuggestionRemovals: (messageIds: string[]) => void;
+  setActiveTopicSuggestionMessages: React.Dispatch<React.SetStateAction<Message[]>>;
   updateMessagesWithCurrentResultPrune: (
     updater: (message: Message) => Message | null,
     options?: { source?: string }
@@ -471,6 +472,7 @@ export default function MessageListOrchestrator({
     undoMoveOperation: mutationInputs.undoMoveOperation,
     confirmUnsubscribe: mutationInputs.confirmUnsubscribe,
     applyMoveReconcileSuppression: mutationInputs.applyMoveReconcileSuppression,
+    setActiveTopicSuggestionMessages: mutationInputs.setActiveTopicSuggestionMessages,
     updateThreadCacheWithFlags: mutationInputs.updateThreadCacheWithFlags,
     updateThreadCacheWithCategory: mutationInputs.updateThreadCacheWithCategory,
     queueFilteredSearchRefresh: mutationInputs.queueFilteredSearchRefresh

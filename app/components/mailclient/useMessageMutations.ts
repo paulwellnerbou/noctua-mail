@@ -1,4 +1,5 @@
 import { useCallback } from "react";
+import type React from "react";
 import { buildAccountMessageActionPath } from "@/lib/accountApiPaths";
 import type { Message } from "@/lib/data";
 import { applyFlagsToMessage, isFlaggedMessage, hasTodoFlag, hasDoneFlag, getUnsubscribeCapability } from "./utils/messageHelpers";
@@ -33,6 +34,7 @@ type UseMessageMutationsProps = {
   undoMoveOperation: (targets: UndoMoveTarget[], accountId: string, successTitle?: string) => void;
   confirmUnsubscribe: (sender: string, listId?: string) => Promise<boolean>;
   applyMoveReconcileSuppression: (messages: Message[]) => void;
+  setActiveTopicSuggestionMessages: React.Dispatch<React.SetStateAction<Message[]>>;
   updateThreadCacheWithFlags: (messageId: string, flags: string[]) => void;
   updateThreadCacheWithCategory: (
     messageId: string,
@@ -73,6 +75,7 @@ export function useMessageMutations({
   undoMoveOperation,
   confirmUnsubscribe,
   applyMoveReconcileSuppression,
+  setActiveTopicSuggestionMessages,
   updateThreadCacheWithFlags,
   updateThreadCacheWithCategory,
   queueFilteredSearchRefresh
@@ -88,6 +91,16 @@ export function useMessageMutations({
       (item) => (item.id === message.id ? applyFlagsToMessage(item, flags) : item),
       { source }
     );
+    setActiveTopicSuggestionMessages((prev) => {
+      let changed = false;
+      const next = prev.map((item) => {
+        if (item.id !== message.id) return item;
+        const updated = applyFlagsToMessage(item, flags);
+        if (updated !== item) changed = true;
+        return updated;
+      });
+      return changed ? next : prev;
+    });
     updateThreadCacheWithFlags(message.id, flags);
     if (viewMessage?.id === message.id && !shouldKeepUpdatedMessage) {
       setViewMessage(null);
@@ -96,6 +109,7 @@ export function useMessageMutations({
     return updatedMessage;
   }, [
     setActiveMessageId,
+    setActiveTopicSuggestionMessages,
     setViewMessage,
     shouldKeepMessageInCurrentResults,
     updateMessagesWithCurrentResultPrune,
@@ -468,19 +482,27 @@ export function useMessageMutations({
       if (!updated) return;
 
       const shouldKeepUpdatedMessage = shouldKeepMessageInCurrentResults(updated);
+      const applyCategoryPatch = (item: Message): Message => ({
+        ...item,
+        category: updated.category ?? null,
+        categoryScore:
+          typeof updated.categoryScore === "number" ? updated.categoryScore : null,
+        categorySignals: updated.categorySignals ?? []
+      });
       updateMessagesWithCurrentResultPrune(
-        (item) =>
-          item.id === message.id
-            ? {
-                ...item,
-                category: updated.category ?? null,
-                categoryScore:
-                  typeof updated.categoryScore === "number" ? updated.categoryScore : null,
-                categorySignals: updated.categorySignals ?? []
-              }
-            : item,
+        (item) => (item.id === message.id ? applyCategoryPatch(item) : item),
         { source: "set-category" }
       );
+      setActiveTopicSuggestionMessages((prev) => {
+        let changed = false;
+        const next = prev.map((item) => {
+          if (item.id !== message.id) return item;
+          const patched = applyCategoryPatch(item);
+          changed = true;
+          return patched;
+        });
+        return changed ? next : prev;
+      });
       updateThreadCacheWithCategory(
         message.id,
         updated.category ?? null,
@@ -508,8 +530,9 @@ export function useMessageMutations({
     }
   }, [
     activeAccountId, apiFetch, hasFilteredSearchCriteria, pushNotice, queueFilteredSearchRefresh, readErrorMessage,
-    reportError, setActiveMessageId, setPendingMessageActions, setViewMessage, shouldKeepMessageInCurrentResults,
-    updateMessagesWithCurrentResultPrune, updateThreadCacheWithCategory, viewMessage?.id
+    reportError, setActiveMessageId, setActiveTopicSuggestionMessages, setPendingMessageActions, setViewMessage,
+    shouldKeepMessageInCurrentResults, updateMessagesWithCurrentResultPrune, updateThreadCacheWithCategory,
+    viewMessage?.id
   ]);
 
   const transitionTodoState = useCallback(async (
