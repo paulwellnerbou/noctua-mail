@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react";
 import { Button } from "@radix-ui/themes";
 import {
   AArrowDown,
@@ -83,7 +83,7 @@ import {
   TableRowNode
 } from "@lexical/table";
 import { $createImageNode, ImageNode } from "./lexical/ImageNode";
-import { HtmlBlockNode } from "./lexical/HtmlBlockNode";
+import { $createHtmlBlockNode, HtmlBlockNode } from "./lexical/HtmlBlockNode";
 import {
   ExtendedTableNode,
   ExtendedTableCellNode,
@@ -91,6 +91,10 @@ import {
 } from "./lexical/ExtendedTableNodes";
 import { CenterNode } from "./lexical/CenterNode";
 import { composeAutoLinkMatchers } from "./composeEditorAutoLink";
+
+export type ComposeEditorHandle = {
+  appendHtmlBlock: (html: string) => void;
+};
 
 type ComposeEditorProps = {
   initialHtml?: string;
@@ -109,6 +113,27 @@ const theme = {
     strikethrough: styles.composeTextStrike
   }
 };
+
+// Lexical's exportDOM wraps <strong> with <b> and <em> with <i> for email client
+// compatibility. Both elements carry the same UA font-weight/font-style, so the
+// nesting compounds them (font-weight:bolder applied twice = over-bold text).
+// This unwraps the redundant inner element, moving its inline styles to the outer tag.
+function cleanLexicalHtml(html: string): string {
+  const template = document.createElement("template");
+  template.innerHTML = html;
+  template.content.querySelectorAll<HTMLElement>("b > strong, i > em").forEach((inner) => {
+    const outer = inner.parentElement;
+    if (!outer) return;
+    if (inner.style.cssText) {
+      outer.style.cssText = outer.style.cssText
+        ? `${outer.style.cssText};${inner.style.cssText}`
+        : inner.style.cssText;
+    }
+    while (inner.firstChild) outer.insertBefore(inner.firstChild, inner);
+    outer.removeChild(inner);
+  });
+  return template.innerHTML;
+}
 
 const FONT_SIZE_STEPS = [10, 11, 12, 13, 14, 16, 18, 20, 24, 28, 32, 36, 42, 48, 56, 64, 72];
 const DEFAULT_FONT_SIZE = 14;
@@ -296,7 +321,7 @@ function ComposeToolbar({
       onExitSource();
     } else {
       editor.getEditorState().read(() => {
-        const html = $generateHtmlFromNodes(editor, null);
+        const html = cleanLexicalHtml($generateHtmlFromNodes(editor, null));
         onEnterSource(html);
       });
     }
@@ -657,13 +682,39 @@ function ComposerInitializer({
   return null;
 }
 
-export default function ComposeEditor({
+function AppendPlugin({ handleRef }: { handleRef: React.Ref<ComposeEditorHandle> }) {
+  const [editor] = useLexicalComposerContext();
+  useImperativeHandle(
+    handleRef,
+    () => ({
+      appendHtmlBlock(html: string) {
+        editor.update(() => {
+          const root = $getRoot();
+          const firstChild = root.getFirstChild();
+          const onlyEmptyParagraph =
+            root.getChildrenSize() === 1 &&
+            firstChild != null &&
+            firstChild.getType() === "paragraph" &&
+            firstChild.getTextContent() === "";
+          if (!onlyEmptyParagraph) {
+            root.append($createParagraphNode());
+          }
+          root.append($createHtmlBlockNode(html));
+        });
+      }
+    }),
+    [editor]
+  );
+  return null;
+}
+
+const ComposeEditor = forwardRef<ComposeEditorHandle, ComposeEditorProps>(function ComposeEditor({
   initialHtml,
   resetKey,
   className,
   onChange,
   onInlineImage
-}: ComposeEditorProps) {
+}, ref) {
   const toolbarRef = useRef<HTMLDivElement | null>(null);
   const [toolbarHeight, setToolbarHeight] = useState(0);
   const changeFrameRef = useRef<number | null>(null);
@@ -747,6 +798,7 @@ export default function ComposeEditor({
           onEnterSource={handleEnterSource}
           onExitSource={handleExitSource}
         />
+        <AppendPlugin handleRef={ref} />
         <ComposerInitializer initialHtml={initialHtml} resetKey={resetKey} />
         <SourceSyncPlugin html={sourceHtml} showSource={showSource} />
         <RichTextPlugin
@@ -763,7 +815,7 @@ export default function ComposeEditor({
         <OnChangePlugin
           onChange={(editorState, editor) => {
             editorState.read(() => {
-              const html = $generateHtmlFromNodes(editor, null);
+              const html = cleanLexicalHtml($generateHtmlFromNodes(editor, null));
               const text = $getRoot().getTextContent();
               pendingChangeRef.current = { html, text };
               if (changeFrameRef.current !== null) return;
@@ -789,4 +841,6 @@ export default function ComposeEditor({
       )}
     </div>
   );
-}
+});
+
+export default ComposeEditor;

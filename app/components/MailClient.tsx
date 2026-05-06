@@ -104,6 +104,7 @@ import {
   buildAccountRecipientAliasesPath,
   buildAccountComposeRecipientsPath,
   buildAccountDraftSendPath,
+  buildAccountDraftDiscardPath,
   buildAccountFoldersPath,
   buildAccountMessageTopicsPath,
   buildAccountMessageTopicSuggestionsPath,
@@ -2304,6 +2305,66 @@ export default function MailClient({
       suppressDraftDeleteReconcile
     ]
   );
+
+  const handleDiscardDraft = useCallback(
+    async (message: Message) => {
+      if (!activeAccountId) return;
+      const draftId = message.id;
+      setPendingMessageActions((prev) => {
+        if (prev.has(draftId)) return prev;
+        const next = new Set(prev);
+        next.add(draftId);
+        return next;
+      });
+      try {
+        const res = await apiFetch(buildAccountDraftDiscardPath(activeAccountId, draftId), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({})
+        });
+        if (!res.ok) {
+          const errMsg = await readErrorMessage(res);
+          reportError(errMsg || "Failed to discard draft.");
+          return;
+        }
+        suppressDraftDeleteReconcile(draftId);
+        removeDraftFromUi(draftId);
+        try {
+          await refreshFolders();
+          await refreshMailboxDataRef.current();
+        } catch (refreshErr) {
+          pushNotice({
+            type: "warning",
+            title: "Draft discarded, but mailbox refresh failed.",
+            description:
+              (refreshErr as Error)?.message ||
+              "Refresh the mailbox manually to see the updated state."
+          });
+        }
+      } catch (err) {
+        reportError((err as Error)?.message || "Failed to discard draft.");
+      } finally {
+        setPendingMessageActions((prev) => {
+          if (!prev.has(draftId)) return prev;
+          const next = new Set(prev);
+          next.delete(draftId);
+          return next;
+        });
+      }
+    },
+    [
+      activeAccountId,
+      apiFetch,
+      pushNotice,
+      readErrorMessage,
+      refreshFolders,
+      removeDraftFromUi,
+      reportError,
+      setPendingMessageActions,
+      suppressDraftDeleteReconcile
+    ]
+  );
+
   const {
     threadScopeMessages,
     groupedMessages,
@@ -3098,6 +3159,7 @@ export default function MailClient({
     isTrashFolder,
     isSpamFolder,
     handleSendDraft,
+    handleDiscardDraft,
     origin,
     onOpenChange
   );
@@ -4886,6 +4948,7 @@ export default function MailClient({
             noticeSuccessTimeout: NOTICE_TIMEOUTS.success,
             evictMessageCaches,
             reconcileActiveTopicSuggestionRemovals,
+            setActiveTopicSuggestionMessages,
             updateMessagesWithCurrentResultPrune,
             applyMoveReconcileSuppression,
             applyDeleteReconcileSuppression,
@@ -4947,7 +5010,6 @@ export default function MailClient({
               toggleFlaggedFlag,
               toggleTodoFlag,
               isDraftMessage,
-              openCompose,
               renderQuickActions,
               renderMessageMenu,
               handleUnsubscribe,

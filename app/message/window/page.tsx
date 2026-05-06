@@ -26,7 +26,6 @@ import ThreadView from "@/app/components/mailclient/message/ThreadView";
 import styles from "./page.module.css";
 
 type MessageTab = "html" | "text" | "markdown" | "source";
-type ComposeMode = "new" | "reply" | "replyAll" | "forward" | "edit" | "editAsNew";
 type DeleteResponse = {
   action: "deleted" | "moved";
   trashFolderId?: string | null;
@@ -385,7 +384,6 @@ export default function MessageWindowPage() {
                 },
                 toggleTodoFlag: noop as (message: Message) => void,
                 isDraftMessage: (target) => Boolean(target.draft),
-                openCompose: noop as (mode: ComposeMode, message?: Message) => void,
                 renderQuickActions: (target) => (
                   <MessageQuickActions
                     message={target}

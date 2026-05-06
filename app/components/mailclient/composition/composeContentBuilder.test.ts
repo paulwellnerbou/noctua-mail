@@ -157,6 +157,67 @@ describe("buildComposePayload — html mode", () => {
     expect(result.html).toContain("<p>Hello</p>");
   });
 
+  it("uses composeAssembledQuotedHtml in the payload, ignoring stale composeQuotedHtml", () => {
+    const result = buildComposePayload(
+      makeState({
+        composeTab: "html",
+        composeHtml: "<p>Reply</p>",
+        composeQuotedHtml: "stale and should be ignored",
+        composeAssembledQuotedHtml:
+          '<div id="noctua-quoted-html"><p>Header line</p><blockquote><p>Original body</p></blockquote></div>'
+      }),
+      deps
+    );
+    expect(result.html).toContain("<p>Reply</p>");
+    expect(result.html).toContain("Header line");
+    expect(result.html).toContain("Original body");
+    expect(result.html).toContain("<blockquote");
+    expect(result.html).not.toContain("stale and should be ignored");
+  });
+
+  it("uses the assembled HTML the caller provides — quoteHtml flag is the caller's responsibility", () => {
+    const result = buildComposePayload(
+      makeState({
+        composeTab: "html",
+        composeHtml: "<p>Reply</p>",
+        composeAssembledQuotedHtml:
+          '<div id="noctua-quoted-html"><p>Header line</p><div><p>Original body</p></div></div>'
+      }),
+      deps
+    );
+    expect(result.html).toContain("Original body");
+    expect(result.html).not.toContain("<blockquote");
+  });
+
+  it("falls back to composeQuotedHtml when composeAssembledQuotedHtml is null", () => {
+    const result = buildComposePayload(
+      makeState({
+        composeTab: "html",
+        composeHtml: "<p>Reply</p>",
+        composeQuotedHtml: "<blockquote>From draft</blockquote>",
+        composeAssembledQuotedHtml: null
+      }),
+      deps
+    );
+    expect(result.html).toContain("<blockquote>From draft</blockquote>");
+  });
+
+  it("excludes the quote when composeQuotedHtmlEdited is true even if assembled HTML is provided", () => {
+    const result = buildComposePayload(
+      makeState({
+        composeTab: "html",
+        composeHtml: "<p>Reply already contains the quote</p>",
+        composeQuotedHtml: "<blockquote>edited inline</blockquote>",
+        composeAssembledQuotedHtml:
+          '<div id="noctua-quoted-html"><p>Header</p><p>Body</p></div>',
+        composeQuotedHtmlEdited: true
+      }),
+      deps
+    );
+    expect(result.html).toContain("<p>Reply already contains the quote</p>");
+    expect(result.html).not.toContain("<p>Body</p>");
+  });
+
   it("replaces inline attachment data URLs with cid: references", () => {
     const dataUrl = "data:image/png;base64,ABC123";
     const cid = "unique-cid@mail";
