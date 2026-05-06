@@ -32,7 +32,12 @@ import {
 } from "lucide-react";
 import { DropdownMenu, IconButton } from "@radix-ui/themes";
 import type { Message, Topic, Folder } from "@/lib/data";
-import { hasTodoFlag, hasDoneFlag, getUnsubscribeCapability } from "../utils/messageHelpers";
+import {
+  hasTodoFlag,
+  hasDoneFlag,
+  getUnsubscribeCapability,
+  hasSendableRecipients
+} from "../utils/messageHelpers";
 import styles from "./MessageMenu.module.css";
 import TopicBadge from "../TopicBadge";
 
@@ -40,6 +45,7 @@ type ComposeMode = "new" | "reply" | "replyAll" | "forward" | "edit" | "editAsNe
 type MessageMenuAction =
   | "editDraft"
   | "sendDraft"
+  | "discardDraft"
   | "reply"
   | "replyAll"
   | "forward"
@@ -94,6 +100,7 @@ type MessageMenuProps = {
   onShowRelated: (message: Message) => void;
   onShowThread: (message: Message) => void;
   onSendDraft?: (message: Message) => void | Promise<void>;
+  onDiscardDraft?: (message: Message) => void | Promise<void>;
   allTopics: Topic[];
   onFetchSuggestions: (message: Message) => Promise<Topic[]>;
   onAssignTopics: (message: Message) => void;
@@ -130,6 +137,7 @@ export default function MessageMenu({
   onShowRelated,
   onShowThread,
   onSendDraft,
+  onDiscardDraft,
   allTopics,
   onFetchSuggestions,
   onAssignTopics,
@@ -146,6 +154,7 @@ export default function MessageMenu({
   const showDeleteInMenu = origin !== "table";
   const allowThreadDeletion = origin !== "thread";
   const inSpamFolder = isSpamFolder(message.folderId);
+  const canSendDraft = hasSendableRecipients(message);
   const hasTodo = hasTodoFlag(message);
   const hasDone = hasDoneFlag(message);
   const selectedCategory =
@@ -240,13 +249,17 @@ export default function MessageMenu({
                 : null
               : null,
             isDraft && onSendDraft && isVisible("sendDraft")
-              ? buildItem("sendDraft", "Send draft", <Send size={14} />, () =>
-                  // `onSendDraft` may return a Promise (the orchestrator wires
-                  // it to an async handler). `void` keeps this call
-                  // fire-and-forget without producing an unhandled-rejection
-                  // warning — the handler itself surfaces errors via the
-                  // notice system.
-                  void onSendDraft(message)
+              ? buildItem(
+                  "sendDraft",
+                  "Send draft",
+                  <Send size={14} />,
+                  () => void onSendDraft(message),
+                  !canSendDraft
+                )
+              : null,
+            isDraft && onDiscardDraft && isVisible("discardDraft")
+              ? buildItem("discardDraft", "Discard draft", <Trash2 size={14} />, () =>
+                  void onDiscardDraft(message)
                 )
               : null,
             isVisible("reply")
