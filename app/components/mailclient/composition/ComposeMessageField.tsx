@@ -231,9 +231,11 @@ export default function ComposeMessageField({
   };
 
   const toggleIncludeOriginal = () => {
-    const next = !composeIncludeOriginal;
-    setComposeIncludeOriginal(next);
-    setIsQuotedExpanded(next);
+    setComposeIncludeOriginal((prev) => {
+      const next = !prev;
+      if (!next) setIsQuotedExpanded(false);
+      return next;
+    });
   };
 
   const handleStripImages = () => {

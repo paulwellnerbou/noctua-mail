@@ -82,17 +82,21 @@ export function buildComposePayload(
   const useHtml = state.composeTab === "html" && !options?.preferText;
   const useMarkdown = state.composeTab === "markdown" && !options?.preferText;
 
-  const effectiveQuotedHtml =
-    state.composeQuotedParts && !state.composeQuotedHtmlEdited
-      ? assembleQuotedHtml(state.composeQuotedParts, state.composeQuoteHtml ?? true)
-      : state.composeQuotedHtml;
+  // Assemble lazily — autosave fires often and assembleQuotedHtml does
+  // non-trivial CSS scoping that we don't want to pay when the quote isn't
+  // even being included.
+  const buildQuoted = (): string => {
+    if (!state.composeIncludeOriginal || state.composeQuotedHtmlEdited) return "";
+    const assembled =
+      state.composeQuotedParts
+        ? assembleQuotedHtml(state.composeQuotedParts, state.composeQuoteHtml ?? true)
+        : state.composeQuotedHtml;
+    return assembled.trim();
+  };
 
   if (useMarkdown) {
     const currentMd = state.composeMarkdown.trim();
-    const quoted =
-      state.composeIncludeOriginal && !state.composeQuotedHtmlEdited
-        ? effectiveQuotedHtml.trim()
-        : "";
+    const quoted = buildQuoted();
     let html: string | undefined = quoted || undefined;
     // Strip any embedded HTML from markdown for the text/plain part, keeping markdown syntax intact
     const textBody = currentMd.replace(/<[^>]+>/g, "").trim();
@@ -111,10 +115,7 @@ export function buildComposePayload(
   let html: string | undefined;
   if (useHtml) {
     const baseHtml = state.composeHtml.trim();
-    const quoted =
-      state.composeIncludeOriginal && !state.composeQuotedHtmlEdited
-        ? effectiveQuotedHtml.trim()
-        : "";
+    const quoted = buildQuoted();
     html = baseHtml || quoted ? `${baseHtml}${quoted}` : undefined;
     if (state.composeStripImages && html) {
       html = html.replace(/<img[\s\S]*?>/gi, "");
