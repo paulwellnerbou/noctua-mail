@@ -120,7 +120,11 @@ function cleanLexicalHtml(html: string): string {
   template.content.querySelectorAll<HTMLElement>("b > strong, i > em").forEach((inner) => {
     const outer = inner.parentElement;
     if (!outer) return;
-    if (inner.style.cssText) outer.style.cssText = inner.style.cssText;
+    if (inner.style.cssText) {
+      outer.style.cssText = outer.style.cssText
+        ? `${outer.style.cssText};${inner.style.cssText}`
+        : inner.style.cssText;
+    }
     while (inner.firstChild) outer.insertBefore(inner.firstChild, inner);
     outer.removeChild(inner);
   });
