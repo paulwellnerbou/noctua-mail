@@ -422,34 +422,36 @@ export function useMessageMutations({
     setPendingMessageActions
   ]);
 
-  // Pass `flag = "seen"` to also adjust the folder unread count;
+  // Pass `flag = "seen"` to also adjust the per-folder unread count;
   // any other system flag or `null` (for keywords) skips that bookkeeping.
+  // A bulk selection in cross-folder views may span multiple folders, so
+  // deltas are aggregated per folderId before the single setFolders update.
   const applyFlagsResults = useCallback((
     pairs: Array<{ message: Message; nextFlags: string[] }>,
     flag: SystemFlag | null,
     source: string
   ) => {
-    let unreadDelta = 0;
-    let folderId: string | undefined;
+    const unreadDeltaByFolderId = new Map<string, number>();
     for (const { message, nextFlags } of pairs) {
       const updatedMessage = reconcileMessageFlags(message, nextFlags, source);
       if (flag !== "seen") continue;
       const previousSeen = Boolean(message.seen);
       const nextSeen = Boolean(updatedMessage.seen);
       if (previousSeen === nextSeen) continue;
-      folderId = folderId ?? message.folderId;
-      unreadDelta += previousSeen ? 1 : -1;
-    }
-    if (folderId && unreadDelta !== 0) {
-      const targetFolderId = folderId;
-      setFolders((prev) =>
-        prev.map((f) =>
-          f.id === targetFolderId
-            ? { ...f, unreadCount: Math.max(0, (f.unreadCount ?? 0) + unreadDelta) }
-            : f
-        )
+      const delta = previousSeen ? 1 : -1;
+      unreadDeltaByFolderId.set(
+        message.folderId,
+        (unreadDeltaByFolderId.get(message.folderId) ?? 0) + delta
       );
     }
+    if (unreadDeltaByFolderId.size === 0) return;
+    setFolders((prev) =>
+      prev.map((f) => {
+        const delta = unreadDeltaByFolderId.get(f.id);
+        if (!delta) return f;
+        return { ...f, unreadCount: Math.max(0, (f.unreadCount ?? 0) + delta) };
+      })
+    );
   }, [reconcileMessageFlags, setFolders]);
 
   const updateFlagState = useCallback(async (
@@ -538,7 +540,7 @@ export function useMessageMutations({
       reportError("Failed to update message keyword.");
     }
   }, [
-    hasFilteredSearchCriteria, queueFilteredSearchRefresh, reconcileMessageFlags, reportError,
+    applyBulkFlagResults, hasFilteredSearchCriteria, queueFilteredSearchRefresh, reportError,
     requestBulkFlagMutation
   ]);
 

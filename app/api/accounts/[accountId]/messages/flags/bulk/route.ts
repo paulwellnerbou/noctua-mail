@@ -87,9 +87,10 @@ export async function POST(request: Request, { params }: AccountRouteParams) {
     });
     return NextResponse.json({ ok: true, results, skipped });
   } catch (error) {
-    return NextResponse.json(
-      { ok: false, message: error instanceof Error ? error.message : "Bulk flag update failed" },
-      { status: 502 }
-    );
+    const message = error instanceof Error ? error.message : "Bulk flag update failed";
+    // Validation errors thrown by `buildFlagMutations` are client payload issues;
+    // anything else is an upstream IMAP/DB failure (mirrors the single-message route).
+    const status = message === "Unknown flag" ? 400 : 502;
+    return NextResponse.json({ ok: false, message }, { status });
   }
 }
