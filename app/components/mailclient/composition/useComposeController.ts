@@ -1,7 +1,8 @@
 import type React from "react";
+import { useMemo } from "react";
 import type { Account, AccountDateFormat, Message } from "@/lib/data";
 import { formatAccountMediumDateTime } from "@/lib/dateFormatting";
-import { escapeHtml } from "@/lib/html";
+import { assembleQuotedHtml, escapeHtml } from "@/lib/html";
 import { buildComposePayload as buildComposePayloadFn } from "./composeContentBuilder";
 import { computeComposeInitState } from "./composeInitState";
 import type { ComposeMode, ComposeTab } from "./composeTypes";
@@ -110,6 +111,15 @@ export function useComposeController({
       : null;
   };
 
+  // Cache the assembled quoted HTML across calls — buildComposePayload runs on
+  // every keystroke (autosave hashing), and assembleQuotedHtml does CSS scoping
+  // that's expensive for large styled emails. Recomputes only when the parts or
+  // the quote-html flag actually change.
+  const assembledQuotedHtml = useMemo(() => {
+    if (!compose.composeQuotedParts) return null;
+    return assembleQuotedHtml(compose.composeQuotedParts, compose.composeQuoteHtml);
+  }, [compose.composeQuotedParts, compose.composeQuoteHtml]);
+
   const buildComposePayload = (options?: { preferText?: boolean }) => {
     return buildComposePayloadFn(
       {
@@ -122,8 +132,7 @@ export function useComposeController({
         composeIncludeOriginal: compose.composeIncludeOriginal,
         composeStripImages: compose.composeStripImages,
         composeAttachments: compose.composeAttachments,
-        composeQuotedParts: compose.composeQuotedParts,
-        composeQuoteHtml: compose.composeQuoteHtml
+        composeAssembledQuotedHtml: assembledQuotedHtml
       },
       { stripHtml, normalizeHtmlDerivedText },
       options

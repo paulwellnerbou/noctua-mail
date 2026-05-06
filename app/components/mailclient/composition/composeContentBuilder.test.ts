@@ -157,18 +157,14 @@ describe("buildComposePayload — html mode", () => {
     expect(result.html).toContain("<p>Hello</p>");
   });
 
-  it("assembles quoted html from composeQuotedParts when present (composeQuoteHtml=true wraps in blockquote)", () => {
+  it("uses composeAssembledQuotedHtml in the payload, ignoring stale composeQuotedHtml", () => {
     const result = buildComposePayload(
       makeState({
         composeTab: "html",
         composeHtml: "<p>Reply</p>",
         composeQuotedHtml: "stale and should be ignored",
-        composeQuotedParts: {
-          styles: "",
-          headerHtml: "<p>Header line</p>",
-          bodyHtml: "<p>Original body</p>"
-        },
-        composeQuoteHtml: true
+        composeAssembledQuotedHtml:
+          '<div id="noctua-quoted-html"><p>Header line</p><blockquote><p>Original body</p></blockquote></div>'
       }),
       deps
     );
@@ -179,17 +175,13 @@ describe("buildComposePayload — html mode", () => {
     expect(result.html).not.toContain("stale and should be ignored");
   });
 
-  it("assembles quoted html from composeQuotedParts without blockquote when composeQuoteHtml=false", () => {
+  it("uses the assembled HTML the caller provides — quoteHtml flag is the caller's responsibility", () => {
     const result = buildComposePayload(
       makeState({
         composeTab: "html",
         composeHtml: "<p>Reply</p>",
-        composeQuotedParts: {
-          styles: "",
-          headerHtml: "<p>Header line</p>",
-          bodyHtml: "<p>Original body</p>"
-        },
-        composeQuoteHtml: false
+        composeAssembledQuotedHtml:
+          '<div id="noctua-quoted-html"><p>Header line</p><div><p>Original body</p></div></div>'
       }),
       deps
     );
@@ -197,24 +189,31 @@ describe("buildComposePayload — html mode", () => {
     expect(result.html).not.toContain("<blockquote");
   });
 
-  it("falls back to composeQuotedHtml when composeQuotedHtmlEdited is true even if parts are present", () => {
+  it("falls back to composeQuotedHtml when composeAssembledQuotedHtml is null", () => {
+    const result = buildComposePayload(
+      makeState({
+        composeTab: "html",
+        composeHtml: "<p>Reply</p>",
+        composeQuotedHtml: "<blockquote>From draft</blockquote>",
+        composeAssembledQuotedHtml: null
+      }),
+      deps
+    );
+    expect(result.html).toContain("<blockquote>From draft</blockquote>");
+  });
+
+  it("excludes the quote when composeQuotedHtmlEdited is true even if assembled HTML is provided", () => {
     const result = buildComposePayload(
       makeState({
         composeTab: "html",
         composeHtml: "<p>Reply already contains the quote</p>",
         composeQuotedHtml: "<blockquote>edited inline</blockquote>",
-        composeQuotedParts: {
-          styles: "",
-          headerHtml: "<p>Header</p>",
-          bodyHtml: "<p>Body</p>"
-        },
-        composeQuoteHtml: true,
+        composeAssembledQuotedHtml:
+          '<div id="noctua-quoted-html"><p>Header</p><p>Body</p></div>',
         composeQuotedHtmlEdited: true
       }),
       deps
     );
-    // composeQuotedHtmlEdited=true means quoted is already inlined in composeHtml,
-    // so neither path is appended.
     expect(result.html).toContain("<p>Reply already contains the quote</p>");
     expect(result.html).not.toContain("<p>Body</p>");
   });

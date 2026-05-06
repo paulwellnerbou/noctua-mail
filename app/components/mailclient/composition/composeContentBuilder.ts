@@ -1,6 +1,5 @@
 import type { Attachment } from "@/lib/data";
-import { assembleQuotedHtml, stripStyleTags } from "@/lib/html";
-import type { QuotedHtmlParts } from "@/lib/html";
+import { stripStyleTags } from "@/lib/html";
 import { htmlToMarkdown } from "@/lib/markdownConvert";
 import type { ComposeTab } from "./composeTypes";
 
@@ -17,10 +16,11 @@ export type ComposeContentState = {
   composeIncludeOriginal: boolean;
   composeStripImages: boolean;
   composeAttachments: Attachment[];
-  /** When provided, the payload's quoted HTML is assembled from parts at build
-   *  time, so toggling composeQuoteHtml doesn't have to rewrite composeQuotedHtml. */
-  composeQuotedParts?: QuotedHtmlParts | null;
-  composeQuoteHtml?: boolean;
+  /** Pre-assembled (cached) quoted HTML from composeQuotedParts + composeQuoteHtml.
+   *  When non-null, the payload uses this instead of composeQuotedHtml so that
+   *  toggling composeQuoteHtml takes effect without callers having to rewrite
+   *  composeQuotedHtml on every change. */
+  composeAssembledQuotedHtml?: string | null;
 };
 
 export type ComposePayload = {
@@ -82,16 +82,10 @@ export function buildComposePayload(
   const useHtml = state.composeTab === "html" && !options?.preferText;
   const useMarkdown = state.composeTab === "markdown" && !options?.preferText;
 
-  // Assemble lazily — autosave fires often and assembleQuotedHtml does
-  // non-trivial CSS scoping that we don't want to pay when the quote isn't
-  // even being included.
   const buildQuoted = (): string => {
     if (!state.composeIncludeOriginal || state.composeQuotedHtmlEdited) return "";
-    const assembled =
-      state.composeQuotedParts
-        ? assembleQuotedHtml(state.composeQuotedParts, state.composeQuoteHtml ?? true)
-        : state.composeQuotedHtml;
-    return assembled.trim();
+    const source = state.composeAssembledQuotedHtml ?? state.composeQuotedHtml;
+    return source.trim();
   };
 
   if (useMarkdown) {
