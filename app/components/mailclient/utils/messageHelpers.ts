@@ -80,6 +80,15 @@ export function shouldShowAttachmentIcon(message: Message) {
   return hasNonInlineAttachments(message);
 }
 
+/**
+ * Client-side heuristic for whether a draft has any addressable recipient
+ * across To/Cc/Bcc. Used to gate the Send action in the UI; the server
+ * runs an authoritative parse via `draftHasSendableRecipients` before relay.
+ */
+export function hasSendableRecipients(message: Message): boolean {
+  return Boolean(message.to?.trim() || message.cc?.trim() || message.bcc?.trim());
+}
+
 export function hasAssignedTopics(topics?: Topic[] | null) {
   if (!Array.isArray(topics) || topics.length === 0) return false;
   return topics.some((topic) => typeof topic?.id === "string" && topic.id.trim().length > 0);

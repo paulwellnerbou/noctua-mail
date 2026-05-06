@@ -2,6 +2,7 @@ import type React from "react";
 import { Edit3, Forward, Reply, ReplyAll, Search, Send, Trash2 } from "lucide-react";
 import { IconButton } from "@radix-ui/themes";
 import type { Message } from "@/lib/data";
+import { hasSendableRecipients } from "../utils/messageHelpers";
 
 type ComposeMode = "new" | "reply" | "replyAll" | "forward" | "edit" | "editAsNew";
 type MessageQuickAction =
@@ -46,6 +47,7 @@ export default function MessageQuickActions({
     actionVisibility?.[action] ?? defaultValue;
 
   if (isDraft) {
+    const canSendDraft = hasSendableRecipients(message);
     return (
       <>
         {isVisible("editDraft") ? (
@@ -71,14 +73,9 @@ export default function MessageQuickActions({
             color="gray"
             title="Send draft"
             aria-label="Send draft"
-            disabled={pendingMessageActions.has(message.id)}
+            disabled={pendingMessageActions.has(message.id) || !canSendDraft}
             onClick={(event) => {
               event.stopPropagation();
-              // `onSendDraft` may return a promise (the orchestrator wires
-              // it to an async handler). We explicitly `void` it so the
-              // floating promise doesn't become an unhandled rejection
-              // warning; the handler itself owns error surfacing via
-              // the notice system.
               void onSendDraft(message);
             }}
           >

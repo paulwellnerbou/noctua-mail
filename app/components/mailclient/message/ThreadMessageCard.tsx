@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import type React from "react";
 import {
-  Edit3,
   Image as ImageIcon,
   MoveRight,
   Paperclip,
@@ -48,8 +47,6 @@ type MessageTab = "html" | "text" | "markdown" | "source";
 
 type ImapFlagBadge = { label: string; kind: string };
 
-type ComposeMode = "new" | "reply" | "replyAll" | "forward" | "edit" | "editAsNew";
-
 type ThreadMessageCardProps = {
   message: Message;
   bodyLoading?: boolean;
@@ -66,7 +63,6 @@ type ThreadMessageCardProps = {
   toggleFlaggedFlag: (message: Message) => void;
   toggleTodoFlag: (message: Message) => void;
   isDraftMessage: (message: Message) => boolean;
-  openCompose: (mode: ComposeMode, message?: Message) => void;
   renderQuickActions: (
     message: Message,
     iconSize?: number,
@@ -131,7 +127,6 @@ export default function ThreadMessageCard({
   toggleFlaggedFlag,
   toggleTodoFlag,
   isDraftMessage,
-  openCompose,
   renderQuickActions,
   renderMessageMenu,
   collapsedMessages,
@@ -737,20 +732,7 @@ export default function ThreadMessageCard({
               </div>
               <div className={styles.actions}>
                 <div className={styles.messageActions}>
-                  {isDraftMessage(message) ? (
-                    <IconButton
-                      size="2"
-                      variant="ghost"
-                      color="gray"
-                      title="Edit draft"
-                      aria-label="Edit draft"
-                      onClick={() => openCompose("edit", message)}
-                    >
-                      <Edit3 size={14} />
-                    </IconButton>
-                  ) : (
-                    renderQuickActions(message, 14, "thread")
-                  )}
+                  {renderQuickActions(message, 14, "thread")}
                 </div>
                 {renderMessageMenu(message, "thread", setMenuOpen)}
               </div>
