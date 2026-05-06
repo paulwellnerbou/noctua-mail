@@ -165,8 +165,14 @@ export async function updateImapFlagsBulk(
   enable: boolean,
   clientId?: string
 ) {
+  if (targets.length === 0) return;
   const grouped = groupTargetsByMailbox(targets);
-  if (grouped.length === 0) return;
+  // `targets` had entries but none survived validation (uid <= 0 / NaN, or
+  // empty-trim mailbox path). Surface this loudly so callers don't silently
+  // skip work and let local DB drift away from the IMAP server.
+  if (grouped.length === 0) {
+    throw new Error("Message is missing IMAP metadata");
+  }
   const logContext = buildLogContext(account, clientId);
   await withPooledImapClient(account, logContext, async (client) => {
     for (const group of grouped) {
