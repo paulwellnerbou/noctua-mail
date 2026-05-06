@@ -458,10 +458,17 @@ function MessageViewOrchestratorImpl(
   }, [activeAccountId]);
 
   // Collapse all messages in the active thread except the selected one when
-  // that selection was triggered explicitly by the user.
+  // that selection was triggered explicitly by the user. Skip when threads
+  // are disabled — `activeThread` may still contain siblings (threadId
+  // matches in the visible list), and writing collapse entries for them
+  // pollutes state that the next thread-enabled view would inherit.
   useEffect(() => {
     if (!activeMessage) return;
     if (pendingSelectionCollapseMessageId !== activeMessage.id) return;
+    if (!supportsThreads) {
+      onPendingSelectionCollapseConsumed(activeMessage.id);
+      return;
+    }
     setCollapsedMessages((prev) => {
       const next: Record<string, boolean> = { ...prev };
       activeThread.forEach((msg) => {
@@ -474,7 +481,8 @@ function MessageViewOrchestratorImpl(
     activeMessage,
     activeThread,
     onPendingSelectionCollapseConsumed,
-    pendingSelectionCollapseMessageId
+    pendingSelectionCollapseMessageId,
+    supportsThreads
   ]);
 
   // Collapse siblings so the compose card stays visible when the user

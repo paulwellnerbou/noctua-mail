@@ -55,10 +55,16 @@ export default function ThreadView({
             !isThreadLoading &&
             Boolean(activeThreadError) &&
             needsMessageContentHydration(activeMessageFromThread);
-          const baseThread =
-            supportsThreads && isThreadLoading && !hasFullThread
-              ? [activeMessageFromThread]
-              : activeThread;
+          // When threads are disabled, the right pane shows only the
+          // selected message — `activeThread` may still contain siblings
+          // (from `threadContentById` cache or threadId matches in the
+          // visible list) and rendering them here surfaces them as
+          // collapsed cards from the selection-collapse effect.
+          const showOnlyActiveMessage =
+            !supportsThreads || (isThreadLoading && !hasFullThread);
+          const baseThread = showOnlyActiveMessage
+            ? [activeMessageFromThread]
+            : activeThread;
           const visibleThread = getVisibleThreadMessages({
             activeThread: baseThread,
             showComposeInline,
