@@ -3,11 +3,9 @@ import {
   diffLocalAndRemoteFolderUids,
   diffLocalAndRemoteWithFlags,
   filterMissingRemoteUidsForPendingMoves,
-  isGoogleCalendarSyncMessage,
   planTwoPhaseNewBackfill,
   partitionMissingRemoteUids,
   resolveOrphanedMessageFileRefs,
-  shouldAutoProcessCalendarInviteMessage,
   shouldAutoProcessCalendarInvitesForSyncMode,
   sortCalendarInviteImportsForProcessing
 } from "./syncOperation";
@@ -175,68 +173,6 @@ describe("planTwoPhaseNewBackfill", () => {
       backfillUids: [9, 11, 12],
       requiresExplicitBackfill: true
     });
-  });
-});
-
-describe("isGoogleCalendarSyncMessage", () => {
-  test("matches direct Google sync sender addresses", () => {
-    expect(
-      isGoogleCalendarSyncMessage({
-        from: "\"Google Calendar\" <noreply-calendar-sync@google.com>"
-      })
-    ).toBe(true);
-  });
-
-  test("matches Google sync sender from raw headers even when visible from is a participant", () => {
-    expect(
-      isGoogleCalendarSyncMessage({
-        from: "\"Example Participant\" <participant@example.test>",
-        source: [
-          "Return-Path: <noreply-calendar-sync@google.com>",
-          "Sender: Google Calendar <noreply-calendar-sync@google.com>",
-          "From: \"Example Participant\" <participant@example.test>",
-          "To: paul@example.test",
-          "Subject: StandUp UnifiedAPI",
-          "",
-          "Body content"
-        ].join("\r\n")
-      })
-    ).toBe(true);
-  });
-
-  test("does not match regular organizer notifications", () => {
-    expect(
-      isGoogleCalendarSyncMessage({
-        from: "\"Google Calendar\" <calendar-notification@google.com>",
-        source: [
-          "Return-Path: <calendar-notification@google.com>",
-          "From: \"Google Calendar\" <calendar-notification@google.com>",
-          "To: paul@example.test",
-          "",
-          "Body content"
-        ].join("\r\n")
-      })
-    ).toBe(false);
-  });
-});
-
-describe("shouldAutoProcessCalendarInviteMessage", () => {
-  test("disables automatic processing for Google sync transport mail", () => {
-    expect(
-      shouldAutoProcessCalendarInviteMessage({
-        from: "\"Example Participant\" <participant@example.test>",
-        source: "Sender: Google Calendar <noreply-calendar-sync@google.com>\r\n\r\nBody"
-      })
-    ).toBe(false);
-  });
-
-  test("keeps automatic processing enabled for regular calendar notifications", () => {
-    expect(
-      shouldAutoProcessCalendarInviteMessage({
-        from: "\"Google Calendar\" <calendar-notification@google.com>",
-        source: "From: \"Google Calendar\" <calendar-notification@google.com>\r\n\r\nBody"
-      })
-    ).toBe(true);
   });
 });
 

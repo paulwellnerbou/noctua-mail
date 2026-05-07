@@ -20,7 +20,6 @@ import {
 import { processCalendarInviteForMessage } from "@/lib/calendarInviteProcessor";
 import { getAttachmentContentBuffer, sanitizeSyncedMessage } from "@/lib/mail/syncMessageSanitizer";
 import { isCalendarAttachment, CALENDAR_INVITE_FLAG } from "@/lib/messageFlags";
-import { extractPrimaryEmail, normalizeEmailAddress } from "@/lib/senderIdentity";
 import type { SyncMode } from "@/lib/syncPolicy";
 import { deleteMessageFiles } from "@/lib/storage";
 import { listImapMailboxUidsAndFlags, syncImapAccountBatched } from "@/lib/mail/imap";
@@ -170,7 +169,6 @@ export function planTwoPhaseNewBackfill(
   };
 }
 
-const GOOGLE_CALENDAR_SYNC_SENDER = "noreply-calendar-sync@google.com";
 type CalendarInviteImport = {
   messageId: string;
   icsSource: string;
@@ -179,38 +177,6 @@ type CalendarInviteImport = {
   process: boolean;
   importOrder: number;
 };
-
-function extractMessageHeaderSection(source?: string | null) {
-  if (!source) return "";
-  const separatorMatch = source.match(/\r?\n\r?\n/);
-  if (!separatorMatch || typeof separatorMatch.index !== "number") {
-    return source;
-  }
-  return source.slice(0, separatorMatch.index);
-}
-
-export function isGoogleCalendarSyncMessage(params: {
-  from?: string | null;
-  fromEmail?: string | null;
-  source?: string | null;
-}) {
-  const directFromEmail =
-    normalizeEmailAddress(params.fromEmail) ?? extractPrimaryEmail(params.from) ?? null;
-  if (directFromEmail === GOOGLE_CALENDAR_SYNC_SENDER) {
-    return true;
-  }
-  const headerSection = extractMessageHeaderSection(params.source).toLowerCase();
-  if (!headerSection) return false;
-  return headerSection.includes(GOOGLE_CALENDAR_SYNC_SENDER);
-}
-
-export function shouldAutoProcessCalendarInviteMessage(params: {
-  from?: string | null;
-  fromEmail?: string | null;
-  source?: string | null;
-}) {
-  return !isGoogleCalendarSyncMessage(params);
-}
 
 export function shouldAutoProcessCalendarInvitesForSyncMode(syncMode: SyncMode) {
   return syncMode === "new" || syncMode === "recent";
@@ -717,14 +683,8 @@ export async function runSyncOperationBatched(
       const strippedIds = new Set(strippedMessages.map((item) => item.id));
       const syncedMessages = normalizedMessages.filter((message) => strippedIds.has(message.id));
 
+      const shouldProcessInvite = shouldAutoProcessCalendarInvitesForSyncMode(syncMode);
       syncedMessages.forEach((message) => {
-        const shouldProcessInvite =
-          shouldAutoProcessCalendarInvitesForSyncMode(syncMode) &&
-          shouldAutoProcessCalendarInviteMessage({
-            from: message.from,
-            fromEmail: message.fromEmail,
-            source: message.source
-          });
         (message.attachments ?? []).forEach((attachment) => {
           if (!isCalendarAttachment(attachment)) return;
           const attachmentBuffer = getAttachmentContentBuffer(attachment);
