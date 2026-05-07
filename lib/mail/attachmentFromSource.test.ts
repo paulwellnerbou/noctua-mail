@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import {
   extractAttachmentBufferFromSource,
+  extractIcsSourceFromEmailSource,
   mergeAttachmentMetadataFromParsedAttachments
 } from "@/lib/mail/attachmentFromSource";
 
@@ -154,5 +155,91 @@ describe("extractAttachmentBufferFromSource", () => {
 
     expect(merged[0]?.cid).toBe(cid);
     expect(merged[0]?.filename).toBe(filename);
+  });
+});
+
+describe("extractIcsSourceFromEmailSource", () => {
+  it("decodes a quoted-printable text/calendar inline part", async () => {
+    const email = [
+      "MIME-Version: 1.0",
+      'Content-Type: multipart/mixed; boundary="b"',
+      "",
+      "--b",
+      'Content-Type: text/calendar; charset="UTF-8"; method=REQUEST',
+      "Content-Transfer-Encoding: quoted-printable",
+      "",
+      "BEGIN:VCALENDAR",
+      "METHOD:REQUEST",
+      "BEGIN:VEVENT",
+      "UID:qp@example.test",
+      "DTSTART;TZID=3DEurope/Berlin:20260601T160000",
+      "RRULE:FREQ=3DWEEKLY;BYDAY=3DMO",
+      "SUMMARY:Weekly QP=20",
+      "END:VEVENT",
+      "END:VCALENDAR",
+      "",
+      "--b--"
+    ].join("\r\n");
+
+    const ics = await extractIcsSourceFromEmailSource(email);
+    expect(ics).not.toBeNull();
+    expect(ics).toContain("RRULE:FREQ=WEEKLY;BYDAY=MO");
+    expect(ics).toContain("DTSTART;TZID=Europe/Berlin:20260601T160000");
+    expect(ics).toContain("SUMMARY:Weekly QP ");
+    expect(ics).not.toContain("=3D");
+  });
+
+  it("decodes a base64 application/ics attachment", async () => {
+    const cleanIcs = [
+      "BEGIN:VCALENDAR",
+      "METHOD:REQUEST",
+      "BEGIN:VEVENT",
+      "UID:b64@example.test",
+      "DTSTART:20260601T140000Z",
+      "RRULE:FREQ=WEEKLY;BYDAY=MO",
+      "SUMMARY:Weekly base64",
+      "END:VEVENT",
+      "END:VCALENDAR"
+    ].join("\r\n");
+    const email = [
+      "MIME-Version: 1.0",
+      'Content-Type: multipart/mixed; boundary="b"',
+      "",
+      "--b",
+      "Content-Type: text/plain",
+      "",
+      "Body",
+      "--b",
+      'Content-Type: application/ics; name="invite.ics"',
+      'Content-Disposition: attachment; filename="invite.ics"',
+      "Content-Transfer-Encoding: base64",
+      "",
+      Buffer.from(cleanIcs).toString("base64"),
+      "",
+      "--b--"
+    ].join("\r\n");
+
+    const ics = await extractIcsSourceFromEmailSource(email);
+    expect(ics).not.toBeNull();
+    expect(ics).toContain("UID:b64@example.test");
+    expect(ics).toContain("RRULE:FREQ=WEEKLY;BYDAY=MO");
+  });
+
+  it("returns the input unchanged when it already starts with BEGIN:VCALENDAR", async () => {
+    const bareIcs = "BEGIN:VCALENDAR\r\nMETHOD:REQUEST\r\nEND:VCALENDAR\r\n";
+    const ics = await extractIcsSourceFromEmailSource(bareIcs);
+    expect(ics).toBe(bareIcs);
+  });
+
+  it("returns null for an email with no calendar attachment", async () => {
+    const email = [
+      "MIME-Version: 1.0",
+      "Content-Type: text/plain",
+      "",
+      "Just a regular email"
+    ].join("\r\n");
+
+    const ics = await extractIcsSourceFromEmailSource(email);
+    expect(ics).toBeNull();
   });
 });

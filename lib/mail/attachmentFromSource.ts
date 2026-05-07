@@ -168,7 +168,7 @@ export async function extractIcsSourceFromEmailSource(source: string): Promise<s
       const matches = isCalendarAttachment({
         contentType: attachment.contentType,
         filename: attachment.filename ?? ""
-      } as Attachment);
+      });
       if (!matches) continue;
       const buffer = resolveCandidateBuffer(attachment as ParsedAttachmentCandidate);
       if (buffer?.length) return buffer.toString("utf8");

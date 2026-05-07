@@ -62,7 +62,7 @@ function hasCalendarMime(value?: string | null) {
   return includesHint(normalized, CALENDAR_MIME_HINTS);
 }
 
-export function isCalendarAttachment(attachment: Attachment) {
+export function isCalendarAttachment(attachment: Pick<Attachment, "contentType" | "filename">) {
   return (
     hasCalendarMime(attachment.contentType) ||
     endsWithExtension(normalize(attachment.filename), CALENDAR_FILENAME_EXTENSIONS)
