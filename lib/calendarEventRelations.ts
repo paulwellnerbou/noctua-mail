@@ -6,6 +6,7 @@ import {
   updateCalendarEventMessageRelations
 } from "./db";
 import { getMessageSource } from "./storage";
+import { extractIcsSourceFromEmailSource } from "./mail/attachmentFromSource";
 
 export type MessageCandidate = {
   messageId: string;
@@ -90,7 +91,9 @@ export async function recomputeCalendarEventMessageRelations(accountId: string):
 
       const candidates: MessageCandidate[] = [];
       for (const sm of sourceMessages) {
-        const icsSource = await getMessageSource(accountId, sm.messageId);
+        const emailSource = await getMessageSource(accountId, sm.messageId);
+        if (!emailSource?.trim()) continue;
+        const icsSource = await extractIcsSourceFromEmailSource(emailSource);
         if (!icsSource?.trim()) continue;
         const groups = collectCalendarInviteMutationGroups(icsSource);
         if (groups.length === 0) {

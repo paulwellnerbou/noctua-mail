@@ -440,4 +440,87 @@ describe("processCalendarInviteForMessage", () => {
     // Series-level snapshot still populated from the incoming email.
     expect(fields.sourceSubject).toBe("Invite: Kickoff");
   });
+
+  test("decodes QP-encoded text/calendar from a raw email source when hydrating a missing series", async () => {
+    // Simulate the Google Calendar pattern: a multipart/mixed email with an
+    // inline text/calendar part that is quoted-printable encoded.  When
+    // `=3D` artifacts are not decoded, RRULE becomes `FREQ=3DWEEKLY` and
+    // DTSTART gets a mangled TZID, producing corrupted DB state.
+    const boundary = "test-boundary-001";
+    const rawEmailSource = [
+      "MIME-Version: 1.0",
+      `Content-Type: multipart/mixed; boundary="${boundary}"`,
+      "",
+      `--${boundary}`,
+      'Content-Type: text/calendar; charset="UTF-8"; method=REQUEST',
+      "Content-Transfer-Encoding: quoted-printable",
+      "",
+      "BEGIN:VCALENDAR",
+      "METHOD:REQUEST",
+      "BEGIN:VEVENT",
+      "UID:series-qp@example.test",
+      "SUMMARY:Weekly QP meeting=20",
+      "DTSTART;TZID=3DEurope/Berlin:20260601T160000",
+      "DTEND;TZID=3DEurope/Berlin:20260601T165000",
+      "RRULE:FREQ=3DWEEKLY;BYDAY=3DMO",
+      "END:VEVENT",
+      "END:VCALENDAR",
+      "",
+      `--${boundary}`,
+      'Content-Type: application/ics; name="invite.ics"',
+      "Content-Disposition: attachment; filename=\"invite.ics\"",
+      "Content-Transfer-Encoding: base64",
+      "",
+      // base64 of the clean ICS (same content, properly decoded)
+      Buffer.from(
+        [
+          "BEGIN:VCALENDAR",
+          "METHOD:REQUEST",
+          "BEGIN:VEVENT",
+          "UID:series-qp@example.test",
+          "SUMMARY:Weekly QP meeting ",
+          "DTSTART;TZID=Europe/Berlin:20260601T160000",
+          "DTEND;TZID=Europe/Berlin:20260601T165000",
+          "RRULE:FREQ=WEEKLY;BYDAY=MO",
+          "END:VEVENT",
+          "END:VCALENDAR"
+        ].join("\r\n")
+      ).toString("base64"),
+      "",
+      `--${boundary}--`
+    ].join("\r\n");
+
+    const cancelInstanceIcs = makeIcs([
+      "METHOD:CANCEL",
+      "BEGIN:VEVENT",
+      "UID:series-qp@example.test",
+      "RECURRENCE-ID:20260608T140000Z",
+      "DTSTART:20260608T140000Z",
+      "STATUS:CANCELLED",
+      "END:VEVENT"
+    ]);
+
+    listCalendarInviteSourceMessagesByEventUid.mockResolvedValue([
+      { messageId: "msg-qp-base", dateValue: 1 }
+    ]);
+    await saveMessageSource("acc-1", "msg-qp-base", rawEmailSource);
+
+    const result = await processCalendarInviteForMessage({
+      accountId: "acc-1",
+      messageId: "msg-qp-cancel",
+      icsSource: cancelInstanceIcs,
+      process: true,
+      accountEmail: "test@example.test"
+    });
+
+    expect(result.states[0]?.processed).toBe(true);
+
+    // The bootstrapped event must use the properly decoded ICS, not the QP-encoded one.
+    const [, bootstrappedFields] = upsertCalendarEventByUid.mock.calls[0];
+    expect(bootstrappedFields.recurrenceRule).toBe("FREQ=WEEKLY;BYDAY=MO");
+    // summary is trimmed; trailing space from QP decode is not significant
+    expect(bootstrappedFields.summary).toBe("Weekly QP meeting");
+    // DTSTART;TZID=Europe/Berlin:20260601T160000 → June 1, 2026 14:00 UTC (CEST = UTC+2)
+    expect(bootstrappedFields.startAtMs).toBe(new Date("2026-06-01T14:00:00Z").getTime());
+  });
 });
