@@ -28,6 +28,7 @@ import {
 import { resolveEmailCalendarEventStatus } from "@/lib/calendarEventStatus";
 import { deriveInviteDeckEventBounds } from "@/lib/inviteDeckEventBounds";
 import { getMessageSource } from "@/lib/storage";
+import { extractIcsSourceFromEmailSource } from "@/lib/mail/attachmentFromSource";
 
 const DEFAULT_AUTOMATIC_REMINDER = {
   leadMinutes: 15,
@@ -134,18 +135,20 @@ async function hydrateExistingEventFromPriorInviteSource(
     excludeMessageId: messageId
   });
   for (const candidate of candidates) {
-    const source = await getMessageSource(accountId, candidate.messageId);
-    if (!source?.trim()) continue;
-    const parsed = parseIcsInvite(source);
+    const emailSource = await getMessageSource(accountId, candidate.messageId);
+    if (!emailSource?.trim()) continue;
+    const icsSource = await extractIcsSourceFromEmailSource(emailSource);
+    if (!icsSource?.trim()) continue;
+    const parsed = parseIcsInvite(icsSource);
     if (parsed.method?.trim().toUpperCase() !== "REQUEST") continue;
-    const candidateGroup = collectCalendarInviteMutationGroups(source).find(
+    const candidateGroup = collectCalendarInviteMutationGroups(icsSource).find(
       (group) => group.eventUid.trim().toLowerCase() === eventUid.trim().toLowerCase()
     );
     if (!candidateGroup?.baseEvent) continue;
     const mergedEvent = buildMergedCalendarEventFields(
       candidateGroup,
       candidate.messageId,
-      source,
+      icsSource,
       null,
       accountEmail
     );

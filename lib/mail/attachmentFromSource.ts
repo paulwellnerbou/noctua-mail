@@ -1,6 +1,7 @@
 import { simpleParser } from "mailparser";
 import type { Attachment } from "@/lib/data";
 import { getAttachmentContentBuffer } from "@/lib/mail/syncMessageSanitizer";
+import { isCalendarAttachment } from "@/lib/messageFlags";
 
 type ParsedAttachmentCandidate = {
   filename?: string | null;
@@ -150,4 +151,30 @@ export async function extractAttachmentBufferFromSource(
   if (parsedAttachments.length === 0) return null;
   const candidate = pickParsedAttachment(parsedAttachments, target);
   return resolveCandidateBuffer(candidate);
+}
+
+// Decodes the calendar payload of a raw RFC 2822 email. Without this, an inline
+// text/calendar part with Content-Transfer-Encoding: quoted-printable yields
+// `RRULE:FREQ=3DWEEKLY` and `TZID=3DEurope/Berlin`, breaking RRULE parsing and
+// timezone resolution. A source that already starts with `BEGIN:VCALENDAR` is
+// returned as-is to support callers that pass a bare ICS string.
+export async function extractIcsSourceFromEmailSource(source: string): Promise<string | null> {
+  const trimmed = source.trim();
+  if (!trimmed) return null;
+  if (trimmed.startsWith("BEGIN:VCALENDAR")) return source;
+  try {
+    const parsed = await simpleParser(source);
+    for (const attachment of parsed.attachments ?? []) {
+      const matches = isCalendarAttachment({
+        contentType: attachment.contentType,
+        filename: attachment.filename ?? ""
+      } as Attachment);
+      if (!matches) continue;
+      const buffer = resolveCandidateBuffer(attachment as ParsedAttachmentCandidate);
+      if (buffer?.length) return buffer.toString("utf8");
+    }
+  } catch {
+    // unparseable email
+  }
+  return null;
 }
