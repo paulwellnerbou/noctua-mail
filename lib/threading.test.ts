@@ -110,6 +110,56 @@ describe("resolveThreadingForItems", () => {
     expect(resolved.parentId).toBe("imap-root");
   });
 
+  it("does not treat a reply's own provisional in-reply-to thread id as canonical", () => {
+    const rootMessageId = "<root@example.com>";
+    const sentMessageId = "<sent@example.com>";
+    const items = [
+      {
+        id: "imap-root",
+        dateValue: 100,
+        messageId: "<original@example.com>",
+        inReplyTo: rootMessageId,
+        references: [rootMessageId],
+        threadId: rootMessageId
+      },
+      {
+        id: "imap-sent",
+        dateValue: 200,
+        messageId: sentMessageId,
+        inReplyTo: "<original@example.com>",
+        references: [rootMessageId, "<original@example.com>"],
+        threadId: rootMessageId
+      },
+      {
+        id: "imap-reply",
+        dateValue: 300,
+        messageId: "<reply@example.com>",
+        inReplyTo: sentMessageId,
+        references: [sentMessageId],
+        threadId: sentMessageId
+      },
+      {
+        id: "imap-second-reply",
+        dateValue: 400,
+        messageId: "<second-reply@example.com>",
+        inReplyTo: sentMessageId,
+        references: [sentMessageId],
+        threadId: sentMessageId
+      }
+    ];
+
+    const resolved = resolveThreadingForItems(items);
+
+    expect(resolved.map((item) => item.threadId)).toEqual([
+      rootMessageId,
+      rootMessageId,
+      rootMessageId,
+      rootMessageId
+    ]);
+    expect(resolved[2]?.parentId).toBe("imap-sent");
+    expect(resolved[3]?.parentId).toBe("imap-sent");
+  });
+
   it("merges GitLab note replies into an existing merge-request thread by shared references", () => {
     const mergeRequestId = "<merge_request_462663618@gitlab.com>";
     const discussionId = "<note_3153489529@gitlab.com>";

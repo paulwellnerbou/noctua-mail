@@ -61,10 +61,12 @@ export function resolveThreadingForItems<T extends ThreadingItem>(
     normalizedInReplyTo: normalizeHeaderId(item.inReplyTo),
     normalizedReferences: normalizeReferenceIds(item.references)
   }));
-  const knownThreadIds = new Set<string>();
+  const knownThreadIdCounts = new Map<string, number>();
   prepared.forEach((entry) => {
     const threadId = normalizeHeaderId(entry.item.threadId);
-    if (threadId) knownThreadIds.add(threadId);
+    if (threadId) {
+      knownThreadIdCounts.set(threadId, (knownThreadIdCounts.get(threadId) ?? 0) + 1);
+    }
   });
   const byMessageId = new Map<string, PreparedThreadingItem<T>>();
   prepared.forEach((entry) => {
@@ -87,17 +89,22 @@ export function resolveThreadingForItems<T extends ThreadingItem>(
     return null;
   };
   const findKnownThreadId = (entry: PreparedThreadingItem<T>) => {
+    const ownThreadId = normalizeHeaderId(entry.item.threadId);
+    const isKnownThreadIdFromAnotherItem = (value: string) => {
+      const count = knownThreadIdCounts.get(value) ?? 0;
+      return count > (ownThreadId === value ? 1 : 0);
+    };
     for (const ref of entry.normalizedReferences) {
-      if (knownThreadIds.has(ref)) return ref;
       const external = externalThreadIds.get(ref);
       if (external) return external;
+      if (isKnownThreadIdFromAnotherItem(ref)) return ref;
     }
     if (entry.normalizedInReplyTo) {
-      if (knownThreadIds.has(entry.normalizedInReplyTo)) {
-        return entry.normalizedInReplyTo;
-      }
       const external = externalThreadIds.get(entry.normalizedInReplyTo);
       if (external) return external;
+      if (isKnownThreadIdFromAnotherItem(entry.normalizedInReplyTo)) {
+        return entry.normalizedInReplyTo;
+      }
     }
     return null;
   };
@@ -139,12 +146,13 @@ export function resolveThreadingForItems<T extends ThreadingItem>(
       return fallback;
     }
     stack.add(entry.item.id);
-    let resolved: string | null = findKnownThreadId(entry);
+    let resolved: string | null = null;
+    const localParent = findLocalParent(entry);
+    if (localParent) {
+      resolved = resolveThreadId(localParent, stack);
+    }
     if (!resolved) {
-      const localParent = findLocalParent(entry);
-      if (localParent) {
-        resolved = resolveThreadId(localParent, stack);
-      }
+      resolved = findKnownThreadId(entry);
     }
     if (!resolved) {
       resolved =
