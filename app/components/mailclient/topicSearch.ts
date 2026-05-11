@@ -1,5 +1,8 @@
+import { TOPIC_NONE_SENTINEL, isTopicNoneSentinel } from "@/lib/topics/searchSentinels";
+
 export type SimpleTopicSearchMode = {
   topicId: string;
+  noTopicFilter?: boolean;
 };
 
 const TOPIC_TERM_PATTERN = /(^|\s)topic:("([^"]+)"|\S+)/gi;
@@ -20,5 +23,8 @@ export function parseSimpleTopicSearchMode(query: string | null | undefined): Si
   if (topicIds.length !== 1) return null;
   if (remainder.trim().length > 0) return null;
 
+  if (isTopicNoneSentinel(topicIds[0])) {
+    return { topicId: TOPIC_NONE_SENTINEL, noTopicFilter: true };
+  }
   return { topicId: topicIds[0] };
 }

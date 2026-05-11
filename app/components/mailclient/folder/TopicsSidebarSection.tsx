@@ -2,6 +2,7 @@ import { useMemo, type CSSProperties } from "react";
 import { ChevronDown, ChevronRight } from "lucide-react";
 import type { Topic } from "@/lib/data";
 import { topicColorToCssVar } from "@/lib/data";
+import { TOPIC_NONE_SENTINEL } from "@/lib/topics/searchSentinels";
 import styles from "./FolderTree.module.css";
 import topicStyles from "./TopicsSidebarSection.module.css";
 
@@ -63,6 +64,19 @@ export default function TopicsSidebarSection({
           </span>
         </button>
       ))}
+      {!collapsed && (
+        <button
+          type="button"
+          className={`${styles.treeRow} ${activeTopicId === TOPIC_NONE_SENTINEL ? styles.treeRowActive : ""}`}
+          onClick={() => onTopicClick(TOPIC_NONE_SENTINEL)}
+          title="Without topic"
+        >
+          <span className={topicStyles.noTopicDash} />
+          <span className={styles.treeName}>
+            <span className={styles.treeNameText}>Without topic</span>
+          </span>
+        </button>
+      )}
     </div>
   );
 }

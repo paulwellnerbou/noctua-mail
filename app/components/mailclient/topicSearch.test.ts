@@ -21,4 +21,22 @@ describe("parseSimpleTopicSearchMode", () => {
       topicId: "build alerts"
     });
   });
+
+  it("recognises topic:none as the no-topic filter", () => {
+    expect(parseSimpleTopicSearchMode("topic:none")).toEqual({
+      topicId: "none",
+      noTopicFilter: true
+    });
+  });
+
+  it("normalises case for the no-topic sentinel", () => {
+    expect(parseSimpleTopicSearchMode("topic:NONE")).toEqual({
+      topicId: "none",
+      noTopicFilter: true
+    });
+    expect(parseSimpleTopicSearchMode("topic:None")).toEqual({
+      topicId: "none",
+      noTopicFilter: true
+    });
+  });
 });
