@@ -46,6 +46,7 @@ import { deriveInviteDeckEventBounds } from "../../inviteDeckEventBounds";
 import { normalizeCalendarEventUidKeys } from "../../calendarEventUids";
 import { getAttachmentContentBuffer } from "../../mail/syncMessageSanitizer";
 import { getMessageSource } from "../../storage";
+import { isTopicNoneSentinel } from "../../topics/searchSentinels";
 import {
   buildCalendarEventUidMatchSql,
   getMessageCalendarInviteDataByMessageId,
@@ -652,13 +653,18 @@ function parseSearchInput(
     }
   );
 
-  // Extract "topic:" terms (exact topic ID match)
+  // Extract "topic:" terms (exact topic ID match); "topic:none" means threads with no topic assigned
   const topicTerms: string[] = [];
+  let noTopicFilter = false;
   const withoutTopic = withoutThread.replace(
     /(^|\s)topic:("([^"]+)"|\S+)/gi,
     (match, lead, term) => {
       const cleaned = term.replace(/^"|"$/g, "").trim();
-      if (cleaned) topicTerms.push(cleaned);
+      if (isTopicNoneSentinel(cleaned)) {
+        noTopicFilter = true;
+      } else if (cleaned) {
+        topicTerms.push(cleaned);
+      }
       return lead ? " " : "";
     }
   );
@@ -680,6 +686,7 @@ function parseSearchInput(
     inviteUidTerms,
     threadTerms,
     topicTerms,
+    noTopicFilter,
     rawQuery,
     attachmentFilenameTerms
   };
@@ -1006,6 +1013,7 @@ async function getGroupCounts(params: {
     inviteUidTerms,
     threadTerms,
     topicTerms,
+    noTopicFilter,
     rawQuery,
     attachmentFilenameTerms
   } = parseSearchInput(
@@ -1035,6 +1043,9 @@ async function getGroupCounts(params: {
     where += " AND EXISTS (SELECT 1 FROM thread_topics tt WHERE tt.threadId = m.threadId AND tt.topicId = ?)";
     args.push(topicId);
   });
+  if (noTopicFilter) {
+    where += " AND NOT EXISTS (SELECT 1 FROM thread_topics tt WHERE tt.threadId = m.threadId)";
+  }
 
   // Apply "in:" filter (searches in folder names)
   if (inTerms.length > 0) {
@@ -1246,6 +1257,7 @@ async function getTotalCount(params: {
     inviteUidTerms,
     threadTerms,
     topicTerms,
+    noTopicFilter,
     rawQuery,
     attachmentFilenameTerms
   } = parseSearchInput(
@@ -1275,6 +1287,9 @@ async function getTotalCount(params: {
     where += " AND EXISTS (SELECT 1 FROM thread_topics tt WHERE tt.threadId = m.threadId AND tt.topicId = ?)";
     args.push(topicId);
   });
+  if (noTopicFilter) {
+    where += " AND NOT EXISTS (SELECT 1 FROM thread_topics tt WHERE tt.threadId = m.threadId)";
+  }
 
   // Apply "in:" filter (searches in folder names)
   if (inTerms.length > 0) {
@@ -1863,6 +1878,7 @@ export async function listMessages(params: {
     inviteUidTerms,
     threadTerms,
     topicTerms,
+    noTopicFilter,
     rawQuery,
     attachmentFilenameTerms
   } = parseSearchInput(
@@ -1893,6 +1909,9 @@ export async function listMessages(params: {
     where += " AND EXISTS (SELECT 1 FROM thread_topics tt WHERE tt.threadId = m.threadId AND tt.topicId = ?)";
     args.push(topicId);
   });
+  if (noTopicFilter) {
+    where += " AND NOT EXISTS (SELECT 1 FROM thread_topics tt WHERE tt.threadId = m.threadId)";
+  }
 
   // Apply "in:" filter (searches in folder names)
   if (inTerms.length > 0) {
@@ -2145,6 +2164,7 @@ export async function listThreads(params: {
     inviteUidTerms,
     threadTerms,
     topicTerms,
+    noTopicFilter,
     rawQuery,
     attachmentFilenameTerms
   } = parseSearchInput(
@@ -2175,6 +2195,9 @@ export async function listThreads(params: {
     where += " AND EXISTS (SELECT 1 FROM thread_topics tt WHERE tt.threadId = m.threadId AND tt.topicId = ?)";
     args.push(topicId);
   });
+  if (noTopicFilter) {
+    where += " AND NOT EXISTS (SELECT 1 FROM thread_topics tt WHERE tt.threadId = m.threadId)";
+  }
 
   // Apply "in:" filter (searches in folder names)
   if (inTerms.length > 0) {
@@ -2441,7 +2464,7 @@ export async function listThreads(params: {
 
   const threadMessageArgs: any[] = [accountId];
   let threadMessageWhere = applyVisibleMessageFilters("m.accountId = ?");
-  const shouldExpandTopicMatchedThreads = topicTerms.length > 0;
+  const shouldExpandTopicMatchedThreads = topicTerms.length > 0 || noTopicFilter;
   if (!shouldExpandTopicMatchedThreads) {
     threadMessageWhere = applyExcludedFolderFilters(
       threadMessageWhere,

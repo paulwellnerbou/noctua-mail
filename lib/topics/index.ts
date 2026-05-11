@@ -8,6 +8,8 @@
 // Prefer importing from "@/lib/topics" rather than the sibling files directly;
 // the re-exports here keep the surface stable for the rest of the codebase.
 
+export { TOPIC_NONE_SENTINEL, isTopicNoneSentinel } from "./searchSentinels";
+
 export type { TopicSignalStat, TopicStat } from "./core";
 export {
   addThreadTopic,

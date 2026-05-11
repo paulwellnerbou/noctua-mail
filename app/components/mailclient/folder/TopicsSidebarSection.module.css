@@ -33,3 +33,12 @@
   background: var(--dot-color);
   flex-shrink: 0;
 }
+
+.noTopicDash {
+  width: 10px;
+  height: 2px;
+  border-radius: 1px;
+  background: currentColor;
+  opacity: 0.6;
+  flex-shrink: 0;
+}
