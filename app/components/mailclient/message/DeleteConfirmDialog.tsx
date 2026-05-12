@@ -1,6 +1,8 @@
 import React from "react";
-import { AlertDialog, Button, Flex } from "@radix-ui/themes";
+import { AlertDialog, Box, Button, Flex, Text } from "@radix-ui/themes";
 import type { DeleteConfirmAction, DeleteConfirmState } from "../types";
+import type { LinkedCalendarEventDetail } from "../utils/deleteConfirm";
+import { formatCalendarEventRange } from "@/lib/calendar";
 import AlertDialogContent from "./AlertDialogContent";
 
 interface DeleteConfirmDialogProps {
@@ -11,12 +13,6 @@ interface DeleteConfirmDialogProps {
 
 function formatCountLabel(count: number, singular: string, plural = `${singular}s`) {
   return `${count} ${count === 1 ? singular : plural}`;
-}
-
-function joinNatural(parts: string[]) {
-  if (parts.length <= 1) return parts[0] ?? "";
-  if (parts.length === 2) return `${parts[0]} and ${parts[1]}`;
-  return `${parts.slice(0, -1).join(", ")}, and ${parts[parts.length - 1]}`;
 }
 
 function getDeleteTitle(deleteConfirm: DeleteConfirmState) {
@@ -54,12 +50,14 @@ function getDeleteDescription(deleteConfirm: DeleteConfirmState) {
     : "This message will be moved to Trash.";
 }
 
-function formatCalendarEventLabel(deleteConfirm: DeleteConfirmState) {
-  const total = deleteConfirm.calendarLinkedEventCount;
+function formatLinkedItemLabel(
+  total: number,
+  future: number,
+  past: number,
+  singular: string
+) {
   if (total === 0) return null;
-  const future = deleteConfirm.calendarLinkedEventFutureCount;
-  const past = deleteConfirm.calendarLinkedEventPastCount;
-  const base = formatCountLabel(total, "calendar event");
+  const base = formatCountLabel(total, singular);
   if (future === total) return `${base} in the future`;
   if (past === total) return `${base} in the past`;
   if (future > 0 && past > 0) {
@@ -69,16 +67,31 @@ function formatCalendarEventLabel(deleteConfirm: DeleteConfirmState) {
 }
 
 function getCalendarAssociationDescription(deleteConfirm: DeleteConfirmState) {
-  const linkedItemCount =
-    deleteConfirm.calendarLinkedReminderCount + deleteConfirm.calendarLinkedEventCount;
-  if (linkedItemCount === 0 || deleteConfirm.calendarLinkedMessageCount === 0) return null;
+  const hasEvents = deleteConfirm.calendarLinkedEventCount > 0;
+  const hasReminders = deleteConfirm.calendarLinkedReminderCount > 0;
+  if ((!hasEvents && !hasReminders) || deleteConfirm.calendarLinkedMessageCount === 0) {
+    return null;
+  }
 
-  const linkedItems = [
-    deleteConfirm.calendarLinkedReminderCount > 0
-      ? formatCountLabel(deleteConfirm.calendarLinkedReminderCount, "reminder")
-      : null,
-    formatCalendarEventLabel(deleteConfirm)
-  ].filter((value): value is string => Boolean(value));
+  // Events take precedence: when an event is linked, the reminder is implicit and we don't mention it.
+  const itemLabel = hasEvents
+    ? formatLinkedItemLabel(
+        deleteConfirm.calendarLinkedEventCount,
+        deleteConfirm.calendarLinkedEventFutureCount,
+        deleteConfirm.calendarLinkedEventPastCount,
+        "calendar event"
+      )
+    : formatLinkedItemLabel(
+        deleteConfirm.calendarLinkedReminderCount,
+        deleteConfirm.calendarLinkedReminderFutureCount,
+        deleteConfirm.calendarLinkedReminderPastCount,
+        "reminder"
+      );
+  if (!itemLabel) return null;
+
+  const visibleCount = hasEvents
+    ? deleteConfirm.calendarLinkedEventCount
+    : deleteConfirm.calendarLinkedReminderCount;
 
   const subject =
     deleteConfirm.kind === "thread"
@@ -91,13 +104,10 @@ function getCalendarAssociationDescription(deleteConfirm: DeleteConfirmState) {
           ? "1 selected email is"
           : `${deleteConfirm.calendarLinkedMessageCount} selected emails are`;
 
-  return `${subject} linked to ${joinNatural(linkedItems)}. Deleting the email will not remove ${linkedItemCount === 1 ? "that calendar item" : "those calendar items"}.`;
+  return `${subject} linked to ${itemLabel}. Deleting the email will not remove ${visibleCount === 1 ? "that calendar item" : "those calendar items"}.`;
 }
 
 function getDeleteLinkedLabel(deleteConfirm: DeleteConfirmState) {
-  if (deleteConfirm.calendarLinkedEventCount > 0 && deleteConfirm.calendarLinkedReminderCount > 0) {
-    return "Delete event/reminder and Mail";
-  }
   if (deleteConfirm.calendarLinkedEventCount > 0) {
     return deleteConfirm.calendarLinkedEventCount === 1
       ? "Delete event and Mail"
@@ -109,6 +119,50 @@ function getDeleteLinkedLabel(deleteConfirm: DeleteConfirmState) {
       : "Delete reminders and Mail";
   }
   return "Delete Mail only";
+}
+
+function formatLinkedEventRange(event: LinkedCalendarEventDetail) {
+  if (!Number.isFinite(event.occurrenceStartAtMs) || event.occurrenceStartAtMs <= 0) return "";
+  return formatCalendarEventRange(
+    new Date(event.occurrenceStartAtMs),
+    event.occurrenceEndAtMs && event.occurrenceEndAtMs > event.occurrenceStartAtMs
+      ? new Date(event.occurrenceEndAtMs)
+      : undefined,
+    { allDay: event.allDay, startTimeZone: event.startTimezone }
+  );
+}
+
+function LinkedEventList({ events }: { events: LinkedCalendarEventDetail[] }) {
+  if (events.length === 0) return null;
+  return (
+    <Box mt="3">
+      <Flex direction="column" gap="2">
+        {events.map((event) => {
+          const rangeLabel = formatLinkedEventRange(event);
+          const isNextOccurrence =
+            event.isRecurring && event.isFuture && !event.isMessageSpecificOccurrence;
+          return (
+            <Box key={event.id}>
+              <Text as="div" size="2" weight="medium">
+                {event.summary}
+                {event.isRecurring ? " (recurring)" : ""}
+              </Text>
+              {rangeLabel ? (
+                <Text as="div" size="2" color="gray">
+                  {isNextOccurrence ? `Next: ${rangeLabel}` : rangeLabel}
+                </Text>
+              ) : null}
+              {event.location ? (
+                <Text as="div" size="2" color="gray">
+                  {event.location}
+                </Text>
+              ) : null}
+            </Box>
+          );
+        })}
+      </Flex>
+    </Box>
+  );
 }
 
 export default function DeleteConfirmDialog({
@@ -132,6 +186,9 @@ export default function DeleteConfirmDialog({
           {deleteConfirm ? getDeleteDescription(deleteConfirm) : "This message will be deleted."}
           {calendarDescription ? ` ${calendarDescription}` : null}
         </AlertDialog.Description>
+        {deleteConfirm && deleteConfirm.linkedEvents.length > 0 ? (
+          <LinkedEventList events={deleteConfirm.linkedEvents} />
+        ) : null}
         <Flex gap="3" mt="4" justify="end">
           <AlertDialog.Cancel>
             <Button variant="soft" color="gray" onClick={() => resolveDeleteConfirm("cancel")}>

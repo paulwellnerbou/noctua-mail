@@ -1719,8 +1719,14 @@ export async function listRelatedMessages(params: {
           filtered.map((item) => String(item.row.id ?? ""))
         )
       : new Map<string, string>();
+  const calendarInviteDataByMessageId = await getMessageCalendarInviteDataByMessageId(
+    db,
+    accountId,
+    pageRows.map((row) => String(row.id ?? ""))
+  );
 
   const items: Message[] = pageRows.map((row) => {
+    const calendarInviteData = calendarInviteDataByMessageId.get(row.id);
     const message: Message = {
       id: row.id,
       accountId: row.accountId,
@@ -1763,6 +1769,8 @@ export async function listRelatedMessages(params: {
       category: row.category ?? undefined,
       categoryScore: typeof row.categoryScore === "number" ? row.categoryScore : undefined,
       categorySignals: parseStringArray(row.categorySignals),
+      calendarEventUids: calendarInviteData?.calendarEventUids ?? [],
+      calendarInviteStates: calendarInviteData?.calendarInviteStates ?? [],
       listUnsubscribe: row.listUnsubscribe ?? undefined,
       listId: row.listId ?? undefined
     };
@@ -2032,8 +2040,14 @@ export async function listMessages(params: {
       : new Map<string, { key: string; label: string }>();
   const inviteDeckGroupsByMessageId =
     inviteDeckSummary?.groupsByMessageId ?? new Map<string, string>();
+  const calendarInviteDataByMessageId = await getMessageCalendarInviteDataByMessageId(
+    db,
+    accountId,
+    rows.map((row) => String(row.id ?? ""))
+  );
 
   const items: Message[] = rows.map((row) => {
+    const calendarInviteData = calendarInviteDataByMessageId.get(row.id);
     const message: Message = {
       id: row.id,
       accountId: row.accountId,
@@ -2076,6 +2090,8 @@ export async function listMessages(params: {
       category: row.category ?? undefined,
       categoryScore: typeof row.categoryScore === "number" ? row.categoryScore : undefined,
       categorySignals: parseStringArray(row.categorySignals),
+      calendarEventUids: calendarInviteData?.calendarEventUids ?? [],
+      calendarInviteStates: calendarInviteData?.calendarInviteStates ?? [],
       listUnsubscribe: row.listUnsubscribe ?? undefined,
       listId: row.listId ?? undefined
     };
@@ -2546,8 +2562,14 @@ export async function listThreads(params: {
           messagesRows.map((row) => String(row.id ?? ""))
         )
       : new Map<string, string>();
+  const calendarInviteDataByMessageId = await getMessageCalendarInviteDataByMessageId(
+    db,
+    accountId,
+    messagesRows.map((row) => String(row.id ?? ""))
+  );
 
   const items: Message[] = messagesRows.map((row) => {
+    const calendarInviteData = calendarInviteDataByMessageId.get(row.id);
     const message: Message = {
       id: row.id,
       accountId: row.accountId,
@@ -2590,6 +2612,8 @@ export async function listThreads(params: {
       category: row.category ?? undefined,
       categoryScore: typeof row.categoryScore === "number" ? row.categoryScore : undefined,
       categorySignals: parseStringArray(row.categorySignals),
+      calendarEventUids: calendarInviteData?.calendarEventUids ?? [],
+      calendarInviteStates: calendarInviteData?.calendarInviteStates ?? [],
       listUnsubscribe: row.listUnsubscribe ?? undefined,
       listId: row.listId ?? undefined
     };

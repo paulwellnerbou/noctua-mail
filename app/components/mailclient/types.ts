@@ -2,6 +2,7 @@
  * Type definitions for MailClient
  */
 import type { InAppNotice } from "./InAppNoticeStack";
+import type { LinkedCalendarEventDetail } from "./utils/deleteConfirm";
 import type { SyncMode } from "@/lib/syncPolicy";
 
 export type { SyncMode } from "@/lib/syncPolicy";
@@ -23,11 +24,14 @@ export type DeleteConfirmState = {
   permanentDeleteCount: number;
   calendarLinkedMessageCount: number;
   calendarLinkedReminderCount: number;
+  calendarLinkedReminderFutureCount: number;
+  calendarLinkedReminderPastCount: number;
   calendarLinkedEventCount: number;
   calendarLinkedEventFutureCount: number;
   calendarLinkedEventPastCount: number;
   linkedReminderIds: string[];
   linkedEventIds: string[];
+  linkedEvents: LinkedCalendarEventDetail[];
 };
 
 export type NoticeInput = Omit<InAppNotice, "id" | "expiresAt"> & {

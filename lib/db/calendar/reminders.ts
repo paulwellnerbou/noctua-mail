@@ -10,6 +10,7 @@ import { getAccountDb } from "../connection";
 import { withDbWriteRetry } from "../../dbWriteRetry";
 import { randomUUID } from "crypto";
 import {
+  getEventOccurrenceInfo,
   hasFutureEventOccurrence,
   normalizeReminderDateList,
   resolveNextReminderOccurrence
@@ -167,6 +168,12 @@ export async function listDeleteCalendarAssociations(
     id?: string | null;
     messageId?: string | null;
     eventUid?: string | null;
+    eventStartAtMs?: number | null;
+    eventEndAtMs?: number | null;
+    recurrenceRule?: string | null;
+    recurrenceDates?: string | null;
+    excludedDates?: string | null;
+    startTimezone?: string | null;
   };
   const reminderRowsById = new Map<string, ReminderRow>();
   const loadReminderRows = (clause: string, values: string[]) => {
@@ -175,7 +182,7 @@ export async function listDeleteCalendarAssociations(
       const placeholders = chunk.map(() => "?").join(", ");
       const rows = db
         .prepare(
-          `SELECT id, messageId, eventUid
+          `SELECT id, messageId, eventUid, eventStartAtMs, eventEndAtMs, recurrenceRule, recurrenceDates, excludedDates, startTimezone
            FROM calendar_reminders
            WHERE accountId = ? AND userId = ? AND deletedAtMs IS NULL
              AND ${clause.replace("@PLACEHOLDERS@", placeholders)}`
@@ -201,6 +208,9 @@ export async function listDeleteCalendarAssociations(
   type EventRow = {
     id?: string | null;
     eventUid?: string | null;
+    summary?: string | null;
+    location?: string | null;
+    allDay?: number | null;
     startAtMs?: number | null;
     endAtMs?: number | null;
     recurrenceRule?: string | null;
@@ -210,7 +220,7 @@ export async function listDeleteCalendarAssociations(
   };
   const eventRowsById = new Map<string, EventRow>();
   const eventSelectColumns =
-    "ce.id, ce.eventUid, ce.startAtMs, ce.endAtMs, ce.recurrenceRule, ce.recurrenceDates, ce.excludedDates, ce.startTimezone";
+    "ce.id, ce.eventUid, ce.summary, ce.location, ce.allDay, ce.startAtMs, ce.endAtMs, ce.recurrenceRule, ce.recurrenceDates, ce.excludedDates, ce.startTimezone";
   for (let start = 0; start < uniqueMessageIds.length; start += QUERY_BATCH_SIZE) {
     const chunk = uniqueMessageIds.slice(start, start + QUERY_BATCH_SIZE);
     const rows = db
@@ -248,20 +258,50 @@ export async function listDeleteCalendarAssociations(
     });
   }
   const eventRows = Array.from(eventRowsById.values());
+
+  // Per-message occurrence overrides. For invite updates targeting a single
+  // recurrence instance, the message_calendar_events row records the specific
+  // occurrence's start/end — prefer that over the series-level next-occurrence.
+  type MessageEventLinkRow = {
+    eventUid?: string | null;
+    eventUidKey?: string | null;
+    eventFirstStartAtMs?: number | null;
+    eventLastEndAtMs?: number | null;
+    processedAtMs?: number | null;
+  };
+  const messageEventLinkByKey = new Map<string, MessageEventLinkRow>();
+  if (uniqueMessageIds.length > 0) {
+    for (let start = 0; start < uniqueMessageIds.length; start += QUERY_BATCH_SIZE) {
+      const chunk = uniqueMessageIds.slice(start, start + QUERY_BATCH_SIZE);
+      const rows = db
+        .prepare(
+          `SELECT eventUid, eventUidKey, eventFirstStartAtMs, eventLastEndAtMs, processedAtMs
+           FROM message_calendar_events
+           WHERE accountId = ?
+             AND messageId IN (${chunk.map(() => "?").join(", ")})`
+        )
+        .all(accountId, ...chunk) as MessageEventLinkRow[];
+      rows.forEach((row) => {
+        const key = ((row.eventUidKey || row.eventUid) ?? "").trim().toLowerCase();
+        if (!key) return;
+        const existing = messageEventLinkByKey.get(key);
+        if (
+          !existing ||
+          Number(row.processedAtMs ?? 0) > Number(existing.processedAtMs ?? 0)
+        ) {
+          messageEventLinkByKey.set(key, row);
+        }
+      });
+    }
+  }
+
   const nowMs = Date.now();
 
   return {
     reminders: reminderRows
-      .map((row) => ({
-        id: row.id?.trim() ?? "",
-        messageId: row.messageId?.trim() || undefined,
-        eventUid: row.eventUid?.trim() || undefined
-      }))
-      .filter((row) => Boolean(row.id)),
-    events: eventRows
       .map((row) => {
-        const startAtMs = Number(row.startAtMs ?? 0);
-        const endAtMsRaw = Number(row.endAtMs ?? 0);
+        const startAtMs = Number(row.eventStartAtMs ?? 0);
+        const endAtMsRaw = Number(row.eventEndAtMs ?? 0);
         const endAtMs =
           Number.isFinite(endAtMsRaw) && endAtMsRaw > 0 ? endAtMsRaw : undefined;
         const isFuture = hasFutureEventOccurrence(
@@ -277,7 +317,66 @@ export async function listDeleteCalendarAssociations(
         );
         return {
           id: row.id?.trim() ?? "",
+          messageId: row.messageId?.trim() || undefined,
           eventUid: row.eventUid?.trim() || undefined,
+          isFuture
+        };
+      })
+      .filter((row) => Boolean(row.id)),
+    events: eventRows
+      .map((row) => {
+        const startAtMs = Number(row.startAtMs ?? 0);
+        const endAtMsRaw = Number(row.endAtMs ?? 0);
+        const endAtMs =
+          Number.isFinite(endAtMsRaw) && endAtMsRaw > 0 ? endAtMsRaw : undefined;
+        const recurrenceRule = row.recurrenceRule ?? undefined;
+        const startTimezone = row.startTimezone ?? undefined;
+
+        const messageLink = messageEventLinkByKey.get(
+          (row.eventUid ?? "").trim().toLowerCase()
+        );
+        const linkStart = Number(messageLink?.eventFirstStartAtMs ?? 0);
+        const linkEnd = Number(messageLink?.eventLastEndAtMs ?? 0);
+
+        let occurrenceStartAtMs: number;
+        let occurrenceEndAtMs: number | undefined;
+        let isFuture: boolean;
+        let isMessageSpecificOccurrence = false;
+        if (Number.isFinite(linkStart) && linkStart > 0) {
+          occurrenceStartAtMs = linkStart;
+          occurrenceEndAtMs =
+            Number.isFinite(linkEnd) && linkEnd > linkStart ? linkEnd : undefined;
+          const compareEnd = occurrenceEndAtMs ?? occurrenceStartAtMs;
+          isFuture = compareEnd > nowMs;
+          isMessageSpecificOccurrence = true;
+        } else {
+          const occurrence = getEventOccurrenceInfo(
+            {
+              eventStartAtMs: startAtMs,
+              eventEndAtMs: endAtMs,
+              recurrenceRule,
+              recurrenceDates: parseReminderDateListJson(row.recurrenceDates),
+              excludedDates: parseReminderDateListJson(row.excludedDates),
+              startTimezone
+            },
+            nowMs
+          );
+          occurrenceStartAtMs = occurrence?.startAtMs ?? startAtMs;
+          occurrenceEndAtMs = occurrence?.endAtMs;
+          isFuture = occurrence?.isFuture ?? false;
+        }
+
+        return {
+          id: row.id?.trim() ?? "",
+          eventUid: row.eventUid?.trim() || undefined,
+          summary: row.summary?.trim() || undefined,
+          location: row.location?.trim() || undefined,
+          allDay: Boolean(row.allDay),
+          startTimezone,
+          isRecurring: Boolean(recurrenceRule?.trim()),
+          isMessageSpecificOccurrence,
+          occurrenceStartAtMs,
+          occurrenceEndAtMs,
           isFuture
         };
       })

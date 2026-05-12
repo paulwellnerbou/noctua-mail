@@ -178,27 +178,51 @@ export function listRecurrenceOccurrenceStartsInRange(
   return occurrenceStarts;
 }
 
+export type EventOccurrenceInfo = {
+  isFuture: boolean;
+  startAtMs: number;
+  endAtMs?: number;
+};
+
+export function getEventOccurrenceInfo(
+  event: Omit<RecurrenceRuleLike, "leadMinutes">,
+  nowMs = Date.now()
+): EventOccurrenceInfo | null {
+  const startMs = Number(event.eventStartAtMs);
+  if (!Number.isFinite(startMs) || startMs <= 0) return null;
+  const endMsRaw = Number(event.eventEndAtMs);
+  const durationMs =
+    Number.isFinite(endMsRaw) && endMsRaw > startMs ? endMsRaw - startMs : 0;
+  const endOf = (s: number) => (durationMs > 0 ? s + durationMs : undefined);
+
+  const recurrence = buildRecurrenceQuery({ ...event, leadMinutes: 0 });
+  if (!recurrence) {
+    const endOrStart = durationMs > 0 ? startMs + durationMs : startMs;
+    return { isFuture: endOrStart > nowMs, startAtMs: startMs, endAtMs: endOf(startMs) };
+  }
+
+  if (durationMs > 0) {
+    const prev = recurrence.before(new Date(nowMs), true);
+    if (prev && prev.getTime() + durationMs > nowMs) {
+      return { isFuture: true, startAtMs: prev.getTime(), endAtMs: endOf(prev.getTime()) };
+    }
+  }
+  const next = recurrence.after(new Date(nowMs), true);
+  if (next) {
+    return { isFuture: true, startAtMs: next.getTime(), endAtMs: endOf(next.getTime()) };
+  }
+  const last = recurrence.before(new Date(nowMs), true);
+  if (last) {
+    return { isFuture: false, startAtMs: last.getTime(), endAtMs: endOf(last.getTime()) };
+  }
+  return { isFuture: false, startAtMs: startMs, endAtMs: endOf(startMs) };
+}
+
 export function hasFutureEventOccurrence(
   event: Omit<RecurrenceRuleLike, "leadMinutes">,
   nowMs = Date.now()
 ): boolean {
-  const startMs = Number(event.eventStartAtMs);
-  if (!Number.isFinite(startMs) || startMs <= 0) return false;
-  const endMsRaw = Number(event.eventEndAtMs);
-  const durationMs =
-    Number.isFinite(endMsRaw) && endMsRaw > startMs ? endMsRaw - startMs : 0;
-
-  const recurrence = buildRecurrenceQuery({ ...event, leadMinutes: 0 });
-  if (!recurrence) {
-    return (durationMs > 0 ? startMs + durationMs : startMs) > nowMs;
-  }
-
-  if (recurrence.after(new Date(nowMs), true)) return true;
-  if (durationMs > 0) {
-    const prev = recurrence.before(new Date(nowMs), true);
-    if (prev && prev.getTime() + durationMs > nowMs) return true;
-  }
-  return false;
+  return getEventOccurrenceInfo(event, nowMs)?.isFuture ?? false;
 }
 
 export function resolveNextReminderOccurrence(

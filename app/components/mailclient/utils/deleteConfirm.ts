@@ -4,12 +4,35 @@ type DeleteAssociationReminderMatch = {
   id: string;
   messageId?: string | null;
   eventUid?: string | null;
+  isFuture?: boolean;
 };
 
 type DeleteAssociationEventMatch = {
   id: string;
   eventUid?: string | null;
+  summary?: string | null;
+  location?: string | null;
+  allDay?: boolean;
+  startTimezone?: string | null;
+  isRecurring?: boolean;
+  isMessageSpecificOccurrence?: boolean;
+  occurrenceStartAtMs?: number;
+  occurrenceEndAtMs?: number;
   isFuture?: boolean;
+};
+
+export type LinkedCalendarEventDetail = {
+  id: string;
+  eventUid?: string;
+  summary: string;
+  location?: string;
+  allDay: boolean;
+  startTimezone?: string;
+  isRecurring: boolean;
+  isMessageSpecificOccurrence: boolean;
+  occurrenceStartAtMs: number;
+  occurrenceEndAtMs?: number;
+  isFuture: boolean;
 };
 
 export type DeleteAssociationLookup = {
@@ -20,9 +43,12 @@ export type DeleteAssociationLookup = {
 export type DeleteCalendarAssociationSummary = {
   linkedMessageCount: number;
   linkedReminderCount: number;
+  linkedReminderFutureCount: number;
+  linkedReminderPastCount: number;
   linkedEventCount: number;
   linkedEventFutureCount: number;
   linkedEventPastCount: number;
+  linkedEvents: LinkedCalendarEventDetail[];
 };
 
 export function normalizeDeleteConfirmEventUid(value?: string | null) {
@@ -48,9 +74,12 @@ export function summarizeDeleteCalendarAssociations(
   const messageIdsByEventUid = new Map<string, Set<string>>();
   const linkedMessageIds = new Set<string>();
   const linkedReminderIds = new Set<string>();
+  const futureReminderIds = new Set<string>();
+  const pastReminderIds = new Set<string>();
   const linkedEventIds = new Set<string>();
   const futureEventIds = new Set<string>();
   const pastEventIds = new Set<string>();
+  const linkedEvents: LinkedCalendarEventDetail[] = [];
 
   messages.forEach((message) => {
     const uniqueEventUids = new Set(
@@ -81,6 +110,11 @@ export function summarizeDeleteCalendarAssociations(
     }
     if (matchedMessageIds.size === 0) return;
     linkedReminderIds.add(reminderId);
+    if (reminder.isFuture) {
+      futureReminderIds.add(reminderId);
+    } else {
+      pastReminderIds.add(reminderId);
+    }
     matchedMessageIds.forEach((messageId) => {
       linkedMessageIds.add(messageId);
     });
@@ -93,12 +127,31 @@ export function summarizeDeleteCalendarAssociations(
     if (!eventUid) return;
     const matchedMessageIds = messageIdsByEventUid.get(eventUid);
     if (!matchedMessageIds || matchedMessageIds.size === 0) return;
+    if (linkedEventIds.has(eventId)) return;
     linkedEventIds.add(eventId);
     if (event.isFuture) {
       futureEventIds.add(eventId);
     } else {
       pastEventIds.add(eventId);
     }
+    const occurrenceStartAtMs = Number(event.occurrenceStartAtMs);
+    const occurrenceEndAtMsRaw = Number(event.occurrenceEndAtMs);
+    linkedEvents.push({
+      id: eventId,
+      eventUid: event.eventUid?.trim() || undefined,
+      summary: event.summary?.trim() || "Calendar event",
+      location: event.location?.trim() || undefined,
+      allDay: Boolean(event.allDay),
+      startTimezone: event.startTimezone?.trim() || undefined,
+      isRecurring: Boolean(event.isRecurring),
+      isMessageSpecificOccurrence: Boolean(event.isMessageSpecificOccurrence),
+      occurrenceStartAtMs: Number.isFinite(occurrenceStartAtMs) ? occurrenceStartAtMs : 0,
+      occurrenceEndAtMs:
+        Number.isFinite(occurrenceEndAtMsRaw) && occurrenceEndAtMsRaw > 0
+          ? occurrenceEndAtMsRaw
+          : undefined,
+      isFuture: Boolean(event.isFuture)
+    });
     matchedMessageIds.forEach((messageId) => {
       linkedMessageIds.add(messageId);
     });
@@ -107,8 +160,11 @@ export function summarizeDeleteCalendarAssociations(
   return {
     linkedMessageCount: linkedMessageIds.size,
     linkedReminderCount: linkedReminderIds.size,
+    linkedReminderFutureCount: futureReminderIds.size,
+    linkedReminderPastCount: pastReminderIds.size,
     linkedEventCount: linkedEventIds.size,
     linkedEventFutureCount: futureEventIds.size,
-    linkedEventPastCount: pastEventIds.size
+    linkedEventPastCount: pastEventIds.size,
+    linkedEvents
   };
 }

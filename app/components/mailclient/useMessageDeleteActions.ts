@@ -8,6 +8,7 @@ import {
 } from "@/lib/accountApiPaths";
 import type { Folder, Message } from "@/lib/data";
 import type { DeleteConfirmAction, DeleteConfirmState } from "./types";
+import type { LinkedCalendarEventDetail } from "./utils/deleteConfirm";
 import type { SelectionStore } from "./messagelist/selectionStore";
 import { resolveCollapsedThreadSelectionTarget } from "./messagelist/listSelection";
 import type { MoveMessagesToFolder, UndoMoveTarget } from "./useMessageMoveActions";
@@ -49,8 +50,25 @@ type DeleteNoticeInput = {
 };
 
 type DeleteAssociationLookupResponse = {
-  reminders?: Array<{ id?: string; messageId?: string | null; eventUid?: string | null }>;
-  events?: Array<{ id?: string; eventUid?: string | null; isFuture?: boolean }>;
+  reminders?: Array<{
+    id?: string;
+    messageId?: string | null;
+    eventUid?: string | null;
+    isFuture?: boolean;
+  }>;
+  events?: Array<{
+    id?: string;
+    eventUid?: string | null;
+    summary?: string | null;
+    location?: string | null;
+    allDay?: boolean;
+    startTimezone?: string | null;
+    isRecurring?: boolean;
+    isMessageSpecificOccurrence?: boolean;
+    occurrenceStartAtMs?: number;
+    occurrenceEndAtMs?: number;
+    isFuture?: boolean;
+  }>;
 };
 
 type UseMessageDeleteActionsOptions = {
@@ -158,11 +176,14 @@ export function useMessageDeleteActions({
       const eventUids = collectDeleteConfirmEventUids(targets);
       let calendarLinkedMessageCount = 0;
       let calendarLinkedReminderCount = 0;
+      let calendarLinkedReminderFutureCount = 0;
+      let calendarLinkedReminderPastCount = 0;
       let calendarLinkedEventCount = 0;
       let calendarLinkedEventFutureCount = 0;
       let calendarLinkedEventPastCount = 0;
       let linkedReminderIds: string[] = [];
       let linkedEventIds: string[] = [];
+      let linkedEvents: LinkedCalendarEventDetail[] = [];
 
       if (targets.length > 0) {
         try {
@@ -181,19 +202,45 @@ export function useMessageDeleteActions({
             const data = (await res.json()) as DeleteAssociationLookupResponse;
             const summary = summarizeDeleteCalendarAssociations(targets, {
               reminders: (data.reminders ?? []).flatMap((item) =>
-                item.id ? [{ id: item.id, messageId: item.messageId, eventUid: item.eventUid }] : []
+                item.id
+                  ? [
+                      {
+                        id: item.id,
+                        messageId: item.messageId,
+                        eventUid: item.eventUid,
+                        isFuture: Boolean(item.isFuture)
+                      }
+                    ]
+                  : []
               ),
               events: (data.events ?? []).flatMap((item) =>
                 item.id
-                  ? [{ id: item.id, eventUid: item.eventUid, isFuture: Boolean(item.isFuture) }]
+                  ? [
+                      {
+                        id: item.id,
+                        eventUid: item.eventUid,
+                        summary: item.summary,
+                        location: item.location,
+                        allDay: item.allDay,
+                        startTimezone: item.startTimezone,
+                        isRecurring: item.isRecurring,
+                        isMessageSpecificOccurrence: item.isMessageSpecificOccurrence,
+                        occurrenceStartAtMs: item.occurrenceStartAtMs,
+                        occurrenceEndAtMs: item.occurrenceEndAtMs,
+                        isFuture: Boolean(item.isFuture)
+                      }
+                    ]
                   : []
               )
             });
             calendarLinkedMessageCount = summary.linkedMessageCount;
             calendarLinkedReminderCount = summary.linkedReminderCount;
+            calendarLinkedReminderFutureCount = summary.linkedReminderFutureCount;
+            calendarLinkedReminderPastCount = summary.linkedReminderPastCount;
             calendarLinkedEventCount = summary.linkedEventCount;
             calendarLinkedEventFutureCount = summary.linkedEventFutureCount;
             calendarLinkedEventPastCount = summary.linkedEventPastCount;
+            linkedEvents = summary.linkedEvents;
             linkedReminderIds = Array.from(
               new Set((data.reminders ?? []).flatMap((item) => (item.id ? [item.id] : [])))
             );
@@ -213,11 +260,14 @@ export function useMessageDeleteActions({
         permanentDeleteCount,
         calendarLinkedMessageCount,
         calendarLinkedReminderCount,
+        calendarLinkedReminderFutureCount,
+        calendarLinkedReminderPastCount,
         calendarLinkedEventCount,
         calendarLinkedEventFutureCount,
         calendarLinkedEventPastCount,
         linkedReminderIds,
-        linkedEventIds
+        linkedEventIds,
+        linkedEvents
       };
     },
     [activeAccountId, apiFetch, findTrashFolderId, isPermanentDeleteTarget]
