@@ -178,6 +178,29 @@ export function listRecurrenceOccurrenceStartsInRange(
   return occurrenceStarts;
 }
 
+export function hasFutureEventOccurrence(
+  event: Omit<RecurrenceRuleLike, "leadMinutes">,
+  nowMs = Date.now()
+): boolean {
+  const startMs = Number(event.eventStartAtMs);
+  if (!Number.isFinite(startMs) || startMs <= 0) return false;
+  const endMsRaw = Number(event.eventEndAtMs);
+  const durationMs =
+    Number.isFinite(endMsRaw) && endMsRaw > startMs ? endMsRaw - startMs : 0;
+
+  const recurrence = buildRecurrenceQuery({ ...event, leadMinutes: 0 });
+  if (!recurrence) {
+    return (durationMs > 0 ? startMs + durationMs : startMs) > nowMs;
+  }
+
+  if (recurrence.after(new Date(nowMs), true)) return true;
+  if (durationMs > 0) {
+    const prev = recurrence.before(new Date(nowMs), true);
+    if (prev && prev.getTime() + durationMs > nowMs) return true;
+  }
+  return false;
+}
+
 export function resolveNextReminderOccurrence(
   reminder: RecurrenceRuleLike,
   nowMs = Date.now()

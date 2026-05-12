@@ -9,6 +9,7 @@ type DeleteAssociationReminderMatch = {
 type DeleteAssociationEventMatch = {
   id: string;
   eventUid?: string | null;
+  isFuture?: boolean;
 };
 
 export type DeleteAssociationLookup = {
@@ -20,6 +21,8 @@ export type DeleteCalendarAssociationSummary = {
   linkedMessageCount: number;
   linkedReminderCount: number;
   linkedEventCount: number;
+  linkedEventFutureCount: number;
+  linkedEventPastCount: number;
 };
 
 export function normalizeDeleteConfirmEventUid(value?: string | null) {
@@ -46,6 +49,8 @@ export function summarizeDeleteCalendarAssociations(
   const linkedMessageIds = new Set<string>();
   const linkedReminderIds = new Set<string>();
   const linkedEventIds = new Set<string>();
+  const futureEventIds = new Set<string>();
+  const pastEventIds = new Set<string>();
 
   messages.forEach((message) => {
     const uniqueEventUids = new Set(
@@ -89,6 +94,11 @@ export function summarizeDeleteCalendarAssociations(
     const matchedMessageIds = messageIdsByEventUid.get(eventUid);
     if (!matchedMessageIds || matchedMessageIds.size === 0) return;
     linkedEventIds.add(eventId);
+    if (event.isFuture) {
+      futureEventIds.add(eventId);
+    } else {
+      pastEventIds.add(eventId);
+    }
     matchedMessageIds.forEach((messageId) => {
       linkedMessageIds.add(messageId);
     });
@@ -97,6 +107,8 @@ export function summarizeDeleteCalendarAssociations(
   return {
     linkedMessageCount: linkedMessageIds.size,
     linkedReminderCount: linkedReminderIds.size,
-    linkedEventCount: linkedEventIds.size
+    linkedEventCount: linkedEventIds.size,
+    linkedEventFutureCount: futureEventIds.size,
+    linkedEventPastCount: pastEventIds.size
   };
 }

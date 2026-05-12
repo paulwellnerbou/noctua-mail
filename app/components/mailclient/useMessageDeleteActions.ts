@@ -50,7 +50,7 @@ type DeleteNoticeInput = {
 
 type DeleteAssociationLookupResponse = {
   reminders?: Array<{ id?: string; messageId?: string | null; eventUid?: string | null }>;
-  events?: Array<{ id?: string; eventUid?: string | null }>;
+  events?: Array<{ id?: string; eventUid?: string | null; isFuture?: boolean }>;
 };
 
 type UseMessageDeleteActionsOptions = {
@@ -159,6 +159,8 @@ export function useMessageDeleteActions({
       let calendarLinkedMessageCount = 0;
       let calendarLinkedReminderCount = 0;
       let calendarLinkedEventCount = 0;
+      let calendarLinkedEventFutureCount = 0;
+      let calendarLinkedEventPastCount = 0;
       let linkedReminderIds: string[] = [];
       let linkedEventIds: string[] = [];
 
@@ -182,12 +184,16 @@ export function useMessageDeleteActions({
                 item.id ? [{ id: item.id, messageId: item.messageId, eventUid: item.eventUid }] : []
               ),
               events: (data.events ?? []).flatMap((item) =>
-                item.id ? [{ id: item.id, eventUid: item.eventUid }] : []
+                item.id
+                  ? [{ id: item.id, eventUid: item.eventUid, isFuture: Boolean(item.isFuture) }]
+                  : []
               )
             });
             calendarLinkedMessageCount = summary.linkedMessageCount;
             calendarLinkedReminderCount = summary.linkedReminderCount;
             calendarLinkedEventCount = summary.linkedEventCount;
+            calendarLinkedEventFutureCount = summary.linkedEventFutureCount;
+            calendarLinkedEventPastCount = summary.linkedEventPastCount;
             linkedReminderIds = Array.from(
               new Set((data.reminders ?? []).flatMap((item) => (item.id ? [item.id] : [])))
             );
@@ -208,6 +214,8 @@ export function useMessageDeleteActions({
         calendarLinkedMessageCount,
         calendarLinkedReminderCount,
         calendarLinkedEventCount,
+        calendarLinkedEventFutureCount,
+        calendarLinkedEventPastCount,
         linkedReminderIds,
         linkedEventIds
       };

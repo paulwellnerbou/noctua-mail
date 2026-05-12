@@ -54,6 +54,20 @@ function getDeleteDescription(deleteConfirm: DeleteConfirmState) {
     : "This message will be moved to Trash.";
 }
 
+function formatCalendarEventLabel(deleteConfirm: DeleteConfirmState) {
+  const total = deleteConfirm.calendarLinkedEventCount;
+  if (total === 0) return null;
+  const future = deleteConfirm.calendarLinkedEventFutureCount;
+  const past = deleteConfirm.calendarLinkedEventPastCount;
+  const base = formatCountLabel(total, "calendar event");
+  if (future === total) return `${base} in the future`;
+  if (past === total) return `${base} in the past`;
+  if (future > 0 && past > 0) {
+    return `${base} (${past} in the past, ${future} in the future)`;
+  }
+  return base;
+}
+
 function getCalendarAssociationDescription(deleteConfirm: DeleteConfirmState) {
   const linkedItemCount =
     deleteConfirm.calendarLinkedReminderCount + deleteConfirm.calendarLinkedEventCount;
@@ -63,9 +77,7 @@ function getCalendarAssociationDescription(deleteConfirm: DeleteConfirmState) {
     deleteConfirm.calendarLinkedReminderCount > 0
       ? formatCountLabel(deleteConfirm.calendarLinkedReminderCount, "reminder")
       : null,
-    deleteConfirm.calendarLinkedEventCount > 0
-      ? formatCountLabel(deleteConfirm.calendarLinkedEventCount, "calendar event")
-      : null
+    formatCalendarEventLabel(deleteConfirm)
   ].filter((value): value is string => Boolean(value));
 
   const subject =

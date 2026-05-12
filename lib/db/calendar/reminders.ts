@@ -10,6 +10,7 @@ import { getAccountDb } from "../connection";
 import { withDbWriteRetry } from "../../dbWriteRetry";
 import { randomUUID } from "crypto";
 import {
+  hasFutureEventOccurrence,
   normalizeReminderDateList,
   resolveNextReminderOccurrence
 } from "../../reminderRecurrence";
@@ -200,13 +201,21 @@ export async function listDeleteCalendarAssociations(
   type EventRow = {
     id?: string | null;
     eventUid?: string | null;
+    startAtMs?: number | null;
+    endAtMs?: number | null;
+    recurrenceRule?: string | null;
+    recurrenceDates?: string | null;
+    excludedDates?: string | null;
+    startTimezone?: string | null;
   };
   const eventRowsById = new Map<string, EventRow>();
+  const eventSelectColumns =
+    "ce.id, ce.eventUid, ce.startAtMs, ce.endAtMs, ce.recurrenceRule, ce.recurrenceDates, ce.excludedDates, ce.startTimezone";
   for (let start = 0; start < uniqueMessageIds.length; start += QUERY_BATCH_SIZE) {
     const chunk = uniqueMessageIds.slice(start, start + QUERY_BATCH_SIZE);
     const rows = db
       .prepare(
-        `SELECT DISTINCT ce.id, ce.eventUid
+        `SELECT DISTINCT ${eventSelectColumns}
          FROM calendar_events ce
          WHERE ce.accountId = ? AND ce.deletedAtMs IS NULL
            AND EXISTS (
@@ -227,7 +236,7 @@ export async function listDeleteCalendarAssociations(
     const chunk = uniqueEventUidKeys.slice(start, start + QUERY_BATCH_SIZE);
     const rows = db
       .prepare(
-        `SELECT DISTINCT ce.id, ce.eventUid
+        `SELECT DISTINCT ${eventSelectColumns}
          FROM calendar_events ce
          WHERE ce.accountId = ? AND ce.deletedAtMs IS NULL
            AND lower(COALESCE(ce.eventUid, '')) IN (${chunk.map(() => "?").join(", ")})`
@@ -239,6 +248,7 @@ export async function listDeleteCalendarAssociations(
     });
   }
   const eventRows = Array.from(eventRowsById.values());
+  const nowMs = Date.now();
 
   return {
     reminders: reminderRows
@@ -249,10 +259,28 @@ export async function listDeleteCalendarAssociations(
       }))
       .filter((row) => Boolean(row.id)),
     events: eventRows
-      .map((row) => ({
-        id: row.id?.trim() ?? "",
-        eventUid: row.eventUid?.trim() || undefined
-      }))
+      .map((row) => {
+        const startAtMs = Number(row.startAtMs ?? 0);
+        const endAtMsRaw = Number(row.endAtMs ?? 0);
+        const endAtMs =
+          Number.isFinite(endAtMsRaw) && endAtMsRaw > 0 ? endAtMsRaw : undefined;
+        const isFuture = hasFutureEventOccurrence(
+          {
+            eventStartAtMs: startAtMs,
+            eventEndAtMs: endAtMs,
+            recurrenceRule: row.recurrenceRule ?? undefined,
+            recurrenceDates: parseReminderDateListJson(row.recurrenceDates),
+            excludedDates: parseReminderDateListJson(row.excludedDates),
+            startTimezone: row.startTimezone ?? undefined
+          },
+          nowMs
+        );
+        return {
+          id: row.id?.trim() ?? "",
+          eventUid: row.eventUid?.trim() || undefined,
+          isFuture
+        };
+      })
       .filter((row) => Boolean(row.id))
   };
 }

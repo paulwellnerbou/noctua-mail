@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { resolveNextReminderOccurrence } from "./reminderRecurrence";
+import { hasFutureEventOccurrence, resolveNextReminderOccurrence } from "./reminderRecurrence";
 
 function resolveOccurrenceInSubprocess(timeZone: string) {
   const evalSource = `
@@ -87,6 +87,70 @@ describe("reminder recurrence timezone scheduling", () => {
     );
     expect(occurrence).not.toBeNull();
     expect(occurrence?.eventStartAtMs).toBe(Date.UTC(2025, 10, 11, 9, 45, 0));
+  });
+
+  test("hasFutureEventOccurrence: one-off future event is future", () => {
+    const nowMs = Date.UTC(2026, 0, 1, 12, 0, 0);
+    expect(
+      hasFutureEventOccurrence(
+        { eventStartAtMs: Date.UTC(2026, 0, 2, 9, 0, 0) },
+        nowMs
+      )
+    ).toBe(true);
+  });
+
+  test("hasFutureEventOccurrence: one-off past event is past", () => {
+    const nowMs = Date.UTC(2026, 0, 10, 12, 0, 0);
+    expect(
+      hasFutureEventOccurrence(
+        {
+          eventStartAtMs: Date.UTC(2026, 0, 1, 9, 0, 0),
+          eventEndAtMs: Date.UTC(2026, 0, 1, 10, 0, 0)
+        },
+        nowMs
+      )
+    ).toBe(false);
+  });
+
+  test("hasFutureEventOccurrence: in-progress event counts as future", () => {
+    const nowMs = Date.UTC(2026, 0, 5, 9, 30, 0);
+    expect(
+      hasFutureEventOccurrence(
+        {
+          eventStartAtMs: Date.UTC(2026, 0, 5, 9, 0, 0),
+          eventEndAtMs: Date.UTC(2026, 0, 5, 10, 0, 0)
+        },
+        nowMs
+      )
+    ).toBe(true);
+  });
+
+  test("hasFutureEventOccurrence: recurring series with past dtstart still has future occurrences", () => {
+    const nowMs = Date.UTC(2026, 0, 10, 12, 0, 0);
+    expect(
+      hasFutureEventOccurrence(
+        {
+          eventStartAtMs: Date.UTC(2025, 0, 1, 9, 0, 0),
+          eventEndAtMs: Date.UTC(2025, 0, 1, 10, 0, 0),
+          recurrenceRule: "FREQ=WEEKLY"
+        },
+        nowMs
+      )
+    ).toBe(true);
+  });
+
+  test("hasFutureEventOccurrence: bounded recurring series fully in the past is past", () => {
+    const nowMs = Date.UTC(2026, 0, 10, 12, 0, 0);
+    expect(
+      hasFutureEventOccurrence(
+        {
+          eventStartAtMs: Date.UTC(2025, 0, 1, 9, 0, 0),
+          eventEndAtMs: Date.UTC(2025, 0, 1, 10, 0, 0),
+          recurrenceRule: "FREQ=WEEKLY;COUNT=4"
+        },
+        nowMs
+      )
+    ).toBe(false);
   });
 
   test("returns the same recurring instant regardless of process TZ", () => {

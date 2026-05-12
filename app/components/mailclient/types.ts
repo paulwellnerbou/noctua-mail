@@ -24,6 +24,8 @@ export type DeleteConfirmState = {
   calendarLinkedMessageCount: number;
   calendarLinkedReminderCount: number;
   calendarLinkedEventCount: number;
+  calendarLinkedEventFutureCount: number;
+  calendarLinkedEventPastCount: number;
   linkedReminderIds: string[];
   linkedEventIds: string[];
 };

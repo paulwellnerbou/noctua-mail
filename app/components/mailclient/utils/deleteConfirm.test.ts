@@ -47,15 +47,17 @@ describe("summarizeDeleteCalendarAssociations", () => {
         { id: "r2", eventUid: "EVENT-2" }
       ],
       events: [
-        { id: "e1", eventUid: "event-1" },
-        { id: "e2", eventUid: "event-2" }
+        { id: "e1", eventUid: "event-1", isFuture: true },
+        { id: "e2", eventUid: "event-2", isFuture: false }
       ]
     });
 
     expect(result).toEqual({
       linkedMessageCount: 2,
       linkedReminderCount: 2,
-      linkedEventCount: 2
+      linkedEventCount: 2,
+      linkedEventFutureCount: 1,
+      linkedEventPastCount: 1
     });
   });
 
@@ -71,28 +73,49 @@ describe("summarizeDeleteCalendarAssociations", () => {
         { id: "r1", messageId: "m1", eventUid: "event-1" }
       ],
       events: [
-        { id: "e1", eventUid: "event-1" },
-        { id: "e1", eventUid: "EVENT-1" }
+        { id: "e1", eventUid: "event-1", isFuture: true },
+        { id: "e1", eventUid: "EVENT-1", isFuture: true }
       ]
     });
 
     expect(result).toEqual({
       linkedMessageCount: 2,
       linkedReminderCount: 1,
-      linkedEventCount: 1
+      linkedEventCount: 1,
+      linkedEventFutureCount: 1,
+      linkedEventPastCount: 0
     });
   });
 
   it("ignores unrelated reminders and calendar events", () => {
     const result = summarizeDeleteCalendarAssociations([makeMessage({ id: "m1" })], {
       reminders: [{ id: "r1", messageId: "m2", eventUid: "event-1" }],
-      events: [{ id: "e1", eventUid: "event-1" }]
+      events: [{ id: "e1", eventUid: "event-1", isFuture: true }]
     });
 
     expect(result).toEqual({
       linkedMessageCount: 0,
       linkedReminderCount: 0,
-      linkedEventCount: 0
+      linkedEventCount: 0,
+      linkedEventFutureCount: 0,
+      linkedEventPastCount: 0
+    });
+  });
+
+  it("counts past events when isFuture is missing or false", () => {
+    const messages = [makeMessage({ id: "m1", calendarEventUids: ["event-1"] })];
+
+    const result = summarizeDeleteCalendarAssociations(messages, {
+      reminders: [],
+      events: [{ id: "e1", eventUid: "event-1" }]
+    });
+
+    expect(result).toEqual({
+      linkedMessageCount: 1,
+      linkedReminderCount: 0,
+      linkedEventCount: 1,
+      linkedEventFutureCount: 0,
+      linkedEventPastCount: 1
     });
   });
 });
