@@ -168,6 +168,12 @@ const normalizePreviewWhitespace = (value: string) =>
     .replace(/\s+/g, " ")
     .trim();
 
+function pickReplyTo(parsedSource: unknown, headerReplyTo: string | undefined) {
+  const parsed = (parsedSource as { replyTo?: { text?: string } }).replyTo?.text;
+  const parsedTrimmed = typeof parsed === "string" ? parsed.trim() : "";
+  return parsedTrimmed || headerReplyTo?.trim() || undefined;
+}
+
 function deriveFlagState(flags: string[]) {
   const hasFlag = (flag: string) =>
     flags.some((value) => value.toLowerCase() === flag.toLowerCase());
@@ -359,6 +365,7 @@ function buildLightweightImapMessage(params: {
   const cc = formatEnvelopeAddresses(envelope?.cc);
   const bcc = formatEnvelopeAddresses(envelope?.bcc);
   const headers = parseHeaderMap(rawHeaders);
+  const replyTo = getHeaderValue(headers, "reply-to")?.trim() || undefined;
   const unsubParts: string[] = [];
   const listUnsubVal = getHeaderValue(headers, "list-unsubscribe");
   const listUnsubPostVal = getHeaderValue(headers, "list-unsubscribe-post");
@@ -395,6 +402,7 @@ function buildLightweightImapMessage(params: {
     xForwardedMessageId: undefined,
     subject: envelope?.subject?.trim() || "(no subject)",
     from,
+    replyTo,
     to,
     cc,
     bcc,
@@ -586,6 +594,7 @@ async function parseImapMessage(
     xForwardedMessageId: xForwardedMessageId ?? undefined,
     subject: envelope?.subject?.trim() || headerValue("subject") || "(no subject)",
     from: formatEnvelopeAddresses(envelope?.from) || account.email,
+    replyTo: pickReplyTo(parsedSource, headerValue("reply-to")),
     to: formatEnvelopeAddresses(envelope?.to),
     cc: formatEnvelopeAddresses(envelope?.cc),
     bcc: formatEnvelopeAddresses(envelope?.bcc),

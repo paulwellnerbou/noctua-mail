@@ -201,6 +201,44 @@ describe("recipient alias display", () => {
     );
   });
 
+  it("lists distinct sender display names when the from email is shared across the thread", () => {
+    const fullFlat = [
+      {
+        message: makeMessage("m1", "thread-a", 100, {
+          from: "Daniel Raap [subshell Online Support System] <noreply@subshell.com>",
+          fromEmail: "noreply@subshell.com",
+          to: "Me <me@example.com>"
+        }),
+        depth: 0
+      },
+      {
+        message: makeMessage("m2", "thread-a", 200, {
+          from: "Sarah Smith [subshell Online Support System] <noreply@subshell.com>",
+          fromEmail: "noreply@subshell.com",
+          to: "Me <me@example.com>"
+        }),
+        depth: 1
+      },
+      {
+        message: makeMessage("m3", "thread-a", 300, {
+          from: "Daniel Raap [subshell Online Support System] <noreply@subshell.com>",
+          fromEmail: "noreply@subshell.com",
+          to: "Me <me@example.com>"
+        }),
+        depth: 2
+      }
+    ];
+
+    const result = getCollapsedThreadFromDisplay(fullFlat, "me@example.com");
+
+    expect(result.text).toBe(
+      "Daniel Raap [subshell Online Support System], Sarah Smith [subshell Online Support System]"
+    );
+    expect(result.tooltip).toBe(
+      "Daniel Raap [subshell Online Support System] <noreply@subshell.com>, Sarah Smith [subshell Online Support System] <noreply@subshell.com>"
+    );
+  });
+
   it("dedupes collapsed sent-message recipients against later senders when no alias exists", () => {
     const fullFlat = [
       {

@@ -179,10 +179,10 @@ export async function upsertMessages(
     const insertMessage = db.prepare(`
       INSERT OR REPLACE INTO messages (
         id, accountId, folderId, threadId, parentId, messageId, inReplyTo, "references", xForwardedMessageId, xComposeFormat, quotedHtmlEdited,
-        subject, fromAddr, fromEmail, toAddr, ccAddr, bccAddr, mailboxPath, imapUid, preview, date, dateValue,
+        subject, fromAddr, fromEmail, replyToAddr, toAddr, ccAddr, bccAddr, mailboxPath, imapUid, preview, date, dateValue,
         body, htmlBody, priority, hasSource, unread, flags, seen, answered, flagged, deleted, draft, recent,
         category, categoryScore, categorySignals, categoryManualState, listUnsubscribe, listId
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     const insertFts = db.prepare(`
       INSERT INTO message_fts (messageId, subject, fromAddr, toAddr, ccAddr, bccAddr, body, preview)
@@ -479,6 +479,7 @@ export async function upsertMessages(
           message.subject,
           message.from,
           fromEmail,
+          message.replyTo?.trim() || null,
           message.to,
           message.cc ?? null,
           message.bcc ?? null,

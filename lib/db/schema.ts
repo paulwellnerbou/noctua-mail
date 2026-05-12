@@ -657,6 +657,7 @@ export function initAccountSchema(db: any) {
       subject TEXT NOT NULL,
       fromAddr TEXT NOT NULL,
       fromEmail TEXT,
+      replyToAddr TEXT,
       toAddr TEXT NOT NULL,
       ccAddr TEXT,
       bccAddr TEXT,
@@ -1018,6 +1019,9 @@ export function initAccountSchema(db: any) {
   }
   if (!messageColumns.has("pendingMoveStartedAt")) {
     db.prepare(`ALTER TABLE messages ADD COLUMN pendingMoveStartedAt INTEGER`).run();
+  }
+  if (!messageColumns.has("replyToAddr")) {
+    db.prepare(`ALTER TABLE messages ADD COLUMN replyToAddr TEXT`).run();
   }
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_messages_account_pending_move_source

@@ -266,6 +266,51 @@ describe("computeComposeInitState — reply", () => {
     expect(fields.composeQuotedParts).not.toBeNull();
   });
 
+  it("uses Reply-To address as To when present on the original message", () => {
+    const fields = computeComposeInitState(
+      "reply",
+      makeMessage({
+        from: "Substack <newsletter@substack.com>",
+        replyTo: "Author Reply <reply+abc@mg1.substack.com>",
+        to: "me@example.com"
+      }),
+      false,
+      opts,
+      deps
+    );
+    expect(fields.composeTo).toBe("Author Reply <reply+abc@mg1.substack.com>");
+  });
+
+  it("falls back to From when Reply-To is an empty/whitespace string", () => {
+    const fields = computeComposeInitState(
+      "reply",
+      makeMessage({
+        from: "Alice <alice@example.com>",
+        replyTo: "   ",
+        to: "me@example.com"
+      }),
+      false,
+      opts,
+      deps
+    );
+    expect(fields.composeTo).toBe("Alice <alice@example.com>");
+  });
+
+  it("ignores Reply-To when replying to a message the user sent themselves", () => {
+    const fields = computeComposeInitState(
+      "reply",
+      makeMessage({
+        from: "me@example.com",
+        replyTo: "someone-else@example.com",
+        to: "Bob <bob@example.com>"
+      }),
+      false,
+      opts,
+      deps
+    );
+    expect(fields.composeTo).toBe("Bob <bob@example.com>");
+  });
+
   it("falls back to html-derived text when opening a text reply without a text body", () => {
     const fields = computeComposeInitState(
       "reply",
@@ -335,6 +380,25 @@ describe("computeComposeInitState — replyAll", () => {
     const allRecipients = [fields.composeTo, fields.composeCc].filter(Boolean).join(",");
     const aliceCount = (allRecipients.match(/alice@example\.com/gi) ?? []).length;
     expect(aliceCount).toBe(1);
+  });
+
+  it("puts Reply-To in To and excludes the From sender when Reply-To is set", () => {
+    const fields = computeComposeInitState(
+      "replyAll",
+      makeMessage({
+        from: "Mailer Daemon <noreply@list.example.com>",
+        replyTo: "list@list.example.com",
+        to: "me@example.com, Bob <bob@example.com>",
+        cc: "Carol <carol@example.com>"
+      }),
+      false,
+      opts,
+      deps
+    );
+    expect(fields.composeTo).toBe("list@list.example.com");
+    expect(fields.composeCc).not.toContain("noreply@list.example.com");
+    expect(fields.composeCc).toContain("Bob <bob@example.com>");
+    expect(fields.composeCc).toContain("Carol <carol@example.com>");
   });
 
   it("keeps quoted-comma recipient names intact when replying all to a sent message", () => {

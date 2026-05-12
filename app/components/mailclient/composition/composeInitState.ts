@@ -163,6 +163,13 @@ export function computeComposeInitState(
 
   const fromEmails = extractEmails(message.from);
   const fromRecipient = getDisplayRecipient(message.from);
+  // Honor RFC 5322 Reply-To: when present on the original message, replies
+  // (and reply-alls) should go to that address instead of From. Mailing
+  // lists and transactional senders rely on this to route replies to a
+  // real inbox rather than a no-reply From.
+  const replyToRaw = message.replyTo?.trim() ?? "";
+  const replyToEmails = replyToRaw ? extractEmails(replyToRaw) : [];
+  const replyToRecipient = replyToRaw ? getDisplayRecipient(replyToRaw) : "";
   const toEmails = extractEmails(message.to);
   const ccEmails = extractEmails(message.cc ?? "");
   const bccEmails = extractEmails(message.bcc ?? "");
@@ -230,6 +237,8 @@ export function computeComposeInitState(
       const firstCc = getDisplayRecipient(splitRecipientEntries(message.cc)[0] ?? "");
       const firstBcc = getDisplayRecipient(splitRecipientEntries(message.bcc)[0] ?? "");
       to = firstTo || firstCc || firstBcc || "";
+    } else if (replyToRaw) {
+      to = replyToRecipient || uniqueEmails(replyToEmails).join(", ");
     } else {
       to = fromRecipient || uniqueEmails(fromEmails).join(", ");
     }
@@ -266,7 +275,18 @@ export function computeComposeInitState(
       );
       ccList = uniqueEmails([...ccEmails, ...bccEmails]);
     } else {
-      toList = uniqueRecipients(fromRecipient ? [fromRecipient] : fromEmails);
+      // When Reply-To is set we deliberately do not add the original From
+      // to CC. Reply-To is an explicit redirection by the sender; including
+      // From would risk duplicate delivery (e.g. the author also receives
+      // every list reply via the list address they already redirected to).
+      const replyTargetList = replyToRaw
+        ? replyToRecipient
+          ? [replyToRecipient]
+          : replyToEmails
+        : fromRecipient
+          ? [fromRecipient]
+          : fromEmails;
+      toList = uniqueRecipients(replyTargetList);
       const toEmailSet = new Set(
         toList.map((r) => (getPrimaryEmail(r) || r).toLowerCase())
       );

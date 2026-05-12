@@ -125,7 +125,7 @@ const getRecipientParticipantEntries = (
       const email = extractPrimaryEmail(recipient);
       if (email && normalizedUserEmail && email === normalizedUserEmail) return;
       const text = recipientDisplayValue(recipient);
-      const key = email ?? text.toLowerCase();
+      const key = text.toLowerCase();
       if (seen.has(key)) return;
       seen.add(key);
       entries.push({
@@ -281,7 +281,7 @@ export function getCollapsedThreadFromDisplay(
     pushParticipant({
       text: senderEntry.text,
       tooltip: senderEntry.tooltip,
-      key: extractPrimaryEmail(normalized) ?? senderEntry.text.toLowerCase()
+      key: senderEntry.text.toLowerCase()
     });
 
     if (!senderEntry.isFromUser) return;

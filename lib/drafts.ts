@@ -126,6 +126,8 @@ function getReplyRecipient(account: Account, message: Message) {
     (email) => normalizeEmail(email) === accountEmail
   );
   if (!sentByCurrentUser) {
+    const replyTo = message.replyTo?.trim();
+    if (replyTo) return replyTo;
     return message.from?.trim() ?? "";
   }
 

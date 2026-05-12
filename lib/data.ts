@@ -101,6 +101,7 @@ export type Message = {
   subject: string;
   from: string;
   fromEmail?: string;
+  replyTo?: string;
   to: string;
   cc?: string;
   bcc?: string;

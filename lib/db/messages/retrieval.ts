@@ -68,6 +68,7 @@ export async function getMessageById(accountId: string, messageId: string) {
     xForwardedMessageId: row.xForwardedMessageId ?? undefined,
     subject: row.subject,
     from: row.fromAddr,
+    replyTo: row.replyToAddr ?? undefined,
     to: row.toAddr,
     cc: row.ccAddr ?? undefined,
     bcc: row.bccAddr ?? undefined,
