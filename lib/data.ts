@@ -343,6 +343,15 @@ export type CalendarEvent = {
    * this over the series-level snapshot when viewing a specific occurrence.
    */
   occurrenceSnapshots?: Record<string, CalendarEventEmailSnapshotFields>;
+  /**
+   * Maps each rescheduled occurrence back to the original RECURRENCE-ID it
+   * supersedes. Key = current occurrence `startAtMs` (string, same shape as
+   * `occurrenceMessageIds`), value = original recurrence-id timestamp (ms).
+   * When a later invite reschedules the same RECURRENCE-ID again, this lets
+   * the processor find and evict the stale RDATE/snapshot/message link
+   * instead of accumulating multiple ghost occurrences in `recurrenceDates`.
+   */
+  occurrenceRecurrenceIds?: Record<string, number>;
   createdAtMs: number;
   updatedAtMs: number;
   deletedAtMs?: number;

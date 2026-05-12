@@ -50,6 +50,7 @@ const CALENDAR_EVENT_RUNTIME_SIGNATURE = [
   "myAttendeeEmail",
   "replyRequested",
   "occurrenceMessageIds",
+  "occurrenceRecurrenceIds",
   "emailStatusBackfillV1",
   "emailParticipationBackfillV1"
 ].join("|");
@@ -304,6 +305,12 @@ export function ensureCalendarEventOptionalColumns(db: any) {
   // Stored as JSON keyed by occurrence startAtMs, mirroring occurrenceMessageIds.
   if (!calendarEventColumns.has("occurrenceSnapshots")) {
     db.prepare(`ALTER TABLE calendar_events ADD COLUMN occurrenceSnapshots TEXT`).run();
+  }
+  // Maps current occurrence startAtMs -> original RECURRENCE-ID it supersedes,
+  // so a later reschedule of the same RECURRENCE-ID can evict the stale RDATE
+  // instead of duplicating it.
+  if (!calendarEventColumns.has("occurrenceRecurrenceIds")) {
+    db.prepare(`ALTER TABLE calendar_events ADD COLUMN occurrenceRecurrenceIds TEXT`).run();
   }
 }
 
@@ -943,6 +950,7 @@ export function initAccountSchema(db: any) {
       sourceBodyText TEXT,
       sourceBodyHtml TEXT,
       occurrenceSnapshots TEXT,
+      occurrenceRecurrenceIds TEXT,
       createdAtMs INTEGER NOT NULL,
       updatedAtMs INTEGER NOT NULL,
       deletedAtMs INTEGER

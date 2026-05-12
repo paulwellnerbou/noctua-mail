@@ -353,6 +353,82 @@ describe("processCalendarInviteForMessage", () => {
     expect(fields.messageId).toBe("msg-series-invite");
   });
 
+  test("a second reschedule of the same RECURRENCE-ID evicts the prior RDATE", async () => {
+    // Scenario mirroring the live bug: an Outlook-style recurring series
+    // (UID series-uid) gets its Jun 8 10:00 instance moved twice.
+    //
+    //   1) First REQUEST: RECURRENCE-ID=Jun 8 10:00 → moved to Jun 8 15:00.
+    //   2) Second REQUEST (accepted counter-proposal): same RECURRENCE-ID,
+    //      now moved to Jun 8 14:45.
+    //
+    // After step 2 the event must show ONLY the 14:45 occurrence — not
+    // both 14:45 and 15:00 — because both invites describe the same
+    // logical Jun 8 instance.
+    const recurrenceIdMs = Date.UTC(2026, 5, 8, 10, 0, 0);
+    const firstRescheduleStartMs = Date.UTC(2026, 5, 8, 15, 0, 0);
+    const secondRescheduleStartMs = Date.UTC(2026, 5, 8, 14, 45, 0);
+
+    const existingSeriesAfterFirstReschedule: CalendarEvent = {
+      id: "cal-existing",
+      accountId: "acc-1",
+      eventUid: "series-uid@example.test",
+      summary: "Weekly standup",
+      startAtMs: Date.UTC(2026, 5, 1, 10, 0, 0),
+      endAtMs: Date.UTC(2026, 5, 1, 10, 30, 0),
+      allDay: false,
+      recurrenceRule: "FREQ=WEEKLY",
+      recurrenceDates: [firstRescheduleStartMs],
+      excludedDates: [recurrenceIdMs],
+      sourceType: "email",
+      messageId: "msg-series-invite",
+      occurrenceMessageIds: { [String(firstRescheduleStartMs)]: "msg-first-reschedule" },
+      occurrenceRecurrenceIds: { [String(firstRescheduleStartMs)]: recurrenceIdMs },
+      occurrenceSnapshots: {
+        [String(firstRescheduleStartMs)]: {
+          sourceSubject: "Reschedule to 15:00",
+          sourceFromAddr: "alice@example.test"
+        }
+      },
+      createdAtMs: 1,
+      updatedAtMs: 1
+    };
+    getCalendarEventByUid.mockResolvedValue(existingSeriesAfterFirstReschedule);
+
+    const secondRescheduleIcs = makeIcs([
+      "METHOD:REQUEST",
+      "BEGIN:VEVENT",
+      "UID:series-uid@example.test",
+      "RECURRENCE-ID:20260608T100000Z",
+      "DTSTART:20260608T144500Z",
+      "DTEND:20260608T153500Z",
+      "SUMMARY:Weekly standup",
+      "SEQUENCE:2",
+      "END:VEVENT"
+    ]);
+
+    await processCalendarInviteForMessage({
+      accountId: "acc-1",
+      messageId: "msg-second-reschedule",
+      icsSource: secondRescheduleIcs,
+      process: true,
+      accountEmail: "paul@example.test"
+    });
+
+    expect(upsertCalendarEventByUid).toHaveBeenCalledTimes(1);
+    const [, fields] = upsertCalendarEventByUid.mock.calls[0];
+
+    expect(fields.recurrenceDates).toEqual([secondRescheduleStartMs]);
+    expect(fields.recurrenceDates).not.toContain(firstRescheduleStartMs);
+
+    expect(fields.occurrenceMessageIds).toEqual({
+      [String(secondRescheduleStartMs)]: "msg-second-reschedule"
+    });
+    expect(fields.occurrenceRecurrenceIds).toEqual({
+      [String(secondRescheduleStartMs)]: recurrenceIdMs
+    });
+    expect(fields.occurrenceSnapshots?.[String(firstRescheduleStartMs)]).toBeUndefined();
+  });
+
   test("records a reason when an occurrence update has no recoverable series event", async () => {
     const rescheduleIcs = makeIcs([
       "METHOD:REQUEST",

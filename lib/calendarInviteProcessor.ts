@@ -52,6 +52,33 @@ function resolveInviteActionType(group: CalendarInviteMutationGroup, existingEve
   return inferCalendarInviteActionType(group, { hasExistingEvent: Boolean(existingEvent) });
 }
 
+/**
+ * For each incoming occurrence override, finds any existing override entries
+ * for the same RECURRENCE-ID at a different startAtMs — those are stale
+ * because the new invite supersedes them. Returns the set of stale startAtMs
+ * keys (as numbers) so callers can evict matching entries from
+ * `recurrenceDates`, `occurrenceMessageIds`, `occurrenceSnapshots`, and
+ * `occurrenceRecurrenceIds`.
+ */
+function collectSupersededOccurrenceStarts(
+  group: CalendarInviteMutationGroup,
+  existingEvent?: CalendarEvent | null
+): Set<number> {
+  const existingOccurrenceRecurrenceIds = existingEvent?.occurrenceRecurrenceIds ?? {};
+  const supersededStarts = new Set<number>();
+  for (const occ of group.instanceOccurrences) {
+    for (const [priorStartKey, priorRecurrenceId] of Object.entries(existingOccurrenceRecurrenceIds)) {
+      if (priorRecurrenceId !== occ.recurrenceIdAtMs) continue;
+      if (priorStartKey === String(occ.startAtMs)) continue;
+      const priorStart = Number(priorStartKey);
+      if (Number.isFinite(priorStart) && priorStart > 0) {
+        supersededStarts.add(priorStart);
+      }
+    }
+  }
+  return supersededStarts;
+}
+
 function buildMergedCalendarEventFields(
   group: CalendarInviteMutationGroup,
   messageId: string,
@@ -67,8 +94,10 @@ function buildMergedCalendarEventFields(
     resolveCalendarParticipationFromPreview(base ?? {}, accountEmail)
   );
 
+  const supersededStarts = collectSupersededOccurrenceStarts(group, existingEvent);
+
   const mergedRecurrenceDates = normalizeDateList([
-    ...(existingEvent?.recurrenceDates ?? []),
+    ...((existingEvent?.recurrenceDates ?? []).filter((value) => !supersededStarts.has(value))),
     ...(base?.recurrenceDates?.map((value) => value.getTime()) ?? []),
     ...group.addedRecurrenceDates
   ]);
@@ -111,15 +140,28 @@ function buildMergedCalendarEventFields(
     // instanceOccurrences is only populated for REQUEST with RECURRENCE-ID (not CANCEL), so
     // these are occurrences that are actually visible in the calendar at the new start time.
     occurrenceMessageIds: (() => {
-      const existing = existingEvent?.occurrenceMessageIds ?? {};
+      const merged: Record<string, string> = {};
+      for (const [key, value] of Object.entries(existingEvent?.occurrenceMessageIds ?? {})) {
+        if (supersededStarts.has(Number(key))) continue;
+        merged[key] = value;
+      }
       if (group.instanceOccurrences.length > 0) {
-        const merged = { ...existing };
         for (const occ of group.instanceOccurrences) {
           merged[String(occ.startAtMs)] = messageId;
         }
-        return merged;
       }
-      return Object.keys(existing).length > 0 ? existing : undefined;
+      return Object.keys(merged).length > 0 ? merged : undefined;
+    })(),
+    occurrenceRecurrenceIds: (() => {
+      const merged: Record<string, number> = {};
+      for (const [key, value] of Object.entries(existingEvent?.occurrenceRecurrenceIds ?? {})) {
+        if (supersededStarts.has(Number(key))) continue;
+        merged[key] = value;
+      }
+      for (const occ of group.instanceOccurrences) {
+        merged[String(occ.startAtMs)] = occ.recurrenceIdAtMs;
+      }
+      return Object.keys(merged).length > 0 ? merged : undefined;
     })(),
     rawIcs: icsSource
   };
@@ -292,11 +334,18 @@ export async function processCalendarInviteForMessage({
       // Per-occurrence snapshots (Option C): for each occurrence added or
       // replaced by this ICS, capture a snapshot from the delivering email
       // so the detail pane can show the occurrence-specific source email
-      // rather than the series invite. Existing entries are preserved.
+      // rather than the series invite. Entries for an occurrence whose
+      // RECURRENCE-ID has been re-rescheduled by this ICS are evicted to
+      // mirror the cleanup applied to recurrenceDates / occurrenceMessageIds.
+      const supersededOccurrenceStarts = collectSupersededOccurrenceStarts(group, existingEvent);
       const occurrenceSnapshotsUpdate: Record<
         string,
         NonNullable<CalendarEvent["occurrenceSnapshots"]>[string]
-      > = { ...(existingEvent?.occurrenceSnapshots ?? {}) };
+      > = {};
+      for (const [key, value] of Object.entries(existingEvent?.occurrenceSnapshots ?? {})) {
+        if (supersededOccurrenceStarts.has(Number(key))) continue;
+        occurrenceSnapshotsUpdate[key] = value;
+      }
       if (group.instanceOccurrences.length > 0) {
         const occurrenceSnapshot = await buildCalendarEventEmailSnapshotFromMessageId(
           accountId,

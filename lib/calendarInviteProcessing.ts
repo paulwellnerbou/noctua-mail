@@ -10,7 +10,7 @@ export type CalendarInviteMutationGroup = {
   baseEvent: CalendarEventPreview | null;
   addedRecurrenceDates: number[];
   addedExcludedDates: number[];
-  instanceOccurrences: Array<{ startAtMs: number; endAtMs?: number }>;
+  instanceOccurrences: Array<{ startAtMs: number; endAtMs?: number; recurrenceIdAtMs: number }>;
   hasInstanceChanges: boolean;
   sequence: number;
 };
@@ -120,7 +120,8 @@ export function collectCalendarInviteMutationGroups(icsSource: string): Calendar
         endAtMs:
           Number.isFinite(eventEndAtMs) && eventEndAtMs > eventStartAtMs
             ? eventEndAtMs
-            : undefined
+            : undefined,
+        recurrenceIdAtMs
       });
       group.hasInstanceChanges = true;
       return;

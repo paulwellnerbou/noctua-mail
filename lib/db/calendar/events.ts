@@ -60,6 +60,7 @@ function rowToCalendarEvent(row: any): CalendarEvent {
     occurrenceSnapshots: safeParseJson<Record<string, CalendarEventEmailSnapshotFields>>(
       row.occurrenceSnapshots
     ),
+    occurrenceRecurrenceIds: safeParseJson<Record<string, number>>(row.occurrenceRecurrenceIds),
     createdAtMs: row.createdAtMs,
     updatedAtMs: row.updatedAtMs,
     deletedAtMs: row.deletedAtMs ?? undefined
@@ -338,9 +339,9 @@ export async function upsertCalendarEvent(
       status, organizer, attendees, myPartstat, myPartstatUpdatedAtMs, myAttendeeEmail, replyRequested,
       remoteEtag, remoteHref, rawIcs, sourceType, messageId, occurrenceMessageIds,
       sourceSubject, sourceFromAddr, sourceToAddr, sourceCcAddr, sourceBccAddr,
-      sourceDateMs, sourceBodyText, sourceBodyHtml, occurrenceSnapshots,
+      sourceDateMs, sourceBodyText, sourceBodyHtml, occurrenceSnapshots, occurrenceRecurrenceIds,
       createdAtMs, updatedAtMs, deletedAtMs
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     event.id,
     event.accountId,
@@ -382,6 +383,9 @@ export async function upsertCalendarEvent(
     event.sourceBodyHtml ?? null,
     event.occurrenceSnapshots && Object.keys(event.occurrenceSnapshots).length > 0
       ? JSON.stringify(event.occurrenceSnapshots)
+      : null,
+    event.occurrenceRecurrenceIds && Object.keys(event.occurrenceRecurrenceIds).length > 0
+      ? JSON.stringify(event.occurrenceRecurrenceIds)
       : null,
     event.createdAtMs,
     event.updatedAtMs,
