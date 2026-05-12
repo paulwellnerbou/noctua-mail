@@ -7,7 +7,8 @@ import {
   getCollapsedThreadFromDisplay,
   getMessageFromDisplay,
   getThreadSubtreeMessageIds,
-  hasThreadSubtreeChildren
+  hasThreadSubtreeChildren,
+  type FromParticipant
 } from "./threadGroupUtils";
 import { isFlaggedMessage } from "../utils/messageHelpers";
 import { getCollapsedThreadRepresentativeMessage } from "./threadRepresentativeMessage";
@@ -62,6 +63,7 @@ export type ListRowItem = {
   folderIds: string[];
   fromText: string;
   fromTooltip: string;
+  fromParticipants?: FromParticipant[];
   showRecipientIcon: boolean;
   iconFrom: string;
   iconFromEmail?: string;
@@ -387,6 +389,7 @@ export function buildMessageListItems(params: BuildMessageListItemsParams): List
             folderIds,
             fromText: fromDisplay.text,
             fromTooltip: fromDisplay.tooltip,
+            fromParticipants: fromDisplay.participants,
             showRecipientIcon: Boolean(fromDisplay.showRecipientIcon),
             iconFrom: fromDisplay.iconFrom ?? message.from,
             iconFromEmail: fromDisplay.iconFromEmail ?? message.fromEmail,
@@ -433,6 +436,7 @@ export function buildMessageListItems(params: BuildMessageListItemsParams): List
         folderIds,
         fromText: fromDisplay.text,
         fromTooltip: fromDisplay.tooltip,
+        fromParticipants: fromDisplay.participants,
         showRecipientIcon: Boolean(fromDisplay.showRecipientIcon),
         iconFrom: fromDisplay.iconFrom ?? message.from,
         iconFromEmail: fromDisplay.iconFromEmail ?? message.fromEmail,

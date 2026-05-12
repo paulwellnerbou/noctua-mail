@@ -17,6 +17,8 @@ import FlagBadge from "../message/FlagBadge";
 import MessageBadge from "../message/MessageBadge";
 import type { Topic } from "@/lib/data";
 import TopicSuggestionAcceptButton from "./TopicSuggestionAcceptButton";
+import FromAddressHoverCard from "./FromAddressHoverCard";
+import type { FromParticipant } from "./threadGroupUtils";
 
 type MessageRowProps = {
   message: Message;
@@ -59,6 +61,7 @@ type MessageRowProps = {
   renderSelectIndicators: React.ReactNode;
   fromText?: string;
   fromTooltip?: string;
+  fromParticipants?: FromParticipant[];
   showRecipientIcon?: boolean;
   iconFrom?: string;
   iconFromEmail?: string;
@@ -133,6 +136,7 @@ function MessageRow({
   renderSelectIndicators,
   fromText,
   fromTooltip,
+  fromParticipants,
   showRecipientIcon = false,
   iconFrom,
   iconFromEmail,
@@ -325,31 +329,36 @@ function MessageRow({
             disabled={isDisabled}
           />
         </span>
-        <Text
-          as="span"
-          size="1"
-          className={`${styles.from} ${!seen ? styles.unreadText : ""}`}
-          title={fromLineTooltip}
+        <FromAddressHoverCard
+          participants={fromParticipants}
+          fallbackTooltip={fromLineTooltip}
         >
-          <span className={styles.fromContent}>
-            {!showRecipientIcon && (
-              <SenderIcon
-                accountId={message.accountId}
-                from={iconFrom ?? message.from}
-                fromEmail={iconFromEmail ?? message.fromEmail}
-                enabled={senderIconsEnabled}
-                className={styles.senderIcon}
-                title={fromLineTooltip}
-              />
-            )}
-            {showRecipientIcon && (
-              <span className={styles.recipientIcon} title="Recipients" aria-label="Recipients">
-                <MoveRight size={12} />
-              </span>
-            )}
-            <span className={styles.fromText}>{fromLine}</span>
-          </span>
-        </Text>
+          <Text
+            as="span"
+            size="1"
+            className={`${styles.from} ${!seen ? styles.unreadText : ""}`}
+            title={fromLineTooltip}
+          >
+            <span className={styles.fromContent}>
+              {!showRecipientIcon && (
+                <SenderIcon
+                  accountId={message.accountId}
+                  from={iconFrom ?? message.from}
+                  fromEmail={iconFromEmail ?? message.fromEmail}
+                  enabled={senderIconsEnabled}
+                  className={styles.senderIcon}
+                  title={fromLineTooltip}
+                />
+              )}
+              {showRecipientIcon && (
+                <span className={styles.recipientIcon} title="Recipients" aria-label="Recipients">
+                  <MoveRight size={12} />
+                </span>
+              )}
+              <span className={styles.fromText}>{fromLine}</span>
+            </span>
+          </Text>
+        </FromAddressHoverCard>
         <div className={actionsClassName}>
           {showNewBadge && (
             <Badge size="1" variant="soft" color={badgeColors.new} className={badgeStyles.badge}>

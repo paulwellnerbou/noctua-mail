@@ -29,6 +29,7 @@ import {
 } from "./listInteractions";
 import { isTopicSuggestionGroupKey } from "./topicSuggestionGroup";
 import TopicSuggestionAcceptButton from "./TopicSuggestionAcceptButton";
+import FromAddressHoverCard from "./FromAddressHoverCard";
 import groupStyles from "./MessageCardList.module.css";
 import styles from "./MessageTable.module.css";
 
@@ -468,9 +469,14 @@ export default function MessageTable({
                       <MoveRight size={12} />
                     </span>
                   )}
-                  <span className={styles.cellFromText} title={item.fromTooltip}>
-                    {item.fromText}
-                  </span>
+                  <FromAddressHoverCard
+                    participants={item.fromParticipants}
+                    fallbackTooltip={item.fromTooltip}
+                  >
+                    <span className={styles.cellFromText} title={item.fromTooltip}>
+                      {item.fromText}
+                    </span>
+                  </FromAddressHoverCard>
                 </span>
                 <span
                   className={styles.cellSubject}
