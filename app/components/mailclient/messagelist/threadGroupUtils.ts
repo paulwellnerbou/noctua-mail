@@ -13,9 +13,15 @@ type MessageGroup = {
   count?: number;
 };
 
+export type FromParticipant = {
+  displayName: string;
+  email: string;
+};
+
 export type FromDisplayInfo = {
   text: string;
   tooltip: string;
+  participants?: FromParticipant[];
   isFromUser?: boolean;
   showRecipientIcon?: boolean;
   iconFrom?: string;
@@ -33,6 +39,14 @@ type ParticipantEntry = {
   text: string;
   tooltip: string;
   key: string;
+  displayName: string;
+  email: string;
+};
+
+const buildParticipant = (raw: string, fallbackDisplay?: string): FromParticipant => {
+  const email = extractPrimaryEmail(raw) ?? "";
+  const displayName = extractDisplayName(raw) || fallbackDisplay || "";
+  return { displayName, email };
 };
 
 const isMessageFromUser = (fromValue: string, userEmail?: string): boolean => {
@@ -111,7 +125,9 @@ const getRecipientParticipantEntries = (
       {
         text: alias.name,
         tooltip,
-        key: `alias:${alias.id}`
+        key: `alias:${alias.id}`,
+        displayName: alias.name,
+        email: ""
       }
     ];
   }
@@ -128,10 +144,13 @@ const getRecipientParticipantEntries = (
       const key = text.toLowerCase();
       if (seen.has(key)) return;
       seen.add(key);
+      const participant = buildParticipant(recipient, text);
       entries.push({
         text,
         tooltip: recipient,
-        key
+        key,
+        displayName: participant.displayName,
+        email: participant.email
       });
     });
   });
@@ -169,9 +188,15 @@ export function getMessageFromDisplay(
 
   if (forceRecipientDisplay) {
     const recipientsDisplay = extractRecipientsDisplay(recipients, findRecipientAlias);
+    const recipientEntries = getRecipientParticipantEntries(
+      recipients,
+      undefined,
+      findRecipientAlias
+    );
     return {
       text: recipientsDisplay || "(no recipients)",
       tooltip: recipientTooltip(recipients),
+      participants: recipientEntries.map(({ displayName, email }) => ({ displayName, email })),
       isFromUser,
       showRecipientIcon: true
     };
@@ -184,9 +209,15 @@ export function getMessageFromDisplay(
   // isInExpandedThread = true means it's an expanded thread or single message (show "To: ...")
   if (isFromUser && isInExpandedThread && recipients) {
     const recipientsDisplay = extractRecipientsDisplay(recipients, findRecipientAlias);
+    const recipientEntries = getRecipientParticipantEntries(
+      recipients,
+      undefined,
+      findRecipientAlias
+    );
     return {
       text: recipientsDisplay || "(no recipients)",
       tooltip: recipientTooltip(recipients),
+      participants: recipientEntries.map(({ displayName, email }) => ({ displayName, email })),
       isFromUser: true,
       showRecipientIcon: true
     };
@@ -198,6 +229,7 @@ export function getMessageFromDisplay(
   return {
     text: displayText,
     tooltip: normalized,
+    participants: [buildParticipant(normalized, displayText)],
     isFromUser,
     showRecipientIcon: false,
     iconFrom: normalized,
@@ -242,11 +274,16 @@ export function getCollapsedThreadFromDisplay(
   const seen = new Set<string>();
   const fromTexts: string[] = [];
   const fromTooltips: string[] = [];
+  const participants: FromParticipant[] = [];
   const pushParticipant = (participant: ParticipantEntry) => {
     if (seen.has(participant.key)) return;
     seen.add(participant.key);
     fromTexts.push(participant.text);
     fromTooltips.push(participant.tooltip);
+    participants.push({
+      displayName: participant.displayName,
+      email: participant.email
+    });
   };
 
   fullFlat.forEach(({ message }) => {
@@ -262,11 +299,22 @@ export function getCollapsedThreadFromDisplay(
         true,
         findRecipientAlias
       );
-      pushParticipant({
-        text: entry.text,
-        tooltip: entry.tooltip,
-        key: entry.text.toLowerCase()
-      });
+      const recipientEntries = getRecipientParticipantEntries(
+        { to: message.to, cc: message.cc, bcc: message.bcc },
+        undefined,
+        findRecipientAlias
+      );
+      if (recipientEntries.length > 0) {
+        recipientEntries.forEach(pushParticipant);
+      } else {
+        pushParticipant({
+          text: entry.text,
+          tooltip: entry.tooltip,
+          key: entry.text.toLowerCase(),
+          displayName: entry.text,
+          email: ""
+        });
+      }
       return;
     }
 
@@ -281,7 +329,9 @@ export function getCollapsedThreadFromDisplay(
     pushParticipant({
       text: senderEntry.text,
       tooltip: senderEntry.tooltip,
-      key: senderEntry.text.toLowerCase()
+      key: senderEntry.text.toLowerCase(),
+      displayName: extractDisplayName(normalized) || senderEntry.text,
+      email: extractPrimaryEmail(normalized) ?? ""
     });
 
     if (!senderEntry.isFromUser) return;
@@ -299,6 +349,7 @@ export function getCollapsedThreadFromDisplay(
   return {
     text: fromTexts.join(", "),
     tooltip: fromTooltips.join(", "),
+    participants,
     iconFrom: iconParticipant?.from,
     iconFromEmail: iconParticipant?.fromEmail ?? null
   };

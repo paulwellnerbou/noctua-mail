@@ -397,6 +397,7 @@ export default function MessageCardList({
               renderSelectIndicators={renderSelectIndicators(message)}
               fromText={item.fromText}
               fromTooltip={item.fromTooltip}
+              fromParticipants={item.fromParticipants}
               showRecipientIcon={item.showRecipientIcon}
               iconFrom={item.iconFrom}
               iconFromEmail={item.iconFromEmail}

@@ -21,6 +21,7 @@ import { getMessageListDateDisplay } from "./messageDateDisplay";
 import { useSelectionSnapshot } from "./selectionStore";
 import ThreadMarkers from "./ThreadMarkers";
 import MessageListRenderer from "./MessageListRenderer";
+import FromAddressHoverCard from "./FromAddressHoverCard";
 import type { MessageThreadListProps } from "./messageListViewTypes";
 import { useMessageListItems } from "./useMessageListItems";
 import { useThreadListAnimationState } from "./useThreadListAnimationState";
@@ -319,28 +320,33 @@ export default function MessageThreadList({
                   </Badge>
                 )}
 
-                <span className={styles.cellFrom} title={item.fromTooltip}>
-                  {!item.showRecipientIcon && (
-                    <SenderIcon
-                      accountId={message.accountId}
-                      from={item.iconFrom}
-                      fromEmail={item.iconFromEmail}
-                      enabled={senderIconsEnabled}
-                      className={styles.senderIcon}
-                      title={item.fromTooltip}
-                    />
-                  )}
-                  {item.showRecipientIcon && (
-                    <span
-                      className={styles.recipientIcon}
-                      title="Recipients"
-                      aria-label="Recipients"
-                    >
-                      <MoveRight size={12} />
-                    </span>
-                  )}
-                  <span className={styles.cellFromText}>{item.fromText}</span>
-                </span>
+                <FromAddressHoverCard
+                  participants={item.fromParticipants}
+                  fallbackTooltip={item.fromTooltip}
+                >
+                  <span className={styles.cellFrom} title={item.fromTooltip}>
+                    {!item.showRecipientIcon && (
+                      <SenderIcon
+                        accountId={message.accountId}
+                        from={item.iconFrom}
+                        fromEmail={item.iconFromEmail}
+                        enabled={senderIconsEnabled}
+                        className={styles.senderIcon}
+                        title={item.fromTooltip}
+                      />
+                    )}
+                    {item.showRecipientIcon && (
+                      <span
+                        className={styles.recipientIcon}
+                        title="Recipients"
+                        aria-label="Recipients"
+                      >
+                        <MoveRight size={12} />
+                      </span>
+                    )}
+                    <span className={styles.cellFromText}>{item.fromText}</span>
+                  </span>
+                </FromAddressHoverCard>
 
                 <span className={styles.cellSubject}>
                   {renderUnreadDot(message, {
