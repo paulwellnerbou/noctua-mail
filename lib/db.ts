@@ -204,6 +204,7 @@ import {
   ensureCalendarReminder as _ensureCalendarReminderImpl,
   getCalendarEventById as _getCalendarEventByIdImpl,
   getCalendarEventByUid as _getCalendarEventByUidImpl,
+  listSiblingCalendarEventsByUidKey as _listSiblingCalendarEventsByUidKeyImpl,
   listCalendarInviteSourceMessagesByEventUid as _listCalendarInviteSourceMessagesByEventUidImpl,
   markMessageCalendarInviteStatesProcessed as _markMessageCalendarInviteStatesProcessedImpl,
   markMessageCalendarInviteStatesUnprocessed as _markMessageCalendarInviteStatesUnprocessedImpl,
@@ -223,6 +224,12 @@ export function getCalendarEventByUid(
   ...args: Parameters<typeof _getCalendarEventByUidImpl>
 ): ReturnType<typeof _getCalendarEventByUidImpl> {
   return _getCalendarEventByUidImpl(...args);
+}
+
+export function listSiblingCalendarEventsByUidKey(
+  ...args: Parameters<typeof _listSiblingCalendarEventsByUidKeyImpl>
+): ReturnType<typeof _listSiblingCalendarEventsByUidKeyImpl> {
+  return _listSiblingCalendarEventsByUidKeyImpl(...args);
 }
 
 export function softDeleteCalendarEvent(

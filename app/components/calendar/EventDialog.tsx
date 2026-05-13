@@ -150,7 +150,7 @@ export default function EventDialog({
 
   return (
     <Dialog.Root open={open} onOpenChange={(o) => { if (!o) onClose(); }}>
-      <Dialog.Content size="3" style={{ maxWidth: 520 }}>
+      <Dialog.Content size="3" style={{ maxWidth: 520 }} aria-describedby={undefined}>
         <Flex direction="column" gap="3">
           <DialogTitleBar
             title={isEditing ? "Edit Event" : "New Event"}

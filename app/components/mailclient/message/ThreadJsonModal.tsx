@@ -24,7 +24,7 @@ export default function ThreadJsonModal({
 
   return (
     <Dialog.Root open={open} onOpenChange={(nextOpen) => (!nextOpen ? onClose() : undefined)}>
-      <Dialog.Content size="4" className={styles.content}>
+      <Dialog.Content size="4" className={styles.content} aria-describedby={undefined}>
         <Flex direction="column" gap="3" className={styles.body}>
           <DialogTitleBar title="Thread JSON" onClose={onClose} />
           <Text size="2" color="gray">

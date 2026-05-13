@@ -29,6 +29,7 @@ import { resolveEmailCalendarEventStatus } from "@/lib/calendarEventStatus";
 import { deriveInviteDeckEventBounds } from "@/lib/inviteDeckEventBounds";
 import { getMessageSource } from "@/lib/storage";
 import { extractIcsSourceFromEmailSource } from "@/lib/mail/attachmentFromSource";
+import { reconcileSeriesAnchorSiblings } from "@/lib/calendarSeriesReanchor";
 
 const DEFAULT_AUTOMATIC_REMINDER = {
   leadMinutes: 15,
@@ -199,10 +200,14 @@ async function hydrateExistingEventFromPriorInviteSource(
       accountId,
       candidate.messageId
     );
-    return upsertCalendarEventByUid(accountId, {
+    const saved = await upsertCalendarEventByUid(accountId, {
       ...mergedEvent,
       ...(snapshot ?? {})
     });
+    // Bootstrapping a missing series row is just as much a new anchor
+    // as a fresh REQUEST — cap any prior siblings that share the key.
+    await reconcileSeriesAnchorSiblings(accountId, saved);
+    return saved;
   }
   return null;
 }
@@ -367,6 +372,7 @@ export async function processCalendarInviteForMessage({
         ...snapshotFields,
         occurrenceSnapshots: occurrenceSnapshotsField
       });
+      await reconcileSeriesAnchorSiblings(accountId, savedEvent);
       await rescheduleCalendarRemindersByEventUid(accountId, group.eventUid, {
         eventTitle: savedEvent.summary,
         eventLocation: savedEvent.location,

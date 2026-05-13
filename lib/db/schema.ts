@@ -51,6 +51,7 @@ const CALENDAR_EVENT_RUNTIME_SIGNATURE = [
   "replyRequested",
   "occurrenceMessageIds",
   "occurrenceRecurrenceIds",
+  "eventUidKey",
   "emailStatusBackfillV1",
   "emailParticipationBackfillV1"
 ].join("|");
@@ -312,6 +313,48 @@ export function ensureCalendarEventOptionalColumns(db: any) {
   if (!calendarEventColumns.has("occurrenceRecurrenceIds")) {
     db.prepare(`ALTER TABLE calendar_events ADD COLUMN occurrenceRecurrenceIds TEXT`).run();
   }
+  // Normalized UID key that strips Google's per-anchor `_R<YYYYMMDDTHHMMSS>`
+  // suffix, mirroring what message_calendar_events / calendar_reminders
+  // already do. This lets the invite processor recognize that two rows with
+  // different UIDs (e.g. `_R20260320T094500@google.com` and
+  // `_R20260403T084500@google.com`) belong to the same logical series so
+  // the prior anchor can be UNTIL-capped when a new one arrives.
+  const hadCalendarEventUidKey = calendarEventColumns.has("eventUidKey");
+  if (!hadCalendarEventUidKey) {
+    db.prepare(`ALTER TABLE calendar_events ADD COLUMN eventUidKey TEXT`).run();
+  }
+  backfillCalendarEventUidKeys(db);
+  db.prepare(
+    `CREATE INDEX IF NOT EXISTS idx_calendar_events_account_uid_key
+     ON calendar_events(accountId, eventUidKey)`
+  ).run();
+}
+
+function backfillCalendarEventUidKeys(db: any) {
+  const rows = db
+    .prepare(
+      `SELECT id, eventUid
+       FROM calendar_events
+       WHERE COALESCE(eventUid, '') <> ''
+         AND COALESCE(eventUidKey, '') = ''`
+    )
+    .all() as Array<{ id?: string | null; eventUid?: string | null }>;
+  if (rows.length === 0) return;
+  const updateStatement = db.prepare(
+    `UPDATE calendar_events SET eventUidKey = ? WHERE id = ?`
+  );
+  const runUpdate = db.transaction(
+    (items: Array<{ id?: string | null; eventUid?: string | null }>) => {
+      items.forEach((row) => {
+        const id = String(row.id ?? "").trim();
+        const eventUid = String(row.eventUid ?? "").trim();
+        const eventUidKey = normalizeCalendarEventUidKey(eventUid);
+        if (!id || !eventUidKey) return;
+        updateStatement.run(eventUidKey, id);
+      });
+    }
+  );
+  runUpdate(rows);
 }
 
 function backfillEmailCalendarEventStatuses(db: any) {
@@ -952,6 +995,7 @@ export function initAccountSchema(db: any) {
       sourceBodyHtml TEXT,
       occurrenceSnapshots TEXT,
       occurrenceRecurrenceIds TEXT,
+      eventUidKey TEXT,
       createdAtMs INTEGER NOT NULL,
       updatedAtMs INTEGER NOT NULL,
       deletedAtMs INTEGER
@@ -964,6 +1008,8 @@ export function initAccountSchema(db: any) {
       ON calendar_events(accountId, sourceType);
     CREATE INDEX IF NOT EXISTS idx_calendar_events_account_calendar
       ON calendar_events(accountId, calendarId);
+    CREATE INDEX IF NOT EXISTS idx_calendar_events_account_uid_key
+      ON calendar_events(accountId, eventUidKey);
 
     CREATE TABLE IF NOT EXISTS calendar_participation_overrides (
       id TEXT PRIMARY KEY,

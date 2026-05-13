@@ -98,6 +98,7 @@ export default function MoveToDialog({
       <Dialog.Content
         className={styles.dialogContent}
         aria-label="Move to folder"
+        aria-describedby={undefined}
         onOpenAutoFocus={(e) => e.preventDefault()}
       >
         <div className={styles.dialogHeader}>

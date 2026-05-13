@@ -83,7 +83,7 @@ export default function InviteAttachmentControls({
         >
           <Info size={12} />
         </Button>
-        <Dialog.Content size="4" className={styles.rawIcsDialog}>
+        <Dialog.Content size="4" className={styles.rawIcsDialog} aria-describedby={undefined}>
           <Flex direction="column" gap="3">
             <DialogTitleBar title="Raw ICS Content" onClose={() => setRawIcsOpen(false)} />
             <Text size="2" color="gray">{downloadLabel}</Text>

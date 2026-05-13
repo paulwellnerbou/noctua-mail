@@ -111,7 +111,7 @@ export default function TopicPickerDialog({
 
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
-      <Dialog.Content maxWidth="360px">
+      <Dialog.Content maxWidth="360px" aria-describedby={undefined}>
         <DialogTitleBar title="Topics" onClose={() => onOpenChange(false)} />
         <Flex direction="column" gap="2" mt="3">
           {allTopics.length === 0 && !showCreate && (

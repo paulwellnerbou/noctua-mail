@@ -353,6 +353,16 @@ export type CalendarEvent = {
    * instead of accumulating multiple ghost occurrences in `recurrenceDates`.
    */
   occurrenceRecurrenceIds?: Record<string, number>;
+  /**
+   * Normalized form of `eventUid` with Google's per-anchor
+   * `_R<YYYYMMDDTHHMMSS>` suffix stripped (see
+   * `normalizeCalendarEventUidKey`). Identifies the *logical* series across
+   * UID rotations: when Google re-anchors a series it mints a new UID, but
+   * the key stays stable, so the invite processor can recognize prior
+   * anchors and UNTIL-cap them. For non-Google UIDs the key equals the UID
+   * (lowercased), so cross-UID linking is a no-op there.
+   */
+  eventUidKey?: string;
   createdAtMs: number;
   updatedAtMs: number;
   deletedAtMs?: number;

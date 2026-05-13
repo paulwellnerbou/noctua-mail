@@ -32,7 +32,7 @@ export default function RecipientAliasDialog({
 
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
-      <Dialog.Content maxWidth="620px">
+      <Dialog.Content maxWidth="620px" aria-describedby={undefined}>
         <DialogTitleBar title={title} onClose={() => onOpenChange(false)} />
         <div style={{ marginTop: "var(--space-3)" }}>
           <RecipientAliasManager

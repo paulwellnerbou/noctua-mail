@@ -66,7 +66,7 @@ export default function EventResponseDialog({
         if (!next && !submittingResponse) onOpenChange(false);
       }}
     >
-      <Dialog.Content size="2" className={styles.responseDialog}>
+      <Dialog.Content size="2" className={styles.responseDialog} aria-describedby={undefined}>
         <Flex direction="column" gap="3">
           <Dialog.Title size="4">Respond to invitation</Dialog.Title>
 

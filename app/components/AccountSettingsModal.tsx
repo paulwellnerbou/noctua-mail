@@ -186,6 +186,7 @@ export default function AccountSettingsModal({
         size="4"
         width="94vw"
         maxWidth="980px"
+        aria-describedby={undefined}
         onInteractOutside={(event) => event.preventDefault()}
         onEscapeKeyDown={(event) => event.preventDefault()}
         style={{

@@ -15,7 +15,7 @@ import type {
 } from "../../data";
 import { getAccountDb } from "../connection";
 import { withDbWriteRetry } from "../../dbWriteRetry";
-import { normalizeCalendarEventUid } from "../../calendarEventUids";
+import { normalizeCalendarEventUid, normalizeCalendarEventUidKey } from "../../calendarEventUids";
 import { normalizeCalendarParticipationStatus } from "../../calendarParticipation";
 import { safeParseJson } from "../messages/_shared";
 
@@ -61,6 +61,7 @@ function rowToCalendarEvent(row: any): CalendarEvent {
       row.occurrenceSnapshots
     ),
     occurrenceRecurrenceIds: safeParseJson<Record<string, number>>(row.occurrenceRecurrenceIds),
+    eventUidKey: row.eventUidKey ?? undefined,
     createdAtMs: row.createdAtMs,
     updatedAtMs: row.updatedAtMs,
     deletedAtMs: row.deletedAtMs ?? undefined
@@ -299,6 +300,36 @@ export async function getCalendarEventByUid(
   return foldedRow ? rowToCalendarEvent(foldedRow) : null;
 }
 
+/**
+ * Returns other live calendar_events rows that share the same logical
+ * series as `eventUid` (per `normalizeCalendarEventUidKey`) but have a
+ * different exact UID. Used by the invite processor to find prior
+ * Google `_R<datetime>` anchors that need to be UNTIL-capped when a
+ * newer anchor arrives. Returns an empty array when the key is null
+ * or when only the exact-UID row exists.
+ */
+export async function listSiblingCalendarEventsByUidKey(
+  accountId: string,
+  eventUid: string
+): Promise<CalendarEvent[]> {
+  const eventUidKey = normalizeCalendarEventUidKey(eventUid);
+  if (!eventUidKey) return [];
+  const exactUid = String(eventUid ?? "").trim();
+  if (!exactUid) return [];
+  const db = await getAccountDb(accountId);
+  const rows = db
+    .prepare(
+      `SELECT * FROM calendar_events
+       WHERE accountId = ?
+         AND eventUidKey = ?
+         AND deletedAtMs IS NULL
+         AND lower(eventUid) <> lower(?)
+       ORDER BY startAtMs ASC`
+    )
+    .all(accountId, eventUidKey, exactUid) as any[];
+  return rows.map(rowToCalendarEvent);
+}
+
 export async function upsertCalendarEventByUid(
   accountId: string,
   fields: Omit<CalendarEvent, "id" | "accountId" | "createdAtMs" | "updatedAtMs" | "deletedAtMs">
@@ -340,8 +371,9 @@ export async function upsertCalendarEvent(
       remoteEtag, remoteHref, rawIcs, sourceType, messageId, occurrenceMessageIds,
       sourceSubject, sourceFromAddr, sourceToAddr, sourceCcAddr, sourceBccAddr,
       sourceDateMs, sourceBodyText, sourceBodyHtml, occurrenceSnapshots, occurrenceRecurrenceIds,
+      eventUidKey,
       createdAtMs, updatedAtMs, deletedAtMs
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     event.id,
     event.accountId,
@@ -387,6 +419,7 @@ export async function upsertCalendarEvent(
     event.occurrenceRecurrenceIds && Object.keys(event.occurrenceRecurrenceIds).length > 0
       ? JSON.stringify(event.occurrenceRecurrenceIds)
       : null,
+    event.eventUidKey ?? normalizeCalendarEventUidKey(event.eventUid) ?? null,
     event.createdAtMs,
     event.updatedAtMs,
     event.deletedAtMs ?? null
