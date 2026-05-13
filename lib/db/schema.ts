@@ -1008,8 +1008,6 @@ export function initAccountSchema(db: any) {
       ON calendar_events(accountId, sourceType);
     CREATE INDEX IF NOT EXISTS idx_calendar_events_account_calendar
       ON calendar_events(accountId, calendarId);
-    CREATE INDEX IF NOT EXISTS idx_calendar_events_account_uid_key
-      ON calendar_events(accountId, eventUidKey);
 
     CREATE TABLE IF NOT EXISTS calendar_participation_overrides (
       id TEXT PRIMARY KEY,
