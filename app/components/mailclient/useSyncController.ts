@@ -1271,6 +1271,7 @@ export function useSyncController({
     lastUidNextByFolderRef,
     localDeleteReconcileByFolderRef,
     localDeleteReconcileByUidRef,
+    notifiedKeysRef,
     // Actions
     syncAccount,
     runSyncJob,

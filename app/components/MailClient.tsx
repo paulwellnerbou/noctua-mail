@@ -748,6 +748,7 @@ export default function MailClient({
     lastUidNextByFolderRef,
     localDeleteReconcileByFolderRef,
     localDeleteReconcileByUidRef,
+    notifiedKeysRef,
     syncAccount,
     runSyncJob,
     recomputeThreads,
@@ -1064,6 +1065,15 @@ export default function MailClient({
     successTitle = "Move undone."
   ) => {
     if (targets.length === 0) return;
+    // IMAP MOVE/COPY assigns a new UID in the destination, so the next
+    // poll/stream tick would otherwise treat restored messages as new
+    // mail. Message-ID is preserved across the move, so seeding the
+    // dedup ring suppresses the spurious re-notification.
+    if (accountId === activeAccountId) {
+      for (const target of targets) {
+        notifiedKeysRef.current.add(target.messageId);
+      }
+    }
     const grouped = new Map<string, string[]>();
     targets.forEach((target) => {
       const list = grouped.get(target.restoreFolderId);
