@@ -748,6 +748,7 @@ export default function MailClient({
     lastUidNextByFolderRef,
     localDeleteReconcileByFolderRef,
     localDeleteReconcileByUidRef,
+    seedNotificationDedupKeys,
     syncAccount,
     runSyncJob,
     recomputeThreads,
@@ -1064,6 +1065,24 @@ export default function MailClient({
     successTitle = "Move undone."
   ) => {
     if (targets.length === 0) return;
+    // IMAP MOVE/COPY assigns a new UID in the destination, so the next
+    // poll/stream tick would otherwise treat restored messages as new
+    // mail. Seed the dedup ring with each restored message's RFC 5322
+    // Message-ID (preserved across the move) so the planner skips them.
+    // Prefer the header captured on the UndoMoveTarget at move time —
+    // the message has typically already been pruned from local state by
+    // the time undo runs, so a `messageById` lookup would miss.
+    if (accountId === activeAccountId) {
+      const dedupKeys = targets
+        .map(
+          (target) =>
+            target.headerMessageId ?? messageById.get(target.messageId)?.messageId
+        )
+        .filter((key): key is string => Boolean(key));
+      if (dedupKeys.length > 0) {
+        seedNotificationDedupKeys(dedupKeys);
+      }
+    }
     const grouped = new Map<string, string[]>();
     targets.forEach((target) => {
       const list = grouped.get(target.restoreFolderId);

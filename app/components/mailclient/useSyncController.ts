@@ -24,6 +24,7 @@ import {
   type FolderConsistencyResponse
 } from "./syncFingerprint";
 import {
+  DEFAULT_MAX_NOTIFIED_KEYS,
   planNewMailNotifications,
   type IncomingMailItem
 } from "./syncNotificationFilter";
@@ -1247,6 +1248,41 @@ export function useSyncController({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeAccountId, activeFolderId, authState, inboxMailboxPath]);
 
+  // Seed the new-mail notification dedup ring with externally-known keys
+  // (e.g. RFC 5322 Message-IDs of messages we're about to restore via undo,
+  // which IMAP MOVE would otherwise resurface as "new" mail in the next
+  // sync). Caps the Set at the same ceiling the planner uses so a large
+  // undo batch can't grow it unbounded — unlike the planner's incremental
+  // `pickKeysToEvict` (which only evicts one batchSize per call), here
+  // we evict the full overflow in one pass since seeds can be arbitrarily
+  // large. If the seed itself exceeds the cap, drop the oldest additions.
+  const seedNotificationDedupKeys = (keys: readonly string[]) => {
+    // Dedup against the ring AND against itself — repeated keys would
+    // otherwise inflate the projected size and over-evict (Set.add silently
+    // ignores duplicates, so the ring would end up smaller than intended).
+    const additions = Array.from(
+      new Set(keys.filter((key) => key && !notifiedKeysRef.current.has(key)))
+    );
+    if (additions.length === 0) return;
+    const boundedAdditions =
+      additions.length > DEFAULT_MAX_NOTIFIED_KEYS
+        ? additions.slice(-DEFAULT_MAX_NOTIFIED_KEYS)
+        : additions;
+    const overflow =
+      notifiedKeysRef.current.size + boundedAdditions.length - DEFAULT_MAX_NOTIFIED_KEYS;
+    if (overflow > 0) {
+      const iterator = notifiedKeysRef.current.values();
+      for (let i = 0; i < overflow; i += 1) {
+        const next = iterator.next();
+        if (next.done) break;
+        notifiedKeysRef.current.delete(next.value);
+      }
+    }
+    for (const key of boundedAdditions) {
+      notifiedKeysRef.current.add(key);
+    }
+  };
+
   return {
     // State
     isSyncing,
@@ -1275,6 +1311,7 @@ export function useSyncController({
     syncAccount,
     runSyncJob,
     recomputeThreads,
-    recomputeCategories
+    recomputeCategories,
+    seedNotificationDedupKeys
   };
 }

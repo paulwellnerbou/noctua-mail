@@ -80,6 +80,11 @@ function notificationKeyFor(item: IncomingMailItem): string {
   return item.messageId || `uid:${item.uid}`;
 }
 
+/** Default ceiling for the dedup ring; shared with external seeders. */
+export const DEFAULT_MAX_NOTIFIED_KEYS = 200;
+/** Default number of oldest keys to evict per planner call once the ring overflows. */
+export const DEFAULT_EVICT_BATCH_SIZE = 50;
+
 /**
  * Compute which keys to evict from a FIFO-ish ring once it exceeds
  * `maxSize`. Keys are dropped oldest-first (Set iteration order).
@@ -115,8 +120,8 @@ export function planNewMailNotifications(
     notifiedKeys,
     isNotificationSuppressedFolder,
     accountEmail,
-    maxNotifiedKeys = 200,
-    evictBatchSize = 50
+    maxNotifiedKeys = DEFAULT_MAX_NOTIFIED_KEYS,
+    evictBatchSize = DEFAULT_EVICT_BATCH_SIZE
   } = input;
 
   const empty: PlanNewMailNotificationsResult = {
