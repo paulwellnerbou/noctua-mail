@@ -178,6 +178,7 @@ export default function MessageTable({
                   visibleMessages,
                   collapsedThreads,
                   threadScopeMessages,
+                  supportsThreads,
                   selectionStore,
                   setLastSelectedId: setLastSelectedIdRef
                 });

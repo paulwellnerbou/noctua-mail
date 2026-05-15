@@ -12,6 +12,7 @@ export function selectRangeToMessage(params: {
   visibleMessages: VisibleMessageEntry[];
   collapsedThreads: Record<string, boolean>;
   threadScopeMessages: Message[];
+  supportsThreads: boolean;
   selectionStore: SelectionStore;
   setLastSelectedId: (id: string) => void;
 }) {
@@ -22,6 +23,7 @@ export function selectRangeToMessage(params: {
     visibleMessages,
     collapsedThreads,
     threadScopeMessages,
+    supportsThreads,
     selectionStore,
     setLastSelectedId
   } = params;
@@ -38,7 +40,8 @@ export function selectRangeToMessage(params: {
     selectedIds: visibleIds,
     visibleMessages,
     collapsedThreads,
-    threadScopeMessages
+    threadScopeMessages,
+    supportsThreads
   });
   selectionStore.setSelection(new Set(expandedIds));
   setLastSelectedId(messageId);
@@ -48,6 +51,7 @@ export function selectAllVisibleMessages(params: {
   visibleMessages: VisibleMessageEntry[];
   collapsedThreads: Record<string, boolean>;
   threadScopeMessages: Message[];
+  supportsThreads: boolean;
   selectionStore: SelectionStore;
   setLastSelectedId: (id: string | null) => void;
 }) {
@@ -55,6 +59,7 @@ export function selectAllVisibleMessages(params: {
     visibleMessages,
     collapsedThreads,
     threadScopeMessages,
+    supportsThreads,
     selectionStore,
     setLastSelectedId
   } = params;
@@ -67,7 +72,8 @@ export function selectAllVisibleMessages(params: {
     selectedIds: visibleIds,
     visibleMessages,
     collapsedThreads,
-    threadScopeMessages
+    threadScopeMessages,
+    supportsThreads
   });
   selectionStore.setSelection(new Set(expandedIds));
   setLastSelectedId(visibleIds[visibleIds.length - 1] ?? null);
@@ -105,8 +111,11 @@ export function getCollapsedRootThreadMessageIds(params: {
   visibleMessages: VisibleMessageEntry[];
   collapsedThreads: Record<string, boolean>;
   threadScopeMessages: Message[];
+  supportsThreads: boolean;
 }) {
-  const { selectedIds, visibleMessages, collapsedThreads, threadScopeMessages } = params;
+  const { selectedIds, visibleMessages, collapsedThreads, threadScopeMessages, supportsThreads } =
+    params;
+  if (!supportsThreads) return null;
   if (selectedIds.length === 0) return null;
 
   const visibleThreadIdByMessageId = new Map<string, string>();
@@ -155,14 +164,17 @@ function expandVisibleSelectionIds(params: {
   visibleMessages: VisibleMessageEntry[];
   collapsedThreads: Record<string, boolean>;
   threadScopeMessages: Message[];
+  supportsThreads: boolean;
 }) {
-  const { selectedIds, visibleMessages, collapsedThreads, threadScopeMessages } = params;
+  const { selectedIds, visibleMessages, collapsedThreads, threadScopeMessages, supportsThreads } =
+    params;
   return (
     getCollapsedRootThreadMessageIds({
       selectedIds,
       visibleMessages,
       collapsedThreads,
-      threadScopeMessages
+      threadScopeMessages,
+      supportsThreads
     }) ?? selectedIds
   );
 }

@@ -210,6 +210,7 @@ export function getCollapsedRootThreadMessageIds(params: {
   visibleMessages: VisibleMessageEntry[];
   collapsedThreads: Record<string, boolean>;
   threadScopeMessages: Message[];
+  supportsThreads: boolean;
 }) {
   return getCollapsedRootThreadMessageIdsFromSelection(params);
 }
