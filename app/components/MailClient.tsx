@@ -2100,6 +2100,7 @@ export default function MailClient({
   );
 
   const includeThreadAcrossFoldersForList =
+    supportsThreads &&
     includeThreadAcrossFolders &&
     !isDraftsFolder(activeFolderId) &&
     !checkIsThreadExcludedFolder(activeFolderId);
@@ -2642,11 +2643,14 @@ export default function MailClient({
         }
         // When cross-folder threads are enabled, allow messages from other folders
         // that are part of threads (have a threadId). These are shown via
-        // threadRelatedMessages or server-side thread grouping.
+        // threadRelatedMessages or server-side thread grouping. Mirror the
+        // exclusions used by the thread-display pipeline (Trash/Junk/Spam) so a
+        // message moved to one of those folders is not retained here.
         const allowCrossFolderThread =
           includeThreadAcrossFoldersForList &&
           message.folderId !== activeFolderId &&
-          Boolean(message.threadId);
+          Boolean(message.threadId) &&
+          !checkIsThreadExcludedFolder(message.folderId);
         if (message.folderId !== activeFolderId && !allowCrossFolderThread) {
           return { keep: false, reason: `folder-mismatch:${message.folderId}` };
         }
@@ -2705,6 +2709,7 @@ export default function MailClient({
     [
       activeAccountId,
       activeFolderId,
+      checkIsThreadExcludedFolder,
       currentSearchExcludedFolderIds,
       effectiveSearchBadges,
       includeThreadAcrossFoldersForList,
