@@ -156,6 +156,7 @@ describe("list selection behavior", () => {
       visibleMessages: collapsedVisible,
       collapsedThreads: { "thread-1": true, "thread-2": true },
       threadScopeMessages: [m1, m2, m3, m4],
+      supportsThreads: true,
       selectionStore: store,
       setLastSelectedId: (id) => {
         lastSelectedId = id;
@@ -181,6 +182,7 @@ describe("list selection behavior", () => {
       visibleMessages: expandedVisible,
       collapsedThreads: { "thread-1": false, "thread-2": true },
       threadScopeMessages: [m1, m2, m3, m4],
+      supportsThreads: true,
       selectionStore: store,
       setLastSelectedId: (id) => {
         lastSelectedId = id;
@@ -210,6 +212,7 @@ describe("list selection behavior", () => {
       visibleMessages,
       collapsedThreads: { "thread-1": true, "thread-2": true },
       threadScopeMessages: [root, child, later],
+      supportsThreads: true,
       selectionStore: store,
       setLastSelectedId: (id) => {
         lastSelectedId = id;
@@ -243,6 +246,7 @@ describe("list selection behavior", () => {
       visibleMessages,
       collapsedThreads: { "thread-a": true, "thread-mid": true, "thread-b": true },
       threadScopeMessages: [a1, a2, mid, b1, b2],
+      supportsThreads: true,
       selectionStore: store,
       setLastSelectedId: (id) => {
         lastSelectedId = id;
@@ -272,6 +276,7 @@ describe("list selection behavior", () => {
       visibleMessages,
       collapsedThreads: { "thread-a": true, "thread-mid": true, "thread-b": true },
       threadScopeMessages: [a1, a2, mid, b1, b2],
+      supportsThreads: true,
       selectionStore: store,
       setLastSelectedId: (id) => {
         lastSelectedId = id;
@@ -280,6 +285,42 @@ describe("list selection behavior", () => {
 
     expect(Array.from(store.getIds()).sort()).toEqual(["a1", "a2", "b1", "b2", "mid"]);
     expect(lastSelectedId).toBe("b1");
+  });
+
+  it("does not expand thread siblings during range selection when supportsThreads is false", () => {
+    const a1 = makeMessage("a1", 1000, { threadId: "thread-x" });
+    const a2 = makeMessage("a2", 2000, { threadId: "thread-x", parentId: "a1" });
+    const a3 = makeMessage("a3", 3000, { threadId: "thread-x", parentId: "a2" });
+    const b1 = makeMessage("b1", 4000, { threadId: "thread-x", parentId: "a3" });
+    const b2 = makeMessage("b2", 5000, { threadId: "thread-x", parentId: "b1" });
+    const store = createSelectionStore(null);
+    let lastSelectedId: string | null = "a1";
+
+    const visibleMessages: VisibleMessageEntry[] = [
+      { message: a1, depth: 0, threadId: "thread-x" },
+      { message: a2, depth: 0, threadId: "thread-x" },
+      { message: a3, depth: 0, threadId: "thread-x" },
+      { message: b1, depth: 0, threadId: "thread-x" },
+      { message: b2, depth: 0, threadId: "thread-x" }
+    ];
+    const indexMap = new Map(visibleMessages.map((item, index) => [item.message.id, index]));
+
+    selectRangeToMessage({
+      messageId: "a3",
+      lastSelectedId,
+      indexMap,
+      visibleMessages,
+      collapsedThreads: {},
+      threadScopeMessages: [a1, a2, a3, b1, b2],
+      supportsThreads: false,
+      selectionStore: store,
+      setLastSelectedId: (id) => {
+        lastSelectedId = id;
+      }
+    });
+
+    expect(Array.from(store.getIds()).sort()).toEqual(["a1", "a2", "a3"]);
+    expect(lastSelectedId).toBe("a3");
   });
 });
 
@@ -471,7 +512,8 @@ describe("collapsed-thread bulk behavior", () => {
       selectedIds: ["m1"],
       visibleMessages: [{ message: m1, depth: 0, threadId: "thread-1" }],
       collapsedThreads: { "thread-1": true },
-      threadScopeMessages: [m1, m2, m3]
+      threadScopeMessages: [m1, m2, m3],
+      supportsThreads: true
     });
 
     expect(ids).toEqual(["m1", "m2", "m3"]);
@@ -485,7 +527,8 @@ describe("collapsed-thread bulk behavior", () => {
       selectedIds: ["m1"],
       visibleMessages: [{ message: m1, depth: 0, threadId: "thread-1" }],
       collapsedThreads: { "thread-1": false },
-      threadScopeMessages: [m1, m2]
+      threadScopeMessages: [m1, m2],
+      supportsThreads: true
     });
     expect(expanded).toBeNull();
 
@@ -496,7 +539,8 @@ describe("collapsed-thread bulk behavior", () => {
         { message: m2, depth: 1, threadId: "thread-1" }
       ],
       collapsedThreads: { "thread-1": true },
-      threadScopeMessages: [m1, m2]
+      threadScopeMessages: [m1, m2],
+      supportsThreads: true
     });
     expect(nonRoot).toEqual(["m2", "m1"]);
   });
@@ -513,7 +557,8 @@ describe("collapsed-thread bulk behavior", () => {
         { message: b1, depth: 0, threadId: "thread-b" }
       ],
       collapsedThreads: { "thread-a": true, "thread-b": true },
-      threadScopeMessages: [a1, a2, b1, b2]
+      threadScopeMessages: [a1, a2, b1, b2],
+      supportsThreads: true
     });
 
     expect(ids).toEqual(["a1", "b1", "a2", "b2"]);
@@ -526,7 +571,8 @@ describe("collapsed-thread bulk behavior", () => {
       selectedIds: ["child"],
       visibleMessages: [{ message: root, depth: 0, threadId: "thread-1" }],
       collapsedThreads: { "thread-1": true },
-      threadScopeMessages: [root, child]
+      threadScopeMessages: [root, child],
+      supportsThreads: true
     });
 
     expect(ids).toEqual(["child", "root"]);
@@ -543,7 +589,25 @@ describe("collapsed-thread bulk behavior", () => {
       selectedIds: ["hidden-child"],
       visibleMessages: [{ message: visibleRoot, depth: 0, threadId: "thread-visible" }],
       collapsedThreads: { "thread-visible": true, "thread-hidden": true },
-      threadScopeMessages: [visibleRoot, hiddenRoot, hiddenChild]
+      threadScopeMessages: [visibleRoot, hiddenRoot, hiddenChild],
+      supportsThreads: true
+    });
+
+    expect(ids).toBeNull();
+  });
+
+  it("returns null when threading is disabled", () => {
+    const m1 = makeMessage("m1", 1000, { threadId: "thread-1" });
+    const m2 = makeMessage("m2", 2000, { threadId: "thread-1", parentId: "m1" });
+    const ids = getCollapsedRootThreadMessageIds({
+      selectedIds: ["m1"],
+      visibleMessages: [
+        { message: m1, depth: 0, threadId: "thread-1" },
+        { message: m2, depth: 0, threadId: "thread-1" }
+      ],
+      collapsedThreads: {},
+      threadScopeMessages: [m1, m2],
+      supportsThreads: false
     });
 
     expect(ids).toBeNull();

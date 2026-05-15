@@ -20,6 +20,7 @@ type UseMessageListSelectionControllerParams = {
   visibleMessagesRef: React.MutableRefObject<VisibleMessageEntry[]>;
   collapsedThreads: Record<string, boolean>;
   threadScopeMessages: Message[];
+  supportsThreads: boolean;
   activeMessageId: string;
   setActiveMessageId: React.Dispatch<React.SetStateAction<string>>;
   messageById: Map<string, Message>;
@@ -34,6 +35,7 @@ export function useMessageListSelectionController({
   visibleMessagesRef,
   collapsedThreads,
   threadScopeMessages,
+  supportsThreads,
   activeMessageId,
   setActiveMessageId,
   messageById,
@@ -56,6 +58,7 @@ export function useMessageListSelectionController({
         visibleMessages: visibleMessagesRef.current,
         collapsedThreads,
         threadScopeMessages,
+        supportsThreads,
         selectionStore,
         setLastSelectedId: (id) => {
           setLastSelectedIdRef(id);
@@ -67,6 +70,7 @@ export function useMessageListSelectionController({
       lastSelectedIdRef,
       selectionStore,
       setLastSelectedIdRef,
+      supportsThreads,
       threadScopeMessages,
       visibleIndexByIdRef,
       visibleMessagesRef

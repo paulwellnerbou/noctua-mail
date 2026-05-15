@@ -2456,6 +2456,7 @@ export default function MailClient({
     visibleMessagesRef,
     collapsedThreads,
     threadScopeMessages,
+    supportsThreads,
     activeMessageId,
     setActiveMessageId,
     messageById,
@@ -3286,6 +3287,7 @@ export default function MailClient({
           visibleMessages,
           collapsedThreads,
           threadScopeMessages,
+          supportsThreads,
           selectionStore,
           setLastSelectedId: (id) => {
             lastSelectedIdRef.current = id;
@@ -3308,7 +3310,8 @@ export default function MailClient({
             selectedIds: ids,
             visibleMessages,
             collapsedThreads,
-            threadScopeMessages
+            threadScopeMessages,
+            supportsThreads
           });
           const targetIds = collapsedRootThreadIds ?? ids;
           void updateFlagStateByIds(targetIds, { flag: "seen", value: true });
@@ -3319,7 +3322,8 @@ export default function MailClient({
             selectedIds: ids,
             visibleMessages,
             collapsedThreads,
-            threadScopeMessages
+            threadScopeMessages,
+            supportsThreads
           });
           const targetIds = collapsedRootThreadIds ?? ids;
           void updateFlagStateByIds(targetIds, { flag: "seen", value: false });
@@ -3350,6 +3354,7 @@ export default function MailClient({
     handleDeleteMessagesByIds,
     messages,
     selectionStore,
+    supportsThreads,
     threadScopeMessages,
     visibleMessages
   ]);
