@@ -236,24 +236,16 @@ export function buildGroupedMessages(params: {
     mergedMeta.push({ key: "Done", label: "Done", count: doneCount });
   }
 
-  // For groupings where pagination drives which groups get populated (sender, domain,
-  // week, year), we keep empty groups visible so the group set is stable across pages.
-  // Without this, scrolling reveals new senders/domains as fresh uncollapsed groups,
-  // and a collapse-all done early no longer applies to them.
-  const keepEmptyGroups = groupBy === "sender" || groupBy === "domain" || groupBy === "week" || groupBy === "year";
-
   return mergedMeta.reduce<MessageGroup[]>((acc, group) => {
     const items = groups.get(group.key) ?? [];
-    const isSpecialGroup = group.key === "Flagged" || group.key === "Done";
-    if (items.length === 0 && !(keepEmptyGroups && !isSpecialGroup)) {
+    if (items.length === 0) {
       return acc;
     }
     acc.push({
       key: group.key,
       label: group.label,
       count: group.count,
-      items,
-      allowToggleWhenEmpty: keepEmptyGroups && !isSpecialGroup ? true : undefined
+      items
     });
     return acc;
   }, []);
