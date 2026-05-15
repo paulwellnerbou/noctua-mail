@@ -233,14 +233,14 @@ export function useMessageListDerivedState({
   }, [visibleIndexById, visibleMessages]);
 
   const toggleAllGroups = useCallback(() => {
-    setCollapsedGroups(
+    setCollapsedGroups((prev) =>
       computeToggleAllGroupsState({
         groupMeta,
         combinedGroups: combinedGroupedMessages,
-        collapsedGroups
+        collapsedGroups: prev
       })
     );
-  }, [collapsedGroups, combinedGroupedMessages, groupMeta, setCollapsedGroups]);
+  }, [combinedGroupedMessages, groupMeta, setCollapsedGroups]);
 
   return {
     threadScopeMessages,
