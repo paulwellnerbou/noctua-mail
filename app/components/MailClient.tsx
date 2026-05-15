@@ -748,7 +748,7 @@ export default function MailClient({
     lastUidNextByFolderRef,
     localDeleteReconcileByFolderRef,
     localDeleteReconcileByUidRef,
-    notifiedKeysRef,
+    seedNotificationDedupKeys,
     syncAccount,
     runSyncJob,
     recomputeThreads,
@@ -1067,11 +1067,16 @@ export default function MailClient({
     if (targets.length === 0) return;
     // IMAP MOVE/COPY assigns a new UID in the destination, so the next
     // poll/stream tick would otherwise treat restored messages as new
-    // mail. Message-ID is preserved across the move, so seeding the
-    // dedup ring suppresses the spurious re-notification.
+    // mail. Seed the dedup ring with each restored message's RFC 5322
+    // Message-ID (preserved across the move) so the planner skips them.
+    // `UndoMoveTarget.messageId` is the app's internal row id; the actual
+    // header lives on the Message itself.
     if (accountId === activeAccountId) {
-      for (const target of targets) {
-        notifiedKeysRef.current.add(target.messageId);
+      const dedupKeys = targets
+        .map((target) => messageById.get(target.messageId)?.messageId)
+        .filter((key): key is string => Boolean(key));
+      if (dedupKeys.length > 0) {
+        seedNotificationDedupKeys(dedupKeys);
       }
     }
     const grouped = new Map<string, string[]>();

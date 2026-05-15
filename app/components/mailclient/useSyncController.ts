@@ -24,6 +24,7 @@ import {
   type FolderConsistencyResponse
 } from "./syncFingerprint";
 import {
+  pickKeysToEvict,
   planNewMailNotifications,
   type IncomingMailItem
 } from "./syncNotificationFilter";
@@ -1247,6 +1248,23 @@ export function useSyncController({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeAccountId, activeFolderId, authState, inboxMailboxPath]);
 
+  // Seed the new-mail notification dedup ring with externally-known keys
+  // (e.g. RFC 5322 Message-IDs of messages we're about to restore via undo,
+  // which IMAP MOVE would otherwise resurface as "new" mail in the next
+  // sync). Applies the same FIFO eviction bound the planner uses so a
+  // large undo batch can't grow the Set unbounded.
+  const seedNotificationDedupKeys = (keys: readonly string[]) => {
+    const additions = keys.filter((key) => key && !notifiedKeysRef.current.has(key));
+    if (additions.length === 0) return;
+    const toEvict = pickKeysToEvict(notifiedKeysRef.current, additions, 200, 50);
+    for (const key of toEvict) {
+      notifiedKeysRef.current.delete(key);
+    }
+    for (const key of additions) {
+      notifiedKeysRef.current.add(key);
+    }
+  };
+
   return {
     // State
     isSyncing,
@@ -1271,11 +1289,11 @@ export function useSyncController({
     lastUidNextByFolderRef,
     localDeleteReconcileByFolderRef,
     localDeleteReconcileByUidRef,
-    notifiedKeysRef,
     // Actions
     syncAccount,
     runSyncJob,
     recomputeThreads,
-    recomputeCategories
+    recomputeCategories,
+    seedNotificationDedupKeys
   };
 }
