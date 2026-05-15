@@ -1069,11 +1069,15 @@ export default function MailClient({
     // poll/stream tick would otherwise treat restored messages as new
     // mail. Seed the dedup ring with each restored message's RFC 5322
     // Message-ID (preserved across the move) so the planner skips them.
-    // `UndoMoveTarget.messageId` is the app's internal row id; the actual
-    // header lives on the Message itself.
+    // Prefer the header captured on the UndoMoveTarget at move time —
+    // the message has typically already been pruned from local state by
+    // the time undo runs, so a `messageById` lookup would miss.
     if (accountId === activeAccountId) {
       const dedupKeys = targets
-        .map((target) => messageById.get(target.messageId)?.messageId)
+        .map(
+          (target) =>
+            target.headerMessageId ?? messageById.get(target.messageId)?.messageId
+        )
         .filter((key): key is string => Boolean(key));
       if (dedupKeys.length > 0) {
         seedNotificationDedupKeys(dedupKeys);
