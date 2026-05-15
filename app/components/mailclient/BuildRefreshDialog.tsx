@@ -1,4 +1,5 @@
 import { AlertDialog, Button, Flex, Text } from "@radix-ui/themes";
+import { useState } from "react";
 import AlertDialogContent from "./message/AlertDialogContent";
 
 type BuildRefreshDialogProps = {
@@ -12,6 +13,12 @@ export default function BuildRefreshDialog({
 }: BuildRefreshDialogProps) {
   const normalizedVersion = buildVersion?.trim() ?? "";
   const open = normalizedVersion.length > 0;
+  const [isRefreshing, setIsRefreshing] = useState(false);
+
+  const handleClick = () => {
+    setIsRefreshing(true);
+    onRefresh();
+  };
 
   return (
     <AlertDialog.Root open={open} onOpenChange={() => undefined}>
@@ -28,9 +35,9 @@ export default function BuildRefreshDialog({
           </Text>
         </Flex>
         <Flex gap="3" mt="4" justify="end">
-          <AlertDialog.Action>
-            <Button onClick={onRefresh}>Refresh now</Button>
-          </AlertDialog.Action>
+          <Button onClick={handleClick} loading={isRefreshing} disabled={isRefreshing}>
+            Refresh now
+          </Button>
         </Flex>
       </AlertDialogContent>
     </AlertDialog.Root>
