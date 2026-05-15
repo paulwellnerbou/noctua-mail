@@ -24,6 +24,7 @@ import {
   type FolderConsistencyResponse
 } from "./syncFingerprint";
 import {
+  DEFAULT_MAX_NOTIFIED_KEYS,
   planNewMailNotifications,
   type IncomingMailItem
 } from "./syncNotificationFilter";
@@ -1256,12 +1257,19 @@ export function useSyncController({
   // we evict the full overflow in one pass since seeds can be arbitrarily
   // large. If the seed itself exceeds the cap, drop the oldest additions.
   const seedNotificationDedupKeys = (keys: readonly string[]) => {
-    const maxKeys = 200;
-    const additions = keys.filter((key) => key && !notifiedKeysRef.current.has(key));
+    // Dedup against the ring AND against itself — repeated keys would
+    // otherwise inflate the projected size and over-evict (Set.add silently
+    // ignores duplicates, so the ring would end up smaller than intended).
+    const additions = Array.from(
+      new Set(keys.filter((key) => key && !notifiedKeysRef.current.has(key)))
+    );
     if (additions.length === 0) return;
     const boundedAdditions =
-      additions.length > maxKeys ? additions.slice(-maxKeys) : additions;
-    const overflow = notifiedKeysRef.current.size + boundedAdditions.length - maxKeys;
+      additions.length > DEFAULT_MAX_NOTIFIED_KEYS
+        ? additions.slice(-DEFAULT_MAX_NOTIFIED_KEYS)
+        : additions;
+    const overflow =
+      notifiedKeysRef.current.size + boundedAdditions.length - DEFAULT_MAX_NOTIFIED_KEYS;
     if (overflow > 0) {
       const iterator = notifiedKeysRef.current.values();
       for (let i = 0; i < overflow; i += 1) {
