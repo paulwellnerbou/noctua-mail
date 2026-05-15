@@ -58,6 +58,33 @@ export function mergeCollapsedGroupsWithMeta(
   return next;
 }
 
+type ToggleAllGroupsInput = {
+  groupMeta: ReadonlyArray<{ key: string }>;
+  combinedGroups: ReadonlyArray<{ key: string; variant?: string }>;
+  collapsedGroups: Record<string, boolean>;
+};
+
+export function computeToggleAllGroupsState({
+  groupMeta,
+  combinedGroups,
+  collapsedGroups
+}: ToggleAllGroupsInput): Record<string, boolean> {
+  const anyOpen = combinedGroups.some(
+    (group) => !(collapsedGroups[group.key] ?? (group.variant === "topic-suggestions"))
+  );
+  const next: Record<string, boolean> = {};
+  // Include all keys known from groupMeta — for paginated groupings like sender/domain,
+  // not every group has loaded messages yet. Setting the state here ensures groups that
+  // materialize on later pages inherit the collapse-all decision.
+  groupMeta.forEach((meta) => {
+    next[meta.key] = anyOpen;
+  });
+  combinedGroups.forEach((group) => {
+    next[group.key] = anyOpen;
+  });
+  return next;
+}
+
 export function mergeCollapsedThreadsWithMessages(
   prev: Record<string, boolean>,
   messages: Message[]
@@ -206,15 +233,14 @@ export function useMessageListDerivedState({
   }, [visibleIndexById, visibleMessages]);
 
   const toggleAllGroups = useCallback(() => {
-    const anyOpen = combinedGroupedMessages.some(
-      (group) => !(collapsedGroups[group.key] ?? (group.variant === "topic-suggestions"))
+    setCollapsedGroups((prev) =>
+      computeToggleAllGroupsState({
+        groupMeta,
+        combinedGroups: combinedGroupedMessages,
+        collapsedGroups: prev
+      })
     );
-    const next: Record<string, boolean> = {};
-    combinedGroupedMessages.forEach((group) => {
-      next[group.key] = anyOpen;
-    });
-    setCollapsedGroups(next);
-  }, [collapsedGroups, combinedGroupedMessages, setCollapsedGroups]);
+  }, [combinedGroupedMessages, groupMeta, setCollapsedGroups]);
 
   return {
     threadScopeMessages,

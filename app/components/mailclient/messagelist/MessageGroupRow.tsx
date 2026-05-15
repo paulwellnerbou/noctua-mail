@@ -35,9 +35,12 @@ function MessageGroupRow({
   renderAsVirtualItem = true
 }: MessageGroupRowProps) {
   const isFlagged = group.key === "Flagged";
-  const count = group.count ?? group.items.length;
+  const totalCount = group.count ?? group.items.length;
+  const loadedCount = group.items.length;
+  const isPartiallyLoaded = group.count !== undefined && loadedCount < group.count;
+  const countLabel = isPartiallyLoaded ? `${loadedCount} / ${totalCount}` : `${totalCount}`;
   const showCount = group.showCount ?? true;
-  const isEmpty = group.items.length === 0;
+  const isEmpty = loadedCount === 0;
   const canToggle = !isEmpty || group.allowToggleWhenEmpty === true;
   const isTopicSuggestionGroup = group.variant === "topic-suggestions";
 
@@ -68,7 +71,7 @@ function MessageGroupRow({
           </span>
           <Text as="span" size="1">
             {getGroupLabel(group)}
-            {showCount ? ` · ${count}` : ""}
+            {showCount ? ` · ${countLabel}` : ""}
           </Text>
         </button>
       </Collapsible.Trigger>
