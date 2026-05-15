@@ -24,7 +24,6 @@ import {
   type FolderConsistencyResponse
 } from "./syncFingerprint";
 import {
-  pickKeysToEvict,
   planNewMailNotifications,
   type IncomingMailItem
 } from "./syncNotificationFilter";
@@ -1251,16 +1250,27 @@ export function useSyncController({
   // Seed the new-mail notification dedup ring with externally-known keys
   // (e.g. RFC 5322 Message-IDs of messages we're about to restore via undo,
   // which IMAP MOVE would otherwise resurface as "new" mail in the next
-  // sync). Applies the same FIFO eviction bound the planner uses so a
-  // large undo batch can't grow the Set unbounded.
+  // sync). Caps the Set at the same ceiling the planner uses so a large
+  // undo batch can't grow it unbounded — unlike the planner's incremental
+  // `pickKeysToEvict` (which only evicts one batchSize per call), here
+  // we evict the full overflow in one pass since seeds can be arbitrarily
+  // large. If the seed itself exceeds the cap, drop the oldest additions.
   const seedNotificationDedupKeys = (keys: readonly string[]) => {
+    const maxKeys = 200;
     const additions = keys.filter((key) => key && !notifiedKeysRef.current.has(key));
     if (additions.length === 0) return;
-    const toEvict = pickKeysToEvict(notifiedKeysRef.current, additions, 200, 50);
-    for (const key of toEvict) {
-      notifiedKeysRef.current.delete(key);
+    const boundedAdditions =
+      additions.length > maxKeys ? additions.slice(-maxKeys) : additions;
+    const overflow = notifiedKeysRef.current.size + boundedAdditions.length - maxKeys;
+    if (overflow > 0) {
+      const iterator = notifiedKeysRef.current.values();
+      for (let i = 0; i < overflow; i += 1) {
+        const next = iterator.next();
+        if (next.done) break;
+        notifiedKeysRef.current.delete(next.value);
+      }
     }
-    for (const key of additions) {
+    for (const key of boundedAdditions) {
       notifiedKeysRef.current.add(key);
     }
   };
