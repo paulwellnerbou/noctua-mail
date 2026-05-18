@@ -929,4 +929,64 @@ describe("processStandaloneCalendarInvite", () => {
     expect(result.failures).toEqual([]);
     expect(upsertCalendarEventByUid).not.toHaveBeenCalled();
   });
+
+  test("isolates a per-group failure when the existing-event lookup throws", async () => {
+    // First group's lookup blows up; second group should still process fine.
+    getCalendarEventByUid
+      .mockImplementationOnce(async () => {
+        throw new Error("lookup failed");
+      })
+      .mockResolvedValueOnce(null);
+    const ics = makeIcs([
+      "METHOD:REQUEST",
+      "BEGIN:VEVENT",
+      "UID:lookup-fails@example.test",
+      "SUMMARY:Lookup will fail",
+      "DTSTART:20260615T120000Z",
+      "DTEND:20260615T130000Z",
+      "END:VEVENT",
+      "BEGIN:VEVENT",
+      "UID:lookup-ok@example.test",
+      "SUMMARY:Lookup ok",
+      "DTSTART:20260616T120000Z",
+      "DTEND:20260616T130000Z",
+      "END:VEVENT"
+    ]);
+    const result = await processStandaloneCalendarInvite({
+      accountId: "acc-1",
+      icsSource: ics,
+      accountEmail: "paul@example.test"
+    });
+    expect(result.eventUids).toEqual(["lookup-ok@example.test"]);
+    expect(result.failures).toEqual([
+      { eventUid: "lookup-fails@example.test", message: "lookup failed" }
+    ]);
+  });
+
+  test("reports the upsert as successful even when reminder reschedule throws", async () => {
+    rescheduleCalendarRemindersByEventUid.mockImplementationOnce(async () => {
+      throw new Error("reminders unavailable");
+    });
+    const ics = makeIcs([
+      "METHOD:REQUEST",
+      "BEGIN:VEVENT",
+      "UID:follow-up-fails@example.test",
+      "SUMMARY:Saved but reminder failed",
+      "DTSTART:20260615T120000Z",
+      "DTEND:20260615T130000Z",
+      "END:VEVENT"
+    ]);
+    const result = await processStandaloneCalendarInvite({
+      accountId: "acc-1",
+      icsSource: ics,
+      accountEmail: "paul@example.test"
+    });
+    // The row was written, so the import counts as successful.
+    expect(result.eventUids).toEqual(["follow-up-fails@example.test"]);
+    expect(result.imports[0]?.action).toBe("upsert");
+    // The reminder failure is surfaced as a per-group failure for the UI.
+    expect(result.failures).toEqual([
+      { eventUid: "follow-up-fails@example.test", message: "reminders unavailable" }
+    ]);
+  });
 });

@@ -6,8 +6,10 @@ import {
   formatImportedEntriesMessage,
   postIcsImport,
   readIcsSourcesFromDataTransfer,
-  type IcsImportEntry
+  type IcsImportEntry,
+  type ReadIcsSourcesResult
 } from "@/lib/calendarImportClient";
+import { dispatchCalendarRemindersUpdatedEvent } from "@/app/components/mailclient/utils/calendarReminders";
 import { dispatchCalendarEventsUpdatedEvent } from "./calendarEventsClient";
 
 export type CalendarIcsDropStatus =
@@ -91,9 +93,9 @@ export function useCalendarIcsDrop({ accountId }: Options): CalendarIcsDropApi {
       dragDepthRef.current = 0;
       setIsDragOver(false);
 
-      let sources: string[];
+      let readResult: ReadIcsSourcesResult;
       try {
-        sources = await readIcsSourcesFromDataTransfer(event.dataTransfer);
+        readResult = await readIcsSourcesFromDataTransfer(event.dataTransfer);
       } catch (error) {
         setStatus({
           kind: "error",
@@ -101,11 +103,16 @@ export function useCalendarIcsDrop({ accountId }: Options): CalendarIcsDropApi {
         });
         return;
       }
+      const { sources, matchedIcsFile } = readResult;
       if (sources.length === 0) {
-        // The user dropped files but none were .ics — silently ignore, the
-        // user can drop again with a real calendar file. Only surface an
-        // error when a non-file payload (e.g. inline text/calendar) had no
-        // usable content.
+        // Tell apart three "no usable content" cases:
+        //  - an .ics file was dropped but it was empty → surface error
+        //  - non-.ics files were dropped → silently ignore (user can retry)
+        //  - inline text/calendar payload was empty   → surface error
+        if (matchedIcsFile) {
+          setStatus({ kind: "error", message: "The dropped .ics file is empty." });
+          return;
+        }
         if (droppedFileCount > 0) return;
         setStatus({ kind: "error", message: "No .ics data in the dropped content." });
         return;
@@ -136,6 +143,12 @@ export function useCalendarIcsDrop({ accountId }: Options): CalendarIcsDropApi {
         // (FullCalendar's getApi().refetchEvents() doesn't help here — the
         // view is React-state-driven and listens for this custom event.)
         dispatchCalendarEventsUpdatedEvent();
+        // Standalone imports reschedule (or cancel) calendar reminders via
+        // rescheduleCalendarRemindersByEventUid / cancelCalendarRemindersByEventUid,
+        // so the pending-reminders panel and notification dedup state both
+        // need to refresh. useReminderNotifications listens for this event
+        // (otherwise it'd be stale until the next 60s poll tick).
+        dispatchCalendarRemindersUpdatedEvent();
         const summary = formatImportedEntriesMessage(importedEntries);
         if (errors.length === 0) {
           setStatus({ kind: "success", message: summary });

@@ -81,30 +81,44 @@ export function dataTransferHasIcs(dataTransfer: DataTransfer | null): boolean {
   return false;
 }
 
+export type ReadIcsSourcesResult = {
+  /** Non-empty ICS sources extracted from files or inline payloads. */
+  sources: string[];
+  /** True when the drop contained at least one .ics file (even if empty). */
+  matchedIcsFile: boolean;
+};
+
 /**
  * Pulls ICS source strings out of a drop event. Accepts any of:
  * - dropped `File`s whose name ends in `.ics` or whose type is `text/calendar`
  * - a `text/calendar` data-transfer string
+ *
+ * Returns both the parsed sources and a flag indicating whether any of the
+ * dropped files looked like an ICS at all, so callers can distinguish:
+ *   - "no .ics files dropped"          → silently ignore
+ *   - "an .ics file was dropped but empty" → surface an error
  */
 export async function readIcsSourcesFromDataTransfer(
   dataTransfer: DataTransfer | null
-): Promise<string[]> {
-  if (!dataTransfer) return [];
+): Promise<ReadIcsSourcesResult> {
+  if (!dataTransfer) return { sources: [], matchedIcsFile: false };
   const sources: string[] = [];
+  let matchedIcsFile = false;
 
   for (const file of Array.from(dataTransfer.files)) {
     if (file.type === "text/calendar" || ICS_EXT_RE.test(file.name)) {
+      matchedIcsFile = true;
       const text = await file.text();
       if (text.trim()) sources.push(text);
     }
   }
 
-  if (sources.length === 0) {
+  if (sources.length === 0 && !matchedIcsFile) {
     const inline = dataTransfer.getData("text/calendar");
     if (inline?.trim()) sources.push(inline);
   }
 
-  return sources;
+  return { sources, matchedIcsFile };
 }
 
 type ImportResponseBody = {

@@ -513,17 +513,26 @@ export async function processStandaloneCalendarInvite({
   const imports: ProcessStandaloneCalendarInviteImport[] = [];
   const failures: ProcessStandaloneCalendarInviteFailure[] = [];
   for (const group of groups) {
-    const existingEvent = await getCalendarEventByUid(accountId, group.eventUid);
-    const actionType = resolveInviteActionType(group, existingEvent);
-
+    // Wrap the entire per-group flow — including the initial existing-event
+    // lookup — in try/catch. Without this, a DB hiccup on lookup would
+    // throw out of the whole function and the caller would lose any
+    // already-imported events / partial-failure detail. We resolve
+    // actionType lazily so the catch block can still tag the failure with
+    // whatever we know about this group.
+    let actionType: CalendarInviteActionType | "unknown" = "unknown";
     try {
+      const existingEvent = await getCalendarEventByUid(accountId, group.eventUid);
+      actionType = resolveInviteActionType(group, existingEvent);
+
       if (actionType === "cancellation") {
         // A CANCEL for an UID we never saw is a no-op — don't pretend we
         // imported it (the API would otherwise return success and the UI
         // would show "Calendar updated" with nothing actually changed).
         if (!existingEvent) continue;
         await cancelCalendarEventByUid(accountId, group.eventUid);
-        await cancelCalendarRemindersByEventUid(accountId, group.eventUid);
+        // The row is gone; mark this UID as imported now so a follow-up
+        // reminder-cancel failure can't downgrade the cancellation to a
+        // "failed" status that would leave the UI showing a stale event.
         eventUids.push(group.eventUid);
         imports.push({
           eventUid: group.eventUid,
@@ -532,6 +541,15 @@ export async function processStandaloneCalendarInvite({
           startAtMs: existingEvent.startAtMs,
           allDay: existingEvent.allDay
         });
+        try {
+          await cancelCalendarRemindersByEventUid(accountId, group.eventUid);
+        } catch (error) {
+          // Surface but don't undo the cancellation.
+          failures.push({
+            eventUid: group.eventUid,
+            message: error instanceof Error ? error.message : "Reminder cleanup failed"
+          });
+        }
         continue;
       }
 
@@ -581,19 +599,11 @@ export async function processStandaloneCalendarInvite({
       };
 
       const savedEvent = await upsertCalendarEventByUid(accountId, sanitized);
-      await reconcileSeriesAnchorSiblings(accountId, savedEvent);
-      await rescheduleCalendarRemindersByEventUid(accountId, group.eventUid, {
-        eventTitle: savedEvent.summary,
-        eventLocation: savedEvent.location,
-        eventDescription: savedEvent.description,
-        startTimezone: savedEvent.startTimezone,
-        recurrenceRule: savedEvent.recurrenceRule,
-        recurrenceDates: savedEvent.recurrenceDates,
-        excludedDates: savedEvent.excludedDates,
-        eventStartAtMs: savedEvent.startAtMs,
-        eventEndAtMs: savedEvent.endAtMs,
-        messageId: savedEvent.messageId ?? ""
-      });
+      // Mark the import successful as soon as the row is written. Any
+      // follow-up failure (reconcile / reminder reschedule) is surfaced as
+      // a separate per-group failure entry rather than a full rollback,
+      // because the calendar row is already in place and the UI needs to
+      // refresh to show it.
       eventUids.push(savedEvent.eventUid);
       imports.push({
         eventUid: savedEvent.eventUid,
@@ -602,6 +612,26 @@ export async function processStandaloneCalendarInvite({
         startAtMs: savedEvent.startAtMs,
         allDay: savedEvent.allDay
       });
+      try {
+        await reconcileSeriesAnchorSiblings(accountId, savedEvent);
+        await rescheduleCalendarRemindersByEventUid(accountId, group.eventUid, {
+          eventTitle: savedEvent.summary,
+          eventLocation: savedEvent.location,
+          eventDescription: savedEvent.description,
+          startTimezone: savedEvent.startTimezone,
+          recurrenceRule: savedEvent.recurrenceRule,
+          recurrenceDates: savedEvent.recurrenceDates,
+          excludedDates: savedEvent.excludedDates,
+          eventStartAtMs: savedEvent.startAtMs,
+          eventEndAtMs: savedEvent.endAtMs,
+          messageId: savedEvent.messageId ?? ""
+        });
+      } catch (error) {
+        failures.push({
+          eventUid: group.eventUid,
+          message: error instanceof Error ? error.message : "Reminder reschedule failed"
+        });
+      }
     } catch (error) {
       console.error("[calendarInviteProcessor] failed to import standalone invite", {
         accountId,
