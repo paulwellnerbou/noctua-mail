@@ -124,9 +124,15 @@ export function useCalendarIcsDrop({ accountId }: Options): CalendarIcsDropApi {
         //  - non-.ics files were dropped → silently ignore (user can retry)
         //  - inline text/calendar payload was empty   → surface error
         if (matchedIcsFile) {
+          const plural = emptyIcsFileNames.length > 1;
           const detail =
             emptyIcsFileNames.length > 0 ? `: ${emptyIcsFileNames.join(", ")}` : "";
-          setStatus({ kind: "error", message: `The dropped .ics file is empty${detail}.` });
+          setStatus({
+            kind: "error",
+            message: plural
+              ? `The dropped .ics files are empty${detail}.`
+              : `The dropped .ics file is empty${detail}.`
+          });
           return;
         }
         if (droppedFileCount > 0) return;
