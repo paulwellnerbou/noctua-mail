@@ -38,10 +38,16 @@ export type CalendarIcsDropApi = {
 };
 
 /**
- * Wires up an HTML element as a drop target for `.ics` files. Reads the
- * dropped file(s) (or inline text/calendar payload), POSTs each to
- * `/api/calendar/import`, and dispatches the calendar-events-updated event
- * so every mounted CalendarView re-fetches from the server.
+ * Wires up an HTML element as a drop target for `.ics` files. On successful
+ * import the hook:
+ *   1. Reads the dropped file(s) (or inline text/calendar payload)
+ *   2. POSTs each to `/api/calendar/import`
+ *   3. Dispatches `noctua:calendar-events-updated` so every mounted CalendarView
+ *      re-fetches from the server
+ *   4. Dispatches `noctua:calendar-reminders-updated` so pending-reminders
+ *      state and notification dedup refresh immediately (otherwise stale
+ *      until the next 60s poll)
+ *   5. Sets a transient success/error status pill rendered by CalendarDropOverlay
  */
 export function useCalendarIcsDrop({ accountId }: Options): CalendarIcsDropApi {
   const [isDragOver, setIsDragOver] = useState(false);
@@ -59,6 +65,14 @@ export function useCalendarIcsDrop({ accountId }: Options): CalendarIcsDropApi {
     dragDepthRef.current += 1;
     if (dragDepthRef.current === 1) {
       setIsDragOver(true);
+      // The previous drop's success/error pill takes priority over the
+      // hover prompt in CalendarDropOverlay, so an old pill could shadow
+      // "Drop .ics file to import" while the user is dragging again.
+      // Clear those transient kinds (but keep "importing" intact in case
+      // a second drag happens while an earlier import is still in flight).
+      setStatus((prev) =>
+        prev.kind === "success" || prev.kind === "error" ? { kind: "idle" } : prev
+      );
     }
   }, []);
 

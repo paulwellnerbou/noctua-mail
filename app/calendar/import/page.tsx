@@ -52,7 +52,11 @@ export default function CalendarImportPage() {
       }
       try {
         const errors: string[] = [];
-        let importedCount = 0;
+        // Count imported events (across all files) rather than imported
+        // files, so a single-file ICS whose response contained N upserts
+        // and M failures reports honestly (e.g. "Imported 4 events with
+        // 1 failure") instead of misleading "Imported 1/1".
+        let importedEventCount = 0;
         for (const handle of files) {
           const { name, text } = await readFile(handle);
           setState({ kind: "importing", filename: name });
@@ -62,7 +66,7 @@ export default function CalendarImportPage() {
           }
           const result = await postIcsImport(text);
           if (result.ok) {
-            importedCount += 1;
+            importedEventCount += result.imports?.length ?? result.eventUids?.length ?? 0;
             if (result.failures) {
               for (const f of result.failures) errors.push(`${name}: ${f.message}`);
             }
@@ -72,13 +76,15 @@ export default function CalendarImportPage() {
         }
         // Only redirect to the calendar if every file imported cleanly; if
         // anything failed, stay on this page so the user actually sees the
-        // error message instead of silently losing it under a navigation.
-        if (importedCount > 0 && errors.length === 0) {
+        // error message instead of losing it under a navigation.
+        if (importedEventCount > 0 && errors.length === 0) {
           router.replace("/?openCalendar=1");
-        } else if (importedCount > 0) {
+        } else if (importedEventCount > 0) {
+          const eventLabel = importedEventCount === 1 ? "1 event" : `${importedEventCount} events`;
+          const failureLabel = errors.length === 1 ? "1 failure" : `${errors.length} failures`;
           setState({
             kind: "error",
-            message: `Imported ${importedCount}/${files.length}. ${errors.join("; ")}`
+            message: `Imported ${eventLabel} with ${failureLabel}: ${errors.join("; ")}`
           });
         } else {
           setState({ kind: "error", message: errors[0] ?? "Import failed" });

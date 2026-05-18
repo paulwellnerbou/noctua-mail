@@ -989,4 +989,135 @@ describe("processStandaloneCalendarInvite", () => {
       { eventUid: "follow-up-fails@example.test", message: "reminders unavailable" }
     ]);
   });
+
+  test("evicts superseded occurrence snapshots and messageIds when an instance reschedules", async () => {
+    // Existing event: series with one rescheduled occurrence at 2026-06-08
+    // (original recurrence-id 2026-06-08T10:00Z, currently moved to 2026-06-08T14:00Z).
+    const originalRecurrenceId = new Date("2026-06-08T10:00:00Z").getTime();
+    const oldOccurrenceStart = new Date("2026-06-08T14:00:00Z").getTime();
+    const existing: CalendarEvent = {
+      id: "cal-series",
+      accountId: "acc-1",
+      eventUid: "series-uid@example.test",
+      summary: "Weekly standup",
+      startAtMs: new Date("2026-06-01T10:00:00Z").getTime(),
+      allDay: false,
+      sourceType: "email",
+      recurrenceRule: "FREQ=WEEKLY",
+      recurrenceDates: [oldOccurrenceStart],
+      occurrenceMessageIds: { [String(oldOccurrenceStart)]: "msg-old-occurrence" },
+      occurrenceSnapshots: {
+        [String(oldOccurrenceStart)]: { sourceSubject: "Old override invite" }
+      },
+      occurrenceRecurrenceIds: { [String(oldOccurrenceStart)]: originalRecurrenceId },
+      createdAtMs: 1,
+      updatedAtMs: 1
+    };
+    getCalendarEventByUid.mockResolvedValue(existing);
+
+    // New ICS reschedules the same RECURRENCE-ID to 2026-06-08T16:00Z.
+    const ics = makeIcs([
+      "METHOD:REQUEST",
+      "BEGIN:VEVENT",
+      "UID:series-uid@example.test",
+      "SUMMARY:Weekly standup (rescheduled)",
+      "RECURRENCE-ID:20260608T100000Z",
+      "DTSTART:20260608T160000Z",
+      "DTEND:20260608T163000Z",
+      "END:VEVENT"
+    ]);
+
+    const result = await processStandaloneCalendarInvite({
+      accountId: "acc-1",
+      icsSource: ics,
+      accountEmail: "paul@example.test"
+    });
+
+    expect(result.eventUids).toEqual(["series-uid@example.test"]);
+    expect(result.failures).toEqual([]);
+
+    const newOccurrenceStart = new Date("2026-06-08T16:00:00Z").getTime();
+    const [, fields] = upsertCalendarEventByUid.mock.calls[0];
+
+    // The old occurrence start key MUST be evicted from snapshots /
+    // messageIds / recurrenceIds — otherwise stale per-occurrence data
+    // would survive the reschedule and the UI would point at a removed
+    // occurrence start.
+    // occurrenceSnapshots: only had the superseded entry → eviction leaves
+    // an empty map, which is normalized back to undefined.
+    expect(fields.occurrenceSnapshots?.[String(oldOccurrenceStart)]).toBeUndefined();
+    // occurrenceMessageIds: same — the only existing key was superseded,
+    // and the standalone import has no message link to add for the new start.
+    expect(fields.occurrenceMessageIds?.[String(oldOccurrenceStart)]).toBeUndefined();
+    // occurrenceRecurrenceIds is populated by buildMergedCalendarEventFields
+    // for the new instance occurrence; assert both eviction and forwarding.
+    expect(fields.occurrenceRecurrenceIds).toBeDefined();
+    expect(fields.occurrenceRecurrenceIds?.[String(oldOccurrenceStart)]).toBeUndefined();
+    expect(fields.occurrenceRecurrenceIds?.[String(newOccurrenceStart)]).toBe(originalRecurrenceId);
+  });
+
+  test("preserves a non-superseded occurrence snapshot through a reschedule of a sibling occurrence", async () => {
+    // Existing event: two rescheduled occurrences. The new ICS reschedules
+    // only the first one, so the second's snapshot must survive untouched.
+    const occurrenceA_recurrenceId = new Date("2026-06-08T10:00:00Z").getTime();
+    const occurrenceA_oldStart = new Date("2026-06-08T14:00:00Z").getTime();
+    const occurrenceB_recurrenceId = new Date("2026-06-15T10:00:00Z").getTime();
+    const occurrenceB_currentStart = new Date("2026-06-15T15:00:00Z").getTime();
+
+    const existing: CalendarEvent = {
+      id: "cal-series",
+      accountId: "acc-1",
+      eventUid: "series-mixed@example.test",
+      summary: "Weekly standup",
+      startAtMs: new Date("2026-06-01T10:00:00Z").getTime(),
+      allDay: false,
+      sourceType: "email",
+      recurrenceRule: "FREQ=WEEKLY",
+      recurrenceDates: [occurrenceA_oldStart, occurrenceB_currentStart],
+      occurrenceMessageIds: {
+        [String(occurrenceA_oldStart)]: "msg-A-old",
+        [String(occurrenceB_currentStart)]: "msg-B-keep"
+      },
+      occurrenceSnapshots: {
+        [String(occurrenceA_oldStart)]: { sourceSubject: "Old A override" },
+        [String(occurrenceB_currentStart)]: { sourceSubject: "B should survive" }
+      },
+      occurrenceRecurrenceIds: {
+        [String(occurrenceA_oldStart)]: occurrenceA_recurrenceId,
+        [String(occurrenceB_currentStart)]: occurrenceB_recurrenceId
+      },
+      createdAtMs: 1,
+      updatedAtMs: 1
+    };
+    getCalendarEventByUid.mockResolvedValue(existing);
+
+    // Reschedule only occurrence A.
+    const ics = makeIcs([
+      "METHOD:REQUEST",
+      "BEGIN:VEVENT",
+      "UID:series-mixed@example.test",
+      "SUMMARY:Weekly standup (A rescheduled)",
+      "RECURRENCE-ID:20260608T100000Z",
+      "DTSTART:20260608T160000Z",
+      "DTEND:20260608T163000Z",
+      "END:VEVENT"
+    ]);
+
+    const result = await processStandaloneCalendarInvite({
+      accountId: "acc-1",
+      icsSource: ics,
+      accountEmail: "paul@example.test"
+    });
+    expect(result.eventUids).toEqual(["series-mixed@example.test"]);
+
+    const [, fields] = upsertCalendarEventByUid.mock.calls[0];
+    // B's snapshot must survive untouched (it wasn't superseded).
+    expect(fields.occurrenceSnapshots?.[String(occurrenceB_currentStart)]).toEqual({
+      sourceSubject: "B should survive"
+    });
+    expect(fields.occurrenceMessageIds?.[String(occurrenceB_currentStart)]).toBe("msg-B-keep");
+    // A's old start must be evicted everywhere.
+    expect(fields.occurrenceSnapshots?.[String(occurrenceA_oldStart)]).toBeUndefined();
+    expect(fields.occurrenceMessageIds?.[String(occurrenceA_oldStart)]).toBeUndefined();
+  });
 });
