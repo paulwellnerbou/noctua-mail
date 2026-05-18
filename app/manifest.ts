@@ -27,6 +27,18 @@ export default function manifest(): MetadataRoute.Manifest {
         sizes: "32x32",
         type: "image/png"
       }
+    ],
+    // PWA File Handling API: register as a handler for .ics calendar files.
+    // When the OS launches the PWA via a double-clicked ICS, the file is
+    // delivered to /calendar/import via window.launchQueue. Supported on
+    // Chromium desktop/Android installed PWAs; ignored elsewhere.
+    file_handlers: [
+      {
+        action: "/calendar/import",
+        accept: {
+          "text/calendar": [".ics"]
+        }
+      }
     ]
   };
 }

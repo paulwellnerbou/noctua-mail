@@ -1,12 +1,14 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type FullCalendar from "@fullcalendar/react";
 import { DropdownMenu, Flex, Heading, IconButton } from "@radix-ui/themes";
 import { CalendarDays, ExternalLink, MoreVertical, PanelRight, X } from "lucide-react";
 import { openDetachedWindow } from "@/lib/ui/openDetachedWindow";
 import CalendarEventBrowser from "./CalendarEventBrowser";
+import CalendarDropOverlay from "./CalendarDropOverlay";
+import { useCalendarIcsDrop } from "./useCalendarIcsDrop";
 import styles from "./CalendarPopover.module.css";
 import {
   computeResizedRect,
@@ -103,6 +105,13 @@ export default function CalendarPopover({
   isRecomputingRelations
 }: Props) {
   const calendarRef = useRef<FullCalendar>(null);
+  const handleImported = useCallback(() => {
+    calendarRef.current?.getApi().refetchEvents();
+  }, []);
+  const { dropProps, isDragOver, status, resetStatus } = useCalendarIcsDrop({
+    accountId,
+    onImported: handleImported
+  });
   const [position, setPosition] = useState<Position>(getInitialPosition);
   const [size, setSize] = useState<Size>({ width: PANEL_WIDTH, height: PANEL_HEIGHT });
   // Tracks the teardown for whichever pointer gesture is currently active
@@ -281,6 +290,7 @@ export default function CalendarPopover({
     <div
       className={styles.floatingPanel}
       style={{ left: position.x, top: position.y, width: size.width, height: size.height }}
+      {...dropProps}
     >
       <Flex align="center" justify="between" className={styles.header} onPointerDown={handleDragStart}>
         <Flex align="center" gap="2">
@@ -330,6 +340,8 @@ export default function CalendarPopover({
           } : undefined}
         />
       </div>
+
+      <CalendarDropOverlay isDragOver={isDragOver} status={status} onResetStatus={resetStatus} />
 
       {ALL_HANDLES.map((handle) =>
         // The SE corner is the "real" keyboard-accessible resize control —

@@ -4410,6 +4410,20 @@ export default function MailClient({
   };
 
   const [openExceptionPanelRequest, setOpenExceptionPanelRequest] = useState<number | undefined>(undefined);
+  const [openCalendarPanelRequest, setOpenCalendarPanelRequest] = useState<number | undefined>(undefined);
+
+  // The PWA file handler at /calendar/import redirects to "/?openCalendar=1"
+  // after importing an .ics, so we open the calendar popover here on mount.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("openCalendar") !== "1") return;
+    setOpenCalendarPanelRequest((prev) => (typeof prev === "number" ? prev + 1 : 1));
+    params.delete("openCalendar");
+    const query = params.toString();
+    const nextUrl = `${window.location.pathname}${query ? `?${query}` : ""}${window.location.hash}`;
+    window.history.replaceState({}, "", nextUrl);
+  }, []);
   const handleNoticeOpen = (notice: InAppNotice) => {
     const jumpTarget = notice.messageId ?? notice.ids?.[0];
     if (jumpTarget) {
@@ -5227,6 +5241,7 @@ export default function MailClient({
           setExceptionEntries([]);
         }}
         openExceptionPanelRequest={openExceptionPanelRequest}
+        openCalendarPanelRequest={openCalendarPanelRequest}
         formatRelativeTime={formatRelativeTime}
         onReloginAccount={handleOpenReloginFromException}
         onOpenCalendarSidebar={() => setCalendarSidebarOpen(true)}

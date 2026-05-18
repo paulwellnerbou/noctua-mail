@@ -1,0 +1,34 @@
+.overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 50;
+  pointer-events: none;
+  background: color-mix(in srgb, var(--accent-3) 75%, transparent);
+  outline: 2px dashed var(--accent-9);
+  outline-offset: -6px;
+  border-radius: inherit;
+  animation: fadeIn 120ms ease-out;
+}
+
+.message {
+  background: var(--color-panel-solid);
+  border: 1px solid var(--accent-7);
+  border-radius: 8px;
+  padding: 8px 14px;
+  font-size: 13px;
+  color: var(--accent-12);
+  box-shadow: var(--shadow-3);
+}
+
+.errorMessage {
+  border-color: var(--red-7);
+  color: var(--red-12);
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}

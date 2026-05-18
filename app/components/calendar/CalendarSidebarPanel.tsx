@@ -1,11 +1,13 @@
 "use client";
 
-import { useRef } from "react";
+import { useCallback, useRef } from "react";
 import type FullCalendar from "@fullcalendar/react";
 import { DropdownMenu, Flex, Heading, IconButton } from "@radix-ui/themes";
 import { X, ExternalLink, MoreVertical } from "lucide-react";
 import { openDetachedWindow } from "@/lib/ui/openDetachedWindow";
 import CalendarEventBrowser from "./CalendarEventBrowser";
+import CalendarDropOverlay from "./CalendarDropOverlay";
+import { useCalendarIcsDrop } from "./useCalendarIcsDrop";
 import styles from "./CalendarSidebarPanel.module.css";
 
 type Props = {
@@ -29,6 +31,14 @@ export default function CalendarSidebarPanel({
 }: Props) {
   const calendarRef = useRef<FullCalendar>(null);
 
+  const handleImported = useCallback(() => {
+    calendarRef.current?.getApi().refetchEvents();
+  }, []);
+  const { dropProps, isDragOver, status, resetStatus } = useCalendarIcsDrop({
+    accountId,
+    onImported: handleImported
+  });
+
   const handleOpenWindow = () => {
     openDetachedWindow(`/calendar/window?accountId=${encodeURIComponent(accountId)}`);
   };
@@ -40,7 +50,7 @@ export default function CalendarSidebarPanel({
   };
 
   return (
-    <div className={styles.panel}>
+    <div className={styles.panel} {...dropProps}>
       <Flex align="center" justify="between" className={styles.header}>
         <Heading size="2">Calendar</Heading>
         <Flex gap="1" align="center">
@@ -89,6 +99,7 @@ export default function CalendarSidebarPanel({
           onFindRelatedByInviteUid={onFindRelatedByInviteUid}
         />
       </div>
+      <CalendarDropOverlay isDragOver={isDragOver} status={status} onResetStatus={resetStatus} />
     </div>
   );
 }

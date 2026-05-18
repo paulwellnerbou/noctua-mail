@@ -458,3 +458,89 @@ export async function processCalendarInviteForMessage({
     })
   };
 }
+
+export type ProcessStandaloneCalendarInviteParams = {
+  accountId: string;
+  icsSource: string;
+  accountEmail?: string | null;
+};
+
+export type ProcessStandaloneCalendarInviteResult = {
+  eventUids: string[];
+};
+
+/**
+ * Imports an ICS source that did not arrive as an email attachment — e.g. a
+ * .ics file opened through the PWA File Handling API. Mirrors the upsert
+ * portion of `processCalendarInviteForMessage` but skips everything that
+ * requires a backing message (per-message invite states, email snapshots,
+ * automatic reminders tied to a message).
+ */
+export async function processStandaloneCalendarInvite({
+  accountId,
+  icsSource,
+  accountEmail
+}: ProcessStandaloneCalendarInviteParams): Promise<ProcessStandaloneCalendarInviteResult> {
+  if (!icsSource.trim()) return { eventUids: [] };
+  const groups = collectCalendarInviteMutationGroups(icsSource);
+  if (groups.length === 0) return { eventUids: [] };
+
+  const eventUids: string[] = [];
+  for (const group of groups) {
+    const existingEvent = await getCalendarEventByUid(accountId, group.eventUid);
+    const actionType = resolveInviteActionType(group, existingEvent);
+
+    try {
+      if (actionType === "cancellation") {
+        await cancelCalendarEventByUid(accountId, group.eventUid);
+        await cancelCalendarRemindersByEventUid(accountId, group.eventUid);
+        eventUids.push(group.eventUid);
+        continue;
+      }
+
+      const mergedEvent = buildMergedCalendarEventFields(group, "", icsSource, existingEvent, accountEmail);
+      if (!mergedEvent) continue;
+
+      // Strip placeholder messageId values that buildMergedCalendarEventFields
+      // wrote because we passed "". A standalone import has no source message,
+      // so preserve whatever the existing event had (or leave undefined).
+      const sanitized = {
+        ...mergedEvent,
+        messageId: mergedEvent.messageId?.trim() ? mergedEvent.messageId : existingEvent?.messageId,
+        occurrenceMessageIds: (() => {
+          if (!mergedEvent.occurrenceMessageIds) return undefined;
+          const filtered: Record<string, string> = {};
+          for (const [key, value] of Object.entries(mergedEvent.occurrenceMessageIds)) {
+            if (value && value.trim()) filtered[key] = value;
+          }
+          return Object.keys(filtered).length > 0 ? filtered : undefined;
+        })(),
+        sourceType: existingEvent?.sourceType ?? "local"
+      };
+
+      const savedEvent = await upsertCalendarEventByUid(accountId, sanitized);
+      await reconcileSeriesAnchorSiblings(accountId, savedEvent);
+      await rescheduleCalendarRemindersByEventUid(accountId, group.eventUid, {
+        eventTitle: savedEvent.summary,
+        eventLocation: savedEvent.location,
+        eventDescription: savedEvent.description,
+        startTimezone: savedEvent.startTimezone,
+        recurrenceRule: savedEvent.recurrenceRule,
+        recurrenceDates: savedEvent.recurrenceDates,
+        excludedDates: savedEvent.excludedDates,
+        eventStartAtMs: savedEvent.startAtMs,
+        eventEndAtMs: savedEvent.endAtMs,
+        messageId: savedEvent.messageId ?? ""
+      });
+      eventUids.push(savedEvent.eventUid);
+    } catch (error) {
+      console.error("[calendarInviteProcessor] failed to import standalone invite", {
+        accountId,
+        eventUid: group.eventUid,
+        actionType,
+        error
+      });
+    }
+  }
+  return { eventUids };
+}

@@ -1,11 +1,13 @@
 "use client";
 
-import { Suspense, useRef, useState } from "react";
+import { Suspense, useCallback, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import type FullCalendar from "@fullcalendar/react";
 import { DropdownMenu, IconButton, Text } from "@radix-ui/themes";
 import { MoreVertical } from "lucide-react";
 import CalendarEventBrowser from "@/app/components/calendar/CalendarEventBrowser";
+import CalendarDropOverlay from "@/app/components/calendar/CalendarDropOverlay";
+import { useCalendarIcsDrop } from "@/app/components/calendar/useCalendarIcsDrop";
 import { buildAccountCalendarRecomputeRelationsPath } from "@/lib/accountApiPaths";
 import styles from "./page.module.css";
 
@@ -14,6 +16,13 @@ function CalendarWindowContent() {
   const accountId = searchParams.get("accountId") ?? "";
   const calendarRef = useRef<FullCalendar>(null);
   const [recomputingRelations, setRecomputingRelations] = useState(false);
+  const handleImported = useCallback(() => {
+    calendarRef.current?.getApi().refetchEvents();
+  }, []);
+  const { dropProps, isDragOver, status, resetStatus } = useCalendarIcsDrop({
+    accountId,
+    onImported: handleImported
+  });
 
   const handleRecomputeRelations = async () => {
     if (recomputingRelations) return;
@@ -65,11 +74,12 @@ function CalendarWindowContent() {
           </DropdownMenu.Content>
         </DropdownMenu.Root>
       </div>
-      <div className={styles.detailContainer}>
+      <div className={styles.detailContainer} {...dropProps}>
         <CalendarEventBrowser
           accountId={accountId}
           calendarRef={calendarRef}
         />
+        <CalendarDropOverlay isDragOver={isDragOver} status={status} onResetStatus={resetStatus} />
       </div>
     </div>
   );
