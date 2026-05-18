@@ -470,9 +470,22 @@ export type ProcessStandaloneCalendarInviteFailure = {
   message: string;
 };
 
+export type ProcessStandaloneCalendarInviteImport = {
+  eventUid: string;
+  /** "upsert" for new/updated events; "cancellation" for a CANCEL that hit a known UID. */
+  action: "upsert" | "cancellation";
+  /** Event summary at the moment of import. Empty for cancellations of rows we already removed. */
+  summary?: string;
+  /** Start time of the event (ms). Cancellations may not have one if the row was deleted. */
+  startAtMs?: number;
+  allDay?: boolean;
+};
+
 export type ProcessStandaloneCalendarInviteResult = {
   /** UIDs that were upserted, cancelled, or whose cancellation affected an existing row. */
   eventUids: string[];
+  /** Detailed metadata for each imported event so callers can build user-facing messages. */
+  imports: ProcessStandaloneCalendarInviteImport[];
   /** Per-group errors that were caught while processing. */
   failures: ProcessStandaloneCalendarInviteFailure[];
 };
@@ -492,11 +505,12 @@ export async function processStandaloneCalendarInvite({
   icsSource,
   accountEmail
 }: ProcessStandaloneCalendarInviteParams): Promise<ProcessStandaloneCalendarInviteResult> {
-  if (!icsSource.trim()) return { eventUids: [], failures: [] };
+  if (!icsSource.trim()) return { eventUids: [], imports: [], failures: [] };
   const groups = collectCalendarInviteMutationGroups(icsSource);
-  if (groups.length === 0) return { eventUids: [], failures: [] };
+  if (groups.length === 0) return { eventUids: [], imports: [], failures: [] };
 
   const eventUids: string[] = [];
+  const imports: ProcessStandaloneCalendarInviteImport[] = [];
   const failures: ProcessStandaloneCalendarInviteFailure[] = [];
   for (const group of groups) {
     const existingEvent = await getCalendarEventByUid(accountId, group.eventUid);
@@ -511,6 +525,13 @@ export async function processStandaloneCalendarInvite({
         await cancelCalendarEventByUid(accountId, group.eventUid);
         await cancelCalendarRemindersByEventUid(accountId, group.eventUid);
         eventUids.push(group.eventUid);
+        imports.push({
+          eventUid: group.eventUid,
+          action: "cancellation",
+          summary: existingEvent.summary,
+          startAtMs: existingEvent.startAtMs,
+          allDay: existingEvent.allDay
+        });
         continue;
       }
 
@@ -574,6 +595,13 @@ export async function processStandaloneCalendarInvite({
         messageId: savedEvent.messageId ?? ""
       });
       eventUids.push(savedEvent.eventUid);
+      imports.push({
+        eventUid: savedEvent.eventUid,
+        action: "upsert",
+        summary: savedEvent.summary,
+        startAtMs: savedEvent.startAtMs,
+        allDay: savedEvent.allDay
+      });
     } catch (error) {
       console.error("[calendarInviteProcessor] failed to import standalone invite", {
         accountId,
@@ -587,5 +615,5 @@ export async function processStandaloneCalendarInvite({
       });
     }
   }
-  return { eventUids, failures };
+  return { eventUids, imports, failures };
 }

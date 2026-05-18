@@ -70,6 +70,7 @@ export async function POST(request: Request) {
     ok: true,
     accountId,
     eventUids: result.eventUids,
+    imports: result.imports,
     failures: result.failures
   });
 }

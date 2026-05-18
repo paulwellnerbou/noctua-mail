@@ -15,7 +15,9 @@ export default function CalendarDropOverlay({ isDragOver, status, onResetStatus 
   // around once the user has seen the result.
   useEffect(() => {
     if (status.kind !== "success" && status.kind !== "error") return;
-    const ms = status.kind === "success" ? 1500 : 4000;
+    // Success messages now carry event details (title + date), so give the
+    // user a few seconds to actually read them before fading.
+    const ms = status.kind === "success" ? 4000 : 6000;
     const handle = window.setTimeout(onResetStatus, ms);
     return () => window.clearTimeout(handle);
   }, [status, onResetStatus]);
@@ -24,7 +26,7 @@ export default function CalendarDropOverlay({ isDragOver, status, onResetStatus 
     status.kind === "importing"
       ? "Importing calendar file…"
       : status.kind === "success"
-        ? "Calendar updated."
+        ? status.message
         : status.kind === "error"
           ? status.message
           : isDragOver

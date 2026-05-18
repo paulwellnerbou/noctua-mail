@@ -2,7 +2,54 @@
 // drag-and-drop targets. Both routes need to (1) extract ICS text from
 // whatever the OS handed us, and (2) POST it to /api/calendar/import.
 
+import { formatAccountMediumDate, formatAccountMediumDateTime } from "@/lib/dateFormatting";
+
+/**
+ * Builds a short user-facing summary for the imported events, prefixed with
+ * the verb that matches the action. Examples:
+ *   "Imported: Lunch with Bob — Jun 15, 12:00 PM"
+ *   "Imported 3 events (first: Standup — Jun 1, 10:00 AM)"
+ *   "Cancelled: Lunch — Jun 15, 12:00 PM"
+ */
+export function formatImportedEntriesMessage(entries: IcsImportEntry[]): string {
+  if (entries.length === 0) return "Calendar updated.";
+  // Show the first entry's details by start time, so multi-event ICS files
+  // surface the soonest event the user can verify in the grid.
+  const sorted = [...entries].sort((a, b) => {
+    const aTs = typeof a.startAtMs === "number" ? a.startAtMs : Number.POSITIVE_INFINITY;
+    const bTs = typeof b.startAtMs === "number" ? b.startAtMs : Number.POSITIVE_INFINITY;
+    return aTs - bTs;
+  });
+  const first = sorted[0];
+  const allUpserts = entries.every((e) => e.action === "upsert");
+  const allCancels = entries.every((e) => e.action === "cancellation");
+  const verb = allCancels ? "Cancelled" : allUpserts ? "Imported" : "Updated";
+
+  const label = formatImportEntryLabel(first);
+  if (entries.length === 1) return `${verb}: ${label}`;
+  return `${verb} ${entries.length} events (first: ${label})`;
+}
+
+function formatImportEntryLabel(entry: IcsImportEntry): string {
+  const title = entry.summary?.trim() || "Untitled event";
+  const when = formatImportEntryWhen(entry);
+  return when ? `${title} — ${when}` : title;
+}
+
+function formatImportEntryWhen(entry: IcsImportEntry): string | null {
+  if (typeof entry.startAtMs !== "number") return null;
+  if (entry.allDay) return formatAccountMediumDate(entry.startAtMs) ?? null;
+  return formatAccountMediumDateTime(entry.startAtMs) ?? null;
+}
+
 export type IcsImportFailure = { eventUid: string; message: string };
+export type IcsImportEntry = {
+  eventUid: string;
+  action: "upsert" | "cancellation";
+  summary?: string;
+  startAtMs?: number;
+  allDay?: boolean;
+};
 export type IcsImportResult = {
   ok: boolean;
   message?: string;
@@ -10,6 +57,8 @@ export type IcsImportResult = {
   failures?: IcsImportFailure[];
   /** UIDs of events the server successfully imported. */
   eventUids?: string[];
+  /** Detailed metadata for each imported event (summary, start time, action). */
+  imports?: IcsImportEntry[];
 };
 
 const ICS_EXT_RE = /\.ics$/i;
@@ -63,6 +112,7 @@ type ImportResponseBody = {
   message?: string;
   failures?: IcsImportFailure[];
   eventUids?: string[];
+  imports?: IcsImportEntry[];
 };
 
 export async function postIcsImport(
@@ -86,7 +136,8 @@ export async function postIcsImport(
     return {
       ok: true,
       failures: data.failures && data.failures.length > 0 ? data.failures : undefined,
-      eventUids: data.eventUids
+      eventUids: data.eventUids,
+      imports: data.imports
     };
   } catch (error) {
     return { ok: false, message: error instanceof Error ? error.message : "Network error" };

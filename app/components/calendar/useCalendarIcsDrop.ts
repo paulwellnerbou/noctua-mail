@@ -3,15 +3,17 @@
 import { useCallback, useRef, useState, type DragEvent } from "react";
 import {
   dataTransferHasIcs,
+  formatImportedEntriesMessage,
   postIcsImport,
-  readIcsSourcesFromDataTransfer
+  readIcsSourcesFromDataTransfer,
+  type IcsImportEntry
 } from "@/lib/calendarImportClient";
 import { dispatchCalendarEventsUpdatedEvent } from "./calendarEventsClient";
 
 export type CalendarIcsDropStatus =
   | { kind: "idle" }
   | { kind: "importing" }
-  | { kind: "success" }
+  | { kind: "success"; message: string }
   | { kind: "error"; message: string };
 
 type Options = {
@@ -110,13 +112,13 @@ export function useCalendarIcsDrop({ accountId }: Options): CalendarIcsDropApi {
       }
 
       setStatus({ kind: "importing" });
-      let importedAny = false;
+      const importedEntries: IcsImportEntry[] = [];
       const errors: string[] = [];
       try {
         for (const source of sources) {
           const result = await postIcsImport(source, accountId);
           if (result.ok) {
-            importedAny = true;
+            if (result.imports) importedEntries.push(...result.imports);
             // The server can succeed overall but report partial per-event
             // failures inside the ICS — surface those too.
             if (result.failures) {
@@ -129,17 +131,18 @@ export function useCalendarIcsDrop({ accountId }: Options): CalendarIcsDropApi {
       } catch (error) {
         errors.push(error instanceof Error ? error.message : "Import failed");
       }
-      if (importedAny) {
+      if (importedEntries.length > 0) {
         // Notify every mounted CalendarView so they refetch from the server.
         // (FullCalendar's getApi().refetchEvents() doesn't help here — the
         // view is React-state-driven and listens for this custom event.)
         dispatchCalendarEventsUpdatedEvent();
+        const summary = formatImportedEntriesMessage(importedEntries);
         if (errors.length === 0) {
-          setStatus({ kind: "success" });
+          setStatus({ kind: "success", message: summary });
         } else {
           setStatus({
             kind: "error",
-            message: `Partial import (${errors.length} failed): ${errors[0]}`
+            message: `${summary} (${errors.length} failed: ${errors[0]})`
           });
         }
       } else {

@@ -736,6 +736,15 @@ describe("processStandaloneCalendarInvite", () => {
 
     expect(result.eventUids).toEqual(["standalone-new@example.test"]);
     expect(result.failures).toEqual([]);
+    expect(result.imports).toEqual([
+      {
+        eventUid: "standalone-new@example.test",
+        action: "upsert",
+        summary: "Lunch with Bob",
+        startAtMs: new Date("2026-06-15T12:00:00Z").getTime(),
+        allDay: false
+      }
+    ]);
     expect(upsertCalendarEventByUid).toHaveBeenCalledTimes(1);
     const [, fields] = upsertCalendarEventByUid.mock.calls[0];
     expect(fields.sourceType).toBe("local");
@@ -861,6 +870,15 @@ describe("processStandaloneCalendarInvite", () => {
     });
 
     expect(result.eventUids).toEqual(["cancel-known@example.test"]);
+    expect(result.imports).toEqual([
+      {
+        eventUid: "cancel-known@example.test",
+        action: "cancellation",
+        summary: "About to be cancelled",
+        startAtMs: new Date("2026-06-01T10:00:00Z").getTime(),
+        allDay: false
+      }
+    ]);
     expect(cancelCalendarEventByUid).toHaveBeenCalledWith("acc-1", "cancel-known@example.test");
     expect(cancelCalendarRemindersByEventUid).toHaveBeenCalledWith(
       "acc-1",
