@@ -4,6 +4,8 @@ import { Flex, Heading, IconButton } from "@radix-ui/themes";
 import { X, ExternalLink } from "lucide-react";
 import { openDetachedWindow } from "@/lib/ui/openDetachedWindow";
 import CalendarEventBrowser from "./CalendarEventBrowser";
+import CalendarDropOverlay from "./CalendarDropOverlay";
+import { useCalendarIcsDrop } from "./useCalendarIcsDrop";
 import styles from "./CalendarSidebarPanel.module.css";
 
 type Props = {
@@ -21,12 +23,14 @@ export default function CalendarSidebarPanel({
   onOpenMessage,
   onFindRelatedByInviteUid
 }: Props) {
+  const { dropProps, isDragOver, status, resetStatus } = useCalendarIcsDrop({ accountId });
+
   const handleOpenWindow = () => {
     openDetachedWindow(`/calendar/window?accountId=${encodeURIComponent(accountId)}`);
   };
 
   return (
-    <div className={styles.panel}>
+    <div className={styles.panel} {...dropProps}>
       <Flex align="center" justify="between" className={styles.header}>
         <Heading size="2">Calendar</Heading>
         <Flex gap="1" align="center">
@@ -59,6 +63,7 @@ export default function CalendarSidebarPanel({
           onFindRelatedByInviteUid={onFindRelatedByInviteUid}
         />
       </div>
+      <CalendarDropOverlay isDragOver={isDragOver} status={status} onResetStatus={resetStatus} />
     </div>
   );
 }

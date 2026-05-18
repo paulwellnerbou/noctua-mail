@@ -458,3 +458,211 @@ export async function processCalendarInviteForMessage({
     })
   };
 }
+
+export type ProcessStandaloneCalendarInviteParams = {
+  accountId: string;
+  icsSource: string;
+  accountEmail?: string | null;
+};
+
+export type ProcessStandaloneCalendarInviteFailure = {
+  eventUid: string;
+  message: string;
+};
+
+export type ProcessStandaloneCalendarInviteImport = {
+  eventUid: string;
+  /** "upsert" for new/updated events; "cancellation" for a CANCEL that hit a known UID. */
+  action: "upsert" | "cancellation";
+  /** Event summary at the moment of import. Empty for cancellations of rows we already removed. */
+  summary?: string;
+  /** Start time of the event (ms). Cancellations may not have one if the row was deleted. */
+  startAtMs?: number;
+  allDay?: boolean;
+};
+
+export type ProcessStandaloneCalendarInviteResult = {
+  /** UIDs that were upserted, cancelled, or whose cancellation affected an existing row. */
+  eventUids: string[];
+  /** Detailed metadata for each imported event so callers can build user-facing messages. */
+  imports: ProcessStandaloneCalendarInviteImport[];
+  /** Per-group errors that were caught while processing. */
+  failures: ProcessStandaloneCalendarInviteFailure[];
+};
+
+/**
+ * Imports an ICS source that did not arrive as an email attachment — e.g. a
+ * .ics file opened through the PWA File Handling API. Mirrors the upsert
+ * portion of `processCalendarInviteForMessage` but skips everything that
+ * requires a backing message (per-message invite states, email snapshots,
+ * automatic reminders tied to a message).
+ *
+ * Per-group failures are caught and returned in `failures` so callers can
+ * surface partial successes rather than rolling back the whole batch.
+ */
+export async function processStandaloneCalendarInvite({
+  accountId,
+  icsSource,
+  accountEmail
+}: ProcessStandaloneCalendarInviteParams): Promise<ProcessStandaloneCalendarInviteResult> {
+  if (!icsSource.trim()) return { eventUids: [], imports: [], failures: [] };
+  const groups = collectCalendarInviteMutationGroups(icsSource);
+  if (groups.length === 0) return { eventUids: [], imports: [], failures: [] };
+
+  const eventUids: string[] = [];
+  const imports: ProcessStandaloneCalendarInviteImport[] = [];
+  const failures: ProcessStandaloneCalendarInviteFailure[] = [];
+  for (const group of groups) {
+    // Wrap the entire per-group flow — including the initial existing-event
+    // lookup — in try/catch. Without this, a DB hiccup on lookup would
+    // throw out of the whole function and the caller would lose any
+    // already-imported events / partial-failure detail. We resolve
+    // actionType lazily so the catch block can still tag the failure with
+    // whatever we know about this group.
+    let actionType: CalendarInviteActionType | "unknown" = "unknown";
+    try {
+      const existingEvent = await getCalendarEventByUid(accountId, group.eventUid);
+      actionType = resolveInviteActionType(group, existingEvent);
+
+      if (actionType === "cancellation") {
+        // A CANCEL for a UID we never saw is a no-op — don't pretend we
+        // imported it (the API would otherwise return success and the UI
+        // would show "Calendar updated" with nothing actually changed).
+        if (!existingEvent) continue;
+        await cancelCalendarEventByUid(accountId, group.eventUid);
+        // The row is gone; mark this UID as imported now so a follow-up
+        // reminder-cancel failure can't downgrade the cancellation to a
+        // "failed" status that would leave the UI showing a stale event.
+        eventUids.push(group.eventUid);
+        imports.push({
+          eventUid: group.eventUid,
+          action: "cancellation",
+          summary: existingEvent.summary,
+          startAtMs: existingEvent.startAtMs,
+          allDay: existingEvent.allDay
+        });
+        try {
+          await cancelCalendarRemindersByEventUid(accountId, group.eventUid);
+        } catch (error) {
+          // Surface but don't undo the cancellation.
+          failures.push({
+            eventUid: group.eventUid,
+            message: error instanceof Error ? error.message : "Reminder cleanup failed"
+          });
+        }
+        continue;
+      }
+
+      const mergedEvent = buildMergedCalendarEventFields(group, "", icsSource, existingEvent, accountEmail);
+      if (!mergedEvent) continue;
+
+      // When an incoming ICS reschedules an occurrence we already had at a
+      // different start time, the prior start key is stale. Mirror the
+      // email-attachment path's eviction so per-occurrence snapshots /
+      // messageIds for those superseded starts don't linger.
+      const supersededStarts = collectSupersededOccurrenceStarts(group, existingEvent);
+
+      const preservedOccurrenceSnapshots = (() => {
+        if (!existingEvent?.occurrenceSnapshots) return undefined;
+        const next: Record<string, NonNullable<CalendarEvent["occurrenceSnapshots"]>[string]> = {};
+        for (const [key, value] of Object.entries(existingEvent.occurrenceSnapshots)) {
+          if (supersededStarts.has(Number(key))) continue;
+          next[key] = value;
+        }
+        return Object.keys(next).length > 0 ? next : undefined;
+      })();
+
+      // `upsertCalendarEventByUid` performs an INSERT OR REPLACE — it does
+      // not merge with the existing row. `buildMergedCalendarEventFields`
+      // only carries forward a small subset of the existing event's fields
+      // (recurrence/excluded dates, remote*, attendees, etc.), so we have
+      // to splice in the rest ourselves or risk wiping them. Layer order:
+      //   1. existing row values (preserve what we don't touch)
+      //   2. merged ICS fields (the new data)
+      //   3. our sanitizations (drop placeholder messageIds, set sourceType)
+      const sanitized = {
+        // calendarId / source* snapshot / occurrenceSnapshots come straight
+        // from the existing row — none of these are derivable from the ICS.
+        calendarId: existingEvent?.calendarId,
+        sourceSubject: existingEvent?.sourceSubject,
+        sourceFromAddr: existingEvent?.sourceFromAddr,
+        sourceToAddr: existingEvent?.sourceToAddr,
+        sourceCcAddr: existingEvent?.sourceCcAddr,
+        sourceBccAddr: existingEvent?.sourceBccAddr,
+        sourceDateMs: existingEvent?.sourceDateMs,
+        sourceBodyText: existingEvent?.sourceBodyText,
+        sourceBodyHtml: existingEvent?.sourceBodyHtml,
+        occurrenceSnapshots: preservedOccurrenceSnapshots,
+        ...mergedEvent,
+        // buildMergedCalendarEventFields stamps the messageId we passed
+        // ("") onto messageId / occurrenceMessageIds. We don't have a
+        // source message, so preserve whatever the existing row had instead
+        // of overwriting with empty strings.
+        messageId: mergedEvent.messageId?.trim() ? mergedEvent.messageId : existingEvent?.messageId,
+        occurrenceMessageIds: (() => {
+          // Start with what buildMergedCalendarEventFields produced (which
+          // already evicts superseded RECURRENCE-ID starts), then bring
+          // forward any existing links the new ICS didn't touch — except
+          // for the same superseded keys.
+          const merged: Record<string, string> = {};
+          for (const [key, value] of Object.entries(mergedEvent.occurrenceMessageIds ?? {})) {
+            if (value && value.trim()) merged[key] = value;
+          }
+          for (const [key, value] of Object.entries(existingEvent?.occurrenceMessageIds ?? {})) {
+            if (supersededStarts.has(Number(key))) continue;
+            if (!(key in merged) && value) merged[key] = value;
+          }
+          return Object.keys(merged).length > 0 ? merged : undefined;
+        })(),
+        sourceType: existingEvent?.sourceType ?? "local"
+      };
+
+      const savedEvent = await upsertCalendarEventByUid(accountId, sanitized);
+      // Mark the import successful as soon as the row is written. Any
+      // follow-up failure (reconcile / reminder reschedule) is surfaced as
+      // a separate per-group failure entry rather than a full rollback,
+      // because the calendar row is already in place and the UI needs to
+      // refresh to show it.
+      eventUids.push(savedEvent.eventUid);
+      imports.push({
+        eventUid: savedEvent.eventUid,
+        action: "upsert",
+        summary: savedEvent.summary,
+        startAtMs: savedEvent.startAtMs,
+        allDay: savedEvent.allDay
+      });
+      try {
+        await reconcileSeriesAnchorSiblings(accountId, savedEvent);
+        await rescheduleCalendarRemindersByEventUid(accountId, group.eventUid, {
+          eventTitle: savedEvent.summary,
+          eventLocation: savedEvent.location,
+          eventDescription: savedEvent.description,
+          startTimezone: savedEvent.startTimezone,
+          recurrenceRule: savedEvent.recurrenceRule,
+          recurrenceDates: savedEvent.recurrenceDates,
+          excludedDates: savedEvent.excludedDates,
+          eventStartAtMs: savedEvent.startAtMs,
+          eventEndAtMs: savedEvent.endAtMs,
+          messageId: savedEvent.messageId ?? ""
+        });
+      } catch (error) {
+        failures.push({
+          eventUid: group.eventUid,
+          message: error instanceof Error ? error.message : "Reminder reschedule failed"
+        });
+      }
+    } catch (error) {
+      console.error("[calendarInviteProcessor] failed to import standalone invite", {
+        accountId,
+        eventUid: group.eventUid,
+        actionType,
+        error
+      });
+      failures.push({
+        eventUid: group.eventUid,
+        message: error instanceof Error ? error.message : "Import failed"
+      });
+    }
+  }
+  return { eventUids, imports, failures };
+}
