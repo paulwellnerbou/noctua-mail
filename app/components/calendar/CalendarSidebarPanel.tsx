@@ -1,7 +1,5 @@
 "use client";
 
-import { useCallback, useRef } from "react";
-import type FullCalendar from "@fullcalendar/react";
 import { Flex, Heading, IconButton } from "@radix-ui/themes";
 import { X, ExternalLink } from "lucide-react";
 import { openDetachedWindow } from "@/lib/ui/openDetachedWindow";
@@ -25,15 +23,7 @@ export default function CalendarSidebarPanel({
   onOpenMessage,
   onFindRelatedByInviteUid
 }: Props) {
-  const calendarRef = useRef<FullCalendar>(null);
-
-  const handleImported = useCallback(() => {
-    calendarRef.current?.getApi().refetchEvents();
-  }, []);
-  const { dropProps, isDragOver, status, resetStatus } = useCalendarIcsDrop({
-    accountId,
-    onImported: handleImported
-  });
+  const { dropProps, isDragOver, status, resetStatus } = useCalendarIcsDrop({ accountId });
 
   const handleOpenWindow = () => {
     openDetachedWindow(`/calendar/window?accountId=${encodeURIComponent(accountId)}`);
@@ -69,7 +59,6 @@ export default function CalendarSidebarPanel({
         <CalendarEventBrowser
           accountId={accountId}
           firstDay={firstDay}
-          calendarRef={calendarRef}
           onOpenMessage={onOpenMessage}
           onFindRelatedByInviteUid={onFindRelatedByInviteUid}
         />

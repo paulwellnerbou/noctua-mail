@@ -465,8 +465,16 @@ export type ProcessStandaloneCalendarInviteParams = {
   accountEmail?: string | null;
 };
 
+export type ProcessStandaloneCalendarInviteFailure = {
+  eventUid: string;
+  message: string;
+};
+
 export type ProcessStandaloneCalendarInviteResult = {
+  /** UIDs that were upserted, cancelled, or whose cancellation affected an existing row. */
   eventUids: string[];
+  /** Per-group errors that were caught while processing. */
+  failures: ProcessStandaloneCalendarInviteFailure[];
 };
 
 /**
@@ -475,23 +483,31 @@ export type ProcessStandaloneCalendarInviteResult = {
  * portion of `processCalendarInviteForMessage` but skips everything that
  * requires a backing message (per-message invite states, email snapshots,
  * automatic reminders tied to a message).
+ *
+ * Per-group failures are caught and returned in `failures` so callers can
+ * surface partial successes rather than rolling back the whole batch.
  */
 export async function processStandaloneCalendarInvite({
   accountId,
   icsSource,
   accountEmail
 }: ProcessStandaloneCalendarInviteParams): Promise<ProcessStandaloneCalendarInviteResult> {
-  if (!icsSource.trim()) return { eventUids: [] };
+  if (!icsSource.trim()) return { eventUids: [], failures: [] };
   const groups = collectCalendarInviteMutationGroups(icsSource);
-  if (groups.length === 0) return { eventUids: [] };
+  if (groups.length === 0) return { eventUids: [], failures: [] };
 
   const eventUids: string[] = [];
+  const failures: ProcessStandaloneCalendarInviteFailure[] = [];
   for (const group of groups) {
     const existingEvent = await getCalendarEventByUid(accountId, group.eventUid);
     const actionType = resolveInviteActionType(group, existingEvent);
 
     try {
       if (actionType === "cancellation") {
+        // A CANCEL for an UID we never saw is a no-op — don't pretend we
+        // imported it (the API would otherwise return success and the UI
+        // would show "Calendar updated" with nothing actually changed).
+        if (!existingEvent) continue;
         await cancelCalendarEventByUid(accountId, group.eventUid);
         await cancelCalendarRemindersByEventUid(accountId, group.eventUid);
         eventUids.push(group.eventUid);
@@ -501,17 +517,42 @@ export async function processStandaloneCalendarInvite({
       const mergedEvent = buildMergedCalendarEventFields(group, "", icsSource, existingEvent, accountEmail);
       if (!mergedEvent) continue;
 
-      // Strip placeholder messageId values that buildMergedCalendarEventFields
-      // wrote because we passed "". A standalone import has no source message,
-      // so preserve whatever the existing event had (or leave undefined).
+      // `upsertCalendarEventByUid` performs an INSERT OR REPLACE — it does
+      // not merge with the existing row. `buildMergedCalendarEventFields`
+      // only carries forward a small subset of the existing event's fields
+      // (recurrence/excluded dates, remote*, attendees, etc.), so we have
+      // to splice in the rest ourselves or risk wiping them. Layer order:
+      //   1. existing row values (preserve what we don't touch)
+      //   2. merged ICS fields (the new data)
+      //   3. our sanitizations (drop placeholder messageIds, set sourceType)
       const sanitized = {
+        // calendarId / source* snapshot / occurrenceSnapshots come straight
+        // from the existing row — none of these are derivable from the ICS.
+        calendarId: existingEvent?.calendarId,
+        sourceSubject: existingEvent?.sourceSubject,
+        sourceFromAddr: existingEvent?.sourceFromAddr,
+        sourceToAddr: existingEvent?.sourceToAddr,
+        sourceCcAddr: existingEvent?.sourceCcAddr,
+        sourceBccAddr: existingEvent?.sourceBccAddr,
+        sourceDateMs: existingEvent?.sourceDateMs,
+        sourceBodyText: existingEvent?.sourceBodyText,
+        sourceBodyHtml: existingEvent?.sourceBodyHtml,
+        occurrenceSnapshots: existingEvent?.occurrenceSnapshots,
         ...mergedEvent,
+        // buildMergedCalendarEventFields stamps the messageId we passed
+        // ("") onto messageId / occurrenceMessageIds. We don't have a
+        // source message, so preserve whatever the existing row had instead
+        // of overwriting with empty strings.
         messageId: mergedEvent.messageId?.trim() ? mergedEvent.messageId : existingEvent?.messageId,
         occurrenceMessageIds: (() => {
-          if (!mergedEvent.occurrenceMessageIds) return undefined;
+          if (!mergedEvent.occurrenceMessageIds) return existingEvent?.occurrenceMessageIds;
           const filtered: Record<string, string> = {};
           for (const [key, value] of Object.entries(mergedEvent.occurrenceMessageIds)) {
             if (value && value.trim()) filtered[key] = value;
+          }
+          // Keep existing per-occurrence links not overwritten by this ICS.
+          for (const [key, value] of Object.entries(existingEvent?.occurrenceMessageIds ?? {})) {
+            if (!(key in filtered) && value) filtered[key] = value;
           }
           return Object.keys(filtered).length > 0 ? filtered : undefined;
         })(),
@@ -540,7 +581,11 @@ export async function processStandaloneCalendarInvite({
         actionType,
         error
       });
+      failures.push({
+        eventUid: group.eventUid,
+        message: error instanceof Error ? error.message : "Import failed"
+      });
     }
   }
-  return { eventUids };
+  return { eventUids, failures };
 }

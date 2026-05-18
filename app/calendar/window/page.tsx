@@ -1,8 +1,7 @@
 "use client";
 
-import { Suspense, useCallback, useRef } from "react";
+import { Suspense } from "react";
 import { useSearchParams } from "next/navigation";
-import type FullCalendar from "@fullcalendar/react";
 import { Text } from "@radix-ui/themes";
 import CalendarEventBrowser from "@/app/components/calendar/CalendarEventBrowser";
 import CalendarDropOverlay from "@/app/components/calendar/CalendarDropOverlay";
@@ -12,14 +11,7 @@ import styles from "./page.module.css";
 function CalendarWindowContent() {
   const searchParams = useSearchParams();
   const accountId = searchParams.get("accountId") ?? "";
-  const calendarRef = useRef<FullCalendar>(null);
-  const handleImported = useCallback(() => {
-    calendarRef.current?.getApi().refetchEvents();
-  }, []);
-  const { dropProps, isDragOver, status, resetStatus } = useCalendarIcsDrop({
-    accountId,
-    onImported: handleImported
-  });
+  const { dropProps, isDragOver, status, resetStatus } = useCalendarIcsDrop({ accountId });
 
   if (!accountId) {
     return (
@@ -34,7 +26,7 @@ function CalendarWindowContent() {
   return (
     <div className={styles.page}>
       <div className={styles.detailContainer} {...dropProps}>
-        <CalendarEventBrowser accountId={accountId} calendarRef={calendarRef} />
+        <CalendarEventBrowser accountId={accountId} />
         <CalendarDropOverlay isDragOver={isDragOver} status={status} onResetStatus={resetStatus} />
       </div>
     </div>

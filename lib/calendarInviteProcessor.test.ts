@@ -99,7 +99,9 @@ mock.module("@/lib/calendarEventEmailSnapshot.server", () => ({
   buildCalendarEventEmailSnapshotFromMessageId
 }));
 
-const { processCalendarInviteForMessage } = await import("./calendarInviteProcessor");
+const { processCalendarInviteForMessage, processStandaloneCalendarInvite } = await import(
+  "./calendarInviteProcessor"
+);
 
 // Reset per-test mutable mock state. Under `--randomize`, tests within
 // this file run in arbitrary order, so any `mockResolvedValue(...)`
@@ -711,5 +713,202 @@ describe("processCalendarInviteForMessage", () => {
     expect(bootstrappedFields.summary).toBe("Weekly QP meeting");
     // DTSTART;TZID=Europe/Berlin:20260601T160000 → June 1, 2026 14:00 UTC (CEST = UTC+2)
     expect(bootstrappedFields.startAtMs).toBe(new Date("2026-06-01T14:00:00Z").getTime());
+  });
+});
+
+describe("processStandaloneCalendarInvite", () => {
+  test("imports a new event with sourceType=local and no message link", async () => {
+    const ics = makeIcs([
+      "METHOD:REQUEST",
+      "BEGIN:VEVENT",
+      "UID:standalone-new@example.test",
+      "SUMMARY:Lunch with Bob",
+      "DTSTART:20260615T120000Z",
+      "DTEND:20260615T130000Z",
+      "END:VEVENT"
+    ]);
+
+    const result = await processStandaloneCalendarInvite({
+      accountId: "acc-1",
+      icsSource: ics,
+      accountEmail: "paul@example.test"
+    });
+
+    expect(result.eventUids).toEqual(["standalone-new@example.test"]);
+    expect(result.failures).toEqual([]);
+    expect(upsertCalendarEventByUid).toHaveBeenCalledTimes(1);
+    const [, fields] = upsertCalendarEventByUid.mock.calls[0];
+    expect(fields.sourceType).toBe("local");
+    expect(fields.messageId).toBeUndefined();
+    expect(fields.occurrenceMessageIds).toBeUndefined();
+    expect(fields.summary).toBe("Lunch with Bob");
+    // Per-message bookkeeping must not happen for a standalone import.
+    expect(upsertMessageCalendarInviteStates).not.toHaveBeenCalled();
+    expect(markMessageCalendarInviteStatesProcessed).not.toHaveBeenCalled();
+    expect(ensureCalendarReminder).not.toHaveBeenCalled();
+  });
+
+  test("preserves calendarId, source-email snapshot, and occurrenceSnapshots when updating an existing event", async () => {
+    const existing: CalendarEvent = {
+      id: "cal-existing",
+      accountId: "acc-1",
+      eventUid: "standalone-update@example.test",
+      calendarId: "default-cal",
+      summary: "Old summary",
+      startAtMs: new Date("2026-06-01T10:00:00Z").getTime(),
+      endAtMs: new Date("2026-06-01T11:00:00Z").getTime(),
+      allDay: false,
+      sourceType: "email",
+      messageId: "msg-original",
+      sourceSubject: "Meeting invite",
+      sourceFromAddr: "alice@example.test",
+      sourceDateMs: new Date("2026-05-01T09:00:00Z").getTime(),
+      sourceBodyText: "See you there",
+      occurrenceSnapshots: {
+        "1717322400000": { sourceSubject: "Override invite" }
+      },
+      createdAtMs: 1,
+      updatedAtMs: 1
+    };
+    getCalendarEventByUid.mockResolvedValue(existing);
+
+    const ics = makeIcs([
+      "METHOD:REQUEST",
+      "BEGIN:VEVENT",
+      "UID:standalone-update@example.test",
+      "SUMMARY:Updated summary",
+      "DTSTART:20260601T100000Z",
+      "DTEND:20260601T113000Z",
+      "END:VEVENT"
+    ]);
+
+    const result = await processStandaloneCalendarInvite({
+      accountId: "acc-1",
+      icsSource: ics,
+      accountEmail: "paul@example.test"
+    });
+
+    expect(result.eventUids).toEqual(["standalone-update@example.test"]);
+    expect(result.failures).toEqual([]);
+    const [, fields] = upsertCalendarEventByUid.mock.calls[0];
+    // Existing fields the ICS doesn't mention must survive the upsert.
+    expect(fields.calendarId).toBe("default-cal");
+    expect(fields.sourceSubject).toBe("Meeting invite");
+    expect(fields.sourceFromAddr).toBe("alice@example.test");
+    expect(fields.sourceBodyText).toBe("See you there");
+    expect(fields.occurrenceSnapshots).toEqual({
+      "1717322400000": { sourceSubject: "Override invite" }
+    });
+    // Existing message link must be preserved (the import has no source message).
+    expect(fields.messageId).toBe("msg-original");
+    // Source type is preserved (was email, stays email).
+    expect(fields.sourceType).toBe("email");
+    // The summary from the ICS is applied.
+    expect(fields.summary).toBe("Updated summary");
+  });
+
+  test("ignores a CANCEL for a UID that has no existing event", async () => {
+    getCalendarEventByUid.mockResolvedValue(null);
+    const ics = makeIcs([
+      "METHOD:CANCEL",
+      "BEGIN:VEVENT",
+      "UID:unknown@example.test",
+      "DTSTART:20260601T100000Z",
+      "DTEND:20260601T110000Z",
+      "STATUS:CANCELLED",
+      "END:VEVENT"
+    ]);
+
+    const result = await processStandaloneCalendarInvite({
+      accountId: "acc-1",
+      icsSource: ics,
+      accountEmail: "paul@example.test"
+    });
+
+    expect(result.eventUids).toEqual([]);
+    expect(result.failures).toEqual([]);
+    expect(cancelCalendarEventByUid).not.toHaveBeenCalled();
+    expect(cancelCalendarRemindersByEventUid).not.toHaveBeenCalled();
+  });
+
+  test("cancels an existing event when CANCEL matches a known UID", async () => {
+    const existing: CalendarEvent = {
+      id: "cal-cancel",
+      accountId: "acc-1",
+      eventUid: "cancel-known@example.test",
+      summary: "About to be cancelled",
+      startAtMs: new Date("2026-06-01T10:00:00Z").getTime(),
+      allDay: false,
+      sourceType: "local",
+      createdAtMs: 1,
+      updatedAtMs: 1
+    };
+    getCalendarEventByUid.mockResolvedValue(existing);
+    const ics = makeIcs([
+      "METHOD:CANCEL",
+      "BEGIN:VEVENT",
+      "UID:cancel-known@example.test",
+      "DTSTART:20260601T100000Z",
+      "DTEND:20260601T110000Z",
+      "STATUS:CANCELLED",
+      "END:VEVENT"
+    ]);
+
+    const result = await processStandaloneCalendarInvite({
+      accountId: "acc-1",
+      icsSource: ics,
+      accountEmail: "paul@example.test"
+    });
+
+    expect(result.eventUids).toEqual(["cancel-known@example.test"]);
+    expect(cancelCalendarEventByUid).toHaveBeenCalledWith("acc-1", "cancel-known@example.test");
+    expect(cancelCalendarRemindersByEventUid).toHaveBeenCalledWith(
+      "acc-1",
+      "cancel-known@example.test"
+    );
+  });
+
+  test("returns failures for groups that throw while leaving other imports intact", async () => {
+    // Two events in one ICS — make the upsert fail for the first one only.
+    upsertCalendarEventByUid.mockImplementationOnce(async () => {
+      throw new Error("db unavailable");
+    });
+    const ics = makeIcs([
+      "METHOD:REQUEST",
+      "BEGIN:VEVENT",
+      "UID:fails@example.test",
+      "SUMMARY:Will fail",
+      "DTSTART:20260615T120000Z",
+      "DTEND:20260615T130000Z",
+      "END:VEVENT",
+      "BEGIN:VEVENT",
+      "UID:succeeds@example.test",
+      "SUMMARY:Will succeed",
+      "DTSTART:20260616T120000Z",
+      "DTEND:20260616T130000Z",
+      "END:VEVENT"
+    ]);
+
+    const result = await processStandaloneCalendarInvite({
+      accountId: "acc-1",
+      icsSource: ics,
+      accountEmail: "paul@example.test"
+    });
+
+    expect(result.eventUids).toEqual(["succeeds@example.test"]);
+    expect(result.failures).toEqual([
+      { eventUid: "fails@example.test", message: "db unavailable" }
+    ]);
+  });
+
+  test("returns empty result for an empty ICS source", async () => {
+    const result = await processStandaloneCalendarInvite({
+      accountId: "acc-1",
+      icsSource: "",
+      accountEmail: "paul@example.test"
+    });
+    expect(result.eventUids).toEqual([]);
+    expect(result.failures).toEqual([]);
+    expect(upsertCalendarEventByUid).not.toHaveBeenCalled();
   });
 });

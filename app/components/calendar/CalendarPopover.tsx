@@ -1,8 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import type FullCalendar from "@fullcalendar/react";
 import { Flex, Heading, IconButton } from "@radix-ui/themes";
 import { CalendarDays, ExternalLink, PanelRight, X } from "lucide-react";
 import { openDetachedWindow } from "@/lib/ui/openDetachedWindow";
@@ -100,14 +99,7 @@ export default function CalendarPopover({
   onOpenMessage,
   onFindRelatedByInviteUid
 }: Props) {
-  const calendarRef = useRef<FullCalendar>(null);
-  const handleImported = useCallback(() => {
-    calendarRef.current?.getApi().refetchEvents();
-  }, []);
-  const { dropProps, isDragOver, status, resetStatus } = useCalendarIcsDrop({
-    accountId,
-    onImported: handleImported
-  });
+  const { dropProps, isDragOver, status, resetStatus } = useCalendarIcsDrop({ accountId });
   const [position, setPosition] = useState<Position>(getInitialPosition);
   const [size, setSize] = useState<Size>({ width: PANEL_WIDTH, height: PANEL_HEIGHT });
   // Tracks the teardown for whichever pointer gesture is currently active
@@ -304,7 +296,6 @@ export default function CalendarPopover({
         <CalendarEventBrowser
           accountId={accountId}
           firstDay={firstDay}
-          calendarRef={calendarRef}
           onOpenMessage={onOpenMessage ? (id) => {
             onOpenMessage(id);
             onOpenChange(false);

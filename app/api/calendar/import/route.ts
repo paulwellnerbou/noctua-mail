@@ -16,13 +16,16 @@ export async function POST(request: Request) {
   const session = requireSessionOr401(request);
   if (session instanceof NextResponse) return session;
 
-  const payload = (await request.json().catch(() => null)) as
-    | { icsSource?: string; accountId?: string }
-    | null;
-  const icsSource = payload?.icsSource ?? "";
-  if (!icsSource.trim()) {
+  const payload = (await request.json().catch(() => null)) as unknown;
+  if (!payload || typeof payload !== "object") {
+    return NextResponse.json({ ok: false, message: "Invalid body" }, { status: 400 });
+  }
+  const body = payload as Record<string, unknown>;
+  const icsSourceRaw = body.icsSource;
+  if (typeof icsSourceRaw !== "string" || !icsSourceRaw.trim()) {
     return NextResponse.json({ ok: false, message: "Missing icsSource" }, { status: 400 });
   }
+  const icsSource = icsSourceRaw;
 
   const sessionAccountId = session.accountId?.trim() ?? "";
   if (!sessionAccountId) {
@@ -32,7 +35,11 @@ export async function POST(request: Request) {
     );
   }
 
-  const requestedAccountId = payload?.accountId?.trim() ?? "";
+  const requestedAccountIdRaw = body.accountId;
+  if (requestedAccountIdRaw !== undefined && typeof requestedAccountIdRaw !== "string") {
+    return NextResponse.json({ ok: false, message: "Invalid accountId" }, { status: 400 });
+  }
+  const requestedAccountId = requestedAccountIdRaw?.trim() ?? "";
   const accountId = requestedAccountId || sessionAccountId;
   const access = requireSessionAccountOr403(session, accountId);
   if (access instanceof NextResponse) return access;
@@ -47,11 +54,22 @@ export async function POST(request: Request) {
     icsSource,
     accountEmail: account.email
   });
+
   if (result.eventUids.length === 0) {
+    // All groups failed (or there were no usable groups at all). Use the
+    // first per-group error message if we have one, otherwise the generic
+    // "nothing in this ICS" message.
+    const message = result.failures[0]?.message ?? "No calendar event data found in ICS source";
+    const status = result.failures.length > 0 ? 500 : 400;
     return NextResponse.json(
-      { ok: false, message: "No calendar event data found in ICS source" },
-      { status: 400 }
+      { ok: false, message, failures: result.failures },
+      { status }
     );
   }
-  return NextResponse.json({ ok: true, accountId, eventUids: result.eventUids });
+  return NextResponse.json({
+    ok: true,
+    accountId,
+    eventUids: result.eventUids,
+    failures: result.failures
+  });
 }

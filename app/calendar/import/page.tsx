@@ -51,26 +51,37 @@ export default function CalendarImportPage() {
         return;
       }
       try {
-        let lastError: string | null = null;
-        let importedAny = false;
+        const errors: string[] = [];
+        let importedCount = 0;
         for (const handle of files) {
           const { name, text } = await readFile(handle);
           setState({ kind: "importing", filename: name });
           if (!text.trim()) {
-            lastError = `${name} is empty`;
+            errors.push(`${name} is empty`);
             continue;
           }
           const result = await postIcsImport(text);
           if (result.ok) {
-            importedAny = true;
+            importedCount += 1;
+            if (result.failures) {
+              for (const f of result.failures) errors.push(`${name}: ${f.message}`);
+            }
           } else {
-            lastError = `${name}: ${result.message ?? "Import failed"}`;
+            errors.push(`${name}: ${result.message ?? "Import failed"}`);
           }
         }
-        if (importedAny) {
+        // Only redirect to the calendar if every file imported cleanly; if
+        // anything failed, stay on this page so the user actually sees the
+        // error message instead of silently losing it under a navigation.
+        if (importedCount > 0 && errors.length === 0) {
           router.replace("/?openCalendar=1");
+        } else if (importedCount > 0) {
+          setState({
+            kind: "error",
+            message: `Imported ${importedCount}/${files.length}. ${errors.join("; ")}`
+          });
         } else {
-          setState({ kind: "error", message: lastError ?? "Import failed" });
+          setState({ kind: "error", message: errors[0] ?? "Import failed" });
         }
       } catch (error) {
         setState({

@@ -2,7 +2,15 @@
 // drag-and-drop targets. Both routes need to (1) extract ICS text from
 // whatever the OS handed us, and (2) POST it to /api/calendar/import.
 
-export type IcsImportResult = { ok: boolean; message?: string };
+export type IcsImportFailure = { eventUid: string; message: string };
+export type IcsImportResult = {
+  ok: boolean;
+  message?: string;
+  /** Per-event failures within the ICS that the server still chose to partially import. */
+  failures?: IcsImportFailure[];
+  /** UIDs of events the server successfully imported. */
+  eventUids?: string[];
+};
 
 const ICS_EXT_RE = /\.ics$/i;
 
@@ -50,6 +58,13 @@ export async function readIcsSourcesFromDataTransfer(
   return sources;
 }
 
+type ImportResponseBody = {
+  ok?: boolean;
+  message?: string;
+  failures?: IcsImportFailure[];
+  eventUids?: string[];
+};
+
 export async function postIcsImport(
   icsSource: string,
   accountId?: string
@@ -60,11 +75,19 @@ export async function postIcsImport(
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ icsSource, ...(accountId ? { accountId } : {}) })
     });
-    const data = (await res.json().catch(() => null)) as { ok?: boolean; message?: string } | null;
+    const data = (await res.json().catch(() => null)) as ImportResponseBody | null;
     if (!res.ok || !data?.ok) {
-      return { ok: false, message: data?.message ?? `HTTP ${res.status}` };
+      return {
+        ok: false,
+        message: data?.message ?? `HTTP ${res.status}`,
+        failures: data?.failures
+      };
     }
-    return { ok: true };
+    return {
+      ok: true,
+      failures: data.failures && data.failures.length > 0 ? data.failures : undefined,
+      eventUids: data.eventUids
+    };
   } catch (error) {
     return { ok: false, message: error instanceof Error ? error.message : "Network error" };
   }
