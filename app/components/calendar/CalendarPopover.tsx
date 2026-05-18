@@ -3,8 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type FullCalendar from "@fullcalendar/react";
-import { DropdownMenu, Flex, Heading, IconButton } from "@radix-ui/themes";
-import { CalendarDays, ExternalLink, MoreVertical, PanelRight, X } from "lucide-react";
+import { Flex, Heading, IconButton } from "@radix-ui/themes";
+import { CalendarDays, ExternalLink, PanelRight, X } from "lucide-react";
 import { openDetachedWindow } from "@/lib/ui/openDetachedWindow";
 import CalendarEventBrowser from "./CalendarEventBrowser";
 import CalendarDropOverlay from "./CalendarDropOverlay";
@@ -28,8 +28,6 @@ type Props = {
   triggerLabel: string;
   onOpenMessage?: (messageId: string) => void;
   onFindRelatedByInviteUid?: (uid: string) => void;
-  onRecomputeRelations?: () => Promise<void>;
-  isRecomputingRelations?: boolean;
 };
 
 type Position = { x: number; y: number };
@@ -100,9 +98,7 @@ export default function CalendarPopover({
   onOpenSidebar,
   triggerLabel,
   onOpenMessage,
-  onFindRelatedByInviteUid,
-  onRecomputeRelations,
-  isRecomputingRelations
+  onFindRelatedByInviteUid
 }: Props) {
   const calendarRef = useRef<FullCalendar>(null);
   const handleImported = useCallback(() => {
@@ -270,12 +266,6 @@ export default function CalendarPopover({
     }));
   };
 
-  const handleRecomputeRelations = async () => {
-    if (!onRecomputeRelations) return;
-    await onRecomputeRelations();
-    calendarRef.current?.getApi().refetchEvents();
-  };
-
   const handleOpenWindow = () => {
     openDetachedWindow(`/calendar/window?accountId=${encodeURIComponent(accountId)}`);
     onOpenChange(false);
@@ -298,21 +288,6 @@ export default function CalendarPopover({
           <Heading size="3">Calendar</Heading>
         </Flex>
         <Flex gap="2" align="center">
-          <DropdownMenu.Root>
-            <DropdownMenu.Trigger>
-              <IconButton size="1" variant="ghost" color="gray" title="Calendar options" aria-label="Calendar options">
-                <MoreVertical size={14} />
-              </IconButton>
-            </DropdownMenu.Trigger>
-            <DropdownMenu.Content align="end" sideOffset={4}>
-              <DropdownMenu.Item
-                disabled={isRecomputingRelations}
-                onSelect={() => void handleRecomputeRelations()}
-              >
-                Recompute event associations
-              </DropdownMenu.Item>
-            </DropdownMenu.Content>
-          </DropdownMenu.Root>
           <IconButton size="1" variant="ghost" color="gray" title="Open in sidebar" aria-label="Open calendar in sidebar" onClick={handleOpenSidebar}>
             <PanelRight size={14} />
           </IconButton>

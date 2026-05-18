@@ -16,6 +16,13 @@ import {
 export type UndoMoveTarget = {
   messageId: string;
   restoreFolderId: string;
+  /**
+   * RFC 5322 `Message-ID` header for the message at the time the undo target
+   * was captured. Carried alongside the internal row id so notification dedup
+   * can seed by header even after the message has been removed from local
+   * state by the move that we're undoing.
+   */
+  headerMessageId?: string;
 };
 
 type MoveNoticeInput = {
@@ -167,8 +174,13 @@ export function useMessageMoveActions({
         .filter((item) => item.accountId === activeAccountId && idSet.has(item.id))
       const localUndoTargets: UndoMoveTarget[] = sourceTargets.map((item) => ({
         messageId: item.id,
-        restoreFolderId: item.folderId
+        restoreFolderId: item.folderId,
+        headerMessageId: item.messageId
       }));
+      const headerMessageIdByRowId = new Map<string, string>();
+      sourceTargets.forEach((item) => {
+        if (item.messageId) headerMessageIdByRowId.set(item.id, item.messageId);
+      });
       const managePendingState = options?.managePendingState ?? true;
       const clearSelectionOnSuccess = options?.clearSelectionOnSuccess ?? true;
       const updateActiveMessage = options?.updateActiveMessage ?? true;
@@ -229,10 +241,18 @@ export function useMessageMoveActions({
                 (target): target is UndoMoveTarget =>
                   Boolean(target?.messageId) && Boolean(target?.restoreFolderId)
               )
-              .map((target) => ({
-                ...target,
-                messageId: resolveMovedId(target.messageId)
-              }))
+              .map((target) => {
+                // Server returns the internal row id (the message's `previousId`
+                // before the move). Use that to look up the header we captured
+                // from local state before the move stripped these messages out.
+                const headerMessageId =
+                  target.headerMessageId ?? headerMessageIdByRowId.get(target.messageId);
+                return {
+                  ...target,
+                  messageId: resolveMovedId(target.messageId),
+                  ...(headerMessageId ? { headerMessageId } : {})
+                };
+              })
           : [];
         const mappedUndoTargets =
           responseUndoTargets.length > 0 ? responseUndoTargets : fallbackUndoTargets;

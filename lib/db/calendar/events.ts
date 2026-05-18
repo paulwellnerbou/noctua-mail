@@ -14,7 +14,6 @@ import type {
   CalendarParticipationStatus
 } from "../../data";
 import { getAccountDb } from "../connection";
-import { withDbWriteRetry } from "../../dbWriteRetry";
 import { normalizeCalendarEventUid, normalizeCalendarEventUidKey } from "../../calendarEventUids";
 import { normalizeCalendarParticipationStatus } from "../../calendarParticipation";
 import { safeParseJson } from "../messages/_shared";
@@ -424,30 +423,6 @@ export async function upsertCalendarEvent(
     event.updatedAtMs,
     event.deletedAtMs ?? null
   );
-}
-
-export async function updateCalendarEventMessageRelations(
-  accountId: string,
-  eventId: string,
-  messageId: string | null,
-  occurrenceMessageIds: Record<string, string> | undefined
-): Promise<void> {
-  return withDbWriteRetry("updateCalendarEventMessageRelations", async () => {
-    const db = await getAccountDb(accountId);
-    db.prepare(
-      `UPDATE calendar_events
-       SET messageId = ?, occurrenceMessageIds = ?, updatedAtMs = ?
-       WHERE accountId = ? AND id = ?`
-    ).run(
-      messageId,
-      occurrenceMessageIds && Object.keys(occurrenceMessageIds).length > 0
-        ? JSON.stringify(occurrenceMessageIds)
-        : null,
-      Date.now(),
-      accountId,
-      eventId
-    );
-  });
 }
 
 export async function deleteCalendarEvent(

@@ -13,15 +13,6 @@
   position: relative;
 }
 
-.toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  padding: 4px 8px;
-  border-bottom: 1px solid var(--border);
-  flex-shrink: 0;
-}
-
 .state {
   flex: 1;
   display: flex;
