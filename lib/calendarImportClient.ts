@@ -2,7 +2,8 @@
 // drag-and-drop targets. Both routes need to (1) extract ICS text from
 // whatever the OS handed us, and (2) POST it to /api/calendar/import.
 
-import { formatAccountMediumDate, formatAccountMediumDateTime } from "@/lib/dateFormatting";
+import { formatAccountMediumDateTime } from "@/lib/dateFormatting";
+import { formatCalendarEventDate } from "@/lib/calendar";
 
 /**
  * Builds a short user-facing summary for the imported events, prefixed with
@@ -38,7 +39,13 @@ function formatImportEntryLabel(entry: IcsImportEntry): string {
 
 function formatImportEntryWhen(entry: IcsImportEntry): string | null {
   if (typeof entry.startAtMs !== "number") return null;
-  if (entry.allDay) return formatAccountMediumDate(entry.startAtMs) ?? null;
+  if (entry.allDay) {
+    // ICS all-day dates round-trip through Date.UTC(...), so a user east
+    // or west of UTC would otherwise see the previous/next day if we
+    // formatted in local time. formatCalendarEventDate handles the UTC
+    // anchoring for allDay events (matches the event-detail view).
+    return formatCalendarEventDate(new Date(entry.startAtMs), { allDay: true }) || null;
+  }
   return formatAccountMediumDateTime(entry.startAtMs) ?? null;
 }
 
@@ -84,7 +91,9 @@ export function dataTransferHasIcs(dataTransfer: DataTransfer | null): boolean {
 export type ReadIcsSourcesResult = {
   /** Non-empty ICS sources extracted from files or inline payloads. */
   sources: string[];
-  /** True when the drop contained at least one .ics file (even if empty). */
+  /** Names of .ics-looking files that were dropped but turned out to be empty. */
+  emptyIcsFileNames: string[];
+  /** True when the drop contained at least one .ics file (whether empty or not). */
   matchedIcsFile: boolean;
 };
 
@@ -93,32 +102,39 @@ export type ReadIcsSourcesResult = {
  * - dropped `File`s whose name ends in `.ics` or whose type is `text/calendar`
  * - a `text/calendar` data-transfer string
  *
- * Returns both the parsed sources and a flag indicating whether any of the
- * dropped files looked like an ICS at all, so callers can distinguish:
- *   - "no .ics files dropped"          → silently ignore
- *   - "an .ics file was dropped but empty" → surface an error
+ * Returns the parsed sources plus the names of any dropped `.ics` files that
+ * were empty, so callers can surface per-file errors instead of silently
+ * losing them. The `matchedIcsFile` flag is true when the drop contained at
+ * least one `.ics`-shaped file (empty or not), letting callers distinguish:
+ *   - "no .ics files dropped"               → silently ignore
+ *   - "an .ics file was dropped but empty"  → surface a per-file error
+ *   - "valid + empty .ics files mixed"      → import valid, report empty ones
  */
 export async function readIcsSourcesFromDataTransfer(
   dataTransfer: DataTransfer | null
 ): Promise<ReadIcsSourcesResult> {
-  if (!dataTransfer) return { sources: [], matchedIcsFile: false };
+  if (!dataTransfer) return { sources: [], emptyIcsFileNames: [], matchedIcsFile: false };
   const sources: string[] = [];
-  let matchedIcsFile = false;
+  const emptyIcsFileNames: string[] = [];
 
   for (const file of Array.from(dataTransfer.files)) {
     if (file.type === "text/calendar" || ICS_EXT_RE.test(file.name)) {
-      matchedIcsFile = true;
       const text = await file.text();
-      if (text.trim()) sources.push(text);
+      if (text.trim()) {
+        sources.push(text);
+      } else {
+        emptyIcsFileNames.push(file.name || "(unnamed .ics)");
+      }
     }
   }
 
-  if (sources.length === 0 && !matchedIcsFile) {
+  const matchedIcsFile = sources.length > 0 || emptyIcsFileNames.length > 0;
+  if (!matchedIcsFile) {
     const inline = dataTransfer.getData("text/calendar");
     if (inline?.trim()) sources.push(inline);
   }
 
-  return { sources, matchedIcsFile };
+  return { sources, emptyIcsFileNames, matchedIcsFile };
 }
 
 type ImportResponseBody = {

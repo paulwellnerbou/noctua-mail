@@ -525,7 +525,7 @@ export async function processStandaloneCalendarInvite({
       actionType = resolveInviteActionType(group, existingEvent);
 
       if (actionType === "cancellation") {
-        // A CANCEL for an UID we never saw is a no-op — don't pretend we
+        // A CANCEL for a UID we never saw is a no-op — don't pretend we
         // imported it (the API would otherwise return success and the UI
         // would show "Calendar updated" with nothing actually changed).
         if (!existingEvent) continue;
@@ -556,6 +556,22 @@ export async function processStandaloneCalendarInvite({
       const mergedEvent = buildMergedCalendarEventFields(group, "", icsSource, existingEvent, accountEmail);
       if (!mergedEvent) continue;
 
+      // When an incoming ICS reschedules an occurrence we already had at a
+      // different start time, the prior start key is stale. Mirror the
+      // email-attachment path's eviction so per-occurrence snapshots /
+      // messageIds for those superseded starts don't linger.
+      const supersededStarts = collectSupersededOccurrenceStarts(group, existingEvent);
+
+      const preservedOccurrenceSnapshots = (() => {
+        if (!existingEvent?.occurrenceSnapshots) return undefined;
+        const next: Record<string, NonNullable<CalendarEvent["occurrenceSnapshots"]>[string]> = {};
+        for (const [key, value] of Object.entries(existingEvent.occurrenceSnapshots)) {
+          if (supersededStarts.has(Number(key))) continue;
+          next[key] = value;
+        }
+        return Object.keys(next).length > 0 ? next : undefined;
+      })();
+
       // `upsertCalendarEventByUid` performs an INSERT OR REPLACE — it does
       // not merge with the existing row. `buildMergedCalendarEventFields`
       // only carries forward a small subset of the existing event's fields
@@ -576,7 +592,7 @@ export async function processStandaloneCalendarInvite({
         sourceDateMs: existingEvent?.sourceDateMs,
         sourceBodyText: existingEvent?.sourceBodyText,
         sourceBodyHtml: existingEvent?.sourceBodyHtml,
-        occurrenceSnapshots: existingEvent?.occurrenceSnapshots,
+        occurrenceSnapshots: preservedOccurrenceSnapshots,
         ...mergedEvent,
         // buildMergedCalendarEventFields stamps the messageId we passed
         // ("") onto messageId / occurrenceMessageIds. We don't have a
@@ -584,16 +600,19 @@ export async function processStandaloneCalendarInvite({
         // of overwriting with empty strings.
         messageId: mergedEvent.messageId?.trim() ? mergedEvent.messageId : existingEvent?.messageId,
         occurrenceMessageIds: (() => {
-          if (!mergedEvent.occurrenceMessageIds) return existingEvent?.occurrenceMessageIds;
-          const filtered: Record<string, string> = {};
-          for (const [key, value] of Object.entries(mergedEvent.occurrenceMessageIds)) {
-            if (value && value.trim()) filtered[key] = value;
+          // Start with what buildMergedCalendarEventFields produced (which
+          // already evicts superseded RECURRENCE-ID starts), then bring
+          // forward any existing links the new ICS didn't touch — except
+          // for the same superseded keys.
+          const merged: Record<string, string> = {};
+          for (const [key, value] of Object.entries(mergedEvent.occurrenceMessageIds ?? {})) {
+            if (value && value.trim()) merged[key] = value;
           }
-          // Keep existing per-occurrence links not overwritten by this ICS.
           for (const [key, value] of Object.entries(existingEvent?.occurrenceMessageIds ?? {})) {
-            if (!(key in filtered) && value) filtered[key] = value;
+            if (supersededStarts.has(Number(key))) continue;
+            if (!(key in merged) && value) merged[key] = value;
           }
-          return Object.keys(filtered).length > 0 ? filtered : undefined;
+          return Object.keys(merged).length > 0 ? merged : undefined;
         })(),
         sourceType: existingEvent?.sourceType ?? "local"
       };

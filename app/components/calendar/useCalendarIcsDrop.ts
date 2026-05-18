@@ -103,14 +103,16 @@ export function useCalendarIcsDrop({ accountId }: Options): CalendarIcsDropApi {
         });
         return;
       }
-      const { sources, matchedIcsFile } = readResult;
+      const { sources, matchedIcsFile, emptyIcsFileNames } = readResult;
       if (sources.length === 0) {
         // Tell apart three "no usable content" cases:
         //  - an .ics file was dropped but it was empty → surface error
         //  - non-.ics files were dropped → silently ignore (user can retry)
         //  - inline text/calendar payload was empty   → surface error
         if (matchedIcsFile) {
-          setStatus({ kind: "error", message: "The dropped .ics file is empty." });
+          const detail =
+            emptyIcsFileNames.length > 0 ? `: ${emptyIcsFileNames.join(", ")}` : "";
+          setStatus({ kind: "error", message: `The dropped .ics file is empty${detail}.` });
           return;
         }
         if (droppedFileCount > 0) return;
@@ -120,7 +122,9 @@ export function useCalendarIcsDrop({ accountId }: Options): CalendarIcsDropApi {
 
       setStatus({ kind: "importing" });
       const importedEntries: IcsImportEntry[] = [];
-      const errors: string[] = [];
+      // Seed errors with any per-file empties so a multi-file drop reports
+      // them alongside the partial-success outcome instead of dropping them.
+      const errors: string[] = emptyIcsFileNames.map((name) => `${name} is empty`);
       try {
         for (const source of sources) {
           const result = await postIcsImport(source, accountId);
