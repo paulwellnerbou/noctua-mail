@@ -177,7 +177,6 @@ export {
   listCalendarEvents,
   listCalendarEventsBySource,
   resolveCalendarParticipation,
-  updateCalendarEventMessageRelations,
   upsertCalendarEvent,
   upsertCalendarParticipationOverride
 } from "./db/calendar";
