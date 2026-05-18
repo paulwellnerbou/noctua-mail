@@ -123,10 +123,6 @@ export function buildAccountCalendarInvitesProcessPath(accountId: string) {
   return buildAccountApiPath(accountId, "/calendar/invites/process");
 }
 
-export function buildAccountCalendarRecomputeRelationsPath(accountId: string) {
-  return buildAccountApiPath(accountId, "/calendar/recompute-relations");
-}
-
 export function buildAccountCalendarSyncPath(accountId: string) {
   return buildAccountApiPath(accountId, "/calendar/sync");
 }

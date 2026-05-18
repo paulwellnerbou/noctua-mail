@@ -98,7 +98,6 @@ import {
 import { stripHtmlToText } from "@/lib/html";
 import {
   buildAccountApiPath,
-  buildAccountCalendarRecomputeRelationsPath,
   buildAccountCalendarSyncPath,
   buildAccountRecipientAliasPath,
   buildAccountRecipientAliasesPath,
@@ -295,7 +294,6 @@ export default function MailClient({
   const [listWidth, setListWidth] = useState(840);
   const [dragging, setDragging] = useState<"left" | "list" | null>(null);
   const [calendarSidebarOpen, setCalendarSidebarOpen] = useState(false);
-  const [isRecomputingCalendarRelations, setIsRecomputingCalendarRelations] = useState(false);
   const [calendarSidebarWidth] = useState(400);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const dragImageRef = useRef<HTMLDivElement | null>(null);
@@ -3082,26 +3080,6 @@ export default function MailClient({
     setQuery(`invite:${uidQueryTerm}`);
   };
 
-  const handleRecomputeCalendarRelations = async () => {
-    if (isRecomputingCalendarRelations || !activeAccountId) return;
-    setIsRecomputingCalendarRelations(true);
-    try {
-      const res = await fetch(buildAccountCalendarRecomputeRelationsPath(activeAccountId), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({})
-      });
-      const data = await res.json();
-      if (!data.ok) {
-        console.error("[Calendar] Recompute relations failed:", data);
-      }
-    } catch (err) {
-      console.error("[Calendar] Recompute relations error:", err);
-    } finally {
-      setIsRecomputingCalendarRelations(false);
-    }
-  };
-
   const handleOpenCalendarMessage = (messageId: string) => {
     const msg = messageById.get(messageId) ?? null;
     if (msg) {
@@ -5058,8 +5036,6 @@ export default function MailClient({
                 onClose={() => setCalendarSidebarOpen(false)}
                 onOpenMessage={handleOpenCalendarMessage}
                 onFindRelatedByInviteUid={handleFindRelatedByCalendarInviteUid}
-                onRecomputeRelations={handleRecomputeCalendarRelations}
-                isRecomputingRelations={isRecomputingCalendarRelations}
               />
             </div>
           </>
@@ -5209,7 +5185,6 @@ export default function MailClient({
         isSyncing={isSyncing}
         isRecomputingThreads={isRecomputingThreads}
         isRecomputingCategories={isRecomputingCategories}
-        isRecomputingCalendarRelations={isRecomputingCalendarRelations}
         syncingFolders={syncingFolders}
         syncProgressItems={Object.values(syncProgressByJobId)}
         accountFolders={accountFolders}
@@ -5232,7 +5207,6 @@ export default function MailClient({
         onOpenCalendarSidebar={() => setCalendarSidebarOpen(true)}
         onOpenCalendarMessage={handleOpenCalendarMessage}
         onFindRelatedCalendarInviteUid={handleFindRelatedByCalendarInviteUid}
-        onRecomputeCalendarRelations={handleRecomputeCalendarRelations}
         calendarFirstDay={calendarFirstDay}
         accountDateFormat={accountDateFormat}
       />
