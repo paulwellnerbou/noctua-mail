@@ -234,6 +234,26 @@ describe("stripConditionalComments", () => {
       '<html><head><meta http-equiv="X-UA-Compatible" content="IE=edge" /></head><body><div>visible</div></body></html>'
     );
   });
+
+  it("keeps closing tags around nested [if true] blocks inside a revealed block", () => {
+    // eBay-style: a downlevel-revealed wrapper containing a nested downlevel-hidden block
+    // for Outlook's &nbsp; placeholder. The closing </div> sits *between* the inner
+    // <![endif]--> and the outer <!--<![endif]-->, and must not be swallowed.
+    const html = [
+      "<!--[if !true]><!-->",
+      '<div class="gutter">',
+      "<!--[if true]>&#160;<![endif]-->",
+      "</div>",
+      "<!--<![endif]-->",
+      '<div class="next">next</div>'
+    ].join("");
+
+    expect(stripConditionalComments(html)).toContain('<div class="gutter">');
+    expect(stripConditionalComments(html)).toContain("</div>");
+    expect(stripConditionalComments(html)).toContain('<div class="next">next</div>');
+    expect(stripConditionalComments(html)).not.toContain("[if");
+    expect(stripConditionalComments(html)).not.toContain("endif");
+  });
 });
 
 describe("html message regression", () => {
