@@ -3044,17 +3044,25 @@ export default function MailClient({
     setQuery(`thread:${threadId}`);
   };
 
+  const threadScopeMessageById = useMemo(() => {
+    const map = new Map<string, Message>();
+    threadScopeMessages.forEach((message) => map.set(message.id, message));
+    return map;
+  }, [threadScopeMessages]);
+
   const resolveMessagesByIds = useCallback(
     (ids: string[]): Message[] => {
-      const unique = Array.from(new Set(ids));
-      return unique.flatMap((id) => {
-        const match =
-          threadScopeMessages.find((item) => item.id === id) ??
-          messages.find((item) => item.id === id);
-        return match ? [match] : [];
-      });
+      const seen = new Set<string>();
+      const result: Message[] = [];
+      for (const id of ids) {
+        if (seen.has(id)) continue;
+        seen.add(id);
+        const match = threadScopeMessageById.get(id) ?? messageById.get(id);
+        if (match) result.push(match);
+      }
+      return result;
     },
-    [messages, threadScopeMessages]
+    [messageById, threadScopeMessageById]
   );
 
   const buildMoveTargetRequest = useCallback(
@@ -3224,15 +3232,8 @@ export default function MailClient({
     const isMessageListShortcutTarget = (target: EventTarget | null) =>
       target instanceof HTMLElement &&
       Boolean(target.closest('[data-message-list-row="true"]'));
-    const resolveMessageById = (id: string) =>
-      threadScopeMessages.find((item) => item.id === id) ??
-      messages.find((item) => item.id === id);
-    const resolveTargets = (messageIds: string[]) => {
-      const uniqueIds = Array.from(new Set(messageIds));
-      return uniqueIds
-        .map((id) => resolveMessageById(id))
-        .filter((message): message is Message => Boolean(message));
-    };
+    const resolveTargets = (messageIds: string[]) =>
+      resolveMessagesByIds(messageIds);
     const updateFlagStateByIds = async (
       messageIds: string[],
       update: { flag: "seen" | "flagged"; value: boolean }
@@ -3365,7 +3366,7 @@ export default function MailClient({
         void handleDeleteMessagesByIds(ids);
         return;
       }
-      const message = resolveMessageById(ids[0]);
+      const [message] = resolveMessagesByIds(ids);
       if (!message) return;
       void handleDeleteMessage(message);
     };
@@ -3376,7 +3377,7 @@ export default function MailClient({
     collapsedThreads,
     handleDeleteMessage,
     handleDeleteMessagesByIds,
-    messages,
+    resolveMessagesByIds,
     selectionStore,
     supportsThreads,
     threadScopeMessages,

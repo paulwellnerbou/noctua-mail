@@ -62,7 +62,7 @@ export default function BulkActionContextMenu({
       <DropdownMenu.Trigger>
         <span
           ref={triggerRef}
-          aria-hidden
+          tabIndex={-1}
           style={{
             position: "fixed",
             width: 0,
