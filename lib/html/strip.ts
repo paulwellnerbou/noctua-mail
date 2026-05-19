@@ -19,15 +19,26 @@ export function stripStyleTags(input: string) {
 }
 
 export function stripConditionalComments(input: string) {
+  // The condition decides whether content is kept, not the syntax:
+  //   * `[if X]`  (no `!`) — drop the block. Almost always Outlook-only.
+  //   * `[if !X]` (leading `!`) — keep the inner content. Appears in both
+  //     the downlevel-hidden form `<!--[if !X]>...<![endif]-->` and the
+  //     downlevel-revealed form `<!--[if !X]><!-->...<!--<![endif]-->`.
+  //
+  // Some senders (eBay) place a `[if X]` block *inside* an `[if !X]` revealed
+  // wrapper, so a single non-greedy regex spanning both can latch onto the
+  // wrong `<![endif]-->` and swallow tags between them. Strip the `[if X]`
+  // blocks first, then peel off the leftover `[if !X]` open/close markers.
   return input
     .replace(
-      /<!--\s*\[if\s*![^\]]+\]\s*>\s*(?:<!-->|<!--\s*-->|<!---->)?\s*([\s\S]*?)\s*(?:<!--\s*)?<!\s*\[endif\s*\]\s*-->/gi,
-      "$1"
+      /<!--\s*\[if\s*(?!\s*!)[^\]]+\]\s*>[\s\S]*?<!\s*\[endif\s*\]\s*-->/gi,
+      ""
     )
     .replace(
-      /<!--\s*\[if[^\]]+\]\s*>\s*(?:<!-->|<!--\s*-->|<!---->)?\s*[\s\S]*?\s*(?:<!--\s*)?<!\s*\[endif\s*\]\s*-->/gi,
+      /<!--\s*\[if\s*![^\]]+\]\s*>\s*(?:<!-->|<!--\s*-->|<!---->)?/gi,
       ""
-    );
+    )
+    .replace(/(?:<!--\s*)?<!\s*\[endif\s*\]\s*-->/gi, "");
 }
 
 /**

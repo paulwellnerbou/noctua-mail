@@ -234,6 +234,29 @@ describe("stripConditionalComments", () => {
       '<html><head><meta http-equiv="X-UA-Compatible" content="IE=edge" /></head><body><div>visible</div></body></html>'
     );
   });
+
+  it("keeps closing tags around nested [if true] blocks inside a revealed block", () => {
+    // eBay-style: a downlevel-revealed wrapper containing a nested downlevel-hidden block
+    // for Outlook's &nbsp; placeholder. The closing </div> sits *between* the inner
+    // <![endif]--> and the outer <!--<![endif]-->, and must not be swallowed — otherwise
+    // following sections end up nested inside .gutter instead of as its siblings.
+    const html = [
+      "<!--[if !true]><!-->",
+      '<div class="gutter">',
+      "<!--[if true]>&#160;<![endif]-->",
+      "</div>",
+      "<!--<![endif]-->",
+      '<div class="next">next</div>'
+    ].join("");
+
+    const out = stripConditionalComments(html);
+    // The .gutter <div> must close *before* the .next sibling — i.e. </div> sits
+    // between them. Asserting both halves separately wouldn't catch a swallowed
+    // </div>, because the .next div also contributes its own </div>.
+    expect(out).toContain('<div class="gutter"></div><div class="next">next</div>');
+    expect(out).not.toContain("[if");
+    expect(out).not.toContain("endif");
+  });
 });
 
 describe("html message regression", () => {
