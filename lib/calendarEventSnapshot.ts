@@ -8,7 +8,11 @@
  * message* asserted — independent of merge order or later updates.
  */
 import { createHash } from "crypto";
-import { parseIcsInvite, type CalendarEventPreview } from "./calendar";
+import {
+  parseIcsInvite,
+  type CalendarEventPreview,
+  type ParsedCalendarInvite
+} from "./calendar";
 
 export const CALENDAR_EVENT_SNAPSHOT_VERSION = 1;
 
@@ -310,13 +314,13 @@ function projectOverrideFields(
 }
 
 /**
- * Build a snapshot for one eventUid present in the given ICS source. If the
- * ICS contains multiple VEVENTs sharing this UID (a base + recurrence-id
- * overrides), they all contribute. Returns null if no VEVENT in the ICS has
- * the requested UID.
+ * Build a snapshot for one eventUid in a pre-parsed VCALENDAR. Use this
+ * form when you already have the parsed invite, or when you're building
+ * snapshots for multiple eventUids from the same ICS — parsing is O(n) in
+ * the ICS length and we'd otherwise re-parse N times during invite ingest.
  */
-export function buildCalendarEventSnapshot(
-  icsSource: string,
+export function buildCalendarEventSnapshotFromParsed(
+  parsed: ParsedCalendarInvite,
   eventUid: string
 ): CalendarEventSnapshot | null {
   const trimmedUid = eventUid?.trim();
@@ -325,7 +329,6 @@ export function buildCalendarEventSnapshot(
   // event UIDs in upper case but our DB stores them lower-cased via
   // normalizeCalendarEventUid.
   const matchKey = trimmedUid.toLowerCase();
-  const parsed = parseIcsInvite(icsSource);
   const method = parsed.method?.trim().toUpperCase() || undefined;
   const matching = parsed.events.filter(
     (event) => (event.uid ?? "").trim().toLowerCase() === matchKey
@@ -377,6 +380,18 @@ export function buildCalendarEventSnapshot(
     base,
     overrides
   };
+}
+
+/**
+ * Convenience wrapper that parses the ICS source first. Call sites that
+ * build snapshots for several UIDs from the same source should parse once
+ * with `parseIcsInvite` and use `buildCalendarEventSnapshotFromParsed`.
+ */
+export function buildCalendarEventSnapshot(
+  icsSource: string,
+  eventUid: string
+): CalendarEventSnapshot | null {
+  return buildCalendarEventSnapshotFromParsed(parseIcsInvite(icsSource), eventUid);
 }
 
 export function serializeCalendarEventSnapshot(snapshot: CalendarEventSnapshot): string {

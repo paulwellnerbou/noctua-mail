@@ -129,13 +129,14 @@ export default function CalendarEventDiffPanel({
   if (diff.kind === "initial" || diff.kind === "no-change") return null;
 
   if (diff.kind === "unavailable") {
+    const message =
+      diff.reason === "no_current_snapshot"
+        ? "This invite hasn’t been snapshotted yet (run the backfill script to enable a diff)."
+        : "The previous version of this invite isn’t available locally, so we can’t show what changed.";
     return (
       <section className={styles.panel} aria-label="Calendar update changes">
         <p className={styles.heading}>What changed</p>
-        <p className={styles.muted}>
-          The previous version of this invite isn&rsquo;t available locally, so we can&rsquo;t
-          show what changed.
-        </p>
+        <p className={styles.muted}>{message}</p>
       </section>
     );
   }

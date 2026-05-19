@@ -359,11 +359,14 @@ export async function getMessageCalendarSnapshot(
 
 /**
  * Find the most recent prior message_calendar_events row for the same
- * eventUid in the same account, strictly before the reference message's
+ * eventUid in the same account, at or before the reference message's
  * received date. Used to derive "what changed" for an update message.
  *
  * Ordered by the delivering message's date, falling back to processedAtMs
- * when two messages share a timestamp. Rows without a snapshot are skipped.
+ * (then messageId, lexically) when two messages share a `dateValue` — so
+ * updates that arrive in the same second still get a deterministic prior.
+ * The reference message itself is excluded by id. Rows without a snapshot
+ * are skipped.
  */
 export async function getPriorCalendarSnapshot(
   accountId: string,
@@ -383,7 +386,7 @@ export async function getPriorCalendarSnapshot(
          AND lower(COALESCE(mce.eventUidKey, mce.eventUid, '')) = lower(?)
          AND mce.messageId <> ?
          AND mce.snapshotJson IS NOT NULL
-         AND m.dateValue < ?
+         AND m.dateValue <= ?
        ORDER BY m.dateValue DESC, COALESCE(mce.processedAtMs, 0) DESC, mce.messageId DESC
        LIMIT 1`
     )

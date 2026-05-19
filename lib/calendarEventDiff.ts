@@ -90,9 +90,14 @@ export type OccurrenceDiff =
   | { kind: "cancelled"; recurrenceIdMs: number }
   | { kind: "uncancelled"; recurrenceIdMs: number };
 
+export type DiffUnavailableReason =
+  | "no_current_snapshot"
+  | "no_prior_snapshot"
+  | "no_prior_message";
+
 export type CalendarEventDiff =
   | { kind: "initial"; snapshot: CalendarEventSnapshot }
-  | { kind: "unavailable"; reason: "no_prior_snapshot" | "no_prior_message" }
+  | { kind: "unavailable"; reason: DiffUnavailableReason }
   | { kind: "no-change"; sequenceDelta: number }
   | {
       kind: "update" | "cancel";

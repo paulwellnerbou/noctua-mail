@@ -1,10 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import {
   buildCalendarEventSnapshot,
+  buildCalendarEventSnapshotFromParsed,
   parseCalendarEventSnapshot,
   parseRecurrenceRule,
   serializeCalendarEventSnapshot
 } from "./calendarEventSnapshot";
+import { parseIcsInvite } from "./calendar";
 
 const UID = "demo-uid@example.test";
 
@@ -235,6 +237,18 @@ describe("buildCalendarEventSnapshot", () => {
     const serialized = serializeCalendarEventSnapshot(snapshot!);
     const parsed = parseCalendarEventSnapshot(serialized);
     expect(parsed).toEqual(snapshot);
+  });
+
+  test("buildCalendarEventSnapshotFromParsed lets callers parse once for several UIDs", () => {
+    const source = ics([
+      [`UID:${UID}-a`, "SUMMARY:A", "DTSTART:20260401T100000Z"].join("\r\n"),
+      [`UID:${UID}-b`, "SUMMARY:B", "DTSTART:20260401T110000Z"].join("\r\n")
+    ]);
+    const parsed = parseIcsInvite(source);
+    const fromSource = buildCalendarEventSnapshot(source, `${UID}-b`);
+    const fromParsed = buildCalendarEventSnapshotFromParsed(parsed, `${UID}-b`);
+    expect(fromParsed).toEqual(fromSource);
+    expect(fromParsed?.base?.summary).toBe("B");
   });
 
   test("parseCalendarEventSnapshot rejects malformed input", () => {

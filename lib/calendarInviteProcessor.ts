@@ -28,7 +28,7 @@ import {
 import { resolveEmailCalendarEventStatus } from "@/lib/calendarEventStatus";
 import { deriveInviteDeckEventBounds } from "@/lib/inviteDeckEventBounds";
 import {
-  buildCalendarEventSnapshot,
+  buildCalendarEventSnapshotFromParsed,
   CALENDAR_EVENT_SNAPSHOT_VERSION,
   serializeCalendarEventSnapshot
 } from "@/lib/calendarEventSnapshot";
@@ -270,8 +270,12 @@ export async function processCalendarInviteForMessage({
     actionType: inferCalendarInviteMessageActionType(group),
     ...deriveInviteDeckEventBounds(group)
   }));
+  // Parse the ICS once; a single message can carry several UIDs (base
+  // event + recurrence overrides) and we'd otherwise re-parse the whole
+  // source N times in this map.
+  const parsedInvite = parseIcsInvite(icsSource);
   const inviteStatesWithSnapshots = inviteStates.map((state) => {
-    const snapshot = buildCalendarEventSnapshot(icsSource, state.eventUid);
+    const snapshot = buildCalendarEventSnapshotFromParsed(parsedInvite, state.eventUid);
     return {
       ...state,
       snapshotJson: snapshot ? serializeCalendarEventSnapshot(snapshot) : null,
