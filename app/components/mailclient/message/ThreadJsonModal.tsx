@@ -24,12 +24,12 @@ export default function ThreadJsonModal({
 
   return (
     <Dialog.Root open={open} onOpenChange={(nextOpen) => (!nextOpen ? onClose() : undefined)}>
-      <Dialog.Content size="4" className={styles.content} aria-describedby={undefined}>
+      <Dialog.Content size="4" className={styles.content}>
         <Flex direction="column" gap="3" className={styles.body}>
           <DialogTitleBar title="Thread JSON" onClose={onClose} />
-          <Text size="2" color="gray">
+          <Dialog.Description size="2" color="gray">
             Messages currently visible in the message view pane (thread).
-          </Text>
+          </Dialog.Description>
           <Flex align="center" gap="2" className={styles.toolbar}>
             <Switch
               checked={!omitBody}

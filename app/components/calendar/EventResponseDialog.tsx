@@ -66,12 +66,12 @@ export default function EventResponseDialog({
         if (!next && !submittingResponse) onOpenChange(false);
       }}
     >
-      <Dialog.Content size="2" className={styles.responseDialog} aria-describedby={undefined}>
+      <Dialog.Content size="2" className={styles.responseDialog}>
         <Flex direction="column" gap="3">
           <Dialog.Title size="4">Respond to invitation</Dialog.Title>
 
           <div className={styles.responseSummary}>
-            <Text size="2" weight="medium">{title || "Untitled Event"}</Text>
+            <Dialog.Description size="2" weight="medium">{title || "Untitled Event"}</Dialog.Description>
             {timeRange && (
               <Text size="1" color="gray">{responseTargetLabel}</Text>
             )}

@@ -730,6 +730,13 @@ export async function rescheduleCalendarRemindersByEventUid(
         ? input.messageId.trim()
         : null;
     const now = Date.now();
+    // Match by exact `eventUid`, not by the cross-anchor `eventUidKey`. After
+    // a Google re-anchor, multiple sibling rows share an eventUidKey but have
+    // their own startAtMs / recurrenceRule (the older anchors are still live
+    // within their UNTIL cap, see `reconcileSeriesAnchorSiblings`). Widening
+    // the WHERE to eventUidKey would rewrite each sibling reminder's timing
+    // to the just-saved anchor's timing, which is wrong: a reminder set on
+    // the older anchor should keep firing on the older anchor's schedule.
     const result = db
       .prepare(
         `UPDATE calendar_reminders
@@ -746,7 +753,7 @@ export async function rescheduleCalendarRemindersByEventUid(
              updatedAtMs = ?,
              messageId = COALESCE(?, messageId)
          WHERE accountId = ? AND deletedAtMs IS NULL
-           AND lower(COALESCE(eventUidKey, eventUid, '')) = lower(?)`
+           AND lower(eventUid) = lower(?)`
       )
       .run(
         eventTitle,
@@ -762,7 +769,7 @@ export async function rescheduleCalendarRemindersByEventUid(
         now,
         messageId,
         accountId,
-        normalizedUidKey
+        normalizedUid
       ) as { changes?: number };
     return result?.changes ?? 0;
   });

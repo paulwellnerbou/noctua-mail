@@ -389,7 +389,7 @@ describe("processCalendarInviteForMessage", () => {
       createdAtMs: 1,
       updatedAtMs: 1
     };
-    listSiblingCalendarEventsByUidKey.mockImplementation(async (_acc, uid) => {
+    listSiblingCalendarEventsByUidKey.mockImplementation(async (_acc: string, uid: string) => {
       if (uid === "base_R20260403T084500@google.com") return [priorSibling];
       return [];
     });
@@ -466,6 +466,177 @@ describe("processCalendarInviteForMessage", () => {
     });
 
     expect(upsertCalendarEventByUid.mock.calls.length).toBe(1);
+  });
+
+  test("UNTIL-caps a newly-arriving older anchor when a newer sibling already exists", async () => {
+    // Out-of-order delivery: the newer anchor was already imported (e.g.
+    // user opened that email first, or it was auto-processed), and now
+    // the older anchor's REQUEST is processed afterwards. Without this
+    // step the older anchor would keep emitting occurrences indefinitely
+    // until the newer one is touched again. Here the just-saved older
+    // anchor is the one that needs the UNTIL cap.
+    const olderAnchorStartMs = Date.UTC(2026, 2, 20, 9, 45, 0); // 2026-03-20 09:45 UTC
+    const newerSiblingStartMs = Date.UTC(2026, 3, 3, 8, 45, 0); // 2026-04-03 08:45 UTC
+
+    const newerSibling: CalendarEvent = {
+      id: "cal-newer-anchor",
+      accountId: "acc-1",
+      eventUid: "base_R20260403T084500@google.com",
+      eventUidKey: "base@google.com",
+      summary: "Stand-Up Unified-API",
+      startAtMs: newerSiblingStartMs,
+      endAtMs: newerSiblingStartMs + 15 * 60 * 1000,
+      allDay: false,
+      recurrenceRule: "FREQ=WEEKLY;INTERVAL=2;BYDAY=FR",
+      sourceType: "email",
+      messageId: "msg-newer-anchor-invite",
+      createdAtMs: 1,
+      updatedAtMs: 1
+    };
+    listSiblingCalendarEventsByUidKey.mockImplementation(async (_acc: string, uid: string) => {
+      if (uid === "base_R20260320T094500@google.com") return [newerSibling];
+      return [];
+    });
+
+    const olderAnchorIcs = makeIcs([
+      "METHOD:REQUEST",
+      "BEGIN:VEVENT",
+      "UID:base_R20260320T094500@google.com",
+      "SUMMARY:Stand-Up Unified-API",
+      "DTSTART:20260320T094500Z",
+      "DTEND:20260320T100000Z",
+      "RRULE:FREQ=WEEKLY;INTERVAL=2;BYDAY=FR",
+      "END:VEVENT"
+    ]);
+
+    await processCalendarInviteForMessage({
+      accountId: "acc-1",
+      messageId: "msg-older-anchor",
+      icsSource: olderAnchorIcs,
+      process: true,
+      accountEmail: "paul@example.test"
+    });
+
+    // First upsert = the new (older) anchor. Second upsert = that same
+    // anchor capped against the pre-existing newer sibling.
+    expect(upsertCalendarEventByUid.mock.calls.length).toBe(2);
+
+    const [, initialAnchorFields] = upsertCalendarEventByUid.mock.calls[0];
+    expect(initialAnchorFields.eventUid).toBe("base_R20260320T094500@google.com");
+    expect(initialAnchorFields.recurrenceRule).toBe("FREQ=WEEKLY;INTERVAL=2;BYDAY=FR");
+
+    const [, cappedFields] = upsertCalendarEventByUid.mock.calls[1];
+    expect(cappedFields.eventUid).toBe("base_R20260320T094500@google.com");
+    const expectedUntilMs = newerSiblingStartMs - 1000;
+    const expectedUntilValue = (() => {
+      const d = new Date(expectedUntilMs);
+      const pad = (n: number) => String(n).padStart(2, "0");
+      return (
+        `${d.getUTCFullYear()}` +
+        `${pad(d.getUTCMonth() + 1)}` +
+        `${pad(d.getUTCDate())}T` +
+        `${pad(d.getUTCHours())}` +
+        `${pad(d.getUTCMinutes())}` +
+        `${pad(d.getUTCSeconds())}Z`
+      );
+    })();
+    expect(cappedFields.recurrenceRule).toBe(
+      `FREQ=WEEKLY;INTERVAL=2;BYDAY=FR;UNTIL=${expectedUntilValue}`
+    );
+    // The follow-up reminder reschedule reads from the just-saved event;
+    // it must see the capped rule, not the original one passed into
+    // reconcileSeriesAnchorSiblings.
+    const reminderCall = rescheduleCalendarRemindersByEventUid.mock.calls.find(
+      (args: unknown[]) => args[1] === "base_R20260320T094500@google.com"
+    );
+    const reminderFields = reminderCall?.[2] as { recurrenceRule?: string } | undefined;
+    expect(reminderFields?.recurrenceRule).toBe(
+      `FREQ=WEEKLY;INTERVAL=2;BYDAY=FR;UNTIL=${expectedUntilValue}`
+    );
+    expect(olderAnchorStartMs).toBeLessThan(newerSiblingStartMs);
+  });
+
+  test("UNTIL-caps every prior sibling when multiple share the new anchor's key", async () => {
+    // Two prior anchors both share the saved row's eventUidKey. Each one
+    // should get its own UNTIL cap in a single reconciliation pass.
+    const oldestStartMs = Date.UTC(2026, 0, 16, 9, 45, 0); // 2026-01-16
+    const middleStartMs = Date.UTC(2026, 2, 20, 9, 45, 0); // 2026-03-20
+    const newAnchorStartMs = Date.UTC(2026, 3, 3, 8, 45, 0); // 2026-04-03
+
+    const oldestSibling: CalendarEvent = {
+      id: "cal-oldest-anchor",
+      accountId: "acc-1",
+      eventUid: "base_R20260116T094500@google.com",
+      eventUidKey: "base@google.com",
+      summary: "Stand-Up Unified-API",
+      startAtMs: oldestStartMs,
+      endAtMs: oldestStartMs + 15 * 60 * 1000,
+      allDay: false,
+      recurrenceRule: "FREQ=WEEKLY;INTERVAL=2;BYDAY=FR",
+      sourceType: "email",
+      messageId: "msg-oldest-invite",
+      createdAtMs: 1,
+      updatedAtMs: 1
+    };
+    const middleSibling: CalendarEvent = {
+      ...oldestSibling,
+      id: "cal-middle-anchor",
+      eventUid: "base_R20260320T094500@google.com",
+      startAtMs: middleStartMs,
+      endAtMs: middleStartMs + 15 * 60 * 1000,
+      messageId: "msg-middle-invite"
+    };
+    listSiblingCalendarEventsByUidKey.mockImplementation(async (_acc: string, uid: string) => {
+      if (uid === "base_R20260403T084500@google.com") return [oldestSibling, middleSibling];
+      return [];
+    });
+
+    const newAnchorIcs = makeIcs([
+      "METHOD:REQUEST",
+      "BEGIN:VEVENT",
+      "UID:base_R20260403T084500@google.com",
+      "SUMMARY:Stand-Up Unified-API",
+      "DTSTART:20260403T084500Z",
+      "DTEND:20260403T090000Z",
+      "RRULE:FREQ=WEEKLY;INTERVAL=2;BYDAY=FR",
+      "END:VEVENT"
+    ]);
+
+    await processCalendarInviteForMessage({
+      accountId: "acc-1",
+      messageId: "msg-new-anchor-multi",
+      icsSource: newAnchorIcs,
+      process: true,
+      accountEmail: "paul@example.test"
+    });
+
+    // 1 upsert for the new anchor + 1 cap per prior sibling.
+    expect(upsertCalendarEventByUid.mock.calls.length).toBe(3);
+
+    const expectedUntilMs = newAnchorStartMs - 1000;
+    const expectedUntilValue = (() => {
+      const d = new Date(expectedUntilMs);
+      const pad = (n: number) => String(n).padStart(2, "0");
+      return (
+        `${d.getUTCFullYear()}` +
+        `${pad(d.getUTCMonth() + 1)}` +
+        `${pad(d.getUTCDate())}T` +
+        `${pad(d.getUTCHours())}` +
+        `${pad(d.getUTCMinutes())}` +
+        `${pad(d.getUTCSeconds())}Z`
+      );
+    })();
+
+    const cappedByUid = new Map<string, string | undefined>();
+    for (const [, fields] of upsertCalendarEventByUid.mock.calls.slice(1)) {
+      cappedByUid.set(fields.eventUid, fields.recurrenceRule ?? undefined);
+    }
+    expect(cappedByUid.get("base_R20260116T094500@google.com")).toBe(
+      `FREQ=WEEKLY;INTERVAL=2;BYDAY=FR;UNTIL=${expectedUntilValue}`
+    );
+    expect(cappedByUid.get("base_R20260320T094500@google.com")).toBe(
+      `FREQ=WEEKLY;INTERVAL=2;BYDAY=FR;UNTIL=${expectedUntilValue}`
+    );
   });
 
   test("a second reschedule of the same RECURRENCE-ID evicts the prior RDATE", async () => {
