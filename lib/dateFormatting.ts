@@ -388,9 +388,9 @@ function ymdWeekday(
 /**
  * Render only the time portion using whatever time-related options the
  * caller supplied (hour, minute, second, hour12, timeZoneName, timeStyle).
- * We delegate to Intl with locale=en-CA — `ymd` is a date-shape preference,
- * not a time-shape preference, so the time portion should respect the
- * caller's options the same way as for any other format.
+ * Delegated to Intl with the system locale (`undefined`) — `ymd` controls
+ * date *order*, not language. AM/PM markers and timezone names follow the
+ * user's UI locale, the same way they do for `mdy` / `dmy` / `locale`.
  */
 function ymdTimePart(date: Date, options: Intl.DateTimeFormatOptions): string {
   const timeOptions: Intl.DateTimeFormatOptions = {};
@@ -402,7 +402,7 @@ function ymdTimePart(date: Date, options: Intl.DateTimeFormatOptions): string {
   if (options.timeZoneName) timeOptions.timeZoneName = options.timeZoneName;
   if (options.timeZone) timeOptions.timeZone = options.timeZone;
   // Default to 24h when nothing was specified — YYYY-MM-DD pairs naturally
-  // with 24h time and that matches what locale-en-CA produces.
+  // with 24h time. Callers that want 12h pass hour12: true explicitly.
   if (timeOptions.hour12 === undefined && !timeOptions.timeStyle) {
     timeOptions.hour12 = false;
   }
@@ -410,7 +410,7 @@ function ymdTimePart(date: Date, options: Intl.DateTimeFormatOptions): string {
     timeOptions.hour = "2-digit";
     timeOptions.minute = "2-digit";
   }
-  return new Intl.DateTimeFormat("en-CA", timeOptions).format(date);
+  return new Intl.DateTimeFormat(undefined, timeOptions).format(date);
 }
 
 function formatYmdComposite(date: Date, options: Intl.DateTimeFormatOptions): string {

@@ -23,6 +23,7 @@ import styles from "./CalendarEventDiffPanel.module.css";
 type DiffEntry = {
   eventUid: string;
   priorMessageId?: string | null;
+  timeZone?: string | null;
   diff: CalendarEventDiff;
 };
 
@@ -163,7 +164,7 @@ export default function CalendarEventDiffPanel({
     );
   }
 
-  const rows = buildDiffRows(diff, dateFormat);
+  const rows = buildDiffRows(diff, dateFormat, entry.timeZone ?? undefined);
   const isCancel = diff.kind === "cancel";
 
   return (

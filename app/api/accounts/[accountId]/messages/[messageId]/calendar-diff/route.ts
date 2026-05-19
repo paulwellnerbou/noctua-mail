@@ -83,9 +83,14 @@ export async function GET(request: Request, { params }: Params) {
           diff: { kind: "unavailable" as const, reason: "no_prior_message" as const }
         };
       }
+      // Surface the event's timezone so the panel can render Start/End
+      // rows in the same zone as the event card right below it; otherwise
+      // a Berlin-based event's diff would show times in the viewer's
+      // local zone and read inconsistently with the card.
       return {
         eventUid,
         priorMessageId: prior?.messageId ?? null,
+        timeZone: currentSnapshot.base?.startTimezone ?? null,
         diff: diffCalendarEventSnapshots(priorSnapshot, currentSnapshot)
       };
     })

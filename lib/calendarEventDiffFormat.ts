@@ -13,10 +13,8 @@ import type {
 } from "./calendarEventDiff";
 import type { CalendarSnapshotAttendee } from "./calendarEventSnapshot";
 import type { AccountDateFormat } from "./data";
-import {
-  formatAccountMediumDate,
-  formatAccountMediumDateTime
-} from "./dateFormatting";
+import { formatAccountIntl, formatAccountMediumDate } from "./dateFormatting";
+import { resolveCalendarTimeZoneId } from "./calendarTimezones";
 
 export type DiffIcon =
   | "title"
@@ -55,25 +53,54 @@ const WEEKDAY_LABELS: Record<string, string> = {
   SU: "Sun"
 };
 
+/**
+ * Format an instant for the diff panel, honoring the event's timezone so
+ * the times match the event card right below the panel (which uses
+ * `formatCalendarEventRange` with the event's startTimezone). Without
+ * this, a Berlin-based event would render its diff times in the viewer's
+ * local zone.
+ *
+ * `timeZone` accepts both IANA names (Europe/Berlin) and Windows zone
+ * names like "W. Europe Standard Time" — we resolve them via
+ * resolveCalendarTimeZoneId before handing to Intl.
+ */
 function formatDateTime(
   ms?: number,
   allDay = false,
-  dateFormat?: AccountDateFormat
+  dateFormat?: AccountDateFormat,
+  timeZone?: string
 ): string {
   if (typeof ms !== "number" || !Number.isFinite(ms)) return "—";
-  return (
-    (allDay
-      ? formatAccountMediumDate(ms, dateFormat)
-      : formatAccountMediumDateTime(ms, dateFormat)) ?? "—"
-  );
+  const resolved = timeZone ? resolveCalendarTimeZoneId(timeZone) : undefined;
+  const options: Intl.DateTimeFormatOptions = allDay
+    ? { dateStyle: "medium", timeZone: "UTC" }
+    : {
+        dateStyle: "medium",
+        timeStyle: "short",
+        ...(resolved ? { timeZone: resolved } : {})
+      };
+  return formatAccountIntl(new Date(ms), dateFormat, options);
 }
 
-function formatDate(ms?: number, dateFormat?: AccountDateFormat): string {
+function formatDate(
+  ms?: number,
+  dateFormat?: AccountDateFormat,
+  timeZone?: string
+): string {
   if (typeof ms !== "number" || !Number.isFinite(ms)) return "—";
-  return formatAccountMediumDate(ms, dateFormat) ?? "—";
+  const resolved = timeZone ? resolveCalendarTimeZoneId(timeZone) : undefined;
+  if (!resolved) return formatAccountMediumDate(ms, dateFormat) ?? "—";
+  return formatAccountIntl(new Date(ms), dateFormat, {
+    dateStyle: "medium",
+    timeZone: resolved
+  });
 }
 
-function renderRRuleSummary(rule: RRuleDiff, dateFormat?: AccountDateFormat): string {
+function renderRRuleSummary(
+  rule: RRuleDiff,
+  dateFormat?: AccountDateFormat,
+  timeZone?: string
+): string {
   if (rule.added) return "Recurrence rule added";
   if (rule.removed) return "Recurrence rule removed";
   const parts: string[] = [];
@@ -83,7 +110,7 @@ function renderRRuleSummary(rule: RRuleDiff, dateFormat?: AccountDateFormat): st
   if (rule.count) parts.push(`count ${rule.count.before ?? "—"} → ${rule.count.after ?? "—"}`);
   if (rule.untilMs)
     parts.push(
-      `ends ${formatDate(rule.untilMs.before, dateFormat)} → ${formatDate(rule.untilMs.after, dateFormat)}`
+      `ends ${formatDate(rule.untilMs.before, dateFormat, timeZone)} → ${formatDate(rule.untilMs.after, dateFormat, timeZone)}`
     );
   if (rule.byDay) {
     const before = (rule.byDay.before ?? []).map((d) => WEEKDAY_LABELS[d] ?? d).join(", ");
@@ -122,10 +149,12 @@ function pushDateSetRows(
   icon: DiffIcon,
   addedLabel: string,
   removedLabel: string,
-  dateFormat: AccountDateFormat | undefined
+  dateFormat: AccountDateFormat | undefined,
+  timeZone: string | undefined
 ) {
   if (!bucket) return;
-  const fmt = (list: number[]) => list.map((ms) => formatDate(ms, dateFormat)).join(", ");
+  const fmt = (list: number[]) =>
+    list.map((ms) => formatDate(ms, dateFormat, timeZone)).join(", ");
   if (bucket.added.length > 0)
     rows.push({ key: `${prefix}-add`, icon, label: addedLabel, after: fmt(bucket.added) });
   if (bucket.removed.length > 0)
@@ -136,7 +165,8 @@ function appendBaseFieldRows(
   rows: DiffRow[],
   base: BaseFieldDiff,
   keyPrefix: string,
-  dateFormat?: AccountDateFormat
+  dateFormat?: AccountDateFormat,
+  timeZone?: string
 ) {
   for (const spec of SCALAR_ROW_SPECS) {
     const change = base[spec.key] as FieldChange<string> | undefined;
@@ -159,8 +189,8 @@ function appendBaseFieldRows(
       key: `${keyPrefix}-${key}`,
       icon: "time",
       label,
-      before: formatDateTime(change.before, base.allDay?.before, dateFormat),
-      after: formatDateTime(change.after, base.allDay?.after, dateFormat)
+      before: formatDateTime(change.before, base.allDay?.before, dateFormat, timeZone),
+      after: formatDateTime(change.after, base.allDay?.after, dateFormat, timeZone)
     });
   }
   if (base.allDay && !base.startAtMs && !base.endAtMs) {
@@ -181,11 +211,11 @@ function appendBaseFieldRows(
       key: `${keyPrefix}-recurrence`,
       icon: "recurrence",
       label: "Recurrence",
-      after: renderRRuleSummary(base.rrule, dateFormat)
+      after: renderRRuleSummary(base.rrule, dateFormat, timeZone)
     });
   }
-  pushDateSetRows(rows, `${keyPrefix}-rdate`, base.rdates, "rdate", "Extra dates added", "Extra dates removed", dateFormat);
-  pushDateSetRows(rows, `${keyPrefix}-exdate`, base.exdates, "exdate", "Occurrences cancelled", "Cancellations undone", dateFormat);
+  pushDateSetRows(rows, `${keyPrefix}-rdate`, base.rdates, "rdate", "Extra dates added", "Extra dates removed", dateFormat, timeZone);
+  pushDateSetRows(rows, `${keyPrefix}-exdate`, base.exdates, "exdate", "Occurrences cancelled", "Cancellations undone", dateFormat, timeZone);
   if (base.organizer) {
     const label = (v?: { email?: string; name?: string }) => (v ? v.email ?? v.name : undefined);
     rows.push({
@@ -200,10 +230,16 @@ function appendBaseFieldRows(
 
 export function buildDiffRows(
   diff: CalendarEventDiff & { kind: "update" | "cancel" },
-  dateFormat?: AccountDateFormat
+  dateFormat?: AccountDateFormat,
+  /**
+   * Event timezone hint for rendering Start/End/Until rows. Accepts IANA
+   * names or Windows zone names; resolved internally. When omitted, times
+   * render in the system zone (which can diverge from the event card).
+   */
+  timeZone?: string
 ): DiffRow[] {
   const rows: DiffRow[] = [];
-  appendBaseFieldRows(rows, diff.base, "base", dateFormat);
+  appendBaseFieldRows(rows, diff.base, "base", dateFormat, timeZone);
 
   diff.attendees.added.forEach((att, i) =>
     rows.push({ key: `att-add-${i}`, icon: "attendee", after: `+ ${attendeeLabel(att)}`, variant: "added" })
@@ -229,7 +265,7 @@ export function buildDiffRows(
   });
 
   diff.occurrences.forEach((occ) => {
-    const at = formatDateTime(occ.recurrenceIdMs, false, dateFormat);
+    const at = formatDateTime(occ.recurrenceIdMs, false, dateFormat, timeZone);
     if (occ.kind === "added") {
       rows.push({ key: `occ-${occ.recurrenceIdMs}`, icon: "occurrence", after: `New occurrence on ${at}` });
     } else if (occ.kind === "removed") {
@@ -241,7 +277,7 @@ export function buildDiffRows(
     } else {
       rows.push({ key: `occ-${occ.recurrenceIdMs}`, icon: "occurrence", after: `Occurrence on ${at} changed` });
       const detailRows: DiffRow[] = [];
-      appendBaseFieldRows(detailRows, occ.fields as BaseFieldDiff, `occ-${occ.recurrenceIdMs}`, dateFormat);
+      appendBaseFieldRows(detailRows, occ.fields as BaseFieldDiff, `occ-${occ.recurrenceIdMs}`, dateFormat, timeZone);
       detailRows.forEach((row) => rows.push({ ...row, indent: true }));
     }
   });
