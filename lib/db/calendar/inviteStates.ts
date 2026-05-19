@@ -313,8 +313,19 @@ type RawSnapshotRow = {
   snapshotVersion?: number | null;
 };
 
-const SNAPSHOT_SELECT_COLUMNS =
-  "messageId, eventUid, inviteActionType, processedAtMs, snapshotJson, snapshotVersion";
+// Always qualify the columns with the `mce` alias: getPriorCalendarSnapshot
+// joins `messages m`, which also has a `messageId` column (the RFC 5322
+// header), and SQLite errors "ambiguous column name: messageId" at prepare
+// time without the qualifier. Both query call sites alias the
+// message_calendar_events table as `mce` to match.
+const SNAPSHOT_SELECT_COLUMNS = [
+  "mce.messageId AS messageId",
+  "mce.eventUid AS eventUid",
+  "mce.inviteActionType AS inviteActionType",
+  "mce.processedAtMs AS processedAtMs",
+  "mce.snapshotJson AS snapshotJson",
+  "mce.snapshotVersion AS snapshotVersion"
+].join(", ");
 
 function mapSnapshotRow(row?: RawSnapshotRow | null): CalendarInviteSnapshotRow | null {
   if (!row) return null;
@@ -355,10 +366,10 @@ export async function getMessageCalendarSnapshot(
   const row = db
     .prepare(
       `SELECT ${SNAPSHOT_SELECT_COLUMNS}
-       FROM message_calendar_events
-       WHERE accountId = ?
-         AND messageId = ?
-         AND eventUid = ?
+       FROM message_calendar_events mce
+       WHERE mce.accountId = ?
+         AND mce.messageId = ?
+         AND mce.eventUid = ?
        LIMIT 1`
     )
     .get(accountId, messageId, normalizedEventUid) as RawSnapshotRow | undefined;
