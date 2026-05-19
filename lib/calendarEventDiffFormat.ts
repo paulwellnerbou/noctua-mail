@@ -1,7 +1,9 @@
 /**
- * Pure helpers that turn structured CalendarEventDiff parts into the short
- * human strings the "What changed" panel renders. Kept separate from the
- * React component so the formatting can be unit tested.
+ * Turn a structured CalendarEventDiff into the flat list of rows the "What
+ * changed" panel renders. Each row carries an icon-key (resolved to a Lucide
+ * icon by the React component) and pre-formatted before/after strings.
+ *
+ * Kept React-free so the format logic stays unit-testable without rendering.
  */
 import type {
   BaseFieldDiff,
@@ -16,10 +18,31 @@ import {
   formatAccountMediumDateTime
 } from "./dateFormatting";
 
-export type RenderableChange = {
-  label: string;
+export type DiffIcon =
+  | "title"
+  | "location"
+  | "status"
+  | "time"
+  | "tz"
+  | "allDay"
+  | "description"
+  | "recurrence"
+  | "rdate"
+  | "exdate"
+  | "organizer"
+  | "attendee"
+  | "occurrence";
+
+export type DiffRow = {
+  key: string;
+  icon: DiffIcon;
+  label?: string;
   before?: string;
   after?: string;
+  /** Color hint for "after"-only rows (added attendee, removed attendee, etc.). */
+  variant?: "added" | "removed";
+  /** Indent under the previous row — used for per-occurrence detail rows. */
+  indent?: boolean;
 };
 
 const WEEKDAY_LABELS: Record<string, string> = {
@@ -38,10 +61,11 @@ function formatDateTime(
   dateFormat?: AccountDateFormat
 ): string {
   if (typeof ms !== "number" || !Number.isFinite(ms)) return "—";
-  const formatted = allDay
-    ? formatAccountMediumDate(ms, dateFormat)
-    : formatAccountMediumDateTime(ms, dateFormat);
-  return formatted ?? "—";
+  return (
+    (allDay
+      ? formatAccountMediumDate(ms, dateFormat)
+      : formatAccountMediumDateTime(ms, dateFormat)) ?? "—"
+  );
 }
 
 function formatDate(ms?: number, dateFormat?: AccountDateFormat): string {
@@ -50,9 +74,9 @@ function formatDate(ms?: number, dateFormat?: AccountDateFormat): string {
 }
 
 function renderRRuleSummary(rule: RRuleDiff, dateFormat?: AccountDateFormat): string {
-  const parts: string[] = [];
   if (rule.added) return "Recurrence rule added";
   if (rule.removed) return "Recurrence rule removed";
+  const parts: string[] = [];
   if (rule.freq) parts.push(`frequency ${rule.freq.before ?? "—"} → ${rule.freq.after ?? "—"}`);
   if (rule.interval)
     parts.push(`interval ${rule.interval.before ?? "—"} → ${rule.interval.after ?? "—"}`);
@@ -75,64 +99,88 @@ function attendeeLabel(att: CalendarSnapshotAttendee): string {
   return att.email ?? att.name ?? "Unknown";
 }
 
-export function renderBaseFieldDiff(
-  base: BaseFieldDiff,
-  dateFormat?: AccountDateFormat
-): RenderableChange[] {
-  const out: RenderableChange[] = [];
-  const stringField = (label: string, change?: FieldChange<string>) => {
-    if (!change) return;
-    out.push({ label, before: change.before, after: change.after });
-  };
-  const boolField = (label: string, change?: FieldChange<boolean>) => {
-    if (!change) return;
-    out.push({
-      label,
-      before: change.before === undefined ? undefined : change.before ? "yes" : "no",
-      after: change.after === undefined ? undefined : change.after ? "yes" : "no"
-    });
-  };
+function pushStringChange(
+  rows: DiffRow[],
+  key: string,
+  icon: DiffIcon,
+  label: string,
+  change?: FieldChange<string>
+) {
+  if (!change) return;
+  rows.push({ key, icon, label, before: change.before, after: change.after });
+}
 
-  stringField("Title", base.summary);
-  stringField("Location", base.location);
-  stringField("Status", base.status);
-  if (base.startAtMs) {
-    out.push({
-      label: "Start",
-      before: formatDateTime(base.startAtMs.before, base.allDay?.before, dateFormat),
-      after: formatDateTime(base.startAtMs.after, base.allDay?.after, dateFormat)
+function pushTimeChange(
+  rows: DiffRow[],
+  key: string,
+  label: string,
+  change: FieldChange<number> | undefined,
+  allDayChange: FieldChange<boolean> | undefined,
+  dateFormat?: AccountDateFormat
+) {
+  if (!change) return;
+  rows.push({
+    key,
+    icon: "time",
+    label,
+    before: formatDateTime(change.before, allDayChange?.before, dateFormat),
+    after: formatDateTime(change.after, allDayChange?.after, dateFormat)
+  });
+}
+
+function appendBaseFieldRows(
+  rows: DiffRow[],
+  base: BaseFieldDiff,
+  keyPrefix: string,
+  dateFormat?: AccountDateFormat
+) {
+  pushStringChange(rows, `${keyPrefix}-summary`, "title", "Title", base.summary);
+  pushStringChange(rows, `${keyPrefix}-location`, "location", "Location", base.location);
+  pushStringChange(rows, `${keyPrefix}-status`, "status", "Status", base.status);
+  pushTimeChange(rows, `${keyPrefix}-start`, "Start", base.startAtMs, base.allDay, dateFormat);
+  pushTimeChange(rows, `${keyPrefix}-end`, "End", base.endAtMs, base.allDay, dateFormat);
+  pushStringChange(rows, `${keyPrefix}-tz-start`, "tz", "Time zone (start)", base.startTimezone);
+  pushStringChange(rows, `${keyPrefix}-tz-end`, "tz", "Time zone (end)", base.endTimezone);
+  if (base.allDay && !base.startAtMs && !base.endAtMs) {
+    rows.push({
+      key: `${keyPrefix}-allday`,
+      icon: "allDay",
+      label: "All day",
+      before: base.allDay.before === undefined ? undefined : base.allDay.before ? "yes" : "no",
+      after: base.allDay.after === undefined ? undefined : base.allDay.after ? "yes" : "no"
     });
   }
-  if (base.endAtMs) {
-    out.push({
-      label: "End",
-      before: formatDateTime(base.endAtMs.before, base.allDay?.before, dateFormat),
-      after: formatDateTime(base.endAtMs.after, base.allDay?.after, dateFormat)
+  if (base.description) {
+    rows.push({
+      key: `${keyPrefix}-description`,
+      icon: "description",
+      label: "Description",
+      after: "(changed)"
     });
   }
-  stringField("Time zone (start)", base.startTimezone);
-  stringField("Time zone (end)", base.endTimezone);
-  // allDay only stands on its own if neither start nor end already covered it
-  if (base.allDay && !base.startAtMs && !base.endAtMs) boolField("All day", base.allDay);
-  if (base.description) out.push({ label: "Description", before: "(changed)", after: undefined });
   if (base.rrule) {
-    out.push({
+    rows.push({
+      key: `${keyPrefix}-recurrence`,
+      icon: "recurrence",
       label: "Recurrence",
-      before: undefined,
       after: renderRRuleSummary(base.rrule, dateFormat)
     });
   }
   if (base.rdates) {
     const adds = base.rdates.added.map((ms) => formatDate(ms, dateFormat));
     const rems = base.rdates.removed.map((ms) => formatDate(ms, dateFormat));
-    if (adds.length > 0) out.push({ label: "Extra dates added", after: adds.join(", ") });
-    if (rems.length > 0) out.push({ label: "Extra dates removed", after: rems.join(", ") });
+    if (adds.length > 0)
+      rows.push({ key: `${keyPrefix}-rdate-add`, icon: "rdate", label: "Extra dates added", after: adds.join(", ") });
+    if (rems.length > 0)
+      rows.push({ key: `${keyPrefix}-rdate-rm`, icon: "rdate", label: "Extra dates removed", after: rems.join(", ") });
   }
   if (base.exdates) {
     const adds = base.exdates.added.map((ms) => formatDate(ms, dateFormat));
     const rems = base.exdates.removed.map((ms) => formatDate(ms, dateFormat));
-    if (adds.length > 0) out.push({ label: "Occurrences cancelled", after: adds.join(", ") });
-    if (rems.length > 0) out.push({ label: "Cancellations undone", after: rems.join(", ") });
+    if (adds.length > 0)
+      rows.push({ key: `${keyPrefix}-exdate-add`, icon: "exdate", label: "Occurrences cancelled", after: adds.join(", ") });
+    if (rems.length > 0)
+      rows.push({ key: `${keyPrefix}-exdate-rm`, icon: "exdate", label: "Cancellations undone", after: rems.join(", ") });
   }
   if (base.organizer) {
     const before = base.organizer.before
@@ -141,72 +189,49 @@ export function renderBaseFieldDiff(
     const after = base.organizer.after
       ? base.organizer.after.email ?? base.organizer.after.name
       : undefined;
-    out.push({ label: "Organizer", before, after });
+    rows.push({ key: `${keyPrefix}-organizer`, icon: "organizer", label: "Organizer", before, after });
   }
-  return out;
 }
 
-export type AttendeeBucket = {
-  kind: "added" | "removed" | "responded";
-  text: string;
-};
+export function buildDiffRows(
+  diff: CalendarEventDiff & { kind: "update" | "cancel" },
+  dateFormat?: AccountDateFormat
+): DiffRow[] {
+  const rows: DiffRow[] = [];
+  appendBaseFieldRows(rows, diff.base, "base", dateFormat);
 
-export function renderAttendeeDiff(diff: CalendarEventDiff & { kind: "update" | "cancel" }): AttendeeBucket[] {
-  const buckets: AttendeeBucket[] = [];
-  diff.attendees.added.forEach((att) => buckets.push({ kind: "added", text: attendeeLabel(att) }));
-  diff.attendees.removed.forEach((att) =>
-    buckets.push({ kind: "removed", text: attendeeLabel(att) })
+  diff.attendees.added.forEach((att, i) =>
+    rows.push({ key: `att-add-${i}`, icon: "attendee", after: `+ ${attendeeLabel(att)}`, variant: "added" })
   );
-  diff.attendees.partstatChanged.forEach((change) => {
+  diff.attendees.removed.forEach((att, i) =>
+    rows.push({ key: `att-rm-${i}`, icon: "attendee", after: `− ${attendeeLabel(att)}`, variant: "removed" })
+  );
+  diff.attendees.partstatChanged.forEach((change, i) => {
     const who = change.name ?? change.email ?? "Unknown";
-    buckets.push({
-      kind: "responded",
-      text: `${who}: ${change.before ?? "—"} → ${change.after ?? "—"}`
+    rows.push({
+      key: `att-partstat-${i}`,
+      icon: "attendee",
+      after: `${who}: ${change.before ?? "—"} → ${change.after ?? "—"}`
     });
   });
-  return buckets;
-}
 
-export type OccurrenceDescription = {
-  recurrenceIdMs: number;
-  primary: string;
-  details: RenderableChange[];
-};
+  diff.occurrences.forEach((occ) => {
+    const at = formatDateTime(occ.recurrenceIdMs, false, dateFormat);
+    if (occ.kind === "added") {
+      rows.push({ key: `occ-${occ.recurrenceIdMs}`, icon: "occurrence", after: `New occurrence on ${at}` });
+    } else if (occ.kind === "removed") {
+      rows.push({ key: `occ-${occ.recurrenceIdMs}`, icon: "occurrence", after: `Occurrence override removed for ${at}` });
+    } else if (occ.kind === "cancelled") {
+      rows.push({ key: `occ-${occ.recurrenceIdMs}`, icon: "occurrence", after: `Occurrence cancelled on ${at}` });
+    } else if (occ.kind === "uncancelled") {
+      rows.push({ key: `occ-${occ.recurrenceIdMs}`, icon: "occurrence", after: `Occurrence un-cancelled on ${at}` });
+    } else {
+      rows.push({ key: `occ-${occ.recurrenceIdMs}`, icon: "occurrence", after: `Occurrence on ${at} changed` });
+      const detailRows: DiffRow[] = [];
+      appendBaseFieldRows(detailRows, occ.fields as BaseFieldDiff, `occ-${occ.recurrenceIdMs}`, dateFormat);
+      detailRows.forEach((row) => rows.push({ ...row, indent: true }));
+    }
+  });
 
-export function describeOccurrence(
-  occ: (CalendarEventDiff & { kind: "update" | "cancel" })["occurrences"][number],
-  dateFormat?: AccountDateFormat
-): OccurrenceDescription {
-  switch (occ.kind) {
-    case "added":
-      return {
-        recurrenceIdMs: occ.recurrenceIdMs,
-        primary: `New occurrence on ${formatDateTime(occ.recurrenceIdMs, false, dateFormat)}`,
-        details: []
-      };
-    case "removed":
-      return {
-        recurrenceIdMs: occ.recurrenceIdMs,
-        primary: `Occurrence override removed for ${formatDateTime(occ.recurrenceIdMs, false, dateFormat)}`,
-        details: []
-      };
-    case "cancelled":
-      return {
-        recurrenceIdMs: occ.recurrenceIdMs,
-        primary: `Occurrence cancelled on ${formatDateTime(occ.recurrenceIdMs, false, dateFormat)}`,
-        details: []
-      };
-    case "uncancelled":
-      return {
-        recurrenceIdMs: occ.recurrenceIdMs,
-        primary: `Occurrence un-cancelled on ${formatDateTime(occ.recurrenceIdMs, false, dateFormat)}`,
-        details: []
-      };
-    case "modified":
-      return {
-        recurrenceIdMs: occ.recurrenceIdMs,
-        primary: `Occurrence on ${formatDateTime(occ.recurrenceIdMs, false, dateFormat)} changed`,
-        details: renderBaseFieldDiff(occ.fields as BaseFieldDiff, dateFormat)
-      };
-  }
+  return rows;
 }

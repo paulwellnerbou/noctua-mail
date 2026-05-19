@@ -1,7 +1,7 @@
 /**
- * Visual style is intentionally aligned with EventDetailView's metaRow
- * (same font size, color, icon size, gap) so the "What changed" rows blend
- * into the event card as if they were additional meta lines.
+ * The panel inherits row layout from EventDetailView.module.css via the
+ * shared CalendarMetaRow component. Only the container, heading, and
+ * before/after color treatments live here.
  */
 
 .panel {
@@ -22,22 +22,9 @@
   color: var(--gray-10);
 }
 
-.row {
-  display: flex;
-  align-items: flex-start;
-  gap: 6px;
+.muted {
+  margin: 0;
   font-size: 12px;
-  color: var(--gray-11);
-  overflow-wrap: anywhere;
-}
-
-.icon {
-  flex: 0 0 auto;
-  color: var(--gray-10);
-  margin-top: 2px;
-}
-
-.label {
   color: var(--gray-10);
 }
 
@@ -62,25 +49,6 @@
   color: var(--red-11);
 }
 
-.muted {
-  color: var(--gray-10);
-  font-size: 12px;
-}
-
-.list {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.occurrenceList {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  margin: 2px 0 0 0;
+.indent {
   padding-left: 18px;
-  list-style: none;
 }
