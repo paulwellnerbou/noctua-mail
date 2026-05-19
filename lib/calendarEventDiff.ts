@@ -148,31 +148,27 @@ function eqOrganizer(
   return a.email === b.email && a.name === b.name;
 }
 
+// Single-value (scalar) RRULE fields and array-valued fields, kept as
+// typed key lists so the diff loop stays type-checked. `as const` is what
+// lets the keyof projection still narrow to specific properties.
+const RRULE_SCALAR_KEYS = ["freq", "interval", "count", "untilMs", "wkst"] as const;
+const RRULE_ARRAY_KEYS = ["byDay", "byMonth", "byMonthDay", "bySetPos"] as const;
+
+function setIfDefined<T extends object, K extends keyof T>(out: T, key: K, value: T[K] | undefined) {
+  if (value !== undefined) out[key] = value;
+}
+
 function diffRRule(before?: ParsedRRule | null, after?: ParsedRRule | null): RRuleDiff | undefined {
   if (!before && !after) return undefined;
-  if (!before && after) return { added: true };
-  if (before && !after) return { removed: true };
+  if (!before) return { added: true };
+  if (!after) return { removed: true };
   const out: RRuleDiff = {};
-  const a = before!;
-  const b = after!;
-  const freq = makeChange(a.freq, b.freq);
-  if (freq) out.freq = freq;
-  const interval = makeChange(a.interval, b.interval);
-  if (interval) out.interval = interval;
-  const count = makeChange(a.count, b.count);
-  if (count) out.count = count;
-  const untilMs = makeChange(a.untilMs, b.untilMs);
-  if (untilMs) out.untilMs = untilMs;
-  const byDay = makeArrayChange(a.byDay, b.byDay);
-  if (byDay) out.byDay = byDay;
-  const byMonth = makeArrayChange(a.byMonth, b.byMonth);
-  if (byMonth) out.byMonth = byMonth;
-  const byMonthDay = makeArrayChange(a.byMonthDay, b.byMonthDay);
-  if (byMonthDay) out.byMonthDay = byMonthDay;
-  const bySetPos = makeArrayChange(a.bySetPos, b.bySetPos);
-  if (bySetPos) out.bySetPos = bySetPos;
-  const wkst = makeChange(a.wkst, b.wkst);
-  if (wkst) out.wkst = wkst;
+  for (const key of RRULE_SCALAR_KEYS) {
+    setIfDefined(out, key, makeChange(before[key], after[key]) as RRuleDiff[typeof key]);
+  }
+  for (const key of RRULE_ARRAY_KEYS) {
+    setIfDefined(out, key, makeArrayChange(before[key], after[key]) as RRuleDiff[typeof key]);
+  }
   return Object.keys(out).length > 0 ? out : undefined;
 }
 
@@ -257,6 +253,19 @@ function diffDescription(
   return change;
 }
 
+// Field categories of CalendarEventSnapshotFields that flow through the
+// generic diff loop. Description / organizer / rrule / rdates / exdates
+// need bespoke equality and are handled separately.
+const SCALAR_FIELDS = [
+  "summary",
+  "location",
+  "status",
+  "startTimezone",
+  "endTimezone"
+] as const satisfies readonly (keyof CalendarEventSnapshotFields)[];
+const NUMERIC_FIELDS = ["startAtMs", "endAtMs"] as const satisfies readonly (keyof CalendarEventSnapshotFields)[];
+const BOOL_FIELDS = ["allDay"] as const satisfies readonly (keyof CalendarEventSnapshotFields)[];
+
 function diffBaseFields(
   before?: CalendarEventSnapshotFields | null,
   after?: CalendarEventSnapshotFields | null
@@ -264,55 +273,38 @@ function diffBaseFields(
   const a = before ?? undefined;
   const b = after ?? undefined;
   const out: BaseFieldDiff = {};
-  const summary = makeChange(a?.summary, b?.summary);
-  if (summary) out.summary = summary;
-  const location = makeChange(a?.location, b?.location);
-  if (location) out.location = location;
-  const status = makeChange(a?.status, b?.status);
-  if (status) out.status = status;
-  const startAtMs = makeChange(a?.startAtMs, b?.startAtMs);
-  if (startAtMs) out.startAtMs = startAtMs;
-  const endAtMs = makeChange(a?.endAtMs, b?.endAtMs);
-  if (endAtMs) out.endAtMs = endAtMs;
-  const startTimezone = makeChange(a?.startTimezone, b?.startTimezone);
-  if (startTimezone) out.startTimezone = startTimezone;
-  const endTimezone = makeChange(a?.endTimezone, b?.endTimezone);
-  if (endTimezone) out.endTimezone = endTimezone;
-  const allDay = makeChange(a?.allDay, b?.allDay);
-  if (allDay) out.allDay = allDay;
-  const description = diffDescription(a, b);
-  if (description) out.description = description;
+  for (const key of SCALAR_FIELDS) {
+    setIfDefined(out, key, makeChange(a?.[key] as string | undefined, b?.[key] as string | undefined));
+  }
+  for (const key of NUMERIC_FIELDS) {
+    setIfDefined(out, key, makeChange(a?.[key] as number | undefined, b?.[key] as number | undefined));
+  }
+  for (const key of BOOL_FIELDS) {
+    setIfDefined(out, key, makeChange(a?.[key] as boolean | undefined, b?.[key] as boolean | undefined));
+  }
+  setIfDefined(out, "description", diffDescription(a, b));
   if (!eqOrganizer(a?.organizer, b?.organizer)) {
     out.organizer = {};
     if (a?.organizer) out.organizer.before = a.organizer;
     if (b?.organizer) out.organizer.after = b.organizer;
   }
-  const rrule = diffRRule(a?.rrule ?? null, b?.rrule ?? null);
-  if (rrule) out.rrule = rrule;
-  const rdates = diffDateSet(a?.rdates, b?.rdates);
-  if (rdates) out.rdates = rdates;
-  const exdates = diffDateSet(a?.exdates, b?.exdates);
-  if (exdates) out.exdates = exdates;
+  setIfDefined(out, "rrule", diffRRule(a?.rrule ?? null, b?.rrule ?? null));
+  setIfDefined(out, "rdates", diffDateSet(a?.rdates, b?.rdates));
+  setIfDefined(out, "exdates", diffDateSet(a?.exdates, b?.exdates));
   return out;
 }
+
+// Per-occurrence overrides expose the subset of base fields that can be
+// per-instance. We reuse diffBaseFields and strip the series-only keys.
+const OCCURRENCE_OMIT_KEYS = ["rrule", "rdates", "exdates", "organizer"] as const;
 
 function diffOccurrenceFields(
   before: CalendarEventSnapshotFields | undefined,
   after: CalendarEventSnapshotFields | undefined
 ): OccurrenceDiff extends { kind: "modified"; fields: infer F } ? F : never {
-  // Reuse base-field diffing but restricted to the per-occurrence subset.
-  const baseDiff = diffBaseFields(before, after);
-  return {
-    summary: baseDiff.summary,
-    location: baseDiff.location,
-    status: baseDiff.status,
-    startAtMs: baseDiff.startAtMs,
-    endAtMs: baseDiff.endAtMs,
-    startTimezone: baseDiff.startTimezone,
-    endTimezone: baseDiff.endTimezone,
-    allDay: baseDiff.allDay,
-    description: baseDiff.description
-  } as OccurrenceDiff extends { kind: "modified"; fields: infer F } ? F : never;
+  const baseDiff: Record<string, unknown> = { ...diffBaseFields(before, after) };
+  for (const key of OCCURRENCE_OMIT_KEYS) delete baseDiff[key];
+  return baseDiff as OccurrenceDiff extends { kind: "modified"; fields: infer F } ? F : never;
 }
 
 function occurrenceFieldsHasChange(fields: Record<string, unknown>): boolean {

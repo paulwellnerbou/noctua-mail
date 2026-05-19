@@ -7,9 +7,9 @@ import {
 import {
   getMessageById,
   getMessageCalendarSnapshot,
-  getPriorCalendarSnapshot
+  getPriorCalendarSnapshot,
+  listMessageCalendarEventUids
 } from "@/lib/db";
-import { getAccountDb } from "@/lib/db/connection";
 import { parseCalendarEventSnapshot } from "@/lib/calendarEventSnapshot";
 import { diffCalendarEventSnapshots } from "@/lib/calendarEventDiff";
 
@@ -44,7 +44,7 @@ export async function GET(request: Request, { params }: Params) {
     return NextResponse.json({ ok: false, message: "Message not found" }, { status: 404 });
   }
 
-  const eventUids = await listEventUidsForMessage(context.accountId, messageId);
+  const eventUids = await listMessageCalendarEventUids(context.accountId, messageId);
   const dateValue =
     typeof message.dateValue === "number" && Number.isFinite(message.dateValue)
       ? message.dateValue
@@ -69,10 +69,9 @@ export async function GET(request: Request, { params }: Params) {
         messageId
       );
       const priorSnapshot = prior ? parseCalendarEventSnapshot(prior.snapshotJson) : null;
-      // When the current message is an update but its stored snapshot
-      // doesn't carry a sequence/method that hints at it, fall back to the
-      // row's inviteActionType so the diff classification matches the UI's
-      // notion of "this is an update".
+      // The stored inviteActionType is authoritative for "this message is
+      // an update" classification; the diff function can't always infer it
+      // from the snapshot alone (e.g. SEQUENCE preserved but content drifted).
       const looksLikeUpdate =
         current?.inviteActionType === "update" ||
         current?.inviteActionType === "cancellation";
@@ -91,22 +90,4 @@ export async function GET(request: Request, { params }: Params) {
   );
 
   return NextResponse.json({ ok: true, diffs });
-}
-
-async function listEventUidsForMessage(
-  accountId: string,
-  messageId: string
-): Promise<string[]> {
-  const db = await getAccountDb(accountId);
-  const rows = db
-    .prepare(
-      `SELECT eventUid
-       FROM message_calendar_events
-       WHERE accountId = ? AND messageId = ?
-       ORDER BY rowid`
-    )
-    .all(accountId, messageId) as Array<{ eventUid?: string | null }>;
-  return rows
-    .map((row) => (typeof row.eventUid === "string" ? row.eventUid.trim() : ""))
-    .filter((uid): uid is string => Boolean(uid));
 }

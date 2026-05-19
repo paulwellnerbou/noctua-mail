@@ -10,6 +10,7 @@ import type { EventClickArg, EventMountArg, DatesSetArg, EventInput } from "@ful
 import { formatCalendarEventRange } from "@/lib/calendar";
 import type { AccountDateFormat, CalendarEvent } from "@/lib/data";
 import type { CalendarReminder } from "@/lib/data";
+import { useAccountDateFormat } from "@/app/components/AccountDateFormatContext";
 import {
   buildAccountCalendarEventsPath,
   buildAccountRemindersPath
@@ -31,7 +32,6 @@ type Props = {
   accountId: string;
   compact?: boolean;
   firstDay?: 0 | 1;
-  dateFormat?: AccountDateFormat;
   onEventClick?: (
     event: CalendarEvent | CalendarReminder,
     kind: "event" | "reminder",
@@ -118,11 +118,11 @@ export default function CalendarView({
   accountId,
   compact = false,
   firstDay = 1,
-  dateFormat,
   onEventClick,
   onDateClick,
   calendarRef: externalRef
 }: Props) {
+  const dateFormat = useAccountDateFormat();
   const internalRef = useRef<FullCalendar>(null);
   const calendarRef = (externalRef ?? internalRef) as React.RefObject<FullCalendar>;
   const [fullCalendarEvents, setFullCalendarEvents] = useState<EventInput[]>([]);

@@ -2,7 +2,8 @@
 
 import { useMemo } from "react";
 import { ArrowLeft } from "lucide-react";
-import type { AccountDateFormat, CalendarEvent, CalendarReminder } from "@/lib/data";
+import type { CalendarEvent, CalendarReminder } from "@/lib/data";
+import { useAccountDateFormat } from "@/app/components/AccountDateFormatContext";
 import { buildCalendarIcsFilename } from "@/lib/calendarIcs";
 import InviteAttachmentControls from "./InviteAttachmentControls";
 import EventDetailView, { type CalendarEventDeleteAction } from "./EventDetailView";
@@ -18,7 +19,6 @@ type Props = {
   onFindRelatedByInviteUid?: (uid: string) => void;
   onEventUpdated?: (event: CalendarEvent) => void;
   onEventDeleted?: (action: CalendarEventDeleteAction) => void;
-  dateFormat?: AccountDateFormat;
 };
 
 function parseAttendees(json?: string): string[] {
@@ -41,9 +41,9 @@ export default function EventDetailPanel({
   onOpenMessage,
   onFindRelatedByInviteUid,
   onEventUpdated,
-  onEventDeleted,
-  dateFormat
+  onEventDeleted
 }: Props) {
+  const dateFormat = useAccountDateFormat();
   const isCalEvent = kind === "event";
   const calEv = isCalEvent ? (event as CalendarEvent) : null;
   const reminder = !isCalEvent ? (event as CalendarReminder) : null;

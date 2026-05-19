@@ -1,6 +1,6 @@
 "use client";
 
-import type { AccountDateFormat, Topic, TopicColor } from "@/lib/data";
+import type { Topic, TopicColor } from "@/lib/data";
 import BuildRefreshDialog from "../BuildRefreshDialog";
 import DeleteConfirmDialog from "../message/DeleteConfirmDialog";
 import FullSyncConfirmDialog from "../message/FullSyncConfirmDialog";
@@ -31,7 +31,6 @@ type Props = {
   confirm: ConfirmDialogsView;
   buildRefresh: BuildRefreshProps;
   topicPicker: TopicPickerProps;
-  accountDateFormat?: AccountDateFormat;
 };
 
 /**
@@ -44,8 +43,7 @@ type Props = {
 export default function DialogsHost({
   confirm,
   buildRefresh,
-  topicPicker,
-  accountDateFormat
+  topicPicker
 }: Props) {
   return (
     <>
@@ -57,7 +55,6 @@ export default function DialogsHost({
         deleteConfirm={confirm.deleteConfirm}
         onOpenChange={confirm.handleDeleteDialogOpenChange}
         resolveDeleteConfirm={confirm.resolveDeleteConfirm}
-        accountDateFormat={accountDateFormat}
       />
       <FullSyncConfirmDialog
         confirmState={confirm.fullSyncConfirm}

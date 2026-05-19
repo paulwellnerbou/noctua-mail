@@ -304,6 +304,34 @@ export type CalendarInviteSnapshotRow = {
   snapshotVersion: number | null;
 };
 
+type RawSnapshotRow = {
+  messageId?: string | null;
+  eventUid?: string | null;
+  inviteActionType?: string | null;
+  processedAtMs?: number | null;
+  snapshotJson?: string | null;
+  snapshotVersion?: number | null;
+};
+
+const SNAPSHOT_SELECT_COLUMNS =
+  "messageId, eventUid, inviteActionType, processedAtMs, snapshotJson, snapshotVersion";
+
+function mapSnapshotRow(row?: RawSnapshotRow | null): CalendarInviteSnapshotRow | null {
+  if (!row) return null;
+  const finiteOrNull = (v: number | null | undefined) =>
+    typeof v === "number" && Number.isFinite(v) ? v : null;
+  const trimmedOrNull = (v: string | null | undefined) =>
+    typeof v === "string" && v.trim() ? v : null;
+  return {
+    messageId: String(row.messageId ?? ""),
+    eventUid: String(row.eventUid ?? ""),
+    inviteActionType: normalizeCalendarInviteActionType(row.inviteActionType),
+    processedAtMs: finiteOrNull(row.processedAtMs),
+    snapshotJson: trimmedOrNull(row.snapshotJson),
+    snapshotVersion: finiteOrNull(row.snapshotVersion)
+  };
+}
+
 /**
  * Fetch the snapshot JSON stored for a single message/eventUid pair, plus
  * the action type and processedAtMs needed to order siblings.
@@ -318,45 +346,24 @@ export async function getMessageCalendarSnapshot(
   if (!normalizedEventUidKey) return null;
   const row = db
     .prepare(
-      `SELECT messageId, eventUid, inviteActionType, processedAtMs, snapshotJson, snapshotVersion
+      `SELECT ${SNAPSHOT_SELECT_COLUMNS}
        FROM message_calendar_events
        WHERE accountId = ?
          AND messageId = ?
          AND lower(COALESCE(eventUidKey, eventUid, '')) = lower(?)
        LIMIT 1`
     )
-    .get(accountId, messageId, normalizedEventUidKey) as
-    | {
-        messageId?: string | null;
-        eventUid?: string | null;
-        inviteActionType?: string | null;
-        processedAtMs?: number | null;
-        snapshotJson?: string | null;
-        snapshotVersion?: number | null;
-      }
-    | undefined;
-  if (!row) return null;
-  return {
-    messageId: String(row.messageId ?? ""),
-    eventUid: String(row.eventUid ?? ""),
-    inviteActionType: normalizeCalendarInviteActionType(row.inviteActionType),
-    processedAtMs:
-      typeof row.processedAtMs === "number" && Number.isFinite(row.processedAtMs)
-        ? row.processedAtMs
-        : null,
-    snapshotJson:
-      typeof row.snapshotJson === "string" && row.snapshotJson.trim() ? row.snapshotJson : null,
-    snapshotVersion:
-      typeof row.snapshotVersion === "number" && Number.isFinite(row.snapshotVersion)
-        ? row.snapshotVersion
-        : null
-  };
+    .get(accountId, messageId, normalizedEventUidKey) as RawSnapshotRow | undefined;
+  return mapSnapshotRow(row);
 }
 
 /**
  * Find the most recent prior message_calendar_events row for the same
  * eventUid in the same account, strictly before the reference message's
  * received date. Used to derive "what changed" for an update message.
+ *
+ * Ordered by the delivering message's date, falling back to processedAtMs
+ * when two messages share a timestamp. Rows without a snapshot are skipped.
  */
 export async function getPriorCalendarSnapshot(
   accountId: string,
@@ -367,17 +374,9 @@ export async function getPriorCalendarSnapshot(
   const db = await getAccountDb(accountId);
   const normalizedEventUidKey = normalizeCalendarEventUidKey(eventUid);
   if (!normalizedEventUidKey) return null;
-  // Order by the delivering message's date, falling back to processedAtMs
-  // when two messages share a timestamp. We only consider rows that
-  // actually carry a snapshot.
   const row = db
     .prepare(
-      `SELECT mce.messageId AS messageId,
-              mce.eventUid AS eventUid,
-              mce.inviteActionType AS inviteActionType,
-              mce.processedAtMs AS processedAtMs,
-              mce.snapshotJson AS snapshotJson,
-              mce.snapshotVersion AS snapshotVersion
+      `SELECT ${SNAPSHOT_SELECT_COLUMNS}
        FROM message_calendar_events mce
        JOIN messages m ON m.accountId = mce.accountId AND m.id = mce.messageId
        WHERE mce.accountId = ?
@@ -389,31 +388,32 @@ export async function getPriorCalendarSnapshot(
        LIMIT 1`
     )
     .get(accountId, normalizedEventUidKey, excludeMessageId, beforeDateValue) as
-    | {
-        messageId?: string | null;
-        eventUid?: string | null;
-        inviteActionType?: string | null;
-        processedAtMs?: number | null;
-        snapshotJson?: string | null;
-        snapshotVersion?: number | null;
-      }
+    | RawSnapshotRow
     | undefined;
-  if (!row) return null;
-  return {
-    messageId: String(row.messageId ?? ""),
-    eventUid: String(row.eventUid ?? ""),
-    inviteActionType: normalizeCalendarInviteActionType(row.inviteActionType),
-    processedAtMs:
-      typeof row.processedAtMs === "number" && Number.isFinite(row.processedAtMs)
-        ? row.processedAtMs
-        : null,
-    snapshotJson:
-      typeof row.snapshotJson === "string" && row.snapshotJson.trim() ? row.snapshotJson : null,
-    snapshotVersion:
-      typeof row.snapshotVersion === "number" && Number.isFinite(row.snapshotVersion)
-        ? row.snapshotVersion
-        : null
-  };
+  return mapSnapshotRow(row);
+}
+
+/**
+ * List all `eventUid` values attached to a single message (in row order),
+ * for callers that want to fan out per-event work without re-reading the
+ * full message_calendar_events row.
+ */
+export async function listMessageCalendarEventUids(
+  accountId: string,
+  messageId: string
+): Promise<string[]> {
+  const db = await getAccountDb(accountId);
+  const rows = db
+    .prepare(
+      `SELECT eventUid
+       FROM message_calendar_events
+       WHERE accountId = ? AND messageId = ?
+       ORDER BY rowid`
+    )
+    .all(accountId, messageId) as Array<{ eventUid?: string | null }>;
+  return rows
+    .map((row) => (typeof row.eventUid === "string" ? row.eventUid.trim() : ""))
+    .filter((uid): uid is string => Boolean(uid));
 }
 
 export async function listCalendarInviteSourceMessagesByEventUid(

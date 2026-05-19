@@ -207,6 +207,7 @@ import {
   listCalendarInviteSourceMessagesByEventUid as _listCalendarInviteSourceMessagesByEventUidImpl,
   getMessageCalendarSnapshot as _getMessageCalendarSnapshotImpl,
   getPriorCalendarSnapshot as _getPriorCalendarSnapshotImpl,
+  listMessageCalendarEventUids as _listMessageCalendarEventUidsImpl,
   markMessageCalendarInviteStatesProcessed as _markMessageCalendarInviteStatesProcessedImpl,
   markMessageCalendarInviteStatesUnprocessed as _markMessageCalendarInviteStatesUnprocessedImpl,
   rescheduleCalendarRemindersByEventUid as _rescheduleCalendarRemindersByEventUidImpl,
@@ -309,6 +310,12 @@ export function getPriorCalendarSnapshot(
   ...args: Parameters<typeof _getPriorCalendarSnapshotImpl>
 ): ReturnType<typeof _getPriorCalendarSnapshotImpl> {
   return _getPriorCalendarSnapshotImpl(...args);
+}
+
+export function listMessageCalendarEventUids(
+  ...args: Parameters<typeof _listMessageCalendarEventUidsImpl>
+): ReturnType<typeof _listMessageCalendarEventUidsImpl> {
+  return _listMessageCalendarEventUidsImpl(...args);
 }
 
 export function listCalendarInviteSourceMessagesByEventUid(

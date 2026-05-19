@@ -4,13 +4,13 @@ import type { DeleteConfirmAction, DeleteConfirmState } from "../types";
 import type { LinkedCalendarEventDetail } from "../utils/deleteConfirm";
 import { formatCalendarEventRange } from "@/lib/calendar";
 import type { AccountDateFormat } from "@/lib/data";
+import { useAccountDateFormat } from "@/app/components/AccountDateFormatContext";
 import AlertDialogContent from "./AlertDialogContent";
 
 interface DeleteConfirmDialogProps {
   deleteConfirm: DeleteConfirmState | null;
   onOpenChange: (open: boolean) => void;
   resolveDeleteConfirm: (action: DeleteConfirmAction) => void;
-  accountDateFormat?: AccountDateFormat;
 }
 
 function formatCountLabel(count: number, singular: string, plural = `${singular}s`) {
@@ -176,9 +176,9 @@ function LinkedEventList({
 export default function DeleteConfirmDialog({
   deleteConfirm,
   onOpenChange,
-  resolveDeleteConfirm,
-  accountDateFormat
+  resolveDeleteConfirm
 }: DeleteConfirmDialogProps) {
+  const accountDateFormat = useAccountDateFormat();
   const calendarDescription =
     deleteConfirm ? getCalendarAssociationDescription(deleteConfirm) : null;
   const hasLinkedCalendarItems =

@@ -440,7 +440,6 @@ export default function CalendarEventPreview({
                           accountId={accountId}
                           messageId={sourceMessageRowId!}
                           eventUid={event.uid!.trim()}
-                          dateFormat={dateFormat}
                         />
                       ) : null}
                     <EventDetailView

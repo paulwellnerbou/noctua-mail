@@ -99,33 +99,37 @@ function attendeeLabel(att: CalendarSnapshotAttendee): string {
   return att.email ?? att.name ?? "Unknown";
 }
 
-function pushStringChange(
-  rows: DiffRow[],
-  key: string,
-  icon: DiffIcon,
-  label: string,
-  change?: FieldChange<string>
-) {
-  if (!change) return;
-  rows.push({ key, icon, label, before: change.before, after: change.after });
-}
+// Spec for the simple "scalar before → after" rows. Each entry is the
+// BaseFieldDiff key, the icon, and the label. The full ICS field set has
+// a few outliers (description, allDay, rrule, rdates, exdates, organizer)
+// that need bespoke rendering; those follow this table.
+const SCALAR_ROW_SPECS: ReadonlyArray<{
+  key: keyof BaseFieldDiff;
+  icon: DiffIcon;
+  label: string;
+}> = [
+  { key: "summary", icon: "title", label: "Title" },
+  { key: "location", icon: "location", label: "Location" },
+  { key: "status", icon: "status", label: "Status" },
+  { key: "startTimezone", icon: "tz", label: "Time zone (start)" },
+  { key: "endTimezone", icon: "tz", label: "Time zone (end)" }
+];
 
-function pushTimeChange(
+function pushDateSetRows(
   rows: DiffRow[],
-  key: string,
-  label: string,
-  change: FieldChange<number> | undefined,
-  allDayChange: FieldChange<boolean> | undefined,
-  dateFormat?: AccountDateFormat
+  prefix: string,
+  bucket: { added: number[]; removed: number[] } | undefined,
+  icon: DiffIcon,
+  addedLabel: string,
+  removedLabel: string,
+  dateFormat: AccountDateFormat | undefined
 ) {
-  if (!change) return;
-  rows.push({
-    key,
-    icon: "time",
-    label,
-    before: formatDateTime(change.before, allDayChange?.before, dateFormat),
-    after: formatDateTime(change.after, allDayChange?.after, dateFormat)
-  });
+  if (!bucket) return;
+  const fmt = (list: number[]) => list.map((ms) => formatDate(ms, dateFormat)).join(", ");
+  if (bucket.added.length > 0)
+    rows.push({ key: `${prefix}-add`, icon, label: addedLabel, after: fmt(bucket.added) });
+  if (bucket.removed.length > 0)
+    rows.push({ key: `${prefix}-rm`, icon, label: removedLabel, after: fmt(bucket.removed) });
 }
 
 function appendBaseFieldRows(
@@ -134,29 +138,43 @@ function appendBaseFieldRows(
   keyPrefix: string,
   dateFormat?: AccountDateFormat
 ) {
-  pushStringChange(rows, `${keyPrefix}-summary`, "title", "Title", base.summary);
-  pushStringChange(rows, `${keyPrefix}-location`, "location", "Location", base.location);
-  pushStringChange(rows, `${keyPrefix}-status`, "status", "Status", base.status);
-  pushTimeChange(rows, `${keyPrefix}-start`, "Start", base.startAtMs, base.allDay, dateFormat);
-  pushTimeChange(rows, `${keyPrefix}-end`, "End", base.endAtMs, base.allDay, dateFormat);
-  pushStringChange(rows, `${keyPrefix}-tz-start`, "tz", "Time zone (start)", base.startTimezone);
-  pushStringChange(rows, `${keyPrefix}-tz-end`, "tz", "Time zone (end)", base.endTimezone);
+  for (const spec of SCALAR_ROW_SPECS) {
+    const change = base[spec.key] as FieldChange<string> | undefined;
+    if (!change) continue;
+    rows.push({
+      key: `${keyPrefix}-${spec.key}`,
+      icon: spec.icon,
+      label: spec.label,
+      before: change.before,
+      after: change.after
+    });
+  }
+  for (const [key, label] of [
+    ["startAtMs", "Start"],
+    ["endAtMs", "End"]
+  ] as const) {
+    const change = base[key];
+    if (!change) continue;
+    rows.push({
+      key: `${keyPrefix}-${key}`,
+      icon: "time",
+      label,
+      before: formatDateTime(change.before, base.allDay?.before, dateFormat),
+      after: formatDateTime(change.after, base.allDay?.after, dateFormat)
+    });
+  }
   if (base.allDay && !base.startAtMs && !base.endAtMs) {
+    const yn = (v: boolean | undefined) => (v === undefined ? undefined : v ? "yes" : "no");
     rows.push({
       key: `${keyPrefix}-allday`,
       icon: "allDay",
       label: "All day",
-      before: base.allDay.before === undefined ? undefined : base.allDay.before ? "yes" : "no",
-      after: base.allDay.after === undefined ? undefined : base.allDay.after ? "yes" : "no"
+      before: yn(base.allDay.before),
+      after: yn(base.allDay.after)
     });
   }
   if (base.description) {
-    rows.push({
-      key: `${keyPrefix}-description`,
-      icon: "description",
-      label: "Description",
-      after: "(changed)"
-    });
+    rows.push({ key: `${keyPrefix}-description`, icon: "description", label: "Description", after: "(changed)" });
   }
   if (base.rrule) {
     rows.push({
@@ -166,30 +184,17 @@ function appendBaseFieldRows(
       after: renderRRuleSummary(base.rrule, dateFormat)
     });
   }
-  if (base.rdates) {
-    const adds = base.rdates.added.map((ms) => formatDate(ms, dateFormat));
-    const rems = base.rdates.removed.map((ms) => formatDate(ms, dateFormat));
-    if (adds.length > 0)
-      rows.push({ key: `${keyPrefix}-rdate-add`, icon: "rdate", label: "Extra dates added", after: adds.join(", ") });
-    if (rems.length > 0)
-      rows.push({ key: `${keyPrefix}-rdate-rm`, icon: "rdate", label: "Extra dates removed", after: rems.join(", ") });
-  }
-  if (base.exdates) {
-    const adds = base.exdates.added.map((ms) => formatDate(ms, dateFormat));
-    const rems = base.exdates.removed.map((ms) => formatDate(ms, dateFormat));
-    if (adds.length > 0)
-      rows.push({ key: `${keyPrefix}-exdate-add`, icon: "exdate", label: "Occurrences cancelled", after: adds.join(", ") });
-    if (rems.length > 0)
-      rows.push({ key: `${keyPrefix}-exdate-rm`, icon: "exdate", label: "Cancellations undone", after: rems.join(", ") });
-  }
+  pushDateSetRows(rows, `${keyPrefix}-rdate`, base.rdates, "rdate", "Extra dates added", "Extra dates removed", dateFormat);
+  pushDateSetRows(rows, `${keyPrefix}-exdate`, base.exdates, "exdate", "Occurrences cancelled", "Cancellations undone", dateFormat);
   if (base.organizer) {
-    const before = base.organizer.before
-      ? base.organizer.before.email ?? base.organizer.before.name
-      : undefined;
-    const after = base.organizer.after
-      ? base.organizer.after.email ?? base.organizer.after.name
-      : undefined;
-    rows.push({ key: `${keyPrefix}-organizer`, icon: "organizer", label: "Organizer", before, after });
+    const label = (v?: { email?: string; name?: string }) => (v ? v.email ?? v.name : undefined);
+    rows.push({
+      key: `${keyPrefix}-organizer`,
+      icon: "organizer",
+      label: "Organizer",
+      before: label(base.organizer.before),
+      after: label(base.organizer.after)
+    });
   }
 }
 

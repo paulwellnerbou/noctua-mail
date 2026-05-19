@@ -6,6 +6,7 @@ import { Text } from "@radix-ui/themes";
 import CalendarEventBrowser from "@/app/components/calendar/CalendarEventBrowser";
 import CalendarDropOverlay from "@/app/components/calendar/CalendarDropOverlay";
 import { useCalendarIcsDrop } from "@/app/components/calendar/useCalendarIcsDrop";
+import { AccountDateFormatProvider } from "@/app/components/AccountDateFormatContext";
 import type { Account, AccountDateFormat } from "@/lib/data";
 import { normalizeAccountDateFormat } from "@/lib/dateFormatting";
 import styles from "./page.module.css";
@@ -45,12 +46,14 @@ function CalendarWindowContent() {
   }
 
   return (
-    <div className={styles.page}>
-      <div className={styles.detailContainer} {...dropProps}>
-        <CalendarEventBrowser accountId={accountId} dateFormat={dateFormat} />
-        <CalendarDropOverlay isDragOver={isDragOver} status={status} onResetStatus={resetStatus} />
+    <AccountDateFormatProvider value={dateFormat}>
+      <div className={styles.page}>
+        <div className={styles.detailContainer} {...dropProps}>
+          <CalendarEventBrowser accountId={accountId} />
+          <CalendarDropOverlay isDragOver={isDragOver} status={status} onResetStatus={resetStatus} />
+        </div>
       </div>
-    </div>
+    </AccountDateFormatProvider>
   );
 }
 

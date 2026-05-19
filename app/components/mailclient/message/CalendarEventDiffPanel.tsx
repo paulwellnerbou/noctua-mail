@@ -16,8 +16,8 @@ import {
 import type { CalendarEventDiff } from "@/lib/calendarEventDiff";
 import { buildDiffRows, type DiffIcon, type DiffRow } from "@/lib/calendarEventDiffFormat";
 import { buildAccountMessageCalendarDiffPath } from "@/lib/accountApiPaths";
-import type { AccountDateFormat } from "@/lib/data";
 import CalendarMetaRow from "@/app/components/calendar/CalendarMetaRow";
+import { useAccountDateFormat } from "@/app/components/AccountDateFormatContext";
 import styles from "./CalendarEventDiffPanel.module.css";
 
 type DiffEntry = {
@@ -97,14 +97,13 @@ function RowContent({ row }: { row: DiffRow }) {
 export default function CalendarEventDiffPanel({
   accountId,
   messageId,
-  eventUid,
-  dateFormat
+  eventUid
 }: {
   accountId: string;
   messageId: string;
   eventUid: string;
-  dateFormat?: AccountDateFormat;
 }) {
+  const dateFormat = useAccountDateFormat();
   const [entry, setEntry] = useState<DiffEntry | null | undefined>(undefined);
 
   useEffect(() => {

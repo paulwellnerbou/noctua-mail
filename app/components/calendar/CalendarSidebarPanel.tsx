@@ -3,7 +3,6 @@
 import { Flex, Heading, IconButton } from "@radix-ui/themes";
 import { X, ExternalLink } from "lucide-react";
 import { openDetachedWindow } from "@/lib/ui/openDetachedWindow";
-import type { AccountDateFormat } from "@/lib/data";
 import CalendarEventBrowser from "./CalendarEventBrowser";
 import CalendarDropOverlay from "./CalendarDropOverlay";
 import { useCalendarIcsDrop } from "./useCalendarIcsDrop";
@@ -12,7 +11,6 @@ import styles from "./CalendarSidebarPanel.module.css";
 type Props = {
   accountId: string;
   firstDay?: 0 | 1;
-  dateFormat?: AccountDateFormat;
   onClose: () => void;
   onOpenMessage?: (messageId: string) => void;
   onFindRelatedByInviteUid?: (uid: string) => void;
@@ -21,7 +19,6 @@ type Props = {
 export default function CalendarSidebarPanel({
   accountId,
   firstDay,
-  dateFormat,
   onClose,
   onOpenMessage,
   onFindRelatedByInviteUid
@@ -62,7 +59,6 @@ export default function CalendarSidebarPanel({
         <CalendarEventBrowser
           accountId={accountId}
           firstDay={firstDay}
-          dateFormat={dateFormat}
           onOpenMessage={onOpenMessage}
           onFindRelatedByInviteUid={onFindRelatedByInviteUid}
         />
