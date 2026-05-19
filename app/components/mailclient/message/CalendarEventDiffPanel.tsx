@@ -24,6 +24,7 @@ type DiffEntry = {
   eventUid: string;
   priorMessageId?: string | null;
   timeZone?: string | null;
+  allDay?: boolean;
   diff: CalendarEventDiff;
 };
 
@@ -164,7 +165,7 @@ export default function CalendarEventDiffPanel({
     );
   }
 
-  const rows = buildDiffRows(diff, dateFormat, entry.timeZone ?? undefined);
+  const rows = buildDiffRows(diff, dateFormat, entry.timeZone ?? undefined, entry.allDay);
   const isCancel = diff.kind === "cancel";
 
   return (

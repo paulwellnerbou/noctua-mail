@@ -76,6 +76,31 @@ describe("buildDiffRows", () => {
     expect(nyStart?.after).toMatch(/11:30/);
   });
 
+  test("all-day events keep date-only Start/End even when allDay didn't change", () => {
+    // The diff omits `allDay` when unchanged, so without an external hint
+    // the renderer would fall back to false and emit times. Both inputs
+    // are all-day; only the date moved.
+    const before = snapshot([
+      [`UID:${UID}`, "DTSTART;VALUE=DATE:20260501", "DTEND;VALUE=DATE:20260502"].join("\r\n")
+    ]);
+    const after = snapshot([
+      [`UID:${UID}`, "DTSTART;VALUE=DATE:20260603", "DTEND;VALUE=DATE:20260604"].join("\r\n")
+    ]);
+    expect(before.base?.allDay).toBe(true);
+    expect(after.base?.allDay).toBe(true);
+    const diff = diffCalendarEventSnapshots(before, after);
+    if (diff.kind !== "update") throw new Error("expected update");
+    // Sanity: the diff itself didn't include allDay (it didn't change).
+    expect(diff.base.allDay).toBeUndefined();
+    const rows = buildDiffRows(diff, undefined, "Europe/Berlin", true);
+    const start = rows.find((r) => r.label === "Start");
+    expect(start?.before).toMatch(/May 1|1 May/);
+    expect(start?.after).toMatch(/Jun 3|3 Jun/);
+    // No time portion should leak in for all-day rendering.
+    expect(start?.before).not.toMatch(/\d{1,2}:\d{2}/);
+    expect(start?.after).not.toMatch(/\d{1,2}:\d{2}/);
+  });
+
   test("removed location renders as a row with `before` and no `after` (one-sided removal)", () => {
     const before = snapshot([
       [`UID:${UID}`, "LOCATION:Office", "DTSTART:20260401T100000Z"].join("\r\n")

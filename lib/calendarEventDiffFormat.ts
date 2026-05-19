@@ -166,7 +166,14 @@ function appendBaseFieldRows(
   base: BaseFieldDiff,
   keyPrefix: string,
   dateFormat?: AccountDateFormat,
-  timeZone?: string
+  timeZone?: string,
+  /**
+   * Fallback all-day state for this layer's start/end rows. The diff omits
+   * `allDay` whenever the value didn't change, so a *date* change on an
+   * unchanged-all-day event would otherwise fall back to false and render
+   * as date+time in the event timezone instead of date-only UTC.
+   */
+  allDayDefault = false
 ) {
   for (const spec of SCALAR_ROW_SPECS) {
     const change = base[spec.key] as FieldChange<string> | undefined;
@@ -185,12 +192,14 @@ function appendBaseFieldRows(
   ] as const) {
     const change = base[key];
     if (!change) continue;
+    const beforeAllDay = base.allDay?.before ?? allDayDefault;
+    const afterAllDay = base.allDay?.after ?? allDayDefault;
     rows.push({
       key: `${keyPrefix}-${key}`,
       icon: "time",
       label,
-      before: formatDateTime(change.before, base.allDay?.before, dateFormat, timeZone),
-      after: formatDateTime(change.after, base.allDay?.after, dateFormat, timeZone)
+      before: formatDateTime(change.before, beforeAllDay, dateFormat, timeZone),
+      after: formatDateTime(change.after, afterAllDay, dateFormat, timeZone)
     });
   }
   if (base.allDay && !base.startAtMs && !base.endAtMs) {
@@ -236,10 +245,16 @@ export function buildDiffRows(
    * names or Windows zone names; resolved internally. When omitted, times
    * render in the system zone (which can diverge from the event card).
    */
-  timeZone?: string
+  timeZone?: string,
+  /**
+   * Whether the (current) event is all-day. The diff itself only includes
+   * `allDay` when it changed, so passing the current state lets unchanged-
+   * all-day events render dates without a misleading 00:00 time.
+   */
+  allDay = false
 ): DiffRow[] {
   const rows: DiffRow[] = [];
-  appendBaseFieldRows(rows, diff.base, "base", dateFormat, timeZone);
+  appendBaseFieldRows(rows, diff.base, "base", dateFormat, timeZone, allDay);
 
   diff.attendees.added.forEach((att, i) =>
     rows.push({ key: `att-add-${i}`, icon: "attendee", after: `+ ${attendeeLabel(att)}`, variant: "added" })
@@ -265,7 +280,10 @@ export function buildDiffRows(
   });
 
   diff.occurrences.forEach((occ) => {
-    const at = formatDateTime(occ.recurrenceIdMs, false, dateFormat, timeZone);
+    // Recurrence IDs for all-day series are date-only UTC instants; for
+    // timed series they're real instants in the event's timezone. Use the
+    // series-level allDay hint so all-day overrides don't show 00:00.
+    const at = formatDateTime(occ.recurrenceIdMs, allDay, dateFormat, timeZone);
     if (occ.kind === "added") {
       rows.push({ key: `occ-${occ.recurrenceIdMs}`, icon: "occurrence", after: `New occurrence on ${at}` });
     } else if (occ.kind === "removed") {
@@ -277,7 +295,17 @@ export function buildDiffRows(
     } else {
       rows.push({ key: `occ-${occ.recurrenceIdMs}`, icon: "occurrence", after: `Occurrence on ${at} changed` });
       const detailRows: DiffRow[] = [];
-      appendBaseFieldRows(detailRows, occ.fields as BaseFieldDiff, `occ-${occ.recurrenceIdMs}`, dateFormat, timeZone);
+      // Per-occurrence overrides inherit the series's all-day-ness unless
+      // the override itself flips it (rare, but `occ.fields.allDay` will
+      // be set in that case and the inner appendBaseFieldRows uses it).
+      appendBaseFieldRows(
+        detailRows,
+        occ.fields as BaseFieldDiff,
+        `occ-${occ.recurrenceIdMs}`,
+        dateFormat,
+        timeZone,
+        allDay
+      );
       detailRows.forEach((row) => rows.push({ ...row, indent: true }));
     }
   });

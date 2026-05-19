@@ -83,14 +83,16 @@ export async function GET(request: Request, { params }: Params) {
           diff: { kind: "unavailable" as const, reason: "no_prior_message" as const }
         };
       }
-      // Surface the event's timezone so the panel can render Start/End
-      // rows in the same zone as the event card right below it; otherwise
-      // a Berlin-based event's diff would show times in the viewer's
-      // local zone and read inconsistently with the card.
+      // Surface the event's timezone *and* all-day flag so the panel can
+      // render Start/End rows consistently with the event card below.
+      // The diff itself only includes `allDay` when it changed, so for
+      // unchanged-all-day events the panel would otherwise fall back to
+      // timed formatting; same problem with timezone.
       return {
         eventUid,
         priorMessageId: prior?.messageId ?? null,
         timeZone: currentSnapshot.base?.startTimezone ?? null,
+        allDay: currentSnapshot.base?.allDay ?? false,
         diff: diffCalendarEventSnapshots(priorSnapshot, currentSnapshot)
       };
     })
