@@ -153,11 +153,13 @@ function eqOrganizer(
   return a.email === b.email && a.name === b.name;
 }
 
-// Single-value (scalar) RRULE fields and array-valued fields, kept as
-// typed key lists so the diff loop stays type-checked. `as const` is what
-// lets the keyof projection still narrow to specific properties.
+// Single-value (scalar) RRULE fields, and array-valued fields split by
+// element type. The two array lists are separate because TypeScript
+// widens `before[key]` to `string[] | number[]` when a single key list
+// spans both shapes, breaking the call to makeArrayChange.
 const RRULE_SCALAR_KEYS = ["freq", "interval", "count", "untilMs", "wkst"] as const;
-const RRULE_ARRAY_KEYS = ["byDay", "byMonth", "byMonthDay", "bySetPos"] as const;
+const RRULE_STRING_ARRAY_KEYS = ["byDay"] as const;
+const RRULE_NUMBER_ARRAY_KEYS = ["byMonth", "byMonthDay", "bySetPos"] as const;
 
 function setIfDefined<T extends object, K extends keyof T>(out: T, key: K, value: T[K] | undefined) {
   if (value !== undefined) out[key] = value;
@@ -171,8 +173,11 @@ function diffRRule(before?: ParsedRRule | null, after?: ParsedRRule | null): RRu
   for (const key of RRULE_SCALAR_KEYS) {
     setIfDefined(out, key, makeChange(before[key], after[key]) as RRuleDiff[typeof key]);
   }
-  for (const key of RRULE_ARRAY_KEYS) {
-    setIfDefined(out, key, makeArrayChange(before[key], after[key]) as RRuleDiff[typeof key]);
+  for (const key of RRULE_STRING_ARRAY_KEYS) {
+    setIfDefined(out, key, makeArrayChange(before[key], after[key]));
+  }
+  for (const key of RRULE_NUMBER_ARRAY_KEYS) {
+    setIfDefined(out, key, makeArrayChange(before[key], after[key]));
   }
   return Object.keys(out).length > 0 ? out : undefined;
 }
