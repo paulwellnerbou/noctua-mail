@@ -58,9 +58,16 @@ async function backfillForAccount(accountId: string, dryRun: boolean) {
      WHERE accountId = ? AND messageId = ? AND eventUid = ?`
   );
 
-  // Source-loading is async, but writes per row are independent. Sequential
-  // is fine; backfill isn't latency sensitive.
-  let filled = 0;
+  // Source-loading is async per row (file I/O + mail parser). Do the
+  // parsing pass sequentially up front, then flush all writes in a single
+  // SQLite transaction at the end. Per-row autocommit would make this
+  // pathologically slow on accounts with thousands of invite rows.
+  type PendingWrite = {
+    messageId: string;
+    eventUid: string;
+    snapshotJson: string;
+  };
+  const pending: PendingWrite[] = [];
   let skipped = 0;
   for (const row of rows) {
     const messageId = row.messageId ?? "";
@@ -84,17 +91,28 @@ async function backfillForAccount(accountId: string, dryRun: boolean) {
       skipped += 1;
       continue;
     }
-    if (!dryRun) {
-      update.run(
-        serializeCalendarEventSnapshot(snapshot),
-        CALENDAR_EVENT_SNAPSHOT_VERSION,
-        accountId,
-        messageId,
-        eventUid
-      );
-    }
-    filled += 1;
+    pending.push({
+      messageId,
+      eventUid,
+      snapshotJson: serializeCalendarEventSnapshot(snapshot)
+    });
   }
+
+  if (!dryRun && pending.length > 0) {
+    const flush = db.transaction((writes: PendingWrite[]) => {
+      for (const w of writes) {
+        update.run(
+          w.snapshotJson,
+          CALENDAR_EVENT_SNAPSHOT_VERSION,
+          accountId,
+          w.messageId,
+          w.eventUid
+        );
+      }
+    });
+    flush(pending);
+  }
+  const filled = pending.length;
 
   console.log(
     `[${accountId}] backfilled ${filled} of ${rows.length} rows (${skipped} skipped)${

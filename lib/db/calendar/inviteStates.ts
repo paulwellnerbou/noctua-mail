@@ -335,6 +335,12 @@ function mapSnapshotRow(row?: RawSnapshotRow | null): CalendarInviteSnapshotRow 
 /**
  * Fetch the snapshot JSON stored for a single message/eventUid pair, plus
  * the action type and processedAtMs needed to order siblings.
+ *
+ * Matches the exact `eventUid` (lower-cased to match the canonical form
+ * the table stores). The fuzzier `eventUidKey` match is reserved for
+ * cross-message series/occurrence lookups (see getPriorCalendarSnapshot);
+ * for a single (messageId, eventUid) row we want a deterministic result
+ * even when a message has multiple rows whose `eventUidKey` collides.
  */
 export async function getMessageCalendarSnapshot(
   accountId: string,
@@ -342,41 +348,42 @@ export async function getMessageCalendarSnapshot(
   eventUid: string
 ): Promise<CalendarInviteSnapshotRow | null> {
   const db = await getAccountDb(accountId);
-  const normalizedEventUidKey = normalizeCalendarEventUidKey(eventUid);
-  if (!normalizedEventUidKey) return null;
+  const normalizedEventUid = normalizeCalendarEventUid(eventUid);
+  if (!normalizedEventUid) return null;
   const row = db
     .prepare(
       `SELECT ${SNAPSHOT_SELECT_COLUMNS}
        FROM message_calendar_events
        WHERE accountId = ?
          AND messageId = ?
-         AND lower(COALESCE(eventUidKey, eventUid, '')) = lower(?)
+         AND lower(eventUid) = lower(?)
        LIMIT 1`
     )
-    .get(accountId, messageId, normalizedEventUidKey) as RawSnapshotRow | undefined;
+    .get(accountId, messageId, normalizedEventUid) as RawSnapshotRow | undefined;
   return mapSnapshotRow(row);
 }
 
 /**
  * Find the most recent prior message_calendar_events row for the same
- * eventUid in the same account, at or before the reference message's
- * received date. Used to derive "what changed" for an update message.
+ * eventUid in the same account, strictly before the reference message in
+ * the `(dateValue, processedAtMs, messageId)` lexicographic order. Used
+ * to derive "what changed" for an update message.
  *
- * Ordered by the delivering message's date, falling back to processedAtMs
- * (then messageId, lexically) when two messages share a `dateValue` — so
- * updates that arrive in the same second still get a deterministic prior.
- * The reference message itself is excluded by id. Rows without a snapshot
- * are skipped.
+ * The tie-break matters because two updates can land in the same second
+ * (Outlook re-sends, IMAP fetch races) and share a `dateValue`. The
+ * compound predicate ensures the reference message's *exact* position is
+ * the cutoff, so we never accidentally pick a later sibling as the prior.
+ * Rows without a snapshot are skipped.
  */
 export async function getPriorCalendarSnapshot(
   accountId: string,
   eventUid: string,
-  beforeDateValue: number,
-  excludeMessageId: string
+  ref: { dateValue: number; processedAtMs: number | null; messageId: string }
 ): Promise<CalendarInviteSnapshotRow | null> {
   const db = await getAccountDb(accountId);
   const normalizedEventUidKey = normalizeCalendarEventUidKey(eventUid);
   if (!normalizedEventUidKey) return null;
+  const refProcessedAtMs = ref.processedAtMs ?? 0;
   const row = db
     .prepare(
       `SELECT ${SNAPSHOT_SELECT_COLUMNS}
@@ -386,13 +393,29 @@ export async function getPriorCalendarSnapshot(
          AND lower(COALESCE(mce.eventUidKey, mce.eventUid, '')) = lower(?)
          AND mce.messageId <> ?
          AND mce.snapshotJson IS NOT NULL
-         AND m.dateValue <= ?
+         AND (
+           m.dateValue < ?
+           OR (
+             m.dateValue = ?
+             AND (
+               COALESCE(mce.processedAtMs, 0) < ?
+               OR (COALESCE(mce.processedAtMs, 0) = ? AND mce.messageId < ?)
+             )
+           )
+         )
        ORDER BY m.dateValue DESC, COALESCE(mce.processedAtMs, 0) DESC, mce.messageId DESC
        LIMIT 1`
     )
-    .get(accountId, normalizedEventUidKey, excludeMessageId, beforeDateValue) as
-    | RawSnapshotRow
-    | undefined;
+    .get(
+      accountId,
+      normalizedEventUidKey,
+      ref.messageId,
+      ref.dateValue,
+      ref.dateValue,
+      refProcessedAtMs,
+      refProcessedAtMs,
+      ref.messageId
+    ) as RawSnapshotRow | undefined;
   return mapSnapshotRow(row);
 }
 

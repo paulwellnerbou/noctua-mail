@@ -354,12 +354,11 @@ function stripTimeZone(options: Intl.DateTimeFormatOptions): Intl.DateTimeFormat
 function ymdDatePartsForTimeZone(date: Date, timeZone?: string) {
   // Intl is the only reliable way to obtain wall-clock components in a
   // specific timezone (Date.getHours / getFullYear use the system zone).
-  // The date portion is always YYYY-MM-DD; we just need the components.
+  // The date portion is always YYYY-MM-DD numeric, so en-CA is fine.
   const formatter = new Intl.DateTimeFormat("en-CA", {
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
-    weekday: "short",
     ...(timeZone ? { timeZone } : {})
   });
   const parts = formatter.formatToParts(date);
@@ -368,9 +367,22 @@ function ymdDatePartsForTimeZone(date: Date, timeZone?: string) {
   return {
     year: get("year"),
     month: get("month"),
-    day: get("day"),
-    weekday: get("weekday")
+    day: get("day")
   };
+}
+
+function ymdWeekday(
+  date: Date,
+  weekday: Intl.DateTimeFormatOptions["weekday"],
+  timeZone?: string
+): string {
+  // `ymd` controls date *order*, not language. The weekday name should
+  // follow the user's system locale so a German user doesn't see "Mon"
+  // when the rest of the UI says "Mo".
+  return new Intl.DateTimeFormat(undefined, {
+    weekday,
+    ...(timeZone ? { timeZone } : {})
+  }).format(date);
 }
 
 /**
@@ -411,10 +423,10 @@ function formatYmdComposite(date: Date, options: Intl.DateTimeFormatOptions): st
   const hasWeekday = Boolean(options.weekday);
   try {
     const segments: string[] = [];
-    if (hasDatePart || hasWeekday) {
-      const dateParts = ymdDatePartsForTimeZone(date, options.timeZone);
-      if (hasWeekday) segments.push(`${dateParts.weekday},`);
-      if (hasDatePart) segments.push(`${dateParts.year}-${dateParts.month}-${dateParts.day}`);
+    if (hasWeekday) segments.push(`${ymdWeekday(date, options.weekday, options.timeZone)},`);
+    if (hasDatePart) {
+      const dp = ymdDatePartsForTimeZone(date, options.timeZone);
+      segments.push(`${dp.year}-${dp.month}-${dp.day}`);
     }
     if (hasTimePart) segments.push(ymdTimePart(date, options));
     return segments.join(" ");

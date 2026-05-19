@@ -65,12 +65,11 @@ export async function GET(request: Request, { params }: Params) {
           diff: { kind: "unavailable" as const, reason: "no_current_snapshot" as const }
         };
       }
-      const prior = await getPriorCalendarSnapshot(
-        context.accountId,
-        eventUid,
+      const prior = await getPriorCalendarSnapshot(context.accountId, eventUid, {
         dateValue,
+        processedAtMs: current?.processedAtMs ?? null,
         messageId
-      );
+      });
       const priorSnapshot = prior ? parseCalendarEventSnapshot(prior.snapshotJson) : null;
       // The stored inviteActionType is authoritative for "this message is
       // an update" classification; the diff function can't always infer it
