@@ -326,6 +326,7 @@ export default function MessageTable({
             <div
               className={rowClassName}
               data-message-list-row="true"
+              data-message-id={message.id}
               style={topicTintVar}
               role="button"
               tabIndex={0}
