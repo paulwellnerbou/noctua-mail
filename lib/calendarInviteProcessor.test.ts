@@ -613,9 +613,12 @@ describe("processCalendarInviteForMessage", () => {
     // 1 upsert for the new anchor + 1 cap per prior sibling.
     expect(upsertCalendarEventByUid.mock.calls.length).toBe(3);
 
-    const expectedUntilMs = newAnchorStartMs - 1000;
-    const expectedUntilValue = (() => {
-      const d = new Date(expectedUntilMs);
+    // Each anchor must be capped at its *immediate* next anchor's start,
+    // not at the newest anchor's start. Otherwise the oldest sibling
+    // would keep emitting occurrences between the middle anchor and the
+    // newest one — overlapping the middle sibling's own occurrences.
+    function formatUntil(ms: number) {
+      const d = new Date(ms - 1000);
       const pad = (n: number) => String(n).padStart(2, "0");
       return (
         `${d.getUTCFullYear()}` +
@@ -625,17 +628,20 @@ describe("processCalendarInviteForMessage", () => {
         `${pad(d.getUTCMinutes())}` +
         `${pad(d.getUTCSeconds())}Z`
       );
-    })();
+    }
 
     const cappedByUid = new Map<string, string | undefined>();
     for (const [, fields] of upsertCalendarEventByUid.mock.calls.slice(1)) {
       cappedByUid.set(fields.eventUid, fields.recurrenceRule ?? undefined);
     }
+    // Oldest (Jan 16) is capped at the middle anchor's start (Mar 20),
+    // not at the new anchor's start (Apr 3).
     expect(cappedByUid.get("base_R20260116T094500@google.com")).toBe(
-      `FREQ=WEEKLY;INTERVAL=2;BYDAY=FR;UNTIL=${expectedUntilValue}`
+      `FREQ=WEEKLY;INTERVAL=2;BYDAY=FR;UNTIL=${formatUntil(middleStartMs)}`
     );
+    // Middle (Mar 20) is capped at the new anchor's start (Apr 3).
     expect(cappedByUid.get("base_R20260320T094500@google.com")).toBe(
-      `FREQ=WEEKLY;INTERVAL=2;BYDAY=FR;UNTIL=${expectedUntilValue}`
+      `FREQ=WEEKLY;INTERVAL=2;BYDAY=FR;UNTIL=${formatUntil(newAnchorStartMs)}`
     );
   });
 

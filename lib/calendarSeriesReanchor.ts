@@ -278,16 +278,23 @@ async function capEventAtUtcMs(
 }
 
 /**
- * Runs after an invite-processor upsert. Caps every live sibling that
- * shares the saved event's `eventUidKey`, has a different exact UID,
- * starts before the saved anchor, and is still uncapped (or capped too
- * late). Also handles out-of-order delivery: if a *newer* sibling
- * already exists when an older anchor lands or is reprocessed, the
- * just-saved row itself gets UNTIL-capped against the earliest newer
- * sibling — and `savedEvent` is mutated in place so callers see the
- * updated rule for any follow-up work (e.g. reminder rescheduling that
- * mirrors the anchor's recurrence). Returns a summary of every row
- * that was reconciled, including the saved row when it was capped.
+ * Runs after an invite-processor upsert. Caps every anchor in the
+ * series timeline — the just-saved row plus all sibling rows sharing
+ * its `eventUidKey` — at its *immediate* next anchor's first
+ * occurrence (minus 1s, so UNTIL stays strictly inclusive per
+ * RFC 5545 §3.3.10). The newest anchor in the timeline is left
+ * uncapped. Capping each row pairwise (rather than capping every
+ * older row at the saved anchor's start) keeps adjacent anchors from
+ * overlapping when three or more siblings exist: with three anchors
+ * A < B < C, A is capped at B's start (not C's), so A and B don't
+ * both emit occurrences between B and C. Out-of-order delivery is
+ * handled implicitly — when the saved anchor isn't the newest, it
+ * sits somewhere in the middle of the timeline and gets capped
+ * against the next anchor up. `savedEvent` is mutated in place when
+ * its own row is capped, so callers see the updated rule for any
+ * follow-up work (e.g. reminder rescheduling that mirrors the
+ * anchor's recurrence). Returns a summary of every row that was
+ * reconciled, including the saved row when it was capped.
  */
 export async function reconcileSeriesAnchorSiblings(
   accountId: string,
@@ -299,38 +306,23 @@ export async function reconcileSeriesAnchorSiblings(
   const siblings = await listSiblingCalendarEventsByUidKey(accountId, savedEvent.eventUid);
   if (siblings.length === 0) return [];
 
-  const reconciled: ReconciledSibling[] = [];
-
-  // Cap the just-saved anchor against the earliest newer sibling, if any.
-  // Without this, an out-of-order delivery (older anchor arriving or
-  // being reprocessed after a newer one already exists) would leave the
-  // older anchor's RRULE uncapped until the newer anchor is touched
-  // again — which may never happen for a stable, already-imported row.
-  // UNTIL is strictly inclusive (RFC 5545 §3.3.10), so subtract a second
-  // so the just-saved row stops emitting exactly at the next anchor.
-  let earliestNewerStartMs: number | null = null;
+  type Anchor = { event: CalendarEvent; isSaved: boolean };
+  const timeline: Anchor[] = [{ event: savedEvent, isSaved: true }];
   for (const sibling of siblings) {
     if (typeof sibling.startAtMs !== "number" || !Number.isFinite(sibling.startAtMs)) continue;
-    if (sibling.startAtMs <= savedEvent.startAtMs) continue;
-    if (earliestNewerStartMs === null || sibling.startAtMs < earliestNewerStartMs) {
-      earliestNewerStartMs = sibling.startAtMs;
-    }
+    timeline.push({ event: sibling, isSaved: false });
   }
-  if (earliestNewerStartMs !== null) {
-    const capAtMs = Math.max(0, earliestNewerStartMs - 1000);
-    const result = await capEventAtUtcMs(accountId, savedEvent, capAtMs);
-    if (result) {
-      Object.assign(savedEvent, result.saved);
-      reconciled.push(result.entry);
-    }
-  }
+  timeline.sort((a, b) => a.event.startAtMs - b.event.startAtMs);
 
-  // Cap older siblings against the just-saved anchor's first occurrence.
-  const olderCapAtMs = Math.max(0, savedEvent.startAtMs - 1000);
-  for (const sibling of siblings) {
-    if (sibling.startAtMs >= savedEvent.startAtMs) continue;
-    const result = await capEventAtUtcMs(accountId, sibling, olderCapAtMs);
-    if (result) reconciled.push(result.entry);
+  const reconciled: ReconciledSibling[] = [];
+  for (let i = 0; i < timeline.length - 1; i++) {
+    const current = timeline[i];
+    const next = timeline[i + 1];
+    const capAtMs = Math.max(0, next.event.startAtMs - 1000);
+    const result = await capEventAtUtcMs(accountId, current.event, capAtMs);
+    if (!result) continue;
+    if (current.isSaved) Object.assign(savedEvent, result.saved);
+    reconciled.push(result.entry);
   }
   return reconciled;
 }
