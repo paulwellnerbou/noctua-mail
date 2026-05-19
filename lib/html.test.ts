@@ -238,7 +238,8 @@ describe("stripConditionalComments", () => {
   it("keeps closing tags around nested [if true] blocks inside a revealed block", () => {
     // eBay-style: a downlevel-revealed wrapper containing a nested downlevel-hidden block
     // for Outlook's &nbsp; placeholder. The closing </div> sits *between* the inner
-    // <![endif]--> and the outer <!--<![endif]-->, and must not be swallowed.
+    // <![endif]--> and the outer <!--<![endif]-->, and must not be swallowed — otherwise
+    // following sections end up nested inside .gutter instead of as its siblings.
     const html = [
       "<!--[if !true]><!-->",
       '<div class="gutter">',
@@ -248,11 +249,13 @@ describe("stripConditionalComments", () => {
       '<div class="next">next</div>'
     ].join("");
 
-    expect(stripConditionalComments(html)).toContain('<div class="gutter">');
-    expect(stripConditionalComments(html)).toContain("</div>");
-    expect(stripConditionalComments(html)).toContain('<div class="next">next</div>');
-    expect(stripConditionalComments(html)).not.toContain("[if");
-    expect(stripConditionalComments(html)).not.toContain("endif");
+    const out = stripConditionalComments(html);
+    // The .gutter <div> must close *before* the .next sibling — i.e. </div> sits
+    // between them. Asserting both halves separately wouldn't catch a swallowed
+    // </div>, because the .next div also contributes its own </div>.
+    expect(out).toContain('<div class="gutter"></div><div class="next">next</div>');
+    expect(out).not.toContain("[if");
+    expect(out).not.toContain("endif");
   });
 });
 
