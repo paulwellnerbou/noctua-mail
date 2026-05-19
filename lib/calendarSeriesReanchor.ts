@@ -150,7 +150,7 @@ export type ReconciledSibling = {
  * as RDATE entries — making the old row keep emitting events past the
  * boundary.
  */
-function pruneOccurrencesPastCap(
+export function pruneOccurrencesPastCap(
   event: CalendarEvent,
   cappedAtMs: number
 ): {
@@ -206,11 +206,95 @@ function pruneOccurrencesPastCap(
 }
 
 /**
- * Runs after an invite-processor upsert. Caps every live sibling that
- * shares the saved event's `eventUidKey`, has a different exact UID,
- * starts before the saved anchor, and is still uncapped (or capped too
- * late). Returns a summary of what was reconciled so callers can log /
- * surface it.
+ * Caps a single event's RRULE / occurrence overrides at `capAtMs` and
+ * upserts the row if anything changed. Used both for older siblings
+ * (capped against the just-saved anchor) and for the just-saved anchor
+ * itself (capped against an earlier-delivered newer sibling — see the
+ * out-of-order handling in `reconcileSeriesAnchorSiblings`).
+ *
+ * Returns the upsert result and a reconciliation summary when something
+ * changed, or `null` when the row was already capped or the rule uses
+ * COUNT (which can't carry UNTIL per RFC 5545 §3.3.10).
+ */
+async function capEventAtUtcMs(
+  accountId: string,
+  event: CalendarEvent,
+  capAtMs: number
+): Promise<{ saved: CalendarEvent; entry: ReconciledSibling } | null> {
+  const ruleCap = capRecurrenceRuleAtUtcMs(event.recurrenceRule, capAtMs);
+  // COUNT and UNTIL are mutually exclusive (RFC 5545 §3.3.10), so we
+  // can't cap the rule. Leaving the row otherwise untouched keeps it
+  // internally consistent — pruning RDATE/snapshot/messageId entries
+  // past the cap while the rule still emits its full COUNT would
+  // produce a row that contradicts itself. Google never emits COUNT
+  // for re-anchored series in practice; revisit (translate to UNTIL
+  // via RRULE expansion) if real cases appear.
+  if (!ruleCap.changed && ruleCap.reason === "count-exclusive") return null;
+  const filtered = pruneOccurrencesPastCap(event, capAtMs);
+
+  const recurrenceRuleChanged = ruleCap.changed;
+  const recurrenceDatesChanged =
+    JSON.stringify(filtered.recurrenceDates ?? null) !==
+    JSON.stringify(event.recurrenceDates ?? null);
+  const occurrenceMessageIdsChanged =
+    JSON.stringify(filtered.occurrenceMessageIds ?? null) !==
+    JSON.stringify(event.occurrenceMessageIds ?? null);
+  const occurrenceSnapshotsChanged =
+    JSON.stringify(filtered.occurrenceSnapshots ?? null) !==
+    JSON.stringify(event.occurrenceSnapshots ?? null);
+  const occurrenceRecurrenceIdsChanged =
+    JSON.stringify(filtered.occurrenceRecurrenceIds ?? null) !==
+    JSON.stringify(event.occurrenceRecurrenceIds ?? null);
+
+  if (
+    !recurrenceRuleChanged &&
+    !recurrenceDatesChanged &&
+    !occurrenceMessageIdsChanged &&
+    !occurrenceSnapshotsChanged &&
+    !occurrenceRecurrenceIdsChanged
+  ) {
+    return null;
+  }
+
+  const nextRecurrenceRule = ruleCap.changed ? ruleCap.rule : event.recurrenceRule;
+  const saved = await upsertCalendarEventByUid(accountId, {
+    ...event,
+    recurrenceRule: nextRecurrenceRule,
+    recurrenceDates: filtered.recurrenceDates,
+    occurrenceMessageIds: filtered.occurrenceMessageIds,
+    occurrenceSnapshots: filtered.occurrenceSnapshots,
+    occurrenceRecurrenceIds: filtered.occurrenceRecurrenceIds
+  });
+  return {
+    saved,
+    entry: {
+      eventId: saved.id,
+      eventUid: saved.eventUid,
+      previousRecurrenceRule: event.recurrenceRule,
+      capRecurrenceRule: nextRecurrenceRule ?? "",
+      cappedAtMs: capAtMs
+    }
+  };
+}
+
+/**
+ * Runs after an invite-processor upsert. Caps every anchor in the
+ * series timeline — the just-saved row plus all sibling rows sharing
+ * its `eventUidKey` — at its *immediate* next anchor's first
+ * occurrence (minus 1s, so UNTIL stays strictly inclusive per
+ * RFC 5545 §3.3.10). The newest anchor in the timeline is left
+ * uncapped. Capping each row pairwise (rather than capping every
+ * older row at the saved anchor's start) keeps adjacent anchors from
+ * overlapping when three or more siblings exist: with three anchors
+ * A < B < C, A is capped at B's start (not C's), so A and B don't
+ * both emit occurrences between B and C. Out-of-order delivery is
+ * handled implicitly — when the saved anchor isn't the newest, it
+ * sits somewhere in the middle of the timeline and gets capped
+ * against the next anchor up. `savedEvent` is mutated in place when
+ * its own row is capped, so callers see the updated rule for any
+ * follow-up work (e.g. reminder rescheduling that mirrors the
+ * anchor's recurrence). Returns a summary of every row that was
+ * reconciled, including the saved row when it was capped.
  */
 export async function reconcileSeriesAnchorSiblings(
   accountId: string,
@@ -222,66 +306,23 @@ export async function reconcileSeriesAnchorSiblings(
   const siblings = await listSiblingCalendarEventsByUidKey(accountId, savedEvent.eventUid);
   if (siblings.length === 0) return [];
 
-  // Cap = 1 second before the new anchor's first occurrence. RFC 5545
-  // requires UNTIL to be strictly inclusive, so subtracting a second
-  // keeps the prior row from emitting at the exact anchor time.
-  const capAtMs = Math.max(0, savedEvent.startAtMs - 1000);
+  type Anchor = { event: CalendarEvent; isSaved: boolean };
+  const timeline: Anchor[] = [{ event: savedEvent, isSaved: true }];
+  for (const sibling of siblings) {
+    if (typeof sibling.startAtMs !== "number" || !Number.isFinite(sibling.startAtMs)) continue;
+    timeline.push({ event: sibling, isSaved: false });
+  }
+  timeline.sort((a, b) => a.event.startAtMs - b.event.startAtMs);
 
   const reconciled: ReconciledSibling[] = [];
-  for (const sibling of siblings) {
-    if (sibling.startAtMs >= savedEvent.startAtMs) continue;
-
-    const ruleCap = capRecurrenceRuleAtUtcMs(sibling.recurrenceRule, capAtMs);
-    // COUNT and UNTIL are mutually exclusive (RFC 5545 §3.3.10), so we
-    // can't cap the rule. Leaving the row otherwise untouched keeps it
-    // internally consistent — pruning RDATE/snapshot/messageId entries
-    // past the cap while the rule still emits its full COUNT would
-    // produce a row that contradicts itself. Google never emits COUNT
-    // for re-anchored series in practice; revisit (translate to UNTIL
-    // via RRULE expansion) if real cases appear.
-    if (!ruleCap.changed && ruleCap.reason === "count-exclusive") continue;
-    const filtered = pruneOccurrencesPastCap(sibling, capAtMs);
-
-    const recurrenceRuleChanged = ruleCap.changed;
-    const recurrenceDatesChanged =
-      JSON.stringify(filtered.recurrenceDates ?? null) !==
-      JSON.stringify(sibling.recurrenceDates ?? null);
-    const occurrenceMessageIdsChanged =
-      JSON.stringify(filtered.occurrenceMessageIds ?? null) !==
-      JSON.stringify(sibling.occurrenceMessageIds ?? null);
-    const occurrenceSnapshotsChanged =
-      JSON.stringify(filtered.occurrenceSnapshots ?? null) !==
-      JSON.stringify(sibling.occurrenceSnapshots ?? null);
-    const occurrenceRecurrenceIdsChanged =
-      JSON.stringify(filtered.occurrenceRecurrenceIds ?? null) !==
-      JSON.stringify(sibling.occurrenceRecurrenceIds ?? null);
-
-    if (
-      !recurrenceRuleChanged &&
-      !recurrenceDatesChanged &&
-      !occurrenceMessageIdsChanged &&
-      !occurrenceSnapshotsChanged &&
-      !occurrenceRecurrenceIdsChanged
-    ) {
-      continue;
-    }
-
-    const nextRecurrenceRule = ruleCap.changed ? ruleCap.rule : sibling.recurrenceRule;
-    const saved = await upsertCalendarEventByUid(accountId, {
-      ...sibling,
-      recurrenceRule: nextRecurrenceRule,
-      recurrenceDates: filtered.recurrenceDates,
-      occurrenceMessageIds: filtered.occurrenceMessageIds,
-      occurrenceSnapshots: filtered.occurrenceSnapshots,
-      occurrenceRecurrenceIds: filtered.occurrenceRecurrenceIds
-    });
-    reconciled.push({
-      eventId: saved.id,
-      eventUid: saved.eventUid,
-      previousRecurrenceRule: sibling.recurrenceRule,
-      capRecurrenceRule: nextRecurrenceRule ?? "",
-      cappedAtMs: capAtMs
-    });
+  for (let i = 0; i < timeline.length - 1; i++) {
+    const current = timeline[i];
+    const next = timeline[i + 1];
+    const capAtMs = Math.max(0, next.event.startAtMs - 1000);
+    const result = await capEventAtUtcMs(accountId, current.event, capAtMs);
+    if (!result) continue;
+    if (current.isSaved) Object.assign(savedEvent, result.saved);
+    reconciled.push(result.entry);
   }
   return reconciled;
 }

@@ -40,10 +40,10 @@ export default function EventReminderDialog({
         if (!next && !savingReminder) onOpenChange(false);
       }}
     >
-      <Dialog.Content size="2" className={styles.reminderDialog} aria-describedby={undefined}>
+      <Dialog.Content size="2" className={styles.reminderDialog}>
         <Flex direction="column" gap="3">
           <Dialog.Title size="4">{existingReminder ? "Modify Reminder" : "Schedule Reminder"}</Dialog.Title>
-          <Text size="2" color="gray">{title || "Calendar event"}</Text>
+          <Dialog.Description size="2" color="gray">{title || "Calendar event"}</Dialog.Description>
           {existingReminder && (
             <Text size="2" color="gray">
               Current: {existingReminder.leadLabel}

@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { Info, Search } from "lucide-react";
-import { Badge, Button, Dialog, Flex, Text } from "@radix-ui/themes";
+import { Badge, Button, Dialog, Flex } from "@radix-ui/themes";
 import { extractCalendarIcsUid, normalizeCalendarIcsLineEndings } from "@/lib/calendarIcs";
 import DialogTitleBar from "@/app/components/mailclient/message/DialogTitleBar";
 import RawTextPanel from "@/app/components/mailclient/message/RawTextPanel";
@@ -83,10 +83,10 @@ export default function InviteAttachmentControls({
         >
           <Info size={12} />
         </Button>
-        <Dialog.Content size="4" className={styles.rawIcsDialog} aria-describedby={undefined}>
+        <Dialog.Content size="4" className={styles.rawIcsDialog}>
           <Flex direction="column" gap="3">
             <DialogTitleBar title="Raw ICS Content" onClose={() => setRawIcsOpen(false)} />
-            <Text size="2" color="gray">{downloadLabel}</Text>
+            <Dialog.Description size="2" color="gray">{downloadLabel}</Dialog.Description>
             {resolvedInviteUid ? (
               <div className={styles.uidRow}>
                 <span className={styles.uidLabel}>UID</span>
