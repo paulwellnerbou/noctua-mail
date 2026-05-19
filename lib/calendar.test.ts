@@ -115,6 +115,40 @@ describe("formatCalendarEventRange ymd", () => {
   });
 });
 
+describe("formatAccountIntl ymd time options", () => {
+  test("renders seconds when options.second is set", async () => {
+    const { formatAccountIntl } = await import("./dateFormatting");
+    const date = new Date(Date.UTC(2026, 2, 11, 14, 30, 45));
+    const out = formatAccountIntl(date, "ymd", {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      timeZone: "UTC"
+    });
+    expect(out).toContain("2026-03-11");
+    expect(out).toMatch(/14:30:45/);
+  });
+
+  test("respects hour12 when requested", async () => {
+    const { formatAccountIntl } = await import("./dateFormatting");
+    const date = new Date(Date.UTC(2026, 2, 11, 14, 30, 0));
+    const out = formatAccountIntl(date, "ymd", {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+      timeZone: "UTC"
+    });
+    expect(out).toContain("2026-03-11");
+    expect(out).toMatch(/p\.?\s?m\.?/i);
+  });
+});
+
 describe("formatCalendarEventRange", () => {
   test("omits the repeated date when the event starts and ends on the same day", () => {
     const start = new Date(Date.UTC(2026, 3, 14, 15, 15, 0));

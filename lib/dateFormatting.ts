@@ -351,17 +351,14 @@ function stripTimeZone(options: Intl.DateTimeFormatOptions): Intl.DateTimeFormat
   return next;
 }
 
-function partsForTimeZone(date: Date, timeZone?: string) {
+function ymdDatePartsForTimeZone(date: Date, timeZone?: string) {
   // Intl is the only reliable way to obtain wall-clock components in a
   // specific timezone (Date.getHours / getFullYear use the system zone).
+  // The date portion is always YYYY-MM-DD; we just need the components.
   const formatter = new Intl.DateTimeFormat("en-CA", {
     year: "numeric",
     month: "2-digit",
     day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-    hour12: false,
     weekday: "short",
     ...(timeZone ? { timeZone } : {})
   });
@@ -372,10 +369,36 @@ function partsForTimeZone(date: Date, timeZone?: string) {
     year: get("year"),
     month: get("month"),
     day: get("day"),
-    hour: get("hour") === "24" ? "00" : get("hour"),
-    minute: get("minute"),
     weekday: get("weekday")
   };
+}
+
+/**
+ * Render only the time portion using whatever time-related options the
+ * caller supplied (hour, minute, second, hour12, timeZoneName, timeStyle).
+ * We delegate to Intl with locale=en-CA — `ymd` is a date-shape preference,
+ * not a time-shape preference, so the time portion should respect the
+ * caller's options the same way as for any other format.
+ */
+function ymdTimePart(date: Date, options: Intl.DateTimeFormatOptions): string {
+  const timeOptions: Intl.DateTimeFormatOptions = {};
+  if (options.timeStyle) timeOptions.timeStyle = options.timeStyle;
+  if (options.hour) timeOptions.hour = options.hour;
+  if (options.minute) timeOptions.minute = options.minute;
+  if (options.second) timeOptions.second = options.second;
+  if (options.hour12 !== undefined) timeOptions.hour12 = options.hour12;
+  if (options.timeZoneName) timeOptions.timeZoneName = options.timeZoneName;
+  if (options.timeZone) timeOptions.timeZone = options.timeZone;
+  // Default to 24h when nothing was specified — YYYY-MM-DD pairs naturally
+  // with 24h time and that matches what locale-en-CA produces.
+  if (timeOptions.hour12 === undefined && !timeOptions.timeStyle) {
+    timeOptions.hour12 = false;
+  }
+  if (!timeOptions.hour && !timeOptions.minute && !timeOptions.second && !timeOptions.timeStyle) {
+    timeOptions.hour = "2-digit";
+    timeOptions.minute = "2-digit";
+  }
+  return new Intl.DateTimeFormat("en-CA", timeOptions).format(date);
 }
 
 function formatYmdComposite(date: Date, options: Intl.DateTimeFormatOptions): string {
@@ -387,11 +410,13 @@ function formatYmdComposite(date: Date, options: Intl.DateTimeFormatOptions): st
   );
   const hasWeekday = Boolean(options.weekday);
   try {
-    const parts = partsForTimeZone(date, options.timeZone);
     const segments: string[] = [];
-    if (hasWeekday) segments.push(`${parts.weekday},`);
-    if (hasDatePart) segments.push(`${parts.year}-${parts.month}-${parts.day}`);
-    if (hasTimePart) segments.push(`${parts.hour}:${parts.minute}`);
+    if (hasDatePart || hasWeekday) {
+      const dateParts = ymdDatePartsForTimeZone(date, options.timeZone);
+      if (hasWeekday) segments.push(`${dateParts.weekday},`);
+      if (hasDatePart) segments.push(`${dateParts.year}-${dateParts.month}-${dateParts.day}`);
+    }
+    if (hasTimePart) segments.push(ymdTimePart(date, options));
     return segments.join(" ");
   } catch {
     try {

@@ -42,13 +42,35 @@ const ICONS: Record<DiffIcon, LucideIcon> = {
   occurrence: CalendarClock
 };
 
-async function loadDiffs(accountId: string, messageId: string): Promise<DiffEntry[]> {
-  const response = await fetch(buildAccountMessageCalendarDiffPath(accountId, messageId), {
-    credentials: "include"
-  });
-  if (!response.ok) return [];
-  const body = (await response.json()) as { ok?: boolean; diffs?: DiffEntry[] };
-  return body.ok ? body.diffs ?? [] : [];
+// A single message can render several event cards, each mounting its own
+// CalendarEventDiffPanel. Without coalescing, that would fan out to N
+// identical requests for the same /calendar-diff endpoint. Cache the
+// in-flight Promise per (accountId, messageId) so all panels share one
+// fetch and dedupe to a single response.
+const inFlightDiffsByKey = new Map<string, Promise<DiffEntry[]>>();
+
+function loadDiffs(accountId: string, messageId: string): Promise<DiffEntry[]> {
+  const cacheKey = `${accountId}:${messageId}`;
+  const cached = inFlightDiffsByKey.get(cacheKey);
+  if (cached) return cached;
+  const promise = (async () => {
+    try {
+      const response = await fetch(
+        buildAccountMessageCalendarDiffPath(accountId, messageId),
+        { credentials: "include" }
+      );
+      if (!response.ok) return [];
+      const body = (await response.json()) as { ok?: boolean; diffs?: DiffEntry[] };
+      return body.ok ? body.diffs ?? [] : [];
+    } finally {
+      // Evict after settle so subsequent mounts (e.g. after the user
+      // navigates away and back) refetch fresh state instead of seeing a
+      // stale snapshot.
+      inFlightDiffsByKey.delete(cacheKey);
+    }
+  })();
+  inFlightDiffsByKey.set(cacheKey, promise);
+  return promise;
 }
 
 function RowContent({ row }: { row: DiffRow }) {
