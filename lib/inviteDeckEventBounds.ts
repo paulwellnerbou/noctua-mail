@@ -70,9 +70,15 @@ function buildRecurrenceTimeline(params: {
     };
     const fromRuleDate = (date: Date) =>
       ruleTimeZone ? fromCalendarTimeZoneWallDate(date, ruleTimeZone) : date;
+    const originalUntil =
+      parsed.origOptions.until instanceof Date ? parsed.origOptions.until : null;
     const rule = new RRule({
       ...parsed.origOptions,
       dtstart: toRuleDate(eventStartAtMs),
+      until:
+        originalUntil && ruleTimeZone
+          ? toCalendarTimeZoneWallDate(originalUntil, ruleTimeZone)
+          : parsed.origOptions.until,
       tzid: ruleTimeZone ? undefined : parsed.origOptions.tzid
     });
     const recurrenceDates = normalizeDateList(params.recurrenceDates);

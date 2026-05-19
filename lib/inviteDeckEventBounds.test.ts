@@ -63,6 +63,26 @@ describe("deriveInviteDeckEventBounds", () => {
     expect(bounds.eventLastEndAtMs).toBe(Date.UTC(2026, 3, 22, 8, 30, 0));
   });
 
+  test("includes the final occurrence when RRULE UNTIL is in UTC and DTSTART timezone is in DST", () => {
+    const ics = [
+      "BEGIN:VCALENDAR",
+      "METHOD:REQUEST",
+      "BEGIN:VEVENT",
+      "UID:demo-uid@example.test",
+      "SUMMARY:Bi-weekly sync",
+      "DTSTART;TZID=Europe/Berlin:20260311T153000",
+      "DTEND;TZID=Europe/Berlin:20260311T161500",
+      "RRULE:FREQ=WEEKLY;UNTIL=20260506T133000Z;INTERVAL=2;BYDAY=WE",
+      "END:VEVENT",
+      "END:VCALENDAR"
+    ].join("\r\n");
+
+    const [group] = collectCalendarInviteMutationGroups(ics);
+    const bounds = deriveInviteDeckEventBounds(group);
+    expect(bounds.eventFirstStartAtMs).toBe(Date.UTC(2026, 2, 11, 14, 30, 0));
+    expect(bounds.eventLastEndAtMs).toBe(Date.UTC(2026, 4, 6, 14, 15, 0));
+  });
+
   test("uses instance-only updates as finite occurrences", () => {
     const ics = [
       "BEGIN:VCALENDAR",
