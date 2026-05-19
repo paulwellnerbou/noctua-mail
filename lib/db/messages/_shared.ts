@@ -225,6 +225,8 @@ export function itemsFromUniqueInviteStates(
     actionType: CalendarInviteActionType;
     eventFirstStartAtMs?: number;
     eventLastEndAtMs?: number | null;
+    snapshotJson?: string | null;
+    snapshotVersion?: number | null;
   }>
 ) {
   const deduped = new Map<
@@ -234,6 +236,8 @@ export function itemsFromUniqueInviteStates(
       actionType: CalendarInviteActionType;
       eventFirstStartAtMs?: number;
       eventLastEndAtMs?: number | null;
+      snapshotJson?: string | null;
+      snapshotVersion?: number | null;
     }
   >();
   states.forEach((state) => {
@@ -244,7 +248,9 @@ export function itemsFromUniqueInviteStates(
       eventUid,
       actionType,
       eventFirstStartAtMs: state.eventFirstStartAtMs,
-      eventLastEndAtMs: state.eventLastEndAtMs
+      eventLastEndAtMs: state.eventLastEndAtMs,
+      snapshotJson: state.snapshotJson,
+      snapshotVersion: state.snapshotVersion
     });
   });
   return Array.from(deduped.values());

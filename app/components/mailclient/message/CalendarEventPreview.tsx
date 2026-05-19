@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { CalendarDays } from "lucide-react";
 import type {
-  AccountDateFormat,
   Attachment,
   CalendarEvent,
   MessageCalendarInviteState
@@ -29,6 +28,7 @@ import { groupItemsByRelativeTime } from "../utils/relativeTimeGroups";
 import type { InviteProcessingStatePatch } from "../utils/calendarInviteState";
 import EventDetailView from "@/app/components/calendar/EventDetailView";
 import InviteAttachmentControls from "@/app/components/calendar/InviteAttachmentControls";
+import CalendarEventDiffPanel from "./CalendarEventDiffPanel";
 import shellStyles from "../../calendar/EmbeddedPreviewShell.module.css";
 import styles from "./CalendarEventPreview.module.css";
 
@@ -97,7 +97,6 @@ export default function CalendarEventPreview({
   accountId,
   sourceMessageRowId,
   inviteStates,
-  dateFormat,
   onFindRelatedByInviteUid,
   onInviteStateChange,
   readErrorMessage,
@@ -107,7 +106,6 @@ export default function CalendarEventPreview({
   accountId: string;
   sourceMessageRowId?: string;
   inviteStates?: MessageCalendarInviteState[];
-  dateFormat?: AccountDateFormat;
   onFindRelatedByInviteUid?: (uid: string) => void;
   onInviteStateChange?: (patches: InviteProcessingStatePatch[]) => void;
   readErrorMessage: (res: Response) => Promise<string>;
@@ -425,7 +423,22 @@ export default function CalendarEventPreview({
                     mutationGroup,
                     storedEvent
                   }).label;
+                  const showDiffPanel =
+                    Boolean(sourceMessageRowId) &&
+                    Boolean(event.uid?.trim()) &&
+                    (inviteActionType === "update" || inviteActionType === "cancellation");
                   return (
+                    <div
+                      key={`${reminderKey}-${reminderVersion}-wrapper`}
+                      className={styles.eventList}
+                    >
+                      {showDiffPanel ? (
+                        <CalendarEventDiffPanel
+                          accountId={accountId}
+                          messageId={sourceMessageRowId!}
+                          eventUid={event.uid!.trim()}
+                        />
+                      ) : null}
                     <EventDetailView
                       key={`${reminderKey}-${reminderVersion}`}
                       accountId={accountId}
@@ -515,8 +528,8 @@ export default function CalendarEventPreview({
                           onProcess: () => handleProcessInvite(event.uid)
                         };
                       })()}
-                      dateFormat={dateFormat}
                     />
+                    </div>
                   );
                 })}
               </div>

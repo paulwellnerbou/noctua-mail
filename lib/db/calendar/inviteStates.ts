@@ -32,6 +32,8 @@ export async function upsertMessageCalendarInviteStates(
     actionType: CalendarInviteActionType;
     eventFirstStartAtMs?: number;
     eventLastEndAtMs?: number | null;
+    snapshotJson?: string | null;
+    snapshotVersion?: number | null;
   }>
 ) {
   return withDbWriteRetry("upsertMessageCalendarInviteStates", async () => {
@@ -44,14 +46,18 @@ export async function upsertMessageCalendarInviteStates(
          eventUidKey,
          eventFirstStartAtMs,
          eventLastEndAtMs,
-         inviteActionType
-       ) VALUES (?, ?, ?, ?, ?, ?, ?)
+         inviteActionType,
+         snapshotJson,
+         snapshotVersion
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(accountId, messageId, eventUid)
        DO UPDATE SET
          eventUidKey = excluded.eventUidKey,
          eventFirstStartAtMs = excluded.eventFirstStartAtMs,
          eventLastEndAtMs = excluded.eventLastEndAtMs,
-         inviteActionType = excluded.inviteActionType`
+         inviteActionType = excluded.inviteActionType,
+         snapshotJson = COALESCE(excluded.snapshotJson, snapshotJson),
+         snapshotVersion = COALESCE(excluded.snapshotVersion, snapshotVersion)`
     );
     const apply = db.transaction(
       (
@@ -60,6 +66,8 @@ export async function upsertMessageCalendarInviteStates(
           actionType: CalendarInviteActionType;
           eventFirstStartAtMs?: number;
           eventLastEndAtMs?: number | null;
+          snapshotJson?: string | null;
+          snapshotVersion?: number | null;
         }>
       ) => {
         items.forEach((item) => {
@@ -79,6 +87,15 @@ export async function upsertMessageCalendarInviteStates(
             item.eventLastEndAtMs > 0
               ? Math.round(item.eventLastEndAtMs)
               : null;
+          const snapshotJson =
+            typeof item.snapshotJson === "string" && item.snapshotJson.trim()
+              ? item.snapshotJson
+              : null;
+          const snapshotVersion =
+            typeof item.snapshotVersion === "number" &&
+            Number.isFinite(item.snapshotVersion)
+              ? Math.round(item.snapshotVersion)
+              : null;
           insert.run(
             accountId,
             messageId,
@@ -86,7 +103,9 @@ export async function upsertMessageCalendarInviteStates(
             eventUidKey,
             eventFirstStartAtMs,
             eventLastEndAtMs,
-            actionType
+            actionType,
+            snapshotJson,
+            snapshotVersion
           );
         });
       }
@@ -274,6 +293,171 @@ export async function deleteMessageCalendarInviteStateByMessageAndEvent(
     `DELETE FROM message_calendar_events
      WHERE accountId = ? AND messageId = ? AND lower(COALESCE(eventUidKey, eventUid, '')) = lower(?)`
   ).run(accountId, messageId, normalizedEventUidKey);
+}
+
+export type CalendarInviteSnapshotRow = {
+  messageId: string;
+  eventUid: string;
+  inviteActionType: CalendarInviteActionType | null;
+  processedAtMs: number | null;
+  snapshotJson: string | null;
+  snapshotVersion: number | null;
+};
+
+type RawSnapshotRow = {
+  messageId?: string | null;
+  eventUid?: string | null;
+  inviteActionType?: string | null;
+  processedAtMs?: number | null;
+  snapshotJson?: string | null;
+  snapshotVersion?: number | null;
+};
+
+// Always qualify the columns with the `mce` alias: getPriorCalendarSnapshot
+// joins `messages m`, which also has a `messageId` column (the RFC 5322
+// header), and SQLite errors "ambiguous column name: messageId" at prepare
+// time without the qualifier. Both query call sites alias the
+// message_calendar_events table as `mce` to match.
+const SNAPSHOT_SELECT_COLUMNS = [
+  "mce.messageId AS messageId",
+  "mce.eventUid AS eventUid",
+  "mce.inviteActionType AS inviteActionType",
+  "mce.processedAtMs AS processedAtMs",
+  "mce.snapshotJson AS snapshotJson",
+  "mce.snapshotVersion AS snapshotVersion"
+].join(", ");
+
+function mapSnapshotRow(row?: RawSnapshotRow | null): CalendarInviteSnapshotRow | null {
+  if (!row) return null;
+  const finiteOrNull = (v: number | null | undefined) =>
+    typeof v === "number" && Number.isFinite(v) ? v : null;
+  const trimmedOrNull = (v: string | null | undefined) =>
+    typeof v === "string" && v.trim() ? v : null;
+  return {
+    messageId: String(row.messageId ?? ""),
+    eventUid: String(row.eventUid ?? ""),
+    inviteActionType: normalizeCalendarInviteActionType(row.inviteActionType),
+    processedAtMs: finiteOrNull(row.processedAtMs),
+    snapshotJson: trimmedOrNull(row.snapshotJson),
+    snapshotVersion: finiteOrNull(row.snapshotVersion)
+  };
+}
+
+/**
+ * Fetch the snapshot JSON stored for a single message/eventUid pair, plus
+ * the action type and processedAtMs needed to order siblings.
+ *
+ * All writes go through `normalizeCalendarEventUid`, so both the stored
+ * column and the normalized input are already lower-case canonical form.
+ * Comparing them as-is lets SQLite use the
+ * `(accountId, messageId, eventUid)` primary-key index for a direct
+ * lookup; wrapping the column in `lower(...)` would block that.
+ * The fuzzier `eventUidKey` match is reserved for cross-message
+ * series/occurrence lookups (see getPriorCalendarSnapshot).
+ */
+export async function getMessageCalendarSnapshot(
+  accountId: string,
+  messageId: string,
+  eventUid: string
+): Promise<CalendarInviteSnapshotRow | null> {
+  const db = await getAccountDb(accountId);
+  const normalizedEventUid = normalizeCalendarEventUid(eventUid);
+  if (!normalizedEventUid) return null;
+  const row = db
+    .prepare(
+      `SELECT ${SNAPSHOT_SELECT_COLUMNS}
+       FROM message_calendar_events mce
+       WHERE mce.accountId = ?
+         AND mce.messageId = ?
+         AND mce.eventUid = ?
+       LIMIT 1`
+    )
+    .get(accountId, messageId, normalizedEventUid) as RawSnapshotRow | undefined;
+  return mapSnapshotRow(row);
+}
+
+/**
+ * Find the most recent prior message_calendar_events row for the same
+ * eventUid in the same account, strictly before the reference message in
+ * the `(dateValue, processedAtMs, messageId)` lexicographic order. Used
+ * to derive "what changed" for an update message.
+ *
+ * The tie-break matters because two updates can land in the same second
+ * (Outlook re-sends, IMAP fetch races) and share a `dateValue`. The
+ * compound predicate ensures the reference message's *exact* position is
+ * the cutoff, so we never accidentally pick a later sibling as the prior.
+ * Rows without a snapshot are skipped.
+ */
+export async function getPriorCalendarSnapshot(
+  accountId: string,
+  eventUid: string,
+  ref: { dateValue: number; processedAtMs: number | null; messageId: string }
+): Promise<CalendarInviteSnapshotRow | null> {
+  const db = await getAccountDb(accountId);
+  const normalizedEventUidKey = normalizeCalendarEventUidKey(eventUid);
+  if (!normalizedEventUidKey) return null;
+  const refProcessedAtMs = ref.processedAtMs ?? 0;
+  // Match `mce.eventUidKey = ?` directly (the column is already canonical
+  // lower-case via normalizeCalendarEventUidKey on every write, and the
+  // schema-ensure backfill fills any legacy nulls) so SQLite can use the
+  // idx_message_calendar_events_account_uid_key index for the lookup
+  // instead of computing lower(COALESCE(...)) per row.
+  const row = db
+    .prepare(
+      `SELECT ${SNAPSHOT_SELECT_COLUMNS}
+       FROM message_calendar_events mce
+       JOIN messages m ON m.accountId = mce.accountId AND m.id = mce.messageId
+       WHERE mce.accountId = ?
+         AND mce.eventUidKey = ?
+         AND mce.messageId <> ?
+         AND mce.snapshotJson IS NOT NULL
+         AND (
+           m.dateValue < ?
+           OR (
+             m.dateValue = ?
+             AND (
+               COALESCE(mce.processedAtMs, 0) < ?
+               OR (COALESCE(mce.processedAtMs, 0) = ? AND mce.messageId < ?)
+             )
+           )
+         )
+       ORDER BY m.dateValue DESC, COALESCE(mce.processedAtMs, 0) DESC, mce.messageId DESC
+       LIMIT 1`
+    )
+    .get(
+      accountId,
+      normalizedEventUidKey,
+      ref.messageId,
+      ref.dateValue,
+      ref.dateValue,
+      refProcessedAtMs,
+      refProcessedAtMs,
+      ref.messageId
+    ) as RawSnapshotRow | undefined;
+  return mapSnapshotRow(row);
+}
+
+/**
+ * List all `eventUid` values attached to a single message (in row order),
+ * for callers that want to fan out per-event work without re-reading the
+ * full message_calendar_events row.
+ */
+export async function listMessageCalendarEventUids(
+  accountId: string,
+  messageId: string
+): Promise<string[]> {
+  const db = await getAccountDb(accountId);
+  const rows = db
+    .prepare(
+      `SELECT eventUid
+       FROM message_calendar_events
+       WHERE accountId = ? AND messageId = ?
+       ORDER BY rowid`
+    )
+    .all(accountId, messageId) as Array<{ eventUid?: string | null }>;
+  return rows
+    .map((row) => (typeof row.eventUid === "string" ? row.eventUid.trim() : ""))
+    .filter((uid): uid is string => Boolean(uid));
 }
 
 export async function listCalendarInviteSourceMessagesByEventUid(

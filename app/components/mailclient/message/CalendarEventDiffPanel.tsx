@@ -1,0 +1,189 @@
+import { useEffect, useState } from "react";
+import {
+  CalendarCheck,
+  CalendarClock,
+  CalendarX,
+  Clock,
+  FileText,
+  Globe,
+  MapPin,
+  Repeat,
+  Tag,
+  User,
+  Users,
+  type LucideIcon
+} from "lucide-react";
+import type { CalendarEventDiff } from "@/lib/calendarEventDiff";
+import { buildDiffRows, type DiffIcon, type DiffRow } from "@/lib/calendarEventDiffFormat";
+import { buildAccountMessageCalendarDiffPath } from "@/lib/accountApiPaths";
+import CalendarMetaRow from "@/app/components/calendar/CalendarMetaRow";
+import { useAccountDateFormat } from "@/app/components/AccountDateFormatContext";
+import styles from "./CalendarEventDiffPanel.module.css";
+
+type DiffEntry = {
+  eventUid: string;
+  priorMessageId?: string | null;
+  timeZone?: string | null;
+  allDay?: boolean;
+  diff: CalendarEventDiff;
+};
+
+const ICONS: Record<DiffIcon, LucideIcon> = {
+  title: Tag,
+  location: MapPin,
+  status: CalendarCheck,
+  time: Clock,
+  tz: Globe,
+  allDay: CalendarCheck,
+  description: FileText,
+  recurrence: Repeat,
+  rdate: CalendarClock,
+  exdate: CalendarX,
+  organizer: User,
+  attendee: Users,
+  occurrence: CalendarClock
+};
+
+// A single message can render several event cards, each mounting its own
+// CalendarEventDiffPanel. Without coalescing, that would fan out to N
+// identical requests for the same /calendar-diff endpoint. Cache the
+// in-flight Promise per (accountId, messageId) so all panels share one
+// fetch and dedupe to a single response.
+const inFlightDiffsByKey = new Map<string, Promise<DiffEntry[]>>();
+
+function loadDiffs(accountId: string, messageId: string): Promise<DiffEntry[]> {
+  const cacheKey = `${accountId}:${messageId}`;
+  const cached = inFlightDiffsByKey.get(cacheKey);
+  if (cached) return cached;
+  const promise = (async () => {
+    try {
+      const response = await fetch(
+        buildAccountMessageCalendarDiffPath(accountId, messageId),
+        { credentials: "include" }
+      );
+      if (!response.ok) return [];
+      const body = (await response.json()) as { ok?: boolean; diffs?: DiffEntry[] };
+      return body.ok ? body.diffs ?? [] : [];
+    } finally {
+      // Evict after settle so subsequent mounts (e.g. after the user
+      // navigates away and back) refetch fresh state instead of seeing a
+      // stale snapshot.
+      inFlightDiffsByKey.delete(cacheKey);
+    }
+  })();
+  inFlightDiffsByKey.set(cacheKey, promise);
+  return promise;
+}
+
+function RowContent({ row }: { row: DiffRow }) {
+  // Use explicit undefined checks (not truthiness) so empty strings still
+  // render as a real value, and so a one-sided diff (e.g. location
+  // removed: before="Office", after=undefined) still shows the
+  // strikethrough → em-dash treatment instead of looking like an
+  // unchanged plain value.
+  const hasBefore = row.before !== undefined;
+  const hasAfter = row.after !== undefined;
+  if (hasBefore && hasAfter) {
+    return (
+      <>
+        <span className={styles.before}>{row.before}</span>{" "}
+        <span className={styles.arrow}>→</span>{" "}
+        <span className={styles.after}>{row.after}</span>
+      </>
+    );
+  }
+  if (hasBefore) {
+    return (
+      <>
+        <span className={styles.before}>{row.before}</span>{" "}
+        <span className={styles.arrow}>→</span>{" "}
+        <span className={styles.arrow}>—</span>
+      </>
+    );
+  }
+  if (hasAfter) {
+    const className =
+      row.variant === "added"
+        ? styles.added
+        : row.variant === "removed"
+          ? styles.removed
+          : styles.after;
+    return <span className={className}>{row.after}</span>;
+  }
+  return null;
+}
+
+/**
+ * "What changed" panel rendered above an UPDATE/CANCEL calendar event card.
+ * Pulls the per-message diff endpoint and renders one CalendarMetaRow per
+ * change so the panel blends visually into the event card below.
+ */
+export default function CalendarEventDiffPanel({
+  accountId,
+  messageId,
+  eventUid
+}: {
+  accountId: string;
+  messageId: string;
+  eventUid: string;
+}) {
+  const dateFormat = useAccountDateFormat();
+  const [entry, setEntry] = useState<DiffEntry | null | undefined>(undefined);
+
+  useEffect(() => {
+    let cancelled = false;
+    loadDiffs(accountId, messageId)
+      .then((entries) => {
+        if (cancelled) return;
+        const normalized = eventUid.trim().toLowerCase();
+        setEntry(
+          entries.find((e) => e.eventUid.trim().toLowerCase() === normalized) ?? null
+        );
+      })
+      .catch(() => {
+        if (!cancelled) setEntry(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [accountId, messageId, eventUid]);
+
+  if (entry === undefined || entry === null) return null;
+  const { diff } = entry;
+  if (diff.kind === "initial" || diff.kind === "no-change") return null;
+
+  if (diff.kind === "unavailable") {
+    const message =
+      diff.reason === "no_current_snapshot"
+        ? "This invite hasn’t been snapshotted yet (run the backfill script to enable a diff)."
+        : "The previous version of this invite isn’t available locally, so we can’t show what changed.";
+    return (
+      <section className={styles.panel} aria-label="Calendar update changes">
+        <p className={styles.heading}>What changed</p>
+        <p className={styles.muted}>{message}</p>
+      </section>
+    );
+  }
+
+  const rows = buildDiffRows(diff, dateFormat, entry.timeZone ?? undefined, entry.allDay);
+  const isCancel = diff.kind === "cancel";
+
+  return (
+    <section className={styles.panel} aria-label="Calendar update changes">
+      <p className={styles.heading}>{isCancel ? "Event cancelled" : "What changed"}</p>
+      {rows.length === 0 && !isCancel ? (
+        <p className={styles.muted}>
+          The organizer sent an update but nothing visible changed (likely a re-sync).
+        </p>
+      ) : (
+        rows.map((row) => (
+          <div key={row.key} className={row.indent ? styles.indent : undefined}>
+            <CalendarMetaRow icon={ICONS[row.icon]} label={row.label}>
+              <RowContent row={row} />
+            </CalendarMetaRow>
+          </div>
+        ))
+      )}
+    </section>
+  );
+}

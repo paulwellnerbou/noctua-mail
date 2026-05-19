@@ -22,6 +22,7 @@ import {
   Trash2,
   X
 } from "lucide-react";
+import { AccountDateFormatProvider } from "./AccountDateFormatContext";
 import LoginOverlay from "./auth/LoginOverlay";
 import FolderSidebarPane from "./mailclient/folder/FolderSidebarPane";
 import MoveToDialog, { recordRecentMoveFolder, getRecentMoveFolderIds } from "./mailclient/message/MoveToDialog";
@@ -4714,6 +4715,7 @@ export default function MailClient({
   }
 
   return (
+    <AccountDateFormatProvider value={accountDateFormat}>
     <div className="app-shell">
       <TopBar
         buildVersionLabel={buildVersionLabel}
@@ -5245,5 +5247,6 @@ export default function MailClient({
         accountDateFormat={accountDateFormat}
       />
     </div>
+    </AccountDateFormatProvider>
   );
 }

@@ -40,7 +40,11 @@ type Props = {
  * lives in `useConfirmDialogs` (for the confirms) and in MailClient (for the
  * topic picker + build refresh).
  */
-export default function DialogsHost({ confirm, buildRefresh, topicPicker }: Props) {
+export default function DialogsHost({
+  confirm,
+  buildRefresh,
+  topicPicker
+}: Props) {
   return (
     <>
       <BuildRefreshDialog

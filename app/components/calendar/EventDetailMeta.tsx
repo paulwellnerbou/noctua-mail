@@ -1,19 +1,9 @@
 "use client";
 
 import { Clock, MapPin, Repeat, User, Users } from "lucide-react";
+import { parseHttpUrl } from "@/lib/url";
+import CalendarMetaRow from "./CalendarMetaRow";
 import styles from "./EventDetailView.module.css";
-
-function parseHttpUrl(value?: string): string | null {
-  if (!value) return null;
-  const trimmed = value.trim();
-  try {
-    const parsed = new URL(trimmed);
-    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
-    return parsed.toString();
-  } catch {
-    return null;
-  }
-}
 
 export type EventDetailMetaProps = {
   timeRange: string;
@@ -41,49 +31,37 @@ export default function EventDetailMeta({
   return (
     <>
       {timeRange && (
-        <div className={styles.metaRow}>
-          <Clock size={12} />
-          <span>{timeRange}</span>
-          {tzLabel && <span className={styles.tzLabel}>({tzLabel})</span>}
-        </div>
+        <CalendarMetaRow icon={Clock}>
+          {timeRange}
+          {tzLabel ? <span className={styles.tzLabel}> ({tzLabel})</span> : null}
+        </CalendarMetaRow>
       )}
-
       {location && (
-        <div className={styles.metaRow}>
-          <MapPin size={12} />
+        <CalendarMetaRow icon={MapPin}>
           {locationUrl ? (
-            <a className={styles.locationLink} href={locationUrl} target="_blank" rel="noreferrer">
+            <a
+              className={styles.locationLink}
+              href={locationUrl}
+              target="_blank"
+              rel="noreferrer"
+            >
               {location}
             </a>
           ) : (
-            <span>{location}</span>
+            location
           )}
-        </div>
+        </CalendarMetaRow>
       )}
-
-      {recurrenceSummary && (
-        <div className={styles.metaRow}>
-          <Repeat size={12} />
-          <span>{recurrenceSummary}</span>
-        </div>
-      )}
-
+      {recurrenceSummary && <CalendarMetaRow icon={Repeat}>{recurrenceSummary}</CalendarMetaRow>}
       {organizer && (
-        <div className={styles.metaRowWrap}>
-          <User size={14} className={styles.metaIcon} aria-hidden />
-          <span className={styles.metaText}>
-            <span className={styles.metaInlineLabel}>Organizer:</span> {organizer}
-          </span>
-        </div>
+        <CalendarMetaRow icon={User} iconSize={14} variant="wrap" label="Organizer">
+          {organizer}
+        </CalendarMetaRow>
       )}
-
       {attendees && attendees.length > 0 && (
-        <div className={styles.metaRowWrap}>
-          <Users size={14} className={styles.metaIcon} aria-hidden />
-          <span className={styles.metaText}>
-            <span className={styles.metaInlineLabel}>Attendees:</span> {attendees.join(", ")}
-          </span>
-        </div>
+        <CalendarMetaRow icon={Users} iconSize={14} variant="wrap" label="Attendees">
+          {attendees.join(", ")}
+        </CalendarMetaRow>
       )}
     </>
   );
