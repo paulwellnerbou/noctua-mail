@@ -9,7 +9,6 @@ import {
   Edit3,
   FileText,
   Flag,
-  FolderInput,
   Forward,
   Mail,
   MailCheck,
@@ -40,6 +39,7 @@ import {
 } from "../utils/messageHelpers";
 import styles from "./MessageMenu.module.css";
 import TopicBadge from "../TopicBadge";
+import MoveToSubmenu from "./MoveToSubmenu";
 
 type ComposeMode = "new" | "reply" | "replyAll" | "forward" | "edit" | "editAsNew";
 type MessageMenuAction =
@@ -150,7 +150,6 @@ export default function MessageMenu({
   onOpenChange
 }: MessageMenuProps) {
   const [suggestions, setSuggestions] = useState<Topic[]>([]);
-  const [recentFolders, setRecentFolders] = useState<Folder[]>([]);
   const showDeleteInMenu = origin !== "table";
   const allowThreadDeletion = origin !== "thread";
   const inSpamFolder = isSpamFolder(message.folderId);
@@ -461,31 +460,13 @@ export default function MessageMenu({
               : null,
             isVisible("moveTo")
               ? (
-                  <DropdownMenu.Sub
+                  <MoveToSubmenu
                     key="moveTo"
-                    onOpenChange={(open) => { if (open) setRecentFolders(onGetRecentFolders()); }}
-                  >
-                    <DropdownMenu.SubTrigger disabled={isDisabled("moveTo")}>
-                      <span className={styles.menuIcon}><FolderInput size={14} /></span>
-                      <span className={styles.menuLabel}>Move to</span>
-                    </DropdownMenu.SubTrigger>
-                    <DropdownMenu.SubContent className={styles.menuContent}>
-                      {recentFolders.map((folder) => (
-                        <DropdownMenu.Item
-                          key={folder.id}
-                          onSelect={() => onMoveToFolder(message, folder.id)}
-                        >
-                          <span className={styles.menuIcon}><FolderInput size={14} /></span>
-                          <span className={styles.menuLabel}>{folder.name}</span>
-                        </DropdownMenu.Item>
-                      ))}
-                      {recentFolders.length > 0 && <DropdownMenu.Separator />}
-                      <DropdownMenu.Item onSelect={() => onMoveTo(message)}>
-                        <span className={styles.menuIcon}><FolderInput size={14} /></span>
-                        <span className={styles.menuLabel}>More...</span>
-                      </DropdownMenu.Item>
-                    </DropdownMenu.SubContent>
-                  </DropdownMenu.Sub>
+                    onGetRecentFolders={onGetRecentFolders}
+                    onMoveToFolder={(folderId) => onMoveToFolder(message, folderId)}
+                    onMoveToOther={() => onMoveTo(message)}
+                    disabled={isDisabled("moveTo")}
+                  />
                 )
               : null,
             showDeleteInMenu && isVisible("delete")

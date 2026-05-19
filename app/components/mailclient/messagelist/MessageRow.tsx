@@ -296,6 +296,7 @@ function MessageRow({
     <div
       className={rowClassName}
       data-message-list-row="true"
+      data-message-id={message.id}
       data-compact={isCompactView}
       data-active={effectiveActive}
       data-selected={effectiveSelected}

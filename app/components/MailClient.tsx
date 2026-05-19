@@ -47,6 +47,7 @@ import {
 import MessageListOrchestrator, {
   type MessageListHandle
 } from "./mailclient/messagelist/MessageListOrchestrator";
+import BulkActionContextMenu from "./mailclient/messagelist/BulkActionContextMenu";
 import {
   dedupeAccountMessages,
   sortMessages
@@ -533,6 +534,8 @@ export default function MailClient({
   const [showJson, setShowJson] = useState(false);
   const [omitBody, setOmitBody] = useState(true);
   const [moveToDialogState, setMoveToDialogState] = useState<MoveToDialogState | null>(null);
+  const [bulkContextMenu, setBulkContextMenu] = useState<{ x: number; y: number } | null>(null);
+  const [bulkContextMenuSelection, setBulkContextMenuSelection] = useState<string[]>([]);
   const messageViewHandleRef = useRef<MessageViewOrchestratorHandle | null>(null);
   const [appEnvironmentLabel, setAppEnvironmentLabel] = useState("");
   const [authState, setAuthState] = useState<"loading" | "ok" | "unauth">("loading");
@@ -3041,6 +3044,19 @@ export default function MailClient({
     setQuery(`thread:${threadId}`);
   };
 
+  const resolveMessagesByIds = useCallback(
+    (ids: string[]): Message[] => {
+      const unique = Array.from(new Set(ids));
+      return unique.flatMap((id) => {
+        const match =
+          threadScopeMessages.find((item) => item.id === id) ??
+          messages.find((item) => item.id === id);
+        return match ? [match] : [];
+      });
+    },
+    [messages, threadScopeMessages]
+  );
+
   const buildMoveTargetRequest = useCallback(
     (message: Message, origin: "list" | "thread" | "table" = "list") =>
       resolveMoveTargetRequest({
@@ -3078,13 +3094,19 @@ export default function MailClient({
       .flatMap((id) => (folderById.has(id) ? [folderById.get(id)!] : []));
   }, [activeAccountId, folderById]);
 
+  const recordAndMove = useCallback(
+    (folderId: string, options: Parameters<typeof moveMessagesToFolder>[1]) => {
+      recordRecentMoveFolder(activeAccountId ?? "", folderId);
+      void moveMessagesToFolder(folderId, options);
+    },
+    [activeAccountId, moveMessagesToFolder]
+  );
+
   const handleMoveToFolder = useCallback(
     (message: Message, folderId: string, origin: "list" | "thread" | "table" = "list") => {
-      recordRecentMoveFolder(activeAccountId ?? "", folderId);
-      const request = buildMoveTargetRequest(message, origin);
-      void moveMessagesToFolder(folderId, request);
+      recordAndMove(folderId, buildMoveTargetRequest(message, origin));
     },
-    [activeAccountId, buildMoveTargetRequest, moveMessagesToFolder]
+    [buildMoveTargetRequest, recordAndMove]
   );
 
   const handleFindRelatedByCalendarInviteUid = (eventUid: string) => {
@@ -3360,6 +3382,30 @@ export default function MailClient({
     threadScopeMessages,
     visibleMessages
   ]);
+
+  // Open the bulk-action menu when the user right-clicks a row that's part
+  // of a multi-message selection. Single-row clicks (and right-clicks on
+  // unselected rows) fall through to the browser's default menu, so this
+  // only kicks in when the user is clearly operating on the selection.
+  useEffect(() => {
+    const handleContextMenu = (event: MouseEvent) => {
+      const target = event.target;
+      if (!(target instanceof HTMLElement)) return;
+      const row = target.closest<HTMLElement>('[data-message-list-row="true"]');
+      if (!row) return;
+      const rowId = row.getAttribute("data-message-id");
+      if (!rowId) return;
+      const selected = selectionStore.getIds();
+      if (selected.size < 2) return;
+      if (!selected.has(rowId)) return;
+      event.preventDefault();
+      setBulkContextMenuSelection(Array.from(selected));
+      setBulkContextMenu({ x: event.clientX, y: event.clientY });
+    };
+    window.addEventListener("contextmenu", handleContextMenu);
+    return () => window.removeEventListener("contextmenu", handleContextMenu);
+  }, [selectionStore]);
+
   const scrubSource = (source?: string) => {
     if (!source) return "";
     return source.replace(/([A-Za-z0-9+/=]{200,})/g, "[base64 omitted]");
@@ -5210,8 +5256,57 @@ export default function MailClient({
         folderById={folderById}
         onMove={(folderId) => {
           if (!moveToDialogState) return;
-          recordRecentMoveFolder(activeAccountId, folderId);
-          void moveMessagesToFolder(folderId, moveToDialogState.request);
+          recordAndMove(folderId, moveToDialogState.request);
+        }}
+      />
+      <BulkActionContextMenu
+        open={bulkContextMenu !== null}
+        position={bulkContextMenu}
+        selectionCount={bulkContextMenuSelection.length}
+        onOpenChange={(open) => { if (!open) setBulkContextMenu(null); }}
+        actions={{
+          onMarkRead: () => {
+            const targets = resolveMessagesByIds(bulkContextMenuSelection);
+            if (targets.length === 0) return;
+            void updateFlagStateBulk(targets, "seen", true);
+          },
+          onMarkUnread: () => {
+            const targets = resolveMessagesByIds(bulkContextMenuSelection);
+            if (targets.length === 0) return;
+            void updateFlagStateBulk(targets, "seen", false);
+          },
+          onToggleFlag: () => {
+            const targets = resolveMessagesByIds(bulkContextMenuSelection);
+            if (targets.length === 0) return;
+            const flagged = targets.filter(isFlaggedMessage).length;
+            const majorityFlagged = flagged > targets.length / 2;
+            void updateFlagStateBulk(targets, "flagged", !majorityFlagged);
+          },
+          onMoveToFolder: (folderId) => {
+            const targets = resolveMessagesByIds(bulkContextMenuSelection);
+            if (targets.length === 0) return;
+            recordAndMove(folderId, { messageIds: targets.map((m) => m.id) });
+          },
+          onMoveToOther: () => {
+            const targets = resolveMessagesByIds(bulkContextMenuSelection);
+            if (targets.length === 0) return;
+            setMoveToDialogState({
+              message: targets[0],
+              request: { messageIds: targets.map((m) => m.id) }
+            });
+          },
+          onGetRecentFolders: handleGetRecentFolders,
+          onArchive: () => {
+            const targets = resolveMessagesByIds(bulkContextMenuSelection);
+            if (targets.length === 0) return;
+            for (const target of targets) {
+              void handleArchiveMessage(target);
+            }
+          },
+          onDelete: () => {
+            if (bulkContextMenuSelection.length === 0) return;
+            void handleDeleteMessagesByIds(bulkContextMenuSelection);
+          }
         }}
       />
       <BottomStatusBar
