@@ -3392,7 +3392,7 @@ export default function MailClient({
   useEffect(() => {
     const handleContextMenu = (event: MouseEvent) => {
       const target = event.target;
-      if (!(target instanceof HTMLElement)) return;
+      if (!(target instanceof Element)) return;
       const row = target.closest<HTMLElement>('[data-message-list-row="true"]');
       if (!row) return;
       const rowId = row.getAttribute("data-message-id");
@@ -5303,9 +5303,11 @@ export default function MailClient({
           onArchive: () => {
             const targets = resolveMessagesByIds(bulkContextMenuSelection);
             if (targets.length === 0) return;
-            for (const target of targets) {
-              void handleArchiveMessage(target);
-            }
+            void (async () => {
+              for (const target of targets) {
+                await handleArchiveMessage(target);
+              }
+            })();
           },
           onDelete: () => {
             if (bulkContextMenuSelection.length === 0) return;
