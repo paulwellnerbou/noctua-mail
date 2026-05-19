@@ -88,11 +88,22 @@ export async function GET(request: Request, { params }: Params) {
       // The diff itself only includes `allDay` when it changed, so for
       // unchanged-all-day events the panel would otherwise fall back to
       // timed formatting; same problem with timezone.
+      //
+      // An ICS that only carries RECURRENCE-ID overrides (no base VEVENT)
+      // produces a snapshot with `base: null` — fall through to the first
+      // override's fields, then to the prior snapshot, so all-day /
+      // timezone hints still flow.
+      const hintFields =
+        currentSnapshot.base ??
+        currentSnapshot.overrides[0]?.fields ??
+        priorSnapshot?.base ??
+        priorSnapshot?.overrides[0]?.fields ??
+        null;
       return {
         eventUid,
         priorMessageId: prior?.messageId ?? null,
-        timeZone: currentSnapshot.base?.startTimezone ?? null,
-        allDay: currentSnapshot.base?.allDay ?? false,
+        timeZone: hintFields?.startTimezone ?? null,
+        allDay: hintFields?.allDay ?? false,
         diff: diffCalendarEventSnapshots(priorSnapshot, currentSnapshot)
       };
     })

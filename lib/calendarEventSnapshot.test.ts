@@ -47,6 +47,16 @@ describe("parseRecurrenceRule", () => {
     expect(parseRecurrenceRule("")).toBeUndefined();
     expect(parseRecurrenceRule(undefined)).toBeUndefined();
   });
+
+  test("parses date-only UNTIL (for all-day recurrences) as UTC midnight", () => {
+    // ICS RRULE for an all-day series carries `UNTIL=YYYYMMDD` with no T
+    // suffix. The regex's `(?:T...)?` non-capturing group is optional so
+    // both date-only and date-time forms match.
+    expect(parseRecurrenceRule("FREQ=DAILY;UNTIL=20260506")).toEqual({
+      freq: "DAILY",
+      untilMs: Date.UTC(2026, 4, 6, 0, 0, 0)
+    });
+  });
 });
 
 describe("buildCalendarEventSnapshot", () => {
