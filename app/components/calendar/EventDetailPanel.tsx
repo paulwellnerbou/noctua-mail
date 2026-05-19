@@ -3,7 +3,6 @@
 import { useMemo } from "react";
 import { ArrowLeft } from "lucide-react";
 import type { CalendarEvent, CalendarReminder } from "@/lib/data";
-import { useAccountDateFormat } from "@/app/components/AccountDateFormatContext";
 import { buildCalendarIcsFilename } from "@/lib/calendarIcs";
 import InviteAttachmentControls from "./InviteAttachmentControls";
 import EventDetailView, { type CalendarEventDeleteAction } from "./EventDetailView";
@@ -43,7 +42,6 @@ export default function EventDetailPanel({
   onEventUpdated,
   onEventDeleted
 }: Props) {
-  const dateFormat = useAccountDateFormat();
   const isCalEvent = kind === "event";
   const calEv = isCalEvent ? (event as CalendarEvent) : null;
   const reminder = !isCalEvent ? (event as CalendarReminder) : null;
@@ -131,7 +129,6 @@ export default function EventDetailPanel({
           onEventUpdated={onEventUpdated}
           onEventDeleted={onEventDeleted}
           responseOccurrenceLabel="This occurrence"
-          dateFormat={dateFormat}
         />
       </div>
     </div>

@@ -1,19 +1,9 @@
 "use client";
 
 import { Clock, MapPin, Repeat, User, Users } from "lucide-react";
+import { parseHttpUrl } from "@/lib/url";
 import CalendarMetaRow from "./CalendarMetaRow";
 import styles from "./EventDetailView.module.css";
-
-function parseHttpUrl(value?: string): string | null {
-  if (!value) return null;
-  try {
-    const parsed = new URL(value.trim());
-    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return null;
-    return parsed.toString();
-  } catch {
-    return null;
-  }
-}
 
 export type EventDetailMetaProps = {
   timeRange: string;

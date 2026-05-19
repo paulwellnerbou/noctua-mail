@@ -7,7 +7,6 @@ import type {
   CalendarInviteUnprocessedReason
 } from "@/lib/calendarInviteProcessing";
 import type {
-  AccountDateFormat,
   CalendarEvent,
   CalendarParticipationScope,
   CalendarParticipationStatus
@@ -15,6 +14,7 @@ import type {
 import { formatCalendarParticipationLabel } from "@/lib/calendarParticipation";
 import { formatCalendarTimeZoneShortLabel } from "@/lib/calendarTimezones";
 import { selectCalendarEventEmailSnapshot } from "@/lib/calendarEventEmailSnapshot";
+import { useAccountDateFormat } from "@/app/components/AccountDateFormatContext";
 import CalendarEventEmailSnapshot from "./CalendarEventEmailSnapshot";
 import EventDeleteScopeDialog from "./EventDeleteScopeDialog";
 import EventDetailActions from "./EventDetailActions";
@@ -79,7 +79,6 @@ export type EventDetailViewProps = {
   responseOccurrenceLabel?: string;
   forceOccurrenceResponse?: boolean;
   inviteScopeLabel?: string;
-  dateFormat?: AccountDateFormat;
   showEmailSnapshot?: boolean;
   inviteProcessing?: {
     actionType: CalendarInviteActionType;
@@ -135,10 +134,10 @@ export default function EventDetailView({
   responseOccurrenceLabel = "This occurrence",
   forceOccurrenceResponse = false,
   inviteScopeLabel,
-  dateFormat,
   showEmailSnapshot = true,
   inviteProcessing
 }: EventDetailViewProps) {
+  const dateFormat = useAccountDateFormat();
   const resolvedStartMs = startMs ?? eventStartAtMs;
 
   // Time formatting

@@ -826,7 +826,6 @@ export default function ThreadMessageCard({
                   accountId={message.accountId}
                   sourceMessageRowId={message.id}
                   inviteStates={message.calendarInviteStates}
-                  dateFormat={dateFormat}
                   onFindRelatedByInviteUid={onFindRelatedByCalendarInviteUid}
                   onInviteStateChange={(patches) => onInviteStateChange?.(message.id, patches)}
                   readErrorMessage={readErrorMessage}

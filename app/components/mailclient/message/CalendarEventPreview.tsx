@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { CalendarDays } from "lucide-react";
 import type {
-  AccountDateFormat,
   Attachment,
   CalendarEvent,
   MessageCalendarInviteState
@@ -98,7 +97,6 @@ export default function CalendarEventPreview({
   accountId,
   sourceMessageRowId,
   inviteStates,
-  dateFormat,
   onFindRelatedByInviteUid,
   onInviteStateChange,
   readErrorMessage,
@@ -108,7 +106,6 @@ export default function CalendarEventPreview({
   accountId: string;
   sourceMessageRowId?: string;
   inviteStates?: MessageCalendarInviteState[];
-  dateFormat?: AccountDateFormat;
   onFindRelatedByInviteUid?: (uid: string) => void;
   onInviteStateChange?: (patches: InviteProcessingStatePatch[]) => void;
   readErrorMessage: (res: Response) => Promise<string>;
@@ -531,7 +528,6 @@ export default function CalendarEventPreview({
                           onProcess: () => handleProcessInvite(event.uid)
                         };
                       })()}
-                      dateFormat={dateFormat}
                     />
                     </div>
                   );
