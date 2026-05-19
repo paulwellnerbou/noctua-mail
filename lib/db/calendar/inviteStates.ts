@@ -336,11 +336,13 @@ function mapSnapshotRow(row?: RawSnapshotRow | null): CalendarInviteSnapshotRow 
  * Fetch the snapshot JSON stored for a single message/eventUid pair, plus
  * the action type and processedAtMs needed to order siblings.
  *
- * Matches the exact `eventUid` (lower-cased to match the canonical form
- * the table stores). The fuzzier `eventUidKey` match is reserved for
- * cross-message series/occurrence lookups (see getPriorCalendarSnapshot);
- * for a single (messageId, eventUid) row we want a deterministic result
- * even when a message has multiple rows whose `eventUidKey` collides.
+ * All writes go through `normalizeCalendarEventUid`, so both the stored
+ * column and the normalized input are already lower-case canonical form.
+ * Comparing them as-is lets SQLite use the
+ * `(accountId, messageId, eventUid)` primary-key index for a direct
+ * lookup; wrapping the column in `lower(...)` would block that.
+ * The fuzzier `eventUidKey` match is reserved for cross-message
+ * series/occurrence lookups (see getPriorCalendarSnapshot).
  */
 export async function getMessageCalendarSnapshot(
   accountId: string,
@@ -356,7 +358,7 @@ export async function getMessageCalendarSnapshot(
        FROM message_calendar_events
        WHERE accountId = ?
          AND messageId = ?
-         AND lower(eventUid) = lower(?)
+         AND eventUid = ?
        LIMIT 1`
     )
     .get(accountId, messageId, normalizedEventUid) as RawSnapshotRow | undefined;

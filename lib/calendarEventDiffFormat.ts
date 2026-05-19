@@ -219,6 +219,14 @@ export function buildDiffRows(
       after: `${who}: ${change.before ?? "—"} → ${change.after ?? "—"}`
     });
   });
+  diff.attendees.roleChanged.forEach((change, i) => {
+    const who = change.name ?? change.email ?? "Unknown";
+    rows.push({
+      key: `att-role-${i}`,
+      icon: "attendee",
+      after: `${who} role: ${change.before ?? "—"} → ${change.after ?? "—"}`
+    });
+  });
 
   diff.occurrences.forEach((occ) => {
     const at = formatDateTime(occ.recurrenceIdMs, false, dateFormat);

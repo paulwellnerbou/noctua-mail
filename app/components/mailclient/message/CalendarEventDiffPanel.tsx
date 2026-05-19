@@ -74,7 +74,14 @@ function loadDiffs(accountId: string, messageId: string): Promise<DiffEntry[]> {
 }
 
 function RowContent({ row }: { row: DiffRow }) {
-  if (row.before && row.after) {
+  // Use explicit undefined checks (not truthiness) so empty strings still
+  // render as a real value, and so a one-sided diff (e.g. location
+  // removed: before="Office", after=undefined) still shows the
+  // strikethrough → em-dash treatment instead of looking like an
+  // unchanged plain value.
+  const hasBefore = row.before !== undefined;
+  const hasAfter = row.after !== undefined;
+  if (hasBefore && hasAfter) {
     return (
       <>
         <span className={styles.before}>{row.before}</span>{" "}
@@ -83,10 +90,25 @@ function RowContent({ row }: { row: DiffRow }) {
       </>
     );
   }
-  const text = row.after ?? row.before;
-  const className =
-    row.variant === "added" ? styles.added : row.variant === "removed" ? styles.removed : undefined;
-  return <span className={className}>{text}</span>;
+  if (hasBefore) {
+    return (
+      <>
+        <span className={styles.before}>{row.before}</span>{" "}
+        <span className={styles.arrow}>→</span>{" "}
+        <span className={styles.arrow}>—</span>
+      </>
+    );
+  }
+  if (hasAfter) {
+    const className =
+      row.variant === "added"
+        ? styles.added
+        : row.variant === "removed"
+          ? styles.removed
+          : styles.after;
+    return <span className={className}>{row.after}</span>;
+  }
+  return null;
 }
 
 /**
