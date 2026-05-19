@@ -174,6 +174,7 @@ export default function BottomStatusBar({
         open={calendarPanelOpen}
         accountId={activeAccountId}
         firstDay={calendarFirstDay}
+        dateFormat={accountDateFormat}
         onOpenChange={handleCalendarPanelOpenChange}
         onOpenSidebar={onOpenCalendarSidebar}
         triggerLabel={currentDateTimeLabel}

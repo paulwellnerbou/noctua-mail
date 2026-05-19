@@ -2,7 +2,7 @@
 
 import { useCallback, useRef, useState } from "react";
 import type FullCalendar from "@fullcalendar/react";
-import type { CalendarEvent, CalendarReminder } from "@/lib/data";
+import type { AccountDateFormat, CalendarEvent, CalendarReminder } from "@/lib/data";
 import dynamic from "next/dynamic";
 import { buildAccountCalendarEventPath } from "@/lib/accountApiPaths";
 import InAppNoticeStack from "@/app/components/mailclient/InAppNoticeStack";
@@ -18,6 +18,7 @@ const CalendarView = dynamic(() => import("./CalendarView"), { ssr: false });
 type Props = {
   accountId: string;
   firstDay?: 0 | 1;
+  dateFormat?: AccountDateFormat;
   calendarRef?: React.RefObject<FullCalendar | null>;
   onOpenMessage?: (messageId: string) => void;
   onFindRelatedByInviteUid?: (uid: string) => void;
@@ -26,6 +27,7 @@ type Props = {
 export default function CalendarEventBrowser({
   accountId,
   firstDay,
+  dateFormat,
   calendarRef: externalCalendarRef,
   onOpenMessage,
   onFindRelatedByInviteUid
@@ -123,12 +125,14 @@ export default function CalendarEventBrowser({
       onFindRelatedByInviteUid={onFindRelatedByInviteUid}
       onEventUpdated={handleEventUpdated}
       onEventDeleted={handleEventDeleted}
+      dateFormat={dateFormat}
     />
   ) : (
     <CalendarView
       accountId={accountId}
       calendarRef={calendarRef}
       firstDay={firstDay}
+      dateFormat={dateFormat}
       onEventClick={handleEventClick}
     />
   );

@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import { Flex, Heading, IconButton } from "@radix-ui/themes";
 import { CalendarDays, ExternalLink, PanelRight, X } from "lucide-react";
 import { openDetachedWindow } from "@/lib/ui/openDetachedWindow";
+import type { AccountDateFormat } from "@/lib/data";
 import CalendarEventBrowser from "./CalendarEventBrowser";
 import CalendarDropOverlay from "./CalendarDropOverlay";
 import { useCalendarIcsDrop } from "./useCalendarIcsDrop";
@@ -22,6 +23,7 @@ type Props = {
   open: boolean;
   accountId: string;
   firstDay?: 0 | 1;
+  dateFormat?: AccountDateFormat;
   onOpenChange: (open: boolean) => void;
   onOpenSidebar: () => void;
   triggerLabel: string;
@@ -93,6 +95,7 @@ export default function CalendarPopover({
   open,
   accountId,
   firstDay,
+  dateFormat,
   onOpenChange,
   onOpenSidebar,
   triggerLabel,
@@ -296,6 +299,7 @@ export default function CalendarPopover({
         <CalendarEventBrowser
           accountId={accountId}
           firstDay={firstDay}
+          dateFormat={dateFormat}
           onOpenMessage={onOpenMessage ? (id) => {
             onOpenMessage(id);
             onOpenChange(false);

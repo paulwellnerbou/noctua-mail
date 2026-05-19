@@ -3,12 +3,14 @@ import { AlertDialog, Box, Button, Flex, Text } from "@radix-ui/themes";
 import type { DeleteConfirmAction, DeleteConfirmState } from "../types";
 import type { LinkedCalendarEventDetail } from "../utils/deleteConfirm";
 import { formatCalendarEventRange } from "@/lib/calendar";
+import type { AccountDateFormat } from "@/lib/data";
 import AlertDialogContent from "./AlertDialogContent";
 
 interface DeleteConfirmDialogProps {
   deleteConfirm: DeleteConfirmState | null;
   onOpenChange: (open: boolean) => void;
   resolveDeleteConfirm: (action: DeleteConfirmAction) => void;
+  accountDateFormat?: AccountDateFormat;
 }
 
 function formatCountLabel(count: number, singular: string, plural = `${singular}s`) {
@@ -121,24 +123,30 @@ function getDeleteLinkedLabel(deleteConfirm: DeleteConfirmState) {
   return "Delete Mail only";
 }
 
-function formatLinkedEventRange(event: LinkedCalendarEventDetail) {
+function formatLinkedEventRange(event: LinkedCalendarEventDetail, dateFormat?: AccountDateFormat) {
   if (!Number.isFinite(event.occurrenceStartAtMs) || event.occurrenceStartAtMs <= 0) return "";
   return formatCalendarEventRange(
     new Date(event.occurrenceStartAtMs),
     event.occurrenceEndAtMs && event.occurrenceEndAtMs > event.occurrenceStartAtMs
       ? new Date(event.occurrenceEndAtMs)
       : undefined,
-    { allDay: event.allDay, startTimeZone: event.startTimezone }
+    { allDay: event.allDay, startTimeZone: event.startTimezone, dateFormat }
   );
 }
 
-function LinkedEventList({ events }: { events: LinkedCalendarEventDetail[] }) {
+function LinkedEventList({
+  events,
+  dateFormat
+}: {
+  events: LinkedCalendarEventDetail[];
+  dateFormat?: AccountDateFormat;
+}) {
   if (events.length === 0) return null;
   return (
     <Box mt="3">
       <Flex direction="column" gap="2">
         {events.map((event) => {
-          const rangeLabel = formatLinkedEventRange(event);
+          const rangeLabel = formatLinkedEventRange(event, dateFormat);
           const isNextOccurrence =
             event.isRecurring && event.isFuture && !event.isMessageSpecificOccurrence;
           return (
@@ -168,7 +176,8 @@ function LinkedEventList({ events }: { events: LinkedCalendarEventDetail[] }) {
 export default function DeleteConfirmDialog({
   deleteConfirm,
   onOpenChange,
-  resolveDeleteConfirm
+  resolveDeleteConfirm,
+  accountDateFormat
 }: DeleteConfirmDialogProps) {
   const calendarDescription =
     deleteConfirm ? getCalendarAssociationDescription(deleteConfirm) : null;
@@ -187,7 +196,7 @@ export default function DeleteConfirmDialog({
           {calendarDescription ? ` ${calendarDescription}` : null}
         </AlertDialog.Description>
         {deleteConfirm && deleteConfirm.linkedEvents.length > 0 ? (
-          <LinkedEventList events={deleteConfirm.linkedEvents} />
+          <LinkedEventList events={deleteConfirm.linkedEvents} dateFormat={accountDateFormat} />
         ) : null}
         <Flex gap="3" mt="4" justify="end">
           <AlertDialog.Cancel>

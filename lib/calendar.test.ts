@@ -45,6 +45,74 @@ describe("buildCalendarRecurrenceSummary", () => {
     expect(summary).toContain("until");
     expect(summary?.indexOf("starting")).toBeLessThan(summary?.indexOf("until") ?? 0);
   });
+
+  test("formats the until date through the account dateFormat, not rrule's English text", () => {
+    const summary = buildCalendarRecurrenceSummary(
+      {
+        allDay: false,
+        start: new Date("2026-03-11T10:00:00.000Z"),
+        startTimezone: "Europe/Berlin",
+        recurrenceRule: "FREQ=WEEKLY;INTERVAL=2;BYDAY=WE;UNTIL=20260506T133000Z"
+      },
+      "dmy"
+    );
+    // en-GB (dmy) renders day before month; we explicitly do not want
+    // rrule.js's "May 6, 2026" en-US text to leak through.
+    expect(summary).toMatch(/until\s+6\s+May\s+2026/);
+    expect(summary).not.toMatch(/until\s+May\s+6/);
+  });
+
+  test("starting date also follows the account dateFormat", () => {
+    const summary = buildCalendarRecurrenceSummary(
+      {
+        allDay: false,
+        start: new Date("2026-03-11T10:00:00.000Z"),
+        startTimezone: "Europe/Berlin",
+        recurrenceRule: "FREQ=WEEKLY;INTERVAL=2;BYDAY=WE;UNTIL=20260506T133000Z"
+      },
+      "dmy"
+    );
+    expect(summary).toMatch(/starting\s+11\s+Mar/);
+  });
+
+  test("ymd renders true YYYY-MM-DD, not a short-month locale fallback", () => {
+    const summary = buildCalendarRecurrenceSummary(
+      {
+        allDay: false,
+        start: new Date("2026-03-11T10:00:00.000Z"),
+        startTimezone: "Europe/Berlin",
+        recurrenceRule: "FREQ=WEEKLY;INTERVAL=2;BYDAY=WE;UNTIL=20260506T133000Z"
+      },
+      "ymd"
+    );
+    expect(summary).toMatch(/starting\s+2026-03-11/);
+    expect(summary).toMatch(/until\s+2026-05-06/);
+    expect(summary).not.toMatch(/Mar 11/);
+  });
+});
+
+describe("formatCalendarEventRange ymd", () => {
+  test("emits YYYY-MM-DD with 24h time for ymd preset", () => {
+    const start = new Date(Date.UTC(2026, 2, 11, 14, 30, 0));
+    const end = new Date(Date.UTC(2026, 2, 11, 15, 15, 0));
+    const range = formatCalendarEventRange(start, end, {
+      startTimeZone: "Europe/Berlin",
+      dateFormat: "ymd"
+    });
+    expect(range).toContain("2026-03-11");
+    expect(range).toContain("15:30");
+    expect(range).toContain("16:15");
+    expect(range).not.toMatch(/Mar 11/);
+  });
+
+  test("resolves Windows timezone names like 'W. Europe Standard Time'", () => {
+    const start = new Date(Date.UTC(2026, 2, 11, 14, 30, 0));
+    const range = formatCalendarEventRange(start, undefined, {
+      startTimeZone: "W. Europe Standard Time",
+      dateFormat: "ymd"
+    });
+    expect(range).toContain("2026-03-11");
+  });
 });
 
 describe("formatCalendarEventRange", () => {
@@ -76,6 +144,17 @@ describe("formatCalendarEventRange", () => {
     expect(
       formatCalendarEventRange(start, end, { startTimeZone: "Europe/Berlin" })
     ).toBe(`${formattedStart} – ${formattedEnd}`);
+  });
+
+  test("respects the account dateFormat preset (DD/MM vs MM/DD)", () => {
+    const date = new Date(Date.UTC(2026, 2, 11, 14, 30, 0));
+    const dmy = formatCalendarEventDate(date, { timeZone: "UTC", dateFormat: "dmy" });
+    const mdy = formatCalendarEventDate(date, { timeZone: "UTC", dateFormat: "mdy" });
+    // en-GB style puts day before month; en-US style puts month before day.
+    // The exact short month/weekday formatting is locale-dependent, so we
+    // assert the day-vs-month ordering rather than the full string.
+    expect(dmy).toMatch(/\b11\b.*\b(March|Mar)\b/);
+    expect(mdy).toMatch(/\b(March|Mar)\b.*\b11\b/);
   });
 });
 

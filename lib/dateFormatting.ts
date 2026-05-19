@@ -313,3 +313,91 @@ export function formatAccountTimestampLabel(
   if (value == null || !Number.isFinite(value)) return fallbackLabel;
   return formatAccountMediumDateTime(value, preferredFormat) ?? fallbackLabel;
 }
+
+/**
+ * Account-format-aware wrapper around Intl.DateTimeFormat. Use this when the
+ * caller needs precise option control (timezone, weekday, etc.) but still
+ * wants the user's preferred date order to apply.
+ *
+ * "ymd" is handled manually because no BCP47 locale produces "YYYY-MM-DD"
+ * for arbitrary option combinations: locales like en-CA still expand
+ * `{ month: "short" }` to "Mar". For ymd we render the YYYY-MM-DD date
+ * portion ourselves and append other requested parts (weekday, time) using
+ * Intl so timezone handling still works.
+ */
+export function formatAccountIntl(
+  date: Date,
+  preferredFormat: AccountDateFormat | undefined,
+  options: Intl.DateTimeFormatOptions
+): string {
+  const format = normalizeAccountDateFormat(preferredFormat);
+  if (format === "ymd") return formatYmdComposite(date, options);
+  const locale =
+    format === "locale" ? undefined : resolveLocaleForFormat(format);
+  try {
+    return new Intl.DateTimeFormat(locale, options).format(date);
+  } catch {
+    try {
+      return new Intl.DateTimeFormat(locale, stripTimeZone(options)).format(date);
+    } catch {
+      return date.toLocaleString();
+    }
+  }
+}
+
+function stripTimeZone(options: Intl.DateTimeFormatOptions): Intl.DateTimeFormatOptions {
+  const next: Intl.DateTimeFormatOptions = { ...options };
+  delete next.timeZone;
+  return next;
+}
+
+function partsForTimeZone(date: Date, timeZone?: string) {
+  // Intl is the only reliable way to obtain wall-clock components in a
+  // specific timezone (Date.getHours / getFullYear use the system zone).
+  const formatter = new Intl.DateTimeFormat("en-CA", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false,
+    weekday: "short",
+    ...(timeZone ? { timeZone } : {})
+  });
+  const parts = formatter.formatToParts(date);
+  const get = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((p) => p.type === type)?.value ?? "";
+  return {
+    year: get("year"),
+    month: get("month"),
+    day: get("day"),
+    hour: get("hour") === "24" ? "00" : get("hour"),
+    minute: get("minute"),
+    weekday: get("weekday")
+  };
+}
+
+function formatYmdComposite(date: Date, options: Intl.DateTimeFormatOptions): string {
+  const hasDatePart = Boolean(
+    options.dateStyle || options.year || options.month || options.day
+  );
+  const hasTimePart = Boolean(
+    options.timeStyle || options.hour || options.minute || options.second
+  );
+  const hasWeekday = Boolean(options.weekday);
+  try {
+    const parts = partsForTimeZone(date, options.timeZone);
+    const segments: string[] = [];
+    if (hasWeekday) segments.push(`${parts.weekday},`);
+    if (hasDatePart) segments.push(`${parts.year}-${parts.month}-${parts.day}`);
+    if (hasTimePart) segments.push(`${parts.hour}:${parts.minute}`);
+    return segments.join(" ");
+  } catch {
+    try {
+      return new Intl.DateTimeFormat("en-CA", options).format(date);
+    } catch {
+      return date.toLocaleString();
+    }
+  }
+}

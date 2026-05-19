@@ -280,6 +280,13 @@ export function buildAccountMessageHtmlPath(accountId: string, messageId: string
   );
 }
 
+export function buildAccountMessageCalendarDiffPath(accountId: string, messageId: string) {
+  return buildAccountApiPath(
+    accountId,
+    `/messages/${encodeURIComponent(messageId)}/calendar-diff`
+  );
+}
+
 export function buildAccountAttachmentPath(
   accountId: string,
   messageId: string,

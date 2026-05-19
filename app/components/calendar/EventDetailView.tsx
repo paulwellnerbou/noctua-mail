@@ -153,7 +153,8 @@ export default function EventDetailView({
         {
           allDay,
           startTimeZone: startTimezone,
-          endTimeZone: endTimezone
+          endTimeZone: endTimezone,
+          dateFormat
         }
       )
     : "";
@@ -167,7 +168,7 @@ export default function EventDetailView({
         recurrenceRule,
         recurrenceDates: (recurrenceDates ?? []).map((ms) => new Date(ms)),
         excludedDates: (excludedDates ?? []).map((ms) => new Date(ms))
-      })
+      }, dateFormat)
     : null;
 
   const canonicalStartMs = eventStartAtMs ?? resolvedStartMs;

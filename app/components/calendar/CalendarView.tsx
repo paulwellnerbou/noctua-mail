@@ -8,7 +8,7 @@ import interactionPlugin from "@fullcalendar/interaction";
 import rrulePlugin from "@fullcalendar/rrule";
 import type { EventClickArg, EventMountArg, DatesSetArg, EventInput } from "@fullcalendar/core";
 import { formatCalendarEventRange } from "@/lib/calendar";
-import type { CalendarEvent } from "@/lib/data";
+import type { AccountDateFormat, CalendarEvent } from "@/lib/data";
 import type { CalendarReminder } from "@/lib/data";
 import {
   buildAccountCalendarEventsPath,
@@ -31,6 +31,7 @@ type Props = {
   accountId: string;
   compact?: boolean;
   firstDay?: 0 | 1;
+  dateFormat?: AccountDateFormat;
   onEventClick?: (
     event: CalendarEvent | CalendarReminder,
     kind: "event" | "reminder",
@@ -83,7 +84,7 @@ function getSavedView(): string {
   return "dayGridMonth";
 }
 
-function buildEventHoverTitle(arg: EventMountArg) {
+function buildEventHoverTitle(arg: EventMountArg, dateFormat?: AccountDateFormat) {
   const props = arg.event.extendedProps as {
     kind: "event" | "reminder";
     data: CalendarEvent | CalendarReminder;
@@ -95,14 +96,16 @@ function buildEventHoverTitle(arg: EventMountArg) {
     const rangeLabel = formatCalendarEventRange(arg.event.start ?? undefined, arg.event.end ?? undefined, {
       allDay: event.allDay,
       startTimeZone: event.startTimezone,
-      endTimeZone: event.endTimezone
+      endTimeZone: event.endTimezone,
+      dateFormat
     });
     if (rangeLabel) lines.push(rangeLabel);
     if (event.location?.trim()) lines.push(event.location.trim());
   } else {
     const reminder = props.data as CalendarReminder;
     const rangeLabel = formatCalendarEventRange(arg.event.start ?? undefined, arg.event.end ?? undefined, {
-      startTimeZone: reminder.startTimezone
+      startTimeZone: reminder.startTimezone,
+      dateFormat
     });
     if (rangeLabel) lines.push(rangeLabel);
     if (reminder.eventLocation?.trim()) lines.push(reminder.eventLocation.trim());
@@ -115,6 +118,7 @@ export default function CalendarView({
   accountId,
   compact = false,
   firstDay = 1,
+  dateFormat,
   onEventClick,
   onDateClick,
   calendarRef: externalRef
@@ -210,9 +214,12 @@ export default function CalendarView({
     [onDateClick]
   );
 
-  const handleEventDidMount = useCallback((arg: EventMountArg) => {
-    arg.el.title = buildEventHoverTitle(arg);
-  }, []);
+  const handleEventDidMount = useCallback(
+    (arg: EventMountArg) => {
+      arg.el.title = buildEventHoverTitle(arg, dateFormat);
+    },
+    [dateFormat]
+  );
 
   // Refetch when accountId changes
   useEffect(() => {

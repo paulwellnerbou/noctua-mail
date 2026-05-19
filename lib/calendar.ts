@@ -1,11 +1,12 @@
 import { RRule } from "rrule";
-import type { CalendarParticipationStatus } from "./data";
+import type { AccountDateFormat, CalendarParticipationStatus } from "./data";
 import {
   fromCalendarTimeZoneWallDate,
   isValidCalendarTimeZone,
   resolveCalendarTimeZoneId,
   toCalendarTimeZoneWallDate
 } from "./calendarTimezones";
+import { formatAccountIntl } from "./dateFormatting";
 
 export type CalendarEventPreview = {
   uid?: string;
@@ -58,12 +59,14 @@ type PendingCalendarDateValue = {
 type CalendarEventDateFormatInput = {
   allDay?: boolean;
   timeZone?: string;
+  dateFormat?: AccountDateFormat;
 };
 
 type CalendarEventRangeFormatInput = {
   allDay?: boolean;
   startTimeZone?: string;
   endTimeZone?: string;
+  dateFormat?: AccountDateFormat;
 };
 
 function unfoldLines(input: string) {
@@ -136,7 +139,7 @@ function decodeIcsText(value: string) {
 
 export function formatCalendarEventDate(
   date?: Date,
-  { allDay = false, timeZone }: CalendarEventDateFormatInput = {}
+  { allDay = false, timeZone, dateFormat }: CalendarEventDateFormatInput = {}
 ) {
   if (!date) return "";
   const dateOptions: Intl.DateTimeFormatOptions = {
@@ -145,42 +148,33 @@ export function formatCalendarEventDate(
     month: "short",
     day: "numeric"
   };
+  const resolvedTimeZone = timeZone ? resolveCalendarTimeZoneId(timeZone) : undefined;
   const options: Intl.DateTimeFormatOptions = allDay
     ? { ...dateOptions, timeZone: "UTC" }
     : {
         ...dateOptions,
         hour: "numeric",
         minute: "2-digit",
-        ...(timeZone ? { timeZone } : {})
+        ...(resolvedTimeZone ? { timeZone: resolvedTimeZone } : {})
       };
-  try {
-    return new Intl.DateTimeFormat(undefined, options).format(date);
-  } catch {
-    const fallbackOptions: Intl.DateTimeFormatOptions = allDay
-      ? dateOptions
-      : { ...dateOptions, hour: "numeric", minute: "2-digit" };
-    return new Intl.DateTimeFormat(undefined, fallbackOptions).format(date);
-  }
+  return formatAccountIntl(date, dateFormat, options);
 }
 
 function formatCalendarEventTime(
   date?: Date,
-  { timeZone }: Pick<CalendarEventDateFormatInput, "timeZone"> = {}
+  {
+    timeZone,
+    dateFormat
+  }: Pick<CalendarEventDateFormatInput, "timeZone" | "dateFormat"> = {}
 ) {
   if (!date) return "";
+  const resolvedTimeZone = timeZone ? resolveCalendarTimeZoneId(timeZone) : undefined;
   const options: Intl.DateTimeFormatOptions = {
     hour: "numeric",
     minute: "2-digit",
-    ...(timeZone ? { timeZone } : {})
+    ...(resolvedTimeZone ? { timeZone: resolvedTimeZone } : {})
   };
-  try {
-    return new Intl.DateTimeFormat(undefined, options).format(date);
-  } catch {
-    return new Intl.DateTimeFormat(undefined, {
-      hour: "numeric",
-      minute: "2-digit"
-    }).format(date);
-  }
+  return formatAccountIntl(date, dateFormat, options);
 }
 
 function formatCalendarDateKey(
@@ -215,9 +209,13 @@ function formatCalendarDateKey(
 export function formatCalendarEventRange(
   start?: Date,
   end?: Date,
-  { allDay = false, startTimeZone, endTimeZone }: CalendarEventRangeFormatInput = {}
+  { allDay = false, startTimeZone, endTimeZone, dateFormat }: CalendarEventRangeFormatInput = {}
 ) {
-  const startLabel = formatCalendarEventDate(start, { allDay, timeZone: startTimeZone });
+  const startLabel = formatCalendarEventDate(start, {
+    allDay,
+    timeZone: startTimeZone,
+    dateFormat
+  });
   if (!startLabel || !end) return startLabel;
 
   const sameDay =
@@ -225,8 +223,15 @@ export function formatCalendarEventRange(
     formatCalendarDateKey(end, { allDay, timeZone: endTimeZone ?? startTimeZone });
   const endLabel =
     sameDay && !allDay
-      ? formatCalendarEventTime(end, { timeZone: endTimeZone ?? startTimeZone })
-      : formatCalendarEventDate(end, { allDay, timeZone: endTimeZone ?? startTimeZone });
+      ? formatCalendarEventTime(end, {
+          timeZone: endTimeZone ?? startTimeZone,
+          dateFormat
+        })
+      : formatCalendarEventDate(end, {
+          allDay,
+          timeZone: endTimeZone ?? startTimeZone,
+          dateFormat
+        });
 
   if (!endLabel || endLabel === startLabel) return startLabel;
   return `${startLabel} – ${endLabel}`;
@@ -509,15 +514,20 @@ function parseRRuleFields(rule: string) {
   return out;
 }
 
-function formatRecurrenceBoundaryDate(event: CalendarEventPreview, value: Date) {
-  try {
-    return new Intl.DateTimeFormat(undefined, {
-      dateStyle: "medium",
-      timeZone: event.allDay ? "UTC" : resolveCalendarTimeZoneId(event.startTimezone)
-    }).format(value);
-  } catch {
-    return new Intl.DateTimeFormat(undefined, { dateStyle: "medium" }).format(value);
-  }
+function formatRecurrenceBoundaryDate(
+  event: CalendarEventPreview,
+  value: Date,
+  dateFormat?: AccountDateFormat
+) {
+  return formatAccountIntl(value, dateFormat, {
+    dateStyle: "medium",
+    ...(event.allDay
+      ? { timeZone: "UTC" }
+      : (() => {
+          const resolved = resolveCalendarTimeZoneId(event.startTimezone);
+          return resolved ? { timeZone: resolved } : {};
+        })())
+  });
 }
 
 function formatTimeZoneLabel(timeZone: string, referenceDate: Date) {
@@ -579,7 +589,10 @@ function buildRecurrenceFallbackLabel(recurrenceRule: string) {
   return "Repeats";
 }
 
-export function buildCalendarRecurrenceSummary(event: CalendarEventPreview): string | null {
+export function buildCalendarRecurrenceSummary(
+  event: CalendarEventPreview,
+  dateFormat?: AccountDateFormat
+): string | null {
   const recurrenceRule = event.recurrenceRule?.trim();
   if (!recurrenceRule) return null;
   const parsedRule = parseRecurrenceRule(event);
@@ -589,31 +602,26 @@ export function buildCalendarRecurrenceSummary(event: CalendarEventPreview): str
     const asText = parsedRule.toText().trim();
     return asText ? capitalizeFirstLetter(asText) : buildRecurrenceFallbackLabel(recurrenceRule);
   })();
-  const untilTextMatch = rawBase.match(/^(.*?)(?:,\s*)?\s+until\s+(.+)$/i);
+  // rrule.js's toText() always emits dates in English (e.g. "until May 6,
+  // 2026"). Strip that segment out of the base text and re-emit it from our
+  // account-format-aware formatter so locale settings apply.
+  const untilTextMatch = rawBase.match(/^(.*?)(?:,\s*)?\s+until\s+.+$/i);
   const base = untilTextMatch?.[1]?.trim().replace(/[,\s]+$/g, "") || rawBase;
-  const untilDetailFromBase = untilTextMatch?.[2]?.trim()
-    ? `until ${untilTextMatch[2].trim()}`
-    : null;
 
   const details: string[] = [];
   if (event.start) {
-    details.push(`starting ${formatRecurrenceBoundaryDate(event, event.start)}`);
+    details.push(`starting ${formatRecurrenceBoundaryDate(event, event.start, dateFormat)}`);
   }
 
-  if (untilDetailFromBase) {
-    details.push(untilDetailFromBase);
-  }
-
-  const hasUntilInBase = Boolean(untilDetailFromBase) || /\buntil\b/i.test(base);
   const untilDate = parsedRule?.options.until;
-  if (untilDate instanceof Date && !hasUntilInBase) {
-    details.push(`until ${formatRecurrenceBoundaryDate(event, untilDate)}`);
-  } else if (!hasUntilInBase) {
+  if (untilDate instanceof Date) {
+    details.push(`until ${formatRecurrenceBoundaryDate(event, untilDate, dateFormat)}`);
+  } else {
     const untilRaw = (fallbackFields.UNTIL ?? "").trim();
     if (untilRaw) {
       const fallbackUntilDate = parseCalendarDate(untilRaw, event.startTimezone).date;
       if (fallbackUntilDate) {
-        details.push(`until ${formatRecurrenceBoundaryDate(event, fallbackUntilDate)}`);
+        details.push(`until ${formatRecurrenceBoundaryDate(event, fallbackUntilDate, dateFormat)}`);
       }
     }
   }

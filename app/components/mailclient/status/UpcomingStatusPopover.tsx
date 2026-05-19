@@ -46,14 +46,19 @@ type UpcomingStatusPopoverProps = {
   accountDateFormat?: AccountDateFormat;
 };
 
-function formatEventTimeRange(startAtMs: number, endAtMs: number | undefined, timeZone?: string) {
+function formatEventTimeRange(
+  startAtMs: number,
+  endAtMs: number | undefined,
+  timeZone?: string,
+  dateFormat?: AccountDateFormat
+) {
   if (!Number.isFinite(startAtMs)) return "";
   return formatCalendarEventRange(
     new Date(startAtMs),
     Number.isFinite(endAtMs ?? Number.NaN) && (endAtMs as number) > startAtMs
       ? new Date(endAtMs as number)
       : undefined,
-    { startTimeZone: timeZone }
+    { startTimeZone: timeZone, dateFormat }
   );
 }
 
@@ -88,7 +93,7 @@ function formatEntryTimeZoneLabel(startAtMs: number, timeZone?: string) {
   return formatCalendarTimeZoneShortLabel(timeZone, new Date(startAtMs));
 }
 
-function buildEntryRecurrenceSummary(entry: UpcomingEntry) {
+function buildEntryRecurrenceSummary(entry: UpcomingEntry, dateFormat?: AccountDateFormat) {
   const event = entry.event;
   if (event?.recurrenceRule?.trim()) {
     return buildCalendarRecurrenceSummary({
@@ -103,7 +108,7 @@ function buildEntryRecurrenceSummary(entry: UpcomingEntry) {
       recurrenceRule: event.recurrenceRule,
       recurrenceDates: event.recurrenceDates?.map((value) => new Date(value)),
       excludedDates: event.excludedDates?.map((value) => new Date(value))
-    });
+    }, dateFormat);
   }
   const reminder = entry.reminder;
   if (reminder?.recurrenceRule?.trim()) {
@@ -115,7 +120,7 @@ function buildEntryRecurrenceSummary(entry: UpcomingEntry) {
       recurrenceRule: reminder.recurrenceRule,
       recurrenceDates: reminder.recurrenceDates?.map((value) => new Date(value)),
       excludedDates: reminder.excludedDates?.map((value) => new Date(value))
-    });
+    }, dateFormat);
   }
   return null;
 }
@@ -278,9 +283,13 @@ export default function UpcomingStatusPopover({
                       const eventTimeLabel = formatEventTimeRange(
                         startAtMs,
                         endAtMs,
-                        entry.timeZone
+                        entry.timeZone,
+                        accountDateFormat
                       );
-                      const recurrenceSummary = buildEntryRecurrenceSummary(entry);
+                      const recurrenceSummary = buildEntryRecurrenceSummary(
+                        entry,
+                        accountDateFormat
+                      );
                       const displayUid = getEntryDisplayUid(entry);
                       return (
                         <Card

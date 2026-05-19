@@ -134,7 +134,9 @@ export async function upsertMessages(
          processedAtMs,
          processedByUserId,
          processedAutomatically,
-         unprocessedReason
+         unprocessedReason,
+         snapshotJson,
+         snapshotVersion
        FROM message_calendar_events
        WHERE accountId = ? AND messageId = ?`
     );
@@ -172,8 +174,10 @@ export async function upsertMessages(
          processedAtMs,
          processedByUserId,
          processedAutomatically,
-         unprocessedReason
-       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+         unprocessedReason,
+         snapshotJson,
+         snapshotVersion
+       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     );
 
     const insertMessage = db.prepare(`
@@ -342,6 +346,8 @@ export async function upsertMessages(
               processedByUserId?: string | null;
               processedAutomatically?: number | boolean | null;
               unprocessedReason?: string | null;
+              snapshotJson?: string | null;
+              snapshotVersion?: number | null;
             }>
           )
             .map((row) => {
@@ -386,6 +392,15 @@ export async function upsertMessages(
                   unprocessedReason:
                     typeof row.unprocessedReason === "string" && row.unprocessedReason.trim()
                       ? row.unprocessedReason.trim()
+                      : null,
+                  snapshotJson:
+                    typeof row.snapshotJson === "string" && row.snapshotJson.trim()
+                      ? row.snapshotJson
+                      : null,
+                  snapshotVersion:
+                    typeof row.snapshotVersion === "number" &&
+                    Number.isFinite(row.snapshotVersion)
+                      ? row.snapshotVersion
                       : null
                 }
               ] as const;
@@ -404,6 +419,8 @@ export async function upsertMessages(
                   processedByUserId: string | null;
                   processedAutomatically: boolean | null;
                   unprocessedReason: string | null;
+                  snapshotJson: string | null;
+                  snapshotVersion: number | null;
                 }
               ] => Boolean(entry)
             )
@@ -533,7 +550,9 @@ export async function upsertMessages(
             typeof existing?.processedAutomatically === "boolean"
               ? (existing.processedAutomatically ? 1 : 0)
               : null,
-            existing?.unprocessedReason ?? null
+            existing?.unprocessedReason ?? null,
+            existing?.snapshotJson ?? null,
+            existing?.snapshotVersion ?? null
           );
         });
         (message.attachments ?? []).forEach((att) => {

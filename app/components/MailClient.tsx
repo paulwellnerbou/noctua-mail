@@ -4783,6 +4783,7 @@ export default function MailClient({
           onSave: handleSaveMessageTopics,
           onCreateTopic: handleCreateTopic
         }}
+        accountDateFormat={accountDateFormat}
       />
 
       <section className="content-grid" ref={containerRef}>
@@ -5066,6 +5067,7 @@ export default function MailClient({
               <CalendarSidebarPanel
                 accountId={activeAccountId}
                 firstDay={calendarFirstDay}
+                dateFormat={accountDateFormat}
                 onClose={() => setCalendarSidebarOpen(false)}
                 onOpenMessage={handleOpenCalendarMessage}
                 onFindRelatedByInviteUid={handleFindRelatedByCalendarInviteUid}

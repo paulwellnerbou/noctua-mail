@@ -205,6 +205,8 @@ import {
   getCalendarEventByUid as _getCalendarEventByUidImpl,
   listSiblingCalendarEventsByUidKey as _listSiblingCalendarEventsByUidKeyImpl,
   listCalendarInviteSourceMessagesByEventUid as _listCalendarInviteSourceMessagesByEventUidImpl,
+  getMessageCalendarSnapshot as _getMessageCalendarSnapshotImpl,
+  getPriorCalendarSnapshot as _getPriorCalendarSnapshotImpl,
   markMessageCalendarInviteStatesProcessed as _markMessageCalendarInviteStatesProcessedImpl,
   markMessageCalendarInviteStatesUnprocessed as _markMessageCalendarInviteStatesUnprocessedImpl,
   rescheduleCalendarRemindersByEventUid as _rescheduleCalendarRemindersByEventUidImpl,
@@ -295,6 +297,18 @@ export function clearMessageCalendarInviteStatesProcessedByEventUid(
   ...args: Parameters<typeof _clearMessageCalendarInviteStatesProcessedByEventUidImpl>
 ): ReturnType<typeof _clearMessageCalendarInviteStatesProcessedByEventUidImpl> {
   return _clearMessageCalendarInviteStatesProcessedByEventUidImpl(...args);
+}
+
+export function getMessageCalendarSnapshot(
+  ...args: Parameters<typeof _getMessageCalendarSnapshotImpl>
+): ReturnType<typeof _getMessageCalendarSnapshotImpl> {
+  return _getMessageCalendarSnapshotImpl(...args);
+}
+
+export function getPriorCalendarSnapshot(
+  ...args: Parameters<typeof _getPriorCalendarSnapshotImpl>
+): ReturnType<typeof _getPriorCalendarSnapshotImpl> {
+  return _getPriorCalendarSnapshotImpl(...args);
 }
 
 export function listCalendarInviteSourceMessagesByEventUid(

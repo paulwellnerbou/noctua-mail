@@ -29,6 +29,7 @@ import { groupItemsByRelativeTime } from "../utils/relativeTimeGroups";
 import type { InviteProcessingStatePatch } from "../utils/calendarInviteState";
 import EventDetailView from "@/app/components/calendar/EventDetailView";
 import InviteAttachmentControls from "@/app/components/calendar/InviteAttachmentControls";
+import CalendarEventDiffPanel from "./CalendarEventDiffPanel";
 import shellStyles from "../../calendar/EmbeddedPreviewShell.module.css";
 import styles from "./CalendarEventPreview.module.css";
 
@@ -425,7 +426,23 @@ export default function CalendarEventPreview({
                     mutationGroup,
                     storedEvent
                   }).label;
+                  const showDiffPanel =
+                    Boolean(sourceMessageRowId) &&
+                    Boolean(event.uid?.trim()) &&
+                    (inviteActionType === "update" || inviteActionType === "cancellation");
                   return (
+                    <div
+                      key={`${reminderKey}-${reminderVersion}-wrapper`}
+                      className={styles.eventList}
+                    >
+                      {showDiffPanel ? (
+                        <CalendarEventDiffPanel
+                          accountId={accountId}
+                          messageId={sourceMessageRowId!}
+                          eventUid={event.uid!.trim()}
+                          dateFormat={dateFormat}
+                        />
+                      ) : null}
                     <EventDetailView
                       key={`${reminderKey}-${reminderVersion}`}
                       accountId={accountId}
@@ -517,6 +534,7 @@ export default function CalendarEventPreview({
                       })()}
                       dateFormat={dateFormat}
                     />
+                    </div>
                   );
                 })}
               </div>

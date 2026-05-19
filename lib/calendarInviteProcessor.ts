@@ -27,6 +27,11 @@ import {
 } from "@/lib/calendarParticipation";
 import { resolveEmailCalendarEventStatus } from "@/lib/calendarEventStatus";
 import { deriveInviteDeckEventBounds } from "@/lib/inviteDeckEventBounds";
+import {
+  buildCalendarEventSnapshot,
+  CALENDAR_EVENT_SNAPSHOT_VERSION,
+  serializeCalendarEventSnapshot
+} from "@/lib/calendarEventSnapshot";
 import { getMessageSource } from "@/lib/storage";
 import { extractIcsSourceFromEmailSource } from "@/lib/mail/attachmentFromSource";
 import { reconcileSeriesAnchorSiblings } from "@/lib/calendarSeriesReanchor";
@@ -265,7 +270,15 @@ export async function processCalendarInviteForMessage({
     actionType: inferCalendarInviteMessageActionType(group),
     ...deriveInviteDeckEventBounds(group)
   }));
-  await upsertMessageCalendarInviteStates(accountId, messageId, inviteStates);
+  const inviteStatesWithSnapshots = inviteStates.map((state) => {
+    const snapshot = buildCalendarEventSnapshot(icsSource, state.eventUid);
+    return {
+      ...state,
+      snapshotJson: snapshot ? serializeCalendarEventSnapshot(snapshot) : null,
+      snapshotVersion: snapshot ? CALENDAR_EVENT_SNAPSHOT_VERSION : null
+    };
+  });
+  await upsertMessageCalendarInviteStates(accountId, messageId, inviteStatesWithSnapshots);
 
   if (!process) {
     return {

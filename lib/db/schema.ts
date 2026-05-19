@@ -40,7 +40,9 @@ const MESSAGE_CALENDAR_EVENT_SCHEMA_SIGNATURE = [
   "processedAtMs",
   "processedByUserId",
   "processedAutomatically",
-  "unprocessedReason"
+  "unprocessedReason",
+  "snapshotJson",
+  "snapshotVersion"
 ].join("|");
 const THREAD_SCHEMA_SIGNATURE = ["latestReceivedDateValue"].join("|");
 const TOPIC_SCHEMA_SIGNATURE = ["shortName"].join("|");
@@ -202,6 +204,12 @@ export function ensureMessageCalendarEventOptionalColumns(db: any) {
   }
   if (!messageCalendarColumns.has("unprocessedReason")) {
     db.prepare(`ALTER TABLE message_calendar_events ADD COLUMN unprocessedReason TEXT`).run();
+  }
+  if (!messageCalendarColumns.has("snapshotJson")) {
+    db.prepare(`ALTER TABLE message_calendar_events ADD COLUMN snapshotJson TEXT`).run();
+  }
+  if (!messageCalendarColumns.has("snapshotVersion")) {
+    db.prepare(`ALTER TABLE message_calendar_events ADD COLUMN snapshotVersion INTEGER`).run();
   }
   backfillMessageCalendarEventUidKeys(db);
   db.prepare(
@@ -756,6 +764,8 @@ export function initAccountSchema(db: any) {
       processedByUserId TEXT,
       processedAutomatically INTEGER,
       unprocessedReason TEXT,
+      snapshotJson TEXT,
+      snapshotVersion INTEGER,
       PRIMARY KEY (accountId, messageId, eventUid),
       FOREIGN KEY(messageId) REFERENCES messages(id) ON DELETE CASCADE
     );
