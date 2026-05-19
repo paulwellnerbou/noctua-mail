@@ -386,13 +386,18 @@ export async function getPriorCalendarSnapshot(
   const normalizedEventUidKey = normalizeCalendarEventUidKey(eventUid);
   if (!normalizedEventUidKey) return null;
   const refProcessedAtMs = ref.processedAtMs ?? 0;
+  // Match `mce.eventUidKey = ?` directly (the column is already canonical
+  // lower-case via normalizeCalendarEventUidKey on every write, and the
+  // schema-ensure backfill fills any legacy nulls) so SQLite can use the
+  // idx_message_calendar_events_account_uid_key index for the lookup
+  // instead of computing lower(COALESCE(...)) per row.
   const row = db
     .prepare(
       `SELECT ${SNAPSHOT_SELECT_COLUMNS}
        FROM message_calendar_events mce
        JOIN messages m ON m.accountId = mce.accountId AND m.id = mce.messageId
        WHERE mce.accountId = ?
-         AND lower(COALESCE(mce.eventUidKey, mce.eventUid, '')) = lower(?)
+         AND mce.eventUidKey = ?
          AND mce.messageId <> ?
          AND mce.snapshotJson IS NOT NULL
          AND (

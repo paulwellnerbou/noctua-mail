@@ -58,16 +58,41 @@ async function backfillForAccount(accountId: string, dryRun: boolean) {
      WHERE accountId = ? AND messageId = ? AND eventUid = ?`
   );
 
-  // Source-loading is async per row (file I/O + mail parser). Do the
-  // parsing pass sequentially up front, then flush all writes in a single
-  // SQLite transaction at the end. Per-row autocommit would make this
-  // pathologically slow on accounts with thousands of invite rows.
+  // Source-loading is async per row (file I/O + mail parser). Stream
+  // snapshots through a rolling batch: accumulate up to BATCH_SIZE
+  // pending writes, flush them in a single SQLite transaction, then
+  // continue. This avoids both per-row autocommit overhead (pathologically
+  // slow) and unbounded memory growth (a naive "collect everything, flush
+  // once" can hold tens/hundreds of MB of snapshot JSON for large
+  // accounts).
   type PendingWrite = {
     messageId: string;
     eventUid: string;
     snapshotJson: string;
   };
-  const pending: PendingWrite[] = [];
+  const BATCH_SIZE = 500;
+  const flush = db.transaction((writes: PendingWrite[]) => {
+    for (const w of writes) {
+      update.run(
+        w.snapshotJson,
+        CALENDAR_EVENT_SNAPSHOT_VERSION,
+        accountId,
+        w.messageId,
+        w.eventUid
+      );
+    }
+  });
+  let batch: PendingWrite[] = [];
+  const flushBatch = () => {
+    if (dryRun || batch.length === 0) {
+      batch = [];
+      return;
+    }
+    flush(batch);
+    batch = [];
+  };
+
+  let filled = 0;
   let skipped = 0;
   for (const row of rows) {
     const messageId = row.messageId ?? "";
@@ -91,28 +116,15 @@ async function backfillForAccount(accountId: string, dryRun: boolean) {
       skipped += 1;
       continue;
     }
-    pending.push({
+    batch.push({
       messageId,
       eventUid,
       snapshotJson: serializeCalendarEventSnapshot(snapshot)
     });
+    filled += 1;
+    if (batch.length >= BATCH_SIZE) flushBatch();
   }
-
-  if (!dryRun && pending.length > 0) {
-    const flush = db.transaction((writes: PendingWrite[]) => {
-      for (const w of writes) {
-        update.run(
-          w.snapshotJson,
-          CALENDAR_EVENT_SNAPSHOT_VERSION,
-          accountId,
-          w.messageId,
-          w.eventUid
-        );
-      }
-    });
-    flush(pending);
-  }
-  const filled = pending.length;
+  flushBatch();
 
   console.log(
     `[${accountId}] backfilled ${filled} of ${rows.length} rows (${skipped} skipped)${

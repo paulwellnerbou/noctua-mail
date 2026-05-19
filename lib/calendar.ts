@@ -182,6 +182,11 @@ function formatCalendarDateKey(
   { allDay = false, timeZone }: CalendarEventDateFormatInput = {}
 ) {
   if (!date) return "";
+  // Match formatCalendarEventDate / formatCalendarEventTime: resolve
+  // Windows zone names (e.g. "W. Europe Standard Time") to IANA before
+  // handing them to Intl, otherwise the same-day comparison would silently
+  // fall back to the system zone and mis-classify cross-day events.
+  const resolvedTimeZone = timeZone ? resolveCalendarTimeZoneId(timeZone) : undefined;
   const options: Intl.DateTimeFormatOptions = allDay
     ? {
         year: "numeric",
@@ -193,7 +198,7 @@ function formatCalendarDateKey(
         year: "numeric",
         month: "2-digit",
         day: "2-digit",
-        ...(timeZone ? { timeZone } : {})
+        ...(resolvedTimeZone ? { timeZone: resolvedTimeZone } : {})
       };
   try {
     return new Intl.DateTimeFormat("en-CA", options).format(date);
