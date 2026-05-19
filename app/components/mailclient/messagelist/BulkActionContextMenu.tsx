@@ -1,5 +1,6 @@
 "use client";
 
+import type React from "react";
 import { useEffect, useRef } from "react";
 import { DropdownMenu } from "@radix-ui/themes";
 import {
@@ -29,6 +30,12 @@ type BulkActionContextMenuProps = {
   position: { x: number; y: number } | null;
   selectionCount: number;
   onOpenChange: (open: boolean) => void;
+  /**
+   * Element to focus when the menu closes. Radix's default would restore
+   * focus to our invisible positioning trigger; we prefer the right-clicked
+   * row so keyboard / screen-reader navigation lands somewhere meaningful.
+   */
+  returnFocusRef?: React.RefObject<HTMLElement | null>;
   actions: BulkActionContextMenuActions;
 };
 
@@ -45,6 +52,7 @@ export default function BulkActionContextMenu({
   position,
   selectionCount,
   onOpenChange,
+  returnFocusRef,
   actions
 }: BulkActionContextMenuProps) {
   const triggerRef = useRef<HTMLSpanElement | null>(null);
@@ -79,6 +87,13 @@ export default function BulkActionContextMenu({
         sideOffset={2}
         className={menuStyles.menuContent}
         onContextMenu={(event) => event.preventDefault()}
+        onCloseAutoFocus={(event) => {
+          const target = returnFocusRef?.current;
+          if (target) {
+            event.preventDefault();
+            target.focus();
+          }
+        }}
       >
         <DropdownMenu.Label>{selectionCount} selected</DropdownMenu.Label>
         <DropdownMenu.Item onSelect={actions.onMarkRead}>

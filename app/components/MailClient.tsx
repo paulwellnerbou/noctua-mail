@@ -536,6 +536,7 @@ export default function MailClient({
   const [moveToDialogState, setMoveToDialogState] = useState<MoveToDialogState | null>(null);
   const [bulkContextMenu, setBulkContextMenu] = useState<{ x: number; y: number } | null>(null);
   const [bulkContextMenuSelection, setBulkContextMenuSelection] = useState<string[]>([]);
+  const bulkContextMenuReturnFocusRef = useRef<HTMLElement | null>(null);
   const messageViewHandleRef = useRef<MessageViewOrchestratorHandle | null>(null);
   const [appEnvironmentLabel, setAppEnvironmentLabel] = useState("");
   const [authState, setAuthState] = useState<"loading" | "ok" | "unauth">("loading");
@@ -3400,6 +3401,7 @@ export default function MailClient({
       if (selected.size < 2) return;
       if (!selected.has(rowId)) return;
       event.preventDefault();
+      bulkContextMenuReturnFocusRef.current = row;
       setBulkContextMenuSelection(Array.from(selected));
       setBulkContextMenu({ x: event.clientX, y: event.clientY });
     };
@@ -5265,6 +5267,7 @@ export default function MailClient({
         position={bulkContextMenu}
         selectionCount={bulkContextMenuSelection.length}
         onOpenChange={(open) => { if (!open) setBulkContextMenu(null); }}
+        returnFocusRef={bulkContextMenuReturnFocusRef}
         actions={{
           onMarkRead: () => {
             const targets = resolveMessagesByIds(bulkContextMenuSelection);
