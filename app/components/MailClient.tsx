@@ -5345,11 +5345,14 @@ export default function MailClient({
             if (targets.length === 0) return;
             const topic = allTopics.find((t) => t.id === topicId);
             if (!topic) return;
-            // Topics are per-thread, so dedup by threadId. Skipping threads
-            // that already have the topic (per local state) avoids a
-            // wasted request, but the server's `add` action is idempotent
-            // either way — so we don't depend on the local check for
-            // correctness.
+            // Topics are per-thread, so dedup by threadId. We then skip
+            // threads that already have the topic per local state as an
+            // optimization to avoid an obviously wasted POST. If local
+            // state is stale (server removed the topic since our last
+            // refresh) we'd silently miss the add for that thread; the
+            // user can re-trigger to recover. The server's `add` action
+            // is idempotent, so removing this skip would be correct but
+            // strictly more expensive.
             const threadIds = new Set<string>();
             for (const m of targets) {
               if (m.threadId) threadIds.add(m.threadId);
