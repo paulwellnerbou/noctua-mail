@@ -12,6 +12,8 @@ import {
   pruneDetachedCrossFolderThreadMessages,
   remapMessageReferenceIds
 } from "./utils/messageMutation";
+import { decrementGroupMetaForMessages } from "./utils/messageHelpers";
+import type { MessageGroupMeta } from "./messagelist/listModel";
 
 export type UndoMoveTarget = {
   messageId: string;
@@ -78,6 +80,7 @@ type UseMessageMoveActionsOptions = {
   lastSelectedIdRef: React.MutableRefObject<string | null>;
   setFolders: React.Dispatch<React.SetStateAction<Folder[]>>;
   setMessages: React.Dispatch<React.SetStateAction<Message[]>>;
+  setGroupMeta: React.Dispatch<React.SetStateAction<MessageGroupMeta[]>>;
   shouldKeepMessageInResults?: (message: Message) => boolean;
   setPendingMessageActions: React.Dispatch<React.SetStateAction<Set<string>>>;
   setActiveMessageId: React.Dispatch<React.SetStateAction<string>>;
@@ -135,6 +138,7 @@ export function useMessageMoveActions({
   lastSelectedIdRef,
   setFolders,
   setMessages,
+  setGroupMeta,
   shouldKeepMessageInResults,
   setPendingMessageActions,
   setActiveMessageId,
@@ -267,6 +271,12 @@ export function useMessageMoveActions({
             }))
           )
         );
+        // `removedFromList` is populated by the setMessages updater
+        // (reads `prev`, the authoritative latest state) and consumed by
+        // the setGroupMeta updater queued right after. Both updaters
+        // run in order within the same React batch, so the closure is
+        // reliable even when the surrounding handler is async.
+        let removedFromList: Message[] = [];
         setMessages((prev) => {
           let changed = false;
           const nextById = new Map<string, Message>();
@@ -295,12 +305,26 @@ export function useMessageMoveActions({
             nextById.set(updated.id, updated);
           });
           const nextMessages = changed ? Array.from(nextById.values()) : prev;
-          return pruneDetachedCrossFolderThreadMessages(nextMessages, {
+          const next = pruneDetachedCrossFolderThreadMessages(nextMessages, {
             searchScope,
             activeFolderId,
             includeThreadAcrossFoldersForList
           });
+          // Moved messages get their id remapped via `resolveMovedId`, so
+          // resolve each prev id to its post-move counterpart before
+          // checking membership — otherwise a kept-but-renamed message
+          // would be misidentified as removed.
+          const nextIds = new Set(next.map((item) => item.id));
+          removedFromList = prev.filter(
+            (item) => !nextIds.has(resolveMovedId(item.id))
+          );
+          return next;
         });
+        setGroupMeta((prev) =>
+          removedFromList.length > 0
+            ? decrementGroupMetaForMessages(prev, removedFromList)
+            : prev
+        );
         if (
           updateActiveMessage &&
           movedPreviousIds.has(activeMessageId)
@@ -424,6 +448,7 @@ export function useMessageMoveActions({
       setViewMessage,
       setFolders,
       setMessages,
+      setGroupMeta,
       setPendingMessageActions,
       undoMoveOperation,
       onMoveComplete,

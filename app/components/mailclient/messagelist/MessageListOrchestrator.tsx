@@ -23,7 +23,7 @@ import {
   type MessageViewMode
 } from "./messageListViewTypes";
 import { createSelectionStore, type SelectionStore } from "./selectionStore";
-import type { VisibleMessageEntry } from "./listModel";
+import type { MessageGroupMeta, VisibleMessageEntry } from "./listModel";
 import type { Folder, Message } from "@/lib/data";
 import type { DeleteConfirmAction, DeleteConfirmState, NoticeInput } from "../types";
 import {
@@ -215,6 +215,7 @@ export type MessageListOrchestratorMutationInputs = {
   shouldKeepMessageInCurrentResults: (message: Message) => boolean;
   setFolders: React.Dispatch<React.SetStateAction<Folder[]>>;
   setMessages: React.Dispatch<React.SetStateAction<Message[]>>;
+  setGroupMeta: React.Dispatch<React.SetStateAction<MessageGroupMeta[]>>;
   setActiveMessageId: React.Dispatch<React.SetStateAction<string>>;
   setViewMessage: (msg: Message | null) => void;
   setPendingMessageActions: React.Dispatch<React.SetStateAction<Set<string>>>;
@@ -390,6 +391,7 @@ export default function MessageListOrchestrator({
     lastSelectedIdRef,
     setFolders: mutationInputs.setFolders,
     setMessages: mutationInputs.setMessages,
+    setGroupMeta: mutationInputs.setGroupMeta,
     shouldKeepMessageInResults: mutationInputs.shouldKeepMessageInCurrentResults,
     setPendingMessageActions: mutationInputs.setPendingMessageActions,
     setActiveMessageId: mutationInputs.setActiveMessageId,
@@ -431,6 +433,7 @@ export default function MessageListOrchestrator({
     selectionStore,
     lastSelectedIdRef,
     setMessages: mutationInputs.setMessages,
+    setGroupMeta: mutationInputs.setGroupMeta,
     shouldKeepMessageInResults: mutationInputs.shouldKeepMessageInCurrentResults,
     setPendingMessageActions: mutationInputs.setPendingMessageActions,
     setActiveMessageId: mutationInputs.setActiveMessageId,

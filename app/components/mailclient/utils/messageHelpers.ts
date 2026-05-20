@@ -25,6 +25,38 @@ export function computeGroupMeta(items: Message[]): MessageGroupMeta[] {
   }));
 }
 
+/**
+ * Adjust group-meta counts after messages are removed from the local list
+ * (delete, move out of view). Without this, the server-reported per-group
+ * total stays stale and the row label flips from "5" to "4 / 5" — making
+ * a fully loaded group look partially loaded.
+ */
+export function decrementGroupMetaForMessages(
+  meta: MessageGroupMeta[],
+  removed: Message[]
+): MessageGroupMeta[] {
+  if (removed.length === 0) return meta;
+  const decrementByKey = new Map<string, number>();
+  removed.forEach((message) => {
+    const key = message.groupKey ?? "Other";
+    decrementByKey.set(key, (decrementByKey.get(key) ?? 0) + 1);
+  });
+  let changed = false;
+  const next: MessageGroupMeta[] = [];
+  meta.forEach((group) => {
+    const dec = decrementByKey.get(group.key) ?? 0;
+    if (dec === 0) {
+      next.push(group);
+      return;
+    }
+    changed = true;
+    const nextCount = Math.max(0, group.count - dec);
+    if (nextCount === 0) return;
+    next.push({ ...group, count: nextCount });
+  });
+  return changed ? next : meta;
+}
+
 export function isFlaggedMessage(message: Message): boolean {
   return isMessageFlagged(message);
 }
