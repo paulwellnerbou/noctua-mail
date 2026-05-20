@@ -313,10 +313,16 @@ export function useMessageDeleteActions({
       const data = (await res.json()) as DeleteResponse;
       const movedMessageId = data.messageId ?? target.id;
       markMessagesMutated?.();
-      const targetInList = messages.find((item) => item.id === target.id);
+      // `removedFromList` is populated by the setMessages updater (reads
+      // `prev`, the authoritative latest state) and consumed by the
+      // setGroupMeta updater queued right after. Both updaters run in
+      // order within the same React batch, so the closure is reliable
+      // even when the surrounding handler is async.
+      let removedFromList: Message[] = [];
       setMessages((prev) => {
+        let next: Message[];
         if (data.action === "deleted" || !data.trashFolderId) {
-          return pruneDetachedCrossFolderThreadMessages(
+          next = pruneDetachedCrossFolderThreadMessages(
             prev.filter((item) => item.id !== target.id),
             {
               searchScope,
@@ -324,10 +330,9 @@ export function useMessageDeleteActions({
               includeThreadAcrossFoldersForList
             }
           );
-        }
-        if (data.action === "moved") {
+        } else if (data.action === "moved") {
           if (!(searchScope === "all" && data.trashFolderId)) {
-            return pruneDetachedCrossFolderThreadMessages(
+            next = pruneDetachedCrossFolderThreadMessages(
               prev.filter((item) => item.id !== target.id),
               {
                 searchScope,
@@ -335,49 +340,38 @@ export function useMessageDeleteActions({
                 includeThreadAcrossFoldersForList
               }
             );
+          } else {
+            const remapped = prev.flatMap((item) => {
+              if (item.id !== target.id) return [item];
+              const updated = {
+                ...item,
+                id: movedMessageId,
+                folderId: data.trashFolderId!,
+                recent: false
+              };
+              const keep = shouldKeepMessageInResults
+                ? shouldKeepMessageInResults(updated)
+                : true;
+              return keep ? [updated] : [];
+            });
+            next = pruneDetachedCrossFolderThreadMessages(remapped, {
+              searchScope,
+              activeFolderId,
+              includeThreadAcrossFoldersForList
+            });
           }
-          const next = prev.flatMap((item) => {
-            if (item.id !== target.id) return [item];
-            const updated = {
-              ...item,
-              id: movedMessageId,
-              folderId: data.trashFolderId!,
-              recent: false
-            };
-            const keep = shouldKeepMessageInResults
-              ? shouldKeepMessageInResults(updated)
-              : true;
-            return keep ? [updated] : [];
-          });
-          return pruneDetachedCrossFolderThreadMessages(next, {
-            searchScope,
-            activeFolderId,
-            includeThreadAcrossFoldersForList
-          });
+        } else {
+          return prev;
         }
-        return prev;
+        const nextIds = new Set(next.map((item) => item.id));
+        removedFromList = prev.filter((item) => !nextIds.has(item.id));
+        return next;
       });
-      const removedFromList = (() => {
-        if (!targetInList) return [];
-        if (data.action === "deleted" || !data.trashFolderId) return [targetInList];
-        if (data.action === "moved") {
-          if (!(searchScope === "all" && data.trashFolderId)) return [targetInList];
-          const movedUpdated = {
-            ...targetInList,
-            id: movedMessageId,
-            folderId: data.trashFolderId,
-            recent: false
-          };
-          const keep = shouldKeepMessageInResults
-            ? shouldKeepMessageInResults(movedUpdated)
-            : true;
-          return keep ? [] : [targetInList];
-        }
-        return [];
-      })();
-      if (removedFromList.length > 0) {
-        setGroupMeta((prev) => decrementGroupMetaForMessages(prev, removedFromList));
-      }
+      setGroupMeta((prev) =>
+        removedFromList.length > 0
+          ? decrementGroupMetaForMessages(prev, removedFromList)
+          : prev
+      );
       return data;
     },
     [
@@ -386,7 +380,6 @@ export function useMessageDeleteActions({
       apiFetch,
       includeThreadAcrossFoldersForList,
       markMessagesMutated,
-      messages,
       readErrorMessage,
       searchScope,
       setGroupMeta,
@@ -416,20 +409,25 @@ export function useMessageDeleteActions({
       const data = (await res.json()) as BulkDeleteResponse;
       const deletedIds = new Set((data.deletedIds ?? []).filter(Boolean));
       markMessagesMutated?.();
-      const removedFromList = messages.filter((item) => deletedIds.has(item.id));
-      setMessages((prev) =>
-        pruneDetachedCrossFolderThreadMessages(
+      let removedFromList: Message[] = [];
+      setMessages((prev) => {
+        const next = pruneDetachedCrossFolderThreadMessages(
           prev.filter((item) => !deletedIds.has(item.id)),
           {
             searchScope,
             activeFolderId,
             includeThreadAcrossFoldersForList
           }
-        )
+        );
+        const nextIds = new Set(next.map((item) => item.id));
+        removedFromList = prev.filter((item) => !nextIds.has(item.id));
+        return next;
+      });
+      setGroupMeta((prev) =>
+        removedFromList.length > 0
+          ? decrementGroupMetaForMessages(prev, removedFromList)
+          : prev
       );
-      if (removedFromList.length > 0) {
-        setGroupMeta((prev) => decrementGroupMetaForMessages(prev, removedFromList));
-      }
       return uniqueIds.filter((id) => deletedIds.has(id));
     },
     [
@@ -439,7 +437,6 @@ export function useMessageDeleteActions({
       deleteSingleMessagePermanently,
       includeThreadAcrossFoldersForList,
       markMessagesMutated,
-      messages,
       readErrorMessage,
       searchScope,
       setGroupMeta,

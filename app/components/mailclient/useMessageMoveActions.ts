@@ -271,6 +271,12 @@ export function useMessageMoveActions({
             }))
           )
         );
+        // `removedFromList` is populated by the setMessages updater
+        // (reads `prev`, the authoritative latest state) and consumed by
+        // the setGroupMeta updater queued right after. Both updaters
+        // run in order within the same React batch, so the closure is
+        // reliable even when the surrounding handler is async.
+        let removedFromList: Message[] = [];
         setMessages((prev) => {
           let changed = false;
           const nextById = new Map<string, Message>();
@@ -299,36 +305,26 @@ export function useMessageMoveActions({
             nextById.set(updated.id, updated);
           });
           const nextMessages = changed ? Array.from(nextById.values()) : prev;
-          return pruneDetachedCrossFolderThreadMessages(nextMessages, {
+          const next = pruneDetachedCrossFolderThreadMessages(nextMessages, {
             searchScope,
             activeFolderId,
             includeThreadAcrossFoldersForList
           });
-        });
-        const removedFromList = sourceTargets.filter((item) => {
-          if (!movedPreviousIds.has(item.id)) return false;
-          const resolvedId = resolveMovedId(item.id);
-          const updated = remapMessageReferenceIds(
-            {
-              ...item,
-              id: resolvedId,
-              folderId: data.destinationFolderId,
-              mailboxPath: data.destinationMailbox ?? item.mailboxPath,
-              imapUid: queued ? undefined : item.imapUid
-            },
-            item.id,
-            resolvedId
+          // Moved messages get their id remapped via `resolveMovedId`, so
+          // resolve each prev id to its post-move counterpart before
+          // checking membership — otherwise a kept-but-renamed message
+          // would be misidentified as removed.
+          const nextIds = new Set(next.map((item) => item.id));
+          removedFromList = prev.filter(
+            (item) => !nextIds.has(resolveMovedId(item.id))
           );
-          return !shouldKeepMovedMessageVisible({
-            message: updated,
-            searchScope,
-            activeFolderId,
-            shouldKeepMessageInResults
-          });
+          return next;
         });
-        if (removedFromList.length > 0) {
-          setGroupMeta((prev) => decrementGroupMetaForMessages(prev, removedFromList));
-        }
+        setGroupMeta((prev) =>
+          removedFromList.length > 0
+            ? decrementGroupMetaForMessages(prev, removedFromList)
+            : prev
+        );
         if (
           updateActiveMessage &&
           movedPreviousIds.has(activeMessageId)

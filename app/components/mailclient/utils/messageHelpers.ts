@@ -49,12 +49,8 @@ export function decrementGroupMetaForMessages(
       next.push(group);
       return;
     }
-    const nextCount = Math.max(0, group.count - dec);
-    if (nextCount === group.count) {
-      next.push(group);
-      return;
-    }
     changed = true;
+    const nextCount = Math.max(0, group.count - dec);
     if (nextCount === 0) return;
     next.push({ ...group, count: nextCount });
   });
