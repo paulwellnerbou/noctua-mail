@@ -363,8 +363,14 @@ export function useMessageDeleteActions({
         } else {
           return prev;
         }
+        // In the "scope=all + trash-move" branch above, a kept target is
+        // remapped from `target.id` to `movedMessageId`. Resolve before
+        // the membership check so a kept-but-renamed row isn't
+        // misidentified as removed. Other branches don't remap, so the
+        // resolver is a no-op there.
+        const resolveId = (id: string) => (id === target.id ? movedMessageId : id);
         const nextIds = new Set(next.map((item) => item.id));
-        removedFromList = prev.filter((item) => !nextIds.has(item.id));
+        removedFromList = prev.filter((item) => !nextIds.has(resolveId(item.id)));
         return next;
       });
       setGroupMeta((prev) =>
