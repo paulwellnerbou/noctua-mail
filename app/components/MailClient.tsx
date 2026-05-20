@@ -5374,7 +5374,14 @@ export default function MailClient({
                   if (current.some((t) => t.id === topic.id)) continue;
                   try {
                     await postAddTopicToThread(threadId, topic.id);
-                    collected.set(threadId, [...current, topic]);
+                    // Mirror the server's canonical ordering
+                    // (lib/topics/core.ts uses `ORDER BY t.name ASC`)
+                    // so a subsequent refresh doesn't visibly reorder
+                    // the badge we just appended.
+                    const nextTopics = [...current, topic].sort(
+                      (a, b) => a.name.localeCompare(b.name)
+                    );
+                    collected.set(threadId, nextTopics);
                   } catch {
                     failed += 1;
                   }
