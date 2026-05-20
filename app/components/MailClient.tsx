@@ -5360,19 +5360,34 @@ export default function MailClient({
               // collecting successful per-thread results. The single
               // local-state apply at the end keeps `setMessages` /
               // `setViewMessage` to one render regardless of how many
-              // threads changed.
+              // threads changed. Per-thread try/catch so one failure
+              // doesn't strand earlier successes — anything we managed
+              // to persist still flushes to local state below.
               const collected = new Map<string, Topic[]>();
+              let failed = 0;
               for (const threadId of threadIds) {
                 const current = messageTopicsById.get(threadId) ?? [];
                 if (current.some((t) => t.id === topic.id)) continue;
-                await postAddTopicToThread(threadId, topic.id);
-                collected.set(threadId, [...current, topic]);
+                try {
+                  await postAddTopicToThread(threadId, topic.id);
+                  collected.set(threadId, [...current, topic]);
+                } catch {
+                  failed += 1;
+                }
               }
-              if (collected.size === 0) return;
-              applyThreadTopicUpdates(collected);
-              void refreshTopicStats(activeAccountId);
-              if (activeTopicId) {
-                await refreshActiveTopicModeResults();
+              if (collected.size > 0) {
+                applyThreadTopicUpdates(collected);
+                void refreshTopicStats(activeAccountId);
+                if (activeTopicId) {
+                  await refreshActiveTopicModeResults();
+                }
+              }
+              if (failed > 0) {
+                reportError(
+                  failed === 1
+                    ? "Failed to add topic to one thread."
+                    : `Failed to add topic to ${failed} threads.`
+                );
               }
             })();
           },
