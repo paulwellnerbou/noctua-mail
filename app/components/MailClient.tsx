@@ -5268,6 +5268,7 @@ export default function MailClient({
         open={bulkContextMenu !== null}
         position={bulkContextMenu}
         selectionCount={bulkContextMenuSelection.length}
+        allTopics={allTopics}
         onOpenChange={(open) => { if (!open) setBulkContextMenu(null); }}
         returnFocusRef={bulkContextMenuReturnFocusRef}
         actions={{
@@ -5302,6 +5303,30 @@ export default function MailClient({
             });
           },
           onGetRecentFolders: handleGetRecentFolders,
+          onAddTopic: (topicId) => {
+            const targets = resolveMessagesByIds(bulkContextMenuSelection);
+            if (targets.length === 0) return;
+            // Topics are per-thread, so dedup by threadId and only POST for
+            // threads that don't already have the topic.
+            const threadIds = new Set<string>();
+            for (const m of targets) {
+              if (m.threadId) threadIds.add(m.threadId);
+            }
+            if (threadIds.size === 0) return;
+            void (async () => {
+              let anyUpdated = false;
+              for (const threadId of threadIds) {
+                const current = messageTopicsById.get(threadId) ?? [];
+                if (current.some((t) => t.id === topicId)) continue;
+                const nextIds = [...current.map((t) => t.id), topicId];
+                await persistThreadTopics(threadId, nextIds);
+                anyUpdated = true;
+              }
+              if (anyUpdated && activeTopicId) {
+                await refreshActiveTopicModeResults();
+              }
+            })();
+          },
           onArchive: () => {
             const targets = resolveMessagesByIds(bulkContextMenuSelection);
             if (targets.length === 0) return;

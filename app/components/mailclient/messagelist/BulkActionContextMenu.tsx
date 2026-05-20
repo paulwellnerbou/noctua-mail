@@ -8,11 +8,13 @@ import {
   Flag,
   Mail,
   MailOpen,
+  Tags,
   Trash2
 } from "lucide-react";
-import type { Folder } from "@/lib/data";
+import type { Folder, Topic } from "@/lib/data";
 import menuStyles from "../message/MessageMenu.module.css";
 import MoveToSubmenu from "../message/MoveToSubmenu";
+import TopicBadge from "../TopicBadge";
 
 export type BulkActionContextMenuActions = {
   onMarkRead: () => void;
@@ -21,6 +23,7 @@ export type BulkActionContextMenuActions = {
   onMoveToFolder: (folderId: string) => void;
   onMoveToOther: () => void;
   onGetRecentFolders: () => Folder[];
+  onAddTopic: (topicId: string) => void;
   onArchive: () => void;
   onDelete: () => void;
 };
@@ -29,6 +32,7 @@ type BulkActionContextMenuProps = {
   open: boolean;
   position: { x: number; y: number } | null;
   selectionCount: number;
+  allTopics: Topic[];
   onOpenChange: (open: boolean) => void;
   /**
    * Element to focus when the menu closes. Radix's default would restore
@@ -51,6 +55,7 @@ export default function BulkActionContextMenu({
   open,
   position,
   selectionCount,
+  allTopics,
   onOpenChange,
   returnFocusRef,
   actions
@@ -120,6 +125,24 @@ export default function BulkActionContextMenu({
           onMoveToFolder={actions.onMoveToFolder}
           onMoveToOther={actions.onMoveToOther}
         />
+        <DropdownMenu.Sub>
+          <DropdownMenu.SubTrigger disabled={allTopics.length === 0}>
+            <span className={menuStyles.menuIcon}>
+              <Tags size={14} />
+            </span>
+            <span className={menuStyles.menuLabel}>Add topic</span>
+          </DropdownMenu.SubTrigger>
+          <DropdownMenu.SubContent className={menuStyles.menuContent}>
+            {allTopics.map((topic) => (
+              <DropdownMenu.Item
+                key={topic.id}
+                onSelect={() => actions.onAddTopic(topic.id)}
+              >
+                <TopicBadge topic={topic} size="1" />
+              </DropdownMenu.Item>
+            ))}
+          </DropdownMenu.SubContent>
+        </DropdownMenu.Sub>
         <DropdownMenu.Item onSelect={actions.onArchive}>
           <span className={menuStyles.menuIcon}>
             <ArchiveIcon size={14} />
