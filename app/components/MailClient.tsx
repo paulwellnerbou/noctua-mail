@@ -1822,6 +1822,42 @@ export default function MailClient({
     return data.topic;
   }, [activeAccountId, apiFetch]);
 
+  /**
+   * Apply a batch of per-thread topic updates to every local
+   * representation (the messages list, the open view, and the thread
+   * cache) in a single pass. Both the single-thread `set` flow and the
+   * multi-thread bulk-add flow funnel through this helper so the three
+   * stores can't drift, and so a bulk update only triggers one
+   * `setMessages` / `setViewMessage` regardless of how many threads
+   * changed.
+   */
+  const applyThreadTopicUpdates = useCallback((
+    updates: Map<string, Topic[]>
+  ) => {
+    if (updates.size === 0) return;
+    setMessages((prev) => prev.map((msg) => {
+      const next = updates.get(msg.threadId);
+      return next ? { ...msg, topics: next, topicSuggestions: [] } : msg;
+    }));
+    setViewMessage((prev) => {
+      if (!prev) return prev;
+      const next = updates.get(prev.threadId);
+      return next ? { ...prev, topics: next, topicSuggestions: [] } : prev;
+    });
+    for (const [threadId, nextTopics] of updates) {
+      const cachedThread = threadContentByIdRef.current[threadId];
+      if (!cachedThread || cachedThread.length === 0) continue;
+      upsertThreadCache(
+        threadId,
+        cachedThread.map((item) => item.threadId === threadId ? {
+          ...item,
+          topics: nextTopics,
+          topicSuggestions: []
+        } : item)
+      );
+    }
+  }, [threadContentByIdRef, upsertThreadCache]);
+
   const persistThreadTopics = useCallback(async (threadId: string, topicIds: string[]) => {
     const res = await apiFetch(buildAccountMessageTopicsPath(activeAccountId), {
       method: "POST",
@@ -1832,31 +1868,32 @@ export default function MailClient({
     if (!data.ok || !Array.isArray(data.topics)) {
       throw new Error(data.message ?? "Failed to update topics");
     }
-
-    const nextTopics = data.topics as Topic[];
-    setMessages((prev) => prev.map((msg) => msg.threadId === threadId ? {
-      ...msg,
-      topics: nextTopics,
-      topicSuggestions: []
-    } : msg));
-    setViewMessage((prev) => prev?.threadId === threadId ? {
-      ...prev,
-      topics: nextTopics,
-      topicSuggestions: []
-    } : prev);
-    const cachedThread = threadContentByIdRef.current[threadId];
-    if (cachedThread && cachedThread.length > 0) {
-      upsertThreadCache(
-        threadId,
-        cachedThread.map((item) => item.threadId === threadId ? {
-          ...item,
-          topics: nextTopics,
-          topicSuggestions: []
-        } : item)
-      );
-    }
+    applyThreadTopicUpdates(new Map([[threadId, data.topics as Topic[]]]));
     void refreshTopicStats(activeAccountId);
-  }, [activeAccountId, apiFetch, refreshTopicStats, threadContentByIdRef, upsertThreadCache]);
+  }, [activeAccountId, apiFetch, applyThreadTopicUpdates, refreshTopicStats]);
+
+  /**
+   * Network-only counterpart to `persistThreadTopics` for the additive
+   * `add` action. The endpoint is idempotent server-side and doesn't
+   * return the new topic list, so callers compute the new list locally
+   * and apply it via `applyThreadTopicUpdates`. Used by the bulk-add
+   * flow, which collects updates across many threads and applies them
+   * in a single batched render at the end.
+   */
+  const postAddTopicToThread = useCallback(async (
+    threadId: string,
+    topicId: string
+  ): Promise<void> => {
+    const res = await apiFetch(buildAccountMessageTopicsPath(activeAccountId), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ threadId, action: "add", topicId })
+    });
+    const data = await res.json();
+    if (!data.ok) {
+      throw new Error(data.message ?? "Failed to add topic");
+    }
+  }, [activeAccountId, apiFetch]);
 
   const refreshActiveTopicSuggestions = useCallback(async (options?: {
     signal?: AbortSignal;
@@ -5268,6 +5305,7 @@ export default function MailClient({
         open={bulkContextMenu !== null}
         position={bulkContextMenu}
         selectionCount={bulkContextMenuSelection.length}
+        allTopics={allTopics}
         onOpenChange={(open) => { if (!open) setBulkContextMenu(null); }}
         returnFocusRef={bulkContextMenuReturnFocusRef}
         actions={{
@@ -5302,6 +5340,78 @@ export default function MailClient({
             });
           },
           onGetRecentFolders: handleGetRecentFolders,
+          onAddTopic: (topicId) => {
+            const targets = resolveMessagesByIds(bulkContextMenuSelection);
+            if (targets.length === 0) return;
+            const topic = allTopics.find((t) => t.id === topicId);
+            if (!topic) return;
+            // Topics are per-thread, so dedup by threadId. We then skip
+            // threads that already have the topic per local state as an
+            // optimization to avoid an obviously wasted POST. If local
+            // state is stale (server removed the topic since our last
+            // refresh) we'd silently miss the add for that thread; the
+            // user can re-trigger to recover. The server's `add` action
+            // is idempotent, so removing this skip would be correct but
+            // strictly more expensive.
+            const threadIds = new Set<string>();
+            for (const m of targets) {
+              if (m.threadId) threadIds.add(m.threadId);
+            }
+            if (threadIds.size === 0) return;
+            void (async () => {
+              // Issue POSTs sequentially (so we don't burst the server),
+              // collecting successful per-thread results. The single
+              // local-state apply at the end keeps `setMessages` /
+              // `setViewMessage` to one render regardless of how many
+              // threads changed. Per-thread try/catch so one failure
+              // doesn't strand earlier successes — anything we managed
+              // to persist still flushes to local state below. The
+              // post-update refresh calls are wrapped too so a refresh
+              // failure can't suppress the aggregate error report in
+              // the finally.
+              const collected = new Map<string, Topic[]>();
+              let failed = 0;
+              try {
+                for (const threadId of threadIds) {
+                  const current = messageTopicsById.get(threadId) ?? [];
+                  if (current.some((t) => t.id === topic.id)) continue;
+                  try {
+                    await postAddTopicToThread(threadId, topic.id);
+                    // Mirror the server's canonical ordering
+                    // (lib/topics/core.ts uses `ORDER BY t.name ASC`)
+                    // so a subsequent refresh doesn't visibly reorder
+                    // the badge we just appended.
+                    const nextTopics = [...current, topic].sort(
+                      (a, b) => a.name.localeCompare(b.name)
+                    );
+                    collected.set(threadId, nextTopics);
+                  } catch {
+                    failed += 1;
+                  }
+                }
+                if (collected.size > 0) {
+                  applyThreadTopicUpdates(collected);
+                  refreshTopicStats(activeAccountId).catch(() => {});
+                  if (activeTopicId) {
+                    try {
+                      await refreshActiveTopicModeResults();
+                    } catch {
+                      // Best-effort UI refresh; the data is already
+                      // persisted server-side and applied locally.
+                    }
+                  }
+                }
+              } finally {
+                if (failed > 0) {
+                  reportError(
+                    failed === 1
+                      ? "Failed to add topic to one thread."
+                      : `Failed to add topic to ${failed} threads.`
+                  );
+                }
+              }
+            })();
+          },
           onArchive: () => {
             const targets = resolveMessagesByIds(bulkContextMenuSelection);
             if (targets.length === 0) return;
