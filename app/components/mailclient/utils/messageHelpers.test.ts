@@ -1,6 +1,11 @@
 import { describe, expect, it } from "bun:test";
 import type { Attachment, Message, Topic } from "@/lib/data";
-import { hasAssignedTopics, shouldShowAttachmentIcon, resolveInReplyToRef } from "./messageHelpers";
+import {
+  decrementGroupMetaForMessages,
+  hasAssignedTopics,
+  resolveInReplyToRef,
+  shouldShowAttachmentIcon
+} from "./messageHelpers";
 
 function makeMessage(overrides?: Partial<Message>): Message {
   return {
@@ -212,5 +217,62 @@ describe("resolveInReplyToRef", () => {
       inReplyTo: "<4855a7bf-a4d1-44be-8c51-df05fde64c71@example.test>"
     });
     expect(resolveInReplyToRef(message, makeMap())).toBeNull();
+  });
+});
+
+describe("decrementGroupMetaForMessages", () => {
+  it("decrements the count for the group of each removed message", () => {
+    const meta = [
+      { key: "Today", label: "Today", count: 5 },
+      { key: "Yesterday", label: "Yesterday", count: 3 }
+    ];
+    const removed = [
+      makeMessage({ id: "m1", groupKey: "Today" }),
+      makeMessage({ id: "m2", groupKey: "Today" }),
+      makeMessage({ id: "m3", groupKey: "Yesterday" })
+    ];
+    expect(decrementGroupMetaForMessages(meta, removed)).toEqual([
+      { key: "Today", label: "Today", count: 3 },
+      { key: "Yesterday", label: "Yesterday", count: 2 }
+    ]);
+  });
+
+  it("drops groups whose count reaches zero", () => {
+    const meta = [
+      { key: "Today", label: "Today", count: 1 },
+      { key: "Older", label: "Older", count: 4 }
+    ];
+    const removed = [makeMessage({ id: "m1", groupKey: "Today" })];
+    expect(decrementGroupMetaForMessages(meta, removed)).toEqual([
+      { key: "Older", label: "Older", count: 4 }
+    ]);
+  });
+
+  it("treats a missing groupKey as 'Other'", () => {
+    const meta = [{ key: "Other", label: "Other", count: 2 }];
+    const removed = [makeMessage({ id: "m1" })];
+    expect(decrementGroupMetaForMessages(meta, removed)).toEqual([
+      { key: "Other", label: "Other", count: 1 }
+    ]);
+  });
+
+  it("clamps at zero when the decrement exceeds the meta count", () => {
+    const meta = [{ key: "Today", label: "Today", count: 1 }];
+    const removed = [
+      makeMessage({ id: "m1", groupKey: "Today" }),
+      makeMessage({ id: "m2", groupKey: "Today" })
+    ];
+    expect(decrementGroupMetaForMessages(meta, removed)).toEqual([]);
+  });
+
+  it("returns the same reference when no removed messages match meta keys", () => {
+    const meta = [{ key: "Today", label: "Today", count: 5 }];
+    const removed = [makeMessage({ id: "m1", groupKey: "NotInMeta" })];
+    expect(decrementGroupMetaForMessages(meta, removed)).toBe(meta);
+  });
+
+  it("returns the same reference when removed is empty", () => {
+    const meta = [{ key: "Today", label: "Today", count: 5 }];
+    expect(decrementGroupMetaForMessages(meta, [])).toBe(meta);
   });
 });

@@ -12,6 +12,8 @@ import {
   pruneDetachedCrossFolderThreadMessages,
   remapMessageReferenceIds
 } from "./utils/messageMutation";
+import { decrementGroupMetaForMessages } from "./utils/messageHelpers";
+import type { MessageGroupMeta } from "./messagelist/listModel";
 
 export type UndoMoveTarget = {
   messageId: string;
@@ -78,6 +80,7 @@ type UseMessageMoveActionsOptions = {
   lastSelectedIdRef: React.MutableRefObject<string | null>;
   setFolders: React.Dispatch<React.SetStateAction<Folder[]>>;
   setMessages: React.Dispatch<React.SetStateAction<Message[]>>;
+  setGroupMeta: React.Dispatch<React.SetStateAction<MessageGroupMeta[]>>;
   shouldKeepMessageInResults?: (message: Message) => boolean;
   setPendingMessageActions: React.Dispatch<React.SetStateAction<Set<string>>>;
   setActiveMessageId: React.Dispatch<React.SetStateAction<string>>;
@@ -135,6 +138,7 @@ export function useMessageMoveActions({
   lastSelectedIdRef,
   setFolders,
   setMessages,
+  setGroupMeta,
   shouldKeepMessageInResults,
   setPendingMessageActions,
   setActiveMessageId,
@@ -301,6 +305,30 @@ export function useMessageMoveActions({
             includeThreadAcrossFoldersForList
           });
         });
+        const removedFromList = sourceTargets.filter((item) => {
+          if (!movedPreviousIds.has(item.id)) return false;
+          const resolvedId = resolveMovedId(item.id);
+          const updated = remapMessageReferenceIds(
+            {
+              ...item,
+              id: resolvedId,
+              folderId: data.destinationFolderId,
+              mailboxPath: data.destinationMailbox ?? item.mailboxPath,
+              imapUid: queued ? undefined : item.imapUid
+            },
+            item.id,
+            resolvedId
+          );
+          return !shouldKeepMovedMessageVisible({
+            message: updated,
+            searchScope,
+            activeFolderId,
+            shouldKeepMessageInResults
+          });
+        });
+        if (removedFromList.length > 0) {
+          setGroupMeta((prev) => decrementGroupMetaForMessages(prev, removedFromList));
+        }
         if (
           updateActiveMessage &&
           movedPreviousIds.has(activeMessageId)
@@ -424,6 +452,7 @@ export function useMessageMoveActions({
       setViewMessage,
       setFolders,
       setMessages,
+      setGroupMeta,
       setPendingMessageActions,
       undoMoveOperation,
       onMoveComplete,
