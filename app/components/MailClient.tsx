@@ -5362,32 +5362,43 @@ export default function MailClient({
               // `setViewMessage` to one render regardless of how many
               // threads changed. Per-thread try/catch so one failure
               // doesn't strand earlier successes — anything we managed
-              // to persist still flushes to local state below.
+              // to persist still flushes to local state below. The
+              // post-update refresh calls are wrapped too so a refresh
+              // failure can't suppress the aggregate error report in
+              // the finally.
               const collected = new Map<string, Topic[]>();
               let failed = 0;
-              for (const threadId of threadIds) {
-                const current = messageTopicsById.get(threadId) ?? [];
-                if (current.some((t) => t.id === topic.id)) continue;
-                try {
-                  await postAddTopicToThread(threadId, topic.id);
-                  collected.set(threadId, [...current, topic]);
-                } catch {
-                  failed += 1;
+              try {
+                for (const threadId of threadIds) {
+                  const current = messageTopicsById.get(threadId) ?? [];
+                  if (current.some((t) => t.id === topic.id)) continue;
+                  try {
+                    await postAddTopicToThread(threadId, topic.id);
+                    collected.set(threadId, [...current, topic]);
+                  } catch {
+                    failed += 1;
+                  }
                 }
-              }
-              if (collected.size > 0) {
-                applyThreadTopicUpdates(collected);
-                void refreshTopicStats(activeAccountId);
-                if (activeTopicId) {
-                  await refreshActiveTopicModeResults();
+                if (collected.size > 0) {
+                  applyThreadTopicUpdates(collected);
+                  refreshTopicStats(activeAccountId).catch(() => {});
+                  if (activeTopicId) {
+                    try {
+                      await refreshActiveTopicModeResults();
+                    } catch {
+                      // Best-effort UI refresh; the data is already
+                      // persisted server-side and applied locally.
+                    }
+                  }
                 }
-              }
-              if (failed > 0) {
-                reportError(
-                  failed === 1
-                    ? "Failed to add topic to one thread."
-                    : `Failed to add topic to ${failed} threads.`
-                );
+              } finally {
+                if (failed > 0) {
+                  reportError(
+                    failed === 1
+                      ? "Failed to add topic to one thread."
+                      : `Failed to add topic to ${failed} threads.`
+                  );
+                }
               }
             })();
           },
