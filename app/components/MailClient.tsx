@@ -1822,6 +1822,42 @@ export default function MailClient({
     return data.topic;
   }, [activeAccountId, apiFetch]);
 
+  /**
+   * Apply a batch of per-thread topic updates to every local
+   * representation (the messages list, the open view, and the thread
+   * cache) in a single pass. Both the single-thread `set` flow and the
+   * multi-thread bulk-add flow funnel through this helper so the three
+   * stores can't drift, and so a bulk update only triggers one
+   * `setMessages` / `setViewMessage` regardless of how many threads
+   * changed.
+   */
+  const applyThreadTopicUpdates = useCallback((
+    updates: Map<string, Topic[]>
+  ) => {
+    if (updates.size === 0) return;
+    setMessages((prev) => prev.map((msg) => {
+      const next = updates.get(msg.threadId);
+      return next ? { ...msg, topics: next, topicSuggestions: [] } : msg;
+    }));
+    setViewMessage((prev) => {
+      if (!prev) return prev;
+      const next = updates.get(prev.threadId);
+      return next ? { ...prev, topics: next, topicSuggestions: [] } : prev;
+    });
+    for (const [threadId, nextTopics] of updates) {
+      const cachedThread = threadContentByIdRef.current[threadId];
+      if (!cachedThread || cachedThread.length === 0) continue;
+      upsertThreadCache(
+        threadId,
+        cachedThread.map((item) => item.threadId === threadId ? {
+          ...item,
+          topics: nextTopics,
+          topicSuggestions: []
+        } : item)
+      );
+    }
+  }, [threadContentByIdRef, upsertThreadCache]);
+
   const persistThreadTopics = useCallback(async (threadId: string, topicIds: string[]) => {
     const res = await apiFetch(buildAccountMessageTopicsPath(activeAccountId), {
       method: "POST",
@@ -1832,80 +1868,32 @@ export default function MailClient({
     if (!data.ok || !Array.isArray(data.topics)) {
       throw new Error(data.message ?? "Failed to update topics");
     }
-
-    const nextTopics = data.topics as Topic[];
-    setMessages((prev) => prev.map((msg) => msg.threadId === threadId ? {
-      ...msg,
-      topics: nextTopics,
-      topicSuggestions: []
-    } : msg));
-    setViewMessage((prev) => prev?.threadId === threadId ? {
-      ...prev,
-      topics: nextTopics,
-      topicSuggestions: []
-    } : prev);
-    const cachedThread = threadContentByIdRef.current[threadId];
-    if (cachedThread && cachedThread.length > 0) {
-      upsertThreadCache(
-        threadId,
-        cachedThread.map((item) => item.threadId === threadId ? {
-          ...item,
-          topics: nextTopics,
-          topicSuggestions: []
-        } : item)
-      );
-    }
+    applyThreadTopicUpdates(new Map([[threadId, data.topics as Topic[]]]));
     void refreshTopicStats(activeAccountId);
-  }, [activeAccountId, apiFetch, refreshTopicStats, threadContentByIdRef, upsertThreadCache]);
+  }, [activeAccountId, apiFetch, applyThreadTopicUpdates, refreshTopicStats]);
 
   /**
-   * Additive counterpart to `persistThreadTopics`. Uses the server's
-   * `add` action so it can't accidentally drop topics the server already
-   * has (which a stale `set` would). The endpoint doesn't return the new
-   * topic list, so we optimistically append the topic into local state
-   * if a copy of the topic is available, mirroring what `persistThreadTopics`
-   * does after a `set`. Caller is responsible for refreshing topic stats
-   * once after a bulk batch instead of per call.
+   * Network-only counterpart to `persistThreadTopics` for the additive
+   * `add` action. The endpoint is idempotent server-side and doesn't
+   * return the new topic list, so callers compute the new list locally
+   * and apply it via `applyThreadTopicUpdates`. Used by the bulk-add
+   * flow, which collects updates across many threads and applies them
+   * in a single batched render at the end.
    */
-  const addTopicToThread = useCallback(async (
+  const postAddTopicToThread = useCallback(async (
     threadId: string,
-    topic: Topic
+    topicId: string
   ): Promise<void> => {
     const res = await apiFetch(buildAccountMessageTopicsPath(activeAccountId), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ threadId, action: "add", topicId: topic.id })
+      body: JSON.stringify({ threadId, action: "add", topicId })
     });
     const data = await res.json();
     if (!data.ok) {
       throw new Error(data.message ?? "Failed to add topic");
     }
-    const appendIfMissing = (existing: Topic[] | undefined): Topic[] => {
-      const list = existing ?? [];
-      return list.some((t) => t.id === topic.id) ? list : [...list, topic];
-    };
-    setMessages((prev) => prev.map((msg) => msg.threadId === threadId ? {
-      ...msg,
-      topics: appendIfMissing(msg.topics),
-      topicSuggestions: []
-    } : msg));
-    setViewMessage((prev) => prev?.threadId === threadId ? {
-      ...prev,
-      topics: appendIfMissing(prev.topics),
-      topicSuggestions: []
-    } : prev);
-    const cachedThread = threadContentByIdRef.current[threadId];
-    if (cachedThread && cachedThread.length > 0) {
-      upsertThreadCache(
-        threadId,
-        cachedThread.map((item) => item.threadId === threadId ? {
-          ...item,
-          topics: appendIfMissing(item.topics),
-          topicSuggestions: []
-        } : item)
-      );
-    }
-  }, [activeAccountId, apiFetch, threadContentByIdRef, upsertThreadCache]);
+  }, [activeAccountId, apiFetch]);
 
   const refreshActiveTopicSuggestions = useCallback(async (options?: {
     signal?: AbortSignal;
@@ -5368,18 +5356,23 @@ export default function MailClient({
             }
             if (threadIds.size === 0) return;
             void (async () => {
-              let anyAdded = false;
+              // Issue POSTs sequentially (so we don't burst the server),
+              // collecting successful per-thread results. The single
+              // local-state apply at the end keeps `setMessages` /
+              // `setViewMessage` to one render regardless of how many
+              // threads changed.
+              const collected = new Map<string, Topic[]>();
               for (const threadId of threadIds) {
                 const current = messageTopicsById.get(threadId) ?? [];
                 if (current.some((t) => t.id === topic.id)) continue;
-                await addTopicToThread(threadId, topic);
-                anyAdded = true;
+                await postAddTopicToThread(threadId, topic.id);
+                collected.set(threadId, [...current, topic]);
               }
-              if (anyAdded) {
-                void refreshTopicStats(activeAccountId);
-                if (activeTopicId) {
-                  await refreshActiveTopicModeResults();
-                }
+              if (collected.size === 0) return;
+              applyThreadTopicUpdates(collected);
+              void refreshTopicStats(activeAccountId);
+              if (activeTopicId) {
+                await refreshActiveTopicModeResults();
               }
             })();
           },
