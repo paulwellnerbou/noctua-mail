@@ -1858,6 +1858,55 @@ export default function MailClient({
     void refreshTopicStats(activeAccountId);
   }, [activeAccountId, apiFetch, refreshTopicStats, threadContentByIdRef, upsertThreadCache]);
 
+  /**
+   * Additive counterpart to `persistThreadTopics`. Uses the server's
+   * `add` action so it can't accidentally drop topics the server already
+   * has (which a stale `set` would). The endpoint doesn't return the new
+   * topic list, so we optimistically append the topic into local state
+   * if a copy of the topic is available, mirroring what `persistThreadTopics`
+   * does after a `set`. Caller is responsible for refreshing topic stats
+   * once after a bulk batch instead of per call.
+   */
+  const addTopicToThread = useCallback(async (
+    threadId: string,
+    topic: Topic
+  ): Promise<void> => {
+    const res = await apiFetch(buildAccountMessageTopicsPath(activeAccountId), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ threadId, action: "add", topicId: topic.id })
+    });
+    const data = await res.json();
+    if (!data.ok) {
+      throw new Error(data.message ?? "Failed to add topic");
+    }
+    const appendIfMissing = (existing: Topic[] | undefined): Topic[] => {
+      const list = existing ?? [];
+      return list.some((t) => t.id === topic.id) ? list : [...list, topic];
+    };
+    setMessages((prev) => prev.map((msg) => msg.threadId === threadId ? {
+      ...msg,
+      topics: appendIfMissing(msg.topics),
+      topicSuggestions: []
+    } : msg));
+    setViewMessage((prev) => prev?.threadId === threadId ? {
+      ...prev,
+      topics: appendIfMissing(prev.topics),
+      topicSuggestions: []
+    } : prev);
+    const cachedThread = threadContentByIdRef.current[threadId];
+    if (cachedThread && cachedThread.length > 0) {
+      upsertThreadCache(
+        threadId,
+        cachedThread.map((item) => item.threadId === threadId ? {
+          ...item,
+          topics: appendIfMissing(item.topics),
+          topicSuggestions: []
+        } : item)
+      );
+    }
+  }, [activeAccountId, apiFetch, threadContentByIdRef, upsertThreadCache]);
+
   const refreshActiveTopicSuggestions = useCallback(async (options?: {
     signal?: AbortSignal;
     force?: boolean;
@@ -5306,24 +5355,31 @@ export default function MailClient({
           onAddTopic: (topicId) => {
             const targets = resolveMessagesByIds(bulkContextMenuSelection);
             if (targets.length === 0) return;
-            // Topics are per-thread, so dedup by threadId and only POST for
-            // threads that don't already have the topic.
+            const topic = allTopics.find((t) => t.id === topicId);
+            if (!topic) return;
+            // Topics are per-thread, so dedup by threadId. Skipping threads
+            // that already have the topic (per local state) avoids a
+            // wasted request, but the server's `add` action is idempotent
+            // either way — so we don't depend on the local check for
+            // correctness.
             const threadIds = new Set<string>();
             for (const m of targets) {
               if (m.threadId) threadIds.add(m.threadId);
             }
             if (threadIds.size === 0) return;
             void (async () => {
-              let anyUpdated = false;
+              let anyAdded = false;
               for (const threadId of threadIds) {
                 const current = messageTopicsById.get(threadId) ?? [];
-                if (current.some((t) => t.id === topicId)) continue;
-                const nextIds = [...current.map((t) => t.id), topicId];
-                await persistThreadTopics(threadId, nextIds);
-                anyUpdated = true;
+                if (current.some((t) => t.id === topic.id)) continue;
+                await addTopicToThread(threadId, topic);
+                anyAdded = true;
               }
-              if (anyUpdated && activeTopicId) {
-                await refreshActiveTopicModeResults();
+              if (anyAdded) {
+                void refreshTopicStats(activeAccountId);
+                if (activeTopicId) {
+                  await refreshActiveTopicModeResults();
+                }
               }
             })();
           },

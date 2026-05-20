@@ -132,7 +132,10 @@ export default function BulkActionContextMenu({
             </span>
             <span className={menuStyles.menuLabel}>Add topic</span>
           </DropdownMenu.SubTrigger>
-          <DropdownMenu.SubContent className={menuStyles.menuContent}>
+          <DropdownMenu.SubContent
+            className={menuStyles.menuContent}
+            style={{ maxHeight: 360, overflowY: "auto" }}
+          >
             {allTopics.map((topic) => (
               <DropdownMenu.Item
                 key={topic.id}
