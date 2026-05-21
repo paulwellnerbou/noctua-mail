@@ -394,7 +394,7 @@ export function diffCalendarEventSnapshots(
   // overrides remain meaningful there.
   const afterIsFullState = after.base !== null;
   if (afterIsFullState) {
-    beforeOverrides.forEach((prev, recurrenceIdMs) => {
+    beforeOverrides.forEach((_prev, recurrenceIdMs) => {
       if (!afterOverrides.has(recurrenceIdMs)) {
         occurrences.push({ kind: "removed", recurrenceIdMs });
       }

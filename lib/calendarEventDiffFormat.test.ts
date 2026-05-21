@@ -151,8 +151,10 @@ describe("buildDiffRows", () => {
     // depends on the system locale's hour12 default — assert the
     // minutes appear in the right order rather than locking 24-hour or
     // 12-hour notation.)
-    expect(occRow?.after).toMatch(/12:45.*–.*1:?00/);
-    expect(occRow?.after).toMatch(/2:?00.*–.*2:?15/);
+    // Accept both 12-hour ("1:00 PM") and 24-hour ("13:00") output so
+    // the test isn't tied to the CI/dev runtime's hour-cycle default.
+    expect(occRow?.after).toMatch(/12:45.*–.*(?:1:00|13:00)/);
+    expect(occRow?.after).toMatch(/(?:2:00|14:00).*–.*(?:2:15|14:15)/);
     // No separate End / Title / Location detail rows — those fields
     // didn't actually change versus the series, they're just present in
     // the override snapshot.
@@ -186,8 +188,9 @@ describe("buildDiffRows", () => {
     expect(occRow?.after).toBeDefined();
     // Both time ranges present, but the date (May 26 / 26 May / 2026-05-26)
     // should appear only once.
-    expect(occRow!.after).toMatch(/12:45.*–.*1:?00/);
-    expect(occRow!.after).toMatch(/2:?00.*–.*2:?15/);
+    // Accept both 12-hour ("1:00 PM") and 24-hour ("13:00") output.
+    expect(occRow!.after).toMatch(/12:45.*–.*(?:1:00|13:00)/);
+    expect(occRow!.after).toMatch(/(?:2:00|14:00).*–.*(?:2:15|14:15)/);
     const dateMatches = occRow!.after!.match(/May 26|26 May|2026-05-26/g);
     expect(dateMatches?.length).toBe(1);
   });

@@ -113,7 +113,7 @@ function formatOccurrenceRange(
  * Render just the `HH:MM – HH:MM` time portion in the event timezone.
  * Used on the right-hand side of a same-day reschedule so the date
  * isn't duplicated: "26 May 2026, 12:45 – 13:00 rescheduled to 14:00 – 14:15".
- * Falls back to the full range when either timestamp is missing.
+ * When `endMs` is missing, returns only the formatted start time.
  */
 function formatOccurrenceTimeRange(
   startMs: number,
