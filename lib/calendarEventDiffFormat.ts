@@ -97,39 +97,56 @@ function formatOccurrenceRange(
   endTimeZone: string | undefined,
   dateFormat: AccountDateFormat | undefined
 ): string {
+  // When DTEND has no TZID but DTSTART does, ICS convention is that the
+  // end inherits the start's zone — fall back to startTimeZone before
+  // the panel-level fallbackTimeZone.
+  const resolvedStart = startTimeZone ?? fallbackTimeZone;
+  const resolvedEnd = endTimeZone ?? startTimeZone ?? fallbackTimeZone;
   return formatCalendarEventRange(
     new Date(startMs),
     typeof endMs === "number" ? new Date(endMs) : undefined,
     {
       allDay,
-      startTimeZone: startTimeZone ?? fallbackTimeZone,
-      endTimeZone: endTimeZone ?? fallbackTimeZone,
+      startTimeZone: resolvedStart,
+      endTimeZone: resolvedEnd,
       dateFormat
     }
   );
 }
 
 /**
- * Render just the `HH:MM – HH:MM` time portion in the event timezone.
- * Used on the right-hand side of a same-day reschedule so the date
- * isn't duplicated: "26 May 2026, 12:45 – 13:00 rescheduled to 14:00 – 14:15".
+ * Render just the `HH:MM – HH:MM` time portion. Used on the right-hand
+ * side of a same-day reschedule so the date isn't duplicated:
+ * "26 May 2026, 12:45 – 13:00 rescheduled to 14:00 – 14:15".
+ *
+ * Start and end can carry their own timezones (rare in real ICS but
+ * permitted), so we format each in its own zone instead of forcing a
+ * single zone for both.
+ *
  * When `endMs` is missing, returns only the formatted start time.
  */
 function formatOccurrenceTimeRange(
   startMs: number,
   endMs: number | undefined,
-  timeZone: string | undefined,
+  startTimeZone: string | undefined,
+  endTimeZone: string | undefined,
   dateFormat: AccountDateFormat | undefined
 ): string {
-  const resolved = timeZone ? resolveCalendarTimeZoneId(timeZone) : undefined;
-  const timeOptions: Intl.DateTimeFormatOptions = {
-    hour: "numeric",
-    minute: "2-digit",
-    ...(resolved ? { timeZone: resolved } : {})
+  const timeOptionsFor = (tz: string | undefined): Intl.DateTimeFormatOptions => {
+    const resolved = tz ? resolveCalendarTimeZoneId(tz) : undefined;
+    return {
+      hour: "numeric",
+      minute: "2-digit",
+      ...(resolved ? { timeZone: resolved } : {})
+    };
   };
-  const start = formatAccountIntl(new Date(startMs), dateFormat, timeOptions);
+  const start = formatAccountIntl(new Date(startMs), dateFormat, timeOptionsFor(startTimeZone));
   if (typeof endMs !== "number") return start;
-  const end = formatAccountIntl(new Date(endMs), dateFormat, timeOptions);
+  const end = formatAccountIntl(
+    new Date(endMs),
+    dateFormat,
+    timeOptionsFor(endTimeZone ?? startTimeZone)
+  );
   return `${start} – ${end}`;
 }
 
@@ -381,16 +398,28 @@ export function buildDiffRows(
           dateFormat
         );
         const newStartTz = occ.fields?.startTimezone ?? timeZone;
-        const newEndTz = occ.fields?.endTimezone ?? timeZone;
+        const newEndTz = occ.fields?.endTimezone ?? newStartTz;
         // Collapse the right-hand side to a bare time range when the
-        // reschedule stays on the same local day — "rescheduled to
-        // 14:00 – 14:15" reads more cleanly than repeating the date.
+        // *whole* reschedule (both start and end on each side) stays on
+        // the same local day — "rescheduled to 14:00 – 14:15" reads more
+        // cleanly than repeating the date. We compare each instant in
+        // its own zone so events that cross midnight (or whose start/
+        // end zones differ enough to land them on different days) keep
+        // the full date and don't silently lose the day boundary.
+        const slotKey = localDateKey(occ.recurrenceIdMs, timeZone);
+        const slotEndSameDay =
+          typeof slotEnd !== "number" || localDateKey(slotEnd, timeZone) === slotKey;
+        const newStartKey = localDateKey(overrideStart!, newStartTz);
+        const newEndSameDay =
+          typeof overrideEnd !== "number" ||
+          localDateKey(overrideEnd, newEndTz) === newStartKey;
         const sameDay =
           !allDay &&
-          localDateKey(occ.recurrenceIdMs, timeZone) ===
-            localDateKey(overrideStart!, newStartTz);
+          slotKey === newStartKey &&
+          slotEndSameDay &&
+          newEndSameDay;
         const newSide = sameDay
-          ? formatOccurrenceTimeRange(overrideStart!, overrideEnd, newStartTz, dateFormat)
+          ? formatOccurrenceTimeRange(overrideStart!, overrideEnd, newStartTz, newEndTz, dateFormat)
           : formatOccurrenceRange(
               overrideStart!,
               overrideEnd,
