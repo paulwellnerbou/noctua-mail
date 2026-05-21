@@ -101,6 +101,122 @@ describe("buildDiffRows", () => {
     expect(start?.after).not.toMatch(/\d{1,2}:\d{2}/);
   });
 
+  test("two occurrence-only updates targeting different dates don't read as removed/added", () => {
+    // Reproduces the user-reported bug: an ICS that only carries a
+    // RECURRENCE-ID for May 26 followed an earlier ICS that only carried
+    // one for May 12. Treating overrides as full-state would emit
+    // "removed for May 12" and "new occurrence on May 26", which is
+    // misleading — the May 21 message isn't saying anything about May 12.
+    // Mirror the real user data: ICS uses TZID so the override carries
+    // `Europe/Berlin` on its fields, and the formatter renders in that zone.
+    const prior = snapshot([
+      [
+        `UID:${UID}`,
+        "RECURRENCE-ID;TZID=Europe/Berlin:20260512T124500",
+        "DTSTART;TZID=Europe/Berlin:20260512T124500",
+        "DTEND;TZID=Europe/Berlin:20260512T130000",
+        "SUMMARY:KIND App JF Paul x Robert"
+      ].join("\r\n")
+    ]);
+    const current = snapshot([
+      [
+        `UID:${UID}`,
+        "RECURRENCE-ID;TZID=Europe/Berlin:20260526T124500",
+        "DTSTART;TZID=Europe/Berlin:20260527T140000",
+        "DTEND;TZID=Europe/Berlin:20260527T141500",
+        "SUMMARY:KIND App JF Paul x Robert"
+      ].join("\r\n")
+    ]);
+    expect(prior.base).toBeNull();
+    expect(current.base).toBeNull();
+
+    const diff = diffCalendarEventSnapshots(prior, current);
+    if (diff.kind !== "update") throw new Error("expected update");
+    // No "removed" entry should appear: occurrence-only updates are
+    // patches, not full state.
+    expect(diff.occurrences.find((o) => o.kind === "removed")).toBeUndefined();
+    // The May 26 override should be reported as "added" (i.e. this
+    // message is the first one carrying that override).
+    const added = diff.occurrences.find((o) => o.kind === "added");
+    expect(added).toBeDefined();
+
+    const rows = buildDiffRows(diff, undefined, "Europe/Berlin");
+    // The header should mention both the original slot AND the new time,
+    // not just "New occurrence on 12:45" which was the user's complaint.
+    const occRow = rows.find((r) => r.icon === "occurrence");
+    expect(occRow?.after).toContain("rescheduled to");
+    expect(occRow?.after).not.toContain("New occurrence");
+    // The format should match the event card range style: both sides as
+    // start–end ranges, not just the start. (The exact time formatting
+    // depends on the system locale's hour12 default — assert the
+    // minutes appear in the right order rather than locking 24-hour or
+    // 12-hour notation.)
+    // Accept both 12-hour ("1:00 PM") and 24-hour ("13:00") output so
+    // the test isn't tied to the CI/dev runtime's hour-cycle default.
+    expect(occRow?.after).toMatch(/12:45.*–.*(?:1:00|13:00)/);
+    expect(occRow?.after).toMatch(/(?:2:00|14:00).*–.*(?:2:15|14:15)/);
+    // No separate End / Title / Location detail rows — those fields
+    // didn't actually change versus the series, they're just present in
+    // the override snapshot.
+    expect(rows.find((r) => r.label === "End")).toBeUndefined();
+    expect(rows.find((r) => r.label === "Title")).toBeUndefined();
+    expect(rows.find((r) => r.label === "Location")).toBeUndefined();
+  });
+
+  test("same-day reschedule collapses to one date with two time ranges", () => {
+    // When the slot and the new time are on the same local day, the
+    // header should read "<date>, <slot> rescheduled to <new>" — the
+    // date should not be duplicated.
+    const current = snapshot([
+      [
+        `UID:${UID}`,
+        "RECURRENCE-ID;TZID=Europe/Berlin:20260526T124500",
+        "DTSTART;TZID=Europe/Berlin:20260526T140000",
+        "DTEND;TZID=Europe/Berlin:20260526T141500",
+        "SUMMARY:Same-day shift"
+      ].join("\r\n")
+    ]);
+    // No prior snapshot — we just want to exercise the rendering of the
+    // added override against a synthesized empty prior.
+    const empty = snapshot([
+      [`UID:${UID}`, "SUMMARY:Series", "DTSTART:20260101T000000Z"].join("\r\n")
+    ]);
+    const diff = diffCalendarEventSnapshots(empty, current);
+    if (diff.kind !== "update") throw new Error("expected update");
+    const rows = buildDiffRows(diff, undefined, "Europe/Berlin");
+    const occRow = rows.find((r) => r.icon === "occurrence");
+    expect(occRow?.after).toBeDefined();
+    // Both time ranges present, but the date (May 26 / 26 May / 2026-05-26)
+    // should appear only once.
+    // Accept both 12-hour ("1:00 PM") and 24-hour ("13:00") output.
+    expect(occRow!.after).toMatch(/12:45.*–.*(?:1:00|13:00)/);
+    expect(occRow!.after).toMatch(/(?:2:00|14:00).*–.*(?:2:15|14:15)/);
+    const dateMatches = occRow!.after!.match(/May 26|26 May|2026-05-26/g);
+    expect(dateMatches?.length).toBe(1);
+  });
+
+  test("base-carrying update still reports prior overrides that disappeared as removed", () => {
+    // Full-state updates (base != null) DO carry authoritative event
+    // state, so removed overrides remain meaningful.
+    const prior = snapshot([
+      [`UID:${UID}`, "SUMMARY:Series", "DTSTART:20260401T100000Z", "RRULE:FREQ=WEEKLY;COUNT=4"].join(
+        "\r\n"
+      ),
+      [`UID:${UID}`, "RECURRENCE-ID:20260408T100000Z", "DTSTART:20260408T130000Z", "SUMMARY:Moved"].join(
+        "\r\n"
+      )
+    ]);
+    const current = snapshot([
+      [`UID:${UID}`, "SUMMARY:Series", "DTSTART:20260401T100000Z", "RRULE:FREQ=WEEKLY;COUNT=4"].join(
+        "\r\n"
+      )
+    ]);
+    const diff = diffCalendarEventSnapshots(prior, current);
+    if (diff.kind !== "update") throw new Error("expected update");
+    const removed = diff.occurrences.find((o) => o.kind === "removed");
+    expect(removed).toBeDefined();
+  });
+
   test("removed location renders as a row with `before` and no `after` (one-sided removal)", () => {
     const before = snapshot([
       [`UID:${UID}`, "LOCATION:Office", "DTSTART:20260401T100000Z"].join("\r\n")

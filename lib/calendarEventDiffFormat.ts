@@ -15,6 +15,7 @@ import type { CalendarSnapshotAttendee } from "./calendarEventSnapshot";
 import type { AccountDateFormat } from "./data";
 import { formatAccountIntl, formatAccountMediumDate } from "./dateFormatting";
 import { resolveCalendarTimeZoneId } from "./calendarTimezones";
+import { formatCalendarEventRange } from "./calendar";
 
 export type DiffIcon =
   | "title"
@@ -80,6 +81,89 @@ function formatDateTime(
         ...(resolved ? { timeZone: resolved } : {})
       };
   return formatAccountIntl(new Date(ms), dateFormat, options);
+}
+
+/**
+ * Format a `start–end` range exactly the way the event card below does
+ * (weekday, medium date, short time, account date-format), so the diff
+ * panel reads as a continuation of the card.
+ */
+function formatOccurrenceRange(
+  startMs: number,
+  endMs: number | undefined,
+  allDay: boolean,
+  fallbackTimeZone: string | undefined,
+  startTimeZone: string | undefined,
+  endTimeZone: string | undefined,
+  dateFormat: AccountDateFormat | undefined
+): string {
+  // When DTEND has no TZID but DTSTART does, ICS convention is that the
+  // end inherits the start's zone — fall back to startTimeZone before
+  // the panel-level fallbackTimeZone.
+  const resolvedStart = startTimeZone ?? fallbackTimeZone;
+  const resolvedEnd = endTimeZone ?? startTimeZone ?? fallbackTimeZone;
+  return formatCalendarEventRange(
+    new Date(startMs),
+    typeof endMs === "number" ? new Date(endMs) : undefined,
+    {
+      allDay,
+      startTimeZone: resolvedStart,
+      endTimeZone: resolvedEnd,
+      dateFormat
+    }
+  );
+}
+
+/**
+ * Render just the `HH:MM – HH:MM` time portion. Used on the right-hand
+ * side of a same-day reschedule so the date isn't duplicated:
+ * "26 May 2026, 12:45 – 13:00 rescheduled to 14:00 – 14:15".
+ *
+ * Start and end can carry their own timezones (rare in real ICS but
+ * permitted), so we format each in its own zone instead of forcing a
+ * single zone for both.
+ *
+ * When `endMs` is missing, returns only the formatted start time.
+ */
+function formatOccurrenceTimeRange(
+  startMs: number,
+  endMs: number | undefined,
+  startTimeZone: string | undefined,
+  endTimeZone: string | undefined,
+  dateFormat: AccountDateFormat | undefined
+): string {
+  const timeOptionsFor = (tz: string | undefined): Intl.DateTimeFormatOptions => {
+    const resolved = tz ? resolveCalendarTimeZoneId(tz) : undefined;
+    return {
+      hour: "numeric",
+      minute: "2-digit",
+      ...(resolved ? { timeZone: resolved } : {})
+    };
+  };
+  const start = formatAccountIntl(new Date(startMs), dateFormat, timeOptionsFor(startTimeZone));
+  if (typeof endMs !== "number") return start;
+  const end = formatAccountIntl(
+    new Date(endMs),
+    dateFormat,
+    timeOptionsFor(endTimeZone ?? startTimeZone)
+  );
+  return `${start} – ${end}`;
+}
+
+/**
+ * Return the YYYY-MM-DD date key for `ms` in the given timezone. Used to
+ * decide whether two instants fall on the same local day, so the
+ * reschedule header can collapse to "<date>, <slot> rescheduled to <new>"
+ * instead of repeating the date on both sides.
+ */
+function localDateKey(ms: number, timeZone: string | undefined): string {
+  const resolved = timeZone ? resolveCalendarTimeZoneId(timeZone) : undefined;
+  return new Intl.DateTimeFormat("en-CA", {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    ...(resolved ? { timeZone: resolved } : {})
+  }).format(new Date(ms));
 }
 
 function formatDate(
@@ -285,7 +369,78 @@ export function buildDiffRows(
     // series-level allDay hint so all-day overrides don't show 00:00.
     const at = formatDateTime(occ.recurrenceIdMs, allDay, dateFormat, timeZone);
     if (occ.kind === "added") {
-      rows.push({ key: `occ-${occ.recurrenceIdMs}`, icon: "occurrence", after: `New occurrence on ${at}` });
+      // The override carries the *new* start/end for this occurrence in
+      // `fields`; the recurrence-id is the original series slot. Render
+      // a single line in the event-card range style so it reads
+      // consistently with the card below — no separate End/Title/
+      // Location detail rows: those fields are present in the snapshot
+      // but we have no prior to compare them against, so showing them
+      // would just be the new state masquerading as a change.
+      const overrideStart = occ.fields?.startAtMs;
+      const overrideEnd = occ.fields?.endAtMs;
+      const moved = typeof overrideStart === "number" && overrideStart !== occ.recurrenceIdMs;
+      if (moved) {
+        // Assume the slot had the same duration so we can render a
+        // matching range for the recurrence-id side. The duration is the
+        // only piece of pre-override state we can derive from the
+        // snapshot.
+        const slotEnd =
+          typeof overrideEnd === "number" && typeof overrideStart === "number"
+            ? occ.recurrenceIdMs + (overrideEnd - overrideStart)
+            : undefined;
+        const slotRange = formatOccurrenceRange(
+          occ.recurrenceIdMs,
+          slotEnd,
+          allDay,
+          timeZone,
+          timeZone,
+          timeZone,
+          dateFormat
+        );
+        const newStartTz = occ.fields?.startTimezone ?? timeZone;
+        const newEndTz = occ.fields?.endTimezone ?? newStartTz;
+        // Collapse the right-hand side to a bare time range when the
+        // *whole* reschedule (both start and end on each side) stays on
+        // the same local day — "rescheduled to 14:00 – 14:15" reads more
+        // cleanly than repeating the date. We compare each instant in
+        // its own zone so events that cross midnight (or whose start/
+        // end zones differ enough to land them on different days) keep
+        // the full date and don't silently lose the day boundary.
+        const slotKey = localDateKey(occ.recurrenceIdMs, timeZone);
+        const slotEndSameDay =
+          typeof slotEnd !== "number" || localDateKey(slotEnd, timeZone) === slotKey;
+        const newStartKey = localDateKey(overrideStart!, newStartTz);
+        const newEndSameDay =
+          typeof overrideEnd !== "number" ||
+          localDateKey(overrideEnd, newEndTz) === newStartKey;
+        const sameDay =
+          !allDay &&
+          slotKey === newStartKey &&
+          slotEndSameDay &&
+          newEndSameDay;
+        const newSide = sameDay
+          ? formatOccurrenceTimeRange(overrideStart!, overrideEnd, newStartTz, newEndTz, dateFormat)
+          : formatOccurrenceRange(
+              overrideStart!,
+              overrideEnd,
+              allDay,
+              timeZone,
+              newStartTz,
+              newEndTz,
+              dateFormat
+            );
+        rows.push({
+          key: `occ-${occ.recurrenceIdMs}`,
+          icon: "occurrence",
+          after: `Occurrence on ${slotRange} rescheduled to ${newSide}`
+        });
+      } else {
+        rows.push({
+          key: `occ-${occ.recurrenceIdMs}`,
+          icon: "occurrence",
+          after: `Occurrence on ${at} updated`
+        });
+      }
     } else if (occ.kind === "removed") {
       rows.push({ key: `occ-${occ.recurrenceIdMs}`, icon: "occurrence", after: `Occurrence override removed for ${at}` });
     } else if (occ.kind === "cancelled") {
