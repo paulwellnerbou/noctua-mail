@@ -15,6 +15,7 @@ import type { CalendarSnapshotAttendee } from "./calendarEventSnapshot";
 import type { AccountDateFormat } from "./data";
 import { formatAccountIntl, formatAccountMediumDate } from "./dateFormatting";
 import { resolveCalendarTimeZoneId } from "./calendarTimezones";
+import { formatCalendarEventRange } from "./calendar";
 
 export type DiffIcon =
   | "title"
@@ -80,6 +81,32 @@ function formatDateTime(
         ...(resolved ? { timeZone: resolved } : {})
       };
   return formatAccountIntl(new Date(ms), dateFormat, options);
+}
+
+/**
+ * Format a `start–end` range exactly the way the event card below does
+ * (weekday, medium date, short time, account date-format), so the diff
+ * panel reads as a continuation of the card.
+ */
+function formatOccurrenceRange(
+  startMs: number,
+  endMs: number | undefined,
+  allDay: boolean,
+  fallbackTimeZone: string | undefined,
+  startTimeZone: string | undefined,
+  endTimeZone: string | undefined,
+  dateFormat: AccountDateFormat | undefined
+): string {
+  return formatCalendarEventRange(
+    new Date(startMs),
+    typeof endMs === "number" ? new Date(endMs) : undefined,
+    {
+      allDay,
+      startTimeZone: startTimeZone ?? fallbackTimeZone,
+      endTimeZone: endTimeZone ?? fallbackTimeZone,
+      dateFormat
+    }
+  );
 }
 
 function formatDate(
@@ -286,19 +313,46 @@ export function buildDiffRows(
     const at = formatDateTime(occ.recurrenceIdMs, allDay, dateFormat, timeZone);
     if (occ.kind === "added") {
       // The override carries the *new* start/end for this occurrence in
-      // `fields`; the recurrence-id is the original series slot. Render as
-      // "Occurrence on <slot> rescheduled to <new start>" when the start
-      // moved, otherwise fall back to a summary line with the override's
-      // fields as indented detail rows.
+      // `fields`; the recurrence-id is the original series slot. Render
+      // a single line in the event-card range style so it reads
+      // consistently with the card below — no separate End/Title/
+      // Location detail rows: those fields are present in the snapshot
+      // but we have no prior to compare them against, so showing them
+      // would just be the new state masquerading as a change.
       const overrideStart = occ.fields?.startAtMs;
       const overrideEnd = occ.fields?.endAtMs;
       const moved = typeof overrideStart === "number" && overrideStart !== occ.recurrenceIdMs;
       if (moved) {
-        const newAt = formatDateTime(overrideStart, allDay, dateFormat, timeZone);
+        const newRange = formatOccurrenceRange(
+          overrideStart!,
+          overrideEnd,
+          allDay,
+          timeZone,
+          occ.fields?.startTimezone ?? timeZone,
+          occ.fields?.endTimezone ?? timeZone,
+          dateFormat
+        );
+        // Assume the slot had the same duration so we can render a
+        // matching range for the recurrence-id side. The duration is the
+        // only piece of pre-override state we can derive from the
+        // snapshot.
+        const slotEnd =
+          typeof overrideEnd === "number" && typeof overrideStart === "number"
+            ? occ.recurrenceIdMs + (overrideEnd - overrideStart)
+            : undefined;
+        const slotRange = formatOccurrenceRange(
+          occ.recurrenceIdMs,
+          slotEnd,
+          allDay,
+          timeZone,
+          timeZone,
+          timeZone,
+          dateFormat
+        );
         rows.push({
           key: `occ-${occ.recurrenceIdMs}`,
           icon: "occurrence",
-          after: `Occurrence on ${at} rescheduled to ${newAt}`
+          after: `Occurrence on ${slotRange} rescheduled to ${newRange}`
         });
       } else {
         rows.push({
@@ -306,45 +360,6 @@ export function buildDiffRows(
           icon: "occurrence",
           after: `Occurrence on ${at} updated`
         });
-      }
-      // Show the override's other fields (location, summary, status, end
-      // time when start didn't move) as indented "new value" rows so the
-      // reader can see what this occurrence looks like now.
-      if (occ.fields) {
-        const detail: DiffRow[] = [];
-        if (!moved && typeof overrideStart === "number") {
-          detail.push({
-            key: `occ-${occ.recurrenceIdMs}-start`,
-            icon: "time",
-            label: "Start",
-            after: formatDateTime(overrideStart, allDay, dateFormat, timeZone)
-          });
-        }
-        if (typeof overrideEnd === "number") {
-          detail.push({
-            key: `occ-${occ.recurrenceIdMs}-end`,
-            icon: "time",
-            label: "End",
-            after: formatDateTime(overrideEnd, allDay, dateFormat, timeZone)
-          });
-        }
-        if (occ.fields.summary) {
-          detail.push({
-            key: `occ-${occ.recurrenceIdMs}-summary`,
-            icon: "title",
-            label: "Title",
-            after: occ.fields.summary
-          });
-        }
-        if (occ.fields.location) {
-          detail.push({
-            key: `occ-${occ.recurrenceIdMs}-location`,
-            icon: "location",
-            label: "Location",
-            after: occ.fields.location
-          });
-        }
-        detail.forEach((row) => rows.push({ ...row, indent: true }));
       }
     } else if (occ.kind === "removed") {
       rows.push({ key: `occ-${occ.recurrenceIdMs}`, icon: "occurrence", after: `Occurrence override removed for ${at}` });

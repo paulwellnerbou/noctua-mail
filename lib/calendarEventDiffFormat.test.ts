@@ -107,21 +107,23 @@ describe("buildDiffRows", () => {
     // one for May 12. Treating overrides as full-state would emit
     // "removed for May 12" and "new occurrence on May 26", which is
     // misleading — the May 21 message isn't saying anything about May 12.
+    // Mirror the real user data: ICS uses TZID so the override carries
+    // `Europe/Berlin` on its fields, and the formatter renders in that zone.
     const prior = snapshot([
       [
         `UID:${UID}`,
-        "RECURRENCE-ID:20260512T104500Z",
-        "DTSTART:20260512T124500Z",
-        "DTEND:20260512T130000Z",
+        "RECURRENCE-ID;TZID=Europe/Berlin:20260512T124500",
+        "DTSTART;TZID=Europe/Berlin:20260512T124500",
+        "DTEND;TZID=Europe/Berlin:20260512T130000",
         "SUMMARY:KIND App JF Paul x Robert"
       ].join("\r\n")
     ]);
     const current = snapshot([
       [
         `UID:${UID}`,
-        "RECURRENCE-ID:20260526T104500Z",
-        "DTSTART:20260527T120000Z",
-        "DTEND:20260527T121500Z",
+        "RECURRENCE-ID;TZID=Europe/Berlin:20260526T124500",
+        "DTSTART;TZID=Europe/Berlin:20260527T140000",
+        "DTEND;TZID=Europe/Berlin:20260527T141500",
         "SUMMARY:KIND App JF Paul x Robert"
       ].join("\r\n")
     ]);
@@ -144,6 +146,19 @@ describe("buildDiffRows", () => {
     const occRow = rows.find((r) => r.icon === "occurrence");
     expect(occRow?.after).toContain("rescheduled to");
     expect(occRow?.after).not.toContain("New occurrence");
+    // The format should match the event card range style: both sides as
+    // start–end ranges, not just the start. (The exact time formatting
+    // depends on the system locale's hour12 default — assert the
+    // minutes appear in the right order rather than locking 24-hour or
+    // 12-hour notation.)
+    expect(occRow?.after).toMatch(/12:45.*–.*1:?00/);
+    expect(occRow?.after).toMatch(/2:?00.*–.*2:?15/);
+    // No separate End / Title / Location detail rows — those fields
+    // didn't actually change versus the series, they're just present in
+    // the override snapshot.
+    expect(rows.find((r) => r.label === "End")).toBeUndefined();
+    expect(rows.find((r) => r.label === "Title")).toBeUndefined();
+    expect(rows.find((r) => r.label === "Location")).toBeUndefined();
   });
 
   test("base-carrying update still reports prior overrides that disappeared as removed", () => {
