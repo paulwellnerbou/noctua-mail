@@ -161,6 +161,37 @@ describe("buildDiffRows", () => {
     expect(rows.find((r) => r.label === "Location")).toBeUndefined();
   });
 
+  test("same-day reschedule collapses to one date with two time ranges", () => {
+    // When the slot and the new time are on the same local day, the
+    // header should read "<date>, <slot> rescheduled to <new>" — the
+    // date should not be duplicated.
+    const current = snapshot([
+      [
+        `UID:${UID}`,
+        "RECURRENCE-ID;TZID=Europe/Berlin:20260526T124500",
+        "DTSTART;TZID=Europe/Berlin:20260526T140000",
+        "DTEND;TZID=Europe/Berlin:20260526T141500",
+        "SUMMARY:Same-day shift"
+      ].join("\r\n")
+    ]);
+    // No prior snapshot — we just want to exercise the rendering of the
+    // added override against a synthesized empty prior.
+    const empty = snapshot([
+      [`UID:${UID}`, "SUMMARY:Series", "DTSTART:20260101T000000Z"].join("\r\n")
+    ]);
+    const diff = diffCalendarEventSnapshots(empty, current);
+    if (diff.kind !== "update") throw new Error("expected update");
+    const rows = buildDiffRows(diff, undefined, "Europe/Berlin");
+    const occRow = rows.find((r) => r.icon === "occurrence");
+    expect(occRow?.after).toBeDefined();
+    // Both time ranges present, but the date (May 26 / 26 May / 2026-05-26)
+    // should appear only once.
+    expect(occRow!.after).toMatch(/12:45.*–.*1:?00/);
+    expect(occRow!.after).toMatch(/2:?00.*–.*2:?15/);
+    const dateMatches = occRow!.after!.match(/May 26|26 May|2026-05-26/g);
+    expect(dateMatches?.length).toBe(1);
+  });
+
   test("base-carrying update still reports prior overrides that disappeared as removed", () => {
     // Full-state updates (base != null) DO carry authoritative event
     // state, so removed overrides remain meaningful.
