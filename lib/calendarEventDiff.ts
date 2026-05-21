@@ -382,11 +382,24 @@ export function diffCalendarEventSnapshots(
       occurrences.push({ kind: "modified", recurrenceIdMs, fields: fieldDiff });
     }
   });
-  beforeOverrides.forEach((prev, recurrenceIdMs) => {
-    if (!afterOverrides.has(recurrenceIdMs)) {
-      occurrences.push({ kind: "removed", recurrenceIdMs });
-    }
-  });
+  // An ICS that has only RECURRENCE-ID VEVENTs (no base VEVENT) is a
+  // *patch* describing specific occurrences — it isn't authoritative
+  // about the full event state, so we must NOT treat overrides that the
+  // patch doesn't mention as removed. The previous "removed" emission
+  // produced misleading "Occurrence override removed for X" lines for
+  // every back-to-back per-occurrence update that addressed a different
+  // recurrence-id than the previous message.
+  //
+  // Whole-event updates (base != null) DO carry full state, so removed
+  // overrides remain meaningful there.
+  const afterIsFullState = after.base !== null;
+  if (afterIsFullState) {
+    beforeOverrides.forEach((prev, recurrenceIdMs) => {
+      if (!afterOverrides.has(recurrenceIdMs)) {
+        occurrences.push({ kind: "removed", recurrenceIdMs });
+      }
+    });
+  }
   occurrences.sort((a, b) => a.recurrenceIdMs - b.recurrenceIdMs);
 
   const isCancellation = after.cancelledWhole && !before.cancelledWhole;

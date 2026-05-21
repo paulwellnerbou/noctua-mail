@@ -285,7 +285,67 @@ export function buildDiffRows(
     // series-level allDay hint so all-day overrides don't show 00:00.
     const at = formatDateTime(occ.recurrenceIdMs, allDay, dateFormat, timeZone);
     if (occ.kind === "added") {
-      rows.push({ key: `occ-${occ.recurrenceIdMs}`, icon: "occurrence", after: `New occurrence on ${at}` });
+      // The override carries the *new* start/end for this occurrence in
+      // `fields`; the recurrence-id is the original series slot. Render as
+      // "Occurrence on <slot> rescheduled to <new start>" when the start
+      // moved, otherwise fall back to a summary line with the override's
+      // fields as indented detail rows.
+      const overrideStart = occ.fields?.startAtMs;
+      const overrideEnd = occ.fields?.endAtMs;
+      const moved = typeof overrideStart === "number" && overrideStart !== occ.recurrenceIdMs;
+      if (moved) {
+        const newAt = formatDateTime(overrideStart, allDay, dateFormat, timeZone);
+        rows.push({
+          key: `occ-${occ.recurrenceIdMs}`,
+          icon: "occurrence",
+          after: `Occurrence on ${at} rescheduled to ${newAt}`
+        });
+      } else {
+        rows.push({
+          key: `occ-${occ.recurrenceIdMs}`,
+          icon: "occurrence",
+          after: `Occurrence on ${at} updated`
+        });
+      }
+      // Show the override's other fields (location, summary, status, end
+      // time when start didn't move) as indented "new value" rows so the
+      // reader can see what this occurrence looks like now.
+      if (occ.fields) {
+        const detail: DiffRow[] = [];
+        if (!moved && typeof overrideStart === "number") {
+          detail.push({
+            key: `occ-${occ.recurrenceIdMs}-start`,
+            icon: "time",
+            label: "Start",
+            after: formatDateTime(overrideStart, allDay, dateFormat, timeZone)
+          });
+        }
+        if (typeof overrideEnd === "number") {
+          detail.push({
+            key: `occ-${occ.recurrenceIdMs}-end`,
+            icon: "time",
+            label: "End",
+            after: formatDateTime(overrideEnd, allDay, dateFormat, timeZone)
+          });
+        }
+        if (occ.fields.summary) {
+          detail.push({
+            key: `occ-${occ.recurrenceIdMs}-summary`,
+            icon: "title",
+            label: "Title",
+            after: occ.fields.summary
+          });
+        }
+        if (occ.fields.location) {
+          detail.push({
+            key: `occ-${occ.recurrenceIdMs}-location`,
+            icon: "location",
+            label: "Location",
+            after: occ.fields.location
+          });
+        }
+        detail.forEach((row) => rows.push({ ...row, indent: true }));
+      }
     } else if (occ.kind === "removed") {
       rows.push({ key: `occ-${occ.recurrenceIdMs}`, icon: "occurrence", after: `Occurrence override removed for ${at}` });
     } else if (occ.kind === "cancelled") {
