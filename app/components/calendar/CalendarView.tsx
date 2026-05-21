@@ -46,17 +46,28 @@ function calendarEventToFcEvent(
   displayStartAtMs = ev.startAtMs,
   displayEndAtMs = ev.endAtMs
 ): EventInput {
+  // FullCalendar's event parser discards `end <= start` and then falls
+  // back to `defaultTimedEventDuration` (1h by default), so a true
+  // zero-duration "point in time" event (DTSTART == DTEND) gets rendered
+  // as a full hour. Pad by 1ms so FC keeps the end; eventMinHeight (10)
+  // then clamps the visual to a thin marker, and the hover tooltip
+  // reads the real end from extendedProps so the displayed range stays
+  // truthful.
+  const fcEnd =
+    typeof displayEndAtMs === "number"
+      ? new Date(displayEndAtMs <= displayStartAtMs ? displayStartAtMs + 1 : displayEndAtMs)
+      : undefined;
   return {
     id: ev.recurrenceRule?.trim() ? `${ev.id}-${displayStartAtMs}` : ev.id,
     title: ev.summary,
     start: new Date(displayStartAtMs),
-    end: displayEndAtMs ? new Date(displayEndAtMs) : undefined,
+    end: fcEnd,
     allDay: ev.allDay,
     classNames: [
       `fc-event-${ev.sourceType}`,
       ...(ev.myPartstat ? [`fc-event-partstat-${ev.myPartstat.toLowerCase().replace(/-/g, "")}`] : [])
     ],
-    extendedProps: { kind: "event", data: ev, displayStartAtMs }
+    extendedProps: { kind: "event", data: ev, displayStartAtMs, displayEndAtMs }
   };
 }
 
@@ -88,12 +99,22 @@ function buildEventHoverTitle(arg: EventMountArg, dateFormat?: AccountDateFormat
   const props = arg.event.extendedProps as {
     kind: "event" | "reminder";
     data: CalendarEvent | CalendarReminder;
+    displayEndAtMs?: number;
   };
   const lines = [arg.event.title.trim() || "Calendar event"];
 
+  // Prefer the real end stored in extendedProps over arg.event.end:
+  // we synthetically pad zero-duration events by 1ms so FullCalendar
+  // doesn't drop the end and render a 1h fallback, but the tooltip
+  // should still show the truthful range.
+  const realEnd =
+    typeof props.displayEndAtMs === "number"
+      ? new Date(props.displayEndAtMs)
+      : (arg.event.end ?? undefined);
+
   if (props.kind === "event") {
     const event = props.data as CalendarEvent;
-    const rangeLabel = formatCalendarEventRange(arg.event.start ?? undefined, arg.event.end ?? undefined, {
+    const rangeLabel = formatCalendarEventRange(arg.event.start ?? undefined, realEnd, {
       allDay: event.allDay,
       startTimeZone: event.startTimezone,
       endTimeZone: event.endTimezone,
@@ -103,7 +124,7 @@ function buildEventHoverTitle(arg: EventMountArg, dateFormat?: AccountDateFormat
     if (event.location?.trim()) lines.push(event.location.trim());
   } else {
     const reminder = props.data as CalendarReminder;
-    const rangeLabel = formatCalendarEventRange(arg.event.start ?? undefined, arg.event.end ?? undefined, {
+    const rangeLabel = formatCalendarEventRange(arg.event.start ?? undefined, realEnd, {
       startTimeZone: reminder.startTimezone,
       dateFormat
     });
