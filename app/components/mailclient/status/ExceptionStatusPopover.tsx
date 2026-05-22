@@ -35,6 +35,14 @@ export default function ExceptionStatusPopover({
   onRelogin
 }: ExceptionStatusPopoverProps) {
   const [selectedExceptionId, setSelectedExceptionId] = useState<string | null>(null);
+  const formatAbsoluteTime = (timestamp?: number | null): string | undefined => {
+    if (typeof timestamp !== "number" || !Number.isFinite(timestamp)) return undefined;
+    try {
+      return new Date(timestamp).toLocaleString();
+    } catch {
+      return undefined;
+    }
+  };
   const latestException = exceptionEntries[0] ?? null;
   const selectedException = useMemo(() => {
     if (exceptionEntries.length === 0) return null;
@@ -110,7 +118,12 @@ export default function ExceptionStatusPopover({
                       <Text size="2" className="exception-item-summary">
                         {summary}
                       </Text>
-                      <Text size="1" color="gray" className="exception-item-time">
+                      <Text
+                        size="1"
+                        color="gray"
+                        className="exception-item-time"
+                        title={formatAbsoluteTime(entry.timestamp)}
+                      >
                         {formatRelativeTime(entry.timestamp)}
                       </Text>
                     </div>
@@ -119,7 +132,12 @@ export default function ExceptionStatusPopover({
               </div>
               {selectedException && selectedExceptionDetail ? (
                 <>
-                  <Text size="1" color="gray" className="exception-meta">
+                  <Text
+                    size="1"
+                    color="gray"
+                    className="exception-meta"
+                    title={formatAbsoluteTime(selectedException.timestamp)}
+                  >
                     {formatRelativeTime(selectedException.timestamp)}
                     {selectedException.status !== undefined ? ` · ${selectedException.status}` : ""}
                     {selectedException.requestPath ? ` · ${selectedException.requestPath}` : ""}

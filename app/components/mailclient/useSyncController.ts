@@ -73,7 +73,10 @@ export type UseSyncControllerParams = {
   };
   apiFetch: ApiFetch;
   readErrorMessage: (res: Response) => Promise<string>;
-  reportError: (message: string) => void;
+  reportError: (
+    message: string,
+    meta?: { requestPath?: string; status?: number }
+  ) => void;
   pushNotice: (input: {
     type: "info" | "success" | "warning" | "error";
     icon?: "mail";
@@ -961,6 +964,7 @@ export function useSyncController({
     const pollOnce = async () => {
       if (pollInFlightRef.current) return;
       pollInFlightRef.current = true;
+      let pollPath: string | undefined;
       try {
         const inboxFolderId = inboxFolderRef.current?.id;
         const params = new URLSearchParams({
@@ -970,9 +974,13 @@ export function useSyncController({
         if (typeof since === "number" && Number.isFinite(since)) {
           params.set("sinceUidNext", String(since));
         }
-        const res = await apiFetch(buildAccountImapPollPath(activeAccountId, params));
+        pollPath = buildAccountImapPollPath(activeAccountId, params);
+        const res = await apiFetch(pollPath);
         if (!res.ok) {
-          reportError(await readErrorMessage(res));
+          reportError(await readErrorMessage(res), {
+            requestPath: pollPath,
+            status: res.status
+          });
           return;
         }
         const data = (await res.json()) as {
@@ -982,7 +990,9 @@ export function useSyncController({
           message?: string;
         };
         if (data?.ok === false) {
-          reportError(data.message || "Failed to check for new mail.");
+          reportError(data.message || "Failed to check for new mail.", {
+            requestPath: pollPath
+          });
           return;
         }
         if (typeof data?.uidNext === "number" && inboxFolderId) {
@@ -991,8 +1001,14 @@ export function useSyncController({
         if (Array.isArray(data?.messages) && data.messages.length > 0) {
           await syncAndNotifyNewMessages(data.messages);
         }
-      } catch {
-        reportError("Failed to check for new mail.");
+      } catch (err) {
+        const cause =
+          err instanceof Error
+            ? `${err.name}: ${err.message}${err.stack ? `\n${err.stack}` : ""}`
+            : String(err);
+        reportError(`Failed to check for new mail.\n${cause}`, {
+          requestPath: pollPath
+        });
       } finally {
         pollInFlightRef.current = false;
       }
