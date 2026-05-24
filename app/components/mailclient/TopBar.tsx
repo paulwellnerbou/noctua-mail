@@ -240,7 +240,13 @@ export default function TopBar({
           <TextField.Root
             size="2"
             type="search"
-            placeholder="Search all messages"
+            placeholder={
+              searchScope === "all"
+                ? "Search messages everywhere"
+                : currentFolder
+                  ? `Search messages in ${currentFolder.name}`
+                  : "Search messages"
+            }
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             id="top-search-input"

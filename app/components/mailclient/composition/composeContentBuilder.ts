@@ -43,7 +43,7 @@ export function formatQuotedBody(body: string, header: string): string {
  * The leading newlines leave room for the user to type above the quoted block.
  */
 export function buildTextReplyBody(originalBody: string, replyHeader: string): string {
-  return formatQuotedBody(originalBody, replyHeader).trimStart();
+  return formatQuotedBody(originalBody, replyHeader);
 }
 
 export function normalizeOutboundTableMarkup(value: string): string {

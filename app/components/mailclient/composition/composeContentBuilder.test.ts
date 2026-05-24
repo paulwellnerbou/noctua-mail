@@ -38,19 +38,19 @@ describe("formatQuotedBody", () => {
 });
 
 describe("buildTextReplyBody", () => {
-  it("returns the formatted quoted body without leading newlines", () => {
+  it("returns the formatted quoted body with two leading empty lines above the header", () => {
     const result = buildTextReplyBody("Original message", "On date, Alice wrote:");
-    expect(result).toBe("On date, Alice wrote:\n> Original message");
+    expect(result).toBe("\n\nOn date, Alice wrote:\n> Original message");
   });
 
   it("handles multi-line original body", () => {
     const result = buildTextReplyBody("Line 1\nLine 2", "Header:");
-    expect(result).toBe("Header:\n> Line 1\n> Line 2");
+    expect(result).toBe("\n\nHeader:\n> Line 1\n> Line 2");
   });
 
-  it("does not start with newlines (leading newlines are stripped)", () => {
+  it("starts with two newlines so the textarea shows two empty rows before the quote", () => {
     const result = buildTextReplyBody("body", "Header:");
-    expect(result.startsWith("\n")).toBe(false);
+    expect(result.startsWith("\n\n")).toBe(true);
   });
 });
 
