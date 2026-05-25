@@ -451,6 +451,62 @@ describe("computeComposeInitState — forward", () => {
     );
     expect(fields.composeReplyHeaders?.xForwardedMessageId).toBe("<msg1@example.com>");
   });
+
+  it("puts the Forwarded-message prefix in composeHtml and keeps the quoted block original", () => {
+    const fields = computeComposeInitState(
+      "forward",
+      makeMessage({ from: "Alice <alice@example.com>", htmlBody: "<p>Hello</p>" }),
+      false,
+      opts,
+      deps
+    );
+    expect(fields.composeTab).toBe("html");
+    expect(fields.composeHtml).toContain("Forwarded message from Alice");
+    expect(fields.composeHtmlText).toContain("Forwarded message from Alice");
+    expect(fields.composeQuotedHtml).not.toContain("Forwarded message from");
+    expect(fields.composeQuotedHtml).toContain("<p>Hello</p>");
+  });
+
+  it("escapes HTML in the forwarded sender when placing the prefix in composeHtml", () => {
+    const fields = computeComposeInitState(
+      "forward",
+      makeMessage({ from: '"<script>" <x@example.com>', htmlBody: "<p>Hi</p>" }),
+      false,
+      opts,
+      deps
+    );
+    expect(fields.composeHtml).not.toContain("<script>");
+    expect(fields.composeHtml).toContain("&lt;script&gt;");
+  });
+
+  it("puts the Forwarded-message prefix in composeMarkdown when forwarding from markdown view", () => {
+    const fields = computeComposeInitState(
+      "forward",
+      makeMessage({ from: "Alice <alice@example.com>", htmlBody: "<p>Hello</p>" }),
+      false,
+      { ...opts, preferredComposeTab: "markdown" },
+      deps
+    );
+    expect(fields.composeTab).toBe("markdown");
+    expect(fields.composeMarkdown).toContain("Forwarded message from Alice");
+    expect(fields.composeHtml).toBe("");
+    expect(fields.composeQuotedHtml).not.toContain("Forwarded message from");
+  });
+
+  it("keeps the Forwarded-message prefix embedded in composeBody for text-only forwards", () => {
+    const fields = computeComposeInitState(
+      "forward",
+      makeMessage({ from: "Alice <alice@example.com>", body: "Original", htmlBody: null }),
+      false,
+      opts,
+      deps
+    );
+    expect(fields.composeTab).toBe("text");
+    expect(fields.composeBody).toContain("Forwarded message from Alice");
+    expect(fields.composeBody).toContain("> Original");
+    expect(fields.composeHtml).toBe("");
+    expect(fields.composeMarkdown).toBe("");
+  });
 });
 
 // ---------------------------------------------------------------------------

@@ -4,6 +4,7 @@ import { formatMessageDate } from "@/lib/dateFormatting";
 import {
   assembleQuotedHtml,
   buildQuotedHtmlPartsFromHtml,
+  escapeHtml,
   extractQuotedHtmlFromDraft
 } from "@/lib/html";
 import { splitRecipientEntries } from "@/lib/recipientLists";
@@ -333,11 +334,28 @@ export function computeComposeInitState(
       xForwardedMessageId: replyMessageId
     };
 
-    const replyContent = buildReplyContent(forwardHeader);
+    // For HTML/Markdown forwards, the prefix lives in the editor and the quoted
+    // block holds the original HTML as-is, so the user can add a note above the
+    // forwarded content. Text mode has no separate quoted block, so the header
+    // stays embedded in the textarea body.
+    const isRichForward = preferredComposeTab !== "text" && hasHtmlContent(message.htmlBody);
+    const replyContent = buildReplyContent(isRichForward ? "" : forwardHeader);
+
+    const editorFields: Partial<ComposeInitFields> =
+      replyContent.composeTab === "html"
+        ? {
+            composeHtml: `<p>${escapeHtml(forwardHeader)}</p>`,
+            composeHtmlText: forwardHeader
+          }
+        : replyContent.composeTab === "markdown"
+          ? { composeMarkdown: `${forwardHeader}\n\n` }
+          : {};
+
     return {
       ...BLANK,
       composeSubject: prefixSubject("Fwd", message.subject),
       ...replyContent,
+      ...editorFields,
       composeReplyMessage: message,
       composeReplyHeaders: replyHeaders
     };

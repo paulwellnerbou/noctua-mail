@@ -58,6 +58,40 @@ import { SYNC_STATUS_POLL_INTERVAL_MS, SYNC_STATUS_RUNNING_POLL_INTERVAL_MS } fr
 
 type ApiFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
+async function describeFetchFailureContext(apiFetch: ApiFetch): Promise<string> {
+  const lines: string[] = [];
+  if (typeof navigator !== "undefined") {
+    lines.push(`navigator.onLine: ${navigator.onLine}`);
+    const connection = (
+      navigator as {
+        connection?: { effectiveType?: string; downlink?: number; rtt?: number };
+      }
+    ).connection;
+    if (connection) {
+      lines.push(
+        `connection: effectiveType=${connection.effectiveType ?? "?"} downlink=${connection.downlink ?? "?"} rtt=${connection.rtt ?? "?"}`
+      );
+    }
+  }
+  const probeStart = Date.now();
+  try {
+    const probeRes = await apiFetch("/api/version", {
+      cache: "no-store",
+      signal: AbortSignal.timeout(2000)
+    });
+    lines.push(
+      `probe /api/version: HTTP ${probeRes.status} in ${Date.now() - probeStart}ms`
+    );
+  } catch (probeErr) {
+    const name = probeErr instanceof Error ? probeErr.name : "Unknown";
+    const message = probeErr instanceof Error ? probeErr.message : String(probeErr);
+    lines.push(
+      `probe /api/version: failed after ${Date.now() - probeStart}ms — ${name}: ${message}`
+    );
+  }
+  return lines.join("\n");
+}
+
 export type UseSyncControllerParams = {
   activeAccountId: string;
   activeFolderId: string;
@@ -1006,7 +1040,8 @@ export function useSyncController({
           err instanceof Error
             ? `${err.name}: ${err.message}${err.stack ? `\n${err.stack}` : ""}`
             : String(err);
-        reportError(`Failed to check for new mail.\n${cause}`, {
+        const context = await describeFetchFailureContext(apiFetch);
+        reportError(`Failed to check for new mail.\n${cause}\n${context}`, {
           requestPath: pollPath
         });
       } finally {
