@@ -256,6 +256,28 @@ function shortenRelatedNoticeSubject(subject: string, maxChars: number) {
   return `${subject.slice(0, maxChars - 3).trimEnd()}...`;
 }
 
+function describeRequestTarget(input: RequestInfo | URL): string | null {
+  try {
+    if (typeof input === "string") {
+      if (input.startsWith("http://") || input.startsWith("https://")) {
+        const u = new URL(input);
+        return `${u.pathname}${u.search}`;
+      }
+      return input;
+    }
+    if (input instanceof URL) {
+      return `${input.pathname}${input.search}`;
+    }
+    if (typeof Request !== "undefined" && input instanceof Request) {
+      const u = new URL(input.url);
+      return `${u.pathname}${u.search}`;
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
 type MailClientProps = {
   buildVersionLabel?: string;
 };
@@ -326,7 +348,7 @@ export default function MailClient({
     return id;
   }, []);
   const apiFetch = useCallback(
-    (input: RequestInfo | URL, init?: RequestInit) => {
+    async (input: RequestInfo | URL, init?: RequestInit) => {
       const headers = new Headers(
         init?.headers ??
           (typeof Request !== "undefined" && input instanceof Request ? input.headers : undefined)
@@ -334,7 +356,21 @@ export default function MailClient({
       if (clientId) {
         headers.set("X-Noctua-Client", clientId);
       }
-      return fetch(input, { ...init, headers });
+      try {
+        return await fetch(input, { ...init, headers });
+      } catch (err) {
+        // Annotate network errors with the request URL — the browser's
+        // TypeError: "Failed to fetch" carries no information about which
+        // request failed. Mutating message preserves name/stack/cause, so
+        // callers that check err.name (AbortError, TypeError) still work.
+        if (err instanceof Error) {
+          const target = describeRequestTarget(input);
+          if (target && !err.message.includes(target)) {
+            err.message = `${err.message} (${target})`;
+          }
+        }
+        throw err;
+      }
     },
     [clientId]
   );
