@@ -39,6 +39,17 @@ export default function manifest(): MetadataRoute.Manifest {
           "text/calendar": [".ics"]
         }
       }
+    ],
+    // PWA Protocol Handler API: lets the OS route mailto: links to the
+    // installed PWA. %s is replaced with the encoded mailto: URL, which
+    // MailClient parses on mount and routes into the compose form.
+    // Chromium-only; other browsers expose navigator.registerProtocolHandler
+    // for the non-installed case (see ProtocolHandlerRegistrar).
+    protocol_handlers: [
+      {
+        protocol: "mailto",
+        url: "/?mailto=%s"
+      }
     ]
   };
 }

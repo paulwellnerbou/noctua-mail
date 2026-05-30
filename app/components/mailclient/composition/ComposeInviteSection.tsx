@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useTransition } from "react";
 import { CalendarDays } from "lucide-react";
 import { Badge, Button, Flex, Text } from "@radix-ui/themes";
-import { getEndValueAfterStartChange, type ComposeInviteDraft } from "@/lib/composeInvite";
+import { shiftEndPreservingDuration, type ComposeInviteDraft } from "@/lib/composeInvite";
 import CalendarEventScheduleFields from "@/app/components/calendar/CalendarEventScheduleFields";
 import styles from "./Compose.module.css";
 
@@ -93,15 +93,26 @@ export default function ComposeInviteSection({
 
   const handleStartChange = (value: string) => {
     const currentDraft = latestLocalDraftRef.current;
-    const nextEnd = getEndValueAfterStartChange(
-      value,
-      currentDraft?.end ?? "",
-      currentDraft?.allDay ?? false
-    );
+    const prevStart = currentDraft?.start ?? "";
+    const prevEnd = currentDraft?.end ?? "";
+    const allDay = currentDraft?.allDay ?? false;
+    // Editing the start slides the whole event: preserve the existing duration
+    // so the end follows automatically. The user only changes duration by
+    // editing the end directly (handleEndChange below).
+    //
+    // Skip the duration-shift when the new value's shape (date-only vs
+    // date+time) contradicts the current `allDay` — that happens during an
+    // all-day toggle, where the toggle handler updates start, end, and
+    // allDay in one batch and the shift would run with mismatched semantics.
+    const nextHasTime = value.includes("T");
+    const shapeMatchesAllDay = nextHasTime === !allDay;
+    const nextEnd = shapeMatchesAllDay
+      ? shiftEndPreservingDuration(prevStart, value, prevEnd, allDay)
+      : prevEnd;
     updateLocalDraft((prev) => (prev ? { ...prev, start: value, end: nextEnd } : prev));
     commitInviteChange(() => {
       onStartChange(value);
-      if (nextEnd !== (currentDraft?.end ?? "")) {
+      if (nextEnd !== prevEnd) {
         onEndChange(nextEnd);
       }
     });

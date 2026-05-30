@@ -31,9 +31,11 @@ import DialogsHost from "./mailclient/dialogs/DialogsHost";
 import { useConfirmDialogs } from "./mailclient/dialogs/useConfirmDialogs";
 import ComposeOrchestrator, {
   type ComposeMirror,
+  type ComposeOpenPrefill,
   type ComposeOrchestratorHandle
 } from "./mailclient/composition/ComposeOrchestrator";
 import type { ComposeMode } from "./mailclient/composition/composeTypes";
+import { parseMailto } from "@/lib/mailto";
 import {
   buildSavedDraftListMessage,
   reconcileSavedDraftMessages
@@ -1793,9 +1795,35 @@ export default function MailClient({
     currentAccount?.settings?.appearance?.dateFormat
   );
 
-  const openCompose = (mode: ComposeMode, message?: Message, asNew = false) => {
-    composeHandleRef.current?.openCompose(mode, message, asNew);
+  const openCompose = (
+    mode: ComposeMode,
+    message?: Message,
+    asNew = false,
+    prefill?: ComposeOpenPrefill
+  ) => {
+    composeHandleRef.current?.openCompose(mode, message, asNew, prefill);
   };
+
+  // Pending mailto: query (from ?mailto=...) — captured on mount, applied once
+  // an account is active and the compose orchestrator is mounted.
+  const pendingMailtoRef = useRef<ComposeOpenPrefill | null>(null);
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    const raw = params.get("mailto");
+    if (!raw) return;
+    pendingMailtoRef.current = parseMailto(raw);
+    params.delete("mailto");
+    const query = params.toString();
+    const nextUrl = `${window.location.pathname}${query ? `?${query}` : ""}${window.location.hash}`;
+    window.history.replaceState({}, "", nextUrl);
+  }, []);
+  useEffect(() => {
+    const prefill = pendingMailtoRef.current;
+    if (!prefill || !currentAccount || !composeHandleRef.current) return;
+    pendingMailtoRef.current = null;
+    composeHandleRef.current.openCompose("new", undefined, false, prefill);
+  }, [currentAccount]);
 
   // Derive topics map from messages (topics are now included in the messages API response)
   useEffect(() => {

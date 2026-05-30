@@ -1,5 +1,6 @@
 import { Button, Flex, Grid, Select, Switch, Text, TextField } from "@radix-ui/themes";
 import Field from "@/app/components/account-settings/Field";
+import MailtoHandlerSection from "@/app/components/account-settings/MailtoHandlerSection";
 import type { Account, AccountDateFormat, AccountSettings } from "@/lib/data";
 import { ACCOUNT_DATE_FORMAT_OPTIONS, normalizeAccountDateFormat } from "@/lib/dateFormatting";
 
@@ -137,6 +138,8 @@ export default function PreferencesTabContent({
             </Field>
           </Grid>
         </Flex>
+
+        <MailtoHandlerSection />
 
         {isAdminUser && (
           <Flex direction="column" gap="3">

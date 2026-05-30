@@ -76,6 +76,20 @@ type PushNoticeInput = {
   durationMs?: number;
 };
 
+export type ComposeOpenPrefill = {
+  to?: string;
+  cc?: string;
+  bcc?: string;
+  subject?: string;
+  body?: string;
+  // Note: `mailto:` URLs may carry `in-reply-to`/`references` headers, but they
+  // are intentionally NOT plumbed here. buildSendPayload only emits those
+  // headers when shouldThreadComposeForMode(mode) is true (reply/forward/edit),
+  // and the mailto entry point uses mode "new". Adding the fields would set
+  // composeReplyHeaders state but they'd silently drop on send — worse than not
+  // claiming the feature. Plumb through a "newReply" mode if we ever need it.
+};
+
 export type ComposeOrchestratorHandle = {
   /**
    * Render the inline compose card. Returned from the handle so MailClient can
@@ -88,9 +102,16 @@ export type ComposeOrchestratorHandle = {
   /**
    * Open the compose surface. Hydrates attachments for edit/forward modes and
    * picks the preferred tab from the per-message tab state before handing off
-   * to the underlying controller.
+   * to the underlying controller. When `prefill` is provided (only honored for
+   * mode === "new" without a source message), the fields are applied after the
+   * controller initializes blank state — used by the `mailto:` entry point.
    */
-  openCompose: (mode: ComposeMode, message?: Message, asNew?: boolean) => void;
+  openCompose: (
+    mode: ComposeMode,
+    message?: Message,
+    asNew?: boolean,
+    prefill?: ComposeOpenPrefill
+  ) => void;
   /** Imperative setter used by MailClient's list selection auto-minimize. */
   setComposeView: React.Dispatch<React.SetStateAction<"inline" | "modal" | "minimized">>;
 };
@@ -751,9 +772,39 @@ function ComposeOrchestratorImpl(
     }
   };
 
-  const openCompose = (mode: ComposeMode, message?: Message, asNew = false) => {
+  const applyComposePrefill = (prefill: ComposeOpenPrefill) => {
+    if (prefill.to) compose.setComposeTo(prefill.to);
+    if (prefill.cc) compose.setComposeCc(prefill.cc);
+    if (prefill.bcc) {
+      compose.setComposeBcc(prefill.bcc);
+      compose.setComposeShowBcc(true);
+    }
+    if (prefill.subject) compose.setComposeSubject(prefill.subject);
+    if (prefill.body) {
+      compose.setComposeBody(prefill.body);
+      // The HTML editor reads from composeHtml — escape minimally so user-entered
+      // angle brackets render as text, not as HTML tags.
+      const escapedHtml = prefill.body
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/\n/g, "<br>");
+      compose.setComposeHtml(`<p>${escapedHtml}</p>`);
+      compose.setComposeHtmlText(prefill.body);
+      compose.setComposeMarkdown(prefill.body);
+      compose.setComposeEditorReset((prev) => prev + 1);
+    }
+  };
+
+  const openCompose = (
+    mode: ComposeMode,
+    message?: Message,
+    asNew = false,
+    prefill?: ComposeOpenPrefill
+  ) => {
     if (!message) {
       openComposeInternal(mode, undefined, asNew);
+      if (prefill) applyComposePrefill(prefill);
       return;
     }
 

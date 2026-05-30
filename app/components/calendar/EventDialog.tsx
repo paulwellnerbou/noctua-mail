@@ -12,8 +12,10 @@ import {
   inviteInputToMs,
   msToDateLocal,
   msToDateTimeLocal,
+  parseLocalScheduleDate,
   recurrenceOptionToRRule,
   rruleToOption,
+  shiftEndPreservingDuration,
   type RecurrenceOption
 } from "@/lib/composeInvite";
 import DialogTitleBar from "@/app/components/mailclient/message/DialogTitleBar";
@@ -85,7 +87,11 @@ export default function EventDialog({
     }
     const startMs = startValue ? inviteInputToMs(startValue, allDay) : Date.now();
     const endMs = endValue ? inviteInputToMs(endValue, allDay) : undefined;
-    const rrule = recurrenceOptionToRRule(recurrence) || undefined;
+    // monthly-by-day needs the start date to derive its BYDAY ordinal; without
+    // it the helper silently downgrades to FREQ=MONTHLY and the user's
+    // "Monthly on the Nth weekday" choice is lost on save.
+    const rrule =
+      recurrenceOptionToRRule(recurrence, parseLocalScheduleDate(startValue)) || undefined;
 
     setSaving(true);
     setError("");
@@ -170,10 +176,27 @@ export default function EventDialog({
             startValue={startValue}
             endValue={endValue}
             allDay={allDay}
-            recurrenceRule={recurrenceOptionToRRule(recurrence)}
+            recurrenceRule={recurrenceOptionToRRule(recurrence, parseLocalScheduleDate(startValue))}
             location={location}
             disabled={saving || deleting}
-            onStartValueChange={setStartValue}
+            onStartValueChange={(value) => {
+              // Slide the end alongside the start so duration is preserved.
+              // Editing the end directly (below) is the only way to change duration.
+              //
+              // Skip the duration-shift when the new value's shape (date-only
+              // vs date+time) contradicts the current `allDay` closure — that
+              // happens when the All-day toggle just flipped and queued
+              // setAllDay; the toggle handler will overwrite endValue itself.
+              const nextHasTime = value.includes("T");
+              const shapeMatchesAllDay = nextHasTime === !allDay;
+              if (!shapeMatchesAllDay) {
+                setStartValue(value);
+                return;
+              }
+              const nextEnd = shiftEndPreservingDuration(startValue, value, endValue, allDay);
+              setStartValue(value);
+              if (nextEnd !== endValue) setEndValue(nextEnd);
+            }}
             onEndValueChange={setEndValue}
             onAllDayChange={setAllDay}
             onRecurrenceRuleChange={(value) => setRecurrence(rruleToOption(value))}
