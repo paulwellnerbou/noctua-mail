@@ -5334,6 +5334,7 @@ export default function MailClient({
         ensureMessageContent={ensureMessageContent}
         applyRecipientSelection={applyRecipientSelection}
         loadRecipientOptions={loadRecipientOptions}
+        clearRecipientSuggestionCache={clearRecipientSuggestionCache}
         getComposeToken={getComposeToken}
         formatRelativeTime={formatRelativeTime}
         fromValue={getAccountFromValue(currentAccount)}

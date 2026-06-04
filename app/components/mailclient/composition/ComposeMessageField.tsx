@@ -288,13 +288,13 @@ export default function ComposeMessageField({
         <div className={composeStyles.composeTabs}>
           <Tabs.Root value={composeTab} onValueChange={(value) => switchComposeTab(value as ComposeTab)}>
             <Tabs.List size="1" className={threadStyles.tabsList}>
-              <Tabs.Trigger value="html" className={threadStyles.tabTrigger}>
+              <Tabs.Trigger value="html" className={threadStyles.tabTrigger} tabIndex={-1}>
                 HTML
               </Tabs.Trigger>
-              <Tabs.Trigger value="markdown" className={threadStyles.tabTrigger}>
+              <Tabs.Trigger value="markdown" className={threadStyles.tabTrigger} tabIndex={-1}>
                 Markdown
               </Tabs.Trigger>
-              <Tabs.Trigger value="text" className={threadStyles.tabTrigger}>
+              <Tabs.Trigger value="text" className={threadStyles.tabTrigger} tabIndex={-1}>
                 Text
               </Tabs.Trigger>
             </Tabs.List>
@@ -303,7 +303,14 @@ export default function ComposeMessageField({
         <div className={composeStyles.composeAttach}>
           <DropdownMenu.Root open={signatureMenuOpen} onOpenChange={setSignatureMenuOpen}>
             <DropdownMenu.Trigger>
-              <Button type="button" size="1" variant="soft" color="gray" title="Choose signature">
+              <Button
+                type="button"
+                size="1"
+                variant="soft"
+                color="gray"
+                title="Choose signature"
+                tabIndex={-1}
+              >
                 {selectedSignature ? selectedSignature.name : "Signature"}
                 <ChevronDownIcon width={14} height={14} />
               </Button>
@@ -341,6 +348,7 @@ export default function ComposeMessageField({
             color="gray"
             title="Add attachment"
             onClick={() => composeAttachmentInputRef.current?.click()}
+            tabIndex={-1}
           >
             <Paperclip size={12} />
             Attach

@@ -151,6 +151,7 @@ export default function ComposeInviteSection({
           variant={enabled ? "soft" : "outline"}
           color={enabled ? "indigo" : "gray"}
           disabled={disabled}
+          tabIndex={-1}
           onClick={() => {
             if (enabled) {
               pendingParentEchoDraftsRef.current = [];

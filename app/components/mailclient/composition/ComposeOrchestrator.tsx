@@ -179,6 +179,7 @@ export type ComposeOrchestratorProps = {
     focusAfter?: "to" | "cc" | "bcc" | null
   ) => string;
   loadRecipientOptions: (query: string, signal: AbortSignal) => Promise<RecipientSuggestion[]>;
+  clearRecipientSuggestionCache: (accountId: string) => void;
   getComposeToken: (value: string) => string;
   formatRelativeTime: (timestamp: number | null) => string;
   fromValue: string;
@@ -258,6 +259,7 @@ function ComposeOrchestratorImpl(
     ensureMessageContent,
     applyRecipientSelection,
     loadRecipientOptions,
+    clearRecipientSuggestionCache,
     getComposeToken,
     formatRelativeTime,
     fromValue,
@@ -750,6 +752,7 @@ function ComposeOrchestratorImpl(
         ) {
           await refreshMailboxData();
         }
+        clearRecipientSuggestionCache(activeAccountId);
         pushNotice({
           type: "success",
           title: "Email sent.",
