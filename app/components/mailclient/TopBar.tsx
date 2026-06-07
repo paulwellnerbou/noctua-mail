@@ -210,7 +210,7 @@ export default function TopBar({
         <div className={styles.brandMark} aria-hidden>
           <Image
             className={styles.brandIcon}
-            src="/icon.png"
+            src="/icons/icon-192.png"
             alt=""
             width={44}
             height={44}
