@@ -155,7 +155,7 @@ export function useReminderNotifications({
       const notificationOptions = {
         body,
         tag,
-        icon: "/icon.png",
+        icon: "/icons/icon-192.png",
         badge: "/favicon.png",
         data: {
           url: targetUrl,
