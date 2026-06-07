@@ -59,6 +59,19 @@
   outline: 2px solid var(--accent-a6);
 }
 
+/* The "＋ Event" create action reads as the primary toolbar button. */
+.fc .fc-addEvent-button.fc-button {
+  background-color: var(--accent-9);
+  border-color: var(--accent-9);
+  color: var(--accent-contrast, #fff);
+  font-weight: 600;
+}
+
+.fc .fc-addEvent-button.fc-button:not(:disabled):hover {
+  background-color: var(--accent-10);
+  border-color: var(--accent-10);
+}
+
 .fc .fc-button-primary:not(:disabled):active,
 .fc .fc-button-primary:not(:disabled).fc-button-active {
   background-color: var(--accent-9);
