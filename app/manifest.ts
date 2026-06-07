@@ -11,19 +11,22 @@ export default function manifest(): MetadataRoute.Manifest {
     display: "standalone",
     background_color: "#f3f1ec",
     theme_color: APP_THEME_COLOR,
+    // Served by app/icons/badged/[size]/route.ts, which overlays the
+    // environment badge when APP_ENV_LABEL is set so installed PWAs are
+    // distinguishable (and returns the plain base art otherwise).
     icons: [
       {
-        src: "/icons/icon-192.png",
+        src: "/icons/badged/192",
         sizes: "192x192",
         type: "image/png"
       },
       {
-        src: "/icons/icon-512.png",
+        src: "/icons/badged/512",
         sizes: "512x512",
         type: "image/png"
       },
       {
-        src: "/favicon.png",
+        src: "/icons/badged/32",
         sizes: "32x32",
         type: "image/png"
       }
