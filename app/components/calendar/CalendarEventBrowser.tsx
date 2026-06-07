@@ -11,7 +11,15 @@ import { dispatchCalendarRemindersUpdatedEvent } from "@/app/components/mailclie
 import { useInAppNotices } from "@/app/components/mailclient/useInAppNotices";
 import { dispatchCalendarEventsUpdatedEvent } from "./calendarEventsClient";
 import EventDetailPanel from "./EventDetailPanel";
+import EventDialog from "./EventDialog";
 import type { CalendarEventDeleteAction } from "./EventDetailView";
+
+type CreateDialogState = {
+  open: boolean;
+  defaultStart?: Date;
+  defaultEnd?: Date;
+  defaultAllDay?: boolean;
+};
 
 const CalendarView = dynamic(() => import("./CalendarView"), { ssr: false });
 
@@ -35,7 +43,57 @@ export default function CalendarEventBrowser({
   const [selectedEvent, setSelectedEvent] = useState<CalendarEvent | CalendarReminder | null>(null);
   const [selectedKind, setSelectedKind] = useState<"event" | "reminder" | null>(null);
   const [selectedOccurrenceStartAtMs, setSelectedOccurrenceStartAtMs] = useState<number | undefined>();
+  const [createDialog, setCreateDialog] = useState<CreateDialogState>({ open: false });
   const { inAppNotices, pushNotice, dismissNotice } = useInAppNotices();
+
+  // Toolbar "＋ Event": open a blank dialog (EventDialog defaults to now → +1h).
+  const handleCreateEvent = useCallback(() => {
+    setCreateDialog({ open: true });
+  }, []);
+
+  // Clicking an empty day/slot pre-fills the new-event dialog with that time.
+  // Month-view (and the all-day lane) clicks arrive as all-day; week/day slot
+  // clicks carry the slot time.
+  const handleDateClick = useCallback((date: Date, allDay: boolean) => {
+    if (allDay) {
+      // FullCalendar (timeZone: "local") reports an all-day cell as *local*
+      // midnight, but the app stores all-day events as UTC midnight (see
+      // inviteInputToMs / msToDateLocal, which read UTC components). Rebuild
+      // UTC midnight from the local Y/M/D so the dialog pre-fills the day that
+      // was clicked rather than the previous day for users east of UTC.
+      const utcMidnight = new Date(
+        Date.UTC(date.getFullYear(), date.getMonth(), date.getDate())
+      );
+      setCreateDialog({
+        open: true,
+        defaultStart: utcMidnight,
+        defaultEnd: utcMidnight,
+        defaultAllDay: true
+      });
+      return;
+    }
+    const end = new Date(date.getTime() + 60 * 60 * 1000);
+    setCreateDialog({ open: true, defaultStart: date, defaultEnd: end, defaultAllDay: false });
+  }, []);
+
+  const handleCloseCreate = useCallback(() => {
+    setCreateDialog((prev) => ({ ...prev, open: false }));
+  }, []);
+
+  const handleEventCreated = useCallback(
+    (event: CalendarEvent) => {
+      setCreateDialog({ open: false });
+      dispatchCalendarEventsUpdatedEvent();
+      dispatchCalendarRemindersUpdatedEvent();
+      pushNotice({
+        type: "success",
+        title: "Event created.",
+        description: event.summary,
+        durationMs: NOTICE_TIMEOUTS.success
+      });
+    },
+    [pushNotice]
+  );
 
   const handleEventClick = (
     event: CalendarEvent | CalendarReminder,
@@ -130,12 +188,23 @@ export default function CalendarEventBrowser({
       calendarRef={calendarRef}
       firstDay={firstDay}
       onEventClick={handleEventClick}
+      onDateClick={handleDateClick}
+      onCreateEvent={handleCreateEvent}
     />
   );
 
   return (
     <>
       {content}
+      <EventDialog
+        open={createDialog.open}
+        accountId={accountId}
+        defaultStart={createDialog.defaultStart}
+        defaultEnd={createDialog.defaultEnd}
+        defaultAllDay={createDialog.defaultAllDay}
+        onClose={handleCloseCreate}
+        onSaved={handleEventCreated}
+      />
       <InAppNoticeStack
         className="inapp-notice-stack-pane"
         state={{ inAppNotices }}

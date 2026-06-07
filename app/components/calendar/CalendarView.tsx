@@ -37,7 +37,9 @@ type Props = {
     kind: "event" | "reminder",
     occurrenceStartAtMs?: number
   ) => void;
-  onDateClick?: (date: Date) => void;
+  onDateClick?: (date: Date, allDay: boolean) => void;
+  /** Opens the new-event dialog (wired to the toolbar "＋ Event" button). */
+  onCreateEvent?: () => void;
   calendarRef?: React.RefObject<FullCalendar | null>;
 };
 
@@ -141,6 +143,7 @@ export default function CalendarView({
   firstDay = 1,
   onEventClick,
   onDateClick,
+  onCreateEvent,
   calendarRef: externalRef
 }: Props) {
   const dateFormat = useAccountDateFormat();
@@ -229,8 +232,8 @@ export default function CalendarView({
   );
 
   const handleDateClick = useCallback(
-    (arg: { date: Date }) => {
-      onDateClick?.(arg.date);
+    (arg: { date: Date; allDay: boolean }) => {
+      onDateClick?.(arg.date, arg.allDay);
     },
     [onDateClick]
   );
@@ -313,9 +316,22 @@ export default function CalendarView({
           eventMinHeight: 10
         }
       }}
+      customButtons={
+        onCreateEvent
+          ? {
+              addEvent: {
+                // FullCalendar buttons are text-only; the leading "＋" reads as
+                // a create affordance and `hint` supplies the title/aria-label.
+                text: "＋ Event",
+                hint: "New event",
+                click: () => onCreateEvent()
+              }
+            }
+          : undefined
+      }
       headerToolbar={{
-        left: "prev,next today",
-        center: "title",
+        left: onCreateEvent ? "addEvent today" : "today",
+        center: "prev,title,next",
         right: "dayGridMonth,timeGridWeek,timeGridDay"
       }}
       firstDay={firstDay}

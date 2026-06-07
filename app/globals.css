@@ -77,6 +77,16 @@ body {
   min-height: 100%;
 }
 
+/* Radix Themes dialog overlays portal into `.radix-themes` with z-index: auto.
+   The floating calendar popover is position: fixed at z-index 9990, and a
+   fixed-position element always forms a stacking context — so a dialog opened
+   from the popover (e.g. EventDialog via the "＋ Event" button) would paint
+   *behind* it. Lift dialog overlays above the popover (still below the 9999
+   auth overlay, which is never shown alongside an app dialog). */
+.rt-BaseDialogOverlay {
+  z-index: 9995;
+}
+
 button {
   white-space: nowrap;
 }
