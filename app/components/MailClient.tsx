@@ -577,7 +577,6 @@ export default function MailClient({
   const [bulkContextMenuSelection, setBulkContextMenuSelection] = useState<string[]>([]);
   const bulkContextMenuReturnFocusRef = useRef<HTMLElement | null>(null);
   const messageViewHandleRef = useRef<MessageViewOrchestratorHandle | null>(null);
-  const [appEnvironmentLabel, setAppEnvironmentLabel] = useState("");
   const [authState, setAuthState] = useState<"loading" | "ok" | "unauth">("loading");
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const isAdminUser = currentUser?.role === "admin";
@@ -3705,19 +3704,6 @@ export default function MailClient({
   }, [accounts, activeAccountId, clientId, messageByMessageId, switchAccount]);
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    const runtimeConfig = (
-      window as Window & {
-        __NOCTUA_RUNTIME_CONFIG__?: {
-          appEnvironmentLabel?: string;
-        };
-      }
-    ).__NOCTUA_RUNTIME_CONFIG__;
-    const nextLabel = runtimeConfig?.appEnvironmentLabel?.trim() ?? "";
-    setAppEnvironmentLabel((prev) => (prev === nextLabel ? prev : nextLabel));
-  }, []);
-
-  useEffect(() => {
     if (authState !== "ok" || !sessionTtlSeconds) return;
     const intervalMs = Math.max(
       60_000,
@@ -4870,7 +4856,6 @@ export default function MailClient({
     <div className="app-shell">
       <TopBar
         buildVersionLabel={buildVersionLabel}
-        appEnvironmentLabel={appEnvironmentLabel}
         state={{
           query,
           searchScope,

@@ -24,7 +24,6 @@ import { badgeColors } from "@/lib/ui/badgeColors";
 import { SEARCH_BADGE_OPTIONS, SEARCH_FIELD_OPTIONS } from "@/lib/ui/searchFilters";
 import type { Account, Folder } from "@/lib/data";
 import type { SyncTriggerOptions } from "./types";
-import EnvironmentLabel from "./EnvironmentLabel";
 import styles from "./TopBar.module.css";
 
 type SearchFields = {
@@ -52,7 +51,6 @@ type ComposeMode = "new" | "reply" | "replyAll" | "forward" | "edit" | "editAsNe
 
 type TopBarProps = {
   buildVersionLabel?: string;
-  appEnvironmentLabel?: string;
   state: {
     query: string;
     searchScope: "folder" | "all";
@@ -100,7 +98,6 @@ type TopBarProps = {
 
 export default function TopBar({
   buildVersionLabel = "",
-  appEnvironmentLabel = "",
   state,
   ui,
   actions
@@ -210,7 +207,7 @@ export default function TopBar({
         <div className={styles.brandMark} aria-hidden>
           <Image
             className={styles.brandIcon}
-            src="/icons/icon-192.png"
+            src="/icons/badged/192"
             alt=""
             width={44}
             height={44}
@@ -221,12 +218,6 @@ export default function TopBar({
         <div className={styles.brandText}>
           <div className={styles.brandTitleWrap}>
             <h1 className={styles.brandTitle}>Noctua Mail</h1>
-            {appEnvironmentLabel ? (
-              <EnvironmentLabel
-                label={appEnvironmentLabel}
-                className={styles.brandEnvLabel}
-              />
-            ) : null}
           </div>
           {buildVersionLabel ? (
             <div className={styles.brandVersion} title={`Build ${buildVersionLabel}`}>
