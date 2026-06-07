@@ -331,7 +331,7 @@ export default function CalendarView({
       }
       headerToolbar={{
         left: onCreateEvent ? "addEvent today" : "today",
-        center: "prev,title,next",
+        center: "prev title next",
         right: "dayGridMonth,timeGridWeek,timeGridDay"
       }}
       firstDay={firstDay}

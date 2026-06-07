@@ -48,6 +48,15 @@
   color: var(--text);
 }
 
+/* FullCalendar renders each toolbar chunk as a plain block <div>. The center
+   chunk holds prev, the <h2> title, and next; because the title is a block
+   element it would push the arrows onto their own lines. Lay the chunk out as
+   a centered inline row so the nav reads "< June 2026 >". */
+.fc .fc-toolbar-chunk {
+  display: flex;
+  align-items: center;
+}
+
 .fc .fc-button {
   padding: 0.3em 0.65em;
   font-size: 0.8em;
