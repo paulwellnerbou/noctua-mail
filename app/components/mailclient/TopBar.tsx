@@ -1,5 +1,3 @@
-import Image from "next/image";
-
 import type React from "react";
 import {
   CheckSquare2,
@@ -205,14 +203,16 @@ export default function TopBar({
     <header className={styles.topBar}>
       <div className={styles.brand}>
         <div className={styles.brandMark} aria-hidden>
-          <Image
+          {/* Vector logo with the env ribbon, rendered server-side from
+              APP_ENV_LABEL. Plain <img> (not next/image) to serve the SVG
+              unoptimized so it stays crisp at any size. */}
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
             className={styles.brandIcon}
-            src="/icons/badged/192"
+            src="/icons/logo.svg"
             alt=""
             width={44}
             height={44}
-            quality={85}
-            priority
           />
         </div>
         <div className={styles.brandText}>
