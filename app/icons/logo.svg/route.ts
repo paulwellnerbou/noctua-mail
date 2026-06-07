@@ -27,7 +27,7 @@ function ribbonMarkup(label: string) {
   const text = escapeXml(label.toUpperCase());
   // Shrink the font for longer labels so they stay within the band.
   const fontScale = Math.min(1, 4 / Math.max(label.length, 4));
-  const fontSize = Math.round(216 * fontScale);
+  const fontSize = Math.round(306 * fontScale);
   const cx = 1340;
   const cy = 260;
   const rotate = `rotate(45 ${cx} ${cy})`;
@@ -39,7 +39,7 @@ function ribbonMarkup(label: string) {
     `<feDropShadow dx="0" dy="6" stdDeviation="8" flood-color="#000000" flood-opacity="0.3"/>` +
     `</filter>` +
     `</defs>` +
-    `<rect x="-10" y="120" width="2700" height="279" fill="#c94f00" ` +
+    `<rect x="-10" y="71" width="2700" height="378" fill="#c94f00" ` +
     `filter="url(#ribbonShadow)" transform="${rotate}"/>` +
     `<text x="${cx}" y="${cy}" transform="${rotate}" fill="#ffffff" ` +
     `font-family="-apple-system, system-ui, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif" ` +

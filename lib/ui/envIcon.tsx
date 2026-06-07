@@ -53,14 +53,14 @@ export async function renderEnvIcon(opts: {
   // Scale the pill to the icon and shrink the font for longer labels so it
   // still fits within the pill at small sizes.
   const fontScale = Math.min(1, 4 / Math.max(text.length, 4));
-  const fontSize = Math.max(7, Math.round(size * 0.12 * fontScale));
+  const fontSize = Math.max(7, Math.round(size * 0.17 * fontScale));
 
   // A corner ribbon across the top-right: a solid band rotated 45° whose ends
   // run off the top and right edges (clipped by the icon frame). `k` sets how
   // far in from the corner the band sits (i.e. how much of the corner it cuts).
   const k = size * 0.2;
   const bandWidth = size * 1.5;
-  const bandHeight = Math.round(size * 0.155);
+  const bandHeight = Math.round(size * 0.21);
   const bandLeft = Math.round(size - k - bandWidth / 2);
   const bandTop = Math.round(k - bandHeight / 2);
 
