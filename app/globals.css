@@ -87,6 +87,15 @@ body {
   z-index: 9995;
 }
 
+/* Radix popper content (Popover/Select/DropdownMenu/Tooltip — e.g. the event
+   form's time picker and "Repeat" dropdown) portals out with z-index: auto.
+   Because the dialog overlay above sits at 9995, a popper opened from inside a
+   dialog would render behind it and look unresponsive. Lift poppers above the
+   dialog (still below the 9999 auth overlay). */
+.rt-PopperContent {
+  z-index: 9998;
+}
+
 button {
   white-space: nowrap;
 }
