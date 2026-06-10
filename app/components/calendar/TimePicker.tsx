@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { Clock } from "lucide-react";
 import { IconButton, Popover, TextField } from "@radix-ui/themes";
 import styles from "./TimePicker.module.css";
@@ -95,18 +95,11 @@ export default function TimePicker({
   ariaLabel
 }: Props) {
   const [draft, setDraft] = useState(value);
+  const [isFocused, setIsFocused] = useState(false);
   const [open, setOpen] = useState(false);
   const listRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLInputElement | null>(null);
-
-  // Keep the visible text in sync when the upstream value changes (e.g. after
-  // the start handler shifts the end). Skip while the input is focused — a
-  // value-prop change arriving mid-typing would otherwise wipe what the user
-  // has typed (e.g. "14:3" → parent commits a shifted end → "11:30").
-  useEffect(() => {
-    if (inputRef.current && document.activeElement === inputRef.current) return;
-    setDraft(value);
-  }, [value]);
+  const skipBlurCommitRef = useRef(false);
 
   const options = useMemo(() => {
     const stepsPerDay = Math.floor((24 * 60) / stepMinutes);
@@ -131,13 +124,28 @@ export default function TimePicker({
     if (parsed !== value) onChange(parsed);
   };
 
+  const handleBlur = () => {
+    if (skipBlurCommitRef.current) {
+      skipBlurCommitRef.current = false;
+      setIsFocused(false);
+      return;
+    }
+    commit(draft);
+    setIsFocused(false);
+  };
+
   const handleKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
     if (event.key === "Enter") {
       event.preventDefault();
       commit(draft);
+      skipBlurCommitRef.current = true;
+      setIsFocused(false);
       (event.target as HTMLInputElement).blur();
     } else if (event.key === "Escape") {
+      event.preventDefault();
       setDraft(value);
+      skipBlurCommitRef.current = true;
+      setIsFocused(false);
       (event.target as HTMLInputElement).blur();
     }
   };
@@ -163,10 +171,14 @@ export default function TimePicker({
       <TextField.Root
         ref={inputRef}
         className={styles.input}
-        value={draft}
+        value={isFocused ? draft : value}
         placeholder="HH:MM"
         onChange={(event) => setDraft(event.target.value)}
-        onBlur={() => commit(draft)}
+        onFocus={() => {
+          setDraft(value);
+          setIsFocused(true);
+        }}
+        onBlur={handleBlur}
         onKeyDown={handleKeyDown}
         disabled={disabled}
         aria-label={ariaLabel}

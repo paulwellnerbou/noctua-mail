@@ -17,6 +17,7 @@ export {
   getAttachmentMeta,
   getMessageById,
   getStoredMessagesByIds,
+  type StoredMessageSummary,
   listFolderMessageUidAndFlagRows,
   listFolderMessageUidRows,
   listMessageFileRefs,

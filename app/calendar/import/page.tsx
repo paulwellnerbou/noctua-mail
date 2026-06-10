@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
 import { Text } from "@radix-ui/themes";
 import { postIcsImport } from "@/lib/calendarImportClient";
@@ -33,18 +33,15 @@ async function readFile(handle: FileSystemFileHandle): Promise<{ name: string; t
 export default function CalendarImportPage() {
   const router = useRouter();
   const [state, setState] = useState<ImportState>({ kind: "waiting" });
+  const launchQueue = useSyncExternalStore(
+    () => () => {},
+    () => window.launchQueue ?? null,
+    () => undefined
+  );
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    const queue = window.launchQueue;
-    if (!queue) {
-      setState({
-        kind: "error",
-        message: "This browser does not support PWA file handling. Drop the .ics onto the calendar inside the app instead."
-      });
-      return;
-    }
-    queue.setConsumer(async (params) => {
+    if (!launchQueue) return;
+    launchQueue.setConsumer(async (params) => {
       const files = params.files ?? [];
       if (files.length === 0) {
         setState({ kind: "error", message: "No file was provided." });
@@ -96,17 +93,25 @@ export default function CalendarImportPage() {
         });
       }
     });
-  }, [router]);
+  }, [launchQueue, router]);
+
+  const displayState =
+    state.kind === "waiting" && launchQueue === null
+      ? {
+          kind: "error" as const,
+          message: "This browser does not support PWA file handling. Drop the .ics onto the calendar inside the app instead."
+        }
+      : state;
 
   return (
     <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100vh", padding: "2rem" }}>
       <div style={{ textAlign: "center", maxWidth: 480 }}>
-        {state.kind === "waiting" && <Text size="3" color="gray">Waiting for calendar file…</Text>}
-        {state.kind === "importing" && (
-          <Text size="3" color="gray">Importing {state.filename}…</Text>
+        {displayState.kind === "waiting" && <Text size="3" color="gray">Waiting for calendar file…</Text>}
+        {displayState.kind === "importing" && (
+          <Text size="3" color="gray">Importing {displayState.filename}…</Text>
         )}
-        {state.kind === "error" && (
-          <Text size="3" color="red">{state.message}</Text>
+        {displayState.kind === "error" && (
+          <Text size="3" color="red">{displayState.message}</Text>
         )}
       </div>
     </div>

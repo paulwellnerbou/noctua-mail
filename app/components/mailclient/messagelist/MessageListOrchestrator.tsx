@@ -349,34 +349,41 @@ export default function MessageListOrchestrator({
   searchScope,
   mutationInputs
 }: MessageListOrchestratorProps) {
-  const [messageView, setMessageView] = useState<MessageViewMode>("threads");
-  // `defaultMessageView` arrives asynchronously (it's resolved from the
-  // user's account settings after the component first renders) and can
-  // change at runtime when the user edits their layout preference — so
-  // a lazy `useState` initializer would miss the first value and all
-  // subsequent changes. An effect subscribes instead.
-  useEffect(() => {
-    if (isValidMessageViewMode(defaultMessageView)) {
-      setMessageView(defaultMessageView);
-    }
-  }, [defaultMessageView]);
+  const resolvedDefaultMessageView = isValidMessageViewMode(defaultMessageView)
+    ? defaultMessageView
+    : null;
+  const [messageViewState, setMessageViewState] = useState<{
+    sourceDefault: MessageViewMode | null;
+    value: MessageViewMode;
+  }>(() => ({
+    sourceDefault: resolvedDefaultMessageView,
+    value: resolvedDefaultMessageView ?? "threads"
+  }));
+  const messageView =
+    messageViewState.sourceDefault === resolvedDefaultMessageView
+      ? messageViewState.value
+      : resolvedDefaultMessageView ?? "threads";
+  const setMessageView: React.Dispatch<React.SetStateAction<MessageViewMode>> = (next) => {
+    setMessageViewState((current) => {
+      const currentValue =
+        current.sourceDefault === resolvedDefaultMessageView
+          ? current.value
+          : resolvedDefaultMessageView ?? "threads";
+      return {
+        sourceDefault: resolvedDefaultMessageView,
+        value: typeof next === "function" ? next(currentValue) : next
+      };
+    });
+  };
   // Render the list with a deferred value so rapid header toggles (e.g.
   // keyboard shortcuts stepping through views) don't block the UI while
   // the new view's layout computes.
   const deferredMessageView = useDeferredValue(messageView);
   const isCompactView = deferredMessageView === "compact";
 
-  // Selection state (phase 4c). The store itself is stable across
-  // renders — seeded once via the ref guard pattern used previously in
-  // MailClient — so handlers can capture it without re-running their
-  // useCallbacks.
-  const selectionStoreRef = useRef<SelectionStore | null>(null);
-  if (!selectionStoreRef.current) {
-    selectionStoreRef.current = createSelectionStore(
-      mutationInputs.activeMessageId || null
-    );
-  }
-  const selectionStore = selectionStoreRef.current;
+  const [selectionStore] = useState<SelectionStore>(() =>
+    createSelectionStore(mutationInputs.activeMessageId || null)
+  );
   const lastSelectedIdRef = useRef<string | null>(null);
 
   const { handleMoveMessages, moveMessagesToFolder } = useMessageMoveActions({

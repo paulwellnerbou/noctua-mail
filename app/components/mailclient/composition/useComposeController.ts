@@ -151,12 +151,15 @@ export function useComposeController({
     composeBaselineHashRef.current = null;
     composeDirtyRef.current = false;
     composeEditorInitRef.current = false;
-    if (compose.draftSaveTimerRef.current !== null) {
-      clearTimeout(compose.draftSaveTimerRef.current);
-      compose.draftSaveTimerRef.current = null;
+    const draftSaveTimerRef = compose.draftSaveTimerRef;
+    const pendingDraftSaveRef = compose.pendingDraftSaveRef;
+    const composeSessionVersionRef = compose.composeSessionVersionRef;
+    if (draftSaveTimerRef.current !== null) {
+      clearTimeout(draftSaveTimerRef.current);
+      draftSaveTimerRef.current = null;
     }
-    compose.pendingDraftSaveRef.current = null;
-    compose.composeSessionVersionRef.current += 1;
+    pendingDraftSaveRef.current = null;
+    composeSessionVersionRef.current += 1;
     setDraftSaving(false);
     setDraftSavedAt(null);
     setDraftSaveError(null);
