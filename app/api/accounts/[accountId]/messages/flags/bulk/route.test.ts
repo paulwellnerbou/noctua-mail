@@ -2,8 +2,8 @@ import { randomUUID } from "crypto";
 import { beforeEach, describe, expect, mock, test } from "bun:test";
 import type { Account } from "@/lib/data";
 import { sealSession, type SessionData } from "@/lib/auth";
+import type { StoredMessageSummary } from "@/lib/db";
 import { dbModulePromise } from "@/lib/testDbHarness";
-import type { StoredMessageSummary } from "@/lib/db/messages/retrieval";
 import { applyFlagMutationsToMessages } from "@/lib/messageFlagMutation";
 
 // `@/lib/db` (only `getStoredMessagesByIds`), `@/lib/serverImap` (only

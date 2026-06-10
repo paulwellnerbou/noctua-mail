@@ -5,6 +5,7 @@ export {
 } from "./db/connection";
 import {
   type GroupMeta,
+  type StoredMessageSummary,
   getAttachmentIds,
   getAttachmentMeta,
   getMessageById,
@@ -20,6 +21,7 @@ import {
 } from "./db/messages";
 export {
   type GroupMeta,
+  type StoredMessageSummary,
   getAttachmentIds,
   getAttachmentMeta,
   getMessageById,

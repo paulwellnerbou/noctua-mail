@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type Dispatch, type SetStateAction } from "react";
 import type { AccountDateFormat, CalendarEvent, Folder } from "@/lib/data";
 import { formatAccountMediumDateTime } from "@/lib/dateFormatting";
 import type { CalendarReminder } from "../utils/calendarReminders";
@@ -13,6 +13,8 @@ import ProcessStatusPopover from "./ProcessStatusPopover";
 import UpcomingStatusPopover from "./UpcomingStatusPopover";
 import ExceptionStatusPopover from "./ExceptionStatusPopover";
 import CalendarPopover from "@/app/components/calendar/CalendarPopover";
+
+export type BottomStatusPanel = "process" | "exception" | "reminder" | "calendar" | null;
 
 type BottomStatusBarProps = {
   isSyncing: boolean;
@@ -30,11 +32,8 @@ type BottomStatusBarProps = {
   onReportError: (message: string) => void;
   exceptionEntries: ExceptionEntry[];
   onClearExceptions: () => void;
-  // Bumping this counter (e.g. from a clicked toast) opens the exception popover.
-  openExceptionPanelRequest?: number;
-  // Bumping this counter (e.g. after a PWA file-handler ICS import) opens the
-  // calendar popover.
-  openCalendarPanelRequest?: number;
+  openPanel: BottomStatusPanel;
+  setOpenPanel: Dispatch<SetStateAction<BottomStatusPanel>>;
   formatRelativeTime: (timestamp?: number | null) => string;
   onReloginAccount?: (entry: ExceptionEntry) => void;
   onOpenCalendarSidebar: () => void;
@@ -60,8 +59,8 @@ export default function BottomStatusBar({
   onReportError,
   exceptionEntries,
   onClearExceptions,
-  openExceptionPanelRequest,
-  openCalendarPanelRequest,
+  openPanel,
+  setOpenPanel,
   formatRelativeTime,
   onReloginAccount,
   onOpenCalendarSidebar,
@@ -70,26 +69,11 @@ export default function BottomStatusBar({
   calendarFirstDay,
   accountDateFormat
 }: BottomStatusBarProps) {
-  const [processPanelOpen, setProcessPanelOpen] = useState(false);
-  const [exceptionPanelOpen, setExceptionPanelOpen] = useState(false);
-  const [reminderPanelOpen, setReminderPanelOpen] = useState(false);
-  const [calendarPanelOpen, setCalendarPanelOpen] = useState(false);
-
-  useEffect(() => {
-    if (openExceptionPanelRequest === undefined) return;
-    setExceptionPanelOpen(true);
-    setProcessPanelOpen(false);
-    setReminderPanelOpen(false);
-    setCalendarPanelOpen(false);
-  }, [openExceptionPanelRequest]);
-  useEffect(() => {
-    if (openCalendarPanelRequest === undefined) return;
-    setCalendarPanelOpen(true);
-    setProcessPanelOpen(false);
-    setReminderPanelOpen(false);
-    setExceptionPanelOpen(false);
-  }, [openCalendarPanelRequest]);
   const [currentTimeMs, setCurrentTimeMs] = useState<number | null>(null);
+  const processPanelOpen = openPanel === "process";
+  const exceptionPanelOpen = openPanel === "exception";
+  const reminderPanelOpen = openPanel === "reminder";
+  const calendarPanelOpen = openPanel === "calendar";
 
   const currentDateTimeLabel = useMemo(
     () => (currentTimeMs === null ? "" : formatAccountMediumDateTime(currentTimeMs, accountDateFormat) ?? ""),
@@ -115,39 +99,19 @@ export default function BottomStatusBar({
   }, []);
 
   const handleProcessPanelOpenChange = (open: boolean) => {
-    setProcessPanelOpen(open);
-    if (open) {
-      setReminderPanelOpen(false);
-      setExceptionPanelOpen(false);
-      setCalendarPanelOpen(false);
-    }
+    setOpenPanel((current) => (open ? "process" : current === "process" ? null : current));
   };
 
   const handleReminderPanelOpenChange = (open: boolean) => {
-    setReminderPanelOpen(open);
-    if (open) {
-      setProcessPanelOpen(false);
-      setExceptionPanelOpen(false);
-      setCalendarPanelOpen(false);
-    }
+    setOpenPanel((current) => (open ? "reminder" : current === "reminder" ? null : current));
   };
 
   const handleExceptionPanelOpenChange = (open: boolean) => {
-    setExceptionPanelOpen(open);
-    if (open) {
-      setProcessPanelOpen(false);
-      setReminderPanelOpen(false);
-      setCalendarPanelOpen(false);
-    }
+    setOpenPanel((current) => (open ? "exception" : current === "exception" ? null : current));
   };
 
   const handleCalendarPanelOpenChange = (open: boolean) => {
-    setCalendarPanelOpen(open);
-    if (open) {
-      setProcessPanelOpen(false);
-      setReminderPanelOpen(false);
-      setExceptionPanelOpen(false);
-    }
+    setOpenPanel((current) => (open ? "calendar" : current === "calendar" ? null : current));
   };
 
   const mailCheckStatusValue = mailCheckMode === "idle" ? "Idle" : "Polling";

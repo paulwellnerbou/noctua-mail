@@ -29,6 +29,7 @@ import MoveToDialog, { recordRecentMoveFolder, getRecentMoveFolderIds } from "./
 import InAppNoticeStack, { type InAppNotice } from "./mailclient/InAppNoticeStack";
 import DialogsHost from "./mailclient/dialogs/DialogsHost";
 import { useConfirmDialogs } from "./mailclient/dialogs/useConfirmDialogs";
+import type { BottomStatusPanel } from "./mailclient/status/BottomStatusBar";
 import ComposeOrchestrator, {
   type ComposeMirror,
   type ComposeOpenPrefill,
@@ -4544,8 +4545,7 @@ export default function MailClient({
     return false;
   };
 
-  const [openExceptionPanelRequest, setOpenExceptionPanelRequest] = useState<number | undefined>(undefined);
-  const [openCalendarPanelRequest, setOpenCalendarPanelRequest] = useState<number | undefined>(undefined);
+  const [openBottomStatusPanel, setOpenBottomStatusPanel] = useState<BottomStatusPanel>(null);
 
   // The PWA file handler at /calendar/import redirects to "/?openCalendar=1"
   // after importing an .ics, so we open the calendar popover here on mount.
@@ -4553,7 +4553,7 @@ export default function MailClient({
     if (typeof window === "undefined") return;
     const params = new URLSearchParams(window.location.search);
     if (params.get("openCalendar") !== "1") return;
-    setOpenCalendarPanelRequest((prev) => (typeof prev === "number" ? prev + 1 : 1));
+    setOpenBottomStatusPanel("calendar");
     params.delete("openCalendar");
     const query = params.toString();
     const nextUrl = `${window.location.pathname}${query ? `?${query}` : ""}${window.location.hash}`;
@@ -4564,9 +4564,7 @@ export default function MailClient({
     if (jumpTarget) {
       openMessageByExternalMessageId(jumpTarget, "in-app-notice");
     } else if (notice.type === "error") {
-      // Monotonic counter so two rapid clicks always change the state value
-      // (Date.now() can repeat within the same millisecond).
-      setOpenExceptionPanelRequest((prev) => (prev ?? 0) + 1);
+      setOpenBottomStatusPanel("exception");
     } else {
       const inbox = inboxFolderRef.current;
       if (inbox) {
@@ -5499,8 +5497,8 @@ export default function MailClient({
         onClearExceptions={() => {
           setExceptionEntries([]);
         }}
-        openExceptionPanelRequest={openExceptionPanelRequest}
-        openCalendarPanelRequest={openCalendarPanelRequest}
+        openPanel={openBottomStatusPanel}
+        setOpenPanel={setOpenBottomStatusPanel}
         formatRelativeTime={formatRelativeTime}
         onReloginAccount={handleOpenReloginFromException}
         onOpenCalendarSidebar={() => setCalendarSidebarOpen(true)}
