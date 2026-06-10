@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, type Dispatch, type SetStateAction } from "react";
+import { useEffect, useMemo, useState, type Dispatch, type SetStateAction } from "react";
 import type { AccountDateFormat, CalendarEvent, Folder } from "@/lib/data";
 import { formatAccountMediumDateTime } from "@/lib/dateFormatting";
 import type { CalendarReminder } from "../utils/calendarReminders";

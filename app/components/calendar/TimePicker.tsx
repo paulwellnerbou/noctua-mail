@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { Clock } from "lucide-react";
 import { IconButton, Popover, TextField } from "@radix-ui/themes";
 import styles from "./TimePicker.module.css";
