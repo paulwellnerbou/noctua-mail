@@ -87,6 +87,9 @@ function reminderToFcEvent(r: CalendarReminder): EventInput {
 }
 
 const CALENDAR_VIEW_KEY = "noctua:calendarView";
+// sessionStorage so reopening the app starts at today, while navigating
+// away (event detail unmounts FullCalendar) and back restores the spot.
+const CALENDAR_DATE_KEY = "noctua:calendarDate";
 const ALLOWED_VIEWS = ["dayGridMonth", "timeGridWeek", "timeGridDay"];
 
 function getSavedView(): string {
@@ -95,6 +98,17 @@ function getSavedView(): string {
     if (v && ALLOWED_VIEWS.includes(v)) return v;
   } catch {}
   return "dayGridMonth";
+}
+
+function getSavedDate(): Date | undefined {
+  try {
+    const v = sessionStorage.getItem(CALENDAR_DATE_KEY);
+    if (v) {
+      const ms = Date.parse(v);
+      if (!Number.isNaN(ms)) return new Date(ms);
+    }
+  } catch {}
+  return undefined;
 }
 
 function buildEventHoverTitle(arg: EventMountArg, dateFormat?: AccountDateFormat) {
@@ -154,6 +168,9 @@ export default function CalendarView({
   const fetchRequestIdRef = useRef(0);
   const previousAccountIdRef = useRef<string | null>(null);
   const [initialView] = useState<string>(getSavedView);
+  const [initialDate] = useState<Date | undefined>(() =>
+    compact ? undefined : getSavedDate()
+  );
 
   const fetchEvents = useCallback(
     async (startMs: number, endMs: number) => {
@@ -208,7 +225,14 @@ export default function CalendarView({
 
   const handleDatesSet = useCallback(
     (arg: DatesSetArg) => {
-      try { localStorage.setItem(CALENDAR_VIEW_KEY, arg.view.type); } catch {}
+      if (!compact) {
+        try {
+          localStorage.setItem(CALENDAR_VIEW_KEY, arg.view.type);
+          // currentStart is the interval start (1st of month / week start),
+          // not arg.start, which can bleed into the previous month's days.
+          sessionStorage.setItem(CALENDAR_DATE_KEY, arg.view.currentStart.toISOString());
+        } catch {}
+      }
       const startMs = arg.start.getTime();
       const endMs = arg.end.getTime();
       const prev = fetchRangeRef.current;
@@ -216,7 +240,7 @@ export default function CalendarView({
       fetchRangeRef.current = { startMs, endMs };
       void fetchEvents(startMs, endMs);
     },
-    [fetchEvents]
+    [compact, fetchEvents]
   );
 
   const handleEventClick = useCallback(
@@ -309,6 +333,7 @@ export default function CalendarView({
       ref={calendarRef}
       plugins={[dayGridPlugin, timeGridPlugin, interactionPlugin, rrulePlugin]}
       initialView={initialView}
+      initialDate={initialDate}
       views={{
         // Keep short events readable without making back-to-back entries tall
         // enough to be treated like overlapping conflicts.
