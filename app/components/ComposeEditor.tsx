@@ -45,11 +45,15 @@ import {
   $getSelection,
   $isDecoratorNode,
   $isElementNode,
+  $isNodeSelection,
   $isRangeSelection,
   $isTextNode,
   COMMAND_PRIORITY_LOW,
+  KEY_BACKSPACE_COMMAND,
+  KEY_DELETE_COMMAND,
   SELECTION_CHANGE_COMMAND,
-  FORMAT_TEXT_COMMAND
+  FORMAT_TEXT_COMMAND,
+  type LexicalEditor
 } from "lexical";
 import { $generateHtmlFromNodes, $generateNodesFromDOM } from "@lexical/html";
 import { TRANSFORMERS } from "@lexical/markdown";
@@ -78,16 +82,23 @@ import {
   $insertTableRowAtSelection,
   $isTableSelection,
   INSERT_TABLE_COMMAND,
-  TableNode,
-  TableCellNode,
-  TableRowNode
+  TableCellNode
 } from "@lexical/table";
 import { $createImageNode, ImageNode } from "./lexical/ImageNode";
-import { $createHtmlBlockNode, HtmlBlockNode } from "./lexical/HtmlBlockNode";
+import {
+  $createQuotedMessageNode,
+  $isQuotedMessageNode,
+  QuotedMessageNode,
+  QUOTED_MESSAGE_EDIT_COMMAND,
+  QUOTED_MESSAGE_REMOVE_COMMAND,
+  QUOTED_MESSAGE_STRIP_IMAGES_COMMAND,
+  QUOTED_MESSAGE_TOGGLE_QUOTE_COMMAND
+} from "./lexical/QuotedMessageNode";
 import {
   ExtendedTableNode,
   ExtendedTableCellNode,
-  ExtendedTableRowNode
+  ExtendedTableRowNode,
+  extendedTableNodeReplacements
 } from "./lexical/ExtendedTableNodes";
 import { CenterNode } from "./lexical/CenterNode";
 import { composeAutoLinkMatchers } from "./composeEditorAutoLink";
@@ -96,10 +107,24 @@ export type ComposeEditorHandle = {
   appendHtmlBlock: (html: string) => void;
 };
 
+export type QuotedMessageConfig = {
+  visible: boolean;
+  html: string;
+  quoteHtml: boolean;
+  canToggleQuote: boolean;
+  canStripImages: boolean;
+  darkMode: boolean;
+  onEdit: () => void;
+  onRemove: () => void;
+  onToggleQuote: () => void;
+  onStripImages: () => void;
+};
+
 type ComposeEditorProps = {
   initialHtml?: string;
   resetKey?: number | string;
   className?: string;
+  quotedMessage?: QuotedMessageConfig;
   onChange: (html: string, text: string) => void;
   onInlineImage?: (file: File, dataUrl: string) => void;
 };
@@ -593,6 +618,29 @@ function ComposeEditable({
   );
 }
 
+// Parses an HTML string and appends the resulting editable Lexical nodes to the
+// root. Returns the number of nodes appended so callers can fall back to an
+// empty paragraph when nothing was importable.
+function $appendNodesFromHtml(editor: LexicalEditor, html: string): number {
+  const root = $getRoot();
+  const parser = new DOMParser();
+  const dom = parser.parseFromString(html, "text/html");
+  const nodes = $generateNodesFromDOM(editor, dom);
+  let appended = 0;
+  nodes.forEach((node) => {
+    if ($isElementNode(node) || $isDecoratorNode(node)) {
+      root.append(node);
+      appended += 1;
+    } else if ($isTextNode(node)) {
+      const paragraph = $createParagraphNode();
+      paragraph.append(node);
+      root.append(paragraph);
+      appended += 1;
+    }
+  });
+  return appended;
+}
+
 function SourceSyncPlugin({
   html,
   showSource
@@ -611,26 +659,9 @@ function SourceSyncPlugin({
     editor.update(() => {
       const root = $getRoot();
       root.clear();
-      if (!html.trim()) {
+      if (!html.trim() || $appendNodesFromHtml(editor, html) === 0) {
         root.append($createParagraphNode());
-        return;
       }
-      const parser = new DOMParser();
-      const dom = parser.parseFromString(html, "text/html");
-      const nodes = $generateNodesFromDOM(editor, dom);
-      if (nodes.length === 0) {
-        root.append($createParagraphNode());
-        return;
-      }
-      nodes.forEach((node) => {
-        if ($isElementNode(node) || $isDecoratorNode(node)) {
-          root.append(node);
-        } else if ($isTextNode(node)) {
-          const paragraph = $createParagraphNode();
-          paragraph.append(node);
-          root.append(paragraph);
-        }
-      });
     });
   }, [editor, html, showSource]);
 
@@ -654,28 +685,9 @@ function ComposerInitializer({
     editor.update(() => {
       const root = $getRoot();
       root.clear();
-      if (!seedHtml.trim()) {
+      if (!seedHtml.trim() || $appendNodesFromHtml(editor, seedHtml) === 0) {
         root.append($createParagraphNode());
-        return;
       }
-      const parser = new DOMParser();
-      const dom = parser.parseFromString(seedHtml, "text/html");
-      const nodes = $generateNodesFromDOM(editor, dom);
-      if (nodes.length === 0) {
-        root.append($createParagraphNode());
-        return;
-      }
-      nodes.forEach((node) => {
-        if ($isElementNode(node) || $isDecoratorNode(node)) {
-          root.append(node);
-          return;
-        }
-        if ($isTextNode(node)) {
-          const paragraph = $createParagraphNode();
-          paragraph.append(node);
-          root.append(paragraph);
-        }
-      });
     });
   }, [editor, initialHtml, resetKey]);
 
@@ -699,7 +711,7 @@ function AppendPlugin({ handleRef }: { handleRef: React.Ref<ComposeEditorHandle>
           if (!onlyEmptyParagraph) {
             root.append($createParagraphNode());
           }
-          root.append($createHtmlBlockNode(html));
+          $appendNodesFromHtml(editor, html);
         });
       }
     }),
@@ -708,10 +720,120 @@ function AppendPlugin({ handleRef }: { handleRef: React.Ref<ComposeEditorHandle>
   return null;
 }
 
+// Mirrors the compose quoted-message state into a visual QuotedMessageNode at
+// the end of the document. The compose state stays the source of truth: node
+// actions only invoke the callbacks, and presence drift (editor resets,
+// source-mode reimports, manual deletions) is healed by re-syncing.
+function QuotedMessagePlugin({ config }: { config: QuotedMessageConfig }) {
+  const [editor] = useLexicalComposerContext();
+  const configRef = useRef(config);
+  // Effects run in declaration order, so the ref is fresh before the sync
+  // effect below reads it.
+  useEffect(() => {
+    configRef.current = config;
+  });
+
+  const syncNode = useCallback(() => {
+    const { visible, html, quoteHtml, canToggleQuote, canStripImages, darkMode } =
+      configRef.current;
+    const payload = { html, quoteHtml, canToggleQuote, canStripImages, darkMode };
+    editor.update(
+      () => {
+        const node = $getRoot().getChildren().find($isQuotedMessageNode);
+        if (!visible) {
+          node?.remove();
+          return;
+        }
+        if (!node) {
+          $getRoot().append($createQuotedMessageNode(payload));
+        } else if (!node.matchesPayload(payload)) {
+          node.setPayload(payload);
+        }
+      },
+      { tag: "history-merge" }
+    );
+  }, [editor]);
+
+  useEffect(() => {
+    syncNode();
+  }, [
+    syncNode,
+    config.visible,
+    config.html,
+    config.quoteHtml,
+    config.canToggleQuote,
+    config.canStripImages,
+    config.darkMode
+  ]);
+
+  useEffect(() => {
+    return editor.registerUpdateListener(({ editorState }) => {
+      const hasNode = editorState.read(() =>
+        $getRoot().getChildren().some($isQuotedMessageNode)
+      );
+      if (hasNode !== configRef.current.visible) syncNode();
+    });
+  }, [editor, syncNode]);
+
+  useEffect(() => {
+    const removeQuotedNodeSelection = (event: KeyboardEvent | null) => {
+      const selection = $getSelection();
+      if (!$isNodeSelection(selection)) return false;
+      const nodes = selection.getNodes();
+      if (nodes.length === 1 && $isQuotedMessageNode(nodes[0])) {
+        event?.preventDefault();
+        configRef.current.onRemove();
+        return true;
+      }
+      return false;
+    };
+    const unregisters = [
+      editor.registerCommand(
+        QUOTED_MESSAGE_EDIT_COMMAND,
+        () => {
+          configRef.current.onEdit();
+          return true;
+        },
+        COMMAND_PRIORITY_LOW
+      ),
+      editor.registerCommand(
+        QUOTED_MESSAGE_REMOVE_COMMAND,
+        () => {
+          configRef.current.onRemove();
+          return true;
+        },
+        COMMAND_PRIORITY_LOW
+      ),
+      editor.registerCommand(
+        QUOTED_MESSAGE_TOGGLE_QUOTE_COMMAND,
+        () => {
+          configRef.current.onToggleQuote();
+          return true;
+        },
+        COMMAND_PRIORITY_LOW
+      ),
+      editor.registerCommand(
+        QUOTED_MESSAGE_STRIP_IMAGES_COMMAND,
+        () => {
+          configRef.current.onStripImages();
+          return true;
+        },
+        COMMAND_PRIORITY_LOW
+      ),
+      editor.registerCommand(KEY_BACKSPACE_COMMAND, removeQuotedNodeSelection, COMMAND_PRIORITY_LOW),
+      editor.registerCommand(KEY_DELETE_COMMAND, removeQuotedNodeSelection, COMMAND_PRIORITY_LOW)
+    ];
+    return () => unregisters.forEach((unregister) => unregister());
+  }, [editor]);
+
+  return null;
+}
+
 const ComposeEditor = forwardRef<ComposeEditorHandle, ComposeEditorProps>(function ComposeEditor({
   initialHtml,
   resetKey,
   className,
+  quotedMessage,
   onChange,
   onInlineImage
 }, ref) {
@@ -748,15 +870,13 @@ const ComposeEditor = forwardRef<ComposeEditorHandle, ComposeEditorProps>(functi
         ListItemNode,
         LinkNode,
         AutoLinkNode,
-        TableNode,
-        TableCellNode,
-        TableRowNode,
         ExtendedTableNode,
         ExtendedTableCellNode,
         ExtendedTableRowNode,
+        ...extendedTableNodeReplacements,
         CenterNode,
         ImageNode,
-        HtmlBlockNode
+        QuotedMessageNode
       ],
       onError(error: Error) {
         throw error;
@@ -801,6 +921,7 @@ const ComposeEditor = forwardRef<ComposeEditorHandle, ComposeEditorProps>(functi
         <AppendPlugin handleRef={ref} />
         <ComposerInitializer initialHtml={initialHtml} resetKey={resetKey} />
         <SourceSyncPlugin html={sourceHtml} showSource={showSource} />
+        {quotedMessage && <QuotedMessagePlugin config={quotedMessage} />}
         <RichTextPlugin
           contentEditable={<ComposeEditable onInlineImage={onInlineImage} />}
           placeholder={<div className={styles.composeEditorPlaceholder}>Write your message…</div>}

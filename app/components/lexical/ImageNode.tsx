@@ -1,5 +1,6 @@
 "use client";
 
+import { useCallback, useEffect, useRef } from "react";
 import type {
   DOMConversionMap,
   DOMConversionOutput,
@@ -8,7 +9,17 @@ import type {
   NodeKey,
   SerializedLexicalNode
 } from "lexical";
-import { DecoratorNode } from "lexical";
+import {
+  $getSelection,
+  $isNodeSelection,
+  CLICK_COMMAND,
+  COMMAND_PRIORITY_LOW,
+  DecoratorNode,
+  KEY_BACKSPACE_COMMAND,
+  KEY_DELETE_COMMAND
+} from "lexical";
+import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
+import { useLexicalNodeSelection } from "@lexical/react/useLexicalNodeSelection";
 
 type SerializedImageNode = {
   src: string;
@@ -123,15 +134,85 @@ export class ImageNode extends DecoratorNode<JSX.Element> {
 
   decorate(): JSX.Element {
     return (
-      <img
+      <ImageComponent
         src={this.__src}
         alt={this.__alt}
         width={this.__width}
         height={this.__height}
-        style={{ maxWidth: "100%", height: "auto" }}
+        nodeKey={this.getKey()}
       />
     );
   }
+}
+
+function ImageComponent({
+  src,
+  alt,
+  width,
+  height,
+  nodeKey
+}: {
+  src: string;
+  alt: string;
+  width?: number;
+  height?: number;
+  nodeKey: NodeKey;
+}) {
+  const [editor] = useLexicalComposerContext();
+  const [isSelected, setSelected, clearSelection] = useLexicalNodeSelection(nodeKey);
+  const imageRef = useRef<HTMLImageElement | null>(null);
+
+  const $onDelete = useCallback(
+    (event: KeyboardEvent) => {
+      const selection = $getSelection();
+      if (!isSelected || !$isNodeSelection(selection)) return false;
+      event.preventDefault();
+      selection.getNodes().forEach((node) => {
+        if ($isImageNode(node)) node.remove();
+      });
+      return true;
+    },
+    [isSelected]
+  );
+
+  useEffect(() => {
+    const unregisters = [
+      editor.registerCommand<MouseEvent>(
+        CLICK_COMMAND,
+        (event) => {
+          if (event.target !== imageRef.current) return false;
+          if (event.shiftKey) {
+            setSelected(!isSelected);
+          } else {
+            clearSelection();
+            setSelected(true);
+          }
+          return true;
+        },
+        COMMAND_PRIORITY_LOW
+      ),
+      editor.registerCommand(KEY_BACKSPACE_COMMAND, $onDelete, COMMAND_PRIORITY_LOW),
+      editor.registerCommand(KEY_DELETE_COMMAND, $onDelete, COMMAND_PRIORITY_LOW)
+    ];
+    return () => unregisters.forEach((unregister) => unregister());
+  }, [editor, isSelected, setSelected, clearSelection, $onDelete]);
+
+  return (
+    <img
+      ref={imageRef}
+      src={src}
+      alt={alt}
+      width={width}
+      height={height}
+      draggable={false}
+      style={{
+        maxWidth: "100%",
+        height: "auto",
+        outline: isSelected ? "2px solid var(--accent, #4f86f7)" : "none",
+        outlineOffset: "1px"
+      }}
+    />
+  );
 }
 
 export function $createImageNode(

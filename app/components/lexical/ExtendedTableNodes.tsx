@@ -17,6 +17,8 @@ import type {
   DOMConversionMap,
   DOMConversionOutput,
   DOMExportOutput,
+  LexicalEditor,
+  LexicalNodeReplacement,
   NodeKey,
   LexicalNode,
   EditorConfig,
@@ -87,10 +89,12 @@ export class ExtendedTableNode extends TableNode {
     };
   }
 
-  exportDOM(): DOMExportOutput {
-    const element = document.createElement("table");
-    setAllAttributes(element, this.__attributes);
-    return { element };
+  exportDOM(editor: LexicalEditor): DOMExportOutput {
+    const output = super.exportDOM(editor);
+    if (output.element instanceof HTMLElement) {
+      setAllAttributes(output.element, this.__attributes);
+    }
+    return output;
   }
 }
 
@@ -155,10 +159,12 @@ export class ExtendedTableCellNode extends TableCellNode {
     };
   }
 
-  exportDOM(): DOMExportOutput {
-    const element = document.createElement(this.__headerState ? "th" : "td");
-    setAllAttributes(element, this.__attributes);
-    return { element };
+  exportDOM(editor: LexicalEditor): DOMExportOutput {
+    const output = super.exportDOM(editor);
+    if (output.element instanceof HTMLElement) {
+      setAllAttributes(output.element, this.__attributes);
+    }
+    return output;
   }
 }
 
@@ -209,10 +215,12 @@ export class ExtendedTableRowNode extends TableRowNode {
     };
   }
 
-  exportDOM(): DOMExportOutput {
-    const element = document.createElement("tr");
-    setAllAttributes(element, this.__attributes);
-    return { element };
+  exportDOM(editor: LexicalEditor): DOMExportOutput {
+    const output = super.exportDOM(editor);
+    if (output.element instanceof HTMLElement) {
+      setAllAttributes(output.element, this.__attributes);
+    }
+    return output;
   }
 }
 
@@ -237,6 +245,30 @@ function convertTableRowElement(domNode: Node): DOMConversionOutput | null {
   node.__attributes = getAllAttributes(domNode);
   return { node };
 }
+
+// Node replacements: built-in table nodes are swapped for the extended ones at
+// creation time. This keeps every table in the editor the same (extended) type,
+// which matters for @lexical/table's selection observer — it watches the
+// registered replacement type, and tables of any other type crash it with
+// "tableObserver not found" on interaction.
+export const extendedTableNodeReplacements: LexicalNodeReplacement[] = [
+  {
+    replace: TableNode,
+    with: () => new ExtendedTableNode(),
+    withKlass: ExtendedTableNode
+  },
+  {
+    replace: TableRowNode,
+    with: (node: TableRowNode) => new ExtendedTableRowNode(node.getHeight()),
+    withKlass: ExtendedTableRowNode
+  },
+  {
+    replace: TableCellNode,
+    with: (node: TableCellNode) =>
+      new ExtendedTableCellNode(node.getHeaderStyles(), node.getColSpan(), node.getWidth()),
+    withKlass: ExtendedTableCellNode
+  }
+];
 
 // Creator functions
 export function $createExtendedTableNode(): ExtendedTableNode {

@@ -273,6 +273,16 @@ export default function ComposeMessageField({
     composeLastEditedRef.current = "html";
   };
 
+  const handleRemoveQuoted = () => {
+    setComposeIncludeOriginal(false);
+    composeDirtyRef.current = true;
+  };
+
+  const handleToggleQuotedHtml = () => {
+    setComposeQuoteHtml((prev) => !prev);
+    composeDirtyRef.current = true;
+  };
+
   return (
     <div className={composeStyles.composeMessageField}>
       <ComposeInviteSection
@@ -462,18 +472,29 @@ export default function ComposeMessageField({
             ref={composeEditorRef}
             initialHtml={composeHtml}
             resetKey={composeEditorReset}
+            quotedMessage={{
+              visible: hasQuotedContent && composeIncludeOriginal,
+              html: previewQuotedHtml,
+              quoteHtml: composeQuoteHtml,
+              canToggleQuote: hasQuotedParts,
+              canStripImages:
+                hasQuotedParts && !composeStripImages && /<img\b/i.test(previewQuotedHtml),
+              darkMode,
+              onEdit: handleEditQuotedHtml,
+              onRemove: handleRemoveQuoted,
+              onToggleQuote: handleToggleQuotedHtml,
+              onStripImages: handleStripImages
+            }}
             onInlineImage={handleInlineImage}
             onChange={(nextHtml, nextText) => {
               setComposeHtml(nextHtml);
               setComposeHtmlText(nextText);
-              const isInitChange = !composeEditorInitRef.current;
               composeEditorInitRef.current = true;
-              if (isInitChange) {
-                const htmlUnchanged = nextHtml === composeHtml;
-                const textUnchanged = nextText === composeHtmlText;
-                if (htmlUnchanged && textUnchanged) {
-                  return;
-                }
+              // Quoted-node syncs and editor seeding fire onChange without
+              // altering the exported content — don't mark the draft dirty
+              // unless the HTML or text actually changed.
+              if (nextHtml === composeHtml && nextText === composeHtmlText) {
+                return;
               }
               composeDirtyRef.current = true;
               composeLastEditedRef.current = "html";
@@ -489,7 +510,21 @@ export default function ComposeMessageField({
           />
         </div>
       )}
-      {(composeTab === "html" || composeTab === "markdown") && hasQuotedContent && (
+      {composeTab === "html" && hasQuotedContent && !composeIncludeOriginal && (
+        <div className={composeStyles.composeQuotedToolbar}>
+          <Button
+            type="button"
+            size="1"
+            color="gray"
+            variant="soft"
+            title="Include the original message as a quote in the reply"
+            onClick={toggleIncludeOriginal}
+          >
+            Include quote
+          </Button>
+        </div>
+      )}
+      {composeTab === "markdown" && hasQuotedContent && (
         <Collapsible.Root
           className={composeStyles.composeQuotedBlock}
           open={isQuotedExpanded}
@@ -520,21 +555,6 @@ export default function ComposeMessageField({
                 Include quote
               </Button>
               <span className={composeStyles.quoteActions}>
-                <Button
-                  type="button"
-                  size="1"
-                  variant="soft"
-                  color="gray"
-                  title={
-                    composeTab === "markdown"
-                      ? "Switch to HTML to move the quoted message into the editor"
-                      : "Move quoted HTML into the message editor for direct editing"
-                  }
-                  onClick={handleEditQuotedHtml}
-                  disabled={!hasQuotedContent || !composeIncludeOriginal || composeTab !== "html"}
-                >
-                  Move to editor
-                </Button>
                 <Button
                   type="button"
                   size="1"

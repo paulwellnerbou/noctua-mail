@@ -1,0 +1,73 @@
+.quotedBlock {
+  border: 1px solid var(--gray-a6);
+  border-radius: var(--radius-3);
+  padding: 6px 10px;
+  background: var(--gray-2);
+  color: var(--gray-12);
+  margin: 12px 0 4px;
+  user-select: none;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 24px;
+}
+
+.trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  box-shadow: none;
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--gray-11);
+}
+
+.trigger:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.caret {
+  display: inline-flex;
+  transition: transform 0.2s ease;
+}
+
+.caretOpen {
+  transform: rotate(90deg);
+}
+
+.actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease;
+}
+
+.quotedBlock:hover .actions,
+.quotedBlock:focus-within .actions {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.content {
+  margin-top: 8px;
+  border-top: 1px solid var(--gray-a5);
+  padding-top: 8px;
+  max-height: min(260px, 30vh);
+  overflow: auto;
+  user-select: text;
+}
+
+.content :global(img) {
+  max-width: 100%;
+  height: auto;
+}
