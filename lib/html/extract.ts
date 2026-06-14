@@ -86,7 +86,11 @@ export function extractBodyContent(input: string) {
   const parts = normalizedCandidates.map((candidate) => {
     const scored = scoreHtmlDocument(candidate);
     const styles = candidate.match(/<style[^>]*>[\s\S]*?<\/style>/gi) ?? [];
-    const bodyMatch = candidate.match(/<body([^>]*)>([\s\S]*?)<\/body>/i);
+    // Greedy body match: some real emails (e.g. ExactTarget/Salesforce sends)
+    // nest a second <body> inside the outer one. A non-greedy match stops at
+    // the first </body>, which closes the inner body right after the header and
+    // drops the entire message. Match through the last </body> instead.
+    const bodyMatch = candidate.match(/<body([^>]*)>([\s\S]*)<\/body>/i);
     const attrs = bodyMatch?.[1] ?? "";
     const classMatch = attrs.match(/class=["']([^"']+)["']/i);
     const styleMatch = attrs.match(/style=["']([^"']+)["']/i);
@@ -120,7 +124,10 @@ export function extractBodyContent(input: string) {
 }
 
 export function extractHtmlBody(value: string) {
-  const match = value.match(/<body[^>]*>([\s\S]*?)<\/body>/i);
+  // Greedy through the last </body>: emails that nest a second <body> inside
+  // the outer one would otherwise be truncated at the first (inner) </body>.
+  // See the matching note in extractBodyContent.
+  const match = value.match(/<body[^>]*>([\s\S]*)<\/body>/i);
   if (match?.[1]) return match[1];
   return value;
 }

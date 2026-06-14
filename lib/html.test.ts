@@ -397,6 +397,24 @@ describe("extractBodyContent", () => {
     expect(result.bodyAttrs.style).toBe("font-size:14px");
     expect(result.styles).toEqual(["<style>.x{color:red}</style>"]);
   });
+
+  it("keeps content after a nested second body tag", () => {
+    const html = [
+      '<html><head></head><body bgcolor="#FFFFFF" style="margin:0">',
+      "<table><tr><td>",
+      '<body id="body" style="background-color:#FFFFFF">',
+      "<img src=\"https://example.com/logo.png\" alt=\"\">",
+      "</body>",
+      "<div>Terms of service body text</div>",
+      "</td></tr></table>",
+      "</body></html>"
+    ].join("");
+
+    const result = extractBodyContent(html);
+
+    expect(result.body).toContain("Terms of service body text");
+    expect(result.bodyAttrs.style).toBe("margin:0");
+  });
 });
 
 describe("shouldShowHtmlViewerFrame", () => {
@@ -500,6 +518,21 @@ describe("assembleQuotedHtml", () => {
       "@media only screen and (max-width: 639px){#noctua-quoted-html .noctua-quoted-email-body, #noctua-quoted-html .noctua-quoted-email-body #body{min-width:320px}#noctua-quoted-html .noctua-quoted-email-body .wrapper td{padding:0}}"
     );
     expect(result).toContain("@keyframes fade{from{opacity:0}to{opacity:1}}");
+  });
+
+  it("keeps body content after a nested second body tag when quoting", () => {
+    const html = [
+      '<html><body bgcolor="#FFFFFF">',
+      "<table><tr><td>",
+      '<body id="body"><div>Header logo</div></body>',
+      "<div>Original message body text</div>",
+      "</td></tr></table>",
+      "</body></html>"
+    ].join("");
+
+    const parts = buildQuotedHtmlPartsFromHtml(html, "Header", false);
+
+    expect(parts.bodyHtml).toContain("Original message body text");
   });
 
   it("keeps the quoted wrapper even when html quoting is disabled", () => {
