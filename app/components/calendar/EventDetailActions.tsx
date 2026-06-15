@@ -1,6 +1,6 @@
 "use client";
 
-import { AlarmClock, AlarmClockPlus, Trash2 } from "lucide-react";
+import { AlarmClock, AlarmClockPlus, Pencil, Trash2 } from "lucide-react";
 import { Button } from "@radix-ui/themes";
 import type { CalendarInviteActionType } from "@/lib/calendarInviteProcessing";
 import type { CalendarReminder } from "@/app/components/mailclient/utils/calendarReminders";
@@ -33,6 +33,10 @@ export type EventDetailActionsProps = {
   canDeleteEvent: boolean;
   deletingEvent: boolean;
   onDeleteEvent: () => void;
+  /** True for events the user owns and can modify in place (local/ICS-imported);
+   *  the edit button hides otherwise. */
+  canEditEvent: boolean;
+  onEditEvent: () => void;
 };
 
 function getOccurrenceInviteActionLabel(actionType?: CalendarInviteActionType) {
@@ -62,12 +66,26 @@ export default function EventDetailActions({
   onDeleteReminder,
   canDeleteEvent,
   deletingEvent,
-  onDeleteEvent
+  onDeleteEvent,
+  canEditEvent,
+  onEditEvent
 }: EventDetailActionsProps) {
   if (!show) return null;
 
   return (
     <div className={styles.actions}>
+      {eventId && canEditEvent && (
+        <Button
+          size="1"
+          variant="soft"
+          color="indigo"
+          disabled={deletingEvent}
+          onClick={onEditEvent}
+        >
+          <Pencil size={14} />
+          Edit
+        </Button>
+      )}
       {hasOccurrenceCancellationAction && !inviteProcessing?.processed && (
         <Button
           size="1"

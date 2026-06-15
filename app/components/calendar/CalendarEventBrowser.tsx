@@ -44,6 +44,7 @@ export default function CalendarEventBrowser({
   const [selectedKind, setSelectedKind] = useState<"event" | "reminder" | null>(null);
   const [selectedOccurrenceStartAtMs, setSelectedOccurrenceStartAtMs] = useState<number | undefined>();
   const [createDialog, setCreateDialog] = useState<CreateDialogState>({ open: false });
+  const [editingEvent, setEditingEvent] = useState<CalendarEvent | null>(null);
   const { inAppNotices, pushNotice, dismissNotice } = useInAppNotices();
 
   // Toolbar "＋ Event": open a blank dialog (EventDialog defaults to now → +1h).
@@ -117,6 +118,32 @@ export default function CalendarEventBrowser({
     dispatchCalendarEventsUpdatedEvent();
   };
 
+  // "Edit" in the detail view opens the same dialog used for creation, seeded
+  // with the selected event. Only local/ICS-imported events expose the button
+  // (EventDetailView gates on sourceType), so the cast is safe here.
+  const handleEditEvent = useCallback(() => {
+    if (selectedEvent && selectedKind === "event") {
+      setEditingEvent(selectedEvent as CalendarEvent);
+    }
+  }, [selectedEvent, selectedKind]);
+
+  const handleEventEdited = useCallback(
+    (event: CalendarEvent) => {
+      setEditingEvent(null);
+      setSelectedEvent(event);
+      setSelectedKind("event");
+      dispatchCalendarEventsUpdatedEvent();
+      dispatchCalendarRemindersUpdatedEvent();
+      pushNotice({
+        type: "success",
+        title: "Event updated.",
+        description: event.summary,
+        durationMs: NOTICE_TIMEOUTS.success
+      });
+    },
+    [pushNotice]
+  );
+
   const handleRestoreDeletedEvent = useCallback(
     async (
       event: CalendarEvent,
@@ -181,6 +208,7 @@ export default function CalendarEventBrowser({
       onFindRelatedByInviteUid={onFindRelatedByInviteUid}
       onEventUpdated={handleEventUpdated}
       onEventDeleted={handleEventDeleted}
+      onEditEvent={handleEditEvent}
     />
   ) : (
     <CalendarView
@@ -204,6 +232,13 @@ export default function CalendarEventBrowser({
         defaultAllDay={createDialog.defaultAllDay}
         onClose={handleCloseCreate}
         onSaved={handleEventCreated}
+      />
+      <EventDialog
+        open={Boolean(editingEvent)}
+        accountId={accountId}
+        event={editingEvent ?? undefined}
+        onClose={() => setEditingEvent(null)}
+        onSaved={handleEventEdited}
       />
       <InAppNoticeStack
         className="inapp-notice-stack-pane"

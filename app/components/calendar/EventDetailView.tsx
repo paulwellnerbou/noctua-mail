@@ -69,6 +69,8 @@ export type EventDetailViewProps = {
   onOpenMessage?: (messageId: string) => void;
   onEventUpdated?: (event: CalendarEvent) => void;
   onEventDeleted?: (action: CalendarEventDeleteAction) => void;
+  /** Opens the edit dialog for owned events (local/ICS-imported). */
+  onEditEvent?: () => void;
   onInviteProcessed?: (
     eventUid: string,
     processedState?: {
@@ -130,6 +132,7 @@ export default function EventDetailView({
   onOpenMessage,
   onEventUpdated,
   onEventDeleted,
+  onEditEvent,
   onInviteProcessed,
   responseOccurrenceLabel = "This occurrence",
   forceOccurrenceResponse = false,
@@ -323,6 +326,8 @@ export default function EventDetailView({
         canDeleteEvent={Boolean(onEventDeleted)}
         deletingEvent={deletingEvent}
         onDeleteEvent={handleDeleteEvent}
+        canEditEvent={Boolean(onEditEvent) && sourceType === "local"}
+        onEditEvent={() => onEditEvent?.()}
       />
 
       {replyRequested === false && currentMyPartstat && (

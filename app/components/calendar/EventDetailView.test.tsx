@@ -45,6 +45,26 @@ function render(showEmailSnapshot?: boolean): string {
   );
 }
 
+function renderWithEdit(sourceType: CalendarEvent["sourceType"]): string {
+  const eventSnapshot = buildEventSnapshot({ sourceType });
+  return renderToStaticMarkup(
+    createElement(EventDetailView, {
+      accountId: eventSnapshot.accountId,
+      eventUid: eventSnapshot.eventUid,
+      title: eventSnapshot.summary,
+      startMs: eventSnapshot.startAtMs,
+      endMs: eventSnapshot.endAtMs,
+      allDay: eventSnapshot.allDay,
+      sourceType: eventSnapshot.sourceType,
+      eventId: eventSnapshot.id,
+      eventSnapshot,
+      eventStartAtMs: eventSnapshot.startAtMs,
+      eventEndAtMs: eventSnapshot.endAtMs,
+      onEditEvent: () => undefined
+    })
+  );
+}
+
 describe("EventDetailView", () => {
   it("renders the saved email snapshot by default", () => {
     const html = render();
@@ -57,5 +77,13 @@ describe("EventDetailView", () => {
     const html = render(false);
     expect(html).not.toContain("Original Email");
     expect(html).not.toContain("Invite: Kickoff");
+  });
+
+  it("offers an Edit button for local (custom / ICS-imported) events", () => {
+    expect(renderWithEdit("local")).toContain("Edit");
+  });
+
+  it("does not offer an Edit button for received email invites", () => {
+    expect(renderWithEdit("email")).not.toContain("Edit");
   });
 });
