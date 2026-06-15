@@ -23,6 +23,9 @@
 }
 
 .optionList {
+  /* position: relative makes this the offsetParent of the option rows, so the
+     open-scroll math can use transform-immune offsetTop/offsetHeight metrics. */
+  position: relative;
   max-height: 16rem;
   overflow-y: auto;
   display: flex;

@@ -153,17 +153,24 @@ export default function TimePicker({
   // Scroll the popover to the currently-selected (or nearest) entry on open.
   useEffect(() => {
     if (!open) return;
-    const node = listRef.current;
-    if (!node) return;
     const target = valueMinutes ?? referenceMinutes ?? 9 * 60;
     const nearestIdx = options.reduce((best, mins, idx) => {
       return Math.abs(mins - target) < Math.abs(options[best] - target) ? idx : best;
     }, 0);
-    const child = node.children[nearestIdx] as HTMLElement | undefined;
-    if (child) {
-      // Centre the nearest option in the list so neighbours are visible.
-      child.scrollIntoView({ block: "center" });
-    }
+    // Radix mounts the popover content into a portal on a later tick, so the
+    // list ref/layout aren't ready synchronously here. Defer to the next frame,
+    // then centre the option by setting scrollTop directly — scrollIntoView
+    // would bubble up and scroll the page/popover too.
+    const raf = requestAnimationFrame(() => {
+      const node = listRef.current;
+      const child = node?.children[nearestIdx] as HTMLElement | undefined;
+      if (!node || !child) return;
+      // offsetTop/offsetHeight are layout-box metrics, immune to the popover's
+      // scale-in transform — getBoundingClientRect would shrink mid-animation
+      // and leave the target a few rows above centre.
+      node.scrollTop = child.offsetTop - (node.clientHeight - child.offsetHeight) / 2;
+    });
+    return () => cancelAnimationFrame(raf);
   }, [open, options, valueMinutes, referenceMinutes]);
 
   return (
