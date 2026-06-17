@@ -202,6 +202,7 @@ function buildPreviewDocument({
     ".email-body { width: 100%; max-width: 100%; min-width: 0; box-sizing: border-box; }",
     `a { color: ${linkColor}; }`,
     "img { max-width: 100%; height: auto; }",
+    `.${NOCTUA_EMAIL_CONTENT_CLASS} p, .${NOCTUA_EMAIL_CONTENT_CLASS} div, .${NOCTUA_EMAIL_CONTENT_CLASS} span { max-width: 100%; }`,
     `blockquote { border-left: 3px solid ${blockquoteBorder}; margin: 8px 0; padding-left: 12px; }`,
     "pre { white-space: pre-wrap; }",
     injectedCss,
