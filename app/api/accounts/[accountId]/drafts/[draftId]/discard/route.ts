@@ -1,5 +1,10 @@
 import { NextResponse } from "next/server";
-import { getAttachmentIds, getMessageById, deleteMessageById } from "@/lib/db";
+import {
+  getAttachmentIds,
+  getMessageById,
+  deleteMessageById,
+  recordDraftTombstone
+} from "@/lib/db";
 import { deleteImapMessage } from "@/lib/mail/imap";
 import { deleteMessageFiles } from "@/lib/storage";
 import {
@@ -28,6 +33,11 @@ export async function POST(request: Request, { params }: Params) {
   if (!message) {
     return NextResponse.json({ ok: false, message: "Draft not found" }, { status: 404 });
   }
+  // Tombstone first so the draft can't be resurrected by a sync even if the
+  // IMAP delete below fails or races an in-flight APPEND (the original
+  // forward-too-fast bug left the local row deleted but the IMAP copy alive,
+  // which the next sync then re-imported).
+  await recordDraftTombstone(accountId, message.messageId, message.mailboxPath ?? null);
   if (message.imapUid && message.mailboxPath) {
     await deleteImapMessage(account, message.mailboxPath, message.imapUid, clientId);
   }

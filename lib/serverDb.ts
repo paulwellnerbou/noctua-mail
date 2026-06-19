@@ -39,6 +39,13 @@ export async function getMcpTokenByHash(...args: Parameters<ServerDbModule["getM
   return db.getMcpTokenByHash(...args);
 }
 
+export async function recordDraftTombstone(
+  ...args: Parameters<ServerDbModule["recordDraftTombstone"]>
+) {
+  const db = await loadServerDb();
+  return db.recordDraftTombstone(...args);
+}
+
 export async function getMessageById(...args: Parameters<ServerDbModule["getMessageById"]>) {
   const db = await loadServerDb();
   return db.getMessageById(...args);

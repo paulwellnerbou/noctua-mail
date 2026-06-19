@@ -12,6 +12,7 @@ import {
   recomputeThreadsForAccount,
   getMessageIdsByMessageIds,
   getThreadIdsByMessageIds,
+  getTombstonedDraftMessageIds,
   saveFoldersForAccount,
   saveMailboxState,
   updateMailboxHighestUid,
@@ -19,10 +20,14 @@ import {
 } from "@/lib/db";
 import { processCalendarInviteForMessage } from "@/lib/calendarInviteProcessor";
 import { getAttachmentContentBuffer, sanitizeSyncedMessage } from "@/lib/mail/syncMessageSanitizer";
-import { isCalendarAttachment, CALENDAR_INVITE_FLAG } from "@/lib/messageFlags";
+import { hasMessageFlag, isCalendarAttachment, CALENDAR_INVITE_FLAG } from "@/lib/messageFlags";
 import type { SyncMode } from "@/lib/syncPolicy";
 import { deleteMessageFiles } from "@/lib/storage";
-import { listImapMailboxUidsAndFlags, syncImapAccountBatched } from "@/lib/mail/imap";
+import {
+  deleteImapMessage,
+  listImapMailboxUidsAndFlags,
+  syncImapAccountBatched
+} from "@/lib/mail/imap";
 import { reconcileVerifiedCrossFolderMoves } from "@/lib/syncMoveReconciliation";
 import { collectThreadReferenceIds, resolveThreadingForItems } from "@/lib/threading";
 
@@ -637,6 +642,43 @@ export async function runSyncOperationBatched(
     // against IMAP and only relocate rows whose old UID no longer exists.
     await reconcileVerifiedCrossFolderMoves(account, strippedMessages, clientId);
 
+    // Drop drafts the user already sent or discarded locally. Their IMAP copy
+    // can linger — a delete that raced an in-flight APPEND, a delete that
+    // failed, or another client lagging — and without this guard the next
+    // sync would re-import the orphan and the draft would reappear in the
+    // list next to the message that was sent. Enforcement is keyed on the
+    // stable Message-Id (a draft's row id churns across re-saves) and scoped
+    // to `\Draft`-flagged messages so a Sent copy that shares the same
+    // Message-Id is never affected.
+    let messagesToUpsert = strippedMessages;
+    const draftCandidates = strippedMessages.filter((msg) => hasMessageFlag(msg.flags, "\\Draft"));
+    if (draftCandidates.length > 0) {
+      const tombstoned = await getTombstonedDraftMessageIds(
+        account.id,
+        draftCandidates.map((msg) => msg.messageId)
+      );
+      if (tombstoned.size > 0) {
+        const suppressed = draftCandidates.filter(
+          (msg) => msg.messageId && tombstoned.has(msg.messageId)
+        );
+        const suppressedIds = new Set(suppressed.map((msg) => msg.id));
+        messagesToUpsert = strippedMessages.filter((msg) => !suppressedIds.has(msg.id));
+        for (const msg of suppressed) {
+          if (msg.mailboxPath && typeof msg.imapUid === "number") {
+            try {
+              await deleteImapMessage(account, msg.mailboxPath, msg.imapUid, clientId);
+            } catch (error) {
+              console.warn("[sync] failed to delete tombstoned draft from IMAP", {
+                accountId: account.id,
+                messageId: msg.messageId,
+                error
+              });
+            }
+          }
+        }
+      }
+    }
+
     // Write this batch to database.
     // Never delete existing messages upfront — we upsert incrementally so
     // messages remain visible throughout the sync. Orphan reconciliation
@@ -644,13 +686,13 @@ export async function runSyncOperationBatched(
     await upsertMessages(
       account.id,
       payload.folderId ?? null,
-      strippedMessages,
+      messagesToUpsert,
       false,
       { recomputeThreads: true }
     );
 
     // Track processed IDs and highest UID for orphan cleanup and resume support.
-    for (const msg of strippedMessages) {
+    for (const msg of messagesToUpsert) {
       allProcessedIds.add(msg.id);
       if (typeof msg.imapUid === "number" && msg.imapUid > 0) {
         if (highestProcessedUid === undefined || msg.imapUid > highestProcessedUid) {
@@ -679,8 +721,8 @@ export async function runSyncOperationBatched(
     });
 
     // Collect ICS sources for calendar event import (all sync modes — upsert is idempotent)
-    if (strippedMessages.length > 0) {
-      const strippedIds = new Set(strippedMessages.map((item) => item.id));
+    if (messagesToUpsert.length > 0) {
+      const strippedIds = new Set(messagesToUpsert.map((item) => item.id));
       const syncedMessages = normalizedMessages.filter((message) => strippedIds.has(message.id));
 
       const shouldProcessInvite = shouldAutoProcessCalendarInvitesForSyncMode(syncMode);

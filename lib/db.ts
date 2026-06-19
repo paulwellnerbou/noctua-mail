@@ -91,6 +91,12 @@ export {
 export { upsertMessages } from "./db/messages";
 
 export {
+  getTombstonedDraftMessageIds,
+  recordDraftTombstone,
+  removeDraftTombstone
+} from "./db/messages";
+
+export {
   addTopicSignalExclusion,
   clearTopicSignalExclusions,
   deleteTopicLearningSignals,

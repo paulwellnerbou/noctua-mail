@@ -132,6 +132,7 @@ export function useDraftManager(params: UseDraftManagerParams) {
   } = params;
   const activeAccountIdRef = useRef(activeAccountId);
   const accountScopeVersionRef = useRef(0);
+  const draftSaveLoopPromiseRef = useRef<Promise<void> | null>(null);
   if (activeAccountIdRef.current !== activeAccountId) {
     activeAccountIdRef.current = activeAccountId;
     accountScopeVersionRef.current += 1;
@@ -236,7 +237,7 @@ export function useDraftManager(params: UseDraftManagerParams) {
   const runQueuedDraftSaves = () => {
     if (draftSaveInFlightRef.current) return;
     draftSaveInFlightRef.current = true;
-    void (async () => {
+    draftSaveLoopPromiseRef.current = (async () => {
       try {
         while (pendingDraftSaveRef.current) {
           const next = pendingDraftSaveRef.current;
@@ -247,9 +248,22 @@ export function useDraftManager(params: UseDraftManagerParams) {
         draftSaveInFlightRef.current = false;
         if (pendingDraftSaveRef.current) {
           runQueuedDraftSaves();
+        } else {
+          draftSaveLoopPromiseRef.current = null;
         }
       }
     })();
+  };
+
+  // Await any in-flight or queued draft save until the save queue is fully
+  // idle. Send/discard call this before acting on `composeDraftId`: a
+  // debounced auto-save may still be APPENDing the draft to IMAP, and acting
+  // before it settles leaves an orphan draft on the server that nothing
+  // deletes (the discard would run against a stale or not-yet-known draft id).
+  const flushPendingDraftSaves = async () => {
+    while (draftSaveLoopPromiseRef.current) {
+      await draftSaveLoopPromiseRef.current;
+    }
   };
 
   const saveDraft = (payload: DraftSavePayload, hash: string) => {
@@ -324,5 +338,5 @@ export function useDraftManager(params: UseDraftManagerParams) {
     saveDraft(payload, hash);
   };
 
-  return { saveDraft, handleDiscardDraft, handleSaveDraft };
+  return { saveDraft, handleDiscardDraft, handleSaveDraft, flushPendingDraftSaves };
 }

@@ -520,7 +520,7 @@ function ComposeOrchestratorImpl(
     setComposeResizing
   });
 
-  const { saveDraft, handleDiscardDraft, handleSaveDraft } = useDraftManager({
+  const { saveDraft, handleDiscardDraft, handleSaveDraft, flushPendingDraftSaves } = useDraftManager({
     activeAccountId,
     composeOpen,
     composeTab,
@@ -645,6 +645,18 @@ function ComposeOrchestratorImpl(
       reportError("Please complete the event invitation details before sending.");
       return;
     }
+    // Stop new debounced saves from being scheduled, then let any save that
+    // is already running (or queued) finish before we touch the draft. A
+    // forward/reply auto-saves a draft on open; if its IMAP APPEND is still
+    // in flight when send fires, cancelling outright would orphan that draft
+    // on the server (the discard below would run against a not-yet-known
+    // draft id). Flushing first lets the save settle and populate
+    // `composeDraftIdRef`, so the discard can delete both copies.
+    if (draftSaveTimerRef.current !== null) {
+      clearTimeout(draftSaveTimerRef.current);
+      draftSaveTimerRef.current = null;
+    }
+    await flushPendingDraftSaves();
     cancelDraftAutoSave();
     setSendingMail(true);
     try {
@@ -688,11 +700,16 @@ function ComposeOrchestratorImpl(
             composeReplyMessage.id;
           evictThreadCache(threadId);
         }
-        if (composeDraftId && activeAccountId) {
-          suppressDraftDeleteReconcile(composeDraftId);
-          removeDraftFromUi(composeDraftId);
+        // Read the draft id from the ref, not the `composeDraftId` state
+        // captured in this closure: the flush above may have just created or
+        // updated the draft, and the ref reflects that synchronously while
+        // the state value is still stale for this render.
+        const sentDraftId = composeDraftIdRef.current;
+        if (sentDraftId && activeAccountId) {
+          suppressDraftDeleteReconcile(sentDraftId);
+          removeDraftFromUi(sentDraftId);
           try {
-            await apiFetch(buildAccountDraftDiscardPath(activeAccountId, composeDraftId), {
+            await apiFetch(buildAccountDraftDiscardPath(activeAccountId, sentDraftId), {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({})

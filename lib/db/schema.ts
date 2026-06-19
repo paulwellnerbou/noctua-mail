@@ -1030,6 +1030,14 @@ export function initAccountSchema(db: any) {
     );
     CREATE UNIQUE INDEX IF NOT EXISTS idx_calendar_participation_overrides_account_uid_occurrence
       ON calendar_participation_overrides(accountId, eventUid, occurrenceStartAtMs);
+
+    CREATE TABLE IF NOT EXISTS draft_tombstones (
+      accountId TEXT NOT NULL,
+      messageId TEXT NOT NULL,
+      mailboxPath TEXT,
+      createdAtMs INTEGER NOT NULL,
+      PRIMARY KEY (accountId, messageId)
+    );
   `);
 
   // Lightweight schema migration for existing account DBs.
