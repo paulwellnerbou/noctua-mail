@@ -127,13 +127,18 @@ function coalesceSyncPayload(existing: SyncPayload, incoming: SyncPayload): Sync
   const normalizedIncoming = normalizeSyncPayload(incoming);
   const existingMode = normalizedExisting.mode ?? "recent";
   const incomingMode = normalizedIncoming.mode ?? "recent";
-  const mode = MODE_PRIORITY[incomingMode] >= MODE_PRIORITY[existingMode] ? incomingMode : existingMode;
+  const coalescedMode =
+    MODE_PRIORITY[incomingMode] >= MODE_PRIORITY[existingMode] ? incomingMode : existingMode;
   const folderId =
     normalizedExisting.folderId &&
     normalizedIncoming.folderId &&
     normalizedExisting.folderId === normalizedIncoming.folderId
       ? normalizedExisting.folderId
       : undefined;
+  // Coalescing two different-folder syncs drops the folderId. Repair is the only
+  // mode that cannot run folder-agnostically (see runSyncOperationBatched), so a
+  // folderless repair would be unrunnable — demote it to a full sync instead.
+  const mode = coalescedMode === "repair" && !folderId ? "full" : coalescedMode;
   const backfillUids =
     folderId && mode === "new"
       ? Array.from(

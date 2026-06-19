@@ -15,7 +15,10 @@ const MAX_RETRY_DELAY_MS = 60_000;
 
 const NON_RETRYABLE_PATTERNS = [
   "No password configured",
-  "Account not found"
+  "Account not found",
+  // Deterministic payload-validation failures: the payload can't change between
+  // attempts, so retrying only burns the backoff window.
+  "requires a folderId"
 ];
 
 export async function runSyncJobCli(argv = process.argv) {
