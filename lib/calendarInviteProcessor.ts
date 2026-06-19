@@ -4,9 +4,11 @@ import {
   cancelCalendarRemindersByEventUid,
   ensureCalendarReminder,
   getCalendarEventByUid,
+  isCalendarEventSuppressed,
   listCalendarInviteSourceMessagesByEventUid,
   markMessageCalendarInviteStatesProcessed,
   markMessageCalendarInviteStatesUnprocessed,
+  removeCalendarEventSuppression,
   rescheduleCalendarRemindersByEventUid,
   upsertCalendarEventByUid,
   upsertMessageCalendarInviteStates
@@ -306,6 +308,25 @@ export async function processCalendarInviteForMessage({
         processedEventUids.push(group.eventUid);
         processedStateByUid.set(group.eventUid, true);
         continue;
+      }
+
+      // The user removed this series locally. Google's "synced invitation"
+      // transport keeps re-broadcasting it, so auto-processing must not
+      // resurrect it. Only relevant when there is no live row — an existing
+      // event means the series is already present.
+      //
+      // Only an explicit manual action (processedAutomatically === false — set
+      // by the invite-process and RSVP routes) is an opt-in to bring the
+      // series back. Auto-sync (true) and any unknown/omitted caller default
+      // to the safe behaviour: do not lift the suppression, do not resurrect.
+      if (!existingEvent && (await isCalendarEventSuppressed(accountId, group.eventUid))) {
+        if (processedAutomatically === false) {
+          await removeCalendarEventSuppression(accountId, group.eventUid);
+        } else {
+          processedEventUids.push(group.eventUid);
+          processedStateByUid.set(group.eventUid, true);
+          continue;
+        }
       }
 
       if (!existingEvent && !group.baseEvent && group.hasInstanceChanges) {
@@ -649,6 +670,10 @@ export async function processStandaloneCalendarInvite({
         allDay: savedEvent.allDay
       });
       try {
+        // A manual import is an explicit opt-in to keep this series: drop any
+        // suppression so a later auto-sync of a re-anchored segment isn't
+        // blocked from re-creating it.
+        await removeCalendarEventSuppression(accountId, group.eventUid);
         await reconcileSeriesAnchorSiblings(accountId, savedEvent);
         await rescheduleCalendarRemindersByEventUid(accountId, group.eventUid, {
           eventTitle: savedEvent.summary,

@@ -6,6 +6,7 @@ const softDeleteCalendarEvent = mock(() => Promise.resolve());
 const deleteCalendarEvent = mock(() => Promise.resolve());
 const cancelCalendarRemindersByEventUid = mock(() => Promise.resolve(0));
 const clearMessageCalendarInviteStatesProcessedByEventUid = mock(() => Promise.resolve(0));
+const addCalendarEventSuppression = mock(() => Promise.resolve(true));
 
 const actualDb = await import("./db");
 mock.module("@/lib/db", () => ({
@@ -14,7 +15,8 @@ mock.module("@/lib/db", () => ({
   softDeleteCalendarEvent,
   deleteCalendarEvent,
   cancelCalendarRemindersByEventUid,
-  clearMessageCalendarInviteStatesProcessedByEventUid
+  clearMessageCalendarInviteStatesProcessedByEventUid,
+  addCalendarEventSuppression
 }));
 
 const { deleteCalendarEventAndRelatedData } = await import("./calendarEventDeletion");
@@ -45,6 +47,7 @@ describe("deleteCalendarEventAndRelatedData", () => {
     deleteCalendarEvent.mockClear();
     cancelCalendarRemindersByEventUid.mockClear();
     clearMessageCalendarInviteStatesProcessedByEventUid.mockClear();
+    addCalendarEventSuppression.mockClear();
   });
 
   test("soft deletes imported email events and re-enables invite processing", async () => {
@@ -71,6 +74,7 @@ describe("deleteCalendarEventAndRelatedData", () => {
       "acc-1",
       "event-1@example.test"
     );
+    expect(addCalendarEventSuppression).toHaveBeenCalledWith("acc-1", "event-1@example.test");
   });
 
   test("hard deletes local events without touching invite state", async () => {
@@ -86,6 +90,7 @@ describe("deleteCalendarEventAndRelatedData", () => {
     expect(softDeleteCalendarEvent).not.toHaveBeenCalled();
     expect(cancelCalendarRemindersByEventUid).toHaveBeenCalledWith("acc-1", "event-1@example.test");
     expect(clearMessageCalendarInviteStatesProcessedByEventUid).not.toHaveBeenCalled();
+    expect(addCalendarEventSuppression).not.toHaveBeenCalled();
   });
 
   test("hard deletes sent invite events without touching inbound invite state", async () => {
@@ -105,6 +110,47 @@ describe("deleteCalendarEventAndRelatedData", () => {
     expect(deleteCalendarEvent).toHaveBeenCalledWith("acc-1", "cal-1");
     expect(cancelCalendarRemindersByEventUid).toHaveBeenCalledWith("acc-1", "event-1@example.test");
     expect(clearMessageCalendarInviteStatesProcessedByEventUid).not.toHaveBeenCalled();
+    expect(addCalendarEventSuppression).not.toHaveBeenCalled();
+  });
+
+  test("hard deletes imported email events and suppresses re-creation", async () => {
+    getCalendarEventById.mockResolvedValue(
+      buildEvent({
+        sourceType: "email",
+        messageId: "msg-1",
+        rawIcs: "BEGIN:VCALENDAR\r\nEND:VCALENDAR"
+      })
+    );
+
+    const result = await deleteCalendarEventAndRelatedData({
+      accountId: "acc-1",
+      eventId: "cal-1"
+    });
+
+    expect(result.deleted).toBe(true);
+    expect(deleteCalendarEvent).toHaveBeenCalledWith("acc-1", "cal-1");
+    expect(addCalendarEventSuppression).toHaveBeenCalledWith("acc-1", "event-1@example.test");
+  });
+
+  test("records the suppression before re-enabling invite processing", async () => {
+    getCalendarEventById.mockResolvedValue(
+      buildEvent({ sourceType: "email", messageId: "msg-1" })
+    );
+    const order: string[] = [];
+    addCalendarEventSuppression.mockImplementationOnce(async () => {
+      order.push("suppress");
+      return true;
+    });
+    clearMessageCalendarInviteStatesProcessedByEventUid.mockImplementationOnce(async () => {
+      order.push("clear");
+      return 0;
+    });
+
+    await deleteCalendarEventAndRelatedData({ accountId: "acc-1", eventId: "cal-1" });
+
+    // Order matters: a suppression-write failure must not be able to leave the
+    // series re-armed for re-import with no suppression record.
+    expect(order).toEqual(["suppress", "clear"]);
   });
 
   test("returns without side effects when the event does not exist", async () => {
@@ -120,5 +166,6 @@ describe("deleteCalendarEventAndRelatedData", () => {
     expect(softDeleteCalendarEvent).not.toHaveBeenCalled();
     expect(cancelCalendarRemindersByEventUid).not.toHaveBeenCalled();
     expect(clearMessageCalendarInviteStatesProcessedByEventUid).not.toHaveBeenCalled();
+    expect(addCalendarEventSuppression).not.toHaveBeenCalled();
   });
 });

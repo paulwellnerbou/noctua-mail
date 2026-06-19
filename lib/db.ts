@@ -198,9 +198,12 @@ export {
  * same pattern and rationale.
  */
 import {
+  addCalendarEventSuppression as _addCalendarEventSuppressionImpl,
   cancelCalendarEventByUid as _cancelCalendarEventByUidImpl,
   cancelCalendarRemindersByEventUid as _cancelCalendarRemindersByEventUidImpl,
   clearMessageCalendarInviteStatesProcessedByEventUid as _clearMessageCalendarInviteStatesProcessedByEventUidImpl,
+  isCalendarEventSuppressed as _isCalendarEventSuppressedImpl,
+  removeCalendarEventSuppression as _removeCalendarEventSuppressionImpl,
   deleteCalendarEvent as _deleteCalendarEventImpl,
   ensureCalendarReminder as _ensureCalendarReminderImpl,
   getCalendarEventById as _getCalendarEventByIdImpl,
@@ -300,6 +303,24 @@ export function clearMessageCalendarInviteStatesProcessedByEventUid(
   ...args: Parameters<typeof _clearMessageCalendarInviteStatesProcessedByEventUidImpl>
 ): ReturnType<typeof _clearMessageCalendarInviteStatesProcessedByEventUidImpl> {
   return _clearMessageCalendarInviteStatesProcessedByEventUidImpl(...args);
+}
+
+export function addCalendarEventSuppression(
+  ...args: Parameters<typeof _addCalendarEventSuppressionImpl>
+): ReturnType<typeof _addCalendarEventSuppressionImpl> {
+  return _addCalendarEventSuppressionImpl(...args);
+}
+
+export function isCalendarEventSuppressed(
+  ...args: Parameters<typeof _isCalendarEventSuppressedImpl>
+): ReturnType<typeof _isCalendarEventSuppressedImpl> {
+  return _isCalendarEventSuppressedImpl(...args);
+}
+
+export function removeCalendarEventSuppression(
+  ...args: Parameters<typeof _removeCalendarEventSuppressionImpl>
+): ReturnType<typeof _removeCalendarEventSuppressionImpl> {
+  return _removeCalendarEventSuppressionImpl(...args);
 }
 
 export function getMessageCalendarSnapshot(
