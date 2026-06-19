@@ -132,6 +132,27 @@ describe("deleteCalendarEventAndRelatedData", () => {
     expect(addCalendarEventSuppression).toHaveBeenCalledWith("acc-1", "event-1@example.test");
   });
 
+  test("records the suppression before re-enabling invite processing", async () => {
+    getCalendarEventById.mockResolvedValue(
+      buildEvent({ sourceType: "email", messageId: "msg-1" })
+    );
+    const order: string[] = [];
+    addCalendarEventSuppression.mockImplementationOnce(async () => {
+      order.push("suppress");
+      return true;
+    });
+    clearMessageCalendarInviteStatesProcessedByEventUid.mockImplementationOnce(async () => {
+      order.push("clear");
+      return 0;
+    });
+
+    await deleteCalendarEventAndRelatedData({ accountId: "acc-1", eventId: "cal-1" });
+
+    // Order matters: a suppression-write failure must not be able to leave the
+    // series re-armed for re-import with no suppression record.
+    expect(order).toEqual(["suppress", "clear"]);
+  });
+
   test("returns without side effects when the event does not exist", async () => {
     getCalendarEventById.mockResolvedValue(null);
 

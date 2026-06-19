@@ -42,11 +42,13 @@ export async function deleteCalendarEventAndRelatedData({
   if (event.eventUid.trim()) {
     await cancelCalendarRemindersByEventUid(accountId, event.eventUid);
     if (shouldResetInviteProcessing(event)) {
-      await clearMessageCalendarInviteStatesProcessedByEventUid(accountId, event.eventUid);
-      // Remember that the user removed this series so a later Google "synced
-      // invitation" for the same UID key cannot silently re-create it on the
-      // next sync. A manual re-import lifts the suppression.
+      // Record the suppression BEFORE re-enabling invite processing. Order
+      // matters: if the suppression write failed *after* the clear, the series
+      // would be deleted, re-armed for re-import, and have no suppression —
+      // guaranteeing the exact "deleted event resurrects on next sync" failure
+      // this is meant to prevent. A manual re-import lifts the suppression.
       await addCalendarEventSuppression(accountId, event.eventUid);
+      await clearMessageCalendarInviteStatesProcessedByEventUid(accountId, event.eventUid);
     }
   }
 
