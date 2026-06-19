@@ -1,4 +1,5 @@
 import {
+  addCalendarEventSuppression,
   cancelCalendarRemindersByEventUid,
   clearMessageCalendarInviteStatesProcessedByEventUid,
   deleteCalendarEvent,
@@ -42,6 +43,10 @@ export async function deleteCalendarEventAndRelatedData({
     await cancelCalendarRemindersByEventUid(accountId, event.eventUid);
     if (shouldResetInviteProcessing(event)) {
       await clearMessageCalendarInviteStatesProcessedByEventUid(accountId, event.eventUid);
+      // Remember that the user removed this series so a later Google "synced
+      // invitation" for the same UID key cannot silently re-create it on the
+      // next sync. A manual re-import lifts the suppression.
+      await addCalendarEventSuppression(accountId, event.eventUid);
     }
   }
 

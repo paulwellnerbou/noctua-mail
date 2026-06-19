@@ -166,6 +166,12 @@ export {
 } from "./db/calendar";
 
 export {
+  addCalendarEventSuppression,
+  isCalendarEventSuppressed,
+  removeCalendarEventSuppression
+} from "./db/calendar";
+
+export {
   applyCategoryFeedback,
   getCategoryLearningDebugSnapshot,
   getCategoryLinearModel,
