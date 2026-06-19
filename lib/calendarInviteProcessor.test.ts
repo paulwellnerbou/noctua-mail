@@ -1341,6 +1341,24 @@ describe("processCalendarInviteForMessage suppression guard", () => {
     expect(result.states[0]?.processed).toBe(true);
   });
 
+  test("an unknown/omitted processedAutomatically does not lift or resurrect", async () => {
+    getCalendarEventByUid.mockResolvedValue(null);
+    isCalendarEventSuppressed.mockResolvedValue(true);
+
+    const result = await processCalendarInviteForMessage({
+      accountId: "acc-1",
+      messageId: "msg-unknown-origin",
+      icsSource: inviteIcs,
+      process: true,
+      accountEmail: "paul@example.test"
+      // processedAutomatically omitted — only an explicit `false` may lift.
+    });
+
+    expect(upsertCalendarEventByUid).not.toHaveBeenCalled();
+    expect(removeCalendarEventSuppression).not.toHaveBeenCalled();
+    expect(result.states[0]?.processed).toBe(true);
+  });
+
   test("manual processing lifts the suppression and recreates the event", async () => {
     getCalendarEventByUid.mockResolvedValue(null);
     isCalendarEventSuppressed.mockResolvedValue(true);

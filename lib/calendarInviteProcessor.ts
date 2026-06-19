@@ -312,16 +312,21 @@ export async function processCalendarInviteForMessage({
 
       // The user removed this series locally. Google's "synced invitation"
       // transport keeps re-broadcasting it, so auto-processing must not
-      // resurrect it. A manual (re-)import is an explicit opt-in: lift the
-      // suppression and recreate the event. Only relevant when there is no
-      // live row — an existing event means the series is already present.
+      // resurrect it. Only relevant when there is no live row — an existing
+      // event means the series is already present.
+      //
+      // Only an explicit manual action (processedAutomatically === false — set
+      // by the invite-process and RSVP routes) is an opt-in to bring the
+      // series back. Auto-sync (true) and any unknown/omitted caller default
+      // to the safe behaviour: do not lift the suppression, do not resurrect.
       if (!existingEvent && (await isCalendarEventSuppressed(accountId, group.eventUid))) {
-        if (processedAutomatically) {
+        if (processedAutomatically === false) {
+          await removeCalendarEventSuppression(accountId, group.eventUid);
+        } else {
           processedEventUids.push(group.eventUid);
           processedStateByUid.set(group.eventUid, true);
           continue;
         }
-        await removeCalendarEventSuppression(accountId, group.eventUid);
       }
 
       if (!existingEvent && !group.baseEvent && group.hasInstanceChanges) {
