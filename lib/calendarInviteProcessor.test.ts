@@ -30,6 +30,8 @@ const rescheduleCalendarRemindersByEventUid = mock(() => Promise.resolve(0));
 const ensureCalendarReminder = mock(() => Promise.resolve(null));
 const cancelCalendarEventByUid = mock(() => Promise.resolve());
 const cancelCalendarRemindersByEventUid = mock(() => Promise.resolve());
+const isCalendarEventSuppressed = mock((_acc: string, _uid: string) => Promise.resolve(false));
+const removeCalendarEventSuppression = mock(() => Promise.resolve(0));
 
 const actualDb = await import("./db");
 mock.module("@/lib/db", () => ({
@@ -44,7 +46,9 @@ mock.module("@/lib/db", () => ({
   rescheduleCalendarRemindersByEventUid,
   ensureCalendarReminder,
   cancelCalendarEventByUid,
-  cancelCalendarRemindersByEventUid
+  cancelCalendarRemindersByEventUid,
+  isCalendarEventSuppressed,
+  removeCalendarEventSuppression
 }));
 
 // We mock `@/lib/calendarEventEmailSnapshot.server` so we can seed
@@ -124,6 +128,10 @@ beforeEach(() => {
   cancelCalendarEventByUid.mockClear();
   cancelCalendarRemindersByEventUid.mockClear();
   buildCalendarEventEmailSnapshotFromMessageId.mockClear();
+  isCalendarEventSuppressed.mockClear();
+  isCalendarEventSuppressed.mockResolvedValue(false);
+  removeCalendarEventSuppression.mockClear();
+  removeCalendarEventSuppression.mockResolvedValue(0);
   messagesByIdForSnapshot.clear();
 });
 
@@ -1296,5 +1304,102 @@ describe("processStandaloneCalendarInvite", () => {
     // A's old start must be evicted everywhere.
     expect(fields.occurrenceSnapshots?.[String(occurrenceA_oldStart)]).toBeUndefined();
     expect(fields.occurrenceMessageIds?.[String(occurrenceA_oldStart)]).toBeUndefined();
+  });
+});
+
+describe("processCalendarInviteForMessage suppression guard", () => {
+  const inviteIcs = makeIcs([
+    "METHOD:REQUEST",
+    "BEGIN:VEVENT",
+    "UID:standup-uid@example.test",
+    "SUMMARY:Daily standup",
+    "DTSTART:20260610T084500Z",
+    "DTEND:20260610T090000Z",
+    "RRULE:FREQ=WEEKLY;BYDAY=TU,WE,TH",
+    "ORGANIZER;CN=Alice:mailto:alice@example.test",
+    "ATTENDEE;CN=Paul;PARTSTAT=NEEDS-ACTION;RSVP=TRUE:mailto:paul@example.test",
+    "END:VEVENT"
+  ]);
+
+  test("auto-processing does not resurrect a series the user removed", async () => {
+    getCalendarEventByUid.mockResolvedValue(null);
+    isCalendarEventSuppressed.mockResolvedValue(true);
+
+    const result = await processCalendarInviteForMessage({
+      accountId: "acc-1",
+      messageId: "msg-synced-invite",
+      icsSource: inviteIcs,
+      process: true,
+      accountEmail: "paul@example.test",
+      processedAutomatically: true
+    });
+
+    expect(isCalendarEventSuppressed).toHaveBeenCalledWith("acc-1", "standup-uid@example.test");
+    expect(upsertCalendarEventByUid).not.toHaveBeenCalled();
+    expect(removeCalendarEventSuppression).not.toHaveBeenCalled();
+    // Still recorded as processed so it isn't retried every sync.
+    expect(result.states[0]?.processed).toBe(true);
+  });
+
+  test("an unknown/omitted processedAutomatically does not lift or resurrect", async () => {
+    getCalendarEventByUid.mockResolvedValue(null);
+    isCalendarEventSuppressed.mockResolvedValue(true);
+
+    const result = await processCalendarInviteForMessage({
+      accountId: "acc-1",
+      messageId: "msg-unknown-origin",
+      icsSource: inviteIcs,
+      process: true,
+      accountEmail: "paul@example.test"
+      // processedAutomatically omitted — only an explicit `false` may lift.
+    });
+
+    expect(upsertCalendarEventByUid).not.toHaveBeenCalled();
+    expect(removeCalendarEventSuppression).not.toHaveBeenCalled();
+    expect(result.states[0]?.processed).toBe(true);
+  });
+
+  test("manual processing lifts the suppression and recreates the event", async () => {
+    getCalendarEventByUid.mockResolvedValue(null);
+    isCalendarEventSuppressed.mockResolvedValue(true);
+
+    await processCalendarInviteForMessage({
+      accountId: "acc-1",
+      messageId: "msg-manual-readd",
+      icsSource: inviteIcs,
+      process: true,
+      accountEmail: "paul@example.test",
+      processedAutomatically: false
+    });
+
+    expect(removeCalendarEventSuppression).toHaveBeenCalledWith("acc-1", "standup-uid@example.test");
+    expect(upsertCalendarEventByUid).toHaveBeenCalled();
+  });
+
+  test("does not consult suppression when a live event already exists", async () => {
+    getCalendarEventByUid.mockResolvedValue({
+      id: "cal-existing",
+      accountId: "acc-1",
+      eventUid: "standup-uid@example.test",
+      summary: "Daily standup",
+      startAtMs: Date.UTC(2026, 5, 10, 8, 45, 0),
+      endAtMs: Date.UTC(2026, 5, 10, 9, 0, 0),
+      allDay: false,
+      sourceType: "email",
+      createdAtMs: 1,
+      updatedAtMs: 1
+    } as CalendarEvent);
+
+    await processCalendarInviteForMessage({
+      accountId: "acc-1",
+      messageId: "msg-update",
+      icsSource: inviteIcs,
+      process: true,
+      accountEmail: "paul@example.test",
+      processedAutomatically: true
+    });
+
+    expect(isCalendarEventSuppressed).not.toHaveBeenCalled();
+    expect(upsertCalendarEventByUid).toHaveBeenCalled();
   });
 });

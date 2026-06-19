@@ -1038,6 +1038,13 @@ export function initAccountSchema(db: any) {
       createdAtMs INTEGER NOT NULL,
       PRIMARY KEY (accountId, messageId)
     );
+
+    CREATE TABLE IF NOT EXISTS calendar_event_suppressions (
+      accountId TEXT NOT NULL,
+      eventUidKey TEXT NOT NULL,
+      createdAtMs INTEGER NOT NULL,
+      PRIMARY KEY (accountId, eventUidKey)
+    );
   `);
 
   // Lightweight schema migration for existing account DBs.

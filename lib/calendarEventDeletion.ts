@@ -1,4 +1,5 @@
 import {
+  addCalendarEventSuppression,
   cancelCalendarRemindersByEventUid,
   clearMessageCalendarInviteStatesProcessedByEventUid,
   deleteCalendarEvent,
@@ -41,6 +42,12 @@ export async function deleteCalendarEventAndRelatedData({
   if (event.eventUid.trim()) {
     await cancelCalendarRemindersByEventUid(accountId, event.eventUid);
     if (shouldResetInviteProcessing(event)) {
+      // Record the suppression BEFORE re-enabling invite processing. Order
+      // matters: if the suppression write failed *after* the clear, the series
+      // would be deleted, re-armed for re-import, and have no suppression —
+      // guaranteeing the exact "deleted event resurrects on next sync" failure
+      // this is meant to prevent. A manual re-import lifts the suppression.
+      await addCalendarEventSuppression(accountId, event.eventUid);
       await clearMessageCalendarInviteStatesProcessedByEventUid(accountId, event.eventUid);
     }
   }
