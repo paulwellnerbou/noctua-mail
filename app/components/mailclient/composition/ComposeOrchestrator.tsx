@@ -615,6 +615,21 @@ function ComposeOrchestratorImpl(
     setDraftSaving
   ]);
 
+  const handleDiscardDraftWithCancel = useCallback(async () => {
+    // Cancel a pending debounced auto-save before discarding, mirroring the
+    // send path. Without this, a timer scheduled just before the user clicks
+    // Discard can fire mid-discard and enqueue a fresh save, re-creating the
+    // draft after it was discarded. We clear only the timer here (not the
+    // session version) so the discard's own `flushPendingDraftSaves` can still
+    // settle any already-running save and learn the final draft id; the
+    // version bump that neutralizes a late save happens inside the discard.
+    if (draftSaveTimerRef.current !== null) {
+      clearTimeout(draftSaveTimerRef.current);
+      draftSaveTimerRef.current = null;
+    }
+    await handleDiscardDraft();
+  }, [draftSaveTimerRef, handleDiscardDraft]);
+
   const resetAfterSend = useCallback(() => {
     setComposeOpen(false);
     setComposeDraftId(null);
@@ -1071,7 +1086,7 @@ function ComposeOrchestratorImpl(
     minimizeCompose,
     handleSendMail,
     handleSaveDraft,
-    handleDiscardDraft,
+    handleDiscardDraft: handleDiscardDraftWithCancel,
     markComposeDirty,
     applyRecipientSelection,
     loadRecipientOptions,
