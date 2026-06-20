@@ -696,9 +696,17 @@ export async function runSyncOperationBatched(
       { recomputeThreads: true }
     );
 
-    // Track processed IDs and highest UID for orphan cleanup and resume support.
+    // Track processed IDs (for orphan cleanup) over the rows we actually
+    // wrote: a suppressed tombstoned draft has no local row, so it must not
+    // count as "present" or orphan reconciliation would skip a stale row.
     for (const msg of messagesToUpsert) {
       allProcessedIds.add(msg.id);
+    }
+    // Advance the resume cursor over the FULL fetched batch, including any
+    // suppressed drafts. Their UID was still processed (fetched + deleted), so
+    // excluding them could persist a lower highest UID and make a resumed or
+    // crash-recovered sync re-fetch the same range and re-hit the same drafts.
+    for (const msg of strippedMessages) {
       if (typeof msg.imapUid === "number" && msg.imapUid > 0) {
         if (highestProcessedUid === undefined || msg.imapUid > highestProcessedUid) {
           highestProcessedUid = msg.imapUid;
