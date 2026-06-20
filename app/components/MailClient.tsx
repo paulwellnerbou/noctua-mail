@@ -2961,14 +2961,19 @@ export default function MailClient({
           typeof sendResult?.sentMessageUid === "number" && Number.isFinite(sendResult.sentMessageUid)
             ? sendResult.sentMessageUid
             : null;
-        const optimisticSent = buildSentMessageFromDraft(message, {
-          sentFolderId: sentFolder?.id ?? message.folderId,
-          sentMailboxPath: sentFolder
-            ? sentFolder.id.replace(`${activeAccountId}:`, "")
-            : message.mailboxPath,
-          sentMessageUid
-        });
-        if (shouldKeepMessageInCurrentResults(optimisticSent)) {
+        // The in-place swap is only safe when we know which folder the message
+        // moved to. Without a resolved Sent folder the optimistic row would
+        // keep the draft's own folder/mailbox, which could leave a non-draft
+        // "sent" message lingering in a Drafts-scoped view — so fall back to
+        // removing the row and letting the background sync surface the real one.
+        const optimisticSent = sentFolder
+          ? buildSentMessageFromDraft(message, {
+              sentFolderId: sentFolder.id,
+              sentMailboxPath: sentFolder.id.replace(`${activeAccountId}:`, ""),
+              sentMessageUid
+            })
+          : null;
+        if (optimisticSent && shouldKeepMessageInCurrentResults(optimisticSent)) {
           setMessages((prev) => prev.map((msg) => (msg.id === draftId ? optimisticSent : msg)));
           if (viewMessage?.id === draftId) {
             setViewMessage(optimisticSent);

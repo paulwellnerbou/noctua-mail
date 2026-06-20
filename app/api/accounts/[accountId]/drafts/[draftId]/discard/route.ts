@@ -36,8 +36,18 @@ export async function POST(request: Request, { params }: Params) {
   // Tombstone first so the draft can't be resurrected by a sync even if the
   // IMAP delete below fails or races an in-flight APPEND (the original
   // forward-too-fast bug left the local row deleted but the IMAP copy alive,
-  // which the next sync then re-imported).
-  await recordDraftTombstone(accountId, message.messageId, message.mailboxPath ?? null);
+  // which the next sync then re-imported). Best-effort: a tombstone write
+  // failure (DB lock / retry exhaustion) must not abort the discard — the
+  // user still expects the draft gone locally.
+  try {
+    await recordDraftTombstone(accountId, message.messageId, message.mailboxPath ?? null);
+  } catch (error) {
+    console.warn("[draft-discard] tombstone write failed; proceeding with local delete", {
+      accountId,
+      draftId: message.id,
+      error
+    });
+  }
   // Local-first: the IMAP delete is best-effort. If it fails (e.g. an IMAP
   // outage), still remove the local row and files so the user isn't stuck
   // with an undeletable draft — the tombstone above makes the next Drafts

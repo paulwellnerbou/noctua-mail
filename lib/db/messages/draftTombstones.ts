@@ -93,9 +93,12 @@ export async function getTombstonedDraftMessageIds(
 }
 
 /**
- * Drops a tombstone once its IMAP copy has been confirmed deleted, so a
- * brand-new draft that later reuses the same Message-Id (unlikely, but
- * possible across re-composes) is not silently suppressed.
+ * Optional explicit removal of a tombstone. Tombstones are normally reaped by
+ * the TTL prune in {@link recordDraftTombstone}, which is the primary cleanup
+ * path; there is no confirmed-delete call site today. This helper exists so a
+ * caller can drop a tombstone deliberately — e.g. if a brand-new draft ever
+ * reuses the same Message-Id (unlikely, but possible across re-composes) and
+ * must not be silently suppressed.
  */
 export async function removeDraftTombstone(accountId: string, messageId: string | null | undefined) {
   const trimmed = messageId?.trim();
