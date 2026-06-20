@@ -57,3 +57,9 @@ export {
 } from "./utility";
 
 export { upsertMessages } from "./upsert";
+
+export {
+  getTombstonedDraftMessageIds,
+  recordDraftTombstone,
+  removeDraftTombstone
+} from "./draftTombstones";

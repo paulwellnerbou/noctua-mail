@@ -1,5 +1,10 @@
 import { NextResponse } from "next/server";
-import { getAttachmentIds, getMessageById, deleteMessageById } from "@/lib/db";
+import {
+  getAttachmentIds,
+  getMessageById,
+  deleteMessageById,
+  recordDraftTombstone
+} from "@/lib/db";
 import { deleteImapMessage } from "@/lib/mail/imap";
 import { deleteMessageFiles } from "@/lib/storage";
 import {
@@ -28,8 +33,35 @@ export async function POST(request: Request, { params }: Params) {
   if (!message) {
     return NextResponse.json({ ok: false, message: "Draft not found" }, { status: 404 });
   }
+  // Tombstone first so the draft can't be resurrected by a sync even if the
+  // IMAP delete below fails or races an in-flight APPEND (the original
+  // forward-too-fast bug left the local row deleted but the IMAP copy alive,
+  // which the next sync then re-imported). Best-effort: a tombstone write
+  // failure (DB lock / retry exhaustion) must not abort the discard — the
+  // user still expects the draft gone locally.
+  try {
+    await recordDraftTombstone(accountId, message.messageId, message.mailboxPath ?? null);
+  } catch (error) {
+    console.warn("[draft-discard] tombstone write failed; proceeding with local delete", {
+      accountId,
+      draftId: message.id,
+      error
+    });
+  }
+  // Local-first: the IMAP delete is best-effort. If it fails (e.g. an IMAP
+  // outage), still remove the local row and files so the user isn't stuck
+  // with an undeletable draft — the tombstone above makes the next Drafts
+  // sync delete the lingering server copy and refuse to re-import it.
   if (message.imapUid && message.mailboxPath) {
-    await deleteImapMessage(account, message.mailboxPath, message.imapUid, clientId);
+    try {
+      await deleteImapMessage(account, message.mailboxPath, message.imapUid, clientId);
+    } catch (error) {
+      console.warn("[draft-discard] IMAP delete failed; relying on tombstone cleanup", {
+        accountId,
+        draftId: message.id,
+        error
+      });
+    }
   }
   const attachmentIds = await getAttachmentIds(accountId, message.id);
   await deleteMessageById(accountId, message.id);

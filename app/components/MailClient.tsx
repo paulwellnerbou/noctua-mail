@@ -183,6 +183,7 @@ import type {
 } from "@/lib/data";
 import AccountSettingsModal, { type ManageTab } from "./AccountSettingsModal";
 import {
+  buildSentMessageFromDraft,
   computeGroupMeta,
   isFlaggedMessage,
   getThreadMessages,
@@ -2356,81 +2357,6 @@ export default function MailClient({
     [evictMessageCaches, setMessages, viewMessage?.id]
   );
 
-  const handleSendDraft = useCallback(
-    async (message: Message) => {
-      if (!activeAccountId) return;
-      const draftId = message.id;
-      setPendingMessageActions((prev) => {
-        if (prev.has(draftId)) return prev;
-        const next = new Set(prev);
-        next.add(draftId);
-        return next;
-      });
-      try {
-        const res = await apiFetch(buildAccountDraftSendPath(activeAccountId, draftId), {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({})
-        });
-        if (!res.ok) {
-          const errMsg = await readErrorMessage(res);
-          reportError(errMsg || "Failed to send draft.");
-          return;
-        }
-        // Same UI-cleanup sequence as the compose-editor send flow, so the
-        // draft row disappears from the list immediately and the
-        // deletion-reconciler doesn't fire a misleading "draft gone on
-        // server" tombstone notice.
-        suppressDraftDeleteReconcile(draftId);
-        removeDraftFromUi(draftId);
-        pushNotice({
-          type: "success",
-          title: "Draft sent.",
-          description: message.subject?.trim()
-            ? message.subject.trim().slice(0, 180)
-            : undefined
-        });
-        // Mailbox refresh is best-effort: a failure here does NOT mean
-        // the send failed (the server already confirmed success above).
-        // Surfacing a "send failed" error after a successful send would
-        // prompt the user to retry and send the message twice. Instead,
-        // fail soft with a warning notice.
-        try {
-          await refreshFolders();
-          await refreshMailboxDataRef.current();
-        } catch (refreshErr) {
-          pushNotice({
-            type: "warning",
-            title: "Draft sent, but mailbox refresh failed.",
-            description:
-              (refreshErr as Error)?.message ||
-              "Refresh the mailbox manually to see the updated state."
-          });
-        }
-      } catch (err) {
-        reportError((err as Error)?.message || "Failed to send draft.");
-      } finally {
-        setPendingMessageActions((prev) => {
-          if (!prev.has(draftId)) return prev;
-          const next = new Set(prev);
-          next.delete(draftId);
-          return next;
-        });
-      }
-    },
-    [
-      activeAccountId,
-      apiFetch,
-      pushNotice,
-      readErrorMessage,
-      refreshFolders,
-      removeDraftFromUi,
-      reportError,
-      setPendingMessageActions,
-      suppressDraftDeleteReconcile
-    ]
-  );
-
   const handleDiscardDraft = useCallback(
     async (message: Message) => {
       if (!activeAccountId) return;
@@ -2990,6 +2916,132 @@ export default function MailClient({
       threadDateSource,
       updateThreadCacheWithMessage,
       viewMessage
+    ]
+  );
+
+  const handleSendDraft = useCallback(
+    async (message: Message) => {
+      if (!activeAccountId) return;
+      const draftId = message.id;
+      setPendingMessageActions((prev) => {
+        if (prev.has(draftId)) return prev;
+        const next = new Set(prev);
+        next.add(draftId);
+        return next;
+      });
+      try {
+        const res = await apiFetch(buildAccountDraftSendPath(activeAccountId, draftId), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({})
+        });
+        if (!res.ok) {
+          const errMsg = await readErrorMessage(res);
+          reportError(errMsg || "Failed to send draft.");
+          return;
+        }
+        const sendResult = (await res.json().catch(() => null)) as
+          | { sentFolderId?: string | null; sentMessageUid?: number | null; messageId?: string | null }
+          | null;
+
+        // Don't let the deletion-reconciler fire a misleading "draft gone on
+        // server" tombstone notice for the row we're about to repurpose.
+        suppressDraftDeleteReconcile(draftId);
+
+        // Swap the draft row into its sent form in place rather than removing
+        // it and waiting for the Sent-folder sync to add a fresh row a few
+        // seconds later. The draft and its Sent copy share the same
+        // Message-Id-derived row id, so the background sync below upserts the
+        // authoritative message straight onto this row. When the current view
+        // wouldn't keep a sent message (e.g. a folder-scoped Drafts view), the
+        // message legitimately leaves the list, so fall back to removing it.
+        const sentFolder =
+          accountFolders.find((folder) => folder.id === sendResult?.sentFolderId) ?? findSentFolder();
+        const sentMessageUid =
+          typeof sendResult?.sentMessageUid === "number" && Number.isFinite(sendResult.sentMessageUid)
+            ? sendResult.sentMessageUid
+            : null;
+        // The in-place swap is only safe when we know which folder the message
+        // moved to. Without a resolved Sent folder the optimistic row would
+        // keep the draft's own folder/mailbox, which could leave a non-draft
+        // "sent" message lingering in a Drafts-scoped view — so fall back to
+        // removing the row and letting the background sync surface the real one.
+        const optimisticSent = sentFolder
+          ? buildSentMessageFromDraft(message, {
+              sentFolderId: sentFolder.id,
+              sentMailboxPath: sentFolder.id.replace(`${activeAccountId}:`, ""),
+              sentMessageUid
+            })
+          : null;
+        if (optimisticSent && shouldKeepMessageInCurrentResults(optimisticSent)) {
+          setMessages((prev) => prev.map((msg) => (msg.id === draftId ? optimisticSent : msg)));
+          if (viewMessage?.id === draftId) {
+            setViewMessage(optimisticSent);
+          }
+          updateThreadCacheWithMessage(optimisticSent);
+        } else {
+          removeDraftFromUi(draftId);
+        }
+
+        pushNotice({
+          type: "success",
+          title: "Draft sent.",
+          description: message.subject?.trim() ? message.subject.trim().slice(0, 180) : undefined
+        });
+
+        // Bring the authoritative Sent message into the local store in the
+        // background — it upserts onto the same row id. Best-effort: a failure
+        // here does NOT mean the send failed (the server already confirmed
+        // success above), so fail soft with a warning rather than an error
+        // that would tempt the user to resend. `allowRefresh` is false so the
+        // optimistic row isn't momentarily dropped before the Sent copy lands.
+        try {
+          if (sentFolder) {
+            await syncFolderWithBackgroundRef.current?.(
+              sentFolder.id,
+              false,
+              sentMessageUid !== null ? "new" : "recent",
+              { backfillUids: sentMessageUid !== null ? [sentMessageUid] : undefined }
+            );
+          }
+          await refreshFolders();
+        } catch (refreshErr) {
+          pushNotice({
+            type: "warning",
+            title: "Draft sent, but mailbox refresh failed.",
+            description:
+              (refreshErr as Error)?.message ||
+              "Refresh the mailbox manually to see the updated state."
+          });
+        }
+      } catch (err) {
+        reportError((err as Error)?.message || "Failed to send draft.");
+      } finally {
+        setPendingMessageActions((prev) => {
+          if (!prev.has(draftId)) return prev;
+          const next = new Set(prev);
+          next.delete(draftId);
+          return next;
+        });
+      }
+    },
+    [
+      accountFolders,
+      activeAccountId,
+      apiFetch,
+      findSentFolder,
+      pushNotice,
+      readErrorMessage,
+      refreshFolders,
+      removeDraftFromUi,
+      reportError,
+      setMessages,
+      setPendingMessageActions,
+      setViewMessage,
+      shouldKeepMessageInCurrentResults,
+      suppressDraftDeleteReconcile,
+      updateThreadCacheWithMessage,
+      viewMessage?.id
     ]
   );
 

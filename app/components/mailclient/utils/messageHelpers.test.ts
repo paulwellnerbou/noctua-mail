@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import type { Attachment, Message, Topic } from "@/lib/data";
 import {
+  buildSentMessageFromDraft,
   decrementGroupMetaForMessages,
   hasAssignedTopics,
   resolveInReplyToRef,
@@ -47,6 +48,57 @@ function makeTopic(overrides?: Partial<Topic>): Topic {
     ...overrides
   };
 }
+
+describe("buildSentMessageFromDraft", () => {
+  it("keeps the row id and threadId so the row swaps in place", () => {
+    const draft = makeMessage({
+      id: "imap-abc",
+      threadId: "t-9",
+      folderId: "acc:Drafts",
+      mailboxPath: "Drafts",
+      imapUid: 12,
+      draft: true,
+      flags: ["\\Draft", "\\Seen"]
+    });
+    const sent = buildSentMessageFromDraft(draft, {
+      sentFolderId: "acc:Sent",
+      sentMailboxPath: "Sent",
+      sentMessageUid: 44
+    });
+    expect(sent.id).toBe("imap-abc");
+    expect(sent.threadId).toBe("t-9");
+    expect(sent.folderId).toBe("acc:Sent");
+    expect(sent.mailboxPath).toBe("Sent");
+    expect(sent.imapUid).toBe(44);
+  });
+
+  it("drops the \\Draft flag, keeps \\Seen, and clears draft markers", () => {
+    const draft = makeMessage({
+      draft: true,
+      unread: true,
+      seen: false,
+      flags: ["\\Draft"],
+      draftInvite: null
+    });
+    const sent = buildSentMessageFromDraft(draft, {
+      sentFolderId: "acc:Sent",
+      sentMessageUid: null
+    });
+    expect(sent.flags).not.toContain("\\Draft");
+    expect(sent.flags).toContain("\\Seen");
+    expect(sent.draft).toBe(false);
+    expect(sent.seen).toBe(true);
+    expect(sent.unread).toBe(false);
+    // No known Sent UID yet — the background sync fills it in.
+    expect(sent.imapUid).toBeUndefined();
+  });
+
+  it("does not duplicate \\Seen when the draft already carries it", () => {
+    const draft = makeMessage({ flags: ["\\Draft", "\\Seen"] });
+    const sent = buildSentMessageFromDraft(draft, { sentFolderId: "acc:Sent" });
+    expect(sent.flags?.filter((flag) => flag === "\\Seen")).toHaveLength(1);
+  });
+});
 
 describe("shouldShowAttachmentIcon", () => {
   it("shows icon when lightweight list rows only provide hasAttachments", () => {

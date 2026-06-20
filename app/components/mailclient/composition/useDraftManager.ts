@@ -132,6 +132,7 @@ export function useDraftManager(params: UseDraftManagerParams) {
   } = params;
   const activeAccountIdRef = useRef(activeAccountId);
   const accountScopeVersionRef = useRef(0);
+  const draftSaveLoopPromiseRef = useRef<Promise<void> | null>(null);
   if (activeAccountIdRef.current !== activeAccountId) {
     activeAccountIdRef.current = activeAccountId;
     accountScopeVersionRef.current += 1;
@@ -236,7 +237,7 @@ export function useDraftManager(params: UseDraftManagerParams) {
   const runQueuedDraftSaves = () => {
     if (draftSaveInFlightRef.current) return;
     draftSaveInFlightRef.current = true;
-    void (async () => {
+    draftSaveLoopPromiseRef.current = (async () => {
       try {
         while (pendingDraftSaveRef.current) {
           const next = pendingDraftSaveRef.current;
@@ -247,9 +248,22 @@ export function useDraftManager(params: UseDraftManagerParams) {
         draftSaveInFlightRef.current = false;
         if (pendingDraftSaveRef.current) {
           runQueuedDraftSaves();
+        } else {
+          draftSaveLoopPromiseRef.current = null;
         }
       }
     })();
+  };
+
+  // Await any in-flight or queued draft save until the save queue is fully
+  // idle. Send/discard call this before acting on `composeDraftId`: a
+  // debounced auto-save may still be APPENDing the draft to IMAP, and acting
+  // before it settles leaves an orphan draft on the server that nothing
+  // deletes (the discard would run against a stale or not-yet-known draft id).
+  const flushPendingDraftSaves = async () => {
+    while (draftSaveLoopPromiseRef.current) {
+      await draftSaveLoopPromiseRef.current;
+    }
   };
 
   const saveDraft = (payload: DraftSavePayload, hash: string) => {
@@ -258,11 +272,23 @@ export function useDraftManager(params: UseDraftManagerParams) {
   };
 
   const handleDiscardDraft = async () => {
-    if (composeDraftId && activeAccountId) {
+    // Let any in-flight or queued auto-save settle before discarding, mirroring
+    // the send path. Otherwise a debounced save whose IMAP APPEND is still
+    // running would orphan a draft the discard never sees (its id isn't known
+    // yet). After flushing, read the id from the ref — the `composeDraftId`
+    // state captured in this closure can be stale for a save that just
+    // completed. Then bump the session version (and drop any queued save) so a
+    // save kicked off by a stray debounce timer after this point abandons its
+    // result instead of reconciling the just-discarded draft back into the list.
+    await flushPendingDraftSaves();
+    pendingDraftSaveRef.current = null;
+    composeSessionVersionRef.current += 1;
+    const draftId = composeDraftIdRef.current;
+    if (draftId && activeAccountId) {
       try {
         setDiscardingDraft(true);
-        suppressDraftDeleteReconcile(composeDraftId);
-        const res = await apiFetch(buildAccountDraftDiscardPath(activeAccountId, composeDraftId), {
+        suppressDraftDeleteReconcile(draftId);
+        const res = await apiFetch(buildAccountDraftDiscardPath(activeAccountId, draftId), {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({})
@@ -270,7 +296,7 @@ export function useDraftManager(params: UseDraftManagerParams) {
         if (!res.ok) {
           reportError(await readErrorMessage(res));
         } else {
-          removeDraftFromUi(composeDraftId);
+          removeDraftFromUi(draftId);
           if (searchScope === "folder" && activeFolderId) {
             void refreshMailboxData();
           }
@@ -287,6 +313,7 @@ export function useDraftManager(params: UseDraftManagerParams) {
     composeBaselineHashRef.current = null;
     setDraftSavedAt(null);
     setDraftSaveError(null);
+    composeDraftIdRef.current = null;
     setComposeDraftId(null);
     setComposeOpen(false);
     setComposeView("inline");
@@ -324,5 +351,5 @@ export function useDraftManager(params: UseDraftManagerParams) {
     saveDraft(payload, hash);
   };
 
-  return { saveDraft, handleDiscardDraft, handleSaveDraft };
+  return { saveDraft, handleDiscardDraft, handleSaveDraft, flushPendingDraftSaves };
 }

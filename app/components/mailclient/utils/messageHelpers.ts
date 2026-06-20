@@ -12,6 +12,45 @@ import {
   isMeaningfulVisibleAttachment
 } from "@/lib/messageFlags";
 
+/**
+ * Builds the in-place "sent" representation of a draft that was just sent
+ * from the message list. The row keeps its id and threadId so the list/thread
+ * row transitions seamlessly (draft → sent) instead of being removed and
+ * re-added a few seconds later when the Sent-folder sync lands. A draft and
+ * its Sent copy share the same Message-Id-derived row id, so the background
+ * sync upserts the authoritative message onto this very row.
+ *
+ * The date is intentionally left untouched: the Sent copy is relayed from the
+ * draft's stored MIME, so its `Date:` header — and thus the synced row's date
+ * — matches the draft's, and overriding it here would only cause a transient
+ * re-sort that the sync would then undo.
+ */
+export function buildSentMessageFromDraft(
+  draft: Message,
+  options: {
+    sentFolderId: string;
+    sentMailboxPath?: string;
+    sentMessageUid?: number | null;
+  }
+): Message {
+  const flags = (draft.flags ?? []).filter((flag) => flag.toLowerCase() !== "\\draft");
+  if (!flags.some((flag) => flag.toLowerCase() === "\\seen")) {
+    flags.push("\\Seen");
+  }
+  return {
+    ...draft,
+    folderId: options.sentFolderId,
+    mailboxPath: options.sentMailboxPath ?? draft.mailboxPath,
+    imapUid: typeof options.sentMessageUid === "number" ? options.sentMessageUid : undefined,
+    flags,
+    draft: false,
+    seen: true,
+    unread: false,
+    recent: false,
+    draftInvite: null
+  };
+}
+
 export function computeGroupMeta(items: Message[]): MessageGroupMeta[] {
   const counts = new Map<string, number>();
   items.forEach((msg) => {
