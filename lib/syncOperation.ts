@@ -658,9 +658,14 @@ export async function runSyncOperationBatched(
         draftCandidates.map((msg) => msg.messageId)
       );
       if (tombstoned.size > 0) {
-        const suppressed = draftCandidates.filter(
-          (msg) => msg.messageId && tombstoned.has(msg.messageId)
-        );
+        // `getTombstonedDraftMessageIds` returns trimmed Message-Ids (they are
+        // stored trimmed), so compare against the trimmed value here — a synced
+        // Message-Id carrying stray whitespace would otherwise slip past the
+        // suppression and get resurrected.
+        const suppressed = draftCandidates.filter((msg) => {
+          const trimmedMessageId = msg.messageId?.trim();
+          return trimmedMessageId && tombstoned.has(trimmedMessageId);
+        });
         const suppressedIds = new Set(suppressed.map((msg) => msg.id));
         messagesToUpsert = strippedMessages.filter((msg) => !suppressedIds.has(msg.id));
         for (const msg of suppressed) {
@@ -743,9 +748,12 @@ export async function runSyncOperationBatched(
         });
       });
 
-      // Collect new message notifications (new mode only)
+      // Collect new message notifications (new mode only). Iterate the
+      // messages actually written this batch, not `strippedMessages`, so a
+      // tombstoned draft that was suppressed above never surfaces a
+      // notification for mail that isn't in the local store.
       if (syncMode === "new") {
-        strippedMessages.forEach((message) => {
+        messagesToUpsert.forEach((message) => {
           if (typeof message.imapUid !== "number") return;
           newNotificationMessages.push({
             folderId: message.folderId,
