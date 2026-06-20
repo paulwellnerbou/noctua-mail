@@ -418,14 +418,15 @@ export async function sendDraftForAccount(params: {
   // path are real but non-urgent; the alternative (user-visible
   // duplicate send) is worse. Surfacing these as a soft warning on
   // the client is a future UX polish.
-  // Tombstone the draft by its stable Message-Id before any cleanup runs,
-  // so that even if the IMAP delete below fails (or another client lags),
-  // the next Drafts sync drops this draft instead of resurrecting it next
-  // to the message we just sent. Scoped enforcement (Drafts-flagged only)
-  // keeps the Sent copy — which shares this Message-Id — untouched.
-  await recordDraftTombstone(accountId, draft.messageId, draft.mailboxPath ?? null);
-
   try {
+    // Tombstone the draft by its stable Message-Id before any IMAP/DB
+    // cleanup runs, so that even if the IMAP delete below fails (or another
+    // client lags), the next Drafts sync drops this draft instead of
+    // resurrecting it next to the message we just sent. Scoped enforcement
+    // (Drafts-flagged only) keeps the Sent copy — which shares this
+    // Message-Id — untouched. Kept inside the swallowing try so a transient
+    // DB error here can't surface as a (false) send failure.
+    await recordDraftTombstone(accountId, draft.messageId, draft.mailboxPath ?? null);
     const attachmentIds = await getAttachmentIds(accountId, draft.id);
     if (draft.mailboxPath && typeof draft.imapUid === "number") {
       try {

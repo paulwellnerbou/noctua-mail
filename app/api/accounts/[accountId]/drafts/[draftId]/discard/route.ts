@@ -38,8 +38,20 @@ export async function POST(request: Request, { params }: Params) {
   // forward-too-fast bug left the local row deleted but the IMAP copy alive,
   // which the next sync then re-imported).
   await recordDraftTombstone(accountId, message.messageId, message.mailboxPath ?? null);
+  // Local-first: the IMAP delete is best-effort. If it fails (e.g. an IMAP
+  // outage), still remove the local row and files so the user isn't stuck
+  // with an undeletable draft — the tombstone above makes the next Drafts
+  // sync delete the lingering server copy and refuse to re-import it.
   if (message.imapUid && message.mailboxPath) {
-    await deleteImapMessage(account, message.mailboxPath, message.imapUid, clientId);
+    try {
+      await deleteImapMessage(account, message.mailboxPath, message.imapUid, clientId);
+    } catch (error) {
+      console.warn("[draft-discard] IMAP delete failed; relying on tombstone cleanup", {
+        accountId,
+        draftId: message.id,
+        error
+      });
+    }
   }
   const attachmentIds = await getAttachmentIds(accountId, message.id);
   await deleteMessageById(accountId, message.id);
