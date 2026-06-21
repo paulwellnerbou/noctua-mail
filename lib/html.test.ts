@@ -535,6 +535,20 @@ describe("assembleQuotedHtml", () => {
     expect(parts.bodyHtml).toContain("Original message body text");
   });
 
+  it("quotes the real document when two complete html documents are concatenated", () => {
+    const html = [
+      "<html><head></head><body><div>Original message body text</div></body></html>",
+      "<br/>\n",
+      "<html><head></head><body><div><div></div></div></body></html>"
+    ].join("");
+
+    const parts = buildQuotedHtmlPartsFromHtml(html, "Header", false);
+
+    expect(parts.bodyHtml).toContain("Original message body text");
+    expect(parts.bodyHtml).not.toContain("</body>");
+    expect(parts.bodyHtml).not.toContain("<html");
+  });
+
   it("keeps the quoted wrapper even when html quoting is disabled", () => {
     const parts = buildQuotedHtmlPartsFromHtml("<p>Quoted</p>", "Header", false);
 

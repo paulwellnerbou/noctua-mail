@@ -124,10 +124,15 @@ export function extractBodyContent(input: string) {
 }
 
 export function extractHtmlBody(value: string) {
+  // Collapse concatenated documents first: some emails carry two complete
+  // <html> documents back to back where the trailing one is empty. Without
+  // this, the greedy body match below spans both documents and pulls the
+  // empty trailing doc into the quote, leaving the reply quote blank.
+  const preferred = selectPreferredHtmlDocument(value);
   // Greedy through the last </body>: emails that nest a second <body> inside
   // the outer one would otherwise be truncated at the first (inner) </body>.
   // See the matching note in extractBodyContent.
-  const match = value.match(/<body[^>]*>([\s\S]*)<\/body>/i);
+  const match = preferred.match(/<body[^>]*>([\s\S]*)<\/body>/i);
   if (match?.[1]) return match[1];
-  return value;
+  return preferred;
 }
