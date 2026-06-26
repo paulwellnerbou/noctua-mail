@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo, useRef } from "react";
 import { X, Clock, Folder as FolderIcon } from "lucide-react";
 import { Dialog, IconButton, TextField } from "@radix-ui/themes";
 import type { Folder } from "@/lib/data";
@@ -58,6 +58,7 @@ export default function MoveToDialog({
 }: MoveToDialogProps) {
   const [query, setQuery] = useState("");
   const [collapsedFolders, setCollapsedFolders] = useState<Record<string, boolean>>({});
+  const searchInputRef = useRef<HTMLInputElement>(null);
 
   const recentIds = useMemo(
     () => (open ? getRecentMoveFolderIds(accountId) : []),
@@ -99,7 +100,10 @@ export default function MoveToDialog({
         className={styles.dialogContent}
         aria-label="Move to folder"
         aria-describedby={undefined}
-        onOpenAutoFocus={(e) => e.preventDefault()}
+        onOpenAutoFocus={(e) => {
+          e.preventDefault();
+          searchInputRef.current?.focus();
+        }}
       >
         <div className={styles.dialogHeader}>
           <Dialog.Title className={styles.dialogTitle}>Move to...</Dialog.Title>
@@ -112,12 +116,12 @@ export default function MoveToDialog({
 
         <div className={styles.searchArea}>
           <TextField.Root
+            ref={searchInputRef}
             size="2"
             type="search"
             placeholder="Search folders"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            autoFocus
             className={styles.searchInput}
           >
             {query ? (
