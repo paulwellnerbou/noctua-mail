@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { buildAccountCalendarEventPath } from "@/lib/accountApiPaths";
+import { truncateRecurrenceBeforeOccurrence } from "@/lib/calendarSeriesTruncation";
 import type { CalendarEvent } from "@/lib/data";
 import { dispatchCalendarRemindersUpdatedEvent } from "@/app/components/mailclient/utils/calendarReminders";
 import { dispatchCalendarEventsUpdatedEvent } from "./calendarEventsClient";
@@ -23,6 +24,12 @@ export type UseEventDeleteStateResult = {
   performDeleteEvent: (scope: CalendarEventDeleteScope) => Promise<void>;
 };
 
+const FAILURE_MESSAGES: Record<CalendarEventDeleteScope, string> = {
+  occurrence: "Failed to delete occurrence.",
+  following: "Failed to delete following occurrences.",
+  series: "Failed to delete event."
+};
+
 function buildOccurrenceExcludedDates(excludedDates: number[] | undefined, occurrenceStartAtMs: number) {
   return Array.from(
     new Set(
@@ -36,9 +43,10 @@ function buildOccurrenceExcludedDates(excludedDates: number[] | undefined, occur
 
 /**
  * Owns the event deletion flow: recurring events prompt for series vs.
- * occurrence scope, non-recurring events delete directly. Occurrence deletes
- * add an exclusion date; series deletes issue a soft-delete. Either path
- * broadcasts the calendar/reminder update events and invokes onEventDeleted.
+ * occurrence vs. this-and-following scope, non-recurring events delete directly.
+ * Occurrence deletes add an exclusion date; following deletes cap the series
+ * with UNTIL; series deletes issue a soft-delete. Every path broadcasts the
+ * calendar/reminder update events and invokes onEventDeleted.
  */
 export function useEventDeleteState({
   accountId,
@@ -62,20 +70,34 @@ export function useEventDeleteState({
     setDeletingEvent(true);
     setDeleteScopeDialogOpen(false);
     try {
-      if (scope === "occurrence") {
+      if (scope === "occurrence" || scope === "following") {
         if (resolvedOccurrenceStartAtMs === undefined) {
-          onNotice("Failed to delete occurrence.");
+          onNotice(FAILURE_MESSAGES[scope]);
           return;
         }
+        const body =
+          scope === "occurrence"
+            ? {
+                excludedDates: buildOccurrenceExcludedDates(
+                  eventSnapshot.excludedDates,
+                  resolvedOccurrenceStartAtMs
+                )
+              }
+            : (() => {
+                const truncated = truncateRecurrenceBeforeOccurrence(
+                  eventSnapshot,
+                  resolvedOccurrenceStartAtMs
+                );
+                return {
+                  recurrenceRule: truncated.recurrenceRule,
+                  recurrenceDates: truncated.recurrenceDates ?? [],
+                  excludedDates: truncated.excludedDates ?? []
+                };
+              })();
         const response = await fetch(buildAccountCalendarEventPath(accountId, eventId), {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            excludedDates: buildOccurrenceExcludedDates(
-              eventSnapshot.excludedDates,
-              resolvedOccurrenceStartAtMs
-            )
-          })
+          body: JSON.stringify(body)
         });
         const payload = (await response.json().catch(() => null)) as
           | {
@@ -85,7 +107,7 @@ export function useEventDeleteState({
             }
           | null;
         if (!response.ok || payload?.ok !== true || !payload.event) {
-          onNotice(payload?.message ?? "Failed to delete occurrence.");
+          onNotice(payload?.message ?? FAILURE_MESSAGES[scope]);
           return;
         }
         dispatchCalendarEventsUpdatedEvent();
@@ -119,7 +141,7 @@ export function useEventDeleteState({
         scope
       });
     } catch {
-      onNotice(scope === "occurrence" ? "Failed to delete occurrence." : "Failed to delete event.");
+      onNotice(FAILURE_MESSAGES[scope]);
     } finally {
       setDeletingEvent(false);
     }

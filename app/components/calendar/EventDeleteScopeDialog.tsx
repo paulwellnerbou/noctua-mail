@@ -18,8 +18,9 @@ export type EventDeleteScopeDialogProps = {
 
 /**
  * Confirmation prompt shown before deleting a recurring event. Lets the user
- * choose whether to remove only the currently-viewed occurrence or the whole
- * series. Non-recurring events skip this dialog and are deleted directly.
+ * choose whether to remove only the currently-viewed occurrence, this and all
+ * following occurrences, or the whole series. Non-recurring events skip this
+ * dialog and are deleted directly.
  */
 export default function EventDeleteScopeDialog({
   open,
@@ -43,7 +44,8 @@ export default function EventDeleteScopeDialog({
       <AlertDialogContent size="2">
         <AlertDialog.Title size="3">Delete recurring event?</AlertDialog.Title>
         <AlertDialog.Description>
-          Choose whether to remove only {responseOccurrenceLabel.toLowerCase()} or delete the whole series.
+          Choose whether to remove only {responseOccurrenceLabel.toLowerCase()}, this and all following
+          occurrences, or the whole series.
         </AlertDialog.Description>
         <div className={styles.responseSummary}>
           <Text size="2" weight="medium">{title || "Untitled Event"}</Text>
@@ -65,6 +67,16 @@ export default function EventDeleteScopeDialog({
               onClick={() => void onDelete("occurrence")}
             >
               {responseOccurrenceLabel}
+            </Button>
+          </AlertDialog.Action>
+          <AlertDialog.Action>
+            <Button
+              variant="soft"
+              color="gray"
+              disabled={deletingEvent}
+              onClick={() => void onDelete("following")}
+            >
+              This and all following
             </Button>
           </AlertDialog.Action>
           <AlertDialog.Action>

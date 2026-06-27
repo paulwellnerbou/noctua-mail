@@ -29,7 +29,7 @@ import { useEventReminderState } from "./useEventReminderState";
 import { isReplyChoice, useEventResponseState } from "./useEventResponseState";
 import styles from "./EventDetailView.module.css";
 
-export type CalendarEventDeleteScope = "series" | "occurrence";
+export type CalendarEventDeleteScope = "series" | "occurrence" | "following";
 
 export type CalendarEventDeleteAction = {
   event: CalendarEvent;
