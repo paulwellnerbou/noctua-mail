@@ -16,7 +16,7 @@ import type { CalendarEventDeleteAction, CalendarEventDeleteScope } from "./Even
 
 const DELETE_TITLES: Record<CalendarEventDeleteScope, string> = {
   occurrence: "Occurrence removed.",
-  following: "This and following removed.",
+  following: "This and all following removed.",
   series: "Event deleted."
 };
 

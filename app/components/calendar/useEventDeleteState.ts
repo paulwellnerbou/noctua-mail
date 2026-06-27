@@ -26,7 +26,7 @@ export type UseEventDeleteStateResult = {
 
 const FAILURE_MESSAGES: Record<CalendarEventDeleteScope, string> = {
   occurrence: "Failed to delete occurrence.",
-  following: "Failed to delete following occurrences.",
+  following: "Failed to delete this and all following occurrences.",
   series: "Failed to delete event."
 };
 
@@ -85,7 +85,14 @@ export function useEventDeleteState({
               }
             : (() => {
                 const truncated = truncateRecurrenceBeforeOccurrence(
-                  eventSnapshot,
+                  {
+                    // Use the rule that gated scope selection — it can come from
+                    // a different source than the snapshot's own field.
+                    recurrenceRule: recurrenceRule ?? eventSnapshot.recurrenceRule,
+                    recurrenceDates: eventSnapshot.recurrenceDates,
+                    excludedDates: eventSnapshot.excludedDates,
+                    startTimezone: eventSnapshot.startTimezone
+                  },
                   resolvedOccurrenceStartAtMs
                 );
                 return {
