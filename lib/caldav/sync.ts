@@ -202,24 +202,27 @@ export async function syncCalendarEvents(
         for (const ev of localEvents) {
           if (ev.calendarId !== calendarId) continue;
           if (!ev.pendingRemoteSync || !ev.remoteHref || ev.deletedAtMs) continue;
-          // Look up by the actual remote object identity (href), not a
-          // re-parsed UID, so the If-Match safety check matches what we'd PUT.
-          const remote = remoteByHref.get(ev.remoteHref);
+          // Resolve the remote object by its actual identity (href) so the
+          // If-Match check matches what we'd PUT. Fall back to the UID listing
+          // to catch a moved object (same UID under a different href).
+          const remoteAtHref = remoteByHref.get(ev.remoteHref);
+          const remote = remoteAtHref
+            ? { href: ev.remoteHref, etag: remoteAtHref.etag, icsData: remoteAtHref.icsData }
+            : remoteByUid.get(ev.eventUid);
           if (!remote) {
-            // The server listing has no object at this href (moved or removed).
-            // Don't PUT to a stale href — there's nothing to validate the etag
-            // against. Leave the dirty flag set and surface it; truly-deleted
-            // events are handled by the reconciliation above.
+            // Object is gone from the server entirely — reconciliation handles
+            // the local deletion; nothing safe to push. Leave the flag and log.
             result.errors.push(
               `Skip push for UID ${ev.eventUid}: no remote object at ${ev.remoteHref}`
             );
             continue;
           }
-          // Only push when we can prove the local copy is based on the server's
-          // current revision: a matching, non-empty etag. A diverged etag *or*
-          // a missing local etag (legacy/partial rows) means an If-Match push
-          // would blind-overwrite the server — record a conflict instead.
-          const upToDateWithRemote = !!ev.remoteEtag && remote.etag === ev.remoteEtag;
+          const moved = remote.href !== ev.remoteHref;
+          // Push only when we can prove the local copy is based on the server's
+          // current revision at the same href: a matching, non-empty etag. A
+          // moved object, a diverged etag, or a missing local etag means an
+          // If-Match push could blind-overwrite — record a conflict instead.
+          const upToDateWithRemote = !moved && !!ev.remoteEtag && remote.etag === ev.remoteEtag;
           if (!upToDateWithRemote) {
             await upsertCalendarEventConflict(accountId, {
               eventId: ev.id,
@@ -236,9 +239,14 @@ export async function syncCalendarEvents(
               remoteChangedAtMs: parseIcsLastModified(remote.icsData),
               detectedAtMs: Date.now()
             });
+            // Adopt the current href for a moved object so a "keep mine"
+            // resolution and future syncs target the right resource.
+            if (moved) {
+              await upsertCalendarEvent(accountId, { ...ev, remoteHref: remote.href });
+            }
             result.conflicts++;
             result.errors.push(
-              `Conflict for UID ${ev.eventUid}: local edit cannot be safely pushed (etag mismatch or missing)`
+              `Conflict for UID ${ev.eventUid}: local edit cannot be safely pushed (moved, etag mismatch, or missing etag)`
             );
             continue;
           }

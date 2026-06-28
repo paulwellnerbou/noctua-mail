@@ -53,6 +53,9 @@ export function useCalendarConflicts(accountId: string) {
   }, [accountId]);
 
   useEffect(() => {
+    // Drop the previous account's conflicts immediately on switch so the banner
+    // can't show the wrong account's data while the new fetch is in flight.
+    setConflicts([]);
     void refresh();
     const handler = () => void refresh();
     window.addEventListener(CALENDAR_EVENTS_UPDATED_EVENT, handler);

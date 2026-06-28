@@ -127,22 +127,39 @@ describe("syncCalendarEvents write-back", () => {
     expect(conflicts[0]?.remoteEtag).toBe("etag-server");
   });
 
-  test("skips the push (no blind PUT) when no remote object exists at the href", async () => {
+  test("records a conflict and adopts the new href when the remote object moved", async () => {
+    const accountId = `acc-sync-moved-${randomUUID()}`;
+    await upsertAccount(buildAccount(accountId));
+    const uid = `evt-${randomUUID()}@example.test`;
+    const event = buildDirtyEvent(accountId, uid, "etag-1");
+    await upsertCalendarEvent(accountId, event);
+    // Same UID, different href (moved on the server).
+    const movedHref = `${CALENDAR_URL}moved-${uid}.ics`;
+    remoteObjects = [{ url: movedHref, etag: "etag-moved", data: ics(uid) }];
+
+    const result = await syncCalendarEvents(accountId, syncDeps);
+
+    expect(updateRemoteEvent).not.toHaveBeenCalled();
+    expect(result.conflicts).toBe(1);
+    const conflicts = await listUnresolvedCalendarEventConflicts(accountId);
+    expect(conflicts[0]?.remoteEtag).toBe("etag-moved");
+    const stored = await getCalendarEventById(accountId, event.id);
+    expect(stored?.remoteHref).toBe(movedHref); // adopted the current href
+    expect(stored?.pendingRemoteSync).toBe(event.pendingRemoteSync); // still dirty until resolved
+  });
+
+  test("skips the push (no conflict) when the object is gone from the server", async () => {
     const accountId = `acc-sync-nohref-${randomUUID()}`;
     await upsertAccount(buildAccount(accountId));
     const uid = `evt-${randomUUID()}@example.test`;
     const event = buildDirtyEvent(accountId, uid, "etag-1");
     await upsertCalendarEvent(accountId, event);
-    // UID present (so reconciliation won't soft-delete it) but under a
-    // different href than the local event's remoteHref.
-    remoteObjects = [{ url: `${CALENDAR_URL}moved-${uid}.ics`, etag: "x", data: ics(uid) }];
+    remoteObjects = []; // UID absent entirely → truly gone
 
     const result = await syncCalendarEvents(accountId, syncDeps);
 
     expect(updateRemoteEvent).not.toHaveBeenCalled();
     expect(result.conflicts).toBe(0);
-    const stored = await getCalendarEventById(accountId, event.id);
-    expect(stored?.pendingRemoteSync).toBe(event.pendingRemoteSync); // still dirty
   });
 
   test("ignores caldav events that are not dirty", async () => {
