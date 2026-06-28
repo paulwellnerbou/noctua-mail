@@ -17,7 +17,14 @@ export function mergeRemoteIcsIntoEvent(
   icsData: string,
   opts: { accountId: string; accountEmail: string; remoteEtag?: string; remoteHref?: string }
 ): CalendarEvent | null {
-  const preview = parseIcsEvents(icsData)[0];
+  let preview;
+  try {
+    preview = parseIcsEvents(icsData)[0];
+  } catch {
+    // Malformed ICS — treat it as an unusable remote version rather than
+    // throwing (the resolve route maps null to a 422 instead of a 500).
+    return null;
+  }
   if (!preview?.start) return null;
   const previewEvent = calendarPreviewToDbEvent(preview, opts.accountId, "caldav", {
     calendarId: local.calendarId,
