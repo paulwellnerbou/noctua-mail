@@ -249,10 +249,11 @@ export async function syncCalendarEvents(
         }
 
         // Push soft-deleted local events to remote. Only events still present
-        // on the server (remoteByUid) are deleted — a soft-delete on something
-        // already gone remotely was created by the reconciliation above and
-        // needs no call. On success drop the remote linkage so we don't retry
-        // every sync and so an undo (restore) re-creates it as a new object.
+        // on the server (by remoteHref) are deleted — a soft-delete on
+        // something already gone remotely was created by the reconciliation
+        // above and needs no call. On success drop the remote linkage and the
+        // dirty flag so we don't retry every sync and so an undo (restore)
+        // re-creates it cleanly as a new object.
         const deletedEvents = await listSoftDeletedCaldavEventsToPush(accountId);
         for (const ev of deletedEvents) {
           if (ev.calendarId !== calendarId || !ev.remoteHref) continue;
@@ -262,7 +263,8 @@ export async function syncCalendarEvents(
             await upsertCalendarEvent(accountId, {
               ...ev,
               remoteHref: undefined,
-              remoteEtag: undefined
+              remoteEtag: undefined,
+              pendingRemoteSync: undefined
             });
           } catch {
             // leave the linkage intact so the next sync retries

@@ -146,7 +146,6 @@ describe("syncCalendarEvents write-back", () => {
     await upsertAccount(buildAccount(accountId));
     const uid = `evt-${randomUUID()}@example.test`;
     const event = buildDirtyEvent(accountId, uid, "etag-1");
-    event.pendingRemoteSync = undefined;
     event.deletedAtMs = Date.UTC(2026, 0, 11, 0, 0, 0);
     await upsertCalendarEvent(accountId, event);
     // Still present on the server → the user removed it locally.
@@ -157,6 +156,8 @@ describe("syncCalendarEvents write-back", () => {
     expect(deleteRemoteEvent).toHaveBeenCalledTimes(1);
     const stored = await getCalendarEventById(accountId, event.id);
     expect(stored?.remoteHref).toBeUndefined();
+    expect(stored?.remoteEtag).toBeUndefined();
+    expect(stored?.pendingRemoteSync).toBeUndefined();
     expect(stored?.deletedAtMs).toBe(event.deletedAtMs);
   });
 

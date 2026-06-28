@@ -6,7 +6,6 @@ import {
 } from "@/app/api/_helpers/accountContext";
 import {
   deleteCalendarEventConflict,
-  getAccountById,
   getCalendarEventById,
   getCalendarEventConflict,
   upsertCalendarEvent,
@@ -112,8 +111,13 @@ export async function POST(request: Request, { params }: Params) {
   }
 
   try {
-    const account = await getAccountById(accountId);
-    const outcome = await applyConflictResolution({ accountId, event, conflict, account, resolution });
+    const outcome = await applyConflictResolution({
+      accountId,
+      event,
+      conflict,
+      account: accountContext.account,
+      resolution
+    });
     if (!outcome.ok) {
       return NextResponse.json({ ok: false, message: outcome.message }, { status: outcome.status });
     }
