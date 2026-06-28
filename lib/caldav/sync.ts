@@ -266,9 +266,13 @@ export async function syncCalendarEvents(
         const deletedEvents = await listSoftDeletedCaldavEventsToPush(accountId);
         for (const ev of deletedEvents) {
           if (ev.calendarId !== calendarId || !ev.remoteHref) continue;
-          if (!remoteByHref.has(ev.remoteHref)) continue;
+          const remote = remoteByHref.get(ev.remoteHref);
+          // Delete with an If-Match against the server's *current* etag so a
+          // revision that changed since our listing isn't removed blindly. No
+          // object at the href, or no etag to guard with → skip.
+          if (!remote?.etag) continue;
           try {
-            await deps.deleteRemoteEvent(client, ev.remoteHref, ev.remoteEtag);
+            await deps.deleteRemoteEvent(client, ev.remoteHref, remote.etag);
             await upsertCalendarEvent(accountId, {
               ...ev,
               remoteHref: undefined,

@@ -179,6 +179,23 @@ describe("syncCalendarEvents write-back", () => {
     expect(stored?.deletedAtMs).toBe(event.deletedAtMs);
   });
 
+  test("does not DELETE without an If-Match etag from the server listing", async () => {
+    const accountId = `acc-sync-delete-noetag-${randomUUID()}`;
+    await upsertAccount(buildAccount(accountId));
+    const uid = `evt-${randomUUID()}@example.test`;
+    const event = buildDirtyEvent(accountId, uid, "etag-1");
+    event.deletedAtMs = Date.UTC(2026, 0, 11, 0, 0, 0);
+    await upsertCalendarEvent(accountId, event);
+    // Present on the server but the listing carries no etag → can't guard.
+    remoteObjects = [{ url: event.remoteHref!, etag: "", data: ics(uid) }];
+
+    await syncCalendarEvents(accountId, syncDeps);
+
+    expect(deleteRemoteEvent).not.toHaveBeenCalled();
+    const stored = await getCalendarEventById(accountId, event.id);
+    expect(stored?.remoteHref).toBe(event.remoteHref); // linkage left intact for retry
+  });
+
   test("does not push a DELETE for an event already gone from the server", async () => {
     const accountId = `acc-sync-delete-gone-${randomUUID()}`;
     await upsertAccount(buildAccount(accountId));
