@@ -104,6 +104,20 @@ describe("truncateRecurrenceBeforeOccurrence", () => {
     expect(remaining).toEqual([start, Date.UTC(2026, 0, 9, 12, 0)]);
   });
 
+  test("leaves the series untouched for an invalid cutoff", () => {
+    const input = {
+      recurrenceRule: "FREQ=DAILY",
+      recurrenceDates: [Date.UTC(2026, 0, 5)],
+      excludedDates: [Date.UTC(2026, 0, 6)]
+    };
+    for (const bad of [Number.NaN, 0, -1]) {
+      const result = truncateRecurrenceBeforeOccurrence(input, bad);
+      expect(result.recurrenceRule).toBe("FREQ=DAILY");
+      expect(result.recurrenceDates).toEqual([Date.UTC(2026, 0, 5)]);
+      expect(result.excludedDates).toEqual([Date.UTC(2026, 0, 6)]);
+    }
+  });
+
   test("returns undefined date lists when nothing survives", () => {
     const cutoff = Date.UTC(2026, 0, 10);
     const result = truncateRecurrenceBeforeOccurrence(

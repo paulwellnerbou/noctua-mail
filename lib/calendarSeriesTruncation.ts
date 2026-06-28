@@ -46,6 +46,16 @@ export function truncateRecurrenceBeforeOccurrence(
   input: SeriesTruncationInput,
   cutoffStartAtMs: number
 ): SeriesTruncationResult {
+  // A bad cutoff would trim every date list and produce an invalid UNTIL;
+  // leave the series untouched rather than silently lose data.
+  if (!Number.isFinite(cutoffStartAtMs) || cutoffStartAtMs <= 0) {
+    return {
+      recurrenceRule: input.recurrenceRule,
+      recurrenceDates: input.recurrenceDates,
+      excludedDates: input.excludedDates
+    };
+  }
+
   const recurrenceDates = trimBeforeCutoff(input.recurrenceDates, cutoffStartAtMs);
   const excludedDates = trimBeforeCutoff(input.excludedDates, cutoffStartAtMs);
   const normalized = normalizeRule(input.recurrenceRule);
