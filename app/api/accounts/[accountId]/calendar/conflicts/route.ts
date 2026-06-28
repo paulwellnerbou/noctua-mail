@@ -36,8 +36,11 @@ export async function GET(request: Request, { params }: AccountRouteParams) {
           allDay: c.allDay,
           localChangedAtMs: c.localChangedAtMs ?? null,
           remoteChangedAtMs: c.remoteChangedAtMs ?? null,
-          localDiff: local ? diffCalendarEventSnapshots(base, local) : null,
-          remoteDiff: remote ? diffCalendarEventSnapshots(base, remote) : null
+          // Require a common base — without it the diff would be an "initial"
+          // snapshot that the UI renders as "no changes", masking a real
+          // conflict. Null instead surfaces "Couldn't compute…".
+          localDiff: base && local ? diffCalendarEventSnapshots(base, local) : null,
+          remoteDiff: base && remote ? diffCalendarEventSnapshots(base, remote) : null
         };
       } catch {
         return {
