@@ -127,6 +127,17 @@ export function buildAccountCalendarSyncPath(accountId: string) {
   return buildAccountApiPath(accountId, "/calendar/sync");
 }
 
+export function buildAccountCalendarConflictsPath(accountId: string) {
+  return buildAccountApiPath(accountId, "/calendar/conflicts");
+}
+
+export function buildAccountCalendarConflictResolvePath(accountId: string, eventId: string) {
+  return buildAccountApiPath(
+    accountId,
+    `/calendar/conflicts/${encodeURIComponent(eventId)}/resolve`
+  );
+}
+
 export function buildAccountRemindersPath(
   accountId: string,
   query?: URLSearchParams | string | null

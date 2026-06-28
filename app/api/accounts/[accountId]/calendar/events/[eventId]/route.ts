@@ -13,6 +13,20 @@ import type { CalendarEvent } from "@/lib/data";
 import { toFiniteNumber, toPositiveNumberArray } from "@/app/api/_helpers/numberParsing";
 import { deleteCalendarEventAndRelatedData } from "@/lib/calendarEventDeletion";
 
+/**
+ * Compute the write-back dirty flag after a local edit: stamp the change time
+ * for CalDAV-sourced events that have a remote counterpart, otherwise leave
+ * the existing value untouched (local-only events never push).
+ */
+export function resolvePendingRemoteSync(
+  existing: Pick<CalendarEvent, "sourceType" | "remoteHref" | "pendingRemoteSync">,
+  now: number
+): number | undefined {
+  return existing.sourceType === "caldav" && existing.remoteHref
+    ? now
+    : existing.pendingRemoteSync;
+}
+
 type Params = AccountRouteParams & {
   params: Promise<{ accountId?: string; eventId?: string }>;
 };
@@ -98,6 +112,8 @@ export async function PUT(request: Request, { params }: Params) {
     remoteEtag: body?.remoteEtag !== undefined ? body.remoteEtag?.trim() || undefined : existing.remoteEtag,
     remoteHref: body?.remoteHref !== undefined ? body.remoteHref?.trim() || undefined : existing.remoteHref,
     rawIcs: body?.rawIcs !== undefined ? body.rawIcs ?? undefined : existing.rawIcs,
+    // Flag CalDAV-sourced edits for write-back; the next sync pushes and clears it.
+    pendingRemoteSync: resolvePendingRemoteSync(existing, Date.now()),
     updatedAtMs: Date.now(),
     deletedAtMs: undefined
   };

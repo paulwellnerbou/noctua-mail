@@ -331,6 +331,11 @@ export function ensureCalendarEventOptionalColumns(db: any) {
   if (!hadCalendarEventUidKey) {
     db.prepare(`ALTER TABLE calendar_events ADD COLUMN eventUidKey TEXT`).run();
   }
+  // Dirty flag for CalDAV write-back: change time (ms) of a local edit not
+  // yet pushed to the remote server. Cleared once sync pushes the row.
+  if (!calendarEventColumns.has("pendingRemoteSync")) {
+    db.prepare(`ALTER TABLE calendar_events ADD COLUMN pendingRemoteSync INTEGER`).run();
+  }
   backfillCalendarEventUidKeys(db);
   db.prepare(
     `CREATE INDEX IF NOT EXISTS idx_calendar_events_account_uid_key
@@ -992,6 +997,7 @@ export function initAccountSchema(db: any) {
       remoteEtag TEXT,
       remoteHref TEXT,
       rawIcs TEXT,
+      pendingRemoteSync INTEGER,
       sourceType TEXT NOT NULL DEFAULT 'local',
       messageId TEXT,
       occurrenceMessageIds TEXT,
@@ -1045,6 +1051,28 @@ export function initAccountSchema(db: any) {
       createdAtMs INTEGER NOT NULL,
       PRIMARY KEY (accountId, eventUidKey)
     );
+
+    -- Unresolved CalDAV write-back conflicts: a row exists only while an
+    -- event changed both locally and on the server since the last sync.
+    -- baseIcs/localIcs/remoteIcs are the three full snapshots needed to
+    -- render the resolution diff and apply either side without re-fetching.
+    CREATE TABLE IF NOT EXISTS calendar_event_conflicts (
+      eventId TEXT PRIMARY KEY,
+      accountId TEXT NOT NULL,
+      eventUid TEXT NOT NULL,
+      summary TEXT,
+      timeZone TEXT,
+      allDay INTEGER NOT NULL DEFAULT 0,
+      baseIcs TEXT,
+      localIcs TEXT NOT NULL,
+      remoteIcs TEXT NOT NULL,
+      remoteEtag TEXT,
+      localChangedAtMs INTEGER,
+      remoteChangedAtMs INTEGER,
+      detectedAtMs INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_calendar_event_conflicts_account
+      ON calendar_event_conflicts(accountId);
   `);
 
   // Lightweight schema migration for existing account DBs.

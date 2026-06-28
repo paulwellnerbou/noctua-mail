@@ -184,10 +184,13 @@ export {
   deleteCalendarParticipationOverrideForOccurrence,
   listCalendarEvents,
   listCalendarEventsBySource,
+  listSoftDeletedCaldavEventsToPush,
   resolveCalendarParticipation,
   upsertCalendarEvent,
   upsertCalendarParticipationOverride
 } from "./db/calendar";
+
+export { type CalendarEventConflict } from "./db/calendar";
 
 /*
  * Concrete wrappers for the calendar functions that tests replace via
@@ -224,8 +227,36 @@ import {
   rescheduleCalendarRemindersByEventUid as _rescheduleCalendarRemindersByEventUidImpl,
   softDeleteCalendarEvent as _softDeleteCalendarEventImpl,
   upsertCalendarEventByUid as _upsertCalendarEventByUidImpl,
-  upsertMessageCalendarInviteStates as _upsertMessageCalendarInviteStatesImpl
+  upsertMessageCalendarInviteStates as _upsertMessageCalendarInviteStatesImpl,
+  deleteCalendarEventConflict as _deleteCalendarEventConflictImpl,
+  getCalendarEventConflict as _getCalendarEventConflictImpl,
+  listUnresolvedCalendarEventConflicts as _listUnresolvedCalendarEventConflictsImpl,
+  upsertCalendarEventConflict as _upsertCalendarEventConflictImpl
 } from "./db/calendar";
+
+export function deleteCalendarEventConflict(
+  ...args: Parameters<typeof _deleteCalendarEventConflictImpl>
+): ReturnType<typeof _deleteCalendarEventConflictImpl> {
+  return _deleteCalendarEventConflictImpl(...args);
+}
+
+export function getCalendarEventConflict(
+  ...args: Parameters<typeof _getCalendarEventConflictImpl>
+): ReturnType<typeof _getCalendarEventConflictImpl> {
+  return _getCalendarEventConflictImpl(...args);
+}
+
+export function listUnresolvedCalendarEventConflicts(
+  ...args: Parameters<typeof _listUnresolvedCalendarEventConflictsImpl>
+): ReturnType<typeof _listUnresolvedCalendarEventConflictsImpl> {
+  return _listUnresolvedCalendarEventConflictsImpl(...args);
+}
+
+export function upsertCalendarEventConflict(
+  ...args: Parameters<typeof _upsertCalendarEventConflictImpl>
+): ReturnType<typeof _upsertCalendarEventConflictImpl> {
+  return _upsertCalendarEventConflictImpl(...args);
+}
 
 export function getCalendarEventById(
   ...args: Parameters<typeof _getCalendarEventByIdImpl>

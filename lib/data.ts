@@ -317,6 +317,14 @@ export type CalendarEvent = {
   remoteEtag?: string;
   remoteHref?: string;
   rawIcs?: string;
+  /**
+   * Change time (ms) when a CalDAV-sourced event was modified locally and
+   * the edit has not yet been pushed to the remote server. Sync pushes
+   * flagged events then clears it; remote→local writes leave it `undefined`.
+   * The only signal that distinguishes a locally edited row from one freshly
+   * pulled from the server (both bump `updatedAtMs`).
+   */
+  pendingRemoteSync?: number;
   sourceType: CalendarEventSourceType;
   messageId?: string;
   /** Per-occurrence message links for rescheduled occurrences. Key = occurrence startAtMs as string. */

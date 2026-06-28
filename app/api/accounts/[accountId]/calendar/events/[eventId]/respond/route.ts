@@ -160,6 +160,9 @@ export async function POST(request: Request, { params }: Params) {
         myPartstat: partstat,
         myPartstatUpdatedAtMs: Date.now(),
         myAttendeeEmail: attendeeEmail,
+        // Write the PARTSTAT back to the user's own CalDAV copy on next sync.
+        pendingRemoteSync:
+          event.sourceType === "caldav" && event.remoteHref ? Date.now() : event.pendingRemoteSync,
         updatedAtMs: Date.now()
       };
       await upsertCalendarEvent(accountId, updatedEvent);

@@ -45,6 +45,7 @@ function rowToCalendarEvent(row: any): CalendarEvent {
     remoteEtag: row.remoteEtag ?? undefined,
     remoteHref: row.remoteHref ?? undefined,
     rawIcs: row.rawIcs ?? undefined,
+    pendingRemoteSync: row.pendingRemoteSync ?? undefined,
     sourceType: (row.sourceType as CalendarEventSourceType) ?? "local",
     messageId: row.messageId ?? undefined,
     occurrenceMessageIds: safeParseJson<Record<string, string>>(row.occurrenceMessageIds),
@@ -367,12 +368,12 @@ export async function upsertCalendarEvent(
       startAtMs, endAtMs, allDay, startTimezone, endTimezone,
       recurrenceRule, recurrenceDates, excludedDates,
       status, organizer, attendees, myPartstat, myPartstatUpdatedAtMs, myAttendeeEmail, replyRequested,
-      remoteEtag, remoteHref, rawIcs, sourceType, messageId, occurrenceMessageIds,
+      remoteEtag, remoteHref, rawIcs, pendingRemoteSync, sourceType, messageId, occurrenceMessageIds,
       sourceSubject, sourceFromAddr, sourceToAddr, sourceCcAddr, sourceBccAddr,
       sourceDateMs, sourceBodyText, sourceBodyHtml, occurrenceSnapshots, occurrenceRecurrenceIds,
       eventUidKey,
       createdAtMs, updatedAtMs, deletedAtMs
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).run(
     event.id,
     event.accountId,
@@ -399,6 +400,7 @@ export async function upsertCalendarEvent(
     event.remoteEtag ?? null,
     event.remoteHref ?? null,
     event.rawIcs ?? null,
+    event.pendingRemoteSync ?? null,
     event.sourceType,
     event.messageId ?? null,
     event.occurrenceMessageIds && Object.keys(event.occurrenceMessageIds).length > 0
@@ -455,5 +457,25 @@ export async function listCalendarEventsBySource(
        ORDER BY startAtMs ASC`
     )
     .all(accountId, sourceType) as any[];
+  return rows.map(rowToCalendarEvent);
+}
+
+/**
+ * Soft-deleted CalDAV events that still carry a `remoteHref` — i.e. local
+ * deletions whose removal hasn't been pushed to the server yet. Deliberately
+ * *not* filtered by `deletedAtMs IS NULL` (unlike `listCalendarEventsBySource`)
+ * because these are exactly the deleted rows the sync delete-push needs.
+ */
+export async function listSoftDeletedCaldavEventsToPush(
+  accountId: string
+): Promise<CalendarEvent[]> {
+  const db = await getAccountDb(accountId);
+  const rows = db
+    .prepare(
+      `SELECT * FROM calendar_events
+       WHERE accountId = ? AND sourceType = 'caldav'
+         AND deletedAtMs IS NOT NULL AND remoteHref IS NOT NULL`
+    )
+    .all(accountId) as any[];
   return rows.map(rowToCalendarEvent);
 }

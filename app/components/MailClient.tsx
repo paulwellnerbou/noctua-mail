@@ -102,6 +102,10 @@ import {
 } from "@/lib/threadDate";
 import { stripHtmlToText } from "@/lib/html";
 import {
+  CALENDAR_EVENTS_UPDATED_EVENT,
+  dispatchCalendarSyncCompletedEvent
+} from "@/app/components/calendar/calendarEventsClient";
+import {
   buildAccountApiPath,
   buildAccountCalendarSyncPath,
   buildAccountRecipientAliasPath,
@@ -3872,12 +3876,33 @@ export default function MailClient({
     const caldav = currentAccount?.caldav;
     if (!caldav?.url) return;
     const intervalMs = caldav.syncIntervalMs ?? 15 * 60 * 1000;
-    const doSync = () => {
-      void apiFetch(buildAccountCalendarSyncPath(activeAccountId), { method: "POST" });
+    const accountId = activeAccountId;
+    let debounceTimer: number | undefined;
+    const doSync = async () => {
+      try {
+        await apiFetch(buildAccountCalendarSyncPath(accountId), { method: "POST" });
+      } finally {
+        // Signal listeners (e.g. the write-back conflict banner) that server
+        // state may have changed — without re-dispatching the events-updated
+        // signal that drives this sync, which would loop.
+        dispatchCalendarSyncCompletedEvent();
+      }
     };
-    doSync();
-    const timer = window.setInterval(doSync, intervalMs);
-    return () => window.clearInterval(timer);
+    void doSync();
+    const timer = window.setInterval(() => void doSync(), intervalMs);
+    // Local edits dispatch CALENDAR_EVENTS_UPDATED_EVENT; sync shortly after so
+    // the change reaches the server without waiting for the periodic tick.
+    // Debounced to coalesce bursts (e.g. multi-step edits).
+    const onLocalChange = () => {
+      if (debounceTimer) window.clearTimeout(debounceTimer);
+      debounceTimer = window.setTimeout(() => void doSync(), 1500);
+    };
+    window.addEventListener(CALENDAR_EVENTS_UPDATED_EVENT, onLocalChange);
+    return () => {
+      window.clearInterval(timer);
+      if (debounceTimer) window.clearTimeout(debounceTimer);
+      window.removeEventListener(CALENDAR_EVENTS_UPDATED_EVENT, onLocalChange);
+    };
   }, [activeAccountId, currentAccount?.caldav?.url, currentAccount?.caldav?.syncIntervalMs, initialDataReady, apiFetch]);
 
   useEffect(() => {

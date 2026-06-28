@@ -10,6 +10,7 @@ import { NOTICE_TIMEOUTS } from "@/app/components/mailclient/constants";
 import { dispatchCalendarRemindersUpdatedEvent } from "@/app/components/mailclient/utils/calendarReminders";
 import { useInAppNotices } from "@/app/components/mailclient/useInAppNotices";
 import { dispatchCalendarEventsUpdatedEvent } from "./calendarEventsClient";
+import CalendarConflictBanner from "./CalendarConflictBanner";
 import EventDetailPanel from "./EventDetailPanel";
 import EventDialog from "./EventDialog";
 import type { CalendarEventDeleteAction, CalendarEventDeleteScope } from "./EventDetailView";
@@ -235,6 +236,7 @@ export default function CalendarEventBrowser({
 
   return (
     <>
+      <CalendarConflictBanner accountId={accountId} />
       {content}
       <EventDialog
         open={createDialog.open}

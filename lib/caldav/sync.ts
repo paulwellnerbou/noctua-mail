@@ -1,6 +1,20 @@
-import { getAccountById, listCalendarEventsBySource, upsertCalendarEvent, softDeleteCalendarEvent } from "@/lib/db";
+import {
+  getAccountById,
+  listCalendarEventsBySource,
+  listSoftDeletedCaldavEventsToPush,
+  upsertCalendarEvent,
+  softDeleteCalendarEvent,
+  upsertCalendarEventConflict,
+  deleteCalendarEventConflict
+} from "@/lib/db";
 import { parseIcsEvents } from "@/lib/calendar";
-import { calendarPreviewToDbEvent, calendarEventToIcs } from "./icsSerializer";
+import {
+  calendarPreviewToDbEvent,
+  calendarEventToIcs,
+  patchIcsForEvent,
+  parseIcsLastModified
+} from "./icsSerializer";
+import { mergeRemoteIcsIntoEvent } from "./remoteMerge";
 import {
   createCaldavClient,
   fetchRemoteCalendars,
@@ -16,17 +30,46 @@ export type CalendarSyncResult = {
   inserted: number;
   updated: number;
   pushed: number;
+  updatedRemote: number;
   deleted: number;
+  conflicts: number;
   errors: string[];
 };
 
-export async function syncCalendarEvents(accountId: string): Promise<CalendarSyncResult> {
+// The CalDAV network surface, injectable so tests can stub it without
+// `mock.module`-ing `./client` — that module is also covered by client.test.ts
+// (its real SSRF guard), and a global module mock would strip those exports.
+export type CaldavSyncDeps = {
+  createCaldavClient: typeof createCaldavClient;
+  fetchRemoteCalendars: typeof fetchRemoteCalendars;
+  fetchRemoteEvents: typeof fetchRemoteEvents;
+  pushEventToRemote: typeof pushEventToRemote;
+  updateRemoteEvent: typeof updateRemoteEvent;
+  deleteRemoteEvent: typeof deleteRemoteEvent;
+};
+
+const defaultSyncDeps: CaldavSyncDeps = {
+  createCaldavClient,
+  fetchRemoteCalendars,
+  fetchRemoteEvents,
+  pushEventToRemote,
+  updateRemoteEvent,
+  deleteRemoteEvent
+};
+
+export async function syncCalendarEvents(
+  accountId: string,
+  depsOverride: Partial<CaldavSyncDeps> = {}
+): Promise<CalendarSyncResult> {
+  const deps = { ...defaultSyncDeps, ...depsOverride };
   const result: CalendarSyncResult = {
     accountId,
     inserted: 0,
     updated: 0,
     pushed: 0,
+    updatedRemote: 0,
     deleted: 0,
+    conflicts: 0,
     errors: []
   };
 
@@ -38,14 +81,14 @@ export async function syncCalendarEvents(accountId: string): Promise<CalendarSyn
   const config = account.caldav;
 
   try {
-    const client = await createCaldavClient(config);
-    const calendars = await fetchRemoteCalendars(client, config.calendarPath);
+    const client = await deps.createCaldavClient(config);
+    const calendars = await deps.fetchRemoteCalendars(client, config.calendarPath);
 
     for (const calendar of calendars) {
       const calendarId = calendar.url ?? "";
       try {
         // Fetch all remote objects
-        const remoteObjects = await fetchRemoteEvents(client, calendar);
+        const remoteObjects = await deps.fetchRemoteEvents(client, calendar);
 
         const remoteByHref = new Map<string, { etag: string; icsData: string }>();
         const remoteByUid = new Map<string, { href: string; etag: string; icsData: string }>();
@@ -97,43 +140,20 @@ export async function syncCalendarEvents(accountId: string): Promise<CalendarSyn
               result.errors.push(`Parse error for UID ${uid}: ${e}`);
             }
           } else if (local.remoteEtag !== remote.etag) {
+            if (local.pendingRemoteSync) {
+              // Diverged on both sides — leave the local edit intact; the push
+              // loop below records a conflict for the user to resolve.
+              continue;
+            }
             // Remote-updated: etag changed, update local
             try {
-              const previews = parseIcsEvents(remote.icsData);
-              const preview = previews[0];
-              if (preview?.start) {
-                const previewEvent = calendarPreviewToDbEvent(preview, accountId, "caldav", {
-                  calendarId,
-                  accountEmail: account.email,
-                  remoteEtag: remote.etag,
-                  remoteHref: remote.href,
-                  rawIcs: remote.icsData
-                });
-                const updated: CalendarEvent = {
-                  ...local,
-                  summary: preview.summary?.trim() || local.summary,
-                  description: preview.description?.trim() || undefined,
-                  location: preview.location?.trim() || undefined,
-                  startAtMs: preview.start.getTime(),
-                  endAtMs: preview.end?.getTime(),
-                  allDay: preview.allDay,
-                  startTimezone: preview.startTimezone,
-                  endTimezone: preview.endTimezone,
-                  recurrenceRule: preview.recurrenceRule,
-                  recurrenceDates: preview.recurrenceDates?.map((d) => d.getTime()),
-                  excludedDates: preview.excludedDates?.map((d) => d.getTime()),
-                  status: preview.status,
-                  organizer: preview.organizer,
-                  attendees: previewEvent.attendees,
-                  myPartstat: previewEvent.myPartstat,
-                  myPartstatUpdatedAtMs: previewEvent.myPartstatUpdatedAtMs,
-                  myAttendeeEmail: previewEvent.myAttendeeEmail,
-                  replyRequested: previewEvent.replyRequested,
-                  remoteEtag: remote.etag,
-                  remoteHref: remote.href,
-                  rawIcs: remote.icsData,
-                  updatedAtMs: Date.now()
-                };
+              const updated = mergeRemoteIcsIntoEvent(local, remote.icsData, {
+                accountId,
+                accountEmail: account.email,
+                remoteEtag: remote.etag,
+                remoteHref: remote.href
+              });
+              if (updated) {
                 await upsertCalendarEvent(accountId, updated);
                 result.updated++;
               }
@@ -152,14 +172,16 @@ export async function syncCalendarEvents(accountId: string): Promise<CalendarSyn
           }
         }
 
-        // Push local-new events to remote (no remoteHref)
-        const allCaldavLocal = await listCalendarEventsBySource(accountId, "caldav");
-        for (const ev of allCaldavLocal) {
+        // Push local-new events to remote (no remoteHref). Reuse the
+        // localEvents snapshot from above — reconciliation only inserts/updates
+        // events that already carry a remoteHref, so the no-remoteHref and
+        // dirty candidate sets are unchanged.
+        for (const ev of localEvents) {
           if (ev.calendarId !== calendarId) continue;
           if (ev.remoteHref) continue; // already pushed
           try {
             const icsData = calendarEventToIcs(ev);
-            const pushed = await pushEventToRemote(client, calendar, ev.eventUid, icsData);
+            const pushed = await deps.pushEventToRemote(client, calendar, ev.eventUid, icsData);
             const updatedEv: CalendarEvent = {
               ...ev,
               remoteHref: pushed.url,
@@ -174,15 +196,101 @@ export async function syncCalendarEvents(accountId: string): Promise<CalendarSyn
           }
         }
 
-        // Push soft-deleted local events to remote
-        const allEvents = await listCalendarEventsBySource(accountId, "caldav");
-        for (const ev of allEvents) {
-          if (!ev.deletedAtMs || !ev.remoteHref) continue;
+        // Push local edits to existing remote events (dirty flag set by the
+        // mutation routes). Skip and record a conflict when the remote also
+        // changed since we last pulled it.
+        for (const ev of localEvents) {
           if (ev.calendarId !== calendarId) continue;
+          if (!ev.pendingRemoteSync || !ev.remoteHref || ev.deletedAtMs) continue;
+          // Resolve the remote object by its actual identity (href) so the
+          // If-Match check matches what we'd PUT. Fall back to the UID listing
+          // to catch a moved object (same UID under a different href).
+          const remoteAtHref = remoteByHref.get(ev.remoteHref);
+          const remote = remoteAtHref
+            ? { href: ev.remoteHref, etag: remoteAtHref.etag, icsData: remoteAtHref.icsData }
+            : remoteByUid.get(ev.eventUid);
+          if (!remote) {
+            // Object is gone from the server entirely — reconciliation handles
+            // the local deletion; nothing safe to push. Leave the flag and log.
+            result.errors.push(
+              `Skip push for UID ${ev.eventUid}: no remote object at ${ev.remoteHref}`
+            );
+            continue;
+          }
+          const moved = remote.href !== ev.remoteHref;
+          // Push only when we can prove the local copy is based on the server's
+          // current revision at the same href: a matching, non-empty etag. A
+          // moved object, a diverged etag, or a missing local etag means an
+          // If-Match push could blind-overwrite — record a conflict instead.
+          const upToDateWithRemote = !moved && !!ev.remoteEtag && remote.etag === ev.remoteEtag;
+          if (!upToDateWithRemote) {
+            await upsertCalendarEventConflict(accountId, {
+              eventId: ev.id,
+              accountId,
+              eventUid: ev.eventUid,
+              summary: ev.summary,
+              timeZone: ev.startTimezone,
+              allDay: ev.allDay,
+              baseIcs: ev.rawIcs,
+              localIcs: patchIcsForEvent(ev.rawIcs, ev),
+              remoteIcs: remote.icsData,
+              remoteEtag: remote.etag,
+              localChangedAtMs: ev.pendingRemoteSync,
+              remoteChangedAtMs: parseIcsLastModified(remote.icsData),
+              detectedAtMs: Date.now()
+            });
+            // Adopt the current href for a moved object so a "keep mine"
+            // resolution and future syncs target the right resource.
+            if (moved) {
+              await upsertCalendarEvent(accountId, { ...ev, remoteHref: remote.href });
+            }
+            result.conflicts++;
+            result.errors.push(
+              `Conflict for UID ${ev.eventUid}: local edit cannot be safely pushed (moved, etag mismatch, or missing etag)`
+            );
+            continue;
+          }
           try {
-            await deleteRemoteEvent(client, ev.remoteHref, ev.remoteEtag);
+            const icsData = patchIcsForEvent(ev.rawIcs, ev);
+            const res = await deps.updateRemoteEvent(client, ev.remoteHref, ev.remoteEtag, icsData);
+            await upsertCalendarEvent(accountId, {
+              ...ev,
+              remoteEtag: res.etag ?? ev.remoteEtag,
+              rawIcs: icsData,
+              pendingRemoteSync: undefined,
+              updatedAtMs: Date.now()
+            });
+            await deleteCalendarEventConflict(accountId, ev.id);
+            result.updatedRemote++;
+          } catch (e) {
+            result.errors.push(`Update push error for event ${ev.id}: ${e}`);
+          }
+        }
+
+        // Push soft-deleted local events to remote. Only events still present
+        // on the server (by remoteHref) are deleted — a soft-delete on
+        // something already gone remotely was created by the reconciliation
+        // above and needs no call. On success drop the remote linkage and the
+        // dirty flag so we don't retry every sync and so an undo (restore)
+        // re-creates it cleanly as a new object.
+        const deletedEvents = await listSoftDeletedCaldavEventsToPush(accountId);
+        for (const ev of deletedEvents) {
+          if (ev.calendarId !== calendarId || !ev.remoteHref) continue;
+          const remote = remoteByHref.get(ev.remoteHref);
+          // Delete with an If-Match against the server's *current* etag so a
+          // revision that changed since our listing isn't removed blindly. No
+          // object at the href, or no etag to guard with → skip.
+          if (!remote?.etag) continue;
+          try {
+            await deps.deleteRemoteEvent(client, ev.remoteHref, remote.etag);
+            await upsertCalendarEvent(accountId, {
+              ...ev,
+              remoteHref: undefined,
+              remoteEtag: undefined,
+              pendingRemoteSync: undefined
+            });
           } catch {
-            // ignore — may already be deleted on server
+            // leave the linkage intact so the next sync retries
           }
         }
       } catch (e) {
