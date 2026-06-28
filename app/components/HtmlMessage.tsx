@@ -125,10 +125,23 @@ function getClosestAnchor(target: EventTarget | null) {
   return String(anchor.tagName || "").toUpperCase() === "A" ? (anchor as HTMLAnchorElement) : null;
 }
 
+// Hash links resolve against the document's own URL; under target="_blank" that
+// spawns a duplicate app instance instead of scrolling within the email.
+function isHashHref(href: string | null | undefined) {
+  const trimmed = href?.trim();
+  return !trimmed || trimmed.startsWith("#");
+}
+
+// A bare "#" (or empty) href points nowhere, so clicking it should do nothing at all.
+function isNoOpHref(href: string | null | undefined) {
+  const trimmed = href?.trim();
+  return !trimmed || trimmed === "#";
+}
+
 function getAnchorPreviewUrl(anchor: HTMLAnchorElement | null) {
   if (!anchor) return null;
   const href = anchor.getAttribute("href")?.trim();
-  if (!href) return null;
+  if (!href || isHashHref(href)) return null;
   return anchor.href || href;
 }
 
@@ -283,9 +296,18 @@ function HtmlMessage({
       if (!doc) return;
 
       doc.querySelectorAll("a").forEach((link) => {
+        if (isHashHref(link.getAttribute("href"))) return;
         link.setAttribute("target", "_blank");
         link.setAttribute("rel", "noreferrer noopener");
       });
+
+      const handleClick = (event: Event) => {
+        const anchor = getClosestAnchor(event.target);
+        if (anchor && isNoOpHref(anchor.getAttribute("href"))) {
+          event.preventDefault();
+        }
+      };
+      doc.addEventListener("click", handleClick);
 
       const updateLinkPreview = (value: string | null) => {
         setLinkPreviewUrl(value);
@@ -338,6 +360,7 @@ function HtmlMessage({
 
       removeDocumentListeners = () => {
         updateLinkPreview(null);
+        doc.removeEventListener("click", handleClick);
         doc.removeEventListener("mouseover", handleMouseOver);
         doc.removeEventListener("mouseout", handleMouseOut);
         doc.removeEventListener("focusin", handleFocusIn);
