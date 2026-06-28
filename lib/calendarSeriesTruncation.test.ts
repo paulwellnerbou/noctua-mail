@@ -86,6 +86,24 @@ describe("truncateRecurrenceBeforeOccurrence", () => {
     expect(result.recurrenceDates).toEqual([Date.UTC(2026, 0, 5)]);
   });
 
+  test("does not raise an existing UNTIL earlier than the cutoff", () => {
+    // Rule already ends at Jan 9; the cutoff occurrence (Feb 6) exists only as
+    // an RDATE. Truncating must not push UNTIL out to Feb 6, which would revive
+    // the weekly base occurrences between Jan 9 and Feb 6.
+    const start = Date.UTC(2026, 0, 2, 12, 0);
+    const cutoff = Date.UTC(2026, 1, 6, 12, 0);
+    const result = truncateRecurrenceBeforeOccurrence(
+      {
+        recurrenceRule: "FREQ=WEEKLY;UNTIL=20260109T120000Z",
+        recurrenceDates: [cutoff]
+      },
+      cutoff
+    );
+    expect(result.recurrenceDates).toBeUndefined();
+    const remaining = occurrences({ eventStartAtMs: start, recurrenceRule: result.recurrenceRule });
+    expect(remaining).toEqual([start, Date.UTC(2026, 0, 9, 12, 0)]);
+  });
+
   test("returns undefined date lists when nothing survives", () => {
     const cutoff = Date.UTC(2026, 0, 10);
     const result = truncateRecurrenceBeforeOccurrence(

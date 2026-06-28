@@ -61,7 +61,15 @@ export function truncateRecurrenceBeforeOccurrence(
       const cutoffWallMs = tz
         ? toCalendarTimeZoneWallDate(new Date(cutoffStartAtMs), tz).getTime()
         : cutoffStartAtMs;
-      const until = new Date(cutoffWallMs - TRUNCATION_EPSILON_MS);
+      // Never raise an existing UNTIL: a later cap would revive base-rule
+      // occurrences that the original rule already ended (e.g. when the cutoff
+      // occurrence comes only from an RDATE past the rule's own UNTIL).
+      const existingUntilMs =
+        parsed.origOptions.until instanceof Date ? parsed.origOptions.until.getTime() : null;
+      const cappedUntilMs = cutoffWallMs - TRUNCATION_EPSILON_MS;
+      const until = new Date(
+        existingUntilMs !== null ? Math.min(existingUntilMs, cappedUntilMs) : cappedUntilMs
+      );
       // COUNT and UNTIL are mutually exclusive per RFC 5545; drop COUNT.
       const truncated = new RRule({ ...parsed.origOptions, count: null, until });
       recurrenceRule = truncated.toString().replace(/^RRULE:/, "");
