@@ -125,6 +125,23 @@ describe("applyConflictResolution", () => {
     expect(await getCalendarEventConflict(accountId, event.id)).toBeNull();
   });
 
+  test("local: refuses to push when the conflict has no remote etag", async () => {
+    const accountId = `acc-resolve-noetag-${randomUUID()}`;
+    const { account, event, conflict } = await setupConflict(accountId);
+    conflict.remoteEtag = ""; // no server revision to If-Match against
+    const { upsertCalendarEventConflict } = await dbModulePromise;
+    await upsertCalendarEventConflict(accountId, conflict);
+
+    const outcome = await applyConflictResolution(
+      { accountId, event, conflict, account, resolution: "local" },
+      deps
+    );
+    expect(outcome.ok).toBe(false);
+
+    expect(updateRemoteEvent).not.toHaveBeenCalled();
+    expect(await getCalendarEventConflict(accountId, event.id)).not.toBeNull();
+  });
+
   test("remote: fails without clearing the conflict when the server ICS is unusable", async () => {
     const accountId = `acc-resolve-bad-${randomUUID()}`;
     const { account, event, conflict } = await setupConflict(accountId);

@@ -51,6 +51,16 @@ export async function applyConflictResolution(
     if (!account?.caldav?.url || !event.remoteHref) {
       return { ok: false, status: 400, message: "No remote target" };
     }
+    if (!conflict.remoteEtag) {
+      // Without the server's current revision an If-Match PUT would blindly
+      // overwrite it. Refuse rather than force-push; the user can re-sync (to
+      // pick up an etag) or take the server version instead.
+      return {
+        ok: false,
+        status: 409,
+        message: "Cannot overwrite the server copy without its current revision"
+      };
+    }
     const client = await deps.createCaldavClient(account.caldav);
     const res = await deps.updateRemoteEvent(
       client,

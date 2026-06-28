@@ -127,6 +127,24 @@ describe("syncCalendarEvents write-back", () => {
     expect(conflicts[0]?.remoteEtag).toBe("etag-server");
   });
 
+  test("skips the push (no blind PUT) when no remote object exists at the href", async () => {
+    const accountId = `acc-sync-nohref-${randomUUID()}`;
+    await upsertAccount(buildAccount(accountId));
+    const uid = `evt-${randomUUID()}@example.test`;
+    const event = buildDirtyEvent(accountId, uid, "etag-1");
+    await upsertCalendarEvent(accountId, event);
+    // UID present (so reconciliation won't soft-delete it) but under a
+    // different href than the local event's remoteHref.
+    remoteObjects = [{ url: `${CALENDAR_URL}moved-${uid}.ics`, etag: "x", data: ics(uid) }];
+
+    const result = await syncCalendarEvents(accountId, syncDeps);
+
+    expect(updateRemoteEvent).not.toHaveBeenCalled();
+    expect(result.conflicts).toBe(0);
+    const stored = await getCalendarEventById(accountId, event.id);
+    expect(stored?.pendingRemoteSync).toBe(event.pendingRemoteSync); // still dirty
+  });
+
   test("ignores caldav events that are not dirty", async () => {
     const accountId = `acc-sync-clean-${randomUUID()}`;
     await upsertAccount(buildAccount(accountId));
