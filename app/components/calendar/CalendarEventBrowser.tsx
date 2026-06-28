@@ -12,7 +12,19 @@ import { useInAppNotices } from "@/app/components/mailclient/useInAppNotices";
 import { dispatchCalendarEventsUpdatedEvent } from "./calendarEventsClient";
 import EventDetailPanel from "./EventDetailPanel";
 import EventDialog from "./EventDialog";
-import type { CalendarEventDeleteAction } from "./EventDetailView";
+import type { CalendarEventDeleteAction, CalendarEventDeleteScope } from "./EventDetailView";
+
+const DELETE_TITLES: Record<CalendarEventDeleteScope, string> = {
+  occurrence: "Occurrence removed.",
+  following: "This and all following removed.",
+  series: "Event deleted."
+};
+
+const RESTORE_TITLES: Record<CalendarEventDeleteScope, string> = {
+  occurrence: "Occurrence restored.",
+  following: "Series restored.",
+  series: "Event restored."
+};
 
 type CreateDialogState = {
   open: boolean;
@@ -169,7 +181,7 @@ export default function CalendarEventBrowser({
         dispatchCalendarRemindersUpdatedEvent();
         pushNotice({
           type: "success",
-          title: scope === "occurrence" ? "Occurrence restored." : "Event restored.",
+          title: RESTORE_TITLES[scope],
           description: data.event.summary,
           durationMs: NOTICE_TIMEOUTS.success
         });
@@ -189,7 +201,7 @@ export default function CalendarEventBrowser({
     handleBack();
     pushNotice({
       type: "success",
-      title: scope === "occurrence" ? "Occurrence removed." : "Event deleted.",
+      title: DELETE_TITLES[scope],
       description: event.summary,
       actionLabel: "UNDO",
       onAction: () => handleRestoreDeletedEvent(event, scope),
