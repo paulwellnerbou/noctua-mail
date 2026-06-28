@@ -200,7 +200,9 @@ export async function syncCalendarEvents(
         for (const ev of allCaldavLocal) {
           if (ev.calendarId !== calendarId) continue;
           if (!ev.pendingRemoteSync || !ev.remoteHref || ev.deletedAtMs) continue;
-          const remote = remoteByUid.get(ev.eventUid);
+          // Look up by the actual remote object identity (href), not a
+          // re-parsed UID, so the If-Match safety check matches what we'd PUT.
+          const remote = remoteByHref.get(ev.remoteHref);
           // Only push when we can prove the local copy is based on the server's
           // current revision: a matching, non-empty etag. A diverged etag *or*
           // a missing local etag (legacy/partial rows) means an If-Match push
@@ -254,7 +256,7 @@ export async function syncCalendarEvents(
         const deletedEvents = await listSoftDeletedCaldavEventsToPush(accountId);
         for (const ev of deletedEvents) {
           if (ev.calendarId !== calendarId || !ev.remoteHref) continue;
-          if (!remoteByUid.has(ev.eventUid)) continue;
+          if (!remoteByHref.has(ev.remoteHref)) continue;
           try {
             await deps.deleteRemoteEvent(client, ev.remoteHref, ev.remoteEtag);
             await upsertCalendarEvent(accountId, {
