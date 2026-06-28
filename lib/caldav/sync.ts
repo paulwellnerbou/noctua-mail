@@ -172,9 +172,11 @@ export async function syncCalendarEvents(
           }
         }
 
-        // Push local-new events to remote (no remoteHref)
-        const allCaldavLocal = await listCalendarEventsBySource(accountId, "caldav");
-        for (const ev of allCaldavLocal) {
+        // Push local-new events to remote (no remoteHref). Reuse the
+        // localEvents snapshot from above — reconciliation only inserts/updates
+        // events that already carry a remoteHref, so the no-remoteHref and
+        // dirty candidate sets are unchanged.
+        for (const ev of localEvents) {
           if (ev.calendarId !== calendarId) continue;
           if (ev.remoteHref) continue; // already pushed
           try {
@@ -197,7 +199,7 @@ export async function syncCalendarEvents(
         // Push local edits to existing remote events (dirty flag set by the
         // mutation routes). Skip and record a conflict when the remote also
         // changed since we last pulled it.
-        for (const ev of allCaldavLocal) {
+        for (const ev of localEvents) {
           if (ev.calendarId !== calendarId) continue;
           if (!ev.pendingRemoteSync || !ev.remoteHref || ev.deletedAtMs) continue;
           // Look up by the actual remote object identity (href), not a

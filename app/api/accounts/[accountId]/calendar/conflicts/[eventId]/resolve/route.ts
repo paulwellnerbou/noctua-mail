@@ -14,6 +14,7 @@ import {
 import type { Account, CalendarEvent } from "@/lib/data";
 import { createCaldavClient, updateRemoteEvent } from "@/lib/caldav/client";
 import { mergeRemoteIcsIntoEvent } from "@/lib/caldav/remoteMerge";
+import { patchIcsForEvent } from "@/lib/caldav/icsSerializer";
 
 type Params = AccountRouteParams & {
   params: Promise<{ accountId?: string; eventId?: string }>;
@@ -61,17 +62,16 @@ export async function applyConflictResolution(
         message: "Cannot overwrite the server copy without its current revision"
       };
     }
+    // Recompute the ICS from the *current* event row rather than the snapshot
+    // captured when the conflict was detected, so edits made while the conflict
+    // was open aren't lost when force-pushing.
+    const localIcs = patchIcsForEvent(event.rawIcs, event);
     const client = await deps.createCaldavClient(account.caldav);
-    const res = await deps.updateRemoteEvent(
-      client,
-      event.remoteHref,
-      conflict.remoteEtag,
-      conflict.localIcs
-    );
+    const res = await deps.updateRemoteEvent(client, event.remoteHref, conflict.remoteEtag, localIcs);
     await upsertCalendarEvent(accountId, {
       ...event,
       remoteEtag: res.etag ?? conflict.remoteEtag,
-      rawIcs: conflict.localIcs,
+      rawIcs: localIcs,
       pendingRemoteSync: undefined,
       updatedAtMs: Date.now()
     });

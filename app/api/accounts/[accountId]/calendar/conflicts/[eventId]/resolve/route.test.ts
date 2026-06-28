@@ -84,7 +84,7 @@ describe("applyConflictResolution", () => {
 
   test("local: pushes the local ICS and clears the conflict", async () => {
     const accountId = `acc-resolve-local-${randomUUID()}`;
-    const { account, event, conflict, localIcs } = await setupConflict(accountId);
+    const { account, event, conflict } = await setupConflict(accountId);
     // Seed a conflict row so the helper's delete has something to clear.
     const { upsertCalendarEventConflict } = await dbModulePromise;
     await upsertCalendarEventConflict(accountId, conflict);
@@ -96,9 +96,12 @@ describe("applyConflictResolution", () => {
     expect(outcome.ok).toBe(true);
 
     expect(updateRemoteEvent).toHaveBeenCalledTimes(1);
-    expect(updateRemoteEvent.mock.calls[0]?.[3]).toBe(localIcs);
+    // ICS is recomputed from the current event row (not the stored snapshot),
+    // and what we push is persisted as rawIcs.
+    const pushedIcs = updateRemoteEvent.mock.calls[0]?.[3] as string;
+    expect(pushedIcs).toContain("SUMMARY:Local Version");
     const stored = await getCalendarEventById(accountId, event.id);
-    expect(stored?.rawIcs).toBe(localIcs);
+    expect(stored?.rawIcs).toBe(pushedIcs);
     expect(stored?.remoteEtag).toBe("resolved-etag");
     expect(stored?.pendingRemoteSync).toBeUndefined();
     expect(await getCalendarEventConflict(accountId, event.id)).toBeNull();
