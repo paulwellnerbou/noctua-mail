@@ -184,6 +184,7 @@ export {
   deleteCalendarParticipationOverrideForOccurrence,
   listCalendarEvents,
   listCalendarEventsBySource,
+  listSoftDeletedCaldavEventsToPush,
   resolveCalendarParticipation,
   upsertCalendarEvent,
   upsertCalendarParticipationOverride

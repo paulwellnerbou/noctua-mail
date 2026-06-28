@@ -49,12 +49,27 @@ export async function upsertCalendarEventConflict(
 ): Promise<void> {
   await withDbWriteRetry("upsertCalendarEventConflict", async () => {
     const db = await getAccountDb(accountId);
+    // Refresh the snapshots/timestamps on re-detection but keep the original
+    // detectedAtMs so the conflict holds its place in the detectedAtMs-ordered
+    // list instead of jumping to the end on every sync.
     db.prepare(
-      `INSERT OR REPLACE INTO calendar_event_conflicts (
+      `INSERT INTO calendar_event_conflicts (
         eventId, accountId, eventUid, summary, timeZone, allDay,
         baseIcs, localIcs, remoteIcs, remoteEtag,
         localChangedAtMs, remoteChangedAtMs, detectedAtMs
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(eventId) DO UPDATE SET
+        accountId = excluded.accountId,
+        eventUid = excluded.eventUid,
+        summary = excluded.summary,
+        timeZone = excluded.timeZone,
+        allDay = excluded.allDay,
+        baseIcs = excluded.baseIcs,
+        localIcs = excluded.localIcs,
+        remoteIcs = excluded.remoteIcs,
+        remoteEtag = excluded.remoteEtag,
+        localChangedAtMs = excluded.localChangedAtMs,
+        remoteChangedAtMs = excluded.remoteChangedAtMs`
     ).run(
       conflict.eventId,
       // Scope to the DB we opened, not the caller-supplied field, so a row can

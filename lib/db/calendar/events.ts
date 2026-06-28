@@ -459,3 +459,23 @@ export async function listCalendarEventsBySource(
     .all(accountId, sourceType) as any[];
   return rows.map(rowToCalendarEvent);
 }
+
+/**
+ * Soft-deleted CalDAV events that still carry a `remoteHref` — i.e. local
+ * deletions whose removal hasn't been pushed to the server yet. Deliberately
+ * *not* filtered by `deletedAtMs IS NULL` (unlike `listCalendarEventsBySource`)
+ * because these are exactly the deleted rows the sync delete-push needs.
+ */
+export async function listSoftDeletedCaldavEventsToPush(
+  accountId: string
+): Promise<CalendarEvent[]> {
+  const db = await getAccountDb(accountId);
+  const rows = db
+    .prepare(
+      `SELECT * FROM calendar_events
+       WHERE accountId = ? AND sourceType = 'caldav'
+         AND deletedAtMs IS NOT NULL AND remoteHref IS NOT NULL`
+    )
+    .all(accountId) as any[];
+  return rows.map(rowToCalendarEvent);
+}

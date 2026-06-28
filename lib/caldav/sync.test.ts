@@ -10,6 +10,7 @@ const CALENDAR_URL = "https://caldav.example.test/cal/";
 // covers — a global module mock would strip those exports).
 let remoteObjects: Array<{ url: string; etag: string; data: string }> = [];
 const updateRemoteEvent = mock(async () => ({ etag: "etag-new" }));
+const deleteRemoteEvent = mock(async () => {});
 
 import { syncCalendarEvents, type CaldavSyncDeps } from "./sync";
 
@@ -17,7 +18,8 @@ const syncDeps: Partial<CaldavSyncDeps> = {
   createCaldavClient: (async () => ({})) as unknown as CaldavSyncDeps["createCaldavClient"],
   fetchRemoteCalendars: (async () => [{ url: CALENDAR_URL }]) as unknown as CaldavSyncDeps["fetchRemoteCalendars"],
   fetchRemoteEvents: (async () => remoteObjects) as unknown as CaldavSyncDeps["fetchRemoteEvents"],
-  updateRemoteEvent: updateRemoteEvent as unknown as CaldavSyncDeps["updateRemoteEvent"]
+  updateRemoteEvent: updateRemoteEvent as unknown as CaldavSyncDeps["updateRemoteEvent"],
+  deleteRemoteEvent: deleteRemoteEvent as unknown as CaldavSyncDeps["deleteRemoteEvent"]
 };
 
 const { upsertAccount, upsertCalendarEvent, getCalendarEventById, listUnresolvedCalendarEventConflicts } =
@@ -63,6 +65,7 @@ function buildDirtyEvent(accountId: string, uid: string, remoteEtag: string): Ca
 describe("syncCalendarEvents write-back", () => {
   beforeEach(() => {
     updateRemoteEvent.mockClear();
+    deleteRemoteEvent.mockClear();
     remoteObjects = [];
   });
 
@@ -119,5 +122,39 @@ describe("syncCalendarEvents write-back", () => {
     await syncCalendarEvents(accountId, syncDeps);
 
     expect(updateRemoteEvent).not.toHaveBeenCalled();
+  });
+
+  test("pushes a remote DELETE for a soft-deleted event and drops its linkage", async () => {
+    const accountId = `acc-sync-delete-${randomUUID()}`;
+    await upsertAccount(buildAccount(accountId));
+    const uid = `evt-${randomUUID()}@example.test`;
+    const event = buildDirtyEvent(accountId, uid, "etag-1");
+    event.pendingRemoteSync = undefined;
+    event.deletedAtMs = Date.UTC(2026, 0, 11, 0, 0, 0);
+    await upsertCalendarEvent(accountId, event);
+    // Still present on the server → the user removed it locally.
+    remoteObjects = [{ url: event.remoteHref!, etag: "etag-1", data: ics(uid) }];
+
+    await syncCalendarEvents(accountId, syncDeps);
+
+    expect(deleteRemoteEvent).toHaveBeenCalledTimes(1);
+    const stored = await getCalendarEventById(accountId, event.id);
+    expect(stored?.remoteHref).toBeUndefined();
+    expect(stored?.deletedAtMs).toBe(event.deletedAtMs);
+  });
+
+  test("does not push a DELETE for an event already gone from the server", async () => {
+    const accountId = `acc-sync-delete-gone-${randomUUID()}`;
+    await upsertAccount(buildAccount(accountId));
+    const uid = `evt-${randomUUID()}@example.test`;
+    const event = buildDirtyEvent(accountId, uid, "etag-1");
+    event.pendingRemoteSync = undefined;
+    event.deletedAtMs = Date.UTC(2026, 0, 11, 0, 0, 0);
+    await upsertCalendarEvent(accountId, event);
+    remoteObjects = []; // not on the server anymore
+
+    await syncCalendarEvents(accountId, syncDeps);
+
+    expect(deleteRemoteEvent).not.toHaveBeenCalled();
   });
 });
