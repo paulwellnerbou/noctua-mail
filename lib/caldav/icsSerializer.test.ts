@@ -59,6 +59,23 @@ describe("patchIcsForEvent", () => {
     expect(out).toContain("X-CUSTOM-PROP:keepme");
   });
 
+  test("emits EXDATE with VALUE=DATE for all-day events", () => {
+    const event = buildEvent({ allDay: true, excludedDates: [Date.UTC(2026, 0, 17, 0, 0, 0)] });
+    const out = patchIcsForEvent(BASE_ICS, event);
+    expect(out).toContain("EXDATE;VALUE=DATE:20260117");
+  });
+
+  test("emits EXDATE/RDATE with TZID for timezone-based recurrences", () => {
+    const event = buildEvent({
+      startTimezone: "Europe/Berlin",
+      excludedDates: [Date.UTC(2026, 0, 17, 9, 0, 0)],
+      recurrenceDates: [Date.UTC(2026, 0, 24, 9, 0, 0)]
+    });
+    const out = patchIcsForEvent(BASE_ICS, event);
+    expect(out).toContain("EXDATE;TZID=Europe/Berlin:20260117T090000");
+    expect(out).toContain("RDATE;TZID=Europe/Berlin:20260124T090000");
+  });
+
   test("replaces RRULE on truncation", () => {
     const event = buildEvent({ recurrenceRule: "FREQ=WEEKLY;BYDAY=MO;UNTIL=20260201T090000Z" });
     const out = patchIcsForEvent(BASE_ICS, event);

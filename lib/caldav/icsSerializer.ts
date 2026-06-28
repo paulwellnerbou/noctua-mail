@@ -33,6 +33,35 @@ export function escapeIcsText(value: string): string {
     .replace(/\n/g, "\\n");
 }
 
+/**
+ * Build an RDATE/EXDATE line that carries the same value-type parameters as
+ * the event's DTSTART — `VALUE=DATE` for all-day events, `TZID=` for
+ * timezone-based recurrences — so the listed occurrences resolve to the same
+ * instants the server stored. A bare `RDATE:`/`EXDATE:` would drop these and
+ * shift which occurrence is added/excluded.
+ */
+function buildIcsDateListLine(
+  name: "RDATE" | "EXDATE",
+  values: number[],
+  allDay: boolean,
+  tz?: string
+): string {
+  const p = (n: number) => String(n).padStart(2, "0");
+  // Bare value (no inline param) so a single TZID/VALUE prefix covers the whole
+  // comma-separated list. Uses UTC components to match DTSTART's emission here.
+  const value = (ms: number) => {
+    const d = new Date(ms);
+    const ymd = `${d.getUTCFullYear()}${p(d.getUTCMonth() + 1)}${p(d.getUTCDate())}`;
+    if (allDay) return ymd;
+    const dt = `${ymd}T${p(d.getUTCHours())}${p(d.getUTCMinutes())}${p(d.getUTCSeconds())}`;
+    return tz ? dt : `${dt}Z`;
+  };
+  const joined = values.map(value).join(",");
+  if (allDay) return `${name};VALUE=DATE:${joined}`;
+  if (tz) return `${name};TZID=${tz}:${joined}`;
+  return `${name}:${joined}`;
+}
+
 export function foldLine(line: string): string {
   if (line.length <= 75) return line;
   const chunks: string[] = [];
@@ -96,12 +125,10 @@ export function calendarEventToIcs(event: CalendarEvent): string {
     lines.push(`RRULE:${event.recurrenceRule}`);
   }
   if (event.recurrenceDates && event.recurrenceDates.length > 0) {
-    const rdates = event.recurrenceDates.map((ms) => formatIcsDate(ms, event.allDay)).join(",");
-    lines.push(`RDATE:${rdates}`);
+    lines.push(buildIcsDateListLine("RDATE", event.recurrenceDates, event.allDay, event.startTimezone));
   }
   if (event.excludedDates && event.excludedDates.length > 0) {
-    const exdates = event.excludedDates.map((ms) => formatIcsDate(ms, event.allDay)).join(",");
-    lines.push(`EXDATE:${exdates}`);
+    lines.push(buildIcsDateListLine("EXDATE", event.excludedDates, event.allDay, event.startTimezone));
   }
 
   lines.push("END:VEVENT");
@@ -273,11 +300,11 @@ export function patchIcsForEvent(rawIcs: string | undefined, event: CalendarEven
   setProp("RRULE", event.recurrenceRule, (v) => `RRULE:${v}`);
   removeProp("RDATE");
   if (event.recurrenceDates?.length) {
-    additions.push(`RDATE:${event.recurrenceDates.map((ms) => formatIcsDate(ms, event.allDay)).join(",")}`);
+    additions.push(buildIcsDateListLine("RDATE", event.recurrenceDates, event.allDay, event.startTimezone));
   }
   removeProp("EXDATE");
   if (event.excludedDates?.length) {
-    additions.push(`EXDATE:${event.excludedDates.map((ms) => formatIcsDate(ms, event.allDay)).join(",")}`);
+    additions.push(buildIcsDateListLine("EXDATE", event.excludedDates, event.allDay, event.startTimezone));
   }
 
   if (event.myAttendeeEmail && event.myPartstat) {
