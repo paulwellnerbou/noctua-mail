@@ -221,12 +221,37 @@ export function patchIcsForEvent(rawIcs: string | undefined, event: CalendarEven
   if (!master) return calendarEventToIcs(event);
 
   let body = lines.slice(master.start + 1, master.end);
+
+  // Mark only the VEVENT's *own* property lines (depth 0). Lines inside nested
+  // subcomponents — VALARM and friends, which carry their own SUMMARY /
+  // DESCRIPTION — must be left untouched, or patching the event would silently
+  // strip alarm/reminder fields.
+  const topLevelFlags = (allLines: string[]): boolean[] => {
+    const flags: boolean[] = [];
+    let depth = 0;
+    for (const l of allLines) {
+      const name = icsPropName(l);
+      if (name === "BEGIN") {
+        flags.push(false);
+        depth++;
+      } else if (name === "END") {
+        depth--;
+        flags.push(false);
+      } else {
+        flags.push(depth === 0);
+      }
+    }
+    return flags;
+  };
+
+  const additions: string[] = [];
   const removeProp = (name: string) => {
-    body = body.filter((l) => icsPropName(l) !== name);
+    const tl = topLevelFlags(body);
+    body = body.filter((l, i) => !(tl[i] && icsPropName(l) === name));
   };
   const setProp = (name: string, value: string | undefined, build: (v: string) => string) => {
     removeProp(name);
-    if (value != null && value !== "") body.push(build(value));
+    if (value != null && value !== "") additions.push(build(value));
   };
 
   setProp("SUMMARY", event.summary, (v) => `SUMMARY:${escapeIcsText(v)}`);
@@ -235,44 +260,53 @@ export function patchIcsForEvent(rawIcs: string | undefined, event: CalendarEven
   setProp("STATUS", event.status, (v) => `STATUS:${v.toUpperCase()}`);
 
   removeProp("DTSTART");
-  body.push(buildIcsDtLine("DTSTART", event.startAtMs, event.allDay, event.startTimezone));
+  additions.push(buildIcsDtLine("DTSTART", event.startAtMs, event.allDay, event.startTimezone));
   removeProp("DTEND");
   if (event.endAtMs != null) {
-    body.push(buildIcsDtLine("DTEND", event.endAtMs, event.allDay, event.endTimezone));
+    additions.push(buildIcsDtLine("DTEND", event.endAtMs, event.allDay, event.endTimezone));
   }
 
   setProp("RRULE", event.recurrenceRule, (v) => `RRULE:${v}`);
   removeProp("RDATE");
   if (event.recurrenceDates?.length) {
-    body.push(`RDATE:${event.recurrenceDates.map((ms) => formatIcsDate(ms, event.allDay)).join(",")}`);
+    additions.push(`RDATE:${event.recurrenceDates.map((ms) => formatIcsDate(ms, event.allDay)).join(",")}`);
   }
   removeProp("EXDATE");
   if (event.excludedDates?.length) {
-    body.push(`EXDATE:${event.excludedDates.map((ms) => formatIcsDate(ms, event.allDay)).join(",")}`);
+    additions.push(`EXDATE:${event.excludedDates.map((ms) => formatIcsDate(ms, event.allDay)).join(",")}`);
   }
 
   if (event.myAttendeeEmail && event.myPartstat) {
-    body = body.map((l) =>
-      icsPropName(l) === "ATTENDEE"
+    const tl = topLevelFlags(body);
+    body = body.map((l, i) =>
+      tl[i] && icsPropName(l) === "ATTENDEE"
         ? patchAttendeePartstat(l, event.myAttendeeEmail!, event.myPartstat!)
         : l
     );
   }
 
+  const tlSeq = topLevelFlags(body);
   const currentSeq = body
-    .filter((l) => icsPropName(l) === "SEQUENCE")
+    .filter((l, i) => tlSeq[i] && icsPropName(l) === "SEQUENCE")
     .map((l) => parseInt(l.slice(l.indexOf(":") + 1).trim(), 10))
     .filter((n) => Number.isFinite(n));
   removeProp("SEQUENCE");
-  body.push(`SEQUENCE:${(currentSeq.length ? Math.max(...currentSeq) : 0) + 1}`);
+  additions.push(`SEQUENCE:${(currentSeq.length ? Math.max(...currentSeq) : 0) + 1}`);
 
   const stamp = icsUtcStamp(new Date());
   removeProp("DTSTAMP");
-  body.push(`DTSTAMP:${stamp}`);
+  additions.push(`DTSTAMP:${stamp}`);
   removeProp("LAST-MODIFIED");
-  body.push(`LAST-MODIFIED:${stamp}`);
+  additions.push(`LAST-MODIFIED:${stamp}`);
 
-  const out = [...lines.slice(0, master.start + 1), ...body, ...lines.slice(master.end)];
+  // Insert the refreshed properties at the front of the VEVENT body so they
+  // stay top-level (ahead of any VALARM), never nested inside a subcomponent.
+  const out = [
+    ...lines.slice(0, master.start + 1),
+    ...additions,
+    ...body,
+    ...lines.slice(master.end)
+  ];
   return out.map(foldLine).join("\r\n");
 }
 

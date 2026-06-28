@@ -108,6 +108,46 @@ describe("patchIcsForEvent", () => {
     expect(out).not.toContain("PARTSTAT=ACCEPTED");
   });
 
+  test("preserves nested VALARM SUMMARY/DESCRIPTION when patching the event's own", () => {
+    const icsWithAlarms = [
+      "BEGIN:VCALENDAR",
+      "BEGIN:VEVENT",
+      "UID:evt-alarm@example.test",
+      "DTSTART:20260110T090000Z",
+      "SUMMARY:Event Title",
+      "DESCRIPTION:Event body",
+      "BEGIN:VALARM",
+      "ACTION:DISPLAY",
+      "TRIGGER:-PT15M",
+      "DESCRIPTION:Alarm reminder text",
+      "END:VALARM",
+      "BEGIN:VALARM",
+      "ACTION:EMAIL",
+      "TRIGGER:-PT1H",
+      "SUMMARY:Alarm email subject",
+      "DESCRIPTION:Alarm email body",
+      "END:VALARM",
+      "END:VEVENT",
+      "END:VCALENDAR"
+    ].join("\r\n");
+    const event = buildEvent({
+      eventUid: "evt-alarm@example.test",
+      summary: "New Title",
+      description: "New body"
+    });
+    const out = patchIcsForEvent(icsWithAlarms, event);
+    // Event's own fields updated...
+    expect(out).toContain("SUMMARY:New Title");
+    expect(out).toContain("DESCRIPTION:New body");
+    expect(out).not.toContain("SUMMARY:Event Title");
+    expect(out).not.toContain("DESCRIPTION:Event body");
+    // ...while both alarms keep their own SUMMARY/DESCRIPTION.
+    expect(out).toContain("DESCRIPTION:Alarm reminder text");
+    expect(out).toContain("SUMMARY:Alarm email subject");
+    expect(out).toContain("DESCRIPTION:Alarm email body");
+    expect(out.match(/BEGIN:VALARM/g)?.length).toBe(2);
+  });
+
   test("refreshes LAST-MODIFIED / DTSTAMP", () => {
     const out = patchIcsForEvent(BASE_ICS, buildEvent());
     expect(out).not.toContain("LAST-MODIFIED:20260105T120000Z");
