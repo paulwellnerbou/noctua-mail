@@ -201,7 +201,13 @@ export async function syncCalendarEvents(
           if (ev.calendarId !== calendarId) continue;
           if (!ev.pendingRemoteSync || !ev.remoteHref || ev.deletedAtMs) continue;
           const remote = remoteByUid.get(ev.eventUid);
-          if (remote && remote.etag && ev.remoteEtag && remote.etag !== ev.remoteEtag) {
+          // Only push when we can prove the local copy is based on the server's
+          // current revision: a matching, non-empty etag. A diverged etag *or*
+          // a missing local etag (legacy/partial rows) means an If-Match push
+          // would blind-overwrite the server — record a conflict instead.
+          const upToDateWithRemote =
+            !!remote && !!ev.remoteEtag && remote.etag === ev.remoteEtag;
+          if (remote && !upToDateWithRemote) {
             await upsertCalendarEventConflict(accountId, {
               eventId: ev.id,
               accountId,
@@ -218,7 +224,9 @@ export async function syncCalendarEvents(
               detectedAtMs: Date.now()
             });
             result.conflicts++;
-            result.errors.push(`Conflict for UID ${ev.eventUid}: changed locally and remotely`);
+            result.errors.push(
+              `Conflict for UID ${ev.eventUid}: local edit cannot be safely pushed (etag mismatch or missing)`
+            );
             continue;
           }
           try {

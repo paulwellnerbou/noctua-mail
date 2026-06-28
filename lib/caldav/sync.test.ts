@@ -110,6 +110,23 @@ describe("syncCalendarEvents write-back", () => {
     expect(stored?.remoteEtag).toBe("etag-1");
   });
 
+  test("records a conflict instead of blind-pushing when the local etag is missing", async () => {
+    const accountId = `acc-sync-noetag-${randomUUID()}`;
+    await upsertAccount(buildAccount(accountId));
+    const uid = `evt-${randomUUID()}@example.test`;
+    const event = buildDirtyEvent(accountId, uid, "etag-1");
+    event.remoteEtag = undefined; // legacy/partial row — no etag to compare
+    await upsertCalendarEvent(accountId, event);
+    remoteObjects = [{ url: event.remoteHref!, etag: "etag-server", data: ics(uid) }];
+
+    const result = await syncCalendarEvents(accountId, syncDeps);
+
+    expect(updateRemoteEvent).not.toHaveBeenCalled();
+    expect(result.conflicts).toBe(1);
+    const conflicts = await listUnresolvedCalendarEventConflicts(accountId);
+    expect(conflicts[0]?.remoteEtag).toBe("etag-server");
+  });
+
   test("ignores caldav events that are not dirty", async () => {
     const accountId = `acc-sync-clean-${randomUUID()}`;
     await upsertAccount(buildAccount(accountId));
