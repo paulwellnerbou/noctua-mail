@@ -124,4 +124,24 @@ describe("applyConflictResolution", () => {
     expect(stored?.pendingRemoteSync).toBeUndefined();
     expect(await getCalendarEventConflict(accountId, event.id)).toBeNull();
   });
+
+  test("remote: fails without clearing the conflict when the server ICS is unusable", async () => {
+    const accountId = `acc-resolve-bad-${randomUUID()}`;
+    const { account, event, conflict } = await setupConflict(accountId);
+    // No DTSTART → mergeRemoteIcsIntoEvent returns null.
+    conflict.remoteIcs = ["BEGIN:VCALENDAR", "BEGIN:VEVENT", `UID:${event.eventUid}`, "SUMMARY:Broken", "END:VEVENT", "END:VCALENDAR"].join("\n");
+    const { upsertCalendarEventConflict } = await dbModulePromise;
+    await upsertCalendarEventConflict(accountId, conflict);
+
+    const outcome = await applyConflictResolution(
+      { accountId, event, conflict, account, resolution: "remote" },
+      deps
+    );
+    expect(outcome.ok).toBe(false);
+
+    const stored = await getCalendarEventById(accountId, event.id);
+    expect(stored?.summary).toBe("Local Version");
+    expect(stored?.pendingRemoteSync).toBe(event.pendingRemoteSync);
+    expect(await getCalendarEventConflict(accountId, event.id)).not.toBeNull();
+  });
 });

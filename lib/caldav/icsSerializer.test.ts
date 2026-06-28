@@ -171,4 +171,22 @@ describe("parseIcsLastModified", () => {
     const ics = BASE_ICS.replace("LAST-MODIFIED:20260105T120000Z\r\n", "");
     expect(parseIcsLastModified(ics)).toBe(Date.UTC(2026, 0, 1, 9, 0, 0));
   });
+
+  test("ignores a VTIMEZONE's LAST-MODIFIED and reads the VEVENT's", () => {
+    const ics = [
+      "BEGIN:VCALENDAR",
+      "BEGIN:VTIMEZONE",
+      "TZID:Europe/Berlin",
+      "LAST-MODIFIED:20200101T000000Z",
+      "END:VTIMEZONE",
+      "BEGIN:VEVENT",
+      "UID:evt-tz@example.test",
+      "DTSTART:20260110T090000Z",
+      "SUMMARY:TZ",
+      "LAST-MODIFIED:20260105T120000Z",
+      "END:VEVENT",
+      "END:VCALENDAR"
+    ].join("\r\n");
+    expect(parseIcsLastModified(ics)).toBe(Date.UTC(2026, 0, 5, 12, 0, 0));
+  });
 });

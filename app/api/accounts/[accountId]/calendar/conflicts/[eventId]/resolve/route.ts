@@ -73,16 +73,12 @@ export async function applyConflictResolution(
       remoteEtag: conflict.remoteEtag,
       remoteHref: event.remoteHref
     });
-    await upsertCalendarEvent(
-      accountId,
-      merged ?? {
-        ...event,
-        remoteEtag: conflict.remoteEtag,
-        rawIcs: conflict.remoteIcs,
-        pendingRemoteSync: undefined,
-        updatedAtMs: Date.now()
-      }
-    );
+    if (!merged) {
+      // Remote ICS has no usable VEVENT — adopting it would write an
+      // inconsistent row and falsely clear the conflict. Leave both as-is.
+      return { ok: false, status: 422, message: "Server version could not be parsed" };
+    }
+    await upsertCalendarEvent(accountId, merged);
   }
   await deleteCalendarEventConflict(accountId, event.id);
   return { ok: true };

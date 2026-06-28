@@ -145,8 +145,12 @@ function parseIcsUtcDate(value: string): number | undefined {
 /** Read the remote-modification time from an ICS blob (for conflict display). */
 export function parseIcsLastModified(ics: string): number | undefined {
   const lines = unfoldIcsLines(ics);
+  // Scope to the master VEVENT so we don't pick up a VTIMEZONE's LAST-MODIFIED
+  // (a common property there) and mislabel the event's change time.
+  const master = findMasterVeventRange(lines);
+  const scope = master ? lines.slice(master.start + 1, master.end) : lines;
   const pick = (name: string) => {
-    const line = lines.find((l) => icsPropName(l) === name);
+    const line = scope.find((l) => icsPropName(l) === name);
     if (!line) return undefined;
     return parseIcsUtcDate(line.slice(line.indexOf(":") + 1).trim());
   };
