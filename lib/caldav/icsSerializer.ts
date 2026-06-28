@@ -110,6 +110,166 @@ export function calendarEventToIcs(event: CalendarEvent): string {
   return lines.map(foldLine).join("\r\n");
 }
 
+function unfoldIcsLines(raw: string): string[] {
+  const logical: string[] = [];
+  for (const line of raw.split(/\r\n|\r|\n/)) {
+    if ((line.startsWith(" ") || line.startsWith("\t")) && logical.length > 0) {
+      logical[logical.length - 1] += line.slice(1);
+    } else if (line.length > 0) {
+      logical.push(line);
+    }
+  }
+  return logical;
+}
+
+function icsPropName(line: string): string {
+  const match = line.match(/^([^;:]+)/);
+  return match ? match[1].trim().toUpperCase() : "";
+}
+
+function icsComponentName(line: string): string {
+  return (line.split(":")[1] ?? "").trim().toUpperCase();
+}
+
+function icsUtcStamp(date: Date): string {
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${date.getUTCFullYear()}${p(date.getUTCMonth() + 1)}${p(date.getUTCDate())}T${p(date.getUTCHours())}${p(date.getUTCMinutes())}${p(date.getUTCSeconds())}Z`;
+}
+
+function parseIcsUtcDate(value: string): number | undefined {
+  const m = value.match(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z?$/);
+  if (!m) return undefined;
+  return Date.UTC(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]);
+}
+
+/** Read the remote-modification time from an ICS blob (for conflict display). */
+export function parseIcsLastModified(ics: string): number | undefined {
+  const lines = unfoldIcsLines(ics);
+  const pick = (name: string) => {
+    const line = lines.find((l) => icsPropName(l) === name);
+    if (!line) return undefined;
+    return parseIcsUtcDate(line.slice(line.indexOf(":") + 1).trim());
+  };
+  return pick("LAST-MODIFIED") ?? pick("DTSTAMP");
+}
+
+/**
+ * Locate the master VEVENT (the one without a RECURRENCE-ID) so per-occurrence
+ * override components and VTIMEZONE blocks are left untouched when patching.
+ */
+function findMasterVeventRange(lines: string[]): { start: number; end: number } | null {
+  let i = 0;
+  while (i < lines.length) {
+    if (icsPropName(lines[i]) === "BEGIN" && icsComponentName(lines[i]) === "VEVENT") {
+      let j = i + 1;
+      let hasRecurrenceId = false;
+      while (j < lines.length) {
+        const name = icsPropName(lines[j]);
+        if (name === "RECURRENCE-ID") hasRecurrenceId = true;
+        if (name === "END" && icsComponentName(lines[j]) === "VEVENT") break;
+        j++;
+      }
+      if (j >= lines.length) return null;
+      if (!hasRecurrenceId) return { start: i, end: j };
+      i = j + 1;
+    } else {
+      i++;
+    }
+  }
+  return null;
+}
+
+function buildIcsDtLine(name: "DTSTART" | "DTEND", ms: number, allDay: boolean, tz?: string): string {
+  const formatted = formatIcsDate(ms, allDay, tz);
+  if (allDay) return `${name};VALUE=DATE:${formatted}`;
+  if (tz) return `${name};${formatted}`;
+  return `${name}:${formatted}`;
+}
+
+/** Set PARTSTAT on the ATTENDEE line that belongs to `email`, leaving others as-is. */
+function patchAttendeePartstat(line: string, email: string, partstat: string): string {
+  const colon = line.indexOf(":");
+  if (colon === -1) return line;
+  const head = line.slice(0, colon);
+  const value = line.slice(colon + 1);
+  if (!value.toLowerCase().includes(email.trim().toLowerCase())) return line;
+  const params = head.split(";");
+  const idx = params.findIndex((p, k) => k > 0 && p.toUpperCase().startsWith("PARTSTAT="));
+  if (idx >= 0) params[idx] = `PARTSTAT=${partstat}`;
+  else params.push(`PARTSTAT=${partstat}`);
+  return `${params.join(";")}:${value}`;
+}
+
+/**
+ * Produce the ICS to push for a locally-edited CalDAV event by patching the
+ * stored remote `rawIcs` in place — only the properties Noctua models are
+ * replaced, so VALARM, X-props, other attendees, and unknown fields survive
+ * the round-trip. Falls back to full serialization when no `rawIcs` exists
+ * (locally-created events). SEQUENCE is bumped and DTSTAMP/LAST-MODIFIED
+ * refreshed so the server and other clients see a newer revision.
+ */
+export function patchIcsForEvent(rawIcs: string | undefined, event: CalendarEvent): string {
+  if (!rawIcs || !rawIcs.trim()) return calendarEventToIcs(event);
+  const lines = unfoldIcsLines(rawIcs);
+  const master = findMasterVeventRange(lines);
+  if (!master) return calendarEventToIcs(event);
+
+  let body = lines.slice(master.start + 1, master.end);
+  const removeProp = (name: string) => {
+    body = body.filter((l) => icsPropName(l) !== name);
+  };
+  const setProp = (name: string, value: string | undefined, build: (v: string) => string) => {
+    removeProp(name);
+    if (value != null && value !== "") body.push(build(value));
+  };
+
+  setProp("SUMMARY", event.summary, (v) => `SUMMARY:${escapeIcsText(v)}`);
+  setProp("DESCRIPTION", event.description, (v) => `DESCRIPTION:${escapeIcsText(v)}`);
+  setProp("LOCATION", event.location, (v) => `LOCATION:${escapeIcsText(v)}`);
+  setProp("STATUS", event.status, (v) => `STATUS:${v.toUpperCase()}`);
+
+  removeProp("DTSTART");
+  body.push(buildIcsDtLine("DTSTART", event.startAtMs, event.allDay, event.startTimezone));
+  removeProp("DTEND");
+  if (event.endAtMs != null) {
+    body.push(buildIcsDtLine("DTEND", event.endAtMs, event.allDay, event.endTimezone));
+  }
+
+  setProp("RRULE", event.recurrenceRule, (v) => `RRULE:${v}`);
+  removeProp("RDATE");
+  if (event.recurrenceDates?.length) {
+    body.push(`RDATE:${event.recurrenceDates.map((ms) => formatIcsDate(ms, event.allDay)).join(",")}`);
+  }
+  removeProp("EXDATE");
+  if (event.excludedDates?.length) {
+    body.push(`EXDATE:${event.excludedDates.map((ms) => formatIcsDate(ms, event.allDay)).join(",")}`);
+  }
+
+  if (event.myAttendeeEmail && event.myPartstat) {
+    body = body.map((l) =>
+      icsPropName(l) === "ATTENDEE"
+        ? patchAttendeePartstat(l, event.myAttendeeEmail!, event.myPartstat!)
+        : l
+    );
+  }
+
+  const currentSeq = body
+    .filter((l) => icsPropName(l) === "SEQUENCE")
+    .map((l) => parseInt(l.slice(l.indexOf(":") + 1).trim(), 10))
+    .filter((n) => Number.isFinite(n));
+  removeProp("SEQUENCE");
+  body.push(`SEQUENCE:${(currentSeq.length ? Math.max(...currentSeq) : 0) + 1}`);
+
+  const stamp = icsUtcStamp(new Date());
+  removeProp("DTSTAMP");
+  body.push(`DTSTAMP:${stamp}`);
+  removeProp("LAST-MODIFIED");
+  body.push(`LAST-MODIFIED:${stamp}`);
+
+  const out = [...lines.slice(0, master.start + 1), ...body, ...lines.slice(master.end)];
+  return out.map(foldLine).join("\r\n");
+}
+
 export function calendarPreviewToDbEvent(
   preview: CalendarEventPreview,
   accountId: string,

@@ -7,6 +7,7 @@
  * carries the mock-isolation wrappers that per-function `mock.module`
  * replacements rely on.
  */
+export * from "./conflicts";
 export * from "./events";
 export * from "./inviteStates";
 export * from "./reminders";

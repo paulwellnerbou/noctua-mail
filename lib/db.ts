@@ -189,6 +189,14 @@ export {
   upsertCalendarParticipationOverride
 } from "./db/calendar";
 
+export {
+  type CalendarEventConflict,
+  deleteCalendarEventConflict,
+  getCalendarEventConflict,
+  listUnresolvedCalendarEventConflicts,
+  upsertCalendarEventConflict
+} from "./db/calendar";
+
 /*
  * Concrete wrappers for the calendar functions that tests replace via
  * Bun's `mock.module("@/lib/db", …)`. Bun mutates the target namespace's
