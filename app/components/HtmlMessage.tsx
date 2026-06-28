@@ -296,7 +296,13 @@ function HtmlMessage({
       if (!doc) return;
 
       doc.querySelectorAll("a").forEach((link) => {
-        if (isHashHref(link.getAttribute("href"))) return;
+        // The email's own markup may carry target="_blank"; strip it so hash
+        // links can't open a new browsing context (and a fresh app instance).
+        if (isHashHref(link.getAttribute("href"))) {
+          link.removeAttribute("target");
+          link.removeAttribute("rel");
+          return;
+        }
         link.setAttribute("target", "_blank");
         link.setAttribute("rel", "noreferrer noopener");
       });
