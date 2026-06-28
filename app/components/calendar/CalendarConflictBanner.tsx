@@ -22,16 +22,21 @@ export default function CalendarConflictBanner({ accountId }: { accountId: strin
   const handleResolve = async (eventId: string, resolution: "local" | "remote") => {
     setResolvingEventId(eventId);
     try {
-      await fetch(buildAccountCalendarConflictResolvePath(accountId, eventId), {
+      const res = await fetch(buildAccountCalendarConflictResolvePath(accountId, eventId), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         credentials: "include",
         body: JSON.stringify({ resolution })
       });
+      const body = (await res.json().catch(() => null)) as { ok?: boolean } | null;
+      // Always refresh so the banner reflects true state (a failed resolve
+      // leaves the conflict row in place and it reappears).
       await refresh();
-      // Picking "Keep my version" pushed to the server and changed local state;
-      // let the rest of the calendar UI re-read.
-      dispatchCalendarEventsUpdatedEvent();
+      if (res.ok && body?.ok === true) {
+        // Resolution applied (local push or remote adopt); let the rest of the
+        // calendar UI re-read.
+        dispatchCalendarEventsUpdatedEvent();
+      }
     } finally {
       setResolvingEventId(null);
     }
@@ -47,7 +52,10 @@ export default function CalendarConflictBanner({ accountId }: { accountId: strin
         tabIndex={0}
         onClick={() => setOpen(true)}
         onKeyDown={(e) => {
-          if (e.key === "Enter" || e.key === " ") setOpen(true);
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            setOpen(true);
+          }
         }}
         style={{ cursor: "pointer" }}
       >

@@ -57,7 +57,9 @@ export async function upsertCalendarEventConflict(
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(
       conflict.eventId,
-      conflict.accountId,
+      // Scope to the DB we opened, not the caller-supplied field, so a row can
+      // never be written under an accountId that reads can't see.
+      accountId,
       conflict.eventUid,
       conflict.summary ?? null,
       conflict.timeZone ?? null,

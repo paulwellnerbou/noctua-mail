@@ -85,6 +85,29 @@ describe("patchIcsForEvent", () => {
     expect(lineFor(out, "other@example.test")).toContain("PARTSTAT=DECLINED");
   });
 
+  test("matches the attendee address exactly, not as a substring", () => {
+    const icsSub = [
+      "BEGIN:VCALENDAR",
+      "BEGIN:VEVENT",
+      "UID:evt-2@example.test",
+      "DTSTART:20260110T090000Z",
+      "SUMMARY:Sub",
+      "ATTENDEE;PARTSTAT=NEEDS-ACTION:mailto:team-a@example.test",
+      "END:VEVENT",
+      "END:VCALENDAR"
+    ].join("\r\n");
+    // "a@example.test" is a substring of "team-a@example.test" — the old
+    // includes() check would have wrongly stamped this attendee.
+    const event = buildEvent({
+      eventUid: "evt-2@example.test",
+      myAttendeeEmail: "a@example.test",
+      myPartstat: "ACCEPTED"
+    });
+    const out = patchIcsForEvent(icsSub, event);
+    expect(lineFor(out, "team-a@example.test")).toContain("PARTSTAT=NEEDS-ACTION");
+    expect(out).not.toContain("PARTSTAT=ACCEPTED");
+  });
+
   test("refreshes LAST-MODIFIED / DTSTAMP", () => {
     const out = patchIcsForEvent(BASE_ICS, buildEvent());
     expect(out).not.toContain("LAST-MODIFIED:20260105T120000Z");

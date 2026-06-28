@@ -187,12 +187,18 @@ function buildIcsDtLine(name: "DTSTART" | "DTEND", ms: number, allDay: boolean, 
 }
 
 /** Set PARTSTAT on the ATTENDEE line that belongs to `email`, leaving others as-is. */
+function normalizeCalAddress(value: string): string {
+  return value.trim().replace(/^mailto:/i, "").toLowerCase();
+}
+
 function patchAttendeePartstat(line: string, email: string, partstat: string): string {
   const colon = line.indexOf(":");
   if (colon === -1) return line;
   const head = line.slice(0, colon);
   const value = line.slice(colon + 1);
-  if (!value.toLowerCase().includes(email.trim().toLowerCase())) return line;
+  // Exact address match (after dropping the mailto: scheme) so an attendee
+  // whose address merely contains the user's email isn't mis-targeted.
+  if (normalizeCalAddress(value) !== normalizeCalAddress(email)) return line;
   const params = head.split(";");
   const idx = params.findIndex((p, k) => k > 0 && p.toUpperCase().startsWith("PARTSTAT="));
   if (idx >= 0) params[idx] = `PARTSTAT=${partstat}`;
