@@ -109,6 +109,7 @@ type ThreadMessageCardProps = {
   userEmail?: string;
   senderIconsEnabled?: boolean;
   onSearchByAddress?: (action: "with" | "from" | "to", email: string) => void;
+  onComposeTo?: (email: string) => void;
 };
 
 export default function ThreadMessageCard({
@@ -160,7 +161,8 @@ export default function ThreadMessageCard({
   threadViewMode,
   userEmail,
   senderIconsEnabled = true,
-  onSearchByAddress
+  onSearchByAddress,
+  onComposeTo
 }: ThreadMessageCardProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const toValue = (message.to ?? "").trim() || "(no recipients)";
@@ -761,6 +763,7 @@ export default function ThreadMessageCard({
                     variant="segment"
                     className={styles.metaSegmentField}
                     onSearchByAddress={onSearchByAddress}
+                    onComposeTo={onComposeTo}
                   />
                 </div>
                 <div className={`${styles.metaSegment} ${styles.metaSegmentDate}`}>
@@ -786,6 +789,7 @@ export default function ThreadMessageCard({
                   hideWhenEmpty={field.hideWhenEmpty}
                   expandable
                   onSearchByAddress={onSearchByAddress}
+                  onComposeTo={onComposeTo}
                 />
               ))}
               {(() => {

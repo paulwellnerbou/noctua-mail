@@ -18,6 +18,7 @@ type MessageRecipientMetaFieldProps = {
   expandable?: boolean;
   expandThreshold?: number;
   onSearchByAddress?: (action: EmailAddressMenuAction, email: string) => void;
+  onComposeTo?: (email: string) => void;
 };
 
 export default function MessageRecipientMetaField({
@@ -32,7 +33,8 @@ export default function MessageRecipientMetaField({
   hideWhenEmpty = false,
   expandable = false,
   expandThreshold = 120,
-  onSearchByAddress
+  onSearchByAddress,
+  onComposeTo
 }: MessageRecipientMetaFieldProps) {
   const [expanded, setExpanded] = useState(false);
   const [copyOk, setCopyOk] = useState(false);
@@ -130,6 +132,7 @@ export default function MessageRecipientMetaField({
                   displayName={addr.displayName}
                   email={addr.email}
                   onSearchByAddress={onSearchByAddress}
+                  onComposeTo={onComposeTo}
                 />
               ) : (
                 <span title={addr.raw}>{addr.raw}</span>

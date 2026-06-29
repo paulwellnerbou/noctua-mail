@@ -3188,6 +3188,11 @@ export default function MailClient({
     setActiveFolderId("");
     setQuery(`${action}:${term}`);
   };
+  const handleComposeTo = (email: string) => {
+    const trimmed = email.trim();
+    if (!trimmed) return;
+    openCompose("new", undefined, false, { to: trimmed });
+  };
   const handleShowThread = (message: Message) => {
     const threadId = message.threadId ?? message.messageId ?? message.id;
     if (!threadId) return;
@@ -5268,7 +5273,8 @@ export default function MailClient({
               dateFormat: accountDateFormat,
               userEmail: currentAccount?.email,
               senderIconsEnabled: currentAccount?.settings?.appearance?.senderIcons ?? true,
-              onSearchByAddress: handleSearchByAddress
+              onSearchByAddress: handleSearchByAddress,
+              onComposeTo: handleComposeTo
             }
           }}
         />
