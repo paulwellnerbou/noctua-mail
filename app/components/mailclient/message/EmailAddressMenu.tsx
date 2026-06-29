@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ArrowLeft, ArrowRight, Check, Copy, Search } from "lucide-react";
+import { ArrowLeft, ArrowRight, Check, Copy, PenLine, Search } from "lucide-react";
 import { DropdownMenu } from "@radix-ui/themes";
 import menuStyles from "./MessageMenu.module.css";
 import styles from "./EmailAddressMenu.module.css";
@@ -10,12 +10,14 @@ type EmailAddressMenuProps = {
   displayName: string;
   email: string;
   onSearchByAddress: (action: EmailAddressMenuAction, email: string) => void;
+  onComposeTo?: (email: string) => void;
 };
 
 export default function EmailAddressMenu({
   displayName,
   email,
-  onSearchByAddress
+  onSearchByAddress,
+  onComposeTo
 }: EmailAddressMenuProps) {
   const [copied, setCopied] = useState(false);
   const resetTimer = useRef<number | null>(null);
@@ -79,6 +81,17 @@ export default function EmailAddressMenu({
           </span>
           <span className={menuStyles.menuLabel}>Messages to this address</span>
         </DropdownMenu.Item>
+        {onComposeTo && (
+          <>
+            <DropdownMenu.Separator />
+            <DropdownMenu.Item onSelect={() => onComposeTo(email)}>
+              <span className={menuStyles.menuIcon}>
+                <PenLine size={14} />
+              </span>
+              <span className={menuStyles.menuLabel}>Compose message to</span>
+            </DropdownMenu.Item>
+          </>
+        )}
         <DropdownMenu.Separator />
         <DropdownMenu.Item
           onSelect={(event) => {
