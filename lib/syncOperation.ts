@@ -779,13 +779,19 @@ export async function runSyncOperationBatched(
     // (TypeScript/JS GC will handle this, but makes intent clear)
   }
 
-  emitProgress({
-    phase: "finalizing",
-    processed: totalCount,
-    estimatedTotal: latestEstimatedTotal,
-    percent: calculatePercent(totalCount, latestEstimatedTotal),
-    message: "Applying synchronized changes."
-  });
+  // Finalizing steps below each surface their own message so the UI can
+  // report what the server is doing after fetching; the spinner outlives
+  // the last fetch batch while this work runs.
+  const emitFinalizing = (message: string) =>
+    emitProgress({
+      phase: "finalizing",
+      processed: totalCount,
+      estimatedTotal: latestEstimatedTotal,
+      percent: calculatePercent(totalCount, latestEstimatedTotal),
+      message
+    });
+
+  emitFinalizing("Applying synchronized changes.");
 
   const autoProcessCalendarInvites = shouldAutoProcessCalendarInvitesForSyncMode(syncMode);
   const fullyProcessedInviteMessageIds = autoProcessCalendarInvites
@@ -796,6 +802,14 @@ export async function runSyncOperationBatched(
         )
       )
     : new Set<string>();
+
+  if (calendarInviteImports.length > 0) {
+    emitFinalizing(
+      calendarInviteImports.length === 1
+        ? "Processing 1 calendar invite."
+        : `Processing ${calendarInviteImports.length} calendar invites.`
+    );
+  }
 
   for (const invite of sortCalendarInviteImportsForProcessing(calendarInviteImports)) {
     await processCalendarInviteForMessage({
@@ -814,6 +828,7 @@ export async function runSyncOperationBatched(
     // Final full recompute fixes cross-batch thread assignments (e.g. a reply
     // arriving in an earlier batch than its parent). Per-batch recomputes above
     // already made messages visible; this pass ensures thread roots are correct.
+    emitFinalizing("Recomputing message threads.");
     await recomputeThreadsForAccount(account.id);
   }
 
@@ -835,6 +850,11 @@ export async function runSyncOperationBatched(
         currentFolderId: payload.folderId ?? null
       });
       if (orphaned.length > 0) {
+        emitFinalizing(
+          orphaned.length === 1
+            ? "Removing 1 message deleted on the server."
+            : `Removing ${orphaned.length} messages deleted on the server.`
+        );
         // Delete stored attachment files first, then purge DB records.
         await Promise.all(
           orphaned.map((item) =>
@@ -849,17 +869,11 @@ export async function runSyncOperationBatched(
     }
   }
 
-  // Save folders
+  emitFinalizing("Saving folder list.");
   await saveFoldersForAccount(account.id, folders);
 
   if (payload.recategorizeFolder && payload.folderId) {
-    emitProgress({
-      phase: "finalizing",
-      processed: totalCount,
-      estimatedTotal: latestEstimatedTotal,
-      percent: calculatePercent(totalCount, latestEstimatedTotal),
-      message: "Recomputing categories for synced folder."
-    });
+    emitFinalizing("Recomputing categories for synced folder.");
     await recomputeCategoriesForAccount(account.id, { folderId: payload.folderId });
   }
 
