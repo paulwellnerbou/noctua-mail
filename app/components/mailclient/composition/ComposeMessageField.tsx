@@ -70,7 +70,6 @@ type ComposeMessageFieldProps = {
   selectedSignature: Signature | null;
   accountSignatures: Signature[];
   composeTextRef: React.RefObject<HTMLTextAreaElement | null>;
-  composeAttachmentInputRef: React.RefObject<HTMLInputElement | null>;
   composeBodyDebounceRef: React.MutableRefObject<NodeJS.Timeout | null>;
   composeBodyLastUpdateRef: React.MutableRefObject<number>;
   composeMarkdownRef: React.MutableRefObject<string>;
@@ -130,7 +129,6 @@ export default function ComposeMessageField({
   selectedSignature,
   accountSignatures,
   composeTextRef,
-  composeAttachmentInputRef,
   composeBodyDebounceRef,
   composeBodyLastUpdateRef,
   composeMarkdownRef,
@@ -172,6 +170,10 @@ export default function ComposeMessageField({
   const hasQuotedContent = hasQuotedHtml || hasQuotedParts;
   const [isQuotedExpanded, setIsQuotedExpanded] = useState(true);
   const composeEditorRef = useRef<ComposeEditorHandle | null>(null);
+  // Local to each rendered instance: the inline and modal composers mount the
+  // same element in different trees, so a shared ref would be nulled when the
+  // other instance unmounts during a view switch, breaking the Attach button.
+  const composeAttachmentInputRef = useRef<HTMLInputElement | null>(null);
   const pendingEmbedRef = useRef<File[] | null>(null);
 
   const flushPendingEmbed = useCallback(() => {
