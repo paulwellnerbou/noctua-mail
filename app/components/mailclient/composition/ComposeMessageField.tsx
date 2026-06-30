@@ -1,7 +1,7 @@
 "use client";
 
 import type React from "react";
-import { useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as Collapsible from "@radix-ui/react-collapsible";
 import { CaretRightIcon, ChevronDownIcon } from "@radix-ui/react-icons";
 import { Button, DropdownMenu, Tabs } from "@radix-ui/themes";
@@ -9,6 +9,7 @@ import { Paperclip } from "lucide-react";
 import dynamic from "next/dynamic";
 import type { ComposeEditorHandle } from "../../ComposeEditor";
 import type { ComposeInviteDraft } from "@/lib/composeInvite";
+import type { PendingImageDrop } from "./composeTypes";
 import type { Attachment } from "@/lib/data";
 import { assembleQuotedHtml } from "@/lib/html";
 import {
@@ -24,6 +25,7 @@ import threadStyles from "../message/ThreadMessageCard.module.css";
 import composeStyles from "./Compose.module.css";
 import styles from "./ComposeMessageField.module.css";
 import ComposeInviteSection from "./ComposeInviteSection";
+import ComposeImageDropMenu from "./ComposeImageDropMenu";
 
 // @lexical/* (~5 MB of packages) only mounts when the user switches to the
 // HTML compose tab — keep it out of the initial MailClient chunk.
@@ -74,6 +76,7 @@ type ComposeMessageFieldProps = {
   composeDirtyRef: React.MutableRefObject<boolean>;
   composeEditorInitRef: React.MutableRefObject<boolean>;
   composeLastEditedRef: React.MutableRefObject<ComposeTab>;
+  composeSessionVersionRef: React.MutableRefObject<number>;
   stripHtml: (value: string) => string;
   setComposeBody: React.Dispatch<React.SetStateAction<string>>;
   setComposeHtml: React.Dispatch<React.SetStateAction<string>>;
@@ -100,6 +103,10 @@ type ComposeMessageFieldProps = {
   handleInlineImage: (file: File, dataUrl: string) => Promise<void>;
   handleComposeAttachmentPick: (event: React.ChangeEvent<HTMLInputElement>) => Promise<void>;
   removeComposeAttachment: (attachmentId: string) => void;
+  pendingImageDrop: PendingImageDrop | null;
+  setPendingImageDrop: (drop: PendingImageDrop | null) => void;
+  addComposeFiles: (files: File[], inline?: boolean) => Promise<void>;
+  addDroppedFiles: (files: File[], x: number, y: number) => void;
 };
 
 export default function ComposeMessageField({
@@ -130,6 +137,7 @@ export default function ComposeMessageField({
   composeDirtyRef,
   composeEditorInitRef,
   composeLastEditedRef,
+  composeSessionVersionRef,
   stripHtml,
   setComposeBody,
   setComposeHtml,
@@ -155,7 +163,11 @@ export default function ComposeMessageField({
   applySignatureToCompose,
   handleInlineImage,
   handleComposeAttachmentPick,
-  removeComposeAttachment
+  removeComposeAttachment,
+  pendingImageDrop,
+  setPendingImageDrop,
+  addComposeFiles,
+  addDroppedFiles
 }: ComposeMessageFieldProps) {
   const hasQuotedHtml = composeQuotedHtml.trim().length > 0;
   const hasQuotedParts = Boolean(composeQuotedParts);
@@ -166,6 +178,47 @@ export default function ComposeMessageField({
   // same element in different trees, so a shared ref would be nulled when the
   // other instance unmounts during a view switch, breaking the Attach button.
   const composeAttachmentInputRef = useRef<HTMLInputElement | null>(null);
+  // Tagged with the session version so a draft reset (which also bumps
+  // composeEditorReset) between the Embed click and the editor remount discards
+  // the queued images instead of flushing them into the fresh draft.
+  const pendingEmbedRef = useRef<{ files: File[]; session: number } | null>(null);
+
+  const flushPendingEmbed = useCallback(() => {
+    const pending = pendingEmbedRef.current;
+    if (!pending || !composeEditorRef.current) return;
+    if (pending.session !== composeSessionVersionRef.current) {
+      pendingEmbedRef.current = null;
+      return;
+    }
+    pendingEmbedRef.current = null;
+    composeEditorRef.current.insertInlineImages(pending.files);
+  }, [composeSessionVersionRef]);
+
+  // Embedding needs the HTML editor; once it has (re)mounted after a tab switch,
+  // insert any images queued by the drop-choice popover.
+  useEffect(() => {
+    if (composeTab === "html") flushPendingEmbed();
+  }, [composeTab, composeEditorReset, flushPendingEmbed]);
+
+  const handleEmbedDroppedImages = () => {
+    const drop = pendingImageDrop;
+    setPendingImageDrop(null);
+    if (!drop || drop.files.length === 0) return;
+    pendingEmbedRef.current = { files: drop.files, session: composeSessionVersionRef.current };
+    composeDirtyRef.current = true;
+    if (composeTab === "html") {
+      flushPendingEmbed();
+    } else {
+      switchComposeTab("html");
+    }
+  };
+
+  const handleAttachDroppedImages = () => {
+    const drop = pendingImageDrop;
+    setPendingImageDrop(null);
+    if (!drop || drop.files.length === 0) return;
+    void addComposeFiles(drop.files, false);
+  };
   // Preview mirrors the payload: assembled from parts using the current
   // composeQuoteHtml flag, falling back to composeQuotedHtml for restored
   // drafts where parts aren't available.
@@ -488,6 +541,7 @@ export default function ComposeMessageField({
               onStripImages: handleStripImages
             }}
             onInlineImage={handleInlineImage}
+            onFilesDrop={addDroppedFiles}
             onChange={(nextHtml, nextText) => {
               setComposeHtml(nextHtml);
               setComposeHtmlText(nextText);
@@ -588,6 +642,14 @@ export default function ComposeMessageField({
             <HtmlMessage html={previewQuotedHtml} darkMode={darkMode} />
           </Collapsible.Content>
         </Collapsible.Root>
+      )}
+      {pendingImageDrop && (
+        <ComposeImageDropMenu
+          drop={pendingImageDrop}
+          onEmbed={handleEmbedDroppedImages}
+          onAttach={handleAttachDroppedImages}
+          onCancel={() => setPendingImageDrop(null)}
+        />
       )}
     </div>
   );

@@ -105,6 +105,7 @@ import { composeAutoLinkMatchers } from "./composeEditorAutoLink";
 
 export type ComposeEditorHandle = {
   appendHtmlBlock: (html: string) => void;
+  insertInlineImages: (files: File[]) => void;
 };
 
 export type QuotedMessageConfig = {
@@ -127,6 +128,7 @@ type ComposeEditorProps = {
   quotedMessage?: QuotedMessageConfig;
   onChange: (html: string, text: string) => void;
   onInlineImage?: (file: File, dataUrl: string) => void;
+  onFilesDrop?: (files: File[], x: number, y: number) => void;
 };
 
 const theme = {
@@ -559,36 +561,43 @@ function ComposeToolbar({
   );
 }
 
+function insertImageFilesIntoEditor(
+  editor: LexicalEditor,
+  files: File[],
+  onInlineImage?: (file: File, dataUrl: string) => void
+) {
+  files.forEach((file) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = String(reader.result || "");
+      if (!dataUrl) return;
+      onInlineImage?.(file, dataUrl);
+      const alt = file.name || "image";
+      editor.update(() => {
+        const imageNode = $createImageNode(dataUrl, alt);
+        const selection = $getSelection();
+        if ($isRangeSelection(selection)) {
+          selection.insertNodes([imageNode]);
+        } else {
+          $getRoot().append(imageNode);
+        }
+      });
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
 function ComposeEditable({
-  onInlineImage
+  onInlineImage,
+  onFilesDrop
 }: {
   onInlineImage?: (file: File, dataUrl: string) => void;
+  onFilesDrop?: (files: File[], x: number, y: number) => void;
 }) {
   const [editor] = useLexicalComposerContext();
 
   const handleImageFiles = useCallback(
-    (files: File[]) => {
-      files.forEach((file) => {
-        const reader = new FileReader();
-        reader.onload = () => {
-          const dataUrl = String(reader.result || "");
-          if (!dataUrl) return;
-          onInlineImage?.(file, dataUrl);
-          const src = dataUrl;
-          const alt = file.name || "image";
-          editor.update(() => {
-            const imageNode = $createImageNode(src, alt);
-            const selection = $getSelection();
-            if ($isRangeSelection(selection)) {
-              selection.insertNodes([imageNode]);
-            } else {
-              $getRoot().append(imageNode);
-            }
-          });
-        };
-        reader.readAsDataURL(file);
-      });
-    },
+    (files: File[]) => insertImageFilesIntoEditor(editor, files, onInlineImage),
     [editor, onInlineImage]
   );
 
@@ -608,11 +617,16 @@ function ComposeEditable({
       }}
       onDrop={(event) => {
         const files = Array.from(event.dataTransfer?.files ?? []);
-        const imageFiles = files.filter((file) => file.type.startsWith("image/"));
-        if (imageFiles.length === 0) return;
+        if (files.length === 0) return;
         event.preventDefault();
         event.stopPropagation();
-        handleImageFiles(imageFiles);
+        // Hand the whole drop to the embed-vs-attach router when wired so a mixed
+        // drop attaches non-images too; otherwise embed any images directly.
+        if (onFilesDrop) {
+          onFilesDrop(files, event.clientX, event.clientY);
+        } else {
+          handleImageFiles(files.filter((file) => file.type.startsWith("image/")));
+        }
       }}
     />
   );
@@ -694,7 +708,13 @@ function ComposerInitializer({
   return null;
 }
 
-function AppendPlugin({ handleRef }: { handleRef: React.Ref<ComposeEditorHandle> }) {
+function AppendPlugin({
+  handleRef,
+  onInlineImage
+}: {
+  handleRef: React.Ref<ComposeEditorHandle>;
+  onInlineImage?: (file: File, dataUrl: string) => void;
+}) {
   const [editor] = useLexicalComposerContext();
   useImperativeHandle(
     handleRef,
@@ -713,9 +733,12 @@ function AppendPlugin({ handleRef }: { handleRef: React.Ref<ComposeEditorHandle>
           }
           $appendNodesFromHtml(editor, html);
         });
+      },
+      insertInlineImages(files: File[]) {
+        insertImageFilesIntoEditor(editor, files, onInlineImage);
       }
     }),
-    [editor]
+    [editor, onInlineImage]
   );
   return null;
 }
@@ -835,7 +858,8 @@ const ComposeEditor = forwardRef<ComposeEditorHandle, ComposeEditorProps>(functi
   className,
   quotedMessage,
   onChange,
-  onInlineImage
+  onInlineImage,
+  onFilesDrop
 }, ref) {
   const toolbarRef = useRef<HTMLDivElement | null>(null);
   const [toolbarHeight, setToolbarHeight] = useState(0);
@@ -918,12 +942,12 @@ const ComposeEditor = forwardRef<ComposeEditorHandle, ComposeEditorProps>(functi
           onEnterSource={handleEnterSource}
           onExitSource={handleExitSource}
         />
-        <AppendPlugin handleRef={ref} />
+        <AppendPlugin handleRef={ref} onInlineImage={onInlineImage} />
         <ComposerInitializer initialHtml={initialHtml} resetKey={resetKey} />
         <SourceSyncPlugin html={sourceHtml} showSource={showSource} />
         {quotedMessage && <QuotedMessagePlugin config={quotedMessage} />}
         <RichTextPlugin
-          contentEditable={<ComposeEditable onInlineImage={onInlineImage} />}
+          contentEditable={<ComposeEditable onInlineImage={onInlineImage} onFilesDrop={onFilesDrop} />}
           placeholder={<div className={styles.composeEditorPlaceholder}>Write your message…</div>}
           ErrorBoundary={LexicalErrorBoundary}
         />

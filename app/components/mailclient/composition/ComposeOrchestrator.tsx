@@ -340,6 +340,8 @@ function ComposeOrchestratorImpl(
     setComposeAttachments,
     composeDragActive,
     setComposeDragActive,
+    pendingImageDrop,
+    setPendingImageDrop,
     composeEditorReset,
     setComposeEditorReset,
     composeQuotedParts,
@@ -423,6 +425,8 @@ function ComposeOrchestratorImpl(
     accountSignatures.find((signature) => signature.id === composeSignatureId) ?? null;
 
   const {
+    addComposeFiles,
+    addDroppedFiles,
     removeComposeAttachment,
     handleInlineImage,
     handleComposeDragEnter,
@@ -437,6 +441,7 @@ function ComposeOrchestratorImpl(
     composeDragDepthRef,
     setComposeDragActive,
     setComposeAttachments,
+    setPendingImageDrop,
     apiFetch
   });
 
@@ -982,6 +987,7 @@ function ComposeOrchestratorImpl(
       composeDirtyRef={composeDirtyRef}
       composeEditorInitRef={composeEditorInitRef}
       composeLastEditedRef={composeLastEditedRef}
+      composeSessionVersionRef={composeSessionVersionRef}
       stripHtml={stripHtml}
       setComposeBody={setComposeBody}
       setComposeHtml={setComposeHtml}
@@ -1041,6 +1047,10 @@ function ComposeOrchestratorImpl(
       handleInlineImage={handleInlineImage}
       handleComposeAttachmentPick={handleComposeAttachmentPick}
       removeComposeAttachment={removeComposeAttachment}
+      pendingImageDrop={pendingImageDrop}
+      setPendingImageDrop={setPendingImageDrop}
+      addComposeFiles={addComposeFiles}
+      addDroppedFiles={addDroppedFiles}
     />
   );
 

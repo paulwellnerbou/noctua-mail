@@ -2,8 +2,10 @@ import { describe, expect, it } from "bun:test";
 import {
   pruneUnreferencedInlineAttachments,
   restoreComposeMessageAttachmentDataUrls,
-  restoreInlineAttachmentDataUrls
+  restoreInlineAttachmentDataUrls,
+  routeDroppedFiles
 } from "./useComposeHandlers";
+import type { PendingImageDrop } from "./composeTypes";
 
 describe("restoreInlineAttachmentDataUrls", () => {
   it("replaces inline attachment URLs with hydrated data URLs", () => {
@@ -208,5 +210,64 @@ describe("pruneUnreferencedInlineAttachments", () => {
         dataUrl: "data:application/pdf;base64,BBBB"
       }
     ]);
+  });
+});
+
+describe("routeDroppedFiles", () => {
+  const imageFile = (name: string) => new File([], name, { type: "image/png" });
+  const otherFile = (name: string) => new File([], name, { type: "application/pdf" });
+
+  function setup() {
+    const attached: Array<{ files: File[]; inline?: boolean }> = [];
+    const pending: Array<PendingImageDrop | null> = [];
+    return {
+      attached,
+      pending,
+      deps: {
+        addComposeFiles: (files: File[], inline?: boolean) => attached.push({ files, inline }),
+        setPendingImageDrop: (drop: PendingImageDrop | null) => pending.push(drop)
+      }
+    };
+  }
+
+  it("queues images in pendingImageDrop and does not attach them", () => {
+    const { attached, pending, deps } = setup();
+    const a = imageFile("a.png");
+    const b = imageFile("b.png");
+
+    routeDroppedFiles([a, b], 10, 20, deps);
+
+    expect(attached).toEqual([]);
+    expect(pending).toEqual([{ files: [a, b], x: 10, y: 20 }]);
+  });
+
+  it("attaches non-images immediately without queuing a drop", () => {
+    const { attached, pending, deps } = setup();
+    const doc = otherFile("contract.pdf");
+
+    routeDroppedFiles([doc], 0, 0, deps);
+
+    expect(attached).toEqual([{ files: [doc], inline: false }]);
+    expect(pending).toEqual([]);
+  });
+
+  it("splits a mixed drop: attaches non-images and queues images", () => {
+    const { attached, pending, deps } = setup();
+    const img = imageFile("photo.png");
+    const doc = otherFile("contract.pdf");
+
+    routeDroppedFiles([doc, img], 5, 6, deps);
+
+    expect(attached).toEqual([{ files: [doc], inline: false }]);
+    expect(pending).toEqual([{ files: [img], x: 5, y: 6 }]);
+  });
+
+  it("does nothing for an empty drop", () => {
+    const { attached, pending, deps } = setup();
+
+    routeDroppedFiles([], 0, 0, deps);
+
+    expect(attached).toEqual([]);
+    expect(pending).toEqual([]);
   });
 });

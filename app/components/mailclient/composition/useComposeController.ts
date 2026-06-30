@@ -169,6 +169,7 @@ export function useComposeController({
     compose.setComposeEditorReset((prev) => prev + 1);
     compose.setComposeAttachments([]);
     compose.setComposeDragActive(false);
+    compose.setPendingImageDrop(null);
     compose.setComposeMode(mode);
     compose.setComposeOpenedAt(formatAccountMediumDateTime(Date.now(), accountDateFormat) ?? "");
     compose.setComposeSignatureId(defaultSignatureId ?? "");

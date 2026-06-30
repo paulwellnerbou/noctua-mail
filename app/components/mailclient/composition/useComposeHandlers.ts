@@ -3,12 +3,14 @@ import { buildAccountAttachmentPath } from "@/lib/accountApiPaths";
 import type { Message, Attachment } from "@/lib/data";
 import { replaceInlineImageSources } from "@/lib/html";
 import { createComposeAttachment } from "@/lib/mail/composeAttachment";
+import type { PendingImageDrop } from "./composeTypes";
 
 type UseComposeHandlersProps = {
   composeDirtyRef: React.MutableRefObject<boolean>;
   composeDragDepthRef: React.MutableRefObject<number>;
   setComposeDragActive: (active: boolean) => void;
   setComposeAttachments: React.Dispatch<React.SetStateAction<Attachment[]>>;
+  setPendingImageDrop: (drop: PendingImageDrop | null) => void;
   apiFetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 };
 
@@ -58,6 +60,29 @@ export function restoreComposeMessageAttachmentDataUrls(
   };
 }
 
+// Non-images can't be embedded inline, so attach them without prompting;
+// images defer to a popover where the user picks embed vs. attach. Shared by
+// the compose-surface drop and the editor drop so a mixed drop behaves the same
+// in both places.
+export function routeDroppedFiles(
+  files: File[],
+  x: number,
+  y: number,
+  {
+    addComposeFiles,
+    setPendingImageDrop
+  }: {
+    addComposeFiles: (files: File[], inline?: boolean) => unknown;
+    setPendingImageDrop: (drop: PendingImageDrop | null) => void;
+  }
+) {
+  if (files.length === 0) return;
+  const images = files.filter((file) => file.type.startsWith("image/"));
+  const others = files.filter((file) => !file.type.startsWith("image/"));
+  if (others.length > 0) addComposeFiles(others, false);
+  if (images.length > 0) setPendingImageDrop({ files: images, x, y });
+}
+
 export function pruneUnreferencedInlineAttachments(attachments: Attachment[], html: string) {
   const inlineAttachments = attachments.filter((attachment) => attachment.inline);
   if (inlineAttachments.length === 0) return attachments;
@@ -76,6 +101,7 @@ export function useComposeHandlers({
   composeDragDepthRef,
   setComposeDragActive,
   setComposeAttachments,
+  setPendingImageDrop,
   apiFetch
 }: UseComposeHandlersProps) {
   const hydrateComposeAttachments = useCallback(async (
@@ -144,14 +170,23 @@ export function useComposeHandlers({
     event.dataTransfer.dropEffect = "copy";
   };
 
-  const handleComposeDrop = async (event: React.DragEvent) => {
-    event.preventDefault();
-    event.stopPropagation();
+  const addDroppedFiles = (files: File[], x: number, y: number) => {
+    // Clear the drag-active outline here so it resets for editor drops too,
+    // where the compose-surface drop handler never runs (its onDrop stops
+    // propagation).
     composeDragDepthRef.current = 0;
     setComposeDragActive(false);
-    const files = Array.from(event.dataTransfer?.files ?? []);
-    if (files.length === 0) return;
-    await addComposeFiles(files, false);
+    routeDroppedFiles(files, x, y, { addComposeFiles, setPendingImageDrop });
+  };
+
+  const handleComposeDrop = (event: React.DragEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    addDroppedFiles(
+      Array.from(event.dataTransfer?.files ?? []),
+      event.clientX,
+      event.clientY
+    );
   };
 
   const handleComposeAttachmentPick = async (
@@ -173,6 +208,7 @@ export function useComposeHandlers({
 
   return {
     addComposeFiles,
+    addDroppedFiles,
     removeComposeAttachment,
     handleInlineImage,
     handleComposeDragEnter,
