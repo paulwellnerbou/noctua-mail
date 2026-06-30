@@ -4,6 +4,21 @@ import { escapeHtml } from "./strip";
 // viewer "frame" (based on whether the source already provides its own
 // chrome), and make sure a document has a sensible <title>.
 
+// A plain white or transparent background is the default canvas, not
+// self-provided chrome, so it must not suppress the viewer frame. Helpdesk
+// mailers (e.g. Helpscout) wrap otherwise-bare messages in
+// `<body bgcolor="#ffffff">`, which would otherwise lose their spacing.
+const TRIVIAL_BACKGROUNDS = new Set(["#fff", "#ffffff", "white", "transparent"]);
+
+function isMeaningfulBackground(value: string | undefined) {
+  const normalized = value
+    ?.replace(/\s*!important\s*$/i, "")
+    .trim()
+    .toLowerCase() ?? "";
+  if (!normalized) return false;
+  return !TRIVIAL_BACKGROUNDS.has(normalized);
+}
+
 export function shouldShowHtmlViewerFrame(input: string) {
   const trimmed = input.trim();
   if (!trimmed) return false;
@@ -11,14 +26,18 @@ export function shouldShowHtmlViewerFrame(input: string) {
   const headSample = trimmed
     .slice(0, 8192)
     .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
     .replace(/\s+/g, " ");
 
-  if (/<body[^>]*\sbgcolor\s*=/i.test(headSample)) return false;
-  if (
-    /<body[^>]*style=["'][^"']*background(?:-color)?\s*:[^"']*["']/i.test(
-      headSample
-    )
-  ) {
+  const bodyTag = /<body\b[^>]*>/i.exec(headSample)?.[0] ?? "";
+  const bgColorAttr = /\sbgcolor\s*=\s*["']?([^"'\s>]+)/i.exec(bodyTag)?.[1];
+  const bodyStyle = /style\s*=\s*["']([^"']*)["']/i.exec(bodyTag)?.[1] ?? "";
+  // The cascade lets a later declaration override an earlier one, so the last
+  // background value is the effective one.
+  const bgStyle = [
+    ...bodyStyle.matchAll(/background(?:-color)?\s*:\s*([^;"']+)/gi)
+  ].at(-1)?.[1];
+  if (isMeaningfulBackground(bgColorAttr) || isMeaningfulBackground(bgStyle)) {
     return false;
   }
 
