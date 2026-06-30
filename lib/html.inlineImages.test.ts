@@ -56,6 +56,24 @@ describe("appendUnreferencedInlineImages", () => {
     expect(output).toContain(`src="${url}"`);
   });
 
+  it("resolves cid references in markdown image syntax", () => {
+    const url = "/api/accounts/a/messages/m/attachments/1";
+    const body =
+      "Test-Bild:\n\n![image.png](cid:inline-ba772a9b-ab6f-4642-862b-8d37a14c1652@noctua)";
+    const output = replaceInlineImageSources(body, [
+      {
+        inline: true,
+        contentType: "image/png",
+        filename: "image.png",
+        cid: "inline-ba772a9b-ab6f-4642-862b-8d37a14c1652@noctua",
+        url
+      }
+    ]);
+
+    expect(output).toContain(`![image.png](${url})`);
+    expect(output).not.toContain("cid:");
+  });
+
   it("does not corrupt cid references that share prefixes", () => {
     const output = replaceInlineImageSources(
       '<html><body><img src="cid:logo"><img src="cid:logo2"></body></html>',

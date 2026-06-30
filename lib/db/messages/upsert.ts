@@ -465,21 +465,21 @@ export async function upsertMessages(
             : message.categorySignals;
         const emailMatch = message.from.match(/<([^>]+)>/);
         const fromEmail = emailMatch ? emailMatch[1] : null;
-        const encodedMessageId = encodeURIComponent(message.id);
-        const encodedRowId = encodeURIComponent(rowId);
+        // Attachment URLs embed the message id as a path segment
+        // (/messages/<id>/attachments/<att>), so a collision variant must
+        // rewrite that segment. Sanitization baked the base id into htmlBody
+        // before this upsert assigned the variant; leaving it stale makes the
+        // inline <img> 404 and appendUnreferencedInlineImages tack on a second
+        // copy, so the image renders once broken and once correct.
+        const baseMessagePathSegment = `/messages/${encodeURIComponent(message.id)}/`;
+        const rowMessagePathSegment = `/messages/${encodeURIComponent(rowId)}/`;
         const rewriteAttachmentUrl = (url?: string) => {
           if (!url || rowId === message.id) return url ?? null;
-          return url.replaceAll(
-            `messageId=${encodedMessageId}`,
-            `messageId=${encodedRowId}`
-          );
+          return url.replaceAll(baseMessagePathSegment, rowMessagePathSegment);
         };
         const rewrittenHtmlBody =
           rowId !== message.id && message.htmlBody
-            ? message.htmlBody.replaceAll(
-                `messageId=${encodedMessageId}`,
-                `messageId=${encodedRowId}`
-              )
+            ? message.htmlBody.replaceAll(baseMessagePathSegment, rowMessagePathSegment)
             : message.htmlBody;
         insertMessage.run(
           rowId,

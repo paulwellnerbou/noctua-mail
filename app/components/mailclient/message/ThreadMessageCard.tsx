@@ -368,7 +368,14 @@ export default function ThreadMessageCard({
   const renderTextOrEmpty = () =>
     needsContentHydration ? renderLoadContentPanel() : renderTextPanel(message.body);
   const renderMarkdownOrEmpty = () =>
-    needsContentHydration ? renderLoadContentPanel() : renderMarkdownPanel(message.body, message.id);
+    needsContentHydration
+      ? renderLoadContentPanel()
+      : renderMarkdownPanel(
+          // Resolve cid: image refs to attachment URLs, as the HTML panel does;
+          // otherwise the markdown body renders <img src="cid:…"> as a broken image.
+          replaceInlineImageSources(message.body ?? "", message.attachments ?? []),
+          message.id
+        );
 
   const wrapPanel = (key: string, node: React.ReactNode) => (
     <div key={key} className={styles.panel}>
