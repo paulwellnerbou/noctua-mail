@@ -11,7 +11,10 @@ import { escapeHtml } from "./strip";
 const TRIVIAL_BACKGROUNDS = new Set(["#fff", "#ffffff", "white", "transparent"]);
 
 function isMeaningfulBackground(value: string | undefined) {
-  const normalized = value?.trim().toLowerCase() ?? "";
+  const normalized = value
+    ?.replace(/\s*!important\s*$/i, "")
+    .trim()
+    .toLowerCase() ?? "";
   if (!normalized) return false;
   return !TRIVIAL_BACKGROUNDS.has(normalized);
 }
