@@ -3,12 +3,14 @@ import { buildAccountAttachmentPath } from "@/lib/accountApiPaths";
 import type { Message, Attachment } from "@/lib/data";
 import { replaceInlineImageSources } from "@/lib/html";
 import { createComposeAttachment } from "@/lib/mail/composeAttachment";
+import type { PendingImageDrop } from "./composeTypes";
 
 type UseComposeHandlersProps = {
   composeDirtyRef: React.MutableRefObject<boolean>;
   composeDragDepthRef: React.MutableRefObject<number>;
   setComposeDragActive: (active: boolean) => void;
   setComposeAttachments: React.Dispatch<React.SetStateAction<Attachment[]>>;
+  setPendingImageDrop: (drop: PendingImageDrop | null) => void;
   apiFetch: (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 };
 
@@ -76,6 +78,7 @@ export function useComposeHandlers({
   composeDragDepthRef,
   setComposeDragActive,
   setComposeAttachments,
+  setPendingImageDrop,
   apiFetch
 }: UseComposeHandlersProps) {
   const hydrateComposeAttachments = useCallback(async (
@@ -151,7 +154,13 @@ export function useComposeHandlers({
     setComposeDragActive(false);
     const files = Array.from(event.dataTransfer?.files ?? []);
     if (files.length === 0) return;
-    await addComposeFiles(files, false);
+    // Non-images can't be embedded inline, so attach them without prompting;
+    // images defer to a popover where the user picks embed vs. attach.
+    const images = files.filter((file) => file.type.startsWith("image/"));
+    const others = files.filter((file) => !file.type.startsWith("image/"));
+    if (others.length > 0) await addComposeFiles(others, false);
+    if (images.length === 0) return;
+    setPendingImageDrop({ files: images, x: event.clientX, y: event.clientY });
   };
 
   const handleComposeAttachmentPick = async (

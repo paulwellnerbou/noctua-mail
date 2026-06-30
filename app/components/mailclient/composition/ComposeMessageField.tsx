@@ -1,7 +1,7 @@
 "use client";
 
 import type React from "react";
-import { useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as Collapsible from "@radix-ui/react-collapsible";
 import { CaretRightIcon, ChevronDownIcon } from "@radix-ui/react-icons";
 import { Button, DropdownMenu, Tabs } from "@radix-ui/themes";
@@ -9,6 +9,7 @@ import { Paperclip } from "lucide-react";
 import dynamic from "next/dynamic";
 import type { ComposeEditorHandle } from "../../ComposeEditor";
 import type { ComposeInviteDraft } from "@/lib/composeInvite";
+import type { PendingImageDrop } from "./composeTypes";
 import type { Attachment } from "@/lib/data";
 import { assembleQuotedHtml } from "@/lib/html";
 import {
@@ -24,6 +25,7 @@ import threadStyles from "../message/ThreadMessageCard.module.css";
 import composeStyles from "./Compose.module.css";
 import styles from "./ComposeMessageField.module.css";
 import ComposeInviteSection from "./ComposeInviteSection";
+import ComposeImageDropMenu from "./ComposeImageDropMenu";
 
 // @lexical/* (~5 MB of packages) only mounts when the user switches to the
 // HTML compose tab — keep it out of the initial MailClient chunk.
@@ -101,6 +103,9 @@ type ComposeMessageFieldProps = {
   handleInlineImage: (file: File, dataUrl: string) => Promise<void>;
   handleComposeAttachmentPick: (event: React.ChangeEvent<HTMLInputElement>) => Promise<void>;
   removeComposeAttachment: (attachmentId: string) => void;
+  pendingImageDrop: PendingImageDrop | null;
+  setPendingImageDrop: (drop: PendingImageDrop | null) => void;
+  addComposeFiles: (files: File[], inline?: boolean) => Promise<void>;
 };
 
 export default function ComposeMessageField({
@@ -157,13 +162,50 @@ export default function ComposeMessageField({
   applySignatureToCompose,
   handleInlineImage,
   handleComposeAttachmentPick,
-  removeComposeAttachment
+  removeComposeAttachment,
+  pendingImageDrop,
+  setPendingImageDrop,
+  addComposeFiles
 }: ComposeMessageFieldProps) {
   const hasQuotedHtml = composeQuotedHtml.trim().length > 0;
   const hasQuotedParts = Boolean(composeQuotedParts);
   const hasQuotedContent = hasQuotedHtml || hasQuotedParts;
   const [isQuotedExpanded, setIsQuotedExpanded] = useState(true);
   const composeEditorRef = useRef<ComposeEditorHandle | null>(null);
+  const pendingEmbedRef = useRef<File[] | null>(null);
+
+  const flushPendingEmbed = useCallback(() => {
+    const files = pendingEmbedRef.current;
+    if (!files || !composeEditorRef.current) return;
+    pendingEmbedRef.current = null;
+    composeEditorRef.current.insertInlineImages(files);
+  }, []);
+
+  // Embedding needs the HTML editor; once it has (re)mounted after a tab switch,
+  // insert any images queued by the drop-choice popover.
+  useEffect(() => {
+    if (composeTab === "html") flushPendingEmbed();
+  }, [composeTab, composeEditorReset, flushPendingEmbed]);
+
+  const handleEmbedDroppedImages = () => {
+    const drop = pendingImageDrop;
+    setPendingImageDrop(null);
+    if (!drop || drop.files.length === 0) return;
+    pendingEmbedRef.current = drop.files;
+    composeDirtyRef.current = true;
+    if (composeTab === "html") {
+      flushPendingEmbed();
+    } else {
+      switchComposeTab("html");
+    }
+  };
+
+  const handleAttachDroppedImages = () => {
+    const drop = pendingImageDrop;
+    setPendingImageDrop(null);
+    if (!drop || drop.files.length === 0) return;
+    void addComposeFiles(drop.files, false);
+  };
   // Preview mirrors the payload: assembled from parts using the current
   // composeQuoteHtml flag, falling back to composeQuotedHtml for restored
   // drafts where parts aren't available.
@@ -486,6 +528,7 @@ export default function ComposeMessageField({
               onStripImages: handleStripImages
             }}
             onInlineImage={handleInlineImage}
+            onImageDrop={(files, x, y) => setPendingImageDrop({ files, x, y })}
             onChange={(nextHtml, nextText) => {
               setComposeHtml(nextHtml);
               setComposeHtmlText(nextText);
@@ -586,6 +629,14 @@ export default function ComposeMessageField({
             <HtmlMessage html={previewQuotedHtml} darkMode={darkMode} />
           </Collapsible.Content>
         </Collapsible.Root>
+      )}
+      {pendingImageDrop && (
+        <ComposeImageDropMenu
+          drop={pendingImageDrop}
+          onEmbed={handleEmbedDroppedImages}
+          onAttach={handleAttachDroppedImages}
+          onCancel={() => setPendingImageDrop(null)}
+        />
       )}
     </div>
   );

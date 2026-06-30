@@ -36,6 +36,7 @@ type ResettableComposeState = Pick<
   | "setComposeReplyHeaders"
   | "setComposeAttachments"
   | "setComposeDragActive"
+  | "setPendingImageDrop"
   | "setComposeEditorReset"
   | "setComposeQuotedParts"
   | "setComposeResizing"
@@ -121,6 +122,7 @@ export function resetComposeSession(compose: ResettableComposeState) {
   compose.setComposeReplyHeaders(null);
   compose.setComposeAttachments([]);
   compose.setComposeDragActive(false);
+  compose.setPendingImageDrop(null);
   compose.setComposeEditorReset((prev) => prev + 1);
   compose.setComposeQuotedParts(null);
   compose.setComposeResizing(false);

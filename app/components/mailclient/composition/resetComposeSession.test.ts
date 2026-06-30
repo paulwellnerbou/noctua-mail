@@ -44,6 +44,7 @@ describe("resetComposeSession", () => {
       composeReplyHeaders: { inReplyTo: "message-id" },
       composeAttachments: [{ id: "att-1" }],
       composeDragActive: true,
+      pendingImageDrop: { files: [], x: 1, y: 2 },
       composeEditorReset: 4,
       composeQuotedParts: { styles: "", headerHtml: "", bodyHtml: "" },
       composeResizing: true,
@@ -89,6 +90,7 @@ describe("resetComposeSession", () => {
       setComposeReplyHeaders: createSetter({ get value() { return state.composeReplyHeaders; }, set value(value) { state.composeReplyHeaders = value as { inReplyTo: string } | null; } }),
       setComposeAttachments: createSetter({ get value() { return state.composeAttachments; }, set value(value) { state.composeAttachments = value as Array<{ id: string }>; } }),
       setComposeDragActive: createSetter({ get value() { return state.composeDragActive; }, set value(value) { state.composeDragActive = value as boolean; } }),
+      setPendingImageDrop: createSetter({ get value() { return state.pendingImageDrop; }, set value(value) { state.pendingImageDrop = value as { files: unknown[]; x: number; y: number } | null; } }),
       setComposeEditorReset: createSetter({ get value() { return state.composeEditorReset; }, set value(value) { state.composeEditorReset = value as number; } }),
       setComposeQuotedParts: createSetter({ get value() { return state.composeQuotedParts; }, set value(value) { state.composeQuotedParts = value as { styles: string; headerHtml: string; bodyHtml: string } | null; } }),
       setComposeResizing: createSetter({ get value() { return state.composeResizing; }, set value(value) { state.composeResizing = value as boolean; } }),
@@ -150,6 +152,7 @@ describe("resetComposeSession", () => {
     expect(state.composeReplyHeaders).toBeNull();
     expect(state.composeAttachments).toEqual([]);
     expect(state.composeDragActive).toBe(false);
+    expect(state.pendingImageDrop).toBeNull();
     expect(state.composeEditorReset).toBe(5);
     expect(state.composeQuotedParts).toBeNull();
     expect(state.composeResizing).toBe(false);

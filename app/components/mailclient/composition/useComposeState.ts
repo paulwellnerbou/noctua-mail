@@ -11,7 +11,8 @@ import type {
   ComposeSize,
   ComposeTab,
   ComposeView,
-  DraftSavePayload
+  DraftSavePayload,
+  PendingImageDrop
 } from "./composeTypes";
 
 export function useComposeState() {
@@ -60,6 +61,7 @@ export function useComposeState() {
   const [composeReplyHeaders, setComposeReplyHeaders] = useState<ComposeReplyHeaders | null>(null);
   const [composeAttachments, setComposeAttachments] = useState<Attachment[]>([]);
   const [composeDragActive, setComposeDragActive] = useState(false);
+  const [pendingImageDrop, setPendingImageDrop] = useState<PendingImageDrop | null>(null);
   const [composeEditorReset, setComposeEditorReset] = useState(0);
   const [composeQuotedParts, setComposeQuotedParts] = useState<ComposeQuotedParts | null>(null);
   const recipientCacheRef = useRef<Record<string, RecipientSuggestion[]>>({});
@@ -163,6 +165,8 @@ export function useComposeState() {
     setComposeAttachments,
     composeDragActive,
     setComposeDragActive,
+    pendingImageDrop,
+    setPendingImageDrop,
     composeEditorReset,
     setComposeEditorReset,
     composeQuotedParts,

@@ -37,6 +37,14 @@ export type ComposeResizeState = {
   startHeight: number;
 };
 
+// Dropped image files awaiting the user's embed-vs-attach choice, anchored at
+// the drop position (viewport coordinates) for the choice popover.
+export type PendingImageDrop = {
+  files: File[];
+  x: number;
+  y: number;
+};
+
 export type ComposeSelectionState = {
   start: number;
   end: number;
