@@ -146,6 +146,13 @@ export default function ProcessStatusPopover({
       if (latestSyncProgress.phase === "retrying") {
         return `${modeLabel}: ${formatRetryLabel(latestSyncProgress)} ${scopeLabel}`;
       }
+      // During the post-fetch finalizing tail the percent sits at 100, so
+      // surface the step message instead — that's where the spinner outlives
+      // the fetch and the user wants to know what's happening.
+      const finalizingMessage = latestSyncProgress.message?.trim();
+      if (latestSyncProgress.phase === "finalizing" && finalizingMessage) {
+        return `${scopeLabel}: ${finalizingMessage}`;
+      }
       const percentLabel = formatSyncPercent(latestSyncProgress.percent);
       return percentLabel
         ? `Syncing ${scopeLabel} (${modeLabel}, ${percentLabel})`
