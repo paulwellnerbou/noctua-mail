@@ -76,6 +76,7 @@ type ComposeMessageFieldProps = {
   composeDirtyRef: React.MutableRefObject<boolean>;
   composeEditorInitRef: React.MutableRefObject<boolean>;
   composeLastEditedRef: React.MutableRefObject<ComposeTab>;
+  composeSessionVersionRef: React.MutableRefObject<number>;
   stripHtml: (value: string) => string;
   setComposeBody: React.Dispatch<React.SetStateAction<string>>;
   setComposeHtml: React.Dispatch<React.SetStateAction<string>>;
@@ -136,6 +137,7 @@ export default function ComposeMessageField({
   composeDirtyRef,
   composeEditorInitRef,
   composeLastEditedRef,
+  composeSessionVersionRef,
   stripHtml,
   setComposeBody,
   setComposeHtml,
@@ -176,14 +178,21 @@ export default function ComposeMessageField({
   // same element in different trees, so a shared ref would be nulled when the
   // other instance unmounts during a view switch, breaking the Attach button.
   const composeAttachmentInputRef = useRef<HTMLInputElement | null>(null);
-  const pendingEmbedRef = useRef<File[] | null>(null);
+  // Tagged with the session version so a draft reset (which also bumps
+  // composeEditorReset) between the Embed click and the editor remount discards
+  // the queued images instead of flushing them into the fresh draft.
+  const pendingEmbedRef = useRef<{ files: File[]; session: number } | null>(null);
 
   const flushPendingEmbed = useCallback(() => {
-    const files = pendingEmbedRef.current;
-    if (!files || !composeEditorRef.current) return;
+    const pending = pendingEmbedRef.current;
+    if (!pending || !composeEditorRef.current) return;
+    if (pending.session !== composeSessionVersionRef.current) {
+      pendingEmbedRef.current = null;
+      return;
+    }
     pendingEmbedRef.current = null;
-    composeEditorRef.current.insertInlineImages(files);
-  }, []);
+    composeEditorRef.current.insertInlineImages(pending.files);
+  }, [composeSessionVersionRef]);
 
   // Embedding needs the HTML editor; once it has (re)mounted after a tab switch,
   // insert any images queued by the drop-choice popover.
@@ -195,7 +204,7 @@ export default function ComposeMessageField({
     const drop = pendingImageDrop;
     setPendingImageDrop(null);
     if (!drop || drop.files.length === 0) return;
-    pendingEmbedRef.current = drop.files;
+    pendingEmbedRef.current = { files: drop.files, session: composeSessionVersionRef.current };
     composeDirtyRef.current = true;
     if (composeTab === "html") {
       flushPendingEmbed();

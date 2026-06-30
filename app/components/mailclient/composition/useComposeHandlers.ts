@@ -152,6 +152,11 @@ export function useComposeHandlers({
   // the compose-surface drop and the editor drop so a mixed drop behaves the
   // same in both places.
   const addDroppedFiles = (files: File[], x: number, y: number) => {
+    // Clear the drag-active outline here so it resets for editor drops too,
+    // where the compose-surface drop handler never runs (its onDrop stops
+    // propagation).
+    composeDragDepthRef.current = 0;
+    setComposeDragActive(false);
     if (files.length === 0) return;
     const images = files.filter((file) => file.type.startsWith("image/"));
     const others = files.filter((file) => !file.type.startsWith("image/"));
@@ -162,8 +167,6 @@ export function useComposeHandlers({
   const handleComposeDrop = (event: React.DragEvent) => {
     event.preventDefault();
     event.stopPropagation();
-    composeDragDepthRef.current = 0;
-    setComposeDragActive(false);
     addDroppedFiles(
       Array.from(event.dataTransfer?.files ?? []),
       event.clientX,

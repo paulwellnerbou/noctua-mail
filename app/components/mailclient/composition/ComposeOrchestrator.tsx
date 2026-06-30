@@ -987,6 +987,7 @@ function ComposeOrchestratorImpl(
       composeDirtyRef={composeDirtyRef}
       composeEditorInitRef={composeEditorInitRef}
       composeLastEditedRef={composeLastEditedRef}
+      composeSessionVersionRef={composeSessionVersionRef}
       stripHtml={stripHtml}
       setComposeBody={setComposeBody}
       setComposeHtml={setComposeHtml}

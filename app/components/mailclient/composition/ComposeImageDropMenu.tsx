@@ -20,7 +20,14 @@ export default function ComposeImageDropMenu({
   onCancel
 }: ComposeImageDropMenuProps) {
   const menuRef = useRef<HTMLDivElement | null>(null);
+  const embedButtonRef = useRef<HTMLButtonElement | null>(null);
   const [position, setPosition] = useState({ top: drop.y, left: drop.x });
+
+  // Move focus into the dialog on open so keyboard/screen-reader users land on
+  // the prompt instead of the content behind the backdrop.
+  useEffect(() => {
+    embedButtonRef.current?.focus();
+  }, []);
 
   // Keep the menu inside the viewport regardless of where the drop landed.
   useLayoutEffect(() => {
@@ -57,7 +64,7 @@ export default function ComposeImageDropMenu({
         <Text size="1" color="gray" className={styles.caption} truncate>
           {label}
         </Text>
-        <Button type="button" size="2" variant="soft" color="gray" onClick={onEmbed}>
+        <Button ref={embedButtonRef} type="button" size="2" variant="soft" color="gray" onClick={onEmbed}>
           <ImageIcon size={14} />
           Embed in message
         </Button>
