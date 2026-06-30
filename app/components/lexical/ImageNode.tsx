@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   DOMConversionMap,
   DOMConversionOutput,
@@ -10,6 +10,7 @@ import type {
   SerializedLexicalNode
 } from "lexical";
 import {
+  $getNodeByKey,
   $getSelection,
   $isNodeSelection,
   CLICK_COMMAND,
@@ -20,6 +21,11 @@ import {
 } from "lexical";
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
 import { useLexicalNodeSelection } from "@lexical/react/useLexicalNodeSelection";
+import {
+  computeResizedImageSize,
+  type ImageResizeCorner,
+  type ImageSize
+} from "./imageResize";
 
 type SerializedImageNode = {
   src: string;
@@ -115,6 +121,12 @@ export class ImageNode extends DecoratorNode<JSX.Element> {
     this.__height = normalizeImageDimension(height);
   }
 
+  setWidthAndHeight(width?: number, height?: number): void {
+    const writable = this.getWritable();
+    writable.__width = normalizeImageDimension(width);
+    writable.__height = normalizeImageDimension(height);
+  }
+
   exportDOM(): DOMExportOutput {
     const element = document.createElement("img");
     element.setAttribute("src", this.__src);
@@ -145,6 +157,15 @@ export class ImageNode extends DecoratorNode<JSX.Element> {
   }
 }
 
+const RESIZE_CORNERS: ImageResizeCorner[] = ["nw", "ne", "sw", "se"];
+
+const CORNER_CURSOR: Record<ImageResizeCorner, string> = {
+  nw: "nwse-resize",
+  se: "nwse-resize",
+  ne: "nesw-resize",
+  sw: "nesw-resize"
+};
+
 function ImageComponent({
   src,
   alt,
@@ -161,6 +182,8 @@ function ImageComponent({
   const [editor] = useLexicalComposerContext();
   const [isSelected, setSelected, clearSelection] = useLexicalNodeSelection(nodeKey);
   const imageRef = useRef<HTMLImageElement | null>(null);
+  // Live size shown while dragging a handle; committed to the node on release.
+  const [dragSize, setDragSize] = useState<ImageSize | null>(null);
 
   const $onDelete = useCallback(
     (event: KeyboardEvent) => {
@@ -197,21 +220,117 @@ function ImageComponent({
     return () => unregisters.forEach((unregister) => unregister());
   }, [editor, isSelected, setSelected, clearSelection, $onDelete]);
 
+  const handleResizeStart = useCallback(
+    (corner: ImageResizeCorner) => (event: React.PointerEvent<HTMLElement>) => {
+      const img = imageRef.current;
+      if (!img) return;
+      // Keep the gesture out of Lexical's selection/drag handling.
+      event.preventDefault();
+      event.stopPropagation();
+
+      const rect = img.getBoundingClientRect();
+      const startWidth = rect.width;
+      const startHeight = rect.height;
+      const startX = event.clientX;
+      const startY = event.clientY;
+      // The editable element bounds the image width.
+      const editable = img.closest<HTMLElement>("[contenteditable='true']");
+      const maxWidth = editable ? editable.clientWidth : undefined;
+
+      const target = event.currentTarget;
+      target.setPointerCapture(event.pointerId);
+
+      let latest: ImageSize = { width: Math.round(startWidth), height: Math.round(startHeight) };
+
+      const onMove = (moveEvent: PointerEvent) => {
+        latest = computeResizedImageSize({
+          corner,
+          startWidth,
+          startHeight,
+          deltaX: moveEvent.clientX - startX,
+          deltaY: moveEvent.clientY - startY,
+          maxWidth
+        });
+        setDragSize(latest);
+      };
+
+      const onUp = () => {
+        target.removeEventListener("pointermove", onMove);
+        target.removeEventListener("pointerup", onUp);
+        target.removeEventListener("pointercancel", onUp);
+        setDragSize(null);
+        editor.update(() => {
+          const node = $getNodeByKey(nodeKey);
+          if ($isImageNode(node)) node.setWidthAndHeight(latest.width, latest.height);
+        });
+      };
+
+      target.addEventListener("pointermove", onMove);
+      target.addEventListener("pointerup", onUp);
+      target.addEventListener("pointercancel", onUp);
+    },
+    [editor, nodeKey]
+  );
+
+  const handleReset = useCallback(() => {
+    editor.update(() => {
+      const node = $getNodeByKey(nodeKey);
+      if ($isImageNode(node)) node.setWidthAndHeight(undefined, undefined);
+    });
+  }, [editor, nodeKey]);
+
+  const renderWidth = dragSize?.width ?? width;
+  const renderHeight = dragSize?.height ?? height;
+
   return (
-    <img
-      ref={imageRef}
-      src={src}
-      alt={alt}
-      width={width}
-      height={height}
-      draggable={false}
+    <span
       style={{
-        maxWidth: "100%",
-        height: "auto",
-        outline: isSelected ? "2px solid var(--accent, #4f86f7)" : "none",
-        outlineOffset: "1px"
+        position: "relative",
+        display: "inline-block",
+        lineHeight: 0,
+        maxWidth: "100%"
       }}
-    />
+    >
+      <img
+        ref={imageRef}
+        src={src}
+        alt={alt}
+        width={renderWidth}
+        height={renderHeight}
+        draggable={false}
+        onDoubleClick={handleReset}
+        title={isSelected ? "Drag a corner to resize · double-click to reset" : undefined}
+        style={{
+          display: "block",
+          maxWidth: "100%",
+          height: "auto",
+          outline: isSelected ? "2px solid var(--accent, #4f86f7)" : "none",
+          outlineOffset: "1px"
+        }}
+      />
+      {isSelected &&
+        RESIZE_CORNERS.map((corner) => (
+          <span
+            key={corner}
+            onPointerDown={handleResizeStart(corner)}
+            aria-hidden
+            style={{
+              position: "absolute",
+              width: 10,
+              height: 10,
+              background: "var(--accent, #4f86f7)",
+              border: "1px solid var(--gray-1, #fff)",
+              borderRadius: 2,
+              cursor: CORNER_CURSOR[corner],
+              top: corner[0] === "n" ? -5 : undefined,
+              bottom: corner[0] === "s" ? -5 : undefined,
+              left: corner[1] === "w" ? -5 : undefined,
+              right: corner[1] === "e" ? -5 : undefined,
+              touchAction: "none"
+            }}
+          />
+        ))}
+    </span>
   );
 }
 
