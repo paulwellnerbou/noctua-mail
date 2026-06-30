@@ -354,7 +354,6 @@ function ComposeOrchestratorImpl(
     composeTextRef,
     composeSelectionRef,
     composeDragDepthRef,
-    composeAttachmentInputRef,
     composeCardRef,
     sendingMail,
     setSendingMail,
@@ -977,7 +976,6 @@ function ComposeOrchestratorImpl(
       selectedSignature={selectedSignature}
       accountSignatures={accountSignatures}
       composeTextRef={composeTextRef}
-      composeAttachmentInputRef={composeAttachmentInputRef}
       composeBodyDebounceRef={composeBodyDebounceRef}
       composeBodyLastUpdateRef={composeBodyLastUpdateRef}
       composeMarkdownRef={composeMarkdownRef}

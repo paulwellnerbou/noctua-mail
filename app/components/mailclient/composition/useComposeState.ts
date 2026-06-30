@@ -73,7 +73,6 @@ export function useComposeState() {
   const composeTextRef = useRef<HTMLTextAreaElement | null>(null);
   const composeSelectionRef = useRef<ComposeSelectionState | null>(null);
   const composeDragDepthRef = useRef(0);
-  const composeAttachmentInputRef = useRef<HTMLInputElement | null>(null);
   const composeCardRef = useRef<HTMLDivElement | null>(null);
   const [sendingMail, setSendingMail] = useState(false);
   const [draftSaving, setDraftSaving] = useState(false);
@@ -177,7 +176,6 @@ export function useComposeState() {
     composeTextRef,
     composeSelectionRef,
     composeDragDepthRef,
-    composeAttachmentInputRef,
     composeCardRef,
     sendingMail,
     setSendingMail,
