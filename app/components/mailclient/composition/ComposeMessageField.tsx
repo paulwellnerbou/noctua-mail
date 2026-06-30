@@ -105,6 +105,7 @@ type ComposeMessageFieldProps = {
   pendingImageDrop: PendingImageDrop | null;
   setPendingImageDrop: (drop: PendingImageDrop | null) => void;
   addComposeFiles: (files: File[], inline?: boolean) => Promise<void>;
+  addDroppedFiles: (files: File[], x: number, y: number) => void;
 };
 
 export default function ComposeMessageField({
@@ -163,7 +164,8 @@ export default function ComposeMessageField({
   removeComposeAttachment,
   pendingImageDrop,
   setPendingImageDrop,
-  addComposeFiles
+  addComposeFiles,
+  addDroppedFiles
 }: ComposeMessageFieldProps) {
   const hasQuotedHtml = composeQuotedHtml.trim().length > 0;
   const hasQuotedParts = Boolean(composeQuotedParts);
@@ -530,7 +532,7 @@ export default function ComposeMessageField({
               onStripImages: handleStripImages
             }}
             onInlineImage={handleInlineImage}
-            onImageDrop={(files, x, y) => setPendingImageDrop({ files, x, y })}
+            onFilesDrop={addDroppedFiles}
             onChange={(nextHtml, nextText) => {
               setComposeHtml(nextHtml);
               setComposeHtmlText(nextText);

@@ -49,7 +49,9 @@ export default function ComposeImageDropMenu({
         ref={menuRef}
         className={styles.menu}
         style={{ top: position.top, left: position.left }}
-        role="menu"
+        role="dialog"
+        aria-modal="true"
+        aria-label={`Add ${label}: embed in the message or attach as a file`}
         onClick={(event) => event.stopPropagation()}
       >
         <Text size="1" color="gray" className={styles.caption} truncate>

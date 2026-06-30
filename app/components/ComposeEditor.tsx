@@ -128,7 +128,7 @@ type ComposeEditorProps = {
   quotedMessage?: QuotedMessageConfig;
   onChange: (html: string, text: string) => void;
   onInlineImage?: (file: File, dataUrl: string) => void;
-  onImageDrop?: (files: File[], x: number, y: number) => void;
+  onFilesDrop?: (files: File[], x: number, y: number) => void;
 };
 
 const theme = {
@@ -589,10 +589,10 @@ function insertImageFilesIntoEditor(
 
 function ComposeEditable({
   onInlineImage,
-  onImageDrop
+  onFilesDrop
 }: {
   onInlineImage?: (file: File, dataUrl: string) => void;
-  onImageDrop?: (files: File[], x: number, y: number) => void;
+  onFilesDrop?: (files: File[], x: number, y: number) => void;
 }) {
   const [editor] = useLexicalComposerContext();
 
@@ -617,15 +617,15 @@ function ComposeEditable({
       }}
       onDrop={(event) => {
         const files = Array.from(event.dataTransfer?.files ?? []);
-        const imageFiles = files.filter((file) => file.type.startsWith("image/"));
-        if (imageFiles.length === 0) return;
+        if (files.length === 0) return;
         event.preventDefault();
         event.stopPropagation();
-        // Defer to the embed-vs-attach popover when wired; otherwise embed directly.
-        if (onImageDrop) {
-          onImageDrop(imageFiles, event.clientX, event.clientY);
+        // Hand the whole drop to the embed-vs-attach router when wired so a mixed
+        // drop attaches non-images too; otherwise embed any images directly.
+        if (onFilesDrop) {
+          onFilesDrop(files, event.clientX, event.clientY);
         } else {
-          handleImageFiles(imageFiles);
+          handleImageFiles(files.filter((file) => file.type.startsWith("image/")));
         }
       }}
     />
@@ -859,7 +859,7 @@ const ComposeEditor = forwardRef<ComposeEditorHandle, ComposeEditorProps>(functi
   quotedMessage,
   onChange,
   onInlineImage,
-  onImageDrop
+  onFilesDrop
 }, ref) {
   const toolbarRef = useRef<HTMLDivElement | null>(null);
   const [toolbarHeight, setToolbarHeight] = useState(0);
@@ -947,7 +947,7 @@ const ComposeEditor = forwardRef<ComposeEditorHandle, ComposeEditorProps>(functi
         <SourceSyncPlugin html={sourceHtml} showSource={showSource} />
         {quotedMessage && <QuotedMessagePlugin config={quotedMessage} />}
         <RichTextPlugin
-          contentEditable={<ComposeEditable onInlineImage={onInlineImage} onImageDrop={onImageDrop} />}
+          contentEditable={<ComposeEditable onInlineImage={onInlineImage} onFilesDrop={onFilesDrop} />}
           placeholder={<div className={styles.composeEditorPlaceholder}>Write your message…</div>}
           ErrorBoundary={LexicalErrorBoundary}
         />

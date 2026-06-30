@@ -426,6 +426,7 @@ function ComposeOrchestratorImpl(
 
   const {
     addComposeFiles,
+    addDroppedFiles,
     removeComposeAttachment,
     handleInlineImage,
     handleComposeDragEnter,
@@ -1048,6 +1049,7 @@ function ComposeOrchestratorImpl(
       pendingImageDrop={pendingImageDrop}
       setPendingImageDrop={setPendingImageDrop}
       addComposeFiles={addComposeFiles}
+      addDroppedFiles={addDroppedFiles}
     />
   );
 

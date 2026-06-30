@@ -147,20 +147,28 @@ export function useComposeHandlers({
     event.dataTransfer.dropEffect = "copy";
   };
 
-  const handleComposeDrop = async (event: React.DragEvent) => {
+  // Non-images can't be embedded inline, so attach them without prompting;
+  // images defer to a popover where the user picks embed vs. attach. Shared by
+  // the compose-surface drop and the editor drop so a mixed drop behaves the
+  // same in both places.
+  const addDroppedFiles = (files: File[], x: number, y: number) => {
+    if (files.length === 0) return;
+    const images = files.filter((file) => file.type.startsWith("image/"));
+    const others = files.filter((file) => !file.type.startsWith("image/"));
+    if (others.length > 0) void addComposeFiles(others, false);
+    if (images.length > 0) setPendingImageDrop({ files: images, x, y });
+  };
+
+  const handleComposeDrop = (event: React.DragEvent) => {
     event.preventDefault();
     event.stopPropagation();
     composeDragDepthRef.current = 0;
     setComposeDragActive(false);
-    const files = Array.from(event.dataTransfer?.files ?? []);
-    if (files.length === 0) return;
-    // Non-images can't be embedded inline, so attach them without prompting;
-    // images defer to a popover where the user picks embed vs. attach.
-    const images = files.filter((file) => file.type.startsWith("image/"));
-    const others = files.filter((file) => !file.type.startsWith("image/"));
-    if (others.length > 0) await addComposeFiles(others, false);
-    if (images.length === 0) return;
-    setPendingImageDrop({ files: images, x: event.clientX, y: event.clientY });
+    addDroppedFiles(
+      Array.from(event.dataTransfer?.files ?? []),
+      event.clientX,
+      event.clientY
+    );
   };
 
   const handleComposeAttachmentPick = async (
@@ -182,6 +190,7 @@ export function useComposeHandlers({
 
   return {
     addComposeFiles,
+    addDroppedFiles,
     removeComposeAttachment,
     handleInlineImage,
     handleComposeDragEnter,
