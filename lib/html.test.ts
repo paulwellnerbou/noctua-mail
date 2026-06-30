@@ -461,7 +461,7 @@ describe("shouldShowHtmlViewerFrame", () => {
   it("keeps the viewer frame when the body only declares a plain white background", () => {
     const html = [
       '<html><body bgcolor="#ffffff">',
-      "<div>Hallo Paul,<br><br>das ist korrekt.</div>",
+      "<div>Hallo Alex,<br><br>das ist korrekt.</div>",
       "</body></html>"
     ].join("");
 
@@ -471,7 +471,7 @@ describe("shouldShowHtmlViewerFrame", () => {
   it("keeps the viewer frame for a plain white background declared via style", () => {
     const html = [
       '<html><body style="background-color: #FFFFFF;">',
-      "<div>Hallo Paul,</div>",
+      "<div>Hallo Alex,</div>",
       "</body></html>"
     ].join("");
 
@@ -486,6 +486,13 @@ describe("shouldShowHtmlViewerFrame", () => {
 
   it("drops the viewer frame when the body declares a non-white background", () => {
     const html = '<html><body bgcolor="#f5f5f5"><div>Hello</div></body></html>';
+
+    expect(shouldShowHtmlViewerFrame(html)).toBe(false);
+  });
+
+  it("uses the last background declaration when several cascade in the body style", () => {
+    const html =
+      '<html><body style="background-color:#fff;background-color:#222"><div>Hello</div></body></html>';
 
     expect(shouldShowHtmlViewerFrame(html)).toBe(false);
   });

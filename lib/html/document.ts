@@ -26,12 +26,17 @@ export function shouldShowHtmlViewerFrame(input: string) {
   const headSample = trimmed
     .slice(0, 8192)
     .replace(/<style[\s\S]*?<\/style>/gi, " ")
+    .replace(/<script[\s\S]*?<\/script>/gi, " ")
     .replace(/\s+/g, " ");
 
-  const bodyTag = /<body[^>]*>/i.exec(headSample)?.[0] ?? "";
+  const bodyTag = /<body\b[^>]*>/i.exec(headSample)?.[0] ?? "";
   const bgColorAttr = /\sbgcolor\s*=\s*["']?([^"'\s>]+)/i.exec(bodyTag)?.[1];
   const bodyStyle = /style\s*=\s*["']([^"']*)["']/i.exec(bodyTag)?.[1] ?? "";
-  const bgStyle = /background(?:-color)?\s*:\s*([^;"']+)/i.exec(bodyStyle)?.[1];
+  // The cascade lets a later declaration override an earlier one, so the last
+  // background value is the effective one.
+  const bgStyle = [
+    ...bodyStyle.matchAll(/background(?:-color)?\s*:\s*([^;"']+)/gi)
+  ].at(-1)?.[1];
   if (isMeaningfulBackground(bgColorAttr) || isMeaningfulBackground(bgStyle)) {
     return false;
   }
