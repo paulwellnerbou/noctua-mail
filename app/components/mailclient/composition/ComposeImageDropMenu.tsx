@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { Button, Text } from "@radix-ui/themes";
 import { ImageIcon, Paperclip } from "lucide-react";
 import type { PendingImageDrop } from "./composeTypes";
@@ -70,7 +71,14 @@ export default function ComposeImageDropMenu({
   const count = drop.files.length;
   const label = count === 1 ? drop.files[0]?.name || "image" : `${count} images`;
 
-  return (
+  if (typeof document === "undefined") return null;
+  // Portal out of the compose modal so the fixed-positioned popover escapes its
+  // `overflow: hidden`/transformed ancestors (which otherwise mispositioned it
+  // and clipped the second action off-screen). Target the Radix Themes root
+  // rather than <body> so the theme's CSS variables still resolve.
+  const portalTarget = document.querySelector<HTMLElement>(".radix-themes") ?? document.body;
+
+  return createPortal(
     <div className={styles.backdrop} onClick={onCancel}>
       <div
         ref={menuRef}
@@ -93,6 +101,7 @@ export default function ComposeImageDropMenu({
           Attach as file
         </Button>
       </div>
-    </div>
+    </div>,
+    portalTarget
   );
 }
