@@ -41,6 +41,18 @@ describe("computeResizedImageSize", () => {
     expect(size).toEqual({ width: 250, height: 125 });
   });
 
+  it("never overflows a container narrower than the minimum size", () => {
+    const size = computeResizedImageSize({
+      corner: "se",
+      deltaX: -1000,
+      deltaY: 0,
+      maxWidth: 16,
+      ...base
+    });
+    expect(size.width).toBe(16);
+    expect(size.height).toBe(8);
+  });
+
   it("degrades gracefully when the start size is unknown", () => {
     const size = computeResizedImageSize({ corner: "se", deltaX: 50, deltaY: 50, startWidth: 0, startHeight: 0 });
     expect(size.width).toBeGreaterThanOrEqual(24);

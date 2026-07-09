@@ -59,10 +59,14 @@ export function computeResizedImageSize({
       ? widthFromX
       : widthFromY;
 
-  let clampedWidth = Math.max(minSize, Math.round(width));
-  if (maxWidth && maxWidth >= minSize) {
-    clampedWidth = Math.min(clampedWidth, Math.round(maxWidth));
-  }
+  const hasMax = typeof maxWidth === "number" && maxWidth > 0;
+  // A container narrower than minSize must still win, so the effective floor
+  // is capped at the available width — otherwise the image would overflow.
+  const effectiveMin = hasMax ? Math.min(minSize, Math.round(maxWidth)) : minSize;
+
+  let clampedWidth = Math.round(width);
+  if (hasMax) clampedWidth = Math.min(clampedWidth, Math.round(maxWidth));
+  clampedWidth = Math.max(effectiveMin, clampedWidth);
   const height = Math.max(1, Math.round(clampedWidth / aspect));
   return { width: clampedWidth, height };
 }

@@ -166,6 +166,16 @@ const CORNER_CURSOR: Record<ImageResizeCorner, string> = {
   sw: "nesw-resize"
 };
 
+const CORNER_LABEL: Record<ImageResizeCorner, string> = {
+  nw: "top-left",
+  ne: "top-right",
+  sw: "bottom-left",
+  se: "bottom-right"
+};
+
+const KEYBOARD_STEP = 10;
+const KEYBOARD_STEP_LARGE = 50;
+
 function ImageComponent({
   src,
   alt,
@@ -241,8 +251,10 @@ function ImageComponent({
       target.setPointerCapture(event.pointerId);
 
       let latest: ImageSize = { width: Math.round(startWidth), height: Math.round(startHeight) };
+      let moved = false;
 
       const onMove = (moveEvent: PointerEvent) => {
+        moved = true;
         latest = computeResizedImageSize({
           corner,
           startWidth,
@@ -259,6 +271,8 @@ function ImageComponent({
         target.removeEventListener("pointerup", onUp);
         target.removeEventListener("pointercancel", onUp);
         setDragSize(null);
+        // A click without a drag must not pin an auto-sized image to a fixed size.
+        if (!moved) return;
         editor.update(() => {
           const node = $getNodeByKey(nodeKey);
           if ($isImageNode(node)) node.setWidthAndHeight(latest.width, latest.height);
@@ -278,6 +292,35 @@ function ImageComponent({
       if ($isImageNode(node)) node.setWidthAndHeight(undefined, undefined);
     });
   }, [editor, nodeKey]);
+
+  // Keyboard resize for a focused handle: arrows grow/shrink, shift = larger step.
+  const handleResizeKeyDown = useCallback(
+    (event: React.KeyboardEvent<HTMLElement>) => {
+      let direction = 0;
+      if (event.key === "ArrowRight" || event.key === "ArrowDown") direction = 1;
+      else if (event.key === "ArrowLeft" || event.key === "ArrowUp") direction = -1;
+      else return;
+      const img = imageRef.current;
+      if (!img) return;
+      event.preventDefault();
+      const rect = img.getBoundingClientRect();
+      const step = (event.shiftKey ? KEYBOARD_STEP_LARGE : KEYBOARD_STEP) * direction;
+      const editable = img.closest<HTMLElement>("[contenteditable='true']");
+      const size = computeResizedImageSize({
+        corner: "se",
+        startWidth: rect.width,
+        startHeight: rect.height,
+        deltaX: step,
+        deltaY: 0,
+        maxWidth: editable ? editable.clientWidth : undefined
+      });
+      editor.update(() => {
+        const node = $getNodeByKey(nodeKey);
+        if ($isImageNode(node)) node.setWidthAndHeight(size.width, size.height);
+      });
+    },
+    [editor, nodeKey]
+  );
 
   const renderWidth = dragSize?.width ?? width;
   const renderHeight = dragSize?.height ?? height;
@@ -312,8 +355,11 @@ function ImageComponent({
         RESIZE_CORNERS.map((corner) => (
           <span
             key={corner}
+            role="button"
+            tabIndex={0}
+            aria-label={`Resize image from ${CORNER_LABEL[corner]} corner (arrow keys resize, shift for larger steps)`}
             onPointerDown={handleResizeStart(corner)}
-            aria-hidden
+            onKeyDown={handleResizeKeyDown}
             style={{
               position: "absolute",
               width: 10,
