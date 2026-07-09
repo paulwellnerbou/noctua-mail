@@ -356,6 +356,9 @@ function ImageComponent({
         deltaY: 0,
         maxWidth: editable ? editable.clientWidth : undefined
       });
+      // No-op keypress (e.g. ArrowRight while already at maxWidth) must not
+      // pin an auto-sized image to fixed dimensions.
+      if (size.width === Math.round(rect.width) && size.height === Math.round(rect.height)) return;
       editor.update(() => {
         const node = $getNodeByKey(nodeKey);
         if ($isImageNode(node)) node.setWidthAndHeight(size.width, size.height);
@@ -369,6 +372,7 @@ function ImageComponent({
 
   return (
     <span
+      contentEditable={false}
       style={{
         position: "relative",
         display: "inline-block",
