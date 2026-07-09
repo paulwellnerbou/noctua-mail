@@ -187,6 +187,17 @@ function ImageComponent({
   const imageRef = useRef<HTMLImageElement | null>(null);
   // Live size shown while dragging a handle; committed to the node on release.
   const [dragSize, setDragSize] = useState<ImageSize | null>(null);
+  // Teardown for the in-flight resize gesture, run on unmount so a gesture
+  // interrupted by the image/editor disappearing can't leak listeners, leave
+  // pointer capture held, or call setDragSize on an unmounted component.
+  const activeGestureCleanupRef = useRef<(() => void) | null>(null);
+
+  useEffect(() => {
+    return () => {
+      activeGestureCleanupRef.current?.();
+      activeGestureCleanupRef.current = null;
+    };
+  }, []);
 
   const $onDelete = useCallback(
     (event: KeyboardEvent) => {
@@ -230,6 +241,8 @@ function ImageComponent({
       // Primary button / primary pointer only — avoids right-click and
       // secondary-pointer (multi-touch, pen + mouse) drags.
       if (event.button !== 0 || !event.isPrimary) return;
+      // Drop this gesture if one is already mid-flight rather than racing.
+      if (activeGestureCleanupRef.current) return;
       // Keep the gesture out of Lexical's selection/drag handling.
       event.preventDefault();
       event.stopPropagation();
@@ -276,7 +289,11 @@ function ImageComponent({
         scheduleUpdate();
       };
 
-      const onUp = () => {
+      // Idempotent: safe to run from pointerup/cancel or the unmount effect.
+      let torn = false;
+      const teardown = () => {
+        if (torn) return;
+        torn = true;
         target.removeEventListener("pointermove", onMove);
         target.removeEventListener("pointerup", onUp);
         target.removeEventListener("pointercancel", onUp);
@@ -287,8 +304,16 @@ function ImageComponent({
         }
         if (rafId) cancelAnimationFrame(rafId);
         setDragSize(null);
+        if (activeGestureCleanupRef.current === teardown) {
+          activeGestureCleanupRef.current = null;
+        }
+      };
+
+      const onUp = () => {
+        const didMove = moved;
+        teardown();
         // A click without a drag must not pin an auto-sized image to a fixed size.
-        if (!moved) return;
+        if (!didMove) return;
         editor.update(() => {
           const node = $getNodeByKey(nodeKey);
           if ($isImageNode(node)) node.setWidthAndHeight(latest.width, latest.height);
@@ -298,6 +323,7 @@ function ImageComponent({
       target.addEventListener("pointermove", onMove);
       target.addEventListener("pointerup", onUp);
       target.addEventListener("pointercancel", onUp);
+      activeGestureCleanupRef.current = teardown;
     },
     [editor, nodeKey]
   );
