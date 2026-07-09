@@ -102,6 +102,7 @@ import {
 } from "./lexical/ExtendedTableNodes";
 import { CenterNode } from "./lexical/CenterNode";
 import { composeAutoLinkMatchers } from "./composeEditorAutoLink";
+import { isEmbeddableImage } from "@/lib/mail/embeddableImage";
 
 export type ComposeEditorHandle = {
   appendHtmlBlock: (html: string) => void;
@@ -605,9 +606,12 @@ function ComposeEditable({
     <ContentEditable
       className={styles.composeEditorInput}
       onPaste={(event) => {
+        // Paste only inlines embeddable images; anything else (non-embeddable
+        // images, other files) falls through to the browser's default paste.
+        // Attaching non-embeddable files is the drop path's job, not paste's.
         const items = Array.from(event.clipboardData?.items ?? []);
         const imageItems = items.filter(
-          (item) => item.kind === "file" && item.type.startsWith("image/")
+          (item) => item.kind === "file" && isEmbeddableImage(item.type)
         );
         if (imageItems.length === 0) return;
         event.preventDefault();
@@ -625,7 +629,7 @@ function ComposeEditable({
         if (onFilesDrop) {
           onFilesDrop(files, event.clientX, event.clientY);
         } else {
-          handleImageFiles(files.filter((file) => file.type.startsWith("image/")));
+          handleImageFiles(files.filter((file) => isEmbeddableImage(file.type)));
         }
       }}
     />
