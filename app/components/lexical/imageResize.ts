@@ -37,10 +37,11 @@ function cornerDirections(corner: ImageResizeCorner): { x: number; y: number } {
 
 /** Clamp width to [minSize, maxWidth]; a container narrower than minSize wins. */
 function clampWidth(rawWidth: number, minSize: number, maxWidth?: number): number {
-  const hasMax = typeof maxWidth === "number" && maxWidth > 0;
-  const effectiveMin = hasMax ? Math.min(minSize, Math.round(maxWidth)) : minSize;
+  // Floor the cap so a fractional maxWidth is never rounded up past the bound.
+  const cap = typeof maxWidth === "number" && maxWidth > 0 ? Math.floor(maxWidth) : undefined;
+  const effectiveMin = cap !== undefined ? Math.min(minSize, cap) : minSize;
   let width = Math.round(rawWidth);
-  if (hasMax) width = Math.min(width, Math.round(maxWidth));
+  if (cap !== undefined) width = Math.min(width, cap);
   return Math.max(effectiveMin, width);
 }
 

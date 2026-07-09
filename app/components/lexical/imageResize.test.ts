@@ -59,6 +59,17 @@ describe("computeResizedImageSize", () => {
     expect(size.height).toBeGreaterThanOrEqual(1);
   });
 
+  it("never rounds a fractional maxWidth up past the bound", () => {
+    const size = computeResizedImageSize({
+      corner: "se",
+      deltaX: 1000,
+      deltaY: 0,
+      maxWidth: 10.6,
+      ...base
+    });
+    expect(size.width).toBe(10);
+  });
+
   it("still respects maxWidth when the start size is unknown", () => {
     const size = computeResizedImageSize({
       corner: "se",
