@@ -606,6 +606,9 @@ function ComposeEditable({
     <ContentEditable
       className={styles.composeEditorInput}
       onPaste={(event) => {
+        // Paste only inlines embeddable images; anything else (non-embeddable
+        // images, other files) falls through to the browser's default paste.
+        // Attaching non-embeddable files is the drop path's job, not paste's.
         const items = Array.from(event.clipboardData?.items ?? []);
         const imageItems = items.filter(
           (item) => item.kind === "file" && isEmbeddableImage(item.type)
