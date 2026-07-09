@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type {
   DOMConversionMap,
   DOMConversionOutput,
@@ -10,6 +10,7 @@ import type {
   SerializedLexicalNode
 } from "lexical";
 import {
+  $getNodeByKey,
   $getSelection,
   $isNodeSelection,
   CLICK_COMMAND,
@@ -20,6 +21,11 @@ import {
 } from "lexical";
 import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext";
 import { useLexicalNodeSelection } from "@lexical/react/useLexicalNodeSelection";
+import {
+  computeResizedImageSize,
+  type ImageResizeCorner,
+  type ImageSize
+} from "./imageResize";
 
 type SerializedImageNode = {
   src: string;
@@ -115,6 +121,12 @@ export class ImageNode extends DecoratorNode<JSX.Element> {
     this.__height = normalizeImageDimension(height);
   }
 
+  setWidthAndHeight(width?: number, height?: number): void {
+    const writable = this.getWritable();
+    writable.__width = normalizeImageDimension(width);
+    writable.__height = normalizeImageDimension(height);
+  }
+
   exportDOM(): DOMExportOutput {
     const element = document.createElement("img");
     element.setAttribute("src", this.__src);
@@ -145,6 +157,18 @@ export class ImageNode extends DecoratorNode<JSX.Element> {
   }
 }
 
+const RESIZE_CORNERS: ImageResizeCorner[] = ["nw", "ne", "sw", "se"];
+
+const CORNER_CURSOR: Record<ImageResizeCorner, string> = {
+  nw: "nwse-resize",
+  se: "nwse-resize",
+  ne: "nesw-resize",
+  sw: "nesw-resize"
+};
+
+const KEYBOARD_STEP = 10;
+const KEYBOARD_STEP_LARGE = 50;
+
 function ImageComponent({
   src,
   alt,
@@ -161,6 +185,19 @@ function ImageComponent({
   const [editor] = useLexicalComposerContext();
   const [isSelected, setSelected, clearSelection] = useLexicalNodeSelection(nodeKey);
   const imageRef = useRef<HTMLImageElement | null>(null);
+  // Live size shown while dragging a handle; committed to the node on release.
+  const [dragSize, setDragSize] = useState<ImageSize | null>(null);
+  // Teardown for the in-flight resize gesture, run on unmount so a gesture
+  // interrupted by the image/editor disappearing can't leak listeners, leave
+  // pointer capture held, or call setDragSize on an unmounted component.
+  const activeGestureCleanupRef = useRef<(() => void) | null>(null);
+
+  useEffect(() => {
+    return () => {
+      activeGestureCleanupRef.current?.();
+      activeGestureCleanupRef.current = null;
+    };
+  }, []);
 
   const $onDelete = useCallback(
     (event: KeyboardEvent) => {
@@ -197,21 +234,214 @@ function ImageComponent({
     return () => unregisters.forEach((unregister) => unregister());
   }, [editor, isSelected, setSelected, clearSelection, $onDelete]);
 
+  const handleResizeStart = useCallback(
+    (corner: ImageResizeCorner) => (event: React.PointerEvent<HTMLElement>) => {
+      const img = imageRef.current;
+      if (!img) return;
+      // Primary button / primary pointer only — avoids right-click and
+      // secondary-pointer (multi-touch, pen + mouse) drags.
+      if (event.button !== 0 || !event.isPrimary) return;
+      // Drop this gesture if one is already mid-flight rather than racing.
+      if (activeGestureCleanupRef.current) return;
+      // Keep the gesture out of Lexical's selection/drag handling.
+      event.preventDefault();
+      event.stopPropagation();
+
+      const rect = img.getBoundingClientRect();
+      const startWidth = rect.width;
+      const startHeight = rect.height;
+      // Not laid out yet: a 0×0 rect would commit a bogus min-size on release.
+      if (startWidth <= 0 || startHeight <= 0) return;
+      const startX = event.clientX;
+      const startY = event.clientY;
+      // The editable element bounds the image width.
+      const editable = img.closest<HTMLElement>("[contenteditable='true']");
+      const maxWidth = editable ? editable.clientWidth : undefined;
+
+      const target = event.currentTarget;
+      const pointerId = event.pointerId;
+      try {
+        target.setPointerCapture(pointerId);
+      } catch {
+        // setPointerCapture can throw if the target is detached; harmless.
+      }
+
+      const startSize: ImageSize = { width: Math.round(startWidth), height: Math.round(startHeight) };
+      let latest: ImageSize = startSize;
+      // Coalesce pointermove into at most one state update per frame.
+      let rafId = 0;
+      const scheduleUpdate = () => {
+        if (rafId) return;
+        rafId = requestAnimationFrame(() => {
+          rafId = 0;
+          setDragSize(latest);
+        });
+      };
+
+      const onMove = (moveEvent: PointerEvent) => {
+        latest = computeResizedImageSize({
+          corner,
+          startWidth,
+          startHeight,
+          deltaX: moveEvent.clientX - startX,
+          deltaY: moveEvent.clientY - startY,
+          maxWidth
+        });
+        scheduleUpdate();
+      };
+
+      // Idempotent: safe to run from pointerup/cancel or the unmount effect.
+      let torn = false;
+      const teardown = () => {
+        if (torn) return;
+        torn = true;
+        target.removeEventListener("pointermove", onMove);
+        target.removeEventListener("pointerup", onUp);
+        target.removeEventListener("pointercancel", onUp);
+        try {
+          target.releasePointerCapture(pointerId);
+        } catch {
+          // Already released; ignore.
+        }
+        if (rafId) cancelAnimationFrame(rafId);
+        setDragSize(null);
+        if (activeGestureCleanupRef.current === teardown) {
+          activeGestureCleanupRef.current = null;
+        }
+      };
+
+      const onUp = () => {
+        // Commit only on an effective resize; a click or a sub-pixel drag that
+        // rounds/clamps back to the start size must not pin an auto-sized image.
+        const resized = latest.width !== startSize.width || latest.height !== startSize.height;
+        teardown();
+        if (!resized) return;
+        editor.update(() => {
+          const node = $getNodeByKey(nodeKey);
+          if ($isImageNode(node)) node.setWidthAndHeight(latest.width, latest.height);
+        });
+      };
+
+      target.addEventListener("pointermove", onMove);
+      target.addEventListener("pointerup", onUp);
+      target.addEventListener("pointercancel", onUp);
+      activeGestureCleanupRef.current = teardown;
+    },
+    [editor, nodeKey]
+  );
+
+  const handleReset = useCallback(() => {
+    editor.update(() => {
+      const node = $getNodeByKey(nodeKey);
+      if ($isImageNode(node)) node.setWidthAndHeight(undefined, undefined);
+    });
+  }, [editor, nodeKey]);
+
+  // Keyboard resize for a focused handle: arrows grow/shrink, shift = larger step.
+  const handleResizeKeyDown = useCallback(
+    (event: React.KeyboardEvent<HTMLElement>) => {
+      let direction = 0;
+      if (event.key === "ArrowRight" || event.key === "ArrowDown") direction = 1;
+      else if (event.key === "ArrowLeft" || event.key === "ArrowUp") direction = -1;
+      else return;
+      const img = imageRef.current;
+      if (!img) return;
+      const rect = img.getBoundingClientRect();
+      // Not laid out yet: resizing off a 0×0 rect would commit a bogus size.
+      if (rect.width <= 0 || rect.height <= 0) return;
+      event.preventDefault();
+      const step = (event.shiftKey ? KEYBOARD_STEP_LARGE : KEYBOARD_STEP) * direction;
+      const editable = img.closest<HTMLElement>("[contenteditable='true']");
+      const size = computeResizedImageSize({
+        corner: "se",
+        startWidth: rect.width,
+        startHeight: rect.height,
+        deltaX: step,
+        deltaY: 0,
+        maxWidth: editable ? editable.clientWidth : undefined
+      });
+      // No-op keypress (e.g. ArrowRight while already at maxWidth) must not
+      // pin an auto-sized image to fixed dimensions.
+      if (size.width === Math.round(rect.width) && size.height === Math.round(rect.height)) return;
+      editor.update(() => {
+        const node = $getNodeByKey(nodeKey);
+        if ($isImageNode(node)) node.setWidthAndHeight(size.width, size.height);
+      });
+    },
+    [editor, nodeKey]
+  );
+
+  const renderWidth = dragSize?.width ?? width;
+  const renderHeight = dragSize?.height ?? height;
+
   return (
-    <img
-      ref={imageRef}
-      src={src}
-      alt={alt}
-      width={width}
-      height={height}
-      draggable={false}
+    <span
+      contentEditable={false}
       style={{
-        maxWidth: "100%",
-        height: "auto",
-        outline: isSelected ? "2px solid var(--accent, #4f86f7)" : "none",
-        outlineOffset: "1px"
+        position: "relative",
+        display: "inline-block",
+        lineHeight: 0,
+        maxWidth: "100%"
       }}
-    />
+    >
+      <img
+        ref={imageRef}
+        src={src}
+        alt={alt}
+        width={renderWidth}
+        height={renderHeight}
+        draggable={false}
+        onDoubleClick={handleReset}
+        title={isSelected ? "Drag a corner to resize · double-click to reset" : undefined}
+        style={{
+          display: "block",
+          maxWidth: "100%",
+          height: "auto",
+          outline: isSelected ? "2px solid var(--accent, #4f86f7)" : "none",
+          outlineOffset: "1px"
+        }}
+      />
+      {isSelected &&
+        RESIZE_CORNERS.map((corner) => {
+          const style: React.CSSProperties = {
+            position: "absolute",
+            width: 10,
+            height: 10,
+            padding: 0,
+            background: "var(--accent, #4f86f7)",
+            border: "1px solid var(--gray-1, #fff)",
+            borderRadius: 2,
+            cursor: CORNER_CURSOR[corner],
+            top: corner[0] === "n" ? -5 : undefined,
+            bottom: corner[0] === "s" ? -5 : undefined,
+            left: corner[1] === "w" ? -5 : undefined,
+            right: corner[1] === "e" ? -5 : undefined,
+            touchAction: "none"
+          };
+          // The SE corner is the keyboard-accessible control: a real <button>
+          // announced by AT, focusable, with arrow-key resize. The other
+          // corners duplicate that via pointer only, so they stay out of the
+          // a11y tree rather than cluttering it with redundant handles.
+          return corner === "se" ? (
+            <button
+              key={corner}
+              type="button"
+              aria-label="Resize image (use arrow keys; hold shift for larger steps)"
+              title="Resize"
+              onPointerDown={handleResizeStart(corner)}
+              onKeyDown={handleResizeKeyDown}
+              style={style}
+            />
+          ) : (
+            <span
+              key={corner}
+              aria-hidden="true"
+              onPointerDown={handleResizeStart(corner)}
+              style={style}
+            />
+          );
+        })}
+    </span>
   );
 }
 
