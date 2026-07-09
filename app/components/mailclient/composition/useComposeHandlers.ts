@@ -3,6 +3,7 @@ import { buildAccountAttachmentPath } from "@/lib/accountApiPaths";
 import type { Message, Attachment } from "@/lib/data";
 import { replaceInlineImageSources } from "@/lib/html";
 import { createComposeAttachment } from "@/lib/mail/composeAttachment";
+import { isEmbeddableImage } from "@/lib/mail/embeddableImage";
 import type { PendingImageDrop } from "./composeTypes";
 
 type UseComposeHandlersProps = {
@@ -60,10 +61,10 @@ export function restoreComposeMessageAttachmentDataUrls(
   };
 }
 
-// Non-images can't be embedded inline, so attach them without prompting;
-// images defer to a popover where the user picks embed vs. attach. Shared by
-// the compose-surface drop and the editor drop so a mixed drop behaves the same
-// in both places.
+// Only browser-embeddable images offer the embed-vs-attach choice; anything
+// else (including non-renderable `image/*` types like PSD) is attached without
+// prompting. Shared by the compose-surface drop and the editor drop so a mixed
+// drop behaves the same in both places.
 export function routeDroppedFiles(
   files: File[],
   x: number,
@@ -77,8 +78,8 @@ export function routeDroppedFiles(
   }
 ) {
   if (files.length === 0) return;
-  const images = files.filter((file) => file.type.startsWith("image/"));
-  const others = files.filter((file) => !file.type.startsWith("image/"));
+  const images = files.filter((file) => isEmbeddableImage(file.type));
+  const others = files.filter((file) => !isEmbeddableImage(file.type));
   if (others.length > 0) addComposeFiles(others, false);
   if (images.length > 0) setPendingImageDrop({ files: images, x, y });
 }

@@ -270,4 +270,14 @@ describe("routeDroppedFiles", () => {
     expect(attached).toEqual([]);
     expect(pending).toEqual([]);
   });
+
+  it("attaches non-embeddable image types (e.g. PSD) instead of offering embed", () => {
+    const { attached, pending, deps } = setup();
+    const psd = new File([], "art.psd", { type: "image/vnd.adobe.photoshop" });
+
+    routeDroppedFiles([psd], 5, 6, deps);
+
+    expect(attached).toEqual([{ files: [psd], inline: false }]);
+    expect(pending).toEqual([]);
+  });
 });
