@@ -250,6 +250,8 @@ function ImageComponent({
       const rect = img.getBoundingClientRect();
       const startWidth = rect.width;
       const startHeight = rect.height;
+      // Not laid out yet: a 0×0 rect would commit a bogus min-size on release.
+      if (startWidth <= 0 || startHeight <= 0) return;
       const startX = event.clientX;
       const startY = event.clientY;
       // The editable element bounds the image width.
@@ -344,8 +346,10 @@ function ImageComponent({
       else return;
       const img = imageRef.current;
       if (!img) return;
-      event.preventDefault();
       const rect = img.getBoundingClientRect();
+      // Not laid out yet: resizing off a 0×0 rect would commit a bogus size.
+      if (rect.width <= 0 || rect.height <= 0) return;
+      event.preventDefault();
       const step = (event.shiftKey ? KEYBOARD_STEP_LARGE : KEYBOARD_STEP) * direction;
       const editable = img.closest<HTMLElement>("[contenteditable='true']");
       const size = computeResizedImageSize({
