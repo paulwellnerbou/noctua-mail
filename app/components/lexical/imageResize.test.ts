@@ -58,4 +58,16 @@ describe("computeResizedImageSize", () => {
     expect(size.width).toBeGreaterThanOrEqual(24);
     expect(size.height).toBeGreaterThanOrEqual(1);
   });
+
+  it("still respects maxWidth when the start size is unknown", () => {
+    const size = computeResizedImageSize({
+      corner: "se",
+      deltaX: 50,
+      deltaY: 50,
+      startWidth: 0,
+      startHeight: 0,
+      maxWidth: 16
+    });
+    expect(size.width).toBe(16);
+  });
 });

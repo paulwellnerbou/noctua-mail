@@ -35,6 +35,15 @@ function cornerDirections(corner: ImageResizeCorner): { x: number; y: number } {
   };
 }
 
+/** Clamp width to [minSize, maxWidth]; a container narrower than minSize wins. */
+function clampWidth(rawWidth: number, minSize: number, maxWidth?: number): number {
+  const hasMax = typeof maxWidth === "number" && maxWidth > 0;
+  const effectiveMin = hasMax ? Math.min(minSize, Math.round(maxWidth)) : minSize;
+  let width = Math.round(rawWidth);
+  if (hasMax) width = Math.min(width, Math.round(maxWidth));
+  return Math.max(effectiveMin, width);
+}
+
 export function computeResizedImageSize({
   corner,
   startWidth,
@@ -45,7 +54,7 @@ export function computeResizedImageSize({
   maxWidth
 }: ImageResizeParams): ImageSize {
   if (startWidth <= 0 || startHeight <= 0) {
-    return { width: Math.max(minSize, Math.round(startWidth)), height: Math.max(1, Math.round(startHeight)) };
+    return { width: clampWidth(startWidth, minSize, maxWidth), height: Math.max(1, Math.round(startHeight)) };
   }
   const aspect = startWidth / startHeight;
   const dir = cornerDirections(corner);
@@ -59,14 +68,7 @@ export function computeResizedImageSize({
       ? widthFromX
       : widthFromY;
 
-  const hasMax = typeof maxWidth === "number" && maxWidth > 0;
-  // A container narrower than minSize must still win, so the effective floor
-  // is capped at the available width — otherwise the image would overflow.
-  const effectiveMin = hasMax ? Math.min(minSize, Math.round(maxWidth)) : minSize;
-
-  let clampedWidth = Math.round(width);
-  if (hasMax) clampedWidth = Math.min(clampedWidth, Math.round(maxWidth));
-  clampedWidth = Math.max(effectiveMin, clampedWidth);
+  const clampedWidth = clampWidth(width, minSize, maxWidth);
   const height = Math.max(1, Math.round(clampedWidth / aspect));
   return { width: clampedWidth, height };
 }

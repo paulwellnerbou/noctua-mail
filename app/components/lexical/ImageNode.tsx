@@ -166,13 +166,6 @@ const CORNER_CURSOR: Record<ImageResizeCorner, string> = {
   sw: "nesw-resize"
 };
 
-const CORNER_LABEL: Record<ImageResizeCorner, string> = {
-  nw: "top-left",
-  ne: "top-right",
-  sw: "bottom-left",
-  se: "bottom-right"
-};
-
 const KEYBOARD_STEP = 10;
 const KEYBOARD_STEP_LARGE = 50;
 
@@ -252,6 +245,15 @@ function ImageComponent({
 
       let latest: ImageSize = { width: Math.round(startWidth), height: Math.round(startHeight) };
       let moved = false;
+      // Coalesce pointermove into at most one state update per frame.
+      let rafId = 0;
+      const scheduleUpdate = () => {
+        if (rafId) return;
+        rafId = requestAnimationFrame(() => {
+          rafId = 0;
+          setDragSize(latest);
+        });
+      };
 
       const onMove = (moveEvent: PointerEvent) => {
         moved = true;
@@ -263,13 +265,14 @@ function ImageComponent({
           deltaY: moveEvent.clientY - startY,
           maxWidth
         });
-        setDragSize(latest);
+        scheduleUpdate();
       };
 
       const onUp = () => {
         target.removeEventListener("pointermove", onMove);
         target.removeEventListener("pointerup", onUp);
         target.removeEventListener("pointercancel", onUp);
+        if (rafId) cancelAnimationFrame(rafId);
         setDragSize(null);
         // A click without a drag must not pin an auto-sized image to a fixed size.
         if (!moved) return;
@@ -352,30 +355,45 @@ function ImageComponent({
         }}
       />
       {isSelected &&
-        RESIZE_CORNERS.map((corner) => (
-          <span
-            key={corner}
-            role="button"
-            tabIndex={0}
-            aria-label={`Resize image from ${CORNER_LABEL[corner]} corner (arrow keys resize, shift for larger steps)`}
-            onPointerDown={handleResizeStart(corner)}
-            onKeyDown={handleResizeKeyDown}
-            style={{
-              position: "absolute",
-              width: 10,
-              height: 10,
-              background: "var(--accent, #4f86f7)",
-              border: "1px solid var(--gray-1, #fff)",
-              borderRadius: 2,
-              cursor: CORNER_CURSOR[corner],
-              top: corner[0] === "n" ? -5 : undefined,
-              bottom: corner[0] === "s" ? -5 : undefined,
-              left: corner[1] === "w" ? -5 : undefined,
-              right: corner[1] === "e" ? -5 : undefined,
-              touchAction: "none"
-            }}
-          />
-        ))}
+        RESIZE_CORNERS.map((corner) => {
+          const style: React.CSSProperties = {
+            position: "absolute",
+            width: 10,
+            height: 10,
+            padding: 0,
+            background: "var(--accent, #4f86f7)",
+            border: "1px solid var(--gray-1, #fff)",
+            borderRadius: 2,
+            cursor: CORNER_CURSOR[corner],
+            top: corner[0] === "n" ? -5 : undefined,
+            bottom: corner[0] === "s" ? -5 : undefined,
+            left: corner[1] === "w" ? -5 : undefined,
+            right: corner[1] === "e" ? -5 : undefined,
+            touchAction: "none"
+          };
+          // The SE corner is the keyboard-accessible control: a real <button>
+          // announced by AT, focusable, with arrow-key resize. The other
+          // corners duplicate that via pointer only, so they stay out of the
+          // a11y tree rather than cluttering it with redundant handles.
+          return corner === "se" ? (
+            <button
+              key={corner}
+              type="button"
+              aria-label="Resize image (use arrow keys; hold shift for larger steps)"
+              title="Resize"
+              onPointerDown={handleResizeStart(corner)}
+              onKeyDown={handleResizeKeyDown}
+              style={style}
+            />
+          ) : (
+            <span
+              key={corner}
+              aria-hidden="true"
+              onPointerDown={handleResizeStart(corner)}
+              style={style}
+            />
+          );
+        })}
     </span>
   );
 }
