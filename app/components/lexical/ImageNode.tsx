@@ -264,8 +264,8 @@ function ImageComponent({
         // setPointerCapture can throw if the target is detached; harmless.
       }
 
-      let latest: ImageSize = { width: Math.round(startWidth), height: Math.round(startHeight) };
-      let moved = false;
+      const startSize: ImageSize = { width: Math.round(startWidth), height: Math.round(startHeight) };
+      let latest: ImageSize = startSize;
       // Coalesce pointermove into at most one state update per frame.
       let rafId = 0;
       const scheduleUpdate = () => {
@@ -277,7 +277,6 @@ function ImageComponent({
       };
 
       const onMove = (moveEvent: PointerEvent) => {
-        moved = true;
         latest = computeResizedImageSize({
           corner,
           startWidth,
@@ -310,10 +309,11 @@ function ImageComponent({
       };
 
       const onUp = () => {
-        const didMove = moved;
+        // Commit only on an effective resize; a click or a sub-pixel drag that
+        // rounds/clamps back to the start size must not pin an auto-sized image.
+        const resized = latest.width !== startSize.width || latest.height !== startSize.height;
         teardown();
-        // A click without a drag must not pin an auto-sized image to a fixed size.
-        if (!didMove) return;
+        if (!resized) return;
         editor.update(() => {
           const node = $getNodeByKey(nodeKey);
           if ($isImageNode(node)) node.setWidthAndHeight(latest.width, latest.height);
