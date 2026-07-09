@@ -5,6 +5,7 @@
 const EMBEDDABLE_IMAGE_TYPES = new Set([
   "image/png",
   "image/jpeg",
+  "image/jpg", // non-standard alias some sources report for JPEG
   "image/gif",
   "image/webp",
   "image/bmp",
