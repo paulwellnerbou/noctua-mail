@@ -227,6 +227,9 @@ function ImageComponent({
     (corner: ImageResizeCorner) => (event: React.PointerEvent<HTMLElement>) => {
       const img = imageRef.current;
       if (!img) return;
+      // Primary button / primary pointer only — avoids right-click and
+      // secondary-pointer (multi-touch, pen + mouse) drags.
+      if (event.button !== 0 || !event.isPrimary) return;
       // Keep the gesture out of Lexical's selection/drag handling.
       event.preventDefault();
       event.stopPropagation();
@@ -241,7 +244,12 @@ function ImageComponent({
       const maxWidth = editable ? editable.clientWidth : undefined;
 
       const target = event.currentTarget;
-      target.setPointerCapture(event.pointerId);
+      const pointerId = event.pointerId;
+      try {
+        target.setPointerCapture(pointerId);
+      } catch {
+        // setPointerCapture can throw if the target is detached; harmless.
+      }
 
       let latest: ImageSize = { width: Math.round(startWidth), height: Math.round(startHeight) };
       let moved = false;
@@ -272,6 +280,11 @@ function ImageComponent({
         target.removeEventListener("pointermove", onMove);
         target.removeEventListener("pointerup", onUp);
         target.removeEventListener("pointercancel", onUp);
+        try {
+          target.releasePointerCapture(pointerId);
+        } catch {
+          // Already released; ignore.
+        }
         if (rafId) cancelAnimationFrame(rafId);
         setDragSize(null);
         // A click without a drag must not pin an auto-sized image to a fixed size.
