@@ -469,7 +469,11 @@ export function useSyncController({
       body: JSON.stringify({})
     });
     if (!response.ok) {
-      throw new Error(await readErrorMessage(response));
+      const message = await readErrorMessage(response);
+      if (response.status === 503) {
+        throw new MailServerUnreachableError(message);
+      }
+      throw new Error(message);
     }
     return (await response.json()) as FolderConsistencyResponse;
   }, [activeAccountId, apiFetch, readErrorMessage]);
@@ -791,11 +795,15 @@ export function useSyncController({
         }
       } catch (error) {
         if (!cancelled) {
-          reportError(
-            error instanceof Error
-              ? error.message
-              : "Folder consistency check failed due to a network error."
-          );
+          if (isMailServerUnreachableError(error)) {
+            notifyMailServerUnreachable();
+          } else {
+            reportError(
+              error instanceof Error
+                ? error.message
+                : "Folder consistency check failed due to a network error."
+            );
+          }
         }
       }
       // Note: we intentionally do NOT delete the repairKey here. The guard
@@ -815,6 +823,7 @@ export function useSyncController({
     searchScope,
     checkFolderConsistency,
     executeFolderSyncDecision,
+    notifyMailServerUnreachable,
     reportError
   ]);
 

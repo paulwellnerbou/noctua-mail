@@ -9,6 +9,7 @@ import {
   requireAccountContext,
   type AccountRouteParams
 } from "@/app/api/_helpers/accountContext";
+import { imapUpstreamErrorResponse } from "@/app/api/_helpers/imapUpstreamError";
 
 type Params = AccountRouteParams & {
   params: Promise<{ accountId?: string; folderId?: string }>;
@@ -67,11 +68,21 @@ export async function handleFolderConsistencyRequest(
     });
   }
 
-  const [remote, localHighestUid, mailboxState] = await Promise.all([
-    getImapMailboxStatus(account, mailboxPath, clientId),
-    Promise.resolve(currentLocalHighestUid),
-    Promise.resolve(currentMailboxState)
-  ]);
+  // Only the remote status lookup talks to the mail server; keep the catch
+  // narrow so local failures still surface as a 500.
+  let remote: Awaited<ReturnType<typeof getImapMailboxStatus>>;
+  try {
+    remote = await getImapMailboxStatus(account, mailboxPath, clientId);
+  } catch (error) {
+    const response = imapUpstreamErrorResponse(error, {
+      accountId,
+      op: "folder.consistency"
+    });
+    if (response) return response;
+    throw error;
+  }
+  const localHighestUid = currentLocalHighestUid;
+  const mailboxState = currentMailboxState;
   const remoteCount = remote.messages;
   const policyInput = {
     remote: {
