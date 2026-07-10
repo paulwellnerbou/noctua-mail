@@ -39,8 +39,17 @@ const IMAP_CONNECT_FAILURE_FLAG = "noctuaImapConnectFailure";
  * misclassifying local failures (DB reads, bugs) that share a try block.
  */
 export function markImapConnectFailure<T>(error: T): T {
-  if (typeof error === "object" && error !== null) {
-    (error as Record<string, unknown>)[IMAP_CONNECT_FAILURE_FLAG] = true;
+  if (typeof error === "object" && error !== null && Object.isExtensible(error)) {
+    try {
+      // Non-enumerable so the flag doesn't leak into serialized error logs.
+      Object.defineProperty(error, IMAP_CONNECT_FAILURE_FLAG, {
+        value: true,
+        enumerable: false,
+        configurable: true
+      });
+    } catch {
+      // Untaggable errors stay unmarked and fall through to the 500 path.
+    }
   }
   return error;
 }

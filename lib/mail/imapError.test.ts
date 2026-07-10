@@ -46,4 +46,16 @@ describe("markImapConnectFailure / isImapConnectFailure", () => {
     expect(isImapConnectFailure(null)).toBe(false);
     expect(isImapConnectFailure("boom")).toBe(false);
   });
+
+  it("leaves non-extensible errors unmarked instead of throwing", () => {
+    const error = Object.freeze(new Error("frozen"));
+    expect(markImapConnectFailure(error)).toBe(error);
+    expect(isImapConnectFailure(error)).toBe(false);
+  });
+
+  it("keeps the flag out of enumerable/serialized properties", () => {
+    const error = markImapConnectFailure(new Error("connect ETIMEDOUT"));
+    expect(Object.keys(error)).toEqual([]);
+    expect(JSON.stringify(error)).toBe("{}");
+  });
 });
