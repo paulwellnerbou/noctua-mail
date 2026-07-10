@@ -3,7 +3,9 @@ import { beforeEach, describe, expect, mock, test } from "bun:test";
 import { NextResponse } from "next/server";
 import type { Account, Folder, Message } from "@/lib/data";
 import { sealSession, type SessionData } from "@/lib/auth";
+import { markImapConnectFailure } from "@/lib/mail/imapError";
 import { dbModulePromise } from "@/lib/testDbHarness";
+import { MAIL_SERVER_UNREACHABLE_MESSAGE } from "@/app/api/_helpers/imapUpstreamError";
 
 const getImapMailboxStatus = mock(async () => ({
   messages: 0,
@@ -195,5 +197,58 @@ describe("folder consistency route pending moves", () => {
     expect(body.recommendedMode).toBe("none");
     expect(body.reasons).toEqual([]);
     expect(getImapMailboxStatus).not.toHaveBeenCalled();
+  });
+});
+
+describe("folder consistency route upstream failures", () => {
+  async function setUpFolder(prefix: string) {
+    const accountId = uniqueAccountId(prefix);
+    const folder = buildFolder(`${accountId}:INBOX`, "INBOX");
+    const { saveFoldersForAccount, upsertAccount } = await dbModulePromise;
+    await upsertAccount(buildAccount(accountId));
+    await saveFoldersForAccount(accountId, [folder]);
+    return { accountId, folder };
+  }
+
+  function buildRequest(accountId: string) {
+    return new Request("http://localhost/api/folders/consistency", {
+      method: "POST",
+      headers: {
+        cookie: buildCookieHeader(accountId)
+      },
+      body: JSON.stringify({})
+    });
+  }
+
+  test("maps IMAP connect failures to a 503 with a user-facing message", async () => {
+    const { accountId, folder } = await setUpFolder("acc-consistency-unreachable");
+    getImapMailboxStatus.mockRejectedValueOnce(
+      markImapConnectFailure(
+        new Error('Peer certificate is empty for hostname "imap.example.com"')
+      )
+    );
+
+    const response = await handleFolderConsistencyRequest(buildRequest(accountId), {
+      accountId,
+      folderId: folder.id
+    });
+
+    expect(response.status).toBe(503);
+    const body = await response.json();
+    expect(body.ok).toBe(false);
+    expect(body.message).toBe(MAIL_SERVER_UNREACHABLE_MESSAGE);
+    expect(body.message).not.toContain("Peer certificate");
+  });
+
+  test("rethrows local failures instead of misreporting them as an outage", async () => {
+    const { accountId, folder } = await setUpFolder("acc-consistency-local-error");
+    getImapMailboxStatus.mockRejectedValueOnce(new Error("db is locked"));
+
+    expect(
+      handleFolderConsistencyRequest(buildRequest(accountId), {
+        accountId,
+        folderId: folder.id
+      })
+    ).rejects.toThrow("db is locked");
   });
 });
