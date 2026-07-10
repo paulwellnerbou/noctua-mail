@@ -314,7 +314,10 @@ export async function GET(request: Request, { params }: AccountRouteParams) {
         // would otherwise surface as an unhandledRejection.
         client.on("exists", () => {
           fetchNew().catch((error: unknown) => {
-            send("error", { folderId: folder.id, message: (error as Error).message });
+            send("error", {
+              folderId: folder.id,
+              message: error instanceof Error ? error.message : String(error)
+            });
           });
         });
         client.on("expunge", (info) => {

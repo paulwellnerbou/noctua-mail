@@ -39,6 +39,10 @@ export async function GET(request: Request, { params }: AccountRouteParams) {
 
   const logContext = { accountId, clientId };
 
+  // Local DB read stays outside the try below so its failures surface as a
+  // plain 500 instead of being misreported as a mail-server outage.
+  const latestUid = await getLatestMessageUid(accountId, mailbox);
+
   try {
     const client = await acquirePooledImapClient(account, logContext);
     let pooledClientOk = true;
@@ -52,7 +56,6 @@ export async function GET(request: Request, { params }: AccountRouteParams) {
       if (sinceUidNext !== null && !Number.isNaN(sinceUidNext) && uidNext <= sinceUidNext) {
         return NextResponse.json({ ok: true, uidNext, messages: [] });
       }
-      const latestUid = await getLatestMessageUid(accountId, mailbox);
       const startUid =
         typeof sinceUidNext === "number" && !Number.isNaN(sinceUidNext)
           ? sinceUidNext

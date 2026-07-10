@@ -66,6 +66,9 @@ const MAIL_SERVER_UNREACHABLE_NOTICE = {
   description: "Skipped checking for new mail — it will be retried automatically.",
   durationMs: 10_000
 };
+// Retries fire from several places (manual sync, poll timer); during a longer
+// outage they would otherwise re-push the same warning on every attempt.
+const MAIL_SERVER_UNREACHABLE_NOTICE_THROTTLE_MS = 60_000;
 
 export type UseSyncControllerParams = {
   activeAccountId: string;
@@ -418,6 +421,19 @@ export function useSyncController({
     [pushNotice, reportError]
   );
 
+  const lastMailServerUnreachableNoticeAtRef = useRef(0);
+  const notifyMailServerUnreachable = useCallback(() => {
+    const now = Date.now();
+    if (
+      now - lastMailServerUnreachableNoticeAtRef.current <
+      MAIL_SERVER_UNREACHABLE_NOTICE_THROTTLE_MS
+    ) {
+      return;
+    }
+    lastMailServerUnreachableNoticeAtRef.current = now;
+    pushNotice(MAIL_SERVER_UNREACHABLE_NOTICE);
+  }, [pushNotice]);
+
   const planNewSyncCandidates = async (
     folderIds: string[]
   ): Promise<NewSyncFolderDecision[]> => {
@@ -650,7 +666,7 @@ export function useSyncController({
           if (isMailServerUnreachableError(error)) {
             // Per-folder syncs would hit the same unreachable server; skip
             // the round instead of fanning out follow-up failures.
-            pushNotice(MAIL_SERVER_UNREACHABLE_NOTICE);
+            notifyMailServerUnreachable();
             setIsSyncing(false);
             return;
           }
@@ -998,7 +1014,7 @@ export function useSyncController({
         const res = await apiFetch(pollPath);
         if (!res.ok) {
           if (res.status === 503) {
-            pushNotice(MAIL_SERVER_UNREACHABLE_NOTICE);
+            notifyMailServerUnreachable();
             return;
           }
           reportError(await readErrorMessage(res), {
