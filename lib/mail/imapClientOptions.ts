@@ -646,9 +646,20 @@ function summarizeSpecificTlsSocket(
         return null;
       }
     })();
+  // A resumed TLS session carries no peer certificate, so an empty
+  // certificate together with sessionReused=true points at session
+  // resumption rather than a misbehaving server.
+  const sessionReused = (() => {
+    try {
+      return typeof socket.isSessionReused === "function" ? socket.isSessionReused() : null;
+    } catch {
+      return null;
+    }
+  })();
 
   return {
     secureConnection,
+    sessionReused,
     authorized: typeof socket.authorized === "boolean" ? socket.authorized : null,
     authorizationError:
       socket.authorizationError instanceof Error

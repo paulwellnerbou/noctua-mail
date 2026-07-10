@@ -80,8 +80,12 @@ export async function GET(request: Request, { params }: AccountRouteParams) {
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
       const send = (event: string, data: unknown) => {
-        controller.enqueue(encoder.encode(`event: ${event}\n`));
-        controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
+        try {
+          controller.enqueue(encoder.encode(`event: ${event}\n`));
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
+        } catch {
+          // Stream already closed — in-flight watchers/polls may outlive it.
+        }
       };
 
       type Session = {
@@ -110,7 +114,11 @@ export async function GET(request: Request, { params }: AccountRouteParams) {
             "imap.logout"
           );
         }
-        controller.close();
+        try {
+          controller.close();
+        } catch {
+          // already closed
+        }
         unregister();
       };
 
@@ -302,7 +310,13 @@ export async function GET(request: Request, { params }: AccountRouteParams) {
           });
         };
 
-        client.on("exists", fetchNew);
+        // Event listeners are fire-and-forget; a rejection from fetchNew
+        // would otherwise surface as an unhandledRejection.
+        client.on("exists", () => {
+          fetchNew().catch((error: unknown) => {
+            send("error", { folderId: folder.id, message: (error as Error).message });
+          });
+        });
         client.on("expunge", (info) => {
           void (async () => {
             const payload: any = { folderId: folder.id };
@@ -372,19 +386,23 @@ export async function GET(request: Request, { params }: AccountRouteParams) {
             );
             if (toPoll.length === 0) return;
 
-          const pollClient = await connectImapClientWithRetry({
-            account,
-            logContext: { ...logContext, mailbox: "poll" },
-            connectOp: "imap.connect",
-            createClient: () => {
-              const nextClient = new ImapFlow(
-                buildImapFlowOptions(account, {}, { ...logContext, mailbox: "poll" })
-              );
-              bindImapClientError(nextClient, { ...logContext, mailbox: "poll" });
-              return nextClient;
-            }
-          });
+          // Runs detached on a timer, so any escaping rejection would be
+          // unhandled — the connect must stay inside the try.
+          let pollClient: import("imapflow").ImapFlow | null = null;
           try {
+            const connectedClient = await connectImapClientWithRetry({
+              account,
+              logContext: { ...logContext, mailbox: "poll" },
+              connectOp: "imap.connect",
+              createClient: () => {
+                const nextClient = new ImapFlow(
+                  buildImapFlowOptions(account, {}, { ...logContext, mailbox: "poll" })
+                );
+                bindImapClientError(nextClient, { ...logContext, mailbox: "poll" });
+                return nextClient;
+              }
+            });
+            pollClient = connectedClient;
             const updates: Array<{ id: string; uidNext?: number; unseen?: number; exists?: number }>
               = [];
             for (const folder of toPoll) {
@@ -394,7 +412,7 @@ export async function GET(request: Request, { params }: AccountRouteParams) {
                   "imap.status",
                   { ...logContext, mailbox },
                   async () =>
-                    await pollClient.status(mailbox, {
+                    await connectedClient.status(mailbox, {
                       uidNext: true,
                       messages: true,
                       unseen: true

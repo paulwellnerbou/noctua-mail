@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
 import { getLatestMessageUid } from "@/lib/db";
-import { getImapHttpError } from "@/lib/mail/imapError";
 import { getImapLogger, logImapOp } from "@/lib/mail/imapLogger";
 import {
   acquirePooledImapClient,
@@ -11,6 +10,7 @@ import {
   requireAccountContext,
   type AccountRouteParams
 } from "@/app/api/_helpers/accountContext";
+import { imapUpstreamErrorResponse } from "@/app/api/_helpers/imapUpstreamError";
 
 type EnvelopeAddress = { name?: string | null; mailbox?: string | null; host?: string | null };
 type Envelope = { subject?: string | null; from?: EnvelopeAddress[] | null; date?: Date | null; messageId?: string | null };
@@ -106,22 +106,6 @@ export async function GET(request: Request, { params }: AccountRouteParams) {
       releasePooledImapClient(account, client, logContext, { evict: !pooledClientOk });
     }
   } catch (error) {
-    const imapHttpError = getImapHttpError(error);
-    if (imapHttpError) {
-      return NextResponse.json(
-        {
-          ok: false,
-          message: imapHttpError.message,
-          code: imapHttpError.code,
-          reauthRequired: imapHttpError.reauthRequired,
-          accountId
-        },
-        { status: imapHttpError.status }
-      );
-    }
-    return NextResponse.json(
-      { ok: false, message: (error as Error).message ?? "Poll failed" },
-      { status: 500 }
-    );
+    return imapUpstreamErrorResponse(error, { accountId, op: "imap.poll" });
   }
 }

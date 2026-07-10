@@ -47,6 +47,8 @@ import type {
 import {
   FullSyncDebugCancelledError,
   isFullSyncDebugCancelledError,
+  isMailServerUnreachableError,
+  MailServerUnreachableError,
   type InternalSyncTriggerOptions,
   type NewSyncFolderDecision,
   type SyncJobRequest
@@ -57,6 +59,13 @@ import { withCalendarInviteFlag } from "@/lib/messageFlags";
 import { SYNC_STATUS_POLL_INTERVAL_MS, SYNC_STATUS_RUNNING_POLL_INTERVAL_MS } from "./constants";
 
 type ApiFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
+
+const MAIL_SERVER_UNREACHABLE_NOTICE = {
+  type: "warning" as const,
+  title: "Mail server not reachable",
+  description: "Skipped checking for new mail — it will be retried automatically.",
+  durationMs: 10_000
+};
 
 export type UseSyncControllerParams = {
   activeAccountId: string;
@@ -418,7 +427,11 @@ export function useSyncController({
       body: JSON.stringify({ folderIds })
     });
     if (!response.ok) {
-      throw new Error(await readErrorMessage(response));
+      const message = await readErrorMessage(response);
+      if (response.status === 503) {
+        throw new MailServerUnreachableError(message);
+      }
+      throw new Error(message);
     }
     const data = (await response.json()) as {
       ok?: boolean;
@@ -634,6 +647,13 @@ export function useSyncController({
             return !decision.skip;
           });
         } catch (error) {
+          if (isMailServerUnreachableError(error)) {
+            // Per-folder syncs would hit the same unreachable server; skip
+            // the round instead of fanning out follow-up failures.
+            pushNotice(MAIL_SERVER_UNREACHABLE_NOTICE);
+            setIsSyncing(false);
+            return;
+          }
           reportError(
             error instanceof Error
               ? error.message
@@ -977,6 +997,10 @@ export function useSyncController({
         pollPath = buildAccountImapPollPath(activeAccountId, params);
         const res = await apiFetch(pollPath);
         if (!res.ok) {
+          if (res.status === 503) {
+            pushNotice(MAIL_SERVER_UNREACHABLE_NOTICE);
+            return;
+          }
           reportError(await readErrorMessage(res), {
             requestPath: pollPath,
             status: res.status
