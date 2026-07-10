@@ -39,9 +39,11 @@ export async function POST(request: Request, { params }: AccountRouteParams) {
     const decisions = await planImapNewSyncFolders(account, folderIds, clientId);
     return NextResponse.json({ ok: true, decisions });
   } catch (error) {
-    return imapUpstreamErrorResponse(error, {
+    const response = imapUpstreamErrorResponse(error, {
       accountId: resolvedAccountId,
       op: "sync.new-candidates"
     });
+    if (response) return response;
+    throw error;
   }
 }

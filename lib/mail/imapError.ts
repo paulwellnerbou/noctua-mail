@@ -30,6 +30,29 @@ function collectImapErrorText(error: unknown) {
     .toLowerCase();
 }
 
+const IMAP_CONNECT_FAILURE_FLAG = "noctuaImapConnectFailure";
+
+/**
+ * Tag an error as a failed attempt to reach/connect to the IMAP server (set
+ * where connects are made, i.e. `connectImapClientWithRetry`). Routes use the
+ * guard to map exactly these to "mail server unreachable" responses without
+ * misclassifying local failures (DB reads, bugs) that share a try block.
+ */
+export function markImapConnectFailure<T>(error: T): T {
+  if (typeof error === "object" && error !== null) {
+    (error as Record<string, unknown>)[IMAP_CONNECT_FAILURE_FLAG] = true;
+  }
+  return error;
+}
+
+export function isImapConnectFailure(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    (error as Record<string, unknown>)[IMAP_CONNECT_FAILURE_FLAG] === true
+  );
+}
+
 export function getImapHttpError(error: unknown): ImapHttpError | null {
   const candidate = error as ImapErrorLike | null | undefined;
   const text = collectImapErrorText(error);

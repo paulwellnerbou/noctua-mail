@@ -2,6 +2,7 @@ import { randomUUID } from "crypto";
 import { describe, expect, mock, test } from "bun:test";
 import type { Account } from "@/lib/data";
 import { sealSession, type SessionData } from "@/lib/auth";
+import { markImapConnectFailure } from "@/lib/mail/imapError";
 import { dbModulePromise } from "@/lib/testDbHarness";
 import { MAIL_SERVER_UNREACHABLE_MESSAGE } from "@/app/api/_helpers/imapUpstreamError";
 
@@ -93,7 +94,9 @@ describe("sync new-candidates route", () => {
   test("maps IMAP connect failures to a 503 with a user-facing message", async () => {
     const accountId = await setUpAccount();
     planImapNewSyncFolders.mockRejectedValueOnce(
-      new Error('Peer certificate is empty for hostname "imap.example.test"')
+      markImapConnectFailure(
+        new Error('Peer certificate is empty for hostname "imap.example.test"')
+      )
     );
 
     const response = await POST(buildRequest(accountId), {
@@ -105,6 +108,15 @@ describe("sync new-candidates route", () => {
     expect(body.ok).toBe(false);
     expect(body.message).toBe(MAIL_SERVER_UNREACHABLE_MESSAGE);
     expect(body.message).not.toContain("Peer certificate");
+  });
+
+  test("rethrows local failures instead of misreporting them as an outage", async () => {
+    const accountId = await setUpAccount();
+    planImapNewSyncFolders.mockRejectedValueOnce(new Error("db is locked"));
+
+    expect(
+      POST(buildRequest(accountId), { params: Promise.resolve({ accountId }) })
+    ).rejects.toThrow("db is locked");
   });
 
   test("keeps reauth semantics for IMAP auth failures", async () => {
