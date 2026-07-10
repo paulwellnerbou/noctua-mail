@@ -51,12 +51,15 @@ EXPOSE 3654
 
 # Set default environment variables
 ENV PORT=3654
+# Next standalone binds to HOSTNAME; Docker injects the container ID there,
+# which binds eth0 only and makes loopback (and the healthcheck) unreachable.
+ENV HOSTNAME=0.0.0.0
 ENV NOCTUA_DATA_DIR=/app/.data/
 ENV APP_ENV_LABEL=
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-  CMD bun --bun -e "fetch('http://localhost:3654/').then(r => r.ok ? process.exit(0) : process.exit(1)).catch(() => process.exit(1))"
+  CMD bun --bun -e "const r = await fetch('http://127.0.0.1:' + (process.env.PORT || 3654) + '/api/version'); if (!r.ok) { console.error('unhealthy: HTTP ' + r.status); process.exit(1); }"
 
 # Generate runtime config and run standalone server
 CMD ["/app/entrypoint.sh"]
