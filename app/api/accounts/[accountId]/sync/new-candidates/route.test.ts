@@ -6,9 +6,11 @@ import { markImapConnectFailure } from "@/lib/mail/imapError";
 import { dbModulePromise } from "@/lib/testDbHarness";
 import { MAIL_SERVER_UNREACHABLE_MESSAGE } from "@/app/api/_helpers/imapUpstreamError";
 
-const planImapNewSyncFolders = mock(async () => [] as unknown[]);
-
 const actualImap = await import("@/lib/mail/imap");
+
+// mock.module registrations outlive this file, so the mock delegates to the
+// real implementation by default; tests override it with *Once values only.
+const planImapNewSyncFolders = mock(actualImap.planImapNewSyncFolders);
 
 mock.module("@/lib/mail/imap", () => ({
   ...actualImap,
