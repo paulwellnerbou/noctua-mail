@@ -78,3 +78,29 @@ export function isFullSyncDebugCancelledError(
     typeof maybe.message === "string"
   );
 }
+
+/** Thrown when the server answered 503 — the mail server itself is down or
+ * unreachable, so the sync round should be skipped rather than escalated. */
+export class MailServerUnreachableError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "MailServerUnreachableError";
+  }
+}
+
+export type MailServerUnreachableErrorLike = {
+  name: "MailServerUnreachableError";
+  message: string;
+};
+
+export function isMailServerUnreachableError(
+  error: unknown
+): error is MailServerUnreachableErrorLike {
+  if (typeof error !== "object" || error === null) return false;
+  const maybe = error as { name?: unknown; message?: unknown };
+  return (
+    typeof maybe.name === "string" &&
+    maybe.name === "MailServerUnreachableError" &&
+    typeof maybe.message === "string"
+  );
+}

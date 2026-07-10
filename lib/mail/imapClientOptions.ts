@@ -2,6 +2,7 @@ import type { ImapFlow, ImapFlowOptions } from "imapflow";
 import tls from "tls";
 
 import type { Account } from "@/lib/data";
+import { markImapConnectFailure } from "./imapError";
 import { getImapLogger, logImapOp } from "./imapLogger";
 
 export type ImapClientLogContext = {
@@ -277,8 +278,10 @@ function recordImapConnectFailure(account: Account, error: unknown) {
 function getImapBreakerFastFailError(account: Account, state: ImapConnectCircuitState) {
   const remainingMs = Math.max(0, state.openedUntil - Date.now());
   const seconds = Math.max(1, Math.ceil(remainingMs / 1000));
-  return new Error(
-    `IMAP connection temporarily unavailable for ${account.imap.host}; retry in ${seconds}s`
+  return markImapConnectFailure(
+    new Error(
+      `IMAP connection temporarily unavailable for ${account.imap.host}; retry in ${seconds}s`
+    )
   );
 }
 
@@ -393,7 +396,9 @@ export async function connectImapClientWithRetry(params: {
     }
   }
 
-  throw lastError instanceof Error ? lastError : new Error("IMAP connection failed.");
+  throw markImapConnectFailure(
+    lastError instanceof Error ? lastError : new Error("IMAP connection failed.")
+  );
 }
 
 export async function safeLogoutImapClient(
@@ -646,9 +651,20 @@ function summarizeSpecificTlsSocket(
         return null;
       }
     })();
+  // A resumed TLS session carries no peer certificate, so an empty
+  // certificate together with sessionReused=true points at session
+  // resumption rather than a misbehaving server.
+  const sessionReused = (() => {
+    try {
+      return typeof socket.isSessionReused === "function" ? socket.isSessionReused() : null;
+    } catch {
+      return null;
+    }
+  })();
 
   return {
     secureConnection,
+    sessionReused,
     authorized: typeof socket.authorized === "boolean" ? socket.authorized : null,
     authorizationError:
       socket.authorizationError instanceof Error

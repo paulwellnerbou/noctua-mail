@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { getImapHttpError } from "./imapError";
+import { getImapHttpError, isImapConnectFailure, markImapConnectFailure } from "./imapError";
 
 describe("getImapHttpError", () => {
   it("maps IMAP authentication failures to 401", () => {
@@ -31,5 +31,31 @@ describe("getImapHttpError", () => {
 
   it("leaves unrelated IMAP errors unmapped", () => {
     expect(getImapHttpError(new Error("Socket timeout"))).toBeNull();
+  });
+});
+
+describe("markImapConnectFailure / isImapConnectFailure", () => {
+  it("recognizes tagged errors and returns the same instance", () => {
+    const error = new Error("connect ETIMEDOUT");
+    expect(markImapConnectFailure(error)).toBe(error);
+    expect(isImapConnectFailure(error)).toBe(true);
+  });
+
+  it("does not flag untagged or non-object errors", () => {
+    expect(isImapConnectFailure(new Error("db is locked"))).toBe(false);
+    expect(isImapConnectFailure(null)).toBe(false);
+    expect(isImapConnectFailure("boom")).toBe(false);
+  });
+
+  it("leaves non-extensible errors unmarked instead of throwing", () => {
+    const error = Object.freeze(new Error("frozen"));
+    expect(markImapConnectFailure(error)).toBe(error);
+    expect(isImapConnectFailure(error)).toBe(false);
+  });
+
+  it("keeps the flag out of enumerable/serialized properties", () => {
+    const error = markImapConnectFailure(new Error("connect ETIMEDOUT"));
+    expect(Object.keys(error)).toEqual([]);
+    expect(JSON.stringify(error)).toBe("{}");
   });
 });

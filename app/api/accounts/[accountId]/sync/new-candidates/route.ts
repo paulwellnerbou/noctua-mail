@@ -6,6 +6,7 @@ import {
   requireAccountContext,
   type AccountRouteParams
 } from "@/app/api/_helpers/accountContext";
+import { imapUpstreamErrorResponse } from "@/app/api/_helpers/imapUpstreamError";
 
 type NewSyncCandidatesPayload = {
   accountId?: string;
@@ -34,6 +35,15 @@ export async function POST(request: Request, { params }: AccountRouteParams) {
     : [];
   const folderIds = requestedFolderIds.length > 0 ? requestedFolderIds : Array.from(accountFolderIds);
 
-  const decisions = await planImapNewSyncFolders(account, folderIds, clientId);
-  return NextResponse.json({ ok: true, decisions });
+  try {
+    const decisions = await planImapNewSyncFolders(account, folderIds, clientId);
+    return NextResponse.json({ ok: true, decisions });
+  } catch (error) {
+    const response = imapUpstreamErrorResponse(error, {
+      accountId: resolvedAccountId,
+      op: "sync.new-candidates"
+    });
+    if (response) return response;
+    throw error;
+  }
 }
