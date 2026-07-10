@@ -59,7 +59,7 @@ ENV APP_ENV_LABEL=
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=40s --retries=3 \
-  CMD bun --bun -e "const r = await fetch('http://127.0.0.1:' + (process.env.PORT || 3654) + '/api/version'); if (!r.ok) { console.error('unhealthy: HTTP ' + r.status); process.exit(1); }"
+  CMD bun --bun -e "const r = await fetch('http://127.0.0.1:' + (process.env.PORT || 3654) + '/api/version'); if (!r.ok) { console.error('unhealthy: HTTP ' + r.status); process.exit(1); } process.exit(0);"
 
 # Generate runtime config and run standalone server
 CMD ["/app/entrypoint.sh"]
