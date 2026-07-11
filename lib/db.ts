@@ -49,11 +49,13 @@ export {
   type StagedMessageMove,
   getPendingMoveSourceUids,
   hasPendingMovesForFolder,
-  relocateMovedMessage,
   stageMessageMoves,
   updateMessagesFolderPrefix
 } from "./db/messages";
-import { updateMessageFolder as _updateMessageFolderImpl } from "./db/messages";
+import {
+  relocateMovedMessage as _relocateMovedMessageImpl,
+  updateMessageFolder as _updateMessageFolderImpl
+} from "./db/messages";
 
 /**
  * Thin wrapper that delegates to the extracted implementation. Defined
@@ -73,6 +75,13 @@ export function updateMessageFolder(
   imapUid?: number | null
 ) {
   return _updateMessageFolderImpl(accountId, messageId, folderId, mailboxPath, imapUid);
+}
+
+/** Same rationale as `updateMessageFolder` above. */
+export function relocateMovedMessage(
+  params: Parameters<typeof _relocateMovedMessageImpl>[0]
+) {
+  return _relocateMovedMessageImpl(params);
 }
 
 export {
