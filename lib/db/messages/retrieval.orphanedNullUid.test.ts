@@ -1,5 +1,5 @@
 import { randomUUID } from "crypto";
-import { beforeEach, describe, expect, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import type { Account, Folder, Message } from "@/lib/data";
 import { dbModulePromise } from "@/lib/testDbHarness";
 
