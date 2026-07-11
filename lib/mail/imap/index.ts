@@ -57,3 +57,5 @@ export {
   renameImapFolder,
   unsubscribeImapFolder
 } from "./folders";
+
+export { drainImapConnectionPool } from "./connectionPool";

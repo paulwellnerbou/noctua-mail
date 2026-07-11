@@ -1,3 +1,4 @@
+import { drainImapConnectionPool } from "@/lib/mail/imap";
 import {
   runSyncOperation,
   type SyncOperationProgress,
@@ -67,6 +68,10 @@ export async function runSyncJobCli(argv = process.argv) {
         }
       });
       process.stdout.write(`${formatSyncWorkerResultLine(result)}\n`);
+      // This subprocess exits right after returning — an idle pooled IMAP
+      // connection holds an open socket that would otherwise block Bun from
+      // exiting until the pool's own idle-eviction timer catches up.
+      await drainImapConnectionPool();
       return;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error ?? "unknown error");
