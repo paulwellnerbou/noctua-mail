@@ -124,6 +124,7 @@ export async function POST(request: Request, { params }: AccountRouteParams) {
       results.push({ messageId, ok: false, error: "Message not found" });
       continue;
     }
+    let readBackFailed = false;
     try {
       const { syncedMessage } = await copyMessageToAccount({
         sourceAccount,
@@ -134,6 +135,7 @@ export async function POST(request: Request, { params }: AccountRouteParams) {
         clientId
       });
       if (syncedMessage) syncedForIngest.push(syncedMessage);
+      else readBackFailed = true;
     } catch (error) {
       const errorMessage =
         error instanceof CrossAccountCopyError ? error.message : "Failed to copy message";
@@ -141,8 +143,15 @@ export async function POST(request: Request, { params }: AccountRouteParams) {
       continue;
     }
 
+    // The APPEND succeeded and is durable on the destination server, but the
+    // read-back that ingests it into the local shard failed — surface that so
+    // the client doesn't imply the copy is already visible there.
+    const pendingSyncWarning = readBackFailed
+      ? "Copied, but it may not appear until the destination account next syncs"
+      : undefined;
+
     if (mode !== "move") {
-      results.push({ messageId, ok: true });
+      results.push({ messageId, ok: true, warning: pendingSyncWarning });
       continue;
     }
 
@@ -162,13 +171,26 @@ export async function POST(request: Request, { params }: AccountRouteParams) {
       });
       continue;
     }
-    const trashResult = await trashMessageInAccount({
-      account: sourceAccount,
-      accountId: sourceAccountId,
-      message: message as typeof message & { imapUid: number; mailboxPath: string },
-      clientId
-    });
-    if (!trashResult.ok) {
+    // Trashing the source is best-effort: the destination copy already exists,
+    // so an IMAP/IO error here must not fail the request (a 500 would tempt the
+    // client to retry and create duplicate copies). Report a warning instead.
+    let trashed = false;
+    try {
+      const trashResult = await trashMessageInAccount({
+        account: sourceAccount,
+        accountId: sourceAccountId,
+        message: message as typeof message & { imapUid: number; mailboxPath: string },
+        clientId
+      });
+      trashed = trashResult.ok;
+    } catch (error) {
+      console.warn("[copy-to-account] failed to trash source after copy", {
+        sourceAccountId,
+        messageId: message.id,
+        error
+      });
+    }
+    if (!trashed) {
       results.push({
         messageId,
         ok: true,
@@ -177,7 +199,13 @@ export async function POST(request: Request, { params }: AccountRouteParams) {
       });
       continue;
     }
-    results.push({ messageId, ok: true, moved: true, removedMessageId: message.id });
+    results.push({
+      messageId,
+      ok: true,
+      moved: true,
+      removedMessageId: message.id,
+      warning: pendingSyncWarning
+    });
   }
 
   // Ingest as one batch so a copied thread threads correctly in the destination

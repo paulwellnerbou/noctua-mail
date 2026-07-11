@@ -122,7 +122,10 @@ export default function CopyToAccountDialog({
     folderQueryText.length > 0 && !rootFolders.some((folder) => hasFolderMatch(folder));
 
   const verb = mode === "move" ? "Move" : "Copy";
-  const title = `${verb} ${messageCount === 1 ? "message" : `${messageCount} messages`} to account`;
+  // messageCount can be 0 for a thread-based request (messageIds empty but a
+  // threadMove is set), so fall back to a countless label rather than "0 messages".
+  const subject = messageCount === 1 ? "message" : messageCount > 1 ? `${messageCount} messages` : "messages";
+  const title = `${verb} ${subject} to account`;
 
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
