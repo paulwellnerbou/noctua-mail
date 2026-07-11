@@ -65,6 +65,7 @@ const {
   releasePooledImapClient,
   withPooledImapClient,
   getImapConnectionPoolSize,
+  drainImapConnectionPool,
   __resetImapConnectionPoolForTests,
   __getConnectedAtForTests
 } = await import("./connectionPool");
@@ -266,5 +267,41 @@ describe("withPooledImapClient", () => {
     // After all three release, only one slot is kept; the others are logged
     // out. Exactly one idle entry remains.
     expect(getImapConnectionPoolSize()).toBe(1);
+  });
+});
+
+describe("drainImapConnectionPool", () => {
+  test("logs out and clears every pooled entry, awaiting the logout", async () => {
+    const a = makeAccount("acc-a");
+    const b = makeAccount("acc-b");
+    const clientA = (await acquirePooledImapClient(a, { accountId: "acc-a" })) as StubClient;
+    const clientB = (await acquirePooledImapClient(b, { accountId: "acc-b" })) as StubClient;
+    releasePooledImapClient(a, clientA, { accountId: "acc-a" });
+    releasePooledImapClient(b, clientB, { accountId: "acc-b" });
+    expect(getImapConnectionPoolSize()).toBe(2);
+
+    await drainImapConnectionPool();
+
+    expect(getImapConnectionPoolSize()).toBe(0);
+    expect(clientA.__logoutCount).toBe(1);
+    expect(clientB.__logoutCount).toBe(1);
+  });
+
+  test("empty pool → resolves without error", async () => {
+    expect(getImapConnectionPoolSize()).toBe(0);
+    await expect(drainImapConnectionPool()).resolves.toBeUndefined();
+    expect(getImapConnectionPoolSize()).toBe(0);
+  });
+
+  test("drained connection no longer auto-evicts on close (listener detached)", async () => {
+    const account = makeAccount("acc-1");
+    const client = (await acquirePooledImapClient(account, logCtx)) as StubClient;
+    releasePooledImapClient(account, client, logCtx);
+    await drainImapConnectionPool();
+
+    // Emitting 'close' after drain must not throw or double-evict a slot
+    // that's already gone.
+    expect(() => (client as unknown as EventEmitter).emit("close")).not.toThrow();
+    expect(getImapConnectionPoolSize()).toBe(0);
   });
 });

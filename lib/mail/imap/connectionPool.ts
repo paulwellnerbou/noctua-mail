@@ -242,6 +242,34 @@ export function getImapConnectionPoolSize(): number {
 }
 
 /**
+ * Log out and drop every pooled connection, awaiting each logout.
+ *
+ * The idle cache is a net win for a long-lived process (the Next.js
+ * server), where a released connection has a good chance of being reused
+ * by the next request. A short-lived one-shot process — e.g. the sync
+ * worker subprocess — never gets that chance: it exits right after
+ * releasing, but a pooled `ImapFlow` holds an open socket, which blocks
+ * Node/Bun from exiting naturally until the idle-eviction timer catches up
+ * (up to `POOL_IDLE_MS`, checked every `CLEANUP_INTERVAL_MS`). Such a
+ * process should call this right before it would otherwise return.
+ */
+export async function drainImapConnectionPool(): Promise<void> {
+  const entries = Array.from(state.pool.values());
+  state.pool.clear();
+  if (state.cleanupTimer) {
+    clearInterval(state.cleanupTimer);
+    state.cleanupTimer = null;
+  }
+  await Promise.all(
+    entries.map((entry) => {
+      entry.detach();
+      state.connectedAt.delete(entry.client);
+      return safeLogoutImapClient(entry.client, { ...entry.lastLogContext }, "pool-drain");
+    })
+  );
+}
+
+/**
  * Test helper — drops every pooled entry without logging out. Call from
  * `beforeEach` / `afterEach` in tests that create mock accounts. In
  * production this should never be invoked.

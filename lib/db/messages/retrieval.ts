@@ -273,19 +273,27 @@ export async function listFolderMessageUidRows(accountId: string, folderId: stri
 export async function listFolderMessageUidAndFlagRows(accountId: string, folderId: string) {
   const normalizedFolderId = folderId.trim();
   if (!normalizedFolderId) {
-    return [] as Array<{ id: string; imapUid: number; flags: string | null }>;
+    return [] as Array<{ id: string; imapUid: number | null; flags: string | null }>;
   }
   const db = await getAccountDb(accountId);
   return db
     .prepare(
+      // A NULL imapUid normally means "mid-move, don't touch it yet" — but only
+      // while pendingMoveSourceFolderId still claims it. Once a move finalizes
+      // without ever learning the destination UID (e.g. the server's MOVE/COPY
+      // response omitted one), the row is left with imapUid NULL and no pending
+      // marker: nothing will ever assign it a UID from here. Excluding it from
+      // the diff unconditionally made such rows permanently invisible to stale
+      // cleanup, so include it once it's no longer claimed by an in-flight move.
       `SELECT id, imapUid, flags
        FROM messages
-       WHERE accountId = ? AND folderId = ? AND imapUid IS NOT NULL
+       WHERE accountId = ? AND folderId = ?
+         AND (imapUid IS NOT NULL OR pendingMoveSourceFolderId IS NULL)
        ORDER BY imapUid ASC`
     )
     .all(accountId, normalizedFolderId) as Array<{
     id: string;
-    imapUid: number;
+    imapUid: number | null;
     flags: string | null;
   }>;
 }
