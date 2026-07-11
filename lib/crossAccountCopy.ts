@@ -64,14 +64,12 @@ async function loadRawSource(
 ): Promise<Buffer | null> {
   const stored = await deps.getMessageSource(sourceAccountId, message.id);
   if (stored) return Buffer.from(stored, "utf-8");
-  // No cached source (e.g. header-only sync): pull it fresh from IMAP.
-  if (typeof message.imapUid === "number" && message.mailboxPath) {
-    const synced = await deps.syncImapMessage(
-      sourceAccount,
-      message.mailboxPath,
-      message.imapUid,
-      clientId
-    );
+  // No cached source (e.g. header-only sync): pull it fresh from IMAP. Guard the
+  // UID the way the rest of the codebase does — finite and positive — so a
+  // NaN/Infinity/non-positive value doesn't trigger a bogus IMAP fetch.
+  const { imapUid, mailboxPath } = message;
+  if (typeof imapUid === "number" && Number.isFinite(imapUid) && imapUid > 0 && mailboxPath) {
+    const synced = await deps.syncImapMessage(sourceAccount, mailboxPath, imapUid, clientId);
     if (synced?.source) return Buffer.from(synced.source, "utf-8");
   }
   return null;

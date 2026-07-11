@@ -120,6 +120,25 @@ describe("copyMessageToAccount", () => {
     expect(appendCalls).toHaveLength(0);
   });
 
+  test("does not attempt an IMAP fetch for a non-finite/non-positive UID", async () => {
+    let sourceFetchCalls = 0;
+    for (const badUid of [Number.NaN, Number.POSITIVE_INFINITY, 0, -3]) {
+      const base = makeCopyDeps({ storedSource: null, sourceFetch: "fetched-bytes" });
+      const deps: CopyDeps = {
+        ...base.deps,
+        syncImapMessage: async (...args) => {
+          sourceFetchCalls += 1;
+          return base.deps.syncImapMessage(...args);
+        }
+      };
+      const message = makeMessage({ imapUid: badUid, mailboxPath: "SOURCE" });
+      await expect(copyMessageToAccount(baseParams(message), deps)).rejects.toMatchObject({
+        code: "source-missing"
+      });
+    }
+    expect(sourceFetchCalls).toBe(0);
+  });
+
   test("falls back to an IMAP fetch when there is no cached source", async () => {
     const { deps, appendCalls } = makeCopyDeps({ storedSource: null, sourceFetch: "fetched-bytes" });
     const message = makeMessage({ imapUid: 7, mailboxPath: "SOURCE" });
