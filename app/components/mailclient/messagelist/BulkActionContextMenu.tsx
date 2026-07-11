@@ -5,6 +5,8 @@ import { useEffect, useRef } from "react";
 import { DropdownMenu } from "@radix-ui/themes";
 import {
   Archive as ArchiveIcon,
+  ArrowRightLeft,
+  Copy,
   Flag,
   Mail,
   MailOpen,
@@ -26,6 +28,9 @@ export type BulkActionContextMenuActions = {
   onAddTopic: (topicId: string) => void;
   onArchive: () => void;
   onDelete: () => void;
+  hasOtherAccounts?: boolean;
+  onCopyToAccount?: () => void;
+  onMoveToAccount?: () => void;
 };
 
 type BulkActionContextMenuProps = {
@@ -125,6 +130,22 @@ export default function BulkActionContextMenu({
           onMoveToFolder={actions.onMoveToFolder}
           onMoveToOther={actions.onMoveToOther}
         />
+        {actions.hasOtherAccounts && actions.onCopyToAccount && (
+          <DropdownMenu.Item onSelect={actions.onCopyToAccount}>
+            <span className={menuStyles.menuIcon}>
+              <Copy size={14} />
+            </span>
+            <span className={menuStyles.menuLabel}>Copy to account...</span>
+          </DropdownMenu.Item>
+        )}
+        {actions.hasOtherAccounts && actions.onMoveToAccount && (
+          <DropdownMenu.Item onSelect={actions.onMoveToAccount}>
+            <span className={menuStyles.menuIcon}>
+              <ArrowRightLeft size={14} />
+            </span>
+            <span className={menuStyles.menuLabel}>Move to account...</span>
+          </DropdownMenu.Item>
+        )}
         <DropdownMenu.Sub>
           <DropdownMenu.SubTrigger disabled={allTopics.length === 0}>
             <span className={menuStyles.menuIcon}>

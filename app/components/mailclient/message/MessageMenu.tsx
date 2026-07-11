@@ -2,9 +2,11 @@ import type React from "react";
 import { Fragment, useState } from "react";
 import {
   Archive,
+  ArrowRightLeft,
   CheckSquare,
   Circle,
   CircleDot,
+  Copy,
   Download,
   Edit3,
   FileText,
@@ -59,6 +61,8 @@ type MessageMenuAction =
   | "archive"
   | "category"
   | "moveTo"
+  | "copyToAccount"
+  | "moveToAccount"
   | "delete"
   | "unsubscribe"
   | "showRelated"
@@ -108,6 +112,9 @@ type MessageMenuProps = {
   onGetRecentFolders: () => Folder[];
   onMoveToFolder: (message: Message, folderId: string) => void;
   onMoveTo: (message: Message) => void;
+  hasOtherAccounts?: boolean;
+  onCopyToAccount?: (message: Message) => void;
+  onMoveToAccount?: (message: Message) => void;
   isTrashFolder: (folderId?: string) => boolean;
   isSpamFolder: (folderId?: string) => boolean;
   onOpenChange?: (open: boolean) => void;
@@ -145,6 +152,9 @@ export default function MessageMenu({
   onGetRecentFolders,
   onMoveToFolder,
   onMoveTo,
+  hasOtherAccounts,
+  onCopyToAccount,
+  onMoveToAccount,
   isTrashFolder,
   isSpamFolder,
   onOpenChange
@@ -467,6 +477,24 @@ export default function MessageMenu({
                     onMoveToOther={() => onMoveTo(message)}
                     disabled={isDisabled("moveTo")}
                   />
+                )
+              : null,
+            hasOtherAccounts && onCopyToAccount && isVisible("copyToAccount")
+              ? buildItem(
+                  "copyToAccount",
+                  "Copy to account...",
+                  <Copy size={14} />,
+                  () => onCopyToAccount(message),
+                  isDisabled("copyToAccount")
+                )
+              : null,
+            hasOtherAccounts && onMoveToAccount && isVisible("moveToAccount")
+              ? buildItem(
+                  "moveToAccount",
+                  "Move to account...",
+                  <ArrowRightLeft size={14} />,
+                  () => onMoveToAccount(message),
+                  isDisabled("moveToAccount")
                 )
               : null,
             showDeleteInMenu && isVisible("delete")

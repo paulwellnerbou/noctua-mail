@@ -66,7 +66,10 @@ export const renderMessageMenu = (
   handleSendDraft?: (msg: Message) => Promise<void>,
   handleDiscardDraft?: (msg: Message) => Promise<void>,
   origin: "list" | "thread" | "table" = "list",
-  onOpenChange?: (open: boolean) => void
+  onOpenChange?: (open: boolean) => void,
+  hasOtherAccounts?: boolean,
+  handleCopyToAccount?: (target: Message) => void,
+  handleMoveToAccount?: (target: Message) => void
 ) => (
   <MessageMenu
     message={message}
@@ -98,6 +101,9 @@ export const renderMessageMenu = (
     onGetRecentFolders={handleGetRecentFolders}
     onMoveToFolder={handleMoveToFolder}
     onMoveTo={handleMoveTo}
+    hasOtherAccounts={hasOtherAccounts}
+    onCopyToAccount={handleCopyToAccount}
+    onMoveToAccount={handleMoveToAccount}
     isTrashFolder={isTrashFolder as any}
     isSpamFolder={isSpamFolder as any}
     onOpenChange={onOpenChange}

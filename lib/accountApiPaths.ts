@@ -251,6 +251,10 @@ export function buildAccountFoldersPath(accountId: string, query?: URLSearchPara
   return appendQuery(buildAccountApiPath(accountId, "/folders"), query);
 }
 
+export function buildAccountDestinationFoldersPath(accountId: string) {
+  return buildAccountApiPath(accountId, "/destination-folders");
+}
+
 export function buildAccountMessagePath(accountId: string, messageId: string) {
   return buildAccountApiPath(
     accountId,

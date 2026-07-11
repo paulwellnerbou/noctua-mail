@@ -1,14 +1,19 @@
 import { NextResponse } from "next/server";
 import {
+  getAttachmentIds,
   getFolders,
   getMessageById,
-  relocateMovedMessage
+  deleteMessageById,
+  relocateMovedMessage,
+  updateMessageFlags
 } from "@/lib/db";
-import { moveImapMessage } from "@/lib/mail/imap";
-import type { Message } from "@/lib/data";
+import { deleteImapMessage, moveImapMessage } from "@/lib/mail/imap";
+import type { Account, Message } from "@/lib/data";
 import type { Folder } from "@/lib/data";
-import { moveMessageFiles } from "@/lib/storage";
+import { deleteMessageFiles, moveMessageFiles } from "@/lib/storage";
 import { folderMailboxPath } from "@/lib/mailboxPaths";
+import { withoutRecentFlag } from "@/lib/messageFlags";
+import { findTrashFolder, resolveMessageTrashState } from "@/app/api/_helpers/message/trashUtils";
 import {
   requireAccountContext,
   type AccountContext
@@ -193,4 +198,72 @@ export async function resolveSpecialFolderAndMailbox(
     ? folderMailboxPath(folder, accountId)
     : (options?.fallbackMailbox ?? null);
   return { folder, mailbox };
+}
+
+export type TrashMessageResult =
+  | { ok: false; reason: "no-trash-folder" }
+  | { ok: true; action: "deleted" }
+  | {
+      ok: true;
+      action: "moved";
+      trashFolderId: string | null;
+      trashMailbox: string;
+      previousMessageId: string;
+      messageId: string;
+    };
+
+/**
+ * Move a message to the account's Trash, or hard-delete it if it's already
+ * there. Shared by the single-message delete route and the "move to account"
+ * flow, which trashes the source once the destination copy is confirmed.
+ */
+export async function trashMessageInAccount(params: {
+  account: Account;
+  accountId: string;
+  message: MessageWithImapMetadata;
+  clientId?: string;
+}): Promise<TrashMessageResult> {
+  const { account, accountId, message, clientId } = params;
+  const { folder: trashFolder, mailbox: trashMailbox } = await resolveSpecialFolderAndMailbox(
+    accountId,
+    findTrashFolder
+  );
+  if (!trashFolder) {
+    return { ok: false, reason: "no-trash-folder" };
+  }
+  const trashMailboxPath = trashMailbox ?? "Trash";
+  const { currentMailbox, isInTrash } = resolveMessageTrashState(message, trashFolder, accountId);
+
+  if (isInTrash) {
+    await deleteImapMessage(account, currentMailbox, message.imapUid, clientId);
+    const attachmentIds = await getAttachmentIds(accountId, message.id);
+    await deleteMessageById(accountId, message.id);
+    await deleteMessageFiles(accountId, message.id, attachmentIds);
+    return { ok: true, action: "deleted" };
+  }
+
+  const { relocated } = await moveAndRelocateMessageWithFiles({
+    account,
+    currentMailbox,
+    imapUid: message.imapUid,
+    destinationMailbox: trashMailboxPath,
+    clientId,
+    accountId,
+    previousId: message.id,
+    destinationFolderId: trashFolder.id
+  });
+  if (message.flags && message.flags.length > 0) {
+    const cleaned = withoutRecentFlag(message.flags);
+    if (cleaned.length !== message.flags.length) {
+      await updateMessageFlags(accountId, relocated?.nextId ?? message.id, cleaned);
+    }
+  }
+  return {
+    ok: true,
+    action: "moved",
+    trashFolderId: trashFolder.id,
+    trashMailbox: trashMailboxPath,
+    previousMessageId: relocated?.previousId ?? message.id,
+    messageId: relocated?.nextId ?? message.id
+  };
 }
