@@ -15,6 +15,33 @@ import { sanitizeSyncedMessage } from "@/lib/mail/syncMessageSanitizer";
  * destination shard so it appears without waiting for a full account sync.
  */
 
+// Dependencies are injected (defaulting to the real implementations) so tests
+// can exercise the IMAP/db/storage paths with plain fakes — no global
+// mock.module(), which leaks across Bun's single-process test suite.
+export type CopyDeps = {
+  getMessageSource: typeof getMessageSource;
+  appendImapMessage: typeof appendImapMessage;
+  syncImapMessage: typeof syncImapMessage;
+};
+
+const defaultCopyDeps: CopyDeps = {
+  getMessageSource,
+  appendImapMessage,
+  syncImapMessage
+};
+
+export type IngestDeps = {
+  resolveThreadingForAccountMessages: typeof resolveThreadingForAccountMessages;
+  sanitizeSyncedMessage: typeof sanitizeSyncedMessage;
+  upsertMessages: typeof upsertMessages;
+};
+
+const defaultIngestDeps: IngestDeps = {
+  resolveThreadingForAccountMessages,
+  sanitizeSyncedMessage,
+  upsertMessages
+};
+
 /**
  * Only system flags are carried over. Custom keywords (e.g. `$Todo`) aren't
  * guaranteed to be settable on an arbitrary destination server, and `\Recent`
@@ -32,13 +59,14 @@ async function loadRawSource(
   sourceAccount: Account,
   sourceAccountId: string,
   message: Message,
-  clientId?: string
+  clientId: string | undefined,
+  deps: CopyDeps
 ): Promise<Buffer | null> {
-  const stored = await getMessageSource(sourceAccountId, message.id);
+  const stored = await deps.getMessageSource(sourceAccountId, message.id);
   if (stored) return Buffer.from(stored, "utf-8");
   // No cached source (e.g. header-only sync): pull it fresh from IMAP.
   if (typeof message.imapUid === "number" && message.mailboxPath) {
-    const synced = await syncImapMessage(
+    const synced = await deps.syncImapMessage(
       sourceAccount,
       message.mailboxPath,
       message.imapUid,
@@ -59,14 +87,17 @@ export class CrossAccountCopyError extends Error {
   }
 }
 
-export async function copyMessageToAccount(params: {
-  sourceAccount: Account;
-  sourceAccountId: string;
-  message: Message;
-  destinationAccount: Account;
-  destinationMailboxPath: string;
-  clientId?: string;
-}): Promise<{ syncedMessage: Message | null; destinationUid: number }> {
+export async function copyMessageToAccount(
+  params: {
+    sourceAccount: Account;
+    sourceAccountId: string;
+    message: Message;
+    destinationAccount: Account;
+    destinationMailboxPath: string;
+    clientId?: string;
+  },
+  deps: CopyDeps = defaultCopyDeps
+): Promise<{ syncedMessage: Message | null; destinationUid: number }> {
   const {
     sourceAccount,
     sourceAccountId,
@@ -76,7 +107,7 @@ export async function copyMessageToAccount(params: {
     clientId
   } = params;
 
-  const raw = await loadRawSource(sourceAccount, sourceAccountId, message, clientId);
+  const raw = await loadRawSource(sourceAccount, sourceAccountId, message, clientId, deps);
   if (!raw) {
     throw new CrossAccountCopyError(
       "source-missing",
@@ -84,7 +115,7 @@ export async function copyMessageToAccount(params: {
     );
   }
 
-  const uid = await appendImapMessage(
+  const uid = await deps.appendImapMessage(
     destinationAccount,
     destinationMailboxPath,
     raw,
@@ -103,7 +134,7 @@ export async function copyMessageToAccount(params: {
   // destination IMAP server that a later sync will pick up, so it's non-fatal.
   let syncedMessage: Message | null = null;
   try {
-    syncedMessage = await syncImapMessage(
+    syncedMessage = await deps.syncImapMessage(
       destinationAccount,
       destinationMailboxPath,
       uid,
@@ -130,12 +161,16 @@ export async function copyMessageToAccount(params: {
  */
 export async function ingestCopiedMessages(
   destinationAccountId: string,
-  syncedMessages: Message[]
+  syncedMessages: Message[],
+  deps: IngestDeps = defaultIngestDeps
 ): Promise<void> {
   if (syncedMessages.length === 0) return;
-  const resolved = await resolveThreadingForAccountMessages(destinationAccountId, syncedMessages);
-  const sanitized = await Promise.all(
-    resolved.map((entry) => sanitizeSyncedMessage(entry, destinationAccountId))
+  const resolved = await deps.resolveThreadingForAccountMessages(
+    destinationAccountId,
+    syncedMessages
   );
-  await upsertMessages(destinationAccountId, null, sanitized, false);
+  const sanitized = await Promise.all(
+    resolved.map((entry) => deps.sanitizeSyncedMessage(entry, destinationAccountId))
+  );
+  await deps.upsertMessages(destinationAccountId, null, sanitized, false);
 }

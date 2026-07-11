@@ -1,81 +1,15 @@
-import { beforeEach, describe, expect, mock, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import type { Account, Message } from "@/lib/data";
+import {
+  copyMessageToAccount,
+  ingestCopiedMessages,
+  CrossAccountCopyError,
+  type CopyDeps,
+  type IngestDeps
+} from "@/lib/crossAccountCopy";
 
-// --- IMAP mocks -----------------------------------------------------------
-type AppendCall = { mailboxPath: string; raw: Buffer; flags: string[] };
-let appendCalls: AppendCall[] = [];
-let appendResult: number | null = 4242;
-const appendImapMessage = mock(
-  async (_account: Account, mailboxPath: string, raw: Buffer, flags: string[]) => {
-    appendCalls.push({ mailboxPath, raw, flags });
-    return appendResult;
-  }
-);
-
-// syncImapMessage is used both to fetch the source (source account) and to read
-// the appended message back (destination account); the harness routes by
-// mailbox path so a test can distinguish the two.
-let sourceFetchSource: string | null = null;
-let readBackMessage: Message | null = null;
-let readBackThrows = false;
-const syncImapMessage = mock(
-  async (account: Account, mailboxPath: string, uid: number) => {
-    if (mailboxPath === "SOURCE") {
-      return sourceFetchSource
-        ? ({ id: "src", accountId: account.id, source: sourceFetchSource } as unknown as Message)
-        : null;
-    }
-    if (readBackThrows) throw new Error("read-back boom");
-    return readBackMessage
-      ? ({ ...readBackMessage, imapUid: uid, mailboxPath } as Message)
-      : null;
-  }
-);
-
-// --- storage / db / sanitizer mocks --------------------------------------
-let storedSource: string | null = "raw-source-bytes";
-const getMessageSource = mock(async () => storedSource);
-
-let resolveThreadingCalls: Message[][] = [];
-const resolveThreadingForAccountMessages = mock(
-  async (_accountId: string, messages: Message[]) => {
-    resolveThreadingCalls.push(messages);
-    return messages.map((m) => ({ ...m, threadId: "thread-1" }));
-  }
-);
-let upsertCalls: Message[][] = [];
-const upsertMessages = mock(async (_accountId: string, _folderId: unknown, messages: Message[]) => {
-  upsertCalls.push(messages);
-});
-const sanitizeSyncedMessage = mock(async (message: Message) => message);
-
-const actualServerImap = await import("@/lib/serverImap");
-const actualServerDb = await import("@/lib/serverDb");
-const actualStorage = await import("@/lib/storage");
-const actualSanitizer = await import("@/lib/mail/syncMessageSanitizer");
-
-mock.module("@/lib/serverImap", () => ({
-  ...actualServerImap,
-  appendImapMessage,
-  syncImapMessage
-}));
-mock.module("@/lib/serverDb", () => ({
-  ...actualServerDb,
-  resolveThreadingForAccountMessages,
-  upsertMessages
-}));
-mock.module("@/lib/storage", () => ({
-  ...actualStorage,
-  getMessageSource
-}));
-mock.module("@/lib/mail/syncMessageSanitizer", () => ({
-  ...actualSanitizer,
-  sanitizeSyncedMessage
-}));
-
-const { copyMessageToAccount, ingestCopiedMessages, CrossAccountCopyError } = await import(
-  "@/lib/crossAccountCopy"
-);
+// Dependencies are injected, so these tests use plain fakes — no mock.module(),
+// which would leak across Bun's single-process suite.
 
 const sourceAccount = { id: "acc-src", email: "src@example.test" } as Account;
 const destinationAccount = { id: "acc-dst", email: "dst@example.test" } as Account;
@@ -110,27 +44,50 @@ function baseParams(message: Message) {
   };
 }
 
-beforeEach(() => {
-  appendCalls = [];
-  appendResult = 4242;
-  sourceFetchSource = null;
-  readBackMessage = null;
-  readBackThrows = false;
-  storedSource = "raw-source-bytes";
-  resolveThreadingCalls = [];
-  upsertCalls = [];
-  appendImapMessage.mockClear();
-  syncImapMessage.mockClear();
-  getMessageSource.mockClear();
-  resolveThreadingForAccountMessages.mockClear();
-  upsertMessages.mockClear();
-  sanitizeSyncedMessage.mockClear();
-});
+type AppendCall = { mailboxPath: string; raw: Buffer; flags: string[] };
+
+function makeCopyDeps(
+  overrides: {
+    storedSource?: string | null;
+    appendResult?: number | null;
+    readBack?: Message | null;
+    readBackThrows?: boolean;
+    sourceFetch?: string | null;
+  } = {}
+) {
+  const appendCalls: AppendCall[] = [];
+  const {
+    storedSource = "raw-source-bytes",
+    appendResult = 4242,
+    readBack = null,
+    readBackThrows = false,
+    sourceFetch = null
+  } = overrides;
+  const deps: CopyDeps = {
+    getMessageSource: async () => storedSource,
+    appendImapMessage: async (_account, mailboxPath, raw, flags) => {
+      appendCalls.push({ mailboxPath, raw: raw as Buffer, flags });
+      return appendResult;
+    },
+    // The source account fetches through the SOURCE mailbox; the destination
+    // read-back uses the destination mailbox — route by mailbox path.
+    syncImapMessage: async (_account, mailboxPath, uid) => {
+      if (mailboxPath === "SOURCE") {
+        return sourceFetch
+          ? ({ id: "src", source: sourceFetch } as unknown as Message)
+          : null;
+      }
+      if (readBackThrows) throw new Error("read-back boom");
+      return readBack ? ({ ...readBack, imapUid: uid, mailboxPath } as Message) : null;
+    }
+  };
+  return { deps, appendCalls };
+}
 
 describe("copyMessageToAccount", () => {
   test("appends the source bytes and reads the message back", async () => {
-    readBackMessage = makeMessage({ id: "dst-msg" });
-    const result = await copyMessageToAccount(baseParams(makeMessage()));
+    const { deps, appendCalls } = makeCopyDeps({ readBack: makeMessage({ id: "dst-msg" }) });
+    const result = await copyMessageToAccount(baseParams(makeMessage()), deps);
 
     expect(appendCalls).toHaveLength(1);
     expect(appendCalls[0]!.mailboxPath).toBe("Archive");
@@ -140,57 +97,77 @@ describe("copyMessageToAccount", () => {
   });
 
   test("carries over only system flags", async () => {
+    const { deps, appendCalls } = makeCopyDeps();
     await copyMessageToAccount(
-      baseParams(makeMessage({ seen: true, flagged: true, answered: true }))
+      baseParams(makeMessage({ seen: true, flagged: true, answered: true })),
+      deps
     );
     expect(appendCalls[0]!.flags).toEqual(["\\Seen", "\\Flagged", "\\Answered"]);
   });
 
   test("omits flags that are not set", async () => {
-    await copyMessageToAccount(baseParams(makeMessage({ seen: true })));
+    const { deps, appendCalls } = makeCopyDeps();
+    await copyMessageToAccount(baseParams(makeMessage({ seen: true })), deps);
     expect(appendCalls[0]!.flags).toEqual(["\\Seen"]);
   });
 
   test("throws source-missing when no cached source and no IMAP fallback", async () => {
-    storedSource = null;
+    const { deps, appendCalls } = makeCopyDeps({ storedSource: null });
     const message = makeMessage({ imapUid: undefined, mailboxPath: undefined });
-    await expect(copyMessageToAccount(baseParams(message))).rejects.toMatchObject({
+    await expect(copyMessageToAccount(baseParams(message), deps)).rejects.toMatchObject({
       code: "source-missing"
     });
-    expect(appendImapMessage).not.toHaveBeenCalled();
+    expect(appendCalls).toHaveLength(0);
   });
 
   test("falls back to an IMAP fetch when there is no cached source", async () => {
-    storedSource = null;
-    sourceFetchSource = "fetched-bytes";
+    const { deps, appendCalls } = makeCopyDeps({ storedSource: null, sourceFetch: "fetched-bytes" });
     const message = makeMessage({ imapUid: 7, mailboxPath: "SOURCE" });
-    const result = await copyMessageToAccount(baseParams(message));
+    const result = await copyMessageToAccount(baseParams(message), deps);
     expect(appendCalls[0]!.raw.toString("utf-8")).toBe("fetched-bytes");
     expect(result.destinationUid).toBe(4242);
   });
 
   test("throws append-failed when the destination rejects the APPEND", async () => {
-    appendResult = null;
-    await expect(copyMessageToAccount(baseParams(makeMessage()))).rejects.toBeInstanceOf(
+    const { deps } = makeCopyDeps({ appendResult: null });
+    await expect(copyMessageToAccount(baseParams(makeMessage()), deps)).rejects.toBeInstanceOf(
       CrossAccountCopyError
     );
-    await expect(copyMessageToAccount(baseParams(makeMessage()))).rejects.toMatchObject({
-      code: "append-failed"
-    });
+    const again = makeCopyDeps({ appendResult: null });
+    await expect(
+      copyMessageToAccount(baseParams(makeMessage()), again.deps)
+    ).rejects.toMatchObject({ code: "append-failed" });
   });
 
   test("read-back failure is non-fatal: still returns the destination UID", async () => {
-    readBackThrows = true;
-    const result = await copyMessageToAccount(baseParams(makeMessage()));
+    const { deps } = makeCopyDeps({ readBackThrows: true });
+    const result = await copyMessageToAccount(baseParams(makeMessage()), deps);
     expect(result.destinationUid).toBe(4242);
     expect(result.syncedMessage).toBeNull();
   });
 });
 
 describe("ingestCopiedMessages", () => {
+  function makeIngestDeps() {
+    const resolveThreadingCalls: Message[][] = [];
+    const upsertCalls: Message[][] = [];
+    const deps: IngestDeps = {
+      resolveThreadingForAccountMessages: async (_accountId, messages) => {
+        resolveThreadingCalls.push(messages as Message[]);
+        return (messages as Message[]).map((m) => ({ ...m, threadId: "thread-1" }));
+      },
+      sanitizeSyncedMessage: async (message) => message,
+      upsertMessages: async (_accountId, _folderId, messages) => {
+        upsertCalls.push(messages);
+      }
+    };
+    return { deps, resolveThreadingCalls, upsertCalls };
+  }
+
   test("resolves threading over the whole batch and upserts once", async () => {
+    const { deps, resolveThreadingCalls, upsertCalls } = makeIngestDeps();
     const messages = [makeMessage({ id: "a" }), makeMessage({ id: "b" }), makeMessage({ id: "c" })];
-    await ingestCopiedMessages("acc-dst", messages);
+    await ingestCopiedMessages("acc-dst", messages, deps);
 
     expect(resolveThreadingCalls).toHaveLength(1);
     expect(resolveThreadingCalls[0]!.map((m) => m.id)).toEqual(["a", "b", "c"]);
@@ -200,8 +177,9 @@ describe("ingestCopiedMessages", () => {
   });
 
   test("is a no-op for an empty batch", async () => {
-    await ingestCopiedMessages("acc-dst", []);
-    expect(resolveThreadingForAccountMessages).not.toHaveBeenCalled();
-    expect(upsertMessages).not.toHaveBeenCalled();
+    const { deps, resolveThreadingCalls, upsertCalls } = makeIngestDeps();
+    await ingestCopiedMessages("acc-dst", [], deps);
+    expect(resolveThreadingCalls).toHaveLength(0);
+    expect(upsertCalls).toHaveLength(0);
   });
 });
