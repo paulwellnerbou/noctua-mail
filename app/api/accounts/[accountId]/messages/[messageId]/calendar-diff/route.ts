@@ -57,9 +57,9 @@ export async function GET(request: Request, { params }: Params) {
         ? parseCalendarEventSnapshot(current.snapshotJson)
         : null;
       if (!currentSnapshot) {
-        // The current message itself doesn't have a snapshot yet — most
-        // likely it predates the snapshot column and the backfill script
-        // hasn't run, or hasSource=1 was set without a usable .eml.
+        // The current message itself doesn't have a snapshot — most likely
+        // it predates the snapshot column, or hasSource=1 was set without a
+        // usable .eml. Either way there's nothing to diff against.
         return {
           eventUid,
           diff: { kind: "unavailable" as const, reason: "no_current_snapshot" as const }

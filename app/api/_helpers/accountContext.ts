@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { requireSessionAccountOr403, requireSessionOr401, type SessionData } from "@/lib/auth";
-import { getAccountById } from "@/lib/serverDb";
+import { getAccountById, getAccountsForUser } from "@/lib/serverDb";
 import type { Account } from "@/lib/data";
 import { errorResponse } from "./response";
 
@@ -52,6 +52,34 @@ export async function requireAccountContext(
   const account = await getAccountById(accountId);
   if (!account) {
     return errorResponse("Account not found", 404);
+  }
+  const clientId = request.headers.get("x-noctua-client") ?? undefined;
+  return { session, accountId, account, clientId };
+}
+
+/**
+ * Like `requireAccountContext`, but authorizes any account the session user
+ * owns — not only the session's single active account. Cross-account features
+ * (e.g. copy/move a message into a *different* account of the same user) need
+ * to act on an account that `requireSessionAccountOr403` would reject because
+ * it isn't the active one.
+ */
+export async function requireOwnedAccountContext(
+  request: Request,
+  accountId: string,
+  options?: {
+    missingAccountMessage?: string;
+  }
+): Promise<AccountContext | NextResponse> {
+  if (!accountId) {
+    return errorResponse(options?.missingAccountMessage ?? "Missing accountId", 400);
+  }
+  const session = requireSessionOr401(request);
+  if (session instanceof NextResponse) return session;
+  const ownedAccounts = await getAccountsForUser(session.userId);
+  const account = ownedAccounts.find((item) => item.id === accountId);
+  if (!account) {
+    return errorResponse("Forbidden", 403);
   }
   const clientId = request.headers.get("x-noctua-client") ?? undefined;
   return { session, accountId, account, clientId };

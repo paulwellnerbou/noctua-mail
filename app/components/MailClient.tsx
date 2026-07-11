@@ -26,6 +26,7 @@ import { AccountDateFormatProvider } from "./AccountDateFormatContext";
 import LoginOverlay from "./auth/LoginOverlay";
 import FolderSidebarPane from "./mailclient/folder/FolderSidebarPane";
 import MoveToDialog, { recordRecentMoveFolder, getRecentMoveFolderIds } from "./mailclient/message/MoveToDialog";
+import CopyToAccountDialog from "./mailclient/message/CopyToAccountDialog";
 import InAppNoticeStack, { type InAppNotice } from "./mailclient/InAppNoticeStack";
 import DialogsHost from "./mailclient/dialogs/DialogsHost";
 import { useConfirmDialogs } from "./mailclient/dialogs/useConfirmDialogs";
@@ -292,6 +293,11 @@ type MailClientProps = {
 
 type MoveToDialogState = {
   message: Message;
+  request: MoveTargetRequest;
+};
+
+type CopyToAccountDialogState = {
+  mode: "copy" | "move";
   request: MoveTargetRequest;
 };
 
@@ -579,6 +585,8 @@ export default function MailClient({
   const [showJson, setShowJson] = useState(false);
   const [omitBody, setOmitBody] = useState(true);
   const [moveToDialogState, setMoveToDialogState] = useState<MoveToDialogState | null>(null);
+  const [copyToAccountState, setCopyToAccountState] =
+    useState<CopyToAccountDialogState | null>(null);
   const [bulkContextMenu, setBulkContextMenu] = useState<{ x: number; y: number } | null>(null);
   const [bulkContextMenuSelection, setBulkContextMenuSelection] = useState<string[]>([]);
   const bulkContextMenuReturnFocusRef = useRef<HTMLElement | null>(null);
@@ -3282,6 +3290,107 @@ export default function MailClient({
     [buildMoveTargetRequest, recordAndMove]
   );
 
+  const otherAccounts = useMemo(
+    () => accounts.filter((account) => account.id !== activeAccountId),
+    [accounts, activeAccountId]
+  );
+
+  const handleCopyToAccount = useCallback(
+    (message: Message, origin: "list" | "thread" | "table" = "list") => {
+      setCopyToAccountState({ mode: "copy", request: buildMoveTargetRequest(message, origin) });
+    },
+    [buildMoveTargetRequest]
+  );
+
+  const handleMoveToAccount = useCallback(
+    (message: Message, origin: "list" | "thread" | "table" = "list") => {
+      setCopyToAccountState({ mode: "move", request: buildMoveTargetRequest(message, origin) });
+    },
+    [buildMoveTargetRequest]
+  );
+
+  const handleCopyMessagesToAccount = useCallback(
+    (mode: "copy" | "move", messageIds: string[]) => {
+      const ids = Array.from(new Set(messageIds.filter(Boolean)));
+      if (ids.length === 0) return;
+      setCopyToAccountState({ mode, request: { messageIds: ids } });
+    },
+    []
+  );
+
+  const performCopyToAccount = useCallback(
+    async (destinationAccountId: string, destinationFolderId: string) => {
+      const state = copyToAccountState;
+      if (!state) return;
+      const { mode, request } = state;
+      const { messageIds, threadMove } = request;
+      if (messageIds.length === 0 && !threadMove) return;
+      const destinationName =
+        accounts.find((account) => account.id === destinationAccountId)?.name?.trim() ||
+        accounts.find((account) => account.id === destinationAccountId)?.email?.trim() ||
+        "account";
+      try {
+        const res = await apiFetch(
+          buildAccountMessagesActionPath(activeAccountId, "copy-to-account"),
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              messageIds,
+              threadMove,
+              destinationAccountId,
+              destinationFolderId,
+              mode
+            })
+          }
+        );
+        if (!res.ok) {
+          reportError(await readErrorMessage(res));
+          return;
+        }
+        const data = (await res.json()) as {
+          copied?: number;
+          removedIds?: string[];
+          results?: Array<{ ok: boolean; warning?: string; error?: string }>;
+        };
+        const copied = data.copied ?? 0;
+        const removedIds = new Set(data.removedIds ?? []);
+        if (removedIds.size > 0) {
+          setMessages((prev) => prev.filter((message) => !removedIds.has(message.id)));
+        }
+        const failed = (data.results ?? []).filter((result) => !result.ok);
+        const warning = (data.results ?? []).find((result) => result.warning)?.warning;
+        if (copied === 0) {
+          reportError(failed[0]?.error ?? "Failed to copy messages to the other account.");
+          return;
+        }
+        const verb = mode === "move" ? "Moved" : "Copied";
+        const subject =
+          copied === 1 ? "message" : `${copied} messages`;
+        pushNotice({
+          type: "success",
+          title: `${verb} ${subject} to ${destinationName}.`,
+          description:
+            warning ??
+            (failed.length > 0 ? `${failed.length} could not be processed.` : undefined),
+          durationMs: NOTICE_TIMEOUTS.success
+        });
+      } catch {
+        reportError("Failed to copy messages due to a network error.");
+      }
+    },
+    [
+      copyToAccountState,
+      accounts,
+      apiFetch,
+      activeAccountId,
+      reportError,
+      readErrorMessage,
+      setMessages,
+      pushNotice
+    ]
+  );
+
   const handleFindRelatedByCalendarInviteUid = (eventUid: string) => {
     const normalizedUid = eventUid.trim().replace(/"/g, "");
     if (!normalizedUid) return;
@@ -3359,7 +3468,10 @@ export default function MailClient({
     handleSendDraft,
     handleDiscardDraft,
     origin,
-    onOpenChange
+    onOpenChange,
+    otherAccounts.length > 0,
+    (target) => handleCopyToAccount(target, origin),
+    (target) => handleMoveToAccount(target, origin)
   );
 
   const updateFlagStateRef = useRef(updateFlagState);
@@ -5434,6 +5546,17 @@ export default function MailClient({
           recordAndMove(folderId, moveToDialogState.request);
         }}
       />
+      <CopyToAccountDialog
+        open={copyToAccountState !== null}
+        mode={copyToAccountState?.mode ?? "copy"}
+        messageCount={copyToAccountState?.request.messageIds.length ?? 0}
+        accounts={otherAccounts}
+        apiFetch={apiFetch}
+        onOpenChange={(open) => { if (!open) setCopyToAccountState(null); }}
+        onConfirm={(destinationAccountId, destinationFolderId) => {
+          void performCopyToAccount(destinationAccountId, destinationFolderId);
+        }}
+      />
       <BulkActionContextMenu
         open={bulkContextMenu !== null}
         position={bulkContextMenu}
@@ -5557,6 +5680,17 @@ export default function MailClient({
           onDelete: () => {
             if (bulkContextMenuSelection.length === 0) return;
             void handleDeleteMessagesByIds(bulkContextMenuSelection);
+          },
+          hasOtherAccounts: otherAccounts.length > 0,
+          onCopyToAccount: () => {
+            const targets = resolveMessagesByIds(bulkContextMenuSelection);
+            if (targets.length === 0) return;
+            handleCopyMessagesToAccount("copy", targets.map((m) => m.id));
+          },
+          onMoveToAccount: () => {
+            const targets = resolveMessagesByIds(bulkContextMenuSelection);
+            if (targets.length === 0) return;
+            handleCopyMessagesToAccount("move", targets.map((m) => m.id));
           }
         }}
       />
