@@ -86,14 +86,14 @@ function normalizeForFlagComparison(flags: string[]): string {
 }
 
 export function diffLocalAndRemoteWithFlags(
-  localRows: Array<{ id: string; imapUid: number; flags: string | null }>,
+  localRows: Array<{ id: string; imapUid: number | null; flags: string | null }>,
   remoteEntries: Array<{ uid: number; flags: string[] }>
 ) {
   const remoteByUid = new Map(remoteEntries.map((e) => [e.uid, e]));
   const localByUid = new Map(localRows.map((r) => [r.imapUid, r]));
 
   const staleMessageIds = localRows
-    .filter((row) => !remoteByUid.has(row.imapUid))
+    .filter((row) => row.imapUid === null || !remoteByUid.has(row.imapUid))
     .map((row) => row.id);
 
   const missingRemoteUids = remoteEntries
@@ -322,8 +322,10 @@ export async function runSyncOperationBatched(
     );
     const { staleMessageIds, flagUpdates } = repairDiff;
 
-    const highestLocalUid =
-      localRows.length > 0 ? Math.max(...localRows.map((row) => row.imapUid)) : null;
+    const localRowUids = localRows
+      .map((row) => row.imapUid)
+      .filter((uid): uid is number => typeof uid === "number" && Number.isFinite(uid));
+    const highestLocalUid = localRowUids.length > 0 ? Math.max(...localRowUids) : null;
     const { historicalMissingUids, newerMissingUids, backfillUids } =
       partitionMissingRemoteUids(missingRemoteUids, highestLocalUid);
 
@@ -390,7 +392,6 @@ export async function runSyncOperationBatched(
     emitProgress({
       phase: "done",
       processed: result.count,
-      estimatedTotal: localRows.length,
       percent: 100,
       highestProcessedUid: result.highestProcessedUid,
       message: `Repair completed: ${staleMessageIds.length} removed, ${flagUpdates.length} flag updates, ${backfillUids.length} backfilled.`
@@ -483,9 +484,23 @@ export async function runSyncOperationBatched(
 
     if (missingRemoteUids.length === 0) {
       // No new messages — we're done.
+      emitProgress({
+        phase: "finalizing",
+        processed: phaseOneCount,
+        estimatedTotal: phaseOneCount,
+        percent: 100,
+        message: "Saving folder list."
+      });
       await saveFoldersForAccount(account.id, folders);
 
       if (payload.recategorizeFolder) {
+        emitProgress({
+          phase: "finalizing",
+          processed: phaseOneCount,
+          estimatedTotal: phaseOneCount,
+          percent: 100,
+          message: "Recomputing categories for synced folder."
+        });
         await recomputeCategoriesForAccount(account.id, { folderId: twoPhaseFolderId });
       }
 
@@ -507,8 +522,10 @@ export async function runSyncOperationBatched(
     // mode. When the local folder has no watermark yet, or there are UID gaps
     // below the current watermark, switch to explicit UID backfill so nested
     // "new" mode does not baseline and skip the missing rows.
-    const highestLocalUid =
-      localRows.length > 0 ? Math.max(...localRows.map((row) => row.imapUid)) : null;
+    const localRowUids = localRows
+      .map((row) => row.imapUid)
+      .filter((uid): uid is number => typeof uid === "number" && Number.isFinite(uid));
+    const highestLocalUid = localRowUids.length > 0 ? Math.max(...localRowUids) : null;
     const {
       historicalMissingUids,
       backfillUids,
@@ -537,17 +554,34 @@ export async function runSyncOperationBatched(
       options
     );
 
+    // The nested "new"-mode fetch above already emitted its own terminal
+    // "done" progress. Without these, the client keeps showing that stale
+    // message while the folder/thread/category bookkeeping below — which can
+    // take much longer than the fetch itself — runs with no visible progress.
+    const twoPhaseProcessedCount = phaseOneCount + nestedResult.count;
+    const emitTwoPhaseFinalizing = (message: string) =>
+      emitProgress({
+        phase: "finalizing",
+        processed: twoPhaseProcessedCount,
+        estimatedTotal: twoPhaseProcessedCount,
+        percent: 100,
+        message
+      });
+
+    emitTwoPhaseFinalizing("Saving folder list.");
     await saveFoldersForAccount(account.id, folders);
 
-    if (syncMode === "full" && (phaseOneCount + nestedResult.count) > 0) {
+    if (syncMode === "full" && twoPhaseProcessedCount > 0) {
+      emitTwoPhaseFinalizing("Recomputing message threads.");
       await recomputeThreadsForAccount(account.id);
     }
     if (payload.recategorizeFolder) {
+      emitTwoPhaseFinalizing("Recomputing categories for synced folder.");
       await recomputeCategoriesForAccount(account.id, { folderId: twoPhaseFolderId });
     }
 
     const result: SyncOperationResult = {
-      count: phaseOneCount + nestedResult.count,
+      count: twoPhaseProcessedCount,
       newMessages: nestedResult.newMessages,
       highestProcessedUid: nestedResult.highestProcessedUid ?? snapshot.highestUid ?? undefined
     };

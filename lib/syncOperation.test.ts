@@ -105,6 +105,24 @@ describe("diffLocalAndRemoteWithFlags", () => {
 
     expect(diff.flagUpdates).toEqual([{ id: "msg-1", flags: ["\\Seen"] }]);
   });
+
+  test("a local row with a null imapUid is always stale — it can never match a remote UID", () => {
+    // Covers a finalized-but-unresolved move: the row's pending-move markers
+    // were already cleared, but the destination UID was never learned (e.g.
+    // the server's MOVE/COPY response omitted one). Nothing will ever assign
+    // it a UID from here, so it must be reconcilable like any other orphan.
+    const diff = diffLocalAndRemoteWithFlags(
+      [
+        { id: "msg-orphaned", imapUid: null, flags: null },
+        { id: "msg-1", imapUid: 10, flags: JSON.stringify(["\\Seen"]) }
+      ],
+      [{ uid: 10, flags: ["\\Seen"] }]
+    );
+
+    expect(diff.staleMessageIds).toEqual(["msg-orphaned"]);
+    expect(diff.missingRemoteUids).toEqual([]);
+    expect(diff.flagUpdates).toEqual([]);
+  });
 });
 
 describe("filterMissingRemoteUidsForPendingMoves", () => {
