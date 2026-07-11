@@ -90,7 +90,13 @@ export function diffLocalAndRemoteWithFlags(
   remoteEntries: Array<{ uid: number; flags: string[] }>
 ) {
   const remoteByUid = new Map(remoteEntries.map((e) => [e.uid, e]));
-  const localByUid = new Map(localRows.map((r) => [r.imapUid, r]));
+  // A null imapUid can never match a remote UID, so it's excluded here
+  // rather than left to collide into one dead `null` map entry.
+  const localByUid = new Map(
+    localRows
+      .filter((row): row is typeof row & { imapUid: number } => row.imapUid !== null)
+      .map((row) => [row.imapUid, row])
+  );
 
   const staleMessageIds = localRows
     .filter((row) => row.imapUid === null || !remoteByUid.has(row.imapUid))
