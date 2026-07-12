@@ -1151,8 +1151,9 @@ export function initAccountSchema(db: any) {
   ensureTopicOptionalColumns(db);
   ensureMessageCalendarEventOptionalColumns(db);
 
-  // `marker` was added to make the translation cache content-addressed; back-fill
-  // it on shards created before this column existed.
+  // `marker` makes the translation cache content-addressed. Add the column on
+  // shards created before it existed; pre-existing rows keep a NULL marker, so
+  // they simply miss the marker-matched lookup and are retranslated once.
   const translationColumns = getDbTableColumns(db, "message_translations");
   if (translationColumns.size > 0 && !translationColumns.has("marker")) {
     db.prepare(`ALTER TABLE message_translations ADD COLUMN marker TEXT`).run();
