@@ -66,16 +66,18 @@ export async function POST(request: Request, { params }: Params) {
     );
   }
   // Pull inline base64 images out before translating (they blow DeepL's size
-  // limit and aren't translatable). The marker is derived from the body, so the
-  // cache stores only the small stripped translation and the images are spliced
-  // back in on serve by re-extracting the current body's data URIs.
+  // limit and aren't translatable). The marker is the body's content hash, so
+  // the cache stores only the small stripped translation, the images are spliced
+  // back in on serve, and a rewritten body (new marker) misses and retranslates
+  // instead of restoring against a stale entry.
   const { text: sourceText, tokens: inlineData, marker } = extractInlineData(rawSource);
 
   const cached = await getCachedTranslation(
     resolvedAccountId,
     resolvedMessageId,
     targetLang,
-    format
+    format,
+    marker
   );
   if (cached) {
     return NextResponse.json({
@@ -94,6 +96,7 @@ export async function POST(request: Request, { params }: Params) {
       messageId: resolvedMessageId,
       targetLang,
       format,
+      marker,
       translatedText: result.text,
       detectedSourceLang: result.detectedSourceLang
     });

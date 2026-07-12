@@ -770,6 +770,7 @@ export function initAccountSchema(db: any) {
       messageId TEXT NOT NULL,
       targetLang TEXT NOT NULL,
       format TEXT NOT NULL,
+      marker TEXT,
       translatedText TEXT NOT NULL,
       detectedSourceLang TEXT,
       createdAt INTEGER NOT NULL,
@@ -1149,6 +1150,13 @@ export function initAccountSchema(db: any) {
   ensureThreadOptionalColumns(db);
   ensureTopicOptionalColumns(db);
   ensureMessageCalendarEventOptionalColumns(db);
+
+  // `marker` was added to make the translation cache content-addressed; back-fill
+  // it on shards created before this column existed.
+  const translationColumns = getDbTableColumns(db, "message_translations");
+  if (translationColumns.size > 0 && !translationColumns.has("marker")) {
+    db.prepare(`ALTER TABLE message_translations ADD COLUMN marker TEXT`).run();
+  }
 
   const reminderColumns = getDbTableColumns(db, "calendar_reminders");
   if (reminderColumns.size > 0) {

@@ -8,13 +8,15 @@ import {
 
 export async function POST(request: Request, { params }: AccountRouteParams) {
   const accountId = await getAccountIdFromParams(params);
-  const payload = (await request.json().catch(() => null)) as { apiKey?: string } | null;
 
   const context = await requireAccountContext(request, accountId, {
     missingAccountMessage: "Missing accountId"
   });
   if (context instanceof NextResponse) return context;
 
+  // Parse the body only after auth so an unauthenticated caller can't force
+  // request-body parsing work.
+  const payload = (await request.json().catch(() => null)) as { apiKey?: string } | null;
   // Prefer a key typed into the form; fall back to the stored key so the test
   // works for an already-saved account (the form field is blank by design).
   const provided = typeof payload?.apiKey === "string" ? payload.apiKey.trim() : "";
