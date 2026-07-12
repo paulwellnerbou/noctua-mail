@@ -14,11 +14,17 @@ export type MessageTranslationResult = {
 };
 
 export type MessageTranslationEntry = {
-  /** Whether the translated view is currently shown for this message. */
+  /** Whether translated views are active for this message (vs. originals). */
   showing: boolean;
   /** Active DeepL target language for this message. */
   targetLang: string;
-  status: "idle" | "loading" | "error";
+  /**
+   * Loading/error are tracked per result key (`${format}:${targetLang}`) rather
+   * than globally, so translating the HTML view doesn't make an untranslated
+   * Text view look like it is loading or failed.
+   */
+  loadingKey?: string;
+  errorKey?: string;
   error?: string;
   /** Fetched translations keyed by `${format}:${targetLang}`. */
   results: Record<string, MessageTranslationResult>;

@@ -462,20 +462,18 @@ function MessageViewOrchestratorImpl(
       // later request (or an account-change reset) makes stale responses drop.
       const isCurrentRequest = () => translationRequestSeqRef.current[messageId] === requestSeq;
       setMessageTranslations((prev) => {
-        const entry = prev[messageId] ?? {
-          showing: true,
-          targetLang,
-          status: "idle" as const,
-          results: {}
-        };
+        const entry = prev[messageId] ?? { showing: true, targetLang, results: {} };
         return {
           ...prev,
           [messageId]: {
             ...entry,
             showing: true,
             targetLang,
-            status: cached ? "idle" : "loading",
-            error: undefined
+            // Mark this key as loading unless it's already cached; clear any
+            // prior error for the same key on retry.
+            loadingKey: cached ? entry.loadingKey : key,
+            errorKey: entry.errorKey === key ? undefined : entry.errorKey,
+            error: entry.errorKey === key ? undefined : entry.error
           }
         };
       });
@@ -492,37 +490,47 @@ function MessageViewOrchestratorImpl(
           translatedText?: string;
           detectedSourceLang?: string;
         } | null;
-        if (!isCurrentRequest()) return;
-        if (!res.ok || !data?.ok || typeof data.translatedText !== "string") {
-          throw new Error(data?.message ?? "Translation failed.");
+        if (res.ok && data?.ok && typeof data.translatedText === "string") {
+          const translatedText = data.translatedText;
+          const detectedSourceLang = data.detectedSourceLang ?? "";
+          // Keep a successful result even if a newer request has since
+          // superseded this one (results are keyed by format+lang, so nothing is
+          // clobbered); only the latest request drives the visible targetLang.
+          setMessageTranslations((prev) => {
+            const entry = prev[messageId];
+            if (!entry) return prev;
+            const results = {
+              ...entry.results,
+              [key]: { text: translatedText, detectedSourceLang }
+            };
+            const loadingKey = entry.loadingKey === key ? undefined : entry.loadingKey;
+            const errorKey = entry.errorKey === key ? undefined : entry.errorKey;
+            const error = entry.errorKey === key ? undefined : entry.error;
+            const next = isCurrentRequest()
+              ? { ...entry, targetLang, results, loadingKey, errorKey, error }
+              : { ...entry, results, loadingKey, errorKey, error };
+            return { ...prev, [messageId]: next };
+          });
+          return;
         }
-        const translatedText = data.translatedText;
-        const detectedSourceLang = data.detectedSourceLang ?? "";
-        setMessageTranslations((prev) => {
-          const entry = prev[messageId] ?? {
-            showing: true,
-            targetLang,
-            status: "idle" as const,
-            results: {}
-          };
-          return {
-            ...prev,
-            [messageId]: {
-              ...entry,
-              targetLang,
-              status: "idle",
-              error: undefined,
-              results: { ...entry.results, [key]: { text: translatedText, detectedSourceLang } }
-            }
-          };
-        });
+        throw new Error(data?.message ?? "Translation failed.");
       } catch (error) {
+        // Ignore a stale error so a superseded request can't flip a newer view
+        // into an error state.
         if (!isCurrentRequest()) return;
         const messageText = error instanceof Error ? error.message : "Translation failed.";
         setMessageTranslations((prev) => {
           const entry = prev[messageId];
           if (!entry) return prev;
-          return { ...prev, [messageId]: { ...entry, status: "error", error: messageText } };
+          return {
+            ...prev,
+            [messageId]: {
+              ...entry,
+              loadingKey: entry.loadingKey === key ? undefined : entry.loadingKey,
+              errorKey: key,
+              error: messageText
+            }
+          };
         });
       }
     },
