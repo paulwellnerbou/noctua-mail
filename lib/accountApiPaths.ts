@@ -295,6 +295,14 @@ export function buildAccountMessageHtmlPath(accountId: string, messageId: string
   );
 }
 
+export function buildAccountMessageTranslatePath(accountId: string, messageId: string) {
+  return buildAccountMessageActionPath(accountId, messageId, "translate");
+}
+
+export function buildAccountTranslationTestPath(accountId: string) {
+  return buildAccountApiPath(accountId, "/translation/test");
+}
+
 export function buildAccountMessageCalendarDiffPath(accountId: string, messageId: string) {
   return buildAccountApiPath(
     accountId,

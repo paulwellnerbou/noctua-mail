@@ -5386,7 +5386,11 @@ export default function MailClient({
               userEmail: currentAccount?.email,
               senderIconsEnabled: currentAccount?.settings?.appearance?.senderIcons ?? true,
               onSearchByAddress: handleSearchByAddress,
-              onComposeTo: handleComposeTo
+              onComposeTo: handleComposeTo,
+              translationEnabled: Boolean(
+                currentAccount?.deepl?.enabled && currentAccount?.deepl?.hasApiKey
+              ),
+              defaultTranslationTargetLang: currentAccount?.deepl?.targetLang
             }
           }}
         />

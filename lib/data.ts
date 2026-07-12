@@ -12,6 +12,24 @@ export type CaldavConfig = {
   syncIntervalMs?: number;
 };
 
+export type DeeplConfig = {
+  /**
+   * DeepL API key. A secret: stored encrypted, blanked before reaching the
+   * client (like imap/smtp/caldav passwords). Free-tier keys carry a `:fx`
+   * suffix, which the server uses to pick the free vs pro endpoint.
+   */
+  apiKey?: string;
+  /** Whether the translation feature is turned on for this account. */
+  enabled?: boolean;
+  /** Default DeepL target language code, e.g. "EN-US" or "DE". */
+  targetLang?: string;
+  /**
+   * Client-only signal set during sanitization so the browser can tell that a
+   * key is stored without the value ever leaving the server. Never persisted.
+   */
+  hasApiKey?: boolean;
+};
+
 export type Account = {
   id: string;
   name: string;
@@ -20,6 +38,7 @@ export type Account = {
   ownerUserId?: string;
   settings?: AccountSettings;
   caldav?: CaldavConfig;
+  deepl?: DeeplConfig;
   imap: {
     host: string;
     port: number;

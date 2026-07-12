@@ -1,6 +1,7 @@
 import type {
   Account,
   CaldavConfig,
+  DeeplConfig,
   InviteCode,
   McpTokenMetadata,
   User
@@ -78,6 +79,17 @@ export function mapAccountRow(row: any): Account {
               : undefined
         }
       : undefined;
+  const hasDeepl =
+    (row.deeplApiKey && String(row.deeplApiKey).trim()) ||
+    row.deeplEnabled != null ||
+    (row.deeplTargetLang && String(row.deeplTargetLang).trim());
+  const deepl: DeeplConfig | undefined = hasDeepl
+    ? {
+        apiKey: decodeSecret(String(row.deeplApiKey ?? "")),
+        enabled: row.deeplEnabled != null ? Boolean(row.deeplEnabled) : undefined,
+        targetLang: row.deeplTargetLang ? String(row.deeplTargetLang) : undefined
+      }
+    : undefined;
   return {
     id: row.id,
     name: row.name,
@@ -85,6 +97,7 @@ export function mapAccountRow(row: any): Account {
     avatar: row.avatar,
     settings: normalizeAccountSettings(safeParseJson(row.settings) ?? undefined),
     caldav,
+    deepl,
     imap: {
       host: row.imapHost,
       port: row.imapPort,
@@ -103,6 +116,25 @@ export function mapAccountRow(row: any): Account {
   };
 }
 
+function mergeDeeplForPatch(
+  current: DeeplConfig | undefined,
+  patch: DeeplConfig | null | undefined
+): DeeplConfig | undefined {
+  if (patch === undefined) return current;
+  if (patch === null) return undefined;
+  const merged: DeeplConfig = { ...(current ?? {}), ...patch };
+  // A blank incoming apiKey means "leave the stored key unchanged": the client
+  // never receives the real key (sanitizeAccountForClient blanks it), so saving
+  // unrelated translation settings must not wipe it. Clearing the key entirely
+  // is done by sending `deepl: null`, handled above.
+  if (!patch.apiKey || !patch.apiKey.trim()) {
+    merged.apiKey = current?.apiKey;
+  }
+  // Client-only presence signal; never persisted.
+  delete merged.hasApiKey;
+  return merged;
+}
+
 export function mergeAccount(current: Account, payload: Partial<Account>): Account {
   const mergedCaldav =
     payload.caldav !== undefined
@@ -110,10 +142,12 @@ export function mergeAccount(current: Account, payload: Partial<Account>): Accou
         ? undefined
         : { ...(current.caldav ?? {}), ...payload.caldav }
       : current.caldav;
+  const mergedDeepl = mergeDeeplForPatch(current.deepl, payload.deepl);
   return {
     ...current,
     ...payload,
     caldav: mergedCaldav,
+    deepl: mergedDeepl,
     imap: { ...current.imap, ...(payload.imap ?? {}) },
     smtp: { ...current.smtp, ...(payload.smtp ?? {}) },
     settings: { ...(current.settings ?? {}), ...(payload.settings ?? {}) }
@@ -133,8 +167,9 @@ export function persistAccountRow(db: any, account: Account, dbPath?: string | n
       settings,
       imapHost, imapPort, imapSecure, imapUser, imapPassword,
       smtpHost, smtpPort, smtpSecure, smtpUser, smtpPassword,
-      caldavUrl, caldavUser, caldavPassword, caldavCalendarPath, caldavSyncIntervalMs
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      caldavUrl, caldavUser, caldavPassword, caldavCalendarPath, caldavSyncIntervalMs,
+      deeplApiKey, deeplEnabled, deeplTargetLang
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   insert.run(
     account.id,
@@ -158,6 +193,11 @@ export function persistAccountRow(db: any, account: Account, dbPath?: string | n
     account.caldav?.user ?? null,
     account.caldav?.password ? encodeSecret(account.caldav.password) : null,
     account.caldav?.calendarPath ?? null,
-    account.caldav?.syncIntervalMs ?? null
+    account.caldav?.syncIntervalMs ?? null,
+    // `encodeSecret` returns "" when DB credential storage is disabled; store
+    // NULL rather than an empty string so a key is never silently half-saved.
+    (account.deepl?.apiKey ? encodeSecret(account.deepl.apiKey) : "") || null,
+    account.deepl?.enabled == null ? null : account.deepl.enabled ? 1 : 0,
+    account.deepl?.targetLang?.trim() ? account.deepl.targetLang.trim() : null
   );
 }

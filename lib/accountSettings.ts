@@ -33,6 +33,7 @@ type AccountSettingsSaveTab =
   | "categorization"
   | "calendar"
   | "topics"
+  | "translation"
   | "mcp"
   | "recipient-aliases"
   | "admin";
@@ -98,6 +99,15 @@ function getTabSaveSnapshot(account: Account, tab: AccountSettingsSaveTab, isAdm
       return {
         appearance: {
           topicColorRows: settings.appearance.topicColorRows
+        }
+      };
+    case "translation":
+      return {
+        deepl: {
+          enabled: account.deepl?.enabled ?? false,
+          targetLang: account.deepl?.targetLang ?? "",
+          apiKey: account.deepl?.apiKey ?? "",
+          hasApiKey: account.deepl?.hasApiKey ?? false
         }
       };
     case "categorization":

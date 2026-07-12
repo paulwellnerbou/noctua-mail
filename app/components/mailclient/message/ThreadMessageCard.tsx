@@ -2,13 +2,14 @@ import { useEffect, useState } from "react";
 import type React from "react";
 import {
   Image as ImageIcon,
+  Languages,
   MoveRight,
   Paperclip,
   RefreshCw,
   ZoomIn,
   ZoomOut
 } from "lucide-react";
-import { Badge, Button, Card, IconButton, Tabs } from "@radix-ui/themes";
+import { Badge, Button, Card, Flex, IconButton, Select, Tabs, Text } from "@radix-ui/themes";
 import { CaretRightIcon } from "@radix-ui/react-icons";
 import * as Collapsible from "@radix-ui/react-collapsible";
 import { badgeColors, getFlagBadgeColor, getPriorityBadgeColor } from "@/lib/ui/badgeColors";
@@ -25,6 +26,16 @@ import {
   stripRedundantInlineImageFallbacks
 } from "@/lib/html";
 import { countRecipientEntries } from "@/lib/recipientLists";
+import type {
+  MessageTranslationEntry,
+  MessageTranslationFormat
+} from "./messageTranslation";
+import { translationResultKey } from "./messageTranslation";
+import {
+  DEEPL_TARGET_LANGUAGES,
+  deeplTargetLanguageLabel,
+  normalizeDeeplTargetLang
+} from "@/lib/deeplLanguages";
 import badgeStyles from "./MessageBadge.module.css";
 import styles from "./ThreadMessageCard.module.css";
 import AttachmentsList from "../../AttachmentsList";
@@ -110,6 +121,20 @@ type ThreadMessageCardProps = {
   senderIconsEnabled?: boolean;
   onSearchByAddress?: (action: "with" | "from" | "to", email: string) => void;
   onComposeTo?: (email: string) => void;
+  translationEnabled?: boolean;
+  defaultTranslationTargetLang?: string;
+  messageTranslations?: Record<string, MessageTranslationEntry>;
+  onShowTranslation?: (
+    messageId: string,
+    format: MessageTranslationFormat,
+    targetLang?: string
+  ) => void;
+  onHideTranslation?: (messageId: string) => void;
+  onChangeTranslationLang?: (
+    messageId: string,
+    format: MessageTranslationFormat,
+    targetLang: string
+  ) => void;
 };
 
 export default function ThreadMessageCard({
@@ -162,7 +187,13 @@ export default function ThreadMessageCard({
   userEmail,
   senderIconsEnabled = true,
   onSearchByAddress,
-  onComposeTo
+  onComposeTo,
+  translationEnabled = false,
+  defaultTranslationTargetLang,
+  messageTranslations,
+  onShowTranslation,
+  onHideTranslation,
+  onChangeTranslationLang
 }: ThreadMessageCardProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const toValue = (message.to ?? "").trim() || "(no recipients)";
@@ -191,6 +222,34 @@ export default function ThreadMessageCard({
   const contentLoading = bodyLoading || Boolean(messageContentLoading[message.id]);
   const fontScale = messageFontScale[message.id] ?? 1;
   const zoomValue = messageZoom[message.id] ?? 1;
+  const translation = messageTranslations?.[message.id];
+  const translationShowing = Boolean(translationEnabled && translation?.showing);
+  // Normalize to a supported code so an invalid persisted/overridden language
+  // can't leak into the banner label, the Select value, the request payload, or
+  // the client-side cache key (which must match the server's normalized key).
+  const translationTargetLang = normalizeDeeplTargetLang(
+    translation?.targetLang ?? defaultTranslationTargetLang
+  );
+  const translationFormatForTab = (tab: MessageTab): MessageTranslationFormat | null =>
+    tab === "html" ? "html" : tab === "text" || tab === "markdown" ? "text" : null;
+  // Result, loading, and error are per (format, target-lang), so one tab's
+  // translation state never leaks onto another (e.g. translating HTML doesn't
+  // make an untranslated Text view look like it's loading).
+  const translationResultFor = (format: MessageTranslationFormat) =>
+    translation?.results?.[translationResultKey(format, translationTargetLang)];
+  const translationLoadingFor = (format: MessageTranslationFormat) =>
+    translation?.loadingKey === translationResultKey(format, translationTargetLang);
+  const translationErrorFor = (format: MessageTranslationFormat) =>
+    translation?.errorKey === translationResultKey(format, translationTargetLang)
+      ? translation?.error
+      : undefined;
+  // The current tab counts as "showing a translation" only when it has a result
+  // or a load in progress; otherwise the button offers to translate this tab.
+  const translationActiveForTab = (tab: MessageTab): boolean => {
+    const format = translationFormatForTab(tab);
+    if (!format || !translationShowing) return false;
+    return Boolean(translationResultFor(format) || translationLoadingFor(format));
+  };
   const folderBadgeIds = message.folderId ? [message.folderId] : [];
   const dateDisplay = getMessageDateDisplay(message.dateValue, message.date, dateFormat);
 
@@ -326,6 +385,34 @@ export default function ThreadMessageCard({
               </IconButton>
             </div>
           ) : null}
+          {translationEnabled && translationFormatForTab(currentTab)
+            ? (() => {
+                const active = translationActiveForTab(currentTab);
+                return (
+                  <div className={styles.buttonGroup}>
+                    <Button
+                      size="1"
+                      variant={active ? "solid" : "surface"}
+                      color={active ? "iris" : "gray"}
+                      title={active ? "Show original" : "Translate this message"}
+                      aria-label={active ? "Show original" : "Translate this message"}
+                      onClick={() => {
+                        const format = translationFormatForTab(currentTab);
+                        if (!format) return;
+                        if (active) {
+                          onHideTranslation?.(message.id);
+                        } else {
+                          onShowTranslation?.(message.id, format, translationTargetLang);
+                        }
+                      }}
+                    >
+                      <Languages size={12} />
+                      Translate
+                    </Button>
+                  </div>
+                );
+              })()
+            : null}
         </div>
       ) : null}
     </div>
@@ -337,9 +424,9 @@ export default function ThreadMessageCard({
     </div>
   );
 
-  const renderHtmlPanel = () => {
+  const renderHtmlPanel = (overrideHtml?: string) => {
     const attachments = message.attachments ?? [];
-    let html = replaceInlineImageSources(message.htmlBody ?? "", attachments);
+    let html = replaceInlineImageSources(overrideHtml ?? message.htmlBody ?? "", attachments);
     html = stripRedundantInlineImageFallbacks(html, attachments);
     html = appendUnreferencedInlineImages(html, attachments);
 
@@ -383,6 +470,104 @@ export default function ThreadMessageCard({
     </div>
   );
 
+  const renderTranslationLoadingPanel = () => (
+    <div className={styles.bodyLoading} role="status" aria-live="polite">
+      <span className={styles.bodyLoadingLabel}>Translating…</span>
+      <div className={styles.bodyLoadingSkeleton} aria-hidden="true">
+        <span className={styles.bodyLoadingLine} />
+        <span className={styles.bodyLoadingLine} />
+        <span className={`${styles.bodyLoadingLine} ${styles.bodyLoadingLineShort}`} />
+      </div>
+    </div>
+  );
+
+  const renderTranslationBanner = (format: MessageTranslationFormat) => {
+    const result = translationResultFor(format);
+    const loading = translationLoadingFor(format);
+    const error = translationErrorFor(format);
+    const statusText = loading
+      ? "Translating…"
+      : error
+        ? error
+        : result
+          ? `Translated to ${deeplTargetLanguageLabel(translationTargetLang)}${
+              result.detectedSourceLang ? ` · from ${result.detectedSourceLang}` : ""
+            }`
+          : "Not translated yet.";
+    return (
+      <Flex
+        align="center"
+        gap="2"
+        wrap="wrap"
+        style={{ padding: "var(--space-2)", borderBottom: "1px solid var(--gray-a4)" }}
+      >
+        <Languages size={13} />
+        <Text size="1" color={error ? "red" : "gray"}>
+          {statusText}
+        </Text>
+        <Select.Root
+          size="1"
+          value={translationTargetLang}
+          onValueChange={(value) => onChangeTranslationLang?.(message.id, format, value)}
+        >
+          <Select.Trigger aria-label="Translation target language" />
+          <Select.Content position="popper">
+            {DEEPL_TARGET_LANGUAGES.map((language) => (
+              <Select.Item key={language.code} value={language.code}>
+                {language.label}
+              </Select.Item>
+            ))}
+          </Select.Content>
+        </Select.Root>
+        <Button size="1" variant="ghost" color="gray" onClick={() => onHideTranslation?.(message.id)}>
+          Show original
+        </Button>
+      </Flex>
+    );
+  };
+
+  const renderOriginalPanelForTab = (tab: MessageTab): React.ReactNode => {
+    if (tab === "html") return renderHtmlPanel();
+    if (tab === "markdown") return renderMarkdownOrEmpty();
+    if (tab === "source") return renderSourcePanel(message.id);
+    return renderTextOrEmpty();
+  };
+
+  const renderTranslatedPanelForTab = (
+    tab: MessageTab,
+    format: MessageTranslationFormat,
+    text: string
+  ): React.ReactNode => {
+    if (format === "html") return renderHtmlPanel(text);
+    if (tab === "markdown") return renderMarkdownPanel(text, `${message.id}::translation`);
+    return renderTextPanel(text);
+  };
+
+  // Returns the body for a tab: the DeepL translation (with a banner) when this
+  // tab has a result, an in-progress load, or an error; otherwise the
+  // untranslated original. The loading skeleton only shows while THIS tab is
+  // actually being fetched, and an error falls back to the original.
+  const renderPanelForTab = (tab: MessageTab): React.ReactNode => {
+    const format = translationShowing ? translationFormatForTab(tab) : null;
+    if (!format) return renderOriginalPanelForTab(tab);
+    const result = translationResultFor(format);
+    const loading = translationLoadingFor(format);
+    const error = translationErrorFor(format);
+    // Nothing translation-related for this tab yet — show the original.
+    if (!result && !loading && !error) return renderOriginalPanelForTab(tab);
+    const body = result
+      ? renderTranslatedPanelForTab(tab, format, result.text)
+      : loading
+        ? renderTranslationLoadingPanel()
+        : renderOriginalPanelForTab(tab);
+    return (
+      <>
+        {renderTranslationBanner(format)}
+        {body}
+      </>
+    );
+  };
+
   let content: React.ReactNode = null;
   if (bodyLoadError && needsContentHydration) {
     content = wrapPanel(
@@ -414,14 +599,7 @@ export default function ThreadMessageCard({
       tabs.map((tab) => tab.value),
       preferTextTab ? "text" : "html"
     );
-    const panel =
-      currentTab === "html"
-        ? renderHtmlPanel()
-        : currentTab === "text"
-          ? renderTextOrEmpty()
-          : currentTab === "markdown"
-            ? renderMarkdownOrEmpty()
-            : renderSourcePanel(message.id);
+    const panel = renderPanelForTab(currentTab);
     content = (
       <>
         {renderTabsBar(tabs, currentTab)}
@@ -438,7 +616,7 @@ export default function ThreadMessageCard({
         tabs.map((tab) => tab.value),
         "html"
       );
-      const panel = currentTab === "html" ? renderHtmlPanel() : renderSourcePanel(message.id);
+      const panel = renderPanelForTab(currentTab);
       content = (
         <>
           {renderTabsBar(tabs, currentTab)}
@@ -446,7 +624,14 @@ export default function ThreadMessageCard({
         </>
       );
     } else {
-      content = wrapPanel("html", renderHtmlPanel());
+      const tabs = [{ value: "html" as const, label: "HTML" }];
+      const currentTab: MessageTab = "html";
+      content = (
+        <>
+          {renderTabsBar(tabs, currentTab)}
+          {wrapPanel(currentTab, renderPanelForTab(currentTab))}
+        </>
+      );
     }
   } else if (hasSource) {
     const tabs = [
@@ -458,12 +643,7 @@ export default function ThreadMessageCard({
       tabs.map((tab) => tab.value),
       "text"
     );
-    const panel =
-      currentTab === "text"
-        ? renderTextOrEmpty()
-        : currentTab === "markdown"
-          ? renderMarkdownOrEmpty()
-          : renderSourcePanel(message.id);
+    const panel = renderPanelForTab(currentTab);
     content = (
       <>
         {renderTabsBar(tabs, currentTab)}
@@ -479,10 +659,7 @@ export default function ThreadMessageCard({
       tabs.map((tab) => tab.value),
       "text"
     );
-    const panel =
-      currentTab === "markdown"
-        ? renderMarkdownOrEmpty()
-        : renderTextOrEmpty();
+    const panel = renderPanelForTab(currentTab);
     content = (
       <>
         {renderTabsBar(tabs, currentTab)}

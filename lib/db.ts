@@ -123,6 +123,12 @@ export {
 } from "./db/accounts";
 
 export {
+  getCachedTranslation,
+  putCachedTranslation,
+  type CachedTranslation
+} from "./db/translations";
+
+export {
   addUserAccountLink,
   getUserAccounts,
   getUserById,

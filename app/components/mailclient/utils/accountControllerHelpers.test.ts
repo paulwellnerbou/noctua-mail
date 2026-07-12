@@ -4,6 +4,7 @@ import {
   buildAccountSaveRequest,
   createBlankEditAccount,
   normalizeCaldavForSave,
+  normalizeDeeplForSave,
   resolveActiveAccountId,
   resolveSwitchedAccountId
 } from "./accountControllerHelpers";
@@ -86,6 +87,37 @@ describe("normalizeCaldavForSave", () => {
   it("returns the config when the url is non-empty", () => {
     const config = { url: "https://dav.example/", user: "u", password: "p" };
     expect(normalizeCaldavForSave(config)).toBe(config);
+  });
+});
+
+describe("normalizeDeeplForSave", () => {
+  it("returns null when there is nothing to persist", () => {
+    expect(normalizeDeeplForSave(null)).toBeNull();
+    expect(normalizeDeeplForSave(undefined)).toBeNull();
+    expect(normalizeDeeplForSave({ enabled: false })).toBeNull();
+  });
+
+  it("keeps the config when a key is present (typed key)", () => {
+    const result = normalizeDeeplForSave({ apiKey: "k:fx", enabled: true, targetLang: "DE" });
+    expect(result).toEqual({ apiKey: "k:fx", enabled: true, targetLang: "DE" });
+  });
+
+  it("keeps the config for a saved key even when the field is blank", () => {
+    // Editing settings without re-typing the key: hasApiKey keeps the config,
+    // and the blank apiKey is preserved server-side by mergeAccount.
+    const result = normalizeDeeplForSave({
+      apiKey: "",
+      enabled: false,
+      targetLang: "EN-US",
+      hasApiKey: true
+    });
+    expect(result).toEqual({ apiKey: "", enabled: false, targetLang: "EN-US" });
+  });
+
+  it("drops the client-only hasApiKey flag from the payload", () => {
+    const result = normalizeDeeplForSave({ apiKey: "k", enabled: true, hasApiKey: true });
+    expect(result).not.toBeNull();
+    expect(result).not.toHaveProperty("hasApiKey");
   });
 });
 
