@@ -6,6 +6,8 @@
  * Server-only (uses fetch + Buffer); do not import from client components.
  */
 
+import { randomBytes } from "crypto";
+
 const FREE_BASE = "https://api-free.deepl.com";
 const PRO_BASE = "https://api.deepl.com";
 
@@ -71,24 +73,34 @@ function messageForStatus(status: number, fallback: string): string {
 
 // Inline `data:` URIs (e.g. base64 images embedded in a mail body) can be
 // hundreds of KB — they blow past DeepL's 128 KiB request limit and are not
-// translatable text anyway. Pull them out behind compact placeholders before
-// translating, then splice them back into the result.
+// translatable text anyway. Pull them out behind placeholders before
+// translating, then splice them back into the result. Each extraction uses a
+// random marker, so a placeholder can't collide with text already present in
+// the body, and `restoreInlineData` only rewrites placeholders from its own
+// extraction call.
 const INLINE_DATA_RE = /data:[^\s"'<>)]+/g;
-const INLINE_DATA_PLACEHOLDER_RE = /__NOCTUA_INLINE_DATA_(\d+)__/g;
 
-export function extractInlineData(text: string): { text: string; tokens: string[] } {
+export type InlineDataExtraction = {
+  text: string;
+  tokens: string[];
+  marker: string;
+};
+
+export function extractInlineData(text: string): InlineDataExtraction {
+  const marker = randomBytes(8).toString("hex");
   const tokens: string[] = [];
   const stripped = text.replace(INLINE_DATA_RE, (match) => {
     const index = tokens.length;
     tokens.push(match);
-    return `__NOCTUA_INLINE_DATA_${index}__`;
+    return `__NOCTUA_INLINE_DATA_${marker}_${index}__`;
   });
-  return { text: stripped, tokens };
+  return { text: stripped, tokens, marker };
 }
 
-export function restoreInlineData(text: string, tokens: string[]): string {
+export function restoreInlineData(text: string, tokens: string[], marker: string): string {
   if (tokens.length === 0) return text;
-  return text.replace(INLINE_DATA_PLACEHOLDER_RE, (whole, index) => tokens[Number(index)] ?? whole);
+  const placeholderRe = new RegExp(`__NOCTUA_INLINE_DATA_${marker}_(\\d+)__`, "g");
+  return text.replace(placeholderRe, (whole, index) => tokens[Number(index)] ?? whole);
 }
 
 export async function deeplTranslate(

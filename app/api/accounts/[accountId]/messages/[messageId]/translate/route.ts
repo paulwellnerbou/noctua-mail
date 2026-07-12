@@ -63,12 +63,6 @@ export async function POST(request: Request, { params }: Params) {
       { status: 400 }
     );
   }
-  // Pull inline base64 images out before translating (they blow DeepL's size
-  // limit and aren't translatable), then splice them back into the result. The
-  // cache stores the compact stripped translation; the URIs come from the live
-  // message on each response.
-  const { text: sourceText, tokens: inlineData } = extractInlineData(rawSource);
-
   const cached = await getCachedTranslation(
     resolvedAccountId,
     resolvedMessageId,
@@ -81,18 +75,25 @@ export async function POST(request: Request, { params }: Params) {
       cached: true,
       format,
       targetLang,
-      translatedText: restoreInlineData(cached.translatedText, inlineData),
+      translatedText: cached.translatedText,
       detectedSourceLang: cached.detectedSourceLang
     });
   }
 
+  // Pull inline base64 images out before translating (they blow DeepL's size
+  // limit and aren't translatable), then splice them back into the result. The
+  // per-call marker keeps placeholders from colliding with body text; the cache
+  // stores the fully-restored translation so reads need no further processing.
+  const { text: sourceText, tokens: inlineData, marker } = extractInlineData(rawSource);
+
   try {
     const result = await deeplTranslate({ apiKey, text: sourceText, targetLang, format });
+    const translatedText = restoreInlineData(result.text, inlineData, marker);
     await putCachedTranslation(resolvedAccountId, {
       messageId: resolvedMessageId,
       targetLang,
       format,
-      translatedText: result.text,
+      translatedText,
       detectedSourceLang: result.detectedSourceLang
     });
     return NextResponse.json({
@@ -100,7 +101,7 @@ export async function POST(request: Request, { params }: Params) {
       cached: false,
       format,
       targetLang,
-      translatedText: restoreInlineData(result.text, inlineData),
+      translatedText,
       detectedSourceLang: result.detectedSourceLang
     });
   } catch (error) {

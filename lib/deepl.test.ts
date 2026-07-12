@@ -32,12 +32,14 @@ describe("DeepL endpoint selection", () => {
 describe("inline data-URI extraction", () => {
   test("strips an inline base64 image and restores it round-trip", () => {
     const html = '<p>你好</p><img src="data:image/png;base64,AAAABBBBCCCC"><p>bye</p>';
-    const { text, tokens } = extractInlineData(html);
+    const { text, tokens, marker } = extractInlineData(html);
     expect(tokens).toEqual(["data:image/png;base64,AAAABBBBCCCC"]);
-    expect(text).toBe('<p>你好</p><img src="__NOCTUA_INLINE_DATA_0__"><p>bye</p>');
+    // The data URI is replaced by a marker-scoped placeholder.
+    expect(text).not.toContain("data:image");
+    expect(text).toContain(`__NOCTUA_INLINE_DATA_${marker}_0__`);
     // A translation preserves the placeholder; restoring yields the image back.
     const translated = text.replace("你好", "Hello");
-    expect(restoreInlineData(translated, tokens)).toBe(
+    expect(restoreInlineData(translated, tokens, marker)).toBe(
       '<p>Hello</p><img src="data:image/png;base64,AAAABBBBCCCC"><p>bye</p>'
     );
   });
@@ -53,22 +55,33 @@ describe("inline data-URI extraction", () => {
 
   test("handles multiple data URIs by index", () => {
     const src = "a data:image/gif;base64,ONE b data:image/gif;base64,TWO c";
-    const { text, tokens } = extractInlineData(src);
+    const { text, tokens, marker } = extractInlineData(src);
     expect(tokens).toEqual(["data:image/gif;base64,ONE", "data:image/gif;base64,TWO"]);
-    expect(restoreInlineData(text, tokens)).toBe(src);
+    expect(restoreInlineData(text, tokens, marker)).toBe(src);
+  });
+
+  test("uses a random per-call marker so placeholders can't collide", () => {
+    const a = extractInlineData('<img src="data:image/png;base64,AAA">');
+    const b = extractInlineData('<img src="data:image/png;base64,BBB">');
+    expect(a.marker).not.toBe(b.marker);
+    // Restoring with call A's marker must not rewrite a placeholder-shaped
+    // string carrying a different marker — so stray text is never mutated.
+    const foreign = `text __NOCTUA_INLINE_DATA_${b.marker}_0__ text`;
+    expect(restoreInlineData(foreign, a.tokens, a.marker)).toBe(foreign);
   });
 
   test("leaves text without data URIs untouched", () => {
-    const { text, tokens } = extractInlineData("plain body, no images");
+    const { text, tokens, marker } = extractInlineData("plain body, no images");
     expect(tokens).toEqual([]);
-    expect(restoreInlineData(text, tokens)).toBe("plain body, no images");
+    expect(restoreInlineData(text, tokens, marker)).toBe("plain body, no images");
   });
 
   test("a placeholder DeepL failed to echo back is left as-is, not crashed", () => {
     // Defensive: if a token goes missing, restore leaves the placeholder rather
     // than inserting `undefined`.
-    expect(restoreInlineData("x __NOCTUA_INLINE_DATA_5__ y", [])).toBe(
-      "x __NOCTUA_INLINE_DATA_5__ y"
-    );
+    const marker = "abc123";
+    expect(
+      restoreInlineData(`x __NOCTUA_INLINE_DATA_${marker}_5__ y`, ["only-one"], marker)
+    ).toBe(`x __NOCTUA_INLINE_DATA_${marker}_5__ y`);
   });
 });

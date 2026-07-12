@@ -196,6 +196,6 @@ export function persistAccountRow(db: any, account: Account, dbPath?: string | n
     account.caldav?.syncIntervalMs ?? null,
     account.deepl?.apiKey ? encodeSecret(account.deepl.apiKey) : null,
     account.deepl?.enabled == null ? null : account.deepl.enabled ? 1 : 0,
-    account.deepl?.targetLang ?? null
+    account.deepl?.targetLang?.trim() ? account.deepl.targetLang.trim() : null
   );
 }
