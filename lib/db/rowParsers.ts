@@ -194,7 +194,9 @@ export function persistAccountRow(db: any, account: Account, dbPath?: string | n
     account.caldav?.password ? encodeSecret(account.caldav.password) : null,
     account.caldav?.calendarPath ?? null,
     account.caldav?.syncIntervalMs ?? null,
-    account.deepl?.apiKey ? encodeSecret(account.deepl.apiKey) : null,
+    // `encodeSecret` returns "" when DB credential storage is disabled; store
+    // NULL rather than an empty string so a key is never silently half-saved.
+    (account.deepl?.apiKey ? encodeSecret(account.deepl.apiKey) : "") || null,
     account.deepl?.enabled == null ? null : account.deepl.enabled ? 1 : 0,
     account.deepl?.targetLang?.trim() ? account.deepl.targetLang.trim() : null
   );
