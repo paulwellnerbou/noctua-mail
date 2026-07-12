@@ -202,10 +202,19 @@ export async function deeplUsage(apiKey: string): Promise<DeeplUsage> {
     );
   }
   const data = (await response.json().catch(() => null)) as
-    | { character_count?: number; character_limit?: number }
+    | { character_count?: unknown; character_limit?: unknown }
     | null;
+  // Don't report a key as "valid" with 0/0 usage on a malformed payload —
+  // surface it as an error instead.
+  if (
+    !data ||
+    typeof data.character_count !== "number" ||
+    typeof data.character_limit !== "number"
+  ) {
+    throw new DeeplError("DeepL returned an unexpected response.", 502);
+  }
   return {
-    characterCount: Number(data?.character_count ?? 0),
-    characterLimit: Number(data?.character_limit ?? 0)
+    characterCount: data.character_count,
+    characterLimit: data.character_limit
   };
 }
