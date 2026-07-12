@@ -67,8 +67,10 @@ export default function TranslationTabContent({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ apiKey: deepl?.apiKey ?? "" })
       });
-      const data = (await res.json()) as TestResult;
-      setTestResult(data);
+      // A non-JSON error body (e.g. an HTML 500) parses to null — report it as a
+      // server error with the status rather than masking it as a network error.
+      const data = (await res.json().catch(() => null)) as TestResult | null;
+      setTestResult(data ?? { ok: false, message: `Testing the key failed (HTTP ${res.status}).` });
     } catch {
       setTestResult({ ok: false, message: "Could not reach the server to test the key." });
     } finally {
