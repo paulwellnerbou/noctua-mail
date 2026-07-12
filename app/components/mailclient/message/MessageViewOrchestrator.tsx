@@ -251,6 +251,10 @@ function MessageViewOrchestratorImpl(
   // language without being rebuilt on every state change.
   const messageTranslationsRef = useRef(messageTranslations);
   messageTranslationsRef.current = messageTranslations;
+  // Per-message request counter so a slow/out-of-order translate response can't
+  // overwrite state from a newer request (or one issued after the map was
+  // cleared on account change). Only the latest request per message commits.
+  const translationRequestSeqRef = useRef<Record<string, number>>({});
   // Ref mirror of `messageTabs` so the stable `getMessageTab` handle
   // method (created with empty deps) reads the latest map without
   // rebuilding the handle object on every tab change.
@@ -452,6 +456,11 @@ function MessageViewOrchestratorImpl(
       const targetLang = targetLangOverride ?? existing?.targetLang ?? DEFAULT_DEEPL_TARGET_LANG;
       const key = translationResultKey(format, targetLang);
       const cached = existing?.results?.[key];
+      const requestSeq = (translationRequestSeqRef.current[messageId] ?? 0) + 1;
+      translationRequestSeqRef.current[messageId] = requestSeq;
+      // True only while this is still the newest request for the message; a
+      // later request (or an account-change reset) makes stale responses drop.
+      const isCurrentRequest = () => translationRequestSeqRef.current[messageId] === requestSeq;
       setMessageTranslations((prev) => {
         const entry = prev[messageId] ?? {
           showing: true,
@@ -483,6 +492,7 @@ function MessageViewOrchestratorImpl(
           translatedText?: string;
           detectedSourceLang?: string;
         } | null;
+        if (!isCurrentRequest()) return;
         if (!res.ok || !data?.ok || typeof data.translatedText !== "string") {
           throw new Error(data?.message ?? "Translation failed.");
         }
@@ -507,6 +517,7 @@ function MessageViewOrchestratorImpl(
           };
         });
       } catch (error) {
+        if (!isCurrentRequest()) return;
         const messageText = error instanceof Error ? error.message : "Translation failed.";
         setMessageTranslations((prev) => {
           const entry = prev[messageId];
@@ -566,6 +577,9 @@ function MessageViewOrchestratorImpl(
     setMessageTabs({});
     setCollapsedMessages({});
     setMessageTranslations({});
+    // Drop any in-flight translate requests so a late response can't
+    // re-introduce a translation for the previous account's message id.
+    translationRequestSeqRef.current = {};
   }, [activeAccountId]);
 
   // Collapse all messages in the active thread except the selected one when

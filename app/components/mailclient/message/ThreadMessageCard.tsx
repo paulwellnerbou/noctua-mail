@@ -479,7 +479,7 @@ export default function ThreadMessageCard({
           value={translationTargetLang}
           onValueChange={(value) => onChangeTranslationLang?.(message.id, format, value)}
         >
-          <Select.Trigger />
+          <Select.Trigger aria-label="Translation target language" />
           <Select.Content position="popper">
             {DEEPL_TARGET_LANGUAGES.map((language) => (
               <Select.Item key={language.code} value={language.code}>
