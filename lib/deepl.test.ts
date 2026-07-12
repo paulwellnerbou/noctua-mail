@@ -60,14 +60,33 @@ describe("inline data-URI extraction", () => {
     expect(restoreInlineData(text, tokens, marker)).toBe(src);
   });
 
-  test("uses a random per-call marker so placeholders can't collide", () => {
-    const a = extractInlineData('<img src="data:image/png;base64,AAA">');
+  test("derives a deterministic, collision-resistant marker from the body", () => {
+    const html = '<img src="data:image/png;base64,AAA">';
+    const a = extractInlineData(html);
+    // Deterministic: the same body yields the same marker, so a stripped
+    // translation cached earlier can be restored on a later request.
+    expect(extractInlineData(html).marker).toBe(a.marker);
+    // Different bodies get different markers.
     const b = extractInlineData('<img src="data:image/png;base64,BBB">');
-    expect(a.marker).not.toBe(b.marker);
-    // Restoring with call A's marker must not rewrite a placeholder-shaped
+    expect(b.marker).not.toBe(a.marker);
+    // Restoring with one body's marker must not rewrite a placeholder-shaped
     // string carrying a different marker — so stray text is never mutated.
     const foreign = `text __NOCTUA_INLINE_DATA_${b.marker}_0__ text`;
     expect(restoreInlineData(foreign, a.tokens, a.marker)).toBe(foreign);
+  });
+
+  test("cache round-trip: restoring a cached stripped translation on a later serve", () => {
+    // A message with an inline image is translated once (cache stores the
+    // stripped text), then served again — re-extracting the same body yields
+    // the same marker, so the image is spliced back in.
+    const body = 'Hi <img src="data:image/png;base64,ZZZ"> there';
+    const first = extractInlineData(body);
+    const cachedStrippedTranslation = first.text.replace("Hi", "Hallo").replace("there", "da");
+    // Later request: re-extract from the (unchanged) body and restore.
+    const later = extractInlineData(body);
+    expect(restoreInlineData(cachedStrippedTranslation, later.tokens, later.marker)).toBe(
+      'Hallo <img src="data:image/png;base64,ZZZ"> da'
+    );
   });
 
   test("leaves text without data URIs untouched", () => {

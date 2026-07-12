@@ -33,8 +33,8 @@ import type {
 import { translationResultKey } from "./messageTranslation";
 import {
   DEEPL_TARGET_LANGUAGES,
-  DEFAULT_DEEPL_TARGET_LANG,
-  deeplTargetLanguageLabel
+  deeplTargetLanguageLabel,
+  normalizeDeeplTargetLang
 } from "@/lib/deeplLanguages";
 import badgeStyles from "./MessageBadge.module.css";
 import styles from "./ThreadMessageCard.module.css";
@@ -224,8 +224,12 @@ export default function ThreadMessageCard({
   const zoomValue = messageZoom[message.id] ?? 1;
   const translation = messageTranslations?.[message.id];
   const translationShowing = Boolean(translationEnabled && translation?.showing);
-  const translationTargetLang =
-    translation?.targetLang ?? defaultTranslationTargetLang ?? DEFAULT_DEEPL_TARGET_LANG;
+  // Normalize to a supported code so an invalid persisted/overridden language
+  // can't leak into the banner label, the Select value, the request payload, or
+  // the client-side cache key (which must match the server's normalized key).
+  const translationTargetLang = normalizeDeeplTargetLang(
+    translation?.targetLang ?? defaultTranslationTargetLang
+  );
   const translationFormatForTab = (tab: MessageTab): MessageTranslationFormat | null =>
     tab === "html" ? "html" : tab === "text" || tab === "markdown" ? "text" : null;
   // Result, loading, and error are per (format, target-lang), so one tab's

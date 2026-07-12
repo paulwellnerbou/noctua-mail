@@ -22,9 +22,6 @@ export async function POST(request: Request, { params }: Params) {
   const accountId = await getAccountIdFromParams(params);
   const { messageId: rawMessageId } = await params;
   const messageId = typeof rawMessageId === "string" ? rawMessageId.trim() : "";
-  const payload = (await request.json().catch(() => null)) as
-    | { targetLang?: string; format?: string }
-    | null;
 
   const context = await requireAccountAndMessageContext(
     request,
@@ -54,6 +51,11 @@ export async function POST(request: Request, { params }: Params) {
     );
   }
 
+  // Parse the body only after auth so an unauthenticated caller can't force
+  // request-body parsing work.
+  const payload = (await request.json().catch(() => null)) as
+    | { targetLang?: string; format?: string }
+    | null;
   const format: DeeplFormat = payload?.format === "html" ? "html" : "text";
   const targetLang = normalizeDeeplTargetLang(payload?.targetLang ?? deepl.targetLang);
   const rawSource = format === "html" ? message.htmlBody ?? "" : message.body ?? "";
@@ -63,6 +65,12 @@ export async function POST(request: Request, { params }: Params) {
       { status: 400 }
     );
   }
+  // Pull inline base64 images out before translating (they blow DeepL's size
+  // limit and aren't translatable). The marker is derived from the body, so the
+  // cache stores only the small stripped translation and the images are spliced
+  // back in on serve by re-extracting the current body's data URIs.
+  const { text: sourceText, tokens: inlineData, marker } = extractInlineData(rawSource);
+
   const cached = await getCachedTranslation(
     resolvedAccountId,
     resolvedMessageId,
@@ -75,25 +83,18 @@ export async function POST(request: Request, { params }: Params) {
       cached: true,
       format,
       targetLang,
-      translatedText: cached.translatedText,
+      translatedText: restoreInlineData(cached.translatedText, inlineData, marker),
       detectedSourceLang: cached.detectedSourceLang
     });
   }
 
-  // Pull inline base64 images out before translating (they blow DeepL's size
-  // limit and aren't translatable), then splice them back into the result. The
-  // per-call marker keeps placeholders from colliding with body text; the cache
-  // stores the fully-restored translation so reads need no further processing.
-  const { text: sourceText, tokens: inlineData, marker } = extractInlineData(rawSource);
-
   try {
     const result = await deeplTranslate({ apiKey, text: sourceText, targetLang, format });
-    const translatedText = restoreInlineData(result.text, inlineData, marker);
     await putCachedTranslation(resolvedAccountId, {
       messageId: resolvedMessageId,
       targetLang,
       format,
-      translatedText,
+      translatedText: result.text,
       detectedSourceLang: result.detectedSourceLang
     });
     return NextResponse.json({
@@ -101,7 +102,7 @@ export async function POST(request: Request, { params }: Params) {
       cached: false,
       format,
       targetLang,
-      translatedText,
+      translatedText: restoreInlineData(result.text, inlineData, marker),
       detectedSourceLang: result.detectedSourceLang
     });
   } catch (error) {

@@ -6,7 +6,7 @@
  * Server-only (uses fetch + Buffer); do not import from client components.
  */
 
-import { randomBytes } from "crypto";
+import { createHash } from "crypto";
 
 const FREE_BASE = "https://api-free.deepl.com";
 const PRO_BASE = "https://api.deepl.com";
@@ -74,10 +74,10 @@ function messageForStatus(status: number, fallback: string): string {
 // Inline `data:` URIs (e.g. base64 images embedded in a mail body) can be
 // hundreds of KB — they blow past DeepL's 128 KiB request limit and are not
 // translatable text anyway. Pull them out behind placeholders before
-// translating, then splice them back into the result. Each extraction uses a
-// random marker, so a placeholder can't collide with text already present in
-// the body, and `restoreInlineData` only rewrites placeholders from its own
-// extraction call.
+// translating, then splice them back into the result. The marker is derived
+// from the body content: it is collision-resistant (the body would have to
+// contain its own hash to clash) yet deterministic, so the stripped
+// translation can be cached and the inline data restored when it is served.
 const INLINE_DATA_RE = /data:[^\s"'<>)]+/g;
 
 export type InlineDataExtraction = {
@@ -87,7 +87,7 @@ export type InlineDataExtraction = {
 };
 
 export function extractInlineData(text: string): InlineDataExtraction {
-  const marker = randomBytes(8).toString("hex");
+  const marker = createHash("sha256").update(text).digest("hex").slice(0, 16);
   const tokens: string[] = [];
   const stripped = text.replace(INLINE_DATA_RE, (match) => {
     const index = tokens.length;
