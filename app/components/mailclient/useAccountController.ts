@@ -21,6 +21,7 @@ import {
   buildAccountSaveRequest,
   createBlankEditAccount,
   normalizeCaldavForSave,
+  normalizeDeeplForSave,
   resolveActiveAccountId,
   resolveSwitchedAccountId
 } from "./utils/accountControllerHelpers";
@@ -331,12 +332,14 @@ export function useAccountController({
     const exists = accounts.find((a) => a.id === account.id);
     if (!exists) return;
     const caldav = normalizeCaldavForSave(account.caldav);
+    const deepl = normalizeDeeplForSave(account.deepl);
     const res = await apiFetch(buildAccountApiPath(account.id, ""), {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         settings: account.settings ?? {},
-        caldav
+        caldav,
+        deepl
       })
     });
     if (!res.ok) {

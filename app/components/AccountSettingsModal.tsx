@@ -12,6 +12,7 @@ import CalendarTabContent from "@/app/components/account-settings/tabs/CalendarT
 import TopicsTabContent from "@/app/components/account-settings/tabs/TopicsTabContent";
 import RecipientAliasesTabContent from "@/app/components/account-settings/tabs/RecipientAliasesTabContent";
 import McpTabContent from "@/app/components/account-settings/tabs/McpTabContent";
+import TranslationTabContent from "@/app/components/account-settings/tabs/TranslationTabContent";
 export type ManageTab =
   | "account"
   | "signatures"
@@ -19,6 +20,7 @@ export type ManageTab =
   | "categorization"
   | "calendar"
   | "topics"
+  | "translation"
   | "mcp"
   | "recipient-aliases"
   | "admin";
@@ -115,6 +117,10 @@ export default function AccountSettingsModal({
   );
   const canSaveTopicsTab = useMemo(
     () => hasSavableAccountSettingsChanges(initialAccount, localAccount, "topics", { isAdminUser }),
+    [initialAccount, isAdminUser, localAccount]
+  );
+  const canSaveTranslationTab = useMemo(
+    () => hasSavableAccountSettingsChanges(initialAccount, localAccount, "translation", { isAdminUser }),
     [initialAccount, isAdminUser, localAccount]
   );
 
@@ -226,6 +232,9 @@ export default function AccountSettingsModal({
               <Tabs.Trigger value="calendar" disabled={!isExistingAccount}>
                 Calendar
               </Tabs.Trigger>
+              <Tabs.Trigger value="translation" disabled={!isExistingAccount}>
+                Translation
+              </Tabs.Trigger>
               <Tabs.Trigger value="recipient-aliases" disabled={!isExistingAccount}>
                 Recipient Aliases
               </Tabs.Trigger>
@@ -310,6 +319,18 @@ export default function AccountSettingsModal({
                 onClose={onClose}
                 onSave={handleSave}
                 canSave={canSaveCalendarTab}
+              />
+            </Tabs.Content>
+
+            <Tabs.Content value="translation" style={{ flex: "1 1 auto", minHeight: 0, overflow: "hidden" }}>
+              <TranslationTabContent
+                editingAccount={localAccount}
+                isExistingAccount={isExistingAccount}
+                onUpdateAccount={setLocalAccount}
+                onClose={onClose}
+                onSave={handleSave}
+                canSave={canSaveTranslationTab}
+                apiFetch={apiFetch}
               />
             </Tabs.Content>
 

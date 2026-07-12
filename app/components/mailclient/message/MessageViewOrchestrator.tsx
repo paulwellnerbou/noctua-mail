@@ -22,7 +22,16 @@ import { renderMarkdownPanel as renderMarkdownPanelHelper } from "../RenderHelpe
 import type { ComposeOrchestratorHandle } from "../composition/ComposeOrchestrator";
 import type { ComposeMode } from "../composition/composeTypes";
 import type { TopicSuggestionExplanation } from "./types";
-import { buildAccountMessageTopicSuggestionExplainPath } from "@/lib/accountApiPaths";
+import type {
+  MessageTranslationEntry,
+  MessageTranslationFormat
+} from "./messageTranslation";
+import { translationResultKey } from "./messageTranslation";
+import { DEFAULT_DEEPL_TARGET_LANG } from "@/lib/deeplLanguages";
+import {
+  buildAccountMessageTopicSuggestionExplainPath,
+  buildAccountMessageTranslatePath
+} from "@/lib/accountApiPaths";
 
 /**
  * The message-view pane: toolbar + optional thread-subject/topic header
@@ -203,6 +212,10 @@ export type MessageViewOrchestratorBodyInputs = {
     | "setMessageTabs"
     | "collapsedMessages"
     | "setCollapsedMessages"
+    | "messageTranslations"
+    | "onShowTranslation"
+    | "onHideTranslation"
+    | "onChangeTranslationLang"
   >;
 };
 
@@ -228,6 +241,16 @@ function MessageViewOrchestratorImpl(
     Record<string, "html" | "text" | "markdown" | "source">
   >({});
   const [collapsedMessages, setCollapsedMessages] = useState<Record<string, boolean>>({});
+  // Per-message translation state (which messages show a translated body, the
+  // active target language, fetch status, and cached results per format+lang).
+  // The card writes it via the handlers below and reads it by message id.
+  const [messageTranslations, setMessageTranslations] = useState<
+    Record<string, MessageTranslationEntry>
+  >({});
+  // Ref mirror so the async translate handler reads the latest results/target
+  // language without being rebuilt on every state change.
+  const messageTranslationsRef = useRef(messageTranslations);
+  messageTranslationsRef.current = messageTranslations;
   // Ref mirror of `messageTabs` so the stable `getMessageTab` handle
   // method (created with empty deps) reads the latest map without
   // rebuilding the handle object on every tab change.
@@ -423,6 +446,93 @@ function MessageViewOrchestratorImpl(
     [activeMessage, onToggleTopic]
   );
 
+  const showTranslation = useCallback(
+    async (messageId: string, format: MessageTranslationFormat, targetLangOverride?: string) => {
+      const existing = messageTranslationsRef.current[messageId];
+      const targetLang = targetLangOverride ?? existing?.targetLang ?? DEFAULT_DEEPL_TARGET_LANG;
+      const key = translationResultKey(format, targetLang);
+      const cached = existing?.results?.[key];
+      setMessageTranslations((prev) => {
+        const entry = prev[messageId] ?? {
+          showing: true,
+          targetLang,
+          status: "idle" as const,
+          results: {}
+        };
+        return {
+          ...prev,
+          [messageId]: {
+            ...entry,
+            showing: true,
+            targetLang,
+            status: cached ? "idle" : "loading",
+            error: undefined
+          }
+        };
+      });
+      if (cached) return;
+      try {
+        const res = await apiFetch(buildAccountMessageTranslatePath(activeAccountId, messageId), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ targetLang, format })
+        });
+        const data = (await res.json().catch(() => null)) as {
+          ok?: boolean;
+          message?: string;
+          translatedText?: string;
+          detectedSourceLang?: string;
+        } | null;
+        if (!res.ok || !data?.ok || typeof data.translatedText !== "string") {
+          throw new Error(data?.message ?? "Translation failed.");
+        }
+        const translatedText = data.translatedText;
+        const detectedSourceLang = data.detectedSourceLang ?? "";
+        setMessageTranslations((prev) => {
+          const entry = prev[messageId] ?? {
+            showing: true,
+            targetLang,
+            status: "idle" as const,
+            results: {}
+          };
+          return {
+            ...prev,
+            [messageId]: {
+              ...entry,
+              targetLang,
+              status: "idle",
+              error: undefined,
+              results: { ...entry.results, [key]: { text: translatedText, detectedSourceLang } }
+            }
+          };
+        });
+      } catch (error) {
+        const messageText = error instanceof Error ? error.message : "Translation failed.";
+        setMessageTranslations((prev) => {
+          const entry = prev[messageId];
+          if (!entry) return prev;
+          return { ...prev, [messageId]: { ...entry, status: "error", error: messageText } };
+        });
+      }
+    },
+    [apiFetch, activeAccountId]
+  );
+
+  const hideTranslation = useCallback((messageId: string) => {
+    setMessageTranslations((prev) => {
+      const entry = prev[messageId];
+      if (!entry) return prev;
+      return { ...prev, [messageId]: { ...entry, showing: false } };
+    });
+  }, []);
+
+  const changeTranslationLang = useCallback(
+    (messageId: string, format: MessageTranslationFormat, targetLang: string) => {
+      void showTranslation(messageId, format, targetLang);
+    },
+    [showTranslation]
+  );
+
   useEffect(() => {
     // Close the popover when the active thread or account changes.
     // Also invalidate the in-flight fetch key so any pending response
@@ -455,6 +565,7 @@ function MessageViewOrchestratorImpl(
     setMessageZoom({});
     setMessageTabs({});
     setCollapsedMessages({});
+    setMessageTranslations({});
   }, [activeAccountId]);
 
   // Collapse all messages in the active thread except the selected one when
@@ -632,7 +743,11 @@ function MessageViewOrchestratorImpl(
                   messageTabs,
                   setMessageTabs,
                   collapsedMessages,
-                  setCollapsedMessages
+                  setCollapsedMessages,
+                  messageTranslations,
+                  onShowTranslation: showTranslation,
+                  onHideTranslation: hideTranslation,
+                  onChangeTranslationLang: changeTranslationLang
                 }}
               />
             </>

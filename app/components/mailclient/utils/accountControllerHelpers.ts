@@ -6,7 +6,7 @@
  * to normalise optional config) are better exercised in isolation.
  */
 import { buildAccountApiPath } from "@/lib/accountApiPaths";
-import type { Account, CaldavConfig } from "@/lib/data";
+import type { Account, CaldavConfig, DeeplConfig } from "@/lib/data";
 
 /**
  * Pick the account id that should be active given the freshly loaded list
@@ -83,6 +83,25 @@ export function normalizeCaldavForSave(
   if (!caldav) return null;
   if (!caldav.url || !caldav.url.trim()) return null;
   return caldav;
+}
+
+/**
+ * Shape the DeepL config for the save request. Sends `null` when there is
+ * nothing to persist so the server clears any stored config. A blank `apiKey`
+ * is preserved server-side (means "keep the stored key"); the client-only
+ * `hasApiKey` flag is dropped.
+ */
+export function normalizeDeeplForSave(
+  deepl: DeeplConfig | null | undefined
+): DeeplConfig | null {
+  if (!deepl) return null;
+  const hasKey = Boolean(deepl.apiKey && deepl.apiKey.trim()) || Boolean(deepl.hasApiKey);
+  if (!hasKey && !deepl.enabled && !deepl.targetLang) return null;
+  return {
+    apiKey: deepl.apiKey ?? "",
+    enabled: Boolean(deepl.enabled),
+    targetLang: deepl.targetLang
+  };
 }
 
 /**

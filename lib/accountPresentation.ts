@@ -16,6 +16,15 @@ export function sanitizeAccountForClient(account: Account): Account {
           ...account.caldav,
           password: ""
         }
+      : undefined,
+    deepl: account.deepl
+      ? {
+          ...account.deepl,
+          // Never send the DeepL key to the browser; expose only whether one
+          // is stored so the settings UI can show a "configured" state.
+          apiKey: "",
+          hasApiKey: Boolean(account.deepl.apiKey && account.deepl.apiKey.trim())
+        }
       : undefined
   };
 }

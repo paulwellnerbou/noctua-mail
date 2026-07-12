@@ -677,6 +677,15 @@ export function initMasterSchema(db: any) {
   if (!accountColumns.has("caldavSyncIntervalMs")) {
     db.prepare(`ALTER TABLE accounts ADD COLUMN caldavSyncIntervalMs INTEGER`).run();
   }
+  if (!accountColumns.has("deeplApiKey")) {
+    db.prepare(`ALTER TABLE accounts ADD COLUMN deeplApiKey TEXT`).run();
+  }
+  if (!accountColumns.has("deeplEnabled")) {
+    db.prepare(`ALTER TABLE accounts ADD COLUMN deeplEnabled INTEGER`).run();
+  }
+  if (!accountColumns.has("deeplTargetLang")) {
+    db.prepare(`ALTER TABLE accounts ADD COLUMN deeplTargetLang TEXT`).run();
+  }
 
   const userCount = db.prepare(`SELECT COUNT(*) as count FROM users`).get() as { count: number };
   if (userCount.count === 0) {
@@ -754,6 +763,17 @@ export function initAccountSchema(db: any) {
       inline INTEGER NOT NULL,
       cid TEXT,
       url TEXT,
+      FOREIGN KEY(messageId) REFERENCES messages(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS message_translations (
+      messageId TEXT NOT NULL,
+      targetLang TEXT NOT NULL,
+      format TEXT NOT NULL,
+      translatedText TEXT NOT NULL,
+      detectedSourceLang TEXT,
+      createdAt INTEGER NOT NULL,
+      PRIMARY KEY (messageId, targetLang, format),
       FOREIGN KEY(messageId) REFERENCES messages(id) ON DELETE CASCADE
     );
 
