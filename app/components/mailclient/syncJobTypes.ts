@@ -104,3 +104,20 @@ export function isMailServerUnreachableError(
     typeof maybe.message === "string"
   );
 }
+
+// fetch() rejects with a TypeError when the request never got a response.
+// Match the known browser/runtime phrasings so unrelated TypeErrors thrown
+// inside sync code aren't misread as connectivity loss.
+const NETWORK_FETCH_ERROR_MESSAGES = [
+  "failed to fetch", // Chromium
+  "networkerror", // Firefox
+  "load failed", // Safari
+  "fetch failed" // Bun/Node
+];
+
+/** True when a rejected fetch means the server could not be reached at all. */
+export function isNetworkFetchError(error: unknown): boolean {
+  if (!(error instanceof TypeError)) return false;
+  const message = error.message.toLowerCase();
+  return NETWORK_FETCH_ERROR_MESSAGES.some((phrase) => message.includes(phrase));
+}
