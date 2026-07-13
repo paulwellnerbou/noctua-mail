@@ -1,7 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import {
   FullSyncDebugCancelledError,
-  isFullSyncDebugCancelledError
+  isFullSyncDebugCancelledError,
+  isNetworkFetchError
 } from "./syncJobTypes";
 
 describe("FullSyncDebugCancelledError", () => {
@@ -43,5 +44,36 @@ describe("FullSyncDebugCancelledError", () => {
     expect(
       isFullSyncDebugCancelledError({ name: "FullSyncDebugCancelledError", message: 42 })
     ).toBe(false);
+  });
+});
+
+describe("isNetworkFetchError", () => {
+  test("recognises fetch network failures across engines", () => {
+    expect(isNetworkFetchError(new TypeError("Failed to fetch"))).toBe(true);
+    expect(
+      isNetworkFetchError(new TypeError("NetworkError when attempting to fetch resource."))
+    ).toBe(true);
+    expect(isNetworkFetchError(new TypeError("Load failed"))).toBe(true);
+    expect(isNetworkFetchError(new TypeError("fetch failed"))).toBe(true);
+  });
+
+  test("recognises messages annotated with the request target", () => {
+    expect(
+      isNetworkFetchError(new TypeError("Failed to fetch (/api/accounts/acc-1/imap/poll)"))
+    ).toBe(true);
+  });
+
+  test("rejects TypeErrors from ordinary code bugs", () => {
+    expect(
+      isNetworkFetchError(new TypeError("Cannot read properties of undefined (reading 'uid')"))
+    ).toBe(false);
+  });
+
+  test("rejects aborted requests and non-TypeError values", () => {
+    expect(isNetworkFetchError(new DOMException("Fetch was aborted.", "AbortError"))).toBe(false);
+    expect(isNetworkFetchError(new Error("Failed to fetch"))).toBe(false);
+    expect(isNetworkFetchError("Failed to fetch")).toBe(false);
+    expect(isNetworkFetchError(null)).toBe(false);
+    expect(isNetworkFetchError(undefined)).toBe(false);
   });
 });

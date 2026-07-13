@@ -48,6 +48,7 @@ import {
   FullSyncDebugCancelledError,
   isFullSyncDebugCancelledError,
   isMailServerUnreachableError,
+  isNetworkFetchError,
   MailServerUnreachableError,
   type InternalSyncTriggerOptions,
   type NewSyncFolderDecision,
@@ -405,22 +406,6 @@ export function useSyncController({
     return waitForSyncJob(accountId, data.jobId, syncMode);
   };
 
-  const handleSyncLaunchError = useCallback(
-    (error: unknown, fallbackMessage: string) => {
-      if (isFullSyncDebugCancelledError(error)) {
-        pushNotice({
-          type: "warning",
-          title: "Full sync cancelled",
-          description: error.message,
-          durationMs: 10000
-        });
-        return;
-      }
-      reportError(error instanceof Error ? error.message : fallbackMessage);
-    },
-    [pushNotice, reportError]
-  );
-
   const lastMailServerUnreachableNoticeAtRef = useRef(0);
   const notifyMailServerUnreachable = useCallback(() => {
     const now = Date.now();
@@ -433,6 +418,27 @@ export function useSyncController({
     lastMailServerUnreachableNoticeAtRef.current = now;
     pushNotice(MAIL_SERVER_UNREACHABLE_NOTICE);
   }, [pushNotice]);
+
+  const handleSyncLaunchError = useCallback(
+    (error: unknown, fallbackMessage: string) => {
+      if (isFullSyncDebugCancelledError(error)) {
+        pushNotice({
+          type: "warning",
+          title: "Full sync cancelled",
+          description: error.message,
+          durationMs: 10000
+        });
+        return;
+      }
+      if (isNetworkFetchError(error)) {
+        console.warn("[noctua] Sync launch skipped: mail server unreachable", error);
+        notifyMailServerUnreachable();
+        return;
+      }
+      reportError(error instanceof Error ? error.message : fallbackMessage);
+    },
+    [notifyMailServerUnreachable, pushNotice, reportError]
+  );
 
   const planNewSyncCandidates = async (
     folderIds: string[]
@@ -667,9 +673,10 @@ export function useSyncController({
             return !decision.skip;
           });
         } catch (error) {
-          if (isMailServerUnreachableError(error)) {
+          if (isMailServerUnreachableError(error) || isNetworkFetchError(error)) {
             // Per-folder syncs would hit the same unreachable server; skip
             // the round instead of fanning out follow-up failures.
+            console.warn("[noctua] New-message sync skipped: mail server unreachable", error);
             notifyMailServerUnreachable();
             setIsSyncing(false);
             return;
@@ -795,7 +802,11 @@ export function useSyncController({
         }
       } catch (error) {
         if (!cancelled) {
-          if (isMailServerUnreachableError(error)) {
+          if (isMailServerUnreachableError(error) || isNetworkFetchError(error)) {
+            console.warn(
+              "[noctua] Folder consistency check skipped: mail server unreachable",
+              error
+            );
             notifyMailServerUnreachable();
           } else {
             reportError(
@@ -1051,6 +1062,13 @@ export function useSyncController({
           await syncAndNotifyNewMessages(data.messages);
         }
       } catch (err) {
+        if (isNetworkFetchError(err)) {
+          // Connectivity loss on a background timer is routine (sleep/wake,
+          // server restart); throttled notice instead of an error toast.
+          console.warn("[noctua] Mail poll skipped: mail server unreachable", err);
+          notifyMailServerUnreachable();
+          return;
+        }
         const cause = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
         reportError(`Failed to check for new mail: ${cause}`, {
           requestPath: pollPath
