@@ -132,6 +132,12 @@ export function getCalendarReminderEndAtMs(reminder: CalendarReminder) {
 
 export function dispatchCalendarRemindersUpdatedEvent() {
   if (typeof window === "undefined") return;
+  // The change may have happened server-side (event deletion, invite
+  // processing), where the local cache was never touched — force the next
+  // fetch to revalidate instead of trusting the TTL.
+  reminderRemoteFetchState.forEach((state) => {
+    state.lastSuccessAtMs = 0;
+  });
   window.dispatchEvent(new Event(CALENDAR_REMINDERS_UPDATED_EVENT));
 }
 
