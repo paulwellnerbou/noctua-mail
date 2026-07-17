@@ -65,6 +65,26 @@ function renderWithEdit(sourceType: CalendarEvent["sourceType"]): string {
   );
 }
 
+function renderWithDelete(withDeleteHandler: boolean): string {
+  const eventSnapshot = buildEventSnapshot();
+  return renderToStaticMarkup(
+    createElement(EventDetailView, {
+      accountId: eventSnapshot.accountId,
+      eventUid: eventSnapshot.eventUid,
+      title: eventSnapshot.summary,
+      startMs: eventSnapshot.startAtMs,
+      endMs: eventSnapshot.endAtMs,
+      allDay: eventSnapshot.allDay,
+      sourceType: eventSnapshot.sourceType,
+      eventId: eventSnapshot.id,
+      eventSnapshot,
+      eventStartAtMs: eventSnapshot.startAtMs,
+      eventEndAtMs: eventSnapshot.endAtMs,
+      onEventDeleted: withDeleteHandler ? () => undefined : undefined
+    })
+  );
+}
+
 describe("EventDetailView", () => {
   it("renders the saved email snapshot by default", () => {
     const html = render();
@@ -85,5 +105,13 @@ describe("EventDetailView", () => {
 
   it("does not offer an Edit button for received email invites", () => {
     expect(renderWithEdit("email")).not.toContain("Edit");
+  });
+
+  it("offers a Delete event button when the parent handles deletion", () => {
+    expect(renderWithDelete(true)).toContain("Delete event");
+  });
+
+  it("hides the Delete event button when deletion is not handled", () => {
+    expect(renderWithDelete(false)).not.toContain("Delete event");
   });
 });

@@ -470,6 +470,11 @@ export default function CalendarEventPreview({
                         const normalizedUid = updatedEvent.eventUid.trim().toLowerCase();
                         setStoredEventsByUid((prev) => ({ ...prev, [normalizedUid]: updatedEvent }));
                       }}
+                      onEventDeleted={() => {
+                        // Soft-deleted events drop out of the refetch, reverting
+                        // the card to its unstored state; Reprocess re-adds them.
+                        void refreshStoredEvents();
+                      }}
                       onInviteProcessed={(processedEventUid, processedState) => {
                         const normalizedUid = processedEventUid.trim().toLowerCase();
                         if (!normalizedUid) return;
