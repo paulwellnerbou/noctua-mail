@@ -29,6 +29,33 @@ import {
 
 const getThreadKey = (item: Message) => item.threadId ?? item.messageId ?? item.id;
 
+export function resolveDeleteTargets(params: {
+  message: Message;
+  allowThreadDeletion: boolean;
+  supportsThreads: boolean;
+  collapsedThreads: Record<string, boolean>;
+  threadScopeMessages: Message[];
+  activeAccountId: string;
+}): { targets: Message[]; kind: "thread" | "message" } {
+  const threadId = getThreadKey(params.message);
+  const threadItems = params.supportsThreads
+    ? params.threadScopeMessages.filter(
+        (item) =>
+          item.accountId === params.activeAccountId && getThreadKey(item) === threadId
+      )
+    : [];
+  // Threads absent from the map (e.g. topic-suggestion threads) render
+  // collapsed by default, so missing entries count as collapsed here too.
+  const isCollapsedThread =
+    params.allowThreadDeletion &&
+    params.supportsThreads &&
+    (params.collapsedThreads[threadId] ?? true) &&
+    threadItems.length > 1;
+  return isCollapsedThread
+    ? { targets: threadItems, kind: "thread" }
+    : { targets: [params.message], kind: "message" };
+}
+
 type DeleteResponse = {
   action: "deleted" | "moved";
   trashFolderId?: string | null;
@@ -680,27 +707,18 @@ export function useMessageDeleteActions({
 
   const handleDeleteMessage = useCallback(
     async (message: Message, options?: { allowThreadDeletion?: boolean }) => {
-      const allowThreadDeletion = options?.allowThreadDeletion ?? true;
       const threadId = getThreadKey(message);
-      const threadItems = supportsThreads
-        ? threadScopeMessages.filter(
-            (item) => item.accountId === activeAccountId && getThreadKey(item) === threadId
-          )
-        : [];
-      // Threads absent from the map (e.g. topic-suggestion threads) render
-      // collapsed by default, so missing entries count as collapsed here too.
-      const isCollapsedThread =
-        allowThreadDeletion &&
-        supportsThreads &&
-        (collapsedThreads[threadId] ?? true) &&
-        threadItems.length > 1;
-      const targets = isCollapsedThread ? threadItems : [message];
-      const deleteConfirm = await buildDeleteConfirmState(
-        targets,
-        isCollapsedThread ? "thread" : "message"
-      );
+      const { targets, kind } = resolveDeleteTargets({
+        message,
+        allowThreadDeletion: options?.allowThreadDeletion ?? true,
+        supportsThreads,
+        collapsedThreads,
+        threadScopeMessages,
+        activeAccountId
+      });
+      const deleteConfirm = await buildDeleteConfirmState(targets, kind);
       const requiresDeleteConfirm =
-        isCollapsedThread ||
+        kind === "thread" ||
         deleteConfirm.calendarLinkedReminderCount > 0 ||
         deleteConfirm.calendarLinkedEventCount > 0;
       if (requiresDeleteConfirm) {

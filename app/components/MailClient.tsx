@@ -2469,10 +2469,10 @@ export default function MailClient({
     if (activeTopicSuggestionRankedMessages.length === 0) return threadScopeMessages;
     const seen = new Set(threadScopeMessages.map((message) => message.id));
     const extras = activeTopicSuggestionRankedMessages.filter(
-      (message) => !seen.has(message.id)
+      (message) => message.accountId === activeAccountId && !seen.has(message.id)
     );
     return extras.length > 0 ? [...threadScopeMessages, ...extras] : threadScopeMessages;
-  }, [activeTopicSuggestionRankedMessages, threadScopeMessages]);
+  }, [activeAccountId, activeTopicSuggestionRankedMessages, threadScopeMessages]);
 
   const handleBeforeSelectMessage = useCallback(
     (nextMessage: Message, currentMessage: Message | null) => {
