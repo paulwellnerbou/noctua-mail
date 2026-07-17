@@ -687,10 +687,12 @@ export function useMessageDeleteActions({
             (item) => item.accountId === activeAccountId && getThreadKey(item) === threadId
           )
         : [];
+      // Threads absent from the map (e.g. topic-suggestion threads) render
+      // collapsed by default, so missing entries count as collapsed here too.
       const isCollapsedThread =
         allowThreadDeletion &&
         supportsThreads &&
-        collapsedThreads[threadId] &&
+        (collapsedThreads[threadId] ?? true) &&
         threadItems.length > 1;
       const targets = isCollapsedThread ? threadItems : [message];
       const deleteConfirm = await buildDeleteConfirmState(
