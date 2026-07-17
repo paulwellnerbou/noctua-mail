@@ -7,6 +7,7 @@ import {
   escapeHtml,
   extractQuotedHtmlFromDraft
 } from "@/lib/html";
+import { prefixSubject } from "@/lib/mail/subjectPrefix";
 import { splitRecipientEntries } from "@/lib/recipientLists";
 import { hasHtmlContent } from "@/lib/ui/messageView";
 import { extractEmails } from "../utils/clientHelpers";
@@ -53,13 +54,6 @@ export function uniqueRecipients(entries: string[]): string[] {
     seen.add(key);
     return true;
   });
-}
-
-export function prefixSubject(prefix: string, subject: string): string {
-  const cleaned = subject?.trim() || "(no subject)";
-  return cleaned.toLowerCase().startsWith(`${prefix.toLowerCase()}:`)
-    ? cleaned
-    : `${prefix}: ${cleaned}`;
 }
 
 export function normalizeComposeTo(value?: string | null): string {

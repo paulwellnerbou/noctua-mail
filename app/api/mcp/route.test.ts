@@ -1031,7 +1031,7 @@ describe("/api/mcp", () => {
     expect(buildRawMessage).toHaveBeenCalledTimes(3);
     expect(lastBuiltDraftMail).toMatchObject({
       to: "team@example.test",
-      subject: "Fwd: Re: Project Alpha kickoff",
+      subject: "Fwd: Project Alpha kickoff",
       text: "Please review",
       inReplyTo: `<${accountId}-msg-2@example.test>`,
       references: [

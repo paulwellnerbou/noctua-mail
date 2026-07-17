@@ -3,7 +3,6 @@ import {
   computeComposeInitState,
   getDisplayRecipient,
   normalizeComposeTo,
-  prefixSubject,
   uniqueEmails,
   uniqueRecipients
 } from "./composeInitState";
@@ -75,32 +74,6 @@ describe("getDisplayRecipient", () => {
 
   it("returns empty string for empty input", () => {
     expect(getDisplayRecipient("")).toBe("");
-  });
-});
-
-describe("prefixSubject", () => {
-  it("adds Re: prefix", () => {
-    expect(prefixSubject("Re", "Hello")).toBe("Re: Hello");
-  });
-
-  it("does not double-add Re: prefix", () => {
-    expect(prefixSubject("Re", "Re: Hello")).toBe("Re: Hello");
-  });
-
-  it("adds Fwd: prefix", () => {
-    expect(prefixSubject("Fwd", "Hello")).toBe("Fwd: Hello");
-  });
-
-  it("does not double-add Fwd: prefix", () => {
-    expect(prefixSubject("Fwd", "Fwd: Hello")).toBe("Fwd: Hello");
-  });
-
-  it("handles empty subject", () => {
-    expect(prefixSubject("Re", "")).toBe("Re: (no subject)");
-  });
-
-  it("is case-insensitive for the existing prefix check", () => {
-    expect(prefixSubject("Re", "re: Hello")).toBe("re: Hello");
   });
 });
 
