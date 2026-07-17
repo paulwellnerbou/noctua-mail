@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test";
 import {
+  deleteCalendarReminder,
   dispatchCalendarRemindersUpdatedEvent,
   fetchCalendarReminders
 } from "./calendarReminders";
@@ -92,6 +93,24 @@ describe("fetchCalendarReminders TTL cache", () => {
     dispatchCalendarRemindersUpdatedEvent();
     await fetchCalendarReminders(accountId);
     expect(serverFetchCount).toBe(2);
+  });
+
+  it("leaves the TTL fresh after a mutation refetch so reads stay cached", async () => {
+    const accountId = uniqueAccountId("acc-mutation");
+    await fetchCalendarReminders(accountId);
+    expect(serverFetchCount).toBe(1);
+
+    // A mutation dispatches (zeroing the TTL) then refetches through the
+    // cache-populating path; that refetch must re-stamp the TTL.
+    serverFetchCount = 0;
+    await deleteCalendarReminder(accountId, "reminder-does-not-exist");
+    expect(serverFetchCount).toBeGreaterThan(0);
+
+    // The post-mutation cache is authoritative, so a read within the TTL
+    // must not hit the server again.
+    serverFetchCount = 0;
+    await fetchCalendarReminders(accountId);
+    expect(serverFetchCount).toBe(0);
   });
 
   it("discards an in-flight request when a dispatch invalidates mid-flight", async () => {

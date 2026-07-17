@@ -109,6 +109,14 @@ type ReminderRemoteFetchState = {
 
 const reminderRemoteFetchState = new Map<string, ReminderRemoteFetchState>();
 
+function getReminderRemoteFetchState(accountId: string): ReminderRemoteFetchState {
+  const existing = reminderRemoteFetchState.get(accountId);
+  if (existing) return existing;
+  const created: ReminderRemoteFetchState = { lastSuccessAtMs: 0 };
+  reminderRemoteFetchState.set(accountId, created);
+  return created;
+}
+
 export function getCalendarReminderStartAtMs(reminder: CalendarReminder) {
   const startAtMs =
     typeof reminder.nextEventStartAtMs === "number" && Number.isFinite(reminder.nextEventStartAtMs)
@@ -592,6 +600,10 @@ async function loadRemindersFromServer(accountId: string) {
 async function fetchRemindersFromServer(accountId: string) {
   const reminders = await loadRemindersFromServer(accountId);
   writeReminderCache(accountId, reminders);
+  // A successful server fetch that populates the cache is authoritative, so
+  // refresh the TTL — mutation flows fetch through here after invalidation
+  // zeroed it, and would otherwise leave fresh data marked expired.
+  getReminderRemoteFetchState(accountId).lastSuccessAtMs = Date.now();
   return reminders;
 }
 
@@ -690,8 +702,7 @@ export async function fetchCalendarReminders(accountId: string): Promise<Calenda
     return cache;
   }
   const queue = readReminderQueue(accountId);
-  const state = reminderRemoteFetchState.get(accountId) ?? { lastSuccessAtMs: 0 };
-  reminderRemoteFetchState.set(accountId, state);
+  const state = getReminderRemoteFetchState(accountId);
   const now = Date.now();
   const hasPendingQueue = queue.length > 0;
   const cacheFresh = now - state.lastSuccessAtMs < CALENDAR_REMINDER_REMOTE_FETCH_TTL_MS;
