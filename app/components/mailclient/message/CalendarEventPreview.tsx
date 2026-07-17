@@ -23,7 +23,10 @@ import {
 import { normalizeCalendarIcsLineEndings } from "@/lib/calendarIcs";
 import { isCalendarAttachment } from "@/lib/messageFlags";
 import { resolveNextReminderOccurrence } from "@/lib/reminderRecurrence";
-import { CALENDAR_REMINDERS_UPDATED_EVENT } from "../utils/calendarReminders";
+import {
+  CALENDAR_REMINDERS_UPDATED_EVENT,
+  dispatchCalendarRemindersUpdatedEvent
+} from "../utils/calendarReminders";
 import { groupItemsByRelativeTime } from "../utils/relativeTimeGroups";
 import type { InviteProcessingStatePatch } from "../utils/calendarInviteState";
 import EventDetailView from "@/app/components/calendar/EventDetailView";
@@ -344,7 +347,7 @@ export default function CalendarEventPreview({
           onInviteStateChange?.(statePatches);
         }
         await refreshStoredEvents();
-        window.dispatchEvent(new Event(CALENDAR_REMINDERS_UPDATED_EVENT));
+        dispatchCalendarRemindersUpdatedEvent();
       } catch (error) {
         reportError(error instanceof Error ? error.message : "Failed to process calendar invite.");
       } finally {
@@ -469,6 +472,11 @@ export default function CalendarEventPreview({
                       onEventUpdated={(updatedEvent) => {
                         const normalizedUid = updatedEvent.eventUid.trim().toLowerCase();
                         setStoredEventsByUid((prev) => ({ ...prev, [normalizedUid]: updatedEvent }));
+                      }}
+                      onEventDeleted={() => {
+                        // Soft-deleted events drop out of the refetch, reverting
+                        // the card to its unstored state; Reprocess re-adds them.
+                        void refreshStoredEvents();
                       }}
                       onInviteProcessed={(processedEventUid, processedState) => {
                         const normalizedUid = processedEventUid.trim().toLowerCase();
