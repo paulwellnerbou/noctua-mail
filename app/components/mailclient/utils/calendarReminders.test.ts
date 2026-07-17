@@ -55,20 +55,26 @@ beforeEach(() => {
 });
 
 describe("fetchCalendarReminders TTL cache", () => {
+  // Unique per test execution: the module-level fetch state is keyed by
+  // accountId and survives --rerun-each repeats.
+  const uniqueAccountId = (prefix: string) => `${prefix}-${crypto.randomUUID()}`;
+
   it("serves repeat fetches from the cache within the TTL", async () => {
-    await fetchCalendarReminders("acc-ttl");
+    const accountId = uniqueAccountId("acc-ttl");
+    await fetchCalendarReminders(accountId);
     expect(serverFetchCount).toBe(1);
-    await fetchCalendarReminders("acc-ttl");
+    await fetchCalendarReminders(accountId);
     expect(serverFetchCount).toBe(1);
   });
 
   it("revalidates after a reminders-updated dispatch", async () => {
-    await fetchCalendarReminders("acc-bust");
+    const accountId = uniqueAccountId("acc-bust");
+    await fetchCalendarReminders(accountId);
     expect(serverFetchCount).toBe(1);
     // Simulates a server-side change (event deletion, invite processing)
     // announced without a local cache write.
     dispatchCalendarRemindersUpdatedEvent();
-    await fetchCalendarReminders("acc-bust");
+    await fetchCalendarReminders(accountId);
     expect(serverFetchCount).toBe(2);
   });
 });
