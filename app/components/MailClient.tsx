@@ -2462,6 +2462,18 @@ export default function MailClient({
     setCollapsedGroups
   });
 
+  // Topic-suggestion threads live outside the fetched message state, so the
+  // list-mutation hooks need their messages appended to resolve full-thread
+  // delete targets.
+  const mutationThreadScopeMessages = useMemo(() => {
+    if (activeTopicSuggestionRankedMessages.length === 0) return threadScopeMessages;
+    const seen = new Set(threadScopeMessages.map((message) => message.id));
+    const extras = activeTopicSuggestionRankedMessages.filter(
+      (message) => message.accountId === activeAccountId && !seen.has(message.id)
+    );
+    return extras.length > 0 ? [...threadScopeMessages, ...extras] : threadScopeMessages;
+  }, [activeAccountId, activeTopicSuggestionRankedMessages, threadScopeMessages]);
+
   const handleBeforeSelectMessage = useCallback(
     (nextMessage: Message, currentMessage: Message | null) => {
       const nextThreadKey = nextMessage.threadId ?? nextMessage.messageId ?? nextMessage.id;
@@ -5276,7 +5288,7 @@ export default function MailClient({
             folders,
             folderById,
             messages,
-            threadScopeMessages,
+            threadScopeMessages: mutationThreadScopeMessages,
             visibleMessages,
             sortedMessages,
             collapsedThreads,
