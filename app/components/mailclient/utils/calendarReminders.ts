@@ -134,9 +134,13 @@ export function dispatchCalendarRemindersUpdatedEvent() {
   if (typeof window === "undefined") return;
   // The change may have happened server-side (event deletion, invite
   // processing), where the local cache was never touched — force the next
-  // fetch to revalidate instead of trusting the TTL.
+  // fetch to revalidate instead of trusting the TTL. Dropping inFlight
+  // deregisters requests that started pre-change: new callers get a fresh
+  // request, and the completion of a deregistered one neither stamps
+  // freshness nor writes the cache.
   reminderRemoteFetchState.forEach((state) => {
     state.lastSuccessAtMs = 0;
+    state.inFlight = undefined;
   });
   window.dispatchEvent(new Event(CALENDAR_REMINDERS_UPDATED_EVENT));
 }
@@ -576,13 +580,17 @@ function enqueueMutation(accountId: string, mutation: QueuedReminderMutation) {
   writeReminderQueue(accountId, next);
 }
 
-async function fetchRemindersFromServer(accountId: string) {
+async function loadRemindersFromServer(accountId: string) {
   const res = await fetch(buildAccountRemindersPath(accountId), { cache: "no-store" });
   if (!res.ok) {
     throw new Error(`Failed to load reminders (${res.status})`);
   }
   const payload = (await res.json()) as { items?: unknown[] };
-  const reminders = remindersFromUnknown(payload.items ?? []);
+  return remindersFromUnknown(payload.items ?? []);
+}
+
+async function fetchRemindersFromServer(accountId: string) {
+  const reminders = await loadRemindersFromServer(accountId);
   writeReminderCache(accountId, reminders);
   return reminders;
 }
@@ -693,16 +701,27 @@ export async function fetchCalendarReminders(accountId: string): Promise<Calenda
   if (state.inFlight) {
     return state.inFlight;
   }
-  const request = (async () => {
+  // Assigned immediately below; the closure only reads it after its first
+  // await, by which point the assignment has run.
+  let request!: Promise<CalendarReminder[]>;
+  request = (async () => {
     try {
       await syncQueuedReminderMutations(accountId);
-      const reminders = await fetchRemindersFromServer(accountId);
-      state.lastSuccessAtMs = Date.now();
+      const reminders = await loadRemindersFromServer(accountId);
+      // A reminders-updated dispatch mid-flight deregisters this request;
+      // its data predates the change, so it must not refresh the TTL or
+      // clobber the cache a newer request may have written.
+      if (state.inFlight === request) {
+        writeReminderCache(accountId, reminders);
+        state.lastSuccessAtMs = Date.now();
+      }
       return reminders;
     } catch {
       return cache;
     } finally {
-      state.inFlight = undefined;
+      if (state.inFlight === request) {
+        state.inFlight = undefined;
+      }
     }
   })();
   state.inFlight = request;

@@ -23,6 +23,17 @@ const originalNavigatorDescriptor = Object.getOwnPropertyDescriptor(globalThis, 
 const originalFetch = globalThis.fetch;
 
 let serverFetchCount = 0;
+let holdResponses = false;
+let pendingReleases: Array<() => void> = [];
+
+function releasePendingResponses() {
+  const releases = pendingReleases;
+  pendingReleases = [];
+  holdResponses = false;
+  releases.forEach((release) => release());
+}
+
+const flushAsync = () => new Promise((resolve) => setTimeout(resolve, 0));
 
 beforeAll(() => {
   (globalThis as Record<string, unknown>).window = {
@@ -35,6 +46,9 @@ beforeAll(() => {
   });
   globalThis.fetch = (async () => {
     serverFetchCount += 1;
+    if (holdResponses) {
+      await new Promise<void>((resolve) => pendingReleases.push(resolve));
+    }
     return new Response(JSON.stringify({ items: [] }), {
       status: 200,
       headers: { "Content-Type": "application/json" }
@@ -52,6 +66,8 @@ afterAll(() => {
 
 beforeEach(() => {
   serverFetchCount = 0;
+  holdResponses = false;
+  pendingReleases = [];
 });
 
 describe("fetchCalendarReminders TTL cache", () => {
@@ -74,6 +90,29 @@ describe("fetchCalendarReminders TTL cache", () => {
     // Simulates a server-side change (event deletion, invite processing)
     // announced without a local cache write.
     dispatchCalendarRemindersUpdatedEvent();
+    await fetchCalendarReminders(accountId);
+    expect(serverFetchCount).toBe(2);
+  });
+
+  it("discards an in-flight request when a dispatch invalidates mid-flight", async () => {
+    const accountId = uniqueAccountId("acc-inflight");
+    holdResponses = true;
+    const staleFetch = fetchCalendarReminders(accountId);
+    await flushAsync();
+    expect(serverFetchCount).toBe(1);
+
+    dispatchCalendarRemindersUpdatedEvent();
+
+    // The pre-dispatch request must not be reused...
+    const freshFetch = fetchCalendarReminders(accountId);
+    await flushAsync();
+    expect(serverFetchCount).toBe(2);
+
+    releasePendingResponses();
+    await Promise.all([staleFetch, freshFetch]);
+
+    // ...and its completion must not re-freshen the TTL: only the
+    // post-dispatch request did, so this stays served from the cache.
     await fetchCalendarReminders(accountId);
     expect(serverFetchCount).toBe(2);
   });
