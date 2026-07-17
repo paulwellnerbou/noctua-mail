@@ -12,6 +12,7 @@ import {
 } from "./serverDb";
 import { deleteMessageFiles, getMessageSource } from "@/lib/storage";
 import { parseComposeAttachments, resolveComposeHtml } from "@/lib/mail/composePayload";
+import { prefixSubject } from "@/lib/mail/subjectPrefix";
 import { appendImapMessage, deleteImapMessage, syncImapMessage } from "./serverImap";
 import { buildRawMessage, sendRawSmtpMessage } from "./serverSmtp";
 import { hasMessageFlag } from "@/lib/messageFlags";
@@ -112,13 +113,6 @@ function extractEmails(value?: string | null) {
   if (!value) return [];
   const matches = value.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi);
   return matches ?? [];
-}
-
-function prefixSubject(prefix: string, subject?: string | null) {
-  const cleaned = subject?.trim() || "(no subject)";
-  return cleaned.toLowerCase().startsWith(`${prefix.toLowerCase()}:`)
-    ? cleaned
-    : `${prefix}: ${cleaned}`;
 }
 
 function getReplyRecipient(account: Account, message: Message) {
