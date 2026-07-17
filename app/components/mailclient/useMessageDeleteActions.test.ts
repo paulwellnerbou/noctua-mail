@@ -109,7 +109,12 @@ describe("resolveDeleteTargets", () => {
   });
 
   it("falls back to messageId/id as the thread key when threadId is missing", () => {
-    const root = makeMessage({ id: "r1", threadId: undefined, messageId: "<root@x>" });
+    // Deliberate type violation: threadId is required in Message, but the
+    // getThreadKey fallback handles rows where it is absent at runtime.
+    const root = {
+      ...makeMessage({ id: "r1", messageId: "<root@x>" }),
+      threadId: undefined
+    } as unknown as Message;
     const reply = makeMessage({ id: "r2", threadId: "<root@x>" });
     const result = resolveDeleteTargets({
       ...baseParams,
