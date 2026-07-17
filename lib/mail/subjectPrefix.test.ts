@@ -20,7 +20,7 @@ describe("stripSubjectMarkers", () => {
     expect(stripSubjectMarkers("AW(3): Hello")).toBe("Hello");
   });
 
-  it("does not strip marker-like words inside the subject", () => {
+  it("strips leading markers but not marker-like words in the subject", () => {
     expect(stripSubjectMarkers("Re: Regarding the review")).toBe("Regarding the review");
     expect(stripSubjectMarkers("Rescue mission")).toBe("Rescue mission");
   });
