@@ -107,6 +107,13 @@ import { isEmbeddableImage } from "@/lib/mail/embeddableImage";
 export type ComposeEditorHandle = {
   appendHtmlBlock: (html: string) => void;
   insertInlineImages: (files: File[]) => void;
+  /**
+   * Synchronous export of the current content. The onChange export is deferred
+   * to an animation frame, which a throttled/occluded window may delay
+   * indefinitely — use this when acting on the content right now (e.g.
+   * translating the draft).
+   */
+  exportCurrentHtml: () => { html: string; text: string };
 };
 
 export type QuotedMessageConfig = {
@@ -740,6 +747,12 @@ function AppendPlugin({
       },
       insertInlineImages(files: File[]) {
         insertImageFilesIntoEditor(editor, files, onInlineImage);
+      },
+      exportCurrentHtml() {
+        return editor.getEditorState().read(() => ({
+          html: cleanLexicalHtml($generateHtmlFromNodes(editor, null)),
+          text: $getRoot().getTextContent()
+        }));
       }
     }),
     [editor, onInlineImage]

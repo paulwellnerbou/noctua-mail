@@ -44,6 +44,7 @@ import {
   useComposeHandlers
 } from "./useComposeHandlers";
 import { useComposeState } from "./useComposeState";
+import { useComposeTranslation } from "./useComposeTranslation";
 import { useComposeViewEffects } from "./useComposeViewEffects";
 import { useDraftManager } from "./useDraftManager";
 import type { ComposeMode } from "./composeTypes";
@@ -424,6 +425,29 @@ function ComposeOrchestratorImpl(
   const selectedSignature =
     accountSignatures.find((signature) => signature.id === composeSignatureId) ?? null;
 
+  const composeTranslation = useComposeTranslation({
+    activeAccountId,
+    enabled: Boolean(currentAccount?.deepl?.enabled && currentAccount?.deepl?.hasApiKey),
+    composeTab,
+    composeBody,
+    composeHtml,
+    composeHtmlText,
+    composeTextRef,
+    composeMarkdownRef,
+    composeBodyDebounceRef,
+    composeDirtyRef,
+    composeLastEditedRef,
+    composeSessionVersionRef,
+    setComposeBody,
+    setComposeHtml,
+    setComposeHtmlText,
+    setComposeMarkdown,
+    setComposeEditorReset,
+    stripHtml,
+    apiFetch
+  });
+  const resetComposeTranslation = composeTranslation.reset;
+
   const {
     addComposeFiles,
     addDroppedFiles,
@@ -642,8 +666,10 @@ function ComposeOrchestratorImpl(
     currentDraftHashRef.current = "";
     composeBaselineHashRef.current = null;
     setComposeView("inline");
+    resetComposeTranslation();
   }, [
     composeBaselineHashRef,
+    resetComposeTranslation,
     currentDraftHashRef,
     lastDraftHashRef,
     setComposeAttachments,
@@ -841,6 +867,7 @@ function ComposeOrchestratorImpl(
     asNew = false,
     prefill?: ComposeOpenPrefill
   ) => {
+    resetComposeTranslation();
     if (!message) {
       openComposeInternal(mode, undefined, asNew);
       if (prefill) applyComposePrefill(prefill);
@@ -976,6 +1003,11 @@ function ComposeOrchestratorImpl(
       composeStripImages={composeStripImages}
       composeEditorReset={composeEditorReset}
       visibleComposeAttachments={visibleComposeAttachments}
+      composeTranslation={composeTranslation.ui}
+      onComposeTranslate={composeTranslation.translate}
+      onComposeTranslateRevert={composeTranslation.revert}
+      onComposeTranslateDismiss={composeTranslation.reset}
+      onComposeTranslateLangChange={composeTranslation.setTargetLang}
       composeSignatureId={composeSignatureId}
       signatureMenuOpen={signatureMenuOpen}
       selectedSignature={selectedSignature}
@@ -1133,11 +1165,12 @@ function ComposeOrchestratorImpl(
       ),
       resetSession: () => {
         resetComposeSession(composeRef.current);
+        resetComposeTranslation();
       },
       openCompose,
       setComposeView
     }),
-    [composeCardRef, openCompose, setComposeView]
+    [composeCardRef, openCompose, resetComposeTranslation, setComposeView]
   );
 
   return (

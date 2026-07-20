@@ -89,6 +89,9 @@
 
 .composeTabsRow {
   display: flex;
+  /* The action cluster (translate/signature/attach) outgrows the inline pane;
+     wrapping keeps the view tabs on one line instead of stacking them. */
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
