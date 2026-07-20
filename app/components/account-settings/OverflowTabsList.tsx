@@ -1,4 +1,4 @@
-import { useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { MoreHorizontal } from "lucide-react";
 import { DropdownMenu, Tabs } from "@radix-ui/themes";
 
@@ -21,52 +21,68 @@ const OVERFLOW_TRIGGER_WIDTH = 32;
 /**
  * Tab list that moves the tabs which do not fit into a trailing "more" menu.
  * Widths are cached per tab value because a tab pushed into the menu leaves the
- * DOM and can no longer be measured.
+ * DOM and can no longer be measured; re-measuring therefore clears the cache
+ * rather than updating it in place, so the full set is remeasured together.
  */
 export default function OverflowTabsList({ tabs, activeValue, onSelect, overflowLabel = "More tabs" }: Props) {
   const listRef = useRef<HTMLDivElement | null>(null);
   const [widths, setWidths] = useState<Record<string, number>>({});
   const [availableWidth, setAvailableWidth] = useState<number | null>(null);
 
+  const allMeasured = tabs.every((tab) => widths[tab.value] !== undefined);
+
+  // Until every width is known the full set renders, so one pass measures them all.
+  // Measuring only the rendered subset would strand stale widths on menu tabs.
+  useLayoutEffect(() => {
+    const list = listRef.current;
+    if (!list || allMeasured) return;
+
+    const measured: Record<string, number> = {};
+    list.querySelectorAll<HTMLElement>("[data-tab-value]").forEach((trigger) => {
+      const value = trigger.dataset.tabValue;
+      // offsetWidth, not getBoundingClientRect: the dialog's open animation scales
+      // the modal, which would make every tab measure narrower than it lays out.
+      const width = trigger.offsetWidth;
+      if (value && width > 0) measured[value] = width;
+    });
+
+    // Measuring the DOM and storing the result is the point of this effect; the
+    // identity check below keeps it from looping when nothing actually changed.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setWidths((current) => {
+      const next = { ...current, ...measured };
+      const changed = Object.keys(next).some((value) => next[value] !== current[value]);
+      return changed ? next : current;
+    });
+  }, [allMeasured, tabs]);
+
+  // Triggers do not shrink, so a resize changes the budget but never the widths.
   useLayoutEffect(() => {
     const list = listRef.current;
     if (!list) return;
 
-    const sync = () => {
-      const measured: Record<string, number> = {};
-      list.querySelectorAll<HTMLElement>("[data-tab-value]").forEach((trigger) => {
-        const value = trigger.dataset.tabValue;
-        // offsetWidth, not getBoundingClientRect: the dialog's open animation scales
-        // the modal, which would make every tab measure narrower than it lays out.
-        const width = trigger.offsetWidth;
-        if (value && width > 0) measured[value] = width;
-      });
-
-      setWidths((current) => {
-        const next = { ...current, ...measured };
-        const changed = Object.keys(next).some((value) => next[value] !== current[value]);
-        return changed ? next : current;
-      });
-      setAvailableWidth(list.clientWidth);
-    };
-
-    sync();
-    // The first pass can measure fallback-font widths, which never resize the list.
-    let cancelled = false;
-    document.fonts?.ready.then(() => {
-      if (!cancelled) sync();
-    });
-
-    const observer = new ResizeObserver(sync);
+    const update = () => setAvailableWidth(list.clientWidth);
+    update();
+    const observer = new ResizeObserver(update);
     observer.observe(list);
+    return () => observer.disconnect();
+  }, []);
+
+  // Widths measured in a fallback font are wrong once the real font swaps in, and
+  // that swap never resizes the list. Drop them so the full set is measured again.
+  useEffect(() => {
+    if (!document.fonts || document.fonts.status === "loaded") return;
+
+    let cancelled = false;
+    document.fonts.ready.then(() => {
+      if (!cancelled) setWidths({});
+    });
     return () => {
       cancelled = true;
-      observer.disconnect();
     };
-  }, [tabs]);
+  }, []);
 
   const visibleCount = useMemo(() => {
-    const allMeasured = tabs.every((tab) => widths[tab.value] !== undefined);
     if (!allMeasured || availableWidth === null) return tabs.length;
 
     const total = tabs.reduce((sum, tab) => sum + widths[tab.value], 0);
@@ -81,7 +97,7 @@ export default function OverflowTabsList({ tabs, activeValue, onSelect, overflow
       count += 1;
     }
     return Math.max(count, 1);
-  }, [availableWidth, tabs, widths]);
+  }, [allMeasured, availableWidth, tabs, widths]);
 
   const visibleTabs = tabs.slice(0, visibleCount);
   const overflowTabs = tabs.slice(visibleCount);
