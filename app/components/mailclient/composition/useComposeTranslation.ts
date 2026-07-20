@@ -269,6 +269,15 @@ export function useComposeTranslation({
     setState(IDLE_STATE);
   }, []);
 
+  /** Clears an error banner without discarding the stash — after a failed
+   * retry the draft still holds the earlier translation, and Revert must
+   * survive the dismissal. */
+  const dismissError = useCallback(() => {
+    setState((prev) =>
+      prev.stash ? { ...prev, status: "done", error: null } : IDLE_STATE
+    );
+  }, []);
+
   const ui: ComposeTranslationUi = {
     enabled,
     status: state.status,
@@ -279,5 +288,5 @@ export function useComposeTranslation({
     canRevert: state.stash !== null
   };
 
-  return { ui, translate, revert, reset, setTargetLang };
+  return { ui, translate, revert, reset, dismissError, setTargetLang };
 }

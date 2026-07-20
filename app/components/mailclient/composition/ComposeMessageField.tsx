@@ -497,17 +497,7 @@ export default function ComposeMessageField({
                     : ""
                 }`}
             </Text>
-            {composeTranslation.error ? (
-              <Button
-                type="button"
-                size="1"
-                variant="ghost"
-                color="gray"
-                onClick={onComposeTranslateDismiss}
-              >
-                Dismiss
-              </Button>
-            ) : composeTranslation.canRevert ? (
+            {composeTranslation.canRevert && (
               <Button
                 type="button"
                 size="1"
@@ -518,7 +508,18 @@ export default function ComposeMessageField({
               >
                 Revert
               </Button>
-            ) : null}
+            )}
+            {composeTranslation.error && (
+              <Button
+                type="button"
+                size="1"
+                variant="ghost"
+                color="gray"
+                onClick={onComposeTranslateDismiss}
+              >
+                Dismiss
+              </Button>
+            )}
           </Flex>
         )}
       {composeTab === "text" && (

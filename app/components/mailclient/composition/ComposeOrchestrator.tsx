@@ -1006,7 +1006,7 @@ function ComposeOrchestratorImpl(
       composeTranslation={composeTranslation.ui}
       onComposeTranslate={composeTranslation.translate}
       onComposeTranslateRevert={composeTranslation.revert}
-      onComposeTranslateDismiss={composeTranslation.reset}
+      onComposeTranslateDismiss={composeTranslation.dismissError}
       onComposeTranslateLangChange={composeTranslation.setTargetLang}
       composeSignatureId={composeSignatureId}
       signatureMenuOpen={signatureMenuOpen}
