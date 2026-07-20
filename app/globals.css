@@ -1228,6 +1228,44 @@ a {
   overflow: hidden;
 }
 
+.settings-tabs-list {
+  /* Tighter than the Radix default so the full set of tabs fits on one row. */
+  --tab-padding-x: var(--space-1);
+  margin-bottom: var(--space-4);
+  flex-shrink: 0;
+  /* Overflowing tabs move into the "more" menu, so the built-in scroll is dead weight. */
+  overflow: hidden;
+}
+
+.settings-tabs-overflow {
+  position: relative;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: var(--tab-height);
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--gray-a11);
+  cursor: pointer;
+}
+
+.settings-tabs-overflow:hover,
+.settings-tabs-overflow[data-active] {
+  color: var(--gray-12);
+}
+
+.settings-tabs-overflow[data-active]::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  background-color: var(--accent-indicator);
+}
 
 .settings-body {
   position: relative;
