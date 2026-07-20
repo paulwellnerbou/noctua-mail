@@ -13,6 +13,7 @@ import TopicsTabContent from "@/app/components/account-settings/tabs/TopicsTabCo
 import RecipientAliasesTabContent from "@/app/components/account-settings/tabs/RecipientAliasesTabContent";
 import McpTabContent from "@/app/components/account-settings/tabs/McpTabContent";
 import TranslationTabContent from "@/app/components/account-settings/tabs/TranslationTabContent";
+import OverflowTabsList, { type OverflowTabItem } from "@/app/components/account-settings/OverflowTabsList";
 export type ManageTab =
   | "account"
   | "signatures"
@@ -124,6 +125,22 @@ export default function AccountSettingsModal({
     [initialAccount, isAdminUser, localAccount]
   );
 
+  const tabItems = useMemo<OverflowTabItem[]>(() => {
+    const items: OverflowTabItem[] = [
+      { value: "account", label: "Account" },
+      { value: "signatures", label: "Signatures", disabled: !isExistingAccount },
+      { value: "preferences", label: "Preferences", disabled: !isExistingAccount },
+      { value: "categorization", label: "Categorization", disabled: !isExistingAccount },
+      { value: "topics", label: "Topics", disabled: !isExistingAccount },
+      { value: "calendar", label: "Calendar", disabled: !isExistingAccount },
+      { value: "translation", label: "Translation", disabled: !isExistingAccount },
+      { value: "recipient-aliases", label: "Recipient Aliases", disabled: !isExistingAccount },
+      { value: "mcp", label: "MCP", disabled: !isExistingAccount }
+    ];
+    if (isAdminUser) items.push({ value: "admin", label: "Admin", disabled: !isExistingAccount });
+    return items;
+  }, [isAdminUser, isExistingAccount]);
+
   if (!isOpen) return null;
 
   const handleUpdateSettings = (next: AccountSettings) => {
@@ -215,38 +232,12 @@ export default function AccountSettingsModal({
             onValueChange={(value) => onTabChange(value as ManageTab)}
             style={{ flex: "1 1 auto", minHeight: 0, display: "flex", flexDirection: "column" }}
           >
-            <Tabs.List style={{ marginBottom: "var(--space-4)", flexShrink: 0 }}>
-              <Tabs.Trigger value="account">Account</Tabs.Trigger>
-              <Tabs.Trigger value="signatures" disabled={!isExistingAccount}>
-                Signatures
-              </Tabs.Trigger>
-              <Tabs.Trigger value="preferences" disabled={!isExistingAccount}>
-                Preferences
-              </Tabs.Trigger>
-              <Tabs.Trigger value="categorization" disabled={!isExistingAccount}>
-                Categorization
-              </Tabs.Trigger>
-              <Tabs.Trigger value="topics" disabled={!isExistingAccount}>
-                Topics
-              </Tabs.Trigger>
-              <Tabs.Trigger value="calendar" disabled={!isExistingAccount}>
-                Calendar
-              </Tabs.Trigger>
-              <Tabs.Trigger value="translation" disabled={!isExistingAccount}>
-                Translation
-              </Tabs.Trigger>
-              <Tabs.Trigger value="recipient-aliases" disabled={!isExistingAccount}>
-                Recipient Aliases
-              </Tabs.Trigger>
-              <Tabs.Trigger value="mcp" disabled={!isExistingAccount}>
-                MCP
-              </Tabs.Trigger>
-              {isAdminUser && (
-                <Tabs.Trigger value="admin" disabled={!isExistingAccount}>
-                  Admin
-                </Tabs.Trigger>
-              )}
-            </Tabs.List>
+            <OverflowTabsList
+              tabs={tabItems}
+              activeValue={manageTab}
+              onSelect={(value) => onTabChange(value as ManageTab)}
+              overflowLabel="More settings tabs"
+            />
 
             <Tabs.Content value="account" style={{ flex: "1 1 auto", minHeight: 0, overflow: "hidden" }}>
               <AccountTabContent
