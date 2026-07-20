@@ -176,8 +176,12 @@ export function useComposeTranslation({
       if (composeTabRef.current !== tab) {
         // The user switched tabs mid-flight. Applying now would bump the
         // editor reset and remount the other tab's editor over its unflushed
-        // edits — drop the result instead.
-        setState(IDLE_STATE);
+        // edits — drop the result instead. An earlier translation's stash (and
+        // its banner) survives so Revert stays available for content that is
+        // still translated.
+        setState((prev) =>
+          prev.stash ? { ...prev, status: "done", error: null } : IDLE_STATE
+        );
         return;
       }
       // A debounced state update queued before the click still carries
