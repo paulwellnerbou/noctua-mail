@@ -4,10 +4,12 @@ import type React from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as Collapsible from "@radix-ui/react-collapsible";
 import { CaretRightIcon, ChevronDownIcon } from "@radix-ui/react-icons";
-import { Button, DropdownMenu, Tabs } from "@radix-ui/themes";
-import { Paperclip } from "lucide-react";
+import { Button, DropdownMenu, Flex, Select, Tabs, Text } from "@radix-ui/themes";
+import { Languages, Paperclip } from "lucide-react";
 import dynamic from "next/dynamic";
 import type { ComposeEditorHandle } from "../../ComposeEditor";
+import type { ComposeTranslationUi } from "./useComposeTranslation";
+import { DEEPL_TARGET_LANGUAGES, deeplTargetLanguageLabel } from "@/lib/deeplLanguages";
 import type { ComposeInviteDraft } from "@/lib/composeInvite";
 import type { PendingImageDrop } from "./composeTypes";
 import type { Attachment } from "@/lib/data";
@@ -65,6 +67,11 @@ type ComposeMessageFieldProps = {
   composeStripImages: boolean;
   composeEditorReset: number;
   visibleComposeAttachments: Attachment[];
+  composeTranslation: ComposeTranslationUi;
+  onComposeTranslate: (liveHtml?: { html: string; text: string }) => void;
+  onComposeTranslateRevert: () => void;
+  onComposeTranslateDismiss: () => void;
+  onComposeTranslateLangChange: (lang: string) => void;
   composeSignatureId: string;
   signatureMenuOpen: boolean;
   selectedSignature: Signature | null;
@@ -126,6 +133,11 @@ export default function ComposeMessageField({
   composeStripImages,
   composeEditorReset,
   visibleComposeAttachments,
+  composeTranslation,
+  onComposeTranslate,
+  onComposeTranslateRevert,
+  onComposeTranslateDismiss,
+  onComposeTranslateLangChange,
   composeSignatureId,
   signatureMenuOpen,
   selectedSignature,
@@ -366,6 +378,43 @@ export default function ComposeMessageField({
           </Tabs.Root>
         </div>
         <div className={composeStyles.composeAttach}>
+          {composeTranslation.enabled && (
+            <>
+              <Select.Root
+                size="1"
+                value={composeTranslation.targetLang}
+                onValueChange={onComposeTranslateLangChange}
+              >
+                <Select.Trigger aria-label="Translation target language" />
+                <Select.Content position="popper">
+                  {DEEPL_TARGET_LANGUAGES.map((language) => (
+                    <Select.Item key={language.code} value={language.code}>
+                      {language.label}
+                    </Select.Item>
+                  ))}
+                </Select.Content>
+              </Select.Root>
+              <Button
+                type="button"
+                size="1"
+                variant="soft"
+                color="gray"
+                title="Translate the message with DeepL"
+                disabled={composeTranslation.status === "loading"}
+                onClick={() =>
+                  onComposeTranslate(
+                    composeTab === "html"
+                      ? composeEditorRef.current?.exportCurrentHtml()
+                      : undefined
+                  )
+                }
+                tabIndex={-1}
+              >
+                <Languages size={12} />
+                {composeTranslation.status === "loading" ? "Translating…" : "Translate"}
+              </Button>
+            </>
+          )}
           <DropdownMenu.Root open={signatureMenuOpen} onOpenChange={setSignatureMenuOpen}>
             <DropdownMenu.Trigger>
               <Button
@@ -429,6 +478,50 @@ export default function ComposeMessageField({
           />
         </div>
       </div>
+      {composeTranslation.enabled &&
+        (composeTranslation.status === "done" || composeTranslation.status === "error") && (
+          <Flex
+            align="center"
+            gap="2"
+            wrap="wrap"
+            className={styles.composeTranslationBanner}
+            role="status"
+            aria-live="polite"
+          >
+            <Languages size={13} />
+            <Text size="1" color={composeTranslation.error ? "red" : "gray"}>
+              {composeTranslation.error ??
+                `Translated to ${deeplTargetLanguageLabel(composeTranslation.translatedTo)}${
+                  composeTranslation.detectedSourceLang
+                    ? ` · from ${composeTranslation.detectedSourceLang}`
+                    : ""
+                }`}
+            </Text>
+            {composeTranslation.canRevert && (
+              <Button
+                type="button"
+                size="1"
+                variant="ghost"
+                color="gray"
+                title="Restore the text from before the translation"
+                onClick={onComposeTranslateRevert}
+              >
+                Revert
+              </Button>
+            )}
+            {composeTranslation.error && (
+              <Button
+                type="button"
+                size="1"
+                variant="ghost"
+                color="gray"
+                onClick={onComposeTranslateDismiss}
+              >
+                Dismiss
+              </Button>
+            )}
+          </Flex>
+        )}
       {composeTab === "text" && (
         <>
           <div className={`${styles.composeWriting} ${styles.composeWritingText}`}>

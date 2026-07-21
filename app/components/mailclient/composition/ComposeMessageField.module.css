@@ -39,3 +39,7 @@
   min-height: var(--compose-editor-min-height);
   width: 100%;
 }
+
+.composeTranslationBanner {
+  padding: 2px 0 6px;
+}

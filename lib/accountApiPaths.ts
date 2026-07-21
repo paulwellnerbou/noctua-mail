@@ -303,6 +303,10 @@ export function buildAccountTranslationTestPath(accountId: string) {
   return buildAccountApiPath(accountId, "/translation/test");
 }
 
+export function buildAccountComposeTranslatePath(accountId: string) {
+  return buildAccountApiPath(accountId, "/translation/compose");
+}
+
 export function buildAccountMessageCalendarDiffPath(accountId: string, messageId: string) {
   return buildAccountApiPath(
     accountId,
