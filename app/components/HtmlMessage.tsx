@@ -210,7 +210,9 @@ function buildPreviewDocument({
     `body { margin: 0; width: 100%; min-width: 0; max-width: 100%; box-sizing: border-box; background: transparent; ${hostTextColor} font-size: 100%; }`,
     `.${NOCTUA_EMAIL_CONTENT_CLASS} { font-family: "Sora", system-ui, -apple-system, sans-serif; color: inherit; background: transparent; font-size: 100%; width: 100%; max-width: 100%; min-width: 0; box-sizing: border-box; }`,
     ".html-scale { transform: scale(var(--zoom)); transform-origin: top left; width: calc(100% / var(--zoom)); min-width: 0; max-width: 100%; box-sizing: border-box; }",
-    `.${NOCTUA_EMAIL_VIEWPORT_CLASS} { width: 100%; max-width: 100%; min-width: 0; box-sizing: border-box; }`,
+    // Fixed-width emails (e.g. 840px newsletter tables) overflow narrow panes;
+    // the iframe itself is scrolling="no", so this wrapper provides the scrollbar.
+    `.${NOCTUA_EMAIL_VIEWPORT_CLASS} { width: 100%; max-width: 100%; min-width: 0; box-sizing: border-box; overflow-x: auto; }`,
     `.${NOCTUA_EMAIL_VIEWPORT_DEFAULT_MARGIN_CLASS} { padding: 8px; }`,
     ".email-body { width: 100%; max-width: 100%; min-width: 0; box-sizing: border-box; }",
     `a { color: ${linkColor}; }`,
@@ -276,12 +278,12 @@ function HtmlMessage({
         if (!doc) return;
         const body = doc.body;
         const root = doc.documentElement;
-        const nextHeight = Math.max(
-          body?.scrollHeight ?? 0,
-          body?.offsetHeight ?? 0,
-          root?.scrollHeight ?? 0,
-          root?.offsetHeight ?? 0
-        );
+        // The root's scrollHeight is floored at the iframe's own height, so
+        // including it would ratchet the height up and never let it shrink
+        // when the content reflows shorter (e.g. after the pane widens).
+        const nextHeight = body
+          ? Math.max(body.scrollHeight, body.offsetHeight)
+          : Math.max(root?.scrollHeight ?? 0, root?.offsetHeight ?? 0);
         iframe.style.height = `${Math.max(1, Math.ceil(nextHeight))}px`;
       });
     };
