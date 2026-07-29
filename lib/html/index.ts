@@ -8,6 +8,7 @@
 //   - linkify.ts: auto-linkify bare URLs in HTML text nodes
 //   - inlineImages.ts: inline-image rewriting (cid: <-> resolved URL)
 //   - quotedParts.ts: build / assemble / extract the "quoted original" block
+//   - quoteBoundary.ts: locate the quoted thread inside an incoming message
 //
 // Prefer importing from "@/lib/html" rather than the sibling files directly;
 // the re-exports here keep the surface stable for the rest of the codebase.
@@ -34,6 +35,13 @@ export {
   stripRedundantInlineImageFallbacks,
   appendUnreferencedInlineImages
 } from "./inlineImages";
+export type { QuoteBoundaryCandidate, QuoteSizes } from "./quoteBoundary";
+export {
+  isQuoteBoundary,
+  shouldCollapseQuote,
+  canWrapQuoteInParent,
+  isTableLayoutTag
+} from "./quoteBoundary";
 export type { QuotedHtmlParts } from "./quotedParts";
 export {
   buildQuotedHtmlPartsFromText,
