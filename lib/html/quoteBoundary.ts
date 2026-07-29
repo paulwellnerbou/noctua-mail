@@ -7,13 +7,25 @@
 // The DOM walk that applies these rules lives in HtmlMessage; everything here
 // stays free of DOM types so it can be tested without a browser environment.
 
-export type QuoteBoundaryCandidate = {
+/** The attribute-only half of a candidate, cheap enough to test on every element. */
+export type QuoteBoundaryMarkers = {
   tagName: string;
   id: string;
   className: string;
   typeAttr: string;
+};
+
+export type QuoteBoundaryCandidate = QuoteBoundaryMarkers & {
   text: string;
 };
+
+/**
+ * Longest text prefix any rule inspects. Callers reading text out of a DOM can
+ * stop here instead of materializing a whole subtree: the header and separator
+ * rules only look at the first 1000 characters, and an attribution line longer
+ * than ATTRIBUTION_MAX_LENGTH is rejected on length alone.
+ */
+export const QUOTE_TEXT_SCAN_LIMIT = 1024;
 
 /** Both lengths count non-whitespace characters of visible text. */
 export type QuoteSizes = {
@@ -48,12 +60,13 @@ const BOUNDARY_CLASSES = new Set([
   "outlookmessageheader"
 ]);
 
-// <br> contributes nothing to textContent, so header fields run into the
-// preceding value ("…@example.com>Betreff:") — match on a word boundary
-// rather than on line starts.
+// <br> contributes nothing to textContent, so header fields run into whatever
+// preceded them ("…@example.com>Betreff:", "16:41Betreff:"). Anchoring on a
+// preceding non-letter catches both — \b would not, since digit-to-letter is
+// no boundary — while still keeping "Update:" from matching "date:".
 const HEADER_BLOCK_START = /^(?:von|from)\s*:/i;
-const HEADER_BLOCK_SENT = /\b(?:gesendet|sent|datum|date)\s*:/i;
-const HEADER_BLOCK_SUBJECT = /\b(?:betreff|subject)\s*:/i;
+const HEADER_BLOCK_SENT = /(?:^|[^\p{L}])(?:gesendet|sent|datum|date)\s*:/iu;
+const HEADER_BLOCK_SUBJECT = /(?:^|[^\p{L}])(?:betreff|subject)\s*:/iu;
 
 const FORWARD_SEPARATOR =
   /^-{2,}\s*(?:original message|ursprüngliche nachricht|weitergeleitete nachricht|forwarded message)\s*-{2,}/i;
@@ -78,25 +91,26 @@ const WRAPPABLE_PARENT_TAGS = new Set([
 
 const TABLE_LAYOUT_TAGS = new Set(["TABLE", "THEAD", "TBODY", "TFOOT", "TR", "TD", "TH"]);
 
-export function isQuoteBoundary(candidate: QuoteBoundaryCandidate): boolean {
-  const id = candidate.id.trim().toLowerCase();
+export function hasQuoteBoundaryMarker(markers: QuoteBoundaryMarkers): boolean {
+  const id = markers.id.trim().toLowerCase();
   if (id && BOUNDARY_IDS.has(id)) {
     return true;
   }
 
-  const classNames = candidate.className.toLowerCase().split(/\s+/);
+  const classNames = markers.className.toLowerCase().split(/\s+/);
   if (classNames.some((name) => name && BOUNDARY_CLASSES.has(name))) {
     return true;
   }
 
-  if (
-    candidate.tagName.toUpperCase() === "BLOCKQUOTE" &&
-    candidate.typeAttr.trim().toLowerCase() === "cite"
-  ) {
-    return true;
-  }
+  return (
+    markers.tagName.toUpperCase() === "BLOCKQUOTE" &&
+    markers.typeAttr.trim().toLowerCase() === "cite"
+  );
+}
 
-  const text = candidate.text.trim();
+/** Safe on text truncated to QUOTE_TEXT_SCAN_LIMIT — no rule reads beyond it. */
+export function isQuoteBoundaryText(rawText: string): boolean {
+  const text = rawText.trim();
   if (!text) {
     return false;
   }
@@ -114,6 +128,10 @@ export function isQuoteBoundary(candidate: QuoteBoundaryCandidate): boolean {
   }
 
   return text.length <= ATTRIBUTION_MAX_LENGTH && ATTRIBUTION_LINE.test(text);
+}
+
+export function isQuoteBoundary(candidate: QuoteBoundaryCandidate): boolean {
+  return hasQuoteBoundaryMarker(candidate) || isQuoteBoundaryText(candidate.text);
 }
 
 export function shouldCollapseQuote(sizes: QuoteSizes): boolean {

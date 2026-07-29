@@ -35,9 +35,12 @@ export {
   stripRedundantInlineImageFallbacks,
   appendUnreferencedInlineImages
 } from "./inlineImages";
-export type { QuoteBoundaryCandidate, QuoteSizes } from "./quoteBoundary";
+export type { QuoteBoundaryCandidate, QuoteBoundaryMarkers, QuoteSizes } from "./quoteBoundary";
 export {
+  QUOTE_TEXT_SCAN_LIMIT,
+  hasQuoteBoundaryMarker,
   isQuoteBoundary,
+  isQuoteBoundaryText,
   shouldCollapseQuote,
   canWrapQuoteInParent,
   isTableLayoutTag

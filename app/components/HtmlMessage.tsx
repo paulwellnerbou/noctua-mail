@@ -2,9 +2,11 @@
 
 import { memo, useEffect, useRef } from "react";
 import {
+  QUOTE_TEXT_SCAN_LIMIT,
   canWrapQuoteInParent,
   extractBodyContent,
-  isQuoteBoundary,
+  hasQuoteBoundaryMarker,
+  isQuoteBoundaryText,
   isTableLayoutTag,
   sanitizeHtmlForDisplay,
   shouldCollapseQuote,
@@ -152,18 +154,36 @@ function getAnchorPreviewUrl(anchor: HTMLAnchorElement | null) {
   return anchor.href || href;
 }
 
+// textContent materializes a whole subtree, and the walk visits every element,
+// so reading it outright costs O(elements x document text). No rule looks past
+// QUOTE_TEXT_SCAN_LIMIT, so stop there instead.
+function readBoundedText(element: Element, limit: number) {
+  let text = "";
+  const collect = (node: Node) => {
+    for (let child = node.firstChild; child && text.length < limit; child = child.nextSibling) {
+      if (child.nodeType === Node.TEXT_NODE) {
+        text += child.textContent ?? "";
+      } else if (child.nodeType === Node.ELEMENT_NODE) {
+        collect(child);
+      }
+    }
+  };
+  collect(element);
+  return text.slice(0, limit);
+}
+
 function findQuoteBoundary(root: Element) {
   const walker = root.ownerDocument.createTreeWalker(root, NodeFilter.SHOW_ELEMENT);
   for (let node = walker.nextNode(); node; node = walker.nextNode()) {
     const element = node as Element;
-    const candidate = {
+    const markers = {
       tagName: element.tagName,
       id: element.getAttribute("id") ?? "",
       className: element.getAttribute("class") ?? "",
-      typeAttr: element.getAttribute("type") ?? "",
-      text: element.textContent ?? ""
+      typeAttr: element.getAttribute("type") ?? ""
     };
-    if (isQuoteBoundary(candidate)) return element;
+    if (hasQuoteBoundaryMarker(markers)) return element;
+    if (isQuoteBoundaryText(readBoundedText(element, QUOTE_TEXT_SCAN_LIMIT))) return element;
   }
   return null;
 }
@@ -265,6 +285,7 @@ function attachQuoteAnimation(details: HTMLDetailsElement, content: HTMLElement,
 
   let animation: Animation | null = null;
   let settleTimer = 0;
+  let expandedIntent = details.open;
 
   // Collapsing only completes here, so a dropped finish event would strand the
   // quote open with its content clipped to nothing.
@@ -283,15 +304,22 @@ function attachQuoteAnimation(details: HTMLDetailsElement, content: HTMLElement,
       return;
     }
     event.preventDefault();
+
+    // details.open stays true for the whole collapse, so it can't tell which way
+    // an in-flight animation is heading; the intent flag can. Reversing starts
+    // from the height on screen rather than jumping to the far end first.
+    const startHeight = animation ? content.getBoundingClientRect().height : null;
     animation?.cancel();
     view.clearTimeout(settleTimer);
 
-    const expanding = !details.open;
+    expandedIntent = !expandedIntent;
+    const expanding = expandedIntent;
     if (expanding) details.open = true;
-    const fullHeight = `${content.scrollHeight}px`;
+    const from = startHeight ?? (expanding ? 0 : content.scrollHeight);
+    const to = expanding ? content.scrollHeight : 0;
     content.style.overflow = "hidden";
     animation = content.animate(
-      { height: expanding ? ["0px", fullHeight] : [fullHeight, "0px"] },
+      { height: [`${from}px`, `${to}px`] },
       { duration: QUOTE_ANIMATION_MS, easing: "ease" }
     );
     animation.onfinish = () => settle(expanding);
@@ -299,12 +327,20 @@ function attachQuoteAnimation(details: HTMLDetailsElement, content: HTMLElement,
     settleTimer = view.setTimeout(() => settle(expanding), QUOTE_ANIMATION_MS + 250);
   };
 
+  // Keeps the intent in step when the element toggles outside this handler:
+  // the hidden-document and reduced-motion paths, or a native summary activation.
+  const handleToggleSync = () => {
+    if (!animation) expandedIntent = details.open;
+  };
+
   summary.addEventListener("click", handleClick);
+  details.addEventListener("toggle", handleToggleSync);
   return () => {
     view.clearTimeout(settleTimer);
     animation?.cancel();
     content.style.overflow = "";
     summary.removeEventListener("click", handleClick);
+    details.removeEventListener("toggle", handleToggleSync);
   };
 }
 

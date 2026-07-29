@@ -1,7 +1,10 @@
 import { describe, expect, it } from "bun:test";
 import {
+  QUOTE_TEXT_SCAN_LIMIT,
   canWrapQuoteInParent,
+  hasQuoteBoundaryMarker,
   isQuoteBoundary,
+  isQuoteBoundaryText,
   isTableLayoutTag,
   shouldCollapseQuote,
   type QuoteBoundaryCandidate
@@ -35,10 +38,11 @@ describe("isQuoteBoundary", () => {
   });
 
   it("matches an Outlook header block whose fields ran together without <br> text", () => {
+    // <br> contributes nothing to textContent, so fields collide ("16:41An:").
     const text =
-      "Von: Paul Wellner Bou <paul@wellnerbou.de> Gesendet: Montag, 27. April 2026 16:41An: " +
-      "Bernd Georg Stillger <bgs@bundsag.de>Cc: PH30 Eva Bertus <info@bertus-recht.de>Betreff: " +
-      "Re: ETW 02, Dotzheimer Straße 109, Wiesbaden";
+      "Von: Erika Muster <erika@example.com> Gesendet: Montag, 27. April 2026 16:41An: " +
+      "Max Beispiel <max@example.org>Cc: Kanzlei Beispiel <kanzlei@example.net>Betreff: " +
+      "Re: Wohnung 02, Beispielstraße 109, Musterstadt";
 
     expect(isQuoteBoundary(candidate({ text }))).toBe(true);
   });
@@ -56,19 +60,25 @@ describe("isQuoteBoundary", () => {
     expect(isQuoteBoundary(candidate({ text: "Betreff: Rechnung 2026" }))).toBe(false);
   });
 
+  it("does not read a header field out of the tail of a longer word", () => {
+    const text = "From: Ada Lovelace <ada@example.com>Sent: MondayLastUpdate: 2026-04-27";
+
+    expect(isQuoteBoundary(candidate({ text }))).toBe(false);
+  });
+
   it("matches attribution lines in English and German", () => {
-    expect(
-      isQuoteBoundary(candidate({ text: "On 20.12.19 11:36, Paul Wellner Bou wrote:" }))
-    ).toBe(true);
+    expect(isQuoteBoundary(candidate({ text: "On 20.12.19 11:36, Ada Lovelace wrote:" }))).toBe(
+      true
+    );
     expect(
       isQuoteBoundary(
         candidate({
-          text: "On Wed, Dec 18, 2019 at 8:17 PM Paul Wellner Bou <paul@wellnerbou.de> wrote:"
+          text: "On Wed, Dec 18, 2019 at 8:17 PM Ada Lovelace <ada@example.com> wrote:"
         })
       )
     ).toBe(true);
     expect(
-      isQuoteBoundary(candidate({ text: "Am 12.12.2019 um 17:50 schrieb Bernd Georg Stillger:" }))
+      isQuoteBoundary(candidate({ text: "Am 12.12.2019 um 17:50 schrieb Erika Muster:" }))
     ).toBe(true);
   });
 
@@ -92,6 +102,34 @@ describe("isQuoteBoundary", () => {
   it("ignores empty and ordinary content", () => {
     expect(isQuoteBoundary(candidate())).toBe(false);
     expect(isQuoteBoundary(candidate({ text: "Mit freundlichen Grüßen" }))).toBe(false);
+  });
+});
+
+describe("marker and text checks split apart", () => {
+  it("matches markers without needing any text", () => {
+    expect(hasQuoteBoundaryMarker({ tagName: "DIV", id: "", className: "gmail_quote", typeAttr: "" })).toBe(
+      true
+    );
+    expect(hasQuoteBoundaryMarker({ tagName: "DIV", id: "", className: "", typeAttr: "" })).toBe(
+      false
+    );
+  });
+
+  it("reaches the same verdict on text truncated at the scan limit", () => {
+    const header =
+      "Von: Erika Muster <erika@example.com>Gesendet: Montag, 27. April 2026 16:41Betreff: Re: Test";
+    const full = `${header}${"Weiterer zitierter Text. ".repeat(400)}`;
+
+    expect(full.length).toBeGreaterThan(QUOTE_TEXT_SCAN_LIMIT);
+    expect(isQuoteBoundaryText(full)).toBe(true);
+    expect(isQuoteBoundaryText(full.slice(0, QUOTE_TEXT_SCAN_LIMIT))).toBe(true);
+  });
+
+  it("rejects an attribution line that only looks short once truncated", () => {
+    const long = `On 20.12.19 11:36, Ada Lovelace wrote:${"x".repeat(2000)}`;
+
+    expect(isQuoteBoundaryText(long)).toBe(false);
+    expect(isQuoteBoundaryText(long.slice(0, QUOTE_TEXT_SCAN_LIMIT))).toBe(false);
   });
 });
 
