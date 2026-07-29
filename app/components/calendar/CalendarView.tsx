@@ -21,6 +21,11 @@ import {
 } from "@/lib/calendarOccurrences";
 import { CALENDAR_REMINDERS_UPDATED_EVENT } from "@/app/components/mailclient/utils/calendarReminders";
 import { CALENDAR_EVENTS_UPDATED_EVENT } from "./calendarEventsClient";
+import {
+  NOW_DAY_FRACTION_PROPERTY,
+  dayElapsedFraction,
+  msUntilNextMinute
+} from "./calendarNowIndicator";
 import "./fullcalendar-theme.css";
 
 export type CalendarViewHandle = {
@@ -171,6 +176,7 @@ export default function CalendarView({
   const [initialDate] = useState<Date | undefined>(() =>
     compact ? undefined : getSavedDate()
   );
+  const nowFractionRef = useRef<HTMLDivElement>(null);
 
   const fetchEvents = useCallback(
     async (startMs: number, endMs: number) => {
@@ -281,6 +287,22 @@ export default function CalendarView({
     fetchRequestIdRef.current += 1;
   }, [accountId]);
 
+  // Month view has no time axis, so CSS positions the "now" line from this
+  // fraction. Written straight to the DOM: re-rendering FullCalendar every
+  // minute would cost a full grid diff and reset the scroll position.
+  useEffect(() => {
+    const el = nowFractionRef.current;
+    if (!el) return;
+    let timer: ReturnType<typeof setTimeout>;
+    const tick = () => {
+      const now = new Date();
+      el.style.setProperty(NOW_DAY_FRACTION_PROPERTY, String(dayElapsedFraction(now)));
+      timer = setTimeout(tick, msUntilNextMinute(now));
+    };
+    tick();
+    return () => clearTimeout(timer);
+  }, []);
+
   useEffect(() => {
     if (typeof window === "undefined") return;
     const handleCalendarDataUpdated = () => {
@@ -329,45 +351,50 @@ export default function CalendarView({
   }
 
   return (
-    <FullCalendar
-      ref={calendarRef}
-      plugins={[dayGridPlugin, timeGridPlugin, interactionPlugin, rrulePlugin]}
-      initialView={initialView}
-      initialDate={initialDate}
-      views={{
-        // Keep short events readable without making back-to-back entries tall
-        // enough to be treated like overlapping conflicts.
-        timeGrid: {
-          eventMinHeight: 10
-        }
-      }}
-      customButtons={
-        onCreateEvent
-          ? {
-              addEvent: {
-                // FullCalendar buttons are text-only; the leading "＋" reads as
-                // a create affordance and `hint` supplies the title/aria-label.
-                text: "＋ Event",
-                hint: "New event",
-                click: () => onCreateEvent()
+    // `display: contents` keeps FullCalendar the direct layout child of whatever
+    // sized it; the wrapper only carries the inherited "now" fraction, and its
+    // class gates the month-view rules that read it.
+    <div ref={nowFractionRef} className="fc-now-scope" style={{ display: "contents" }}>
+      <FullCalendar
+        ref={calendarRef}
+        plugins={[dayGridPlugin, timeGridPlugin, interactionPlugin, rrulePlugin]}
+        initialView={initialView}
+        initialDate={initialDate}
+        views={{
+          // Keep short events readable without making back-to-back entries tall
+          // enough to be treated like overlapping conflicts.
+          timeGrid: {
+            eventMinHeight: 10
+          }
+        }}
+        customButtons={
+          onCreateEvent
+            ? {
+                addEvent: {
+                  // FullCalendar buttons are text-only; the leading "＋" reads as
+                  // a create affordance and `hint` supplies the title/aria-label.
+                  text: "＋ Event",
+                  hint: "New event",
+                  click: () => onCreateEvent()
+                }
               }
-            }
-          : undefined
-      }
-      headerToolbar={{
-        left: onCreateEvent ? "addEvent today" : "today",
-        center: "prev title next",
-        right: "dayGridMonth,timeGridWeek,timeGridDay"
-      }}
-      firstDay={firstDay}
-      events={fullCalendarEvents}
-      eventDidMount={handleEventDidMount}
-      nowIndicator
-      datesSet={handleDatesSet}
-      eventClick={handleEventClick}
-      dateClick={handleDateClick}
-      height="100%"
-      fixedWeekCount={false}
-    />
+            : undefined
+        }
+        headerToolbar={{
+          left: onCreateEvent ? "addEvent today" : "today",
+          center: "prev title next",
+          right: "dayGridMonth,timeGridWeek,timeGridDay"
+        }}
+        firstDay={firstDay}
+        events={fullCalendarEvents}
+        eventDidMount={handleEventDidMount}
+        nowIndicator
+        datesSet={handleDatesSet}
+        eventClick={handleEventClick}
+        dateClick={handleDateClick}
+        height="100%"
+        fixedWeekCount={false}
+      />
+    </div>
   );
 }
