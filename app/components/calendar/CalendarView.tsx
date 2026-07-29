@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import FullCalendar from "@fullcalendar/react";
 import dayGridPlugin from "@fullcalendar/daygrid";
 import timeGridPlugin from "@fullcalendar/timegrid";
@@ -289,8 +289,10 @@ export default function CalendarView({
 
   // Month view has no time axis, so CSS positions the "now" line from this
   // fraction. Written straight to the DOM: re-rendering FullCalendar every
-  // minute would cost a full grid diff and reset the scroll position.
-  useEffect(() => {
+  // minute would cost a full grid diff and reset the scroll position. Layout
+  // effect so the first value lands before paint — the CSS fallback would
+  // otherwise flash the mark at the top of today's cell.
+  useLayoutEffect(() => {
     const el = nowFractionRef.current;
     if (!el) return;
     let timer: ReturnType<typeof setTimeout>;
