@@ -2,8 +2,14 @@
 
 import { memo, useEffect, useRef } from "react";
 import {
+  QUOTE_TEXT_SCAN_LIMIT,
+  canWrapQuoteInParent,
   extractBodyContent,
+  hasQuoteBoundaryMarker,
+  isQuoteBoundaryText,
+  isTableLayoutTag,
   sanitizeHtmlForDisplay,
+  shouldCollapseQuote,
   shouldShowHtmlViewerFrame,
   stripConditionalComments
 } from "@/lib/html";
@@ -18,6 +24,9 @@ import {
 const NOCTUA_EMAIL_CONTENT_CLASS = "noctua-email-content";
 const NOCTUA_EMAIL_VIEWPORT_CLASS = "noctua-email-viewport";
 const NOCTUA_EMAIL_VIEWPORT_DEFAULT_MARGIN_CLASS = "noctua-email-viewport--default-margin";
+const NOCTUA_QUOTE_COLLAPSE_CLASS = "noctua-quote-collapse";
+const NOCTUA_QUOTE_CONTENT_CLASS = "noctua-quote-collapse-content";
+const QUOTE_ANIMATION_MS = 220;
 
 function scaleFontSizes(input: string) {
   return input
@@ -145,6 +154,198 @@ function getAnchorPreviewUrl(anchor: HTMLAnchorElement | null) {
   return anchor.href || href;
 }
 
+// textContent materializes a whole subtree, and the walk visits every element,
+// so reading it outright costs O(elements x document text). No rule looks past
+// QUOTE_TEXT_SCAN_LIMIT, so stop there instead.
+function readBoundedText(element: Element, limit: number) {
+  let text = "";
+  const collect = (node: Node) => {
+    for (let child = node.firstChild; child && text.length < limit; child = child.nextSibling) {
+      if (child.nodeType === Node.TEXT_NODE) {
+        // Indented markup leads with whitespace the rules trim away anyway;
+        // letting it use up the budget would cut real characters off the end.
+        text = (text + (child.textContent ?? "")).trimStart();
+      } else if (child.nodeType === Node.ELEMENT_NODE) {
+        collect(child);
+      }
+    }
+  };
+  collect(element);
+  return text.slice(0, limit);
+}
+
+function findQuoteBoundary(root: Element) {
+  const walker = root.ownerDocument.createTreeWalker(root, NodeFilter.SHOW_ELEMENT);
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    const element = node as Element;
+    const markers = {
+      tagName: element.tagName,
+      id: element.getAttribute("id") ?? "",
+      className: element.getAttribute("class") ?? "",
+      typeAttr: element.getAttribute("type") ?? ""
+    };
+    if (hasQuoteBoundaryMarker(markers)) return element;
+    if (isQuoteBoundaryText(readBoundedText(element, QUOTE_TEXT_SCAN_LIMIT))) return element;
+  }
+  return null;
+}
+
+function hasVisibleContentBefore(node: Element) {
+  for (let sibling = node.previousSibling; sibling; sibling = sibling.previousSibling) {
+    if ((sibling.textContent ?? "").trim()) return true;
+    if (sibling.nodeType !== Node.ELEMENT_NODE) continue;
+    const element = sibling as Element;
+    if (element.tagName === "IMG" || element.querySelector("img")) return true;
+  }
+  return false;
+}
+
+// A marker often sits inside a wrapper that holds nothing else (Outlook nests
+// its header block in a bare <div>), so collapse the outermost element the
+// marker still starts — otherwise that wrapper's chrome stays visible above
+// the chip.
+function promoteQuoteRoot(boundary: Element, root: Element) {
+  let node = boundary;
+  while (node.parentElement && node.parentElement !== root && !hasVisibleContentBefore(node)) {
+    node = node.parentElement;
+  }
+  return node;
+}
+
+function isInsideTableLayout(node: Element, root: Element) {
+  for (let ancestor = node.parentElement; ancestor && ancestor !== root; ancestor = ancestor.parentElement) {
+    if (isTableLayoutTag(ancestor.tagName)) return true;
+  }
+  return false;
+}
+
+// Our own quoted block carries the original message's scoped stylesheet, so
+// textContent would count kilobytes of CSS as quoted prose and collapse quotes
+// that are actually a line long.
+function countVisibleTextChars(node: Node): number {
+  if (node.nodeType === Node.TEXT_NODE) {
+    return (node.textContent ?? "").replace(/\s+/g, "").length;
+  }
+  if (node.nodeType !== Node.ELEMENT_NODE) return 0;
+  const tagName = (node as Element).tagName;
+  if (tagName === "STYLE" || tagName === "SCRIPT" || tagName === "TEMPLATE") return 0;
+  let total = 0;
+  for (let child = node.firstChild; child; child = child.nextSibling) {
+    total += countVisibleTextChars(child);
+  }
+  return total;
+}
+
+function collapseQuotedContent(doc: Document, expanded: boolean) {
+  const root = doc.querySelector(`.${NOCTUA_EMAIL_CONTENT_CLASS}`);
+  if (!root) return null;
+
+  const boundary = findQuoteBoundary(root);
+  if (!boundary) return null;
+
+  const quoteRoot = promoteQuoteRoot(boundary, root);
+  const parent = quoteRoot.parentElement;
+  if (!parent || !canWrapQuoteInParent(parent.tagName)) return null;
+  if (isInsideTableLayout(quoteRoot, root)) return null;
+
+  // Only quoteRoot and its siblings move into the <details>, so measure exactly
+  // that range against everything else the reader keeps seeing.
+  let quotedTextLength = 0;
+  for (let node: Node | null = quoteRoot; node; node = node.nextSibling) {
+    quotedTextLength += countVisibleTextChars(node);
+  }
+  const leadingTextLength = countVisibleTextChars(root) - quotedTextLength;
+  if (!shouldCollapseQuote({ leadingTextLength, quotedTextLength })) return null;
+
+  const details = doc.createElement("details");
+  details.className = NOCTUA_QUOTE_COLLAPSE_CLASS;
+  details.open = expanded;
+  const summary = doc.createElement("summary");
+  summary.title = "Show or hide quoted text";
+  summary.setAttribute("aria-label", "Show or hide quoted text");
+  summary.textContent = "•••";
+  // The quote gets its own wrapper because a height animation needs a single
+  // box to drive, and <details> itself must keep the summary at full height.
+  const content = doc.createElement("div");
+  content.className = NOCTUA_QUOTE_CONTENT_CLASS;
+  details.append(summary, content);
+
+  parent.insertBefore(details, quoteRoot);
+  for (let next = details.nextSibling; next; next = details.nextSibling) {
+    content.appendChild(next);
+  }
+  return { details, content };
+}
+
+// A closed <details> hides its content through UA styling that CSS transitions
+// can't reach, so the open/close animation runs here instead: hold the element
+// open for the whole collapse and only flip the flag once the height lands.
+function attachQuoteAnimation(details: HTMLDetailsElement, content: HTMLElement, onSettled: () => void) {
+  const view = details.ownerDocument.defaultView;
+  const summary = details.querySelector("summary");
+  if (!view || !summary || typeof content.animate !== "function") return null;
+
+  let animation: Animation | null = null;
+  let settleTimer = 0;
+  let expandedIntent = details.open;
+
+  // Collapsing only completes here, so a dropped finish event would strand the
+  // quote open with its content clipped to nothing.
+  const settle = (expanding: boolean) => {
+    view.clearTimeout(settleTimer);
+    settleTimer = 0;
+    animation = null;
+    content.style.overflow = "";
+    if (!expanding) details.open = false;
+    onSettled();
+  };
+
+  const handleClick = (event: Event) => {
+    // A hidden document never advances the animation; reduced motion opts out.
+    if (view.document.hidden || view.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      return;
+    }
+    event.preventDefault();
+
+    // details.open stays true for the whole collapse, so it can't tell which way
+    // an in-flight animation is heading; the intent flag can. Reversing starts
+    // from the height on screen rather than jumping to the far end first.
+    const startHeight = animation ? content.getBoundingClientRect().height : null;
+    animation?.cancel();
+    view.clearTimeout(settleTimer);
+
+    expandedIntent = !expandedIntent;
+    const expanding = expandedIntent;
+    if (expanding) details.open = true;
+    const from = startHeight ?? (expanding ? 0 : content.scrollHeight);
+    const to = expanding ? content.scrollHeight : 0;
+    content.style.overflow = "hidden";
+    animation = content.animate(
+      { height: [`${from}px`, `${to}px`] },
+      { duration: QUOTE_ANIMATION_MS, easing: "ease" }
+    );
+    animation.onfinish = () => settle(expanding);
+    // Backstop for a tab hidden mid-animation, where the timeline stalls.
+    settleTimer = view.setTimeout(() => settle(expanding), QUOTE_ANIMATION_MS + 250);
+  };
+
+  // Keeps the intent in step when the element toggles outside this handler:
+  // the hidden-document and reduced-motion paths, or a native summary activation.
+  const handleToggleSync = () => {
+    if (!animation) expandedIntent = details.open;
+  };
+
+  summary.addEventListener("click", handleClick);
+  details.addEventListener("toggle", handleToggleSync);
+  return () => {
+    view.clearTimeout(settleTimer);
+    animation?.cancel();
+    content.style.overflow = "";
+    summary.removeEventListener("click", handleClick);
+    details.removeEventListener("toggle", handleToggleSync);
+  };
+}
+
 function buildPreviewDocument({
   html,
   darkMode,
@@ -182,6 +383,9 @@ function buildPreviewDocument({
   const { body, styles: styleBlocks, bodyAttrs } = extractBodyContent(scaledHtml);
   const blockquoteBorder = darkMode ? "#8aa7d4" : "#1847d5";
   const linkColor = darkMode ? "#b8d5ff" : "#1847d5";
+  const quoteChipBackground = darkMode ? "#2b303b" : "#e8ebf0";
+  const quoteChipHoverBackground = darkMode ? "#39404e" : "#dbe0e8";
+  const quoteChipColor = darkMode ? "#aab4c4" : "#6b7480";
   const hostTextColor = hasExplicitColor
     ? ""
     : "color: var(--mail-view-fg, var(--text, #1a1a1a));";
@@ -223,6 +427,13 @@ function buildPreviewDocument({
     `.${NOCTUA_EMAIL_CONTENT_CLASS} p, .${NOCTUA_EMAIL_CONTENT_CLASS} div, .${NOCTUA_EMAIL_CONTENT_CLASS} span { max-width: 100%; }`,
     `blockquote { border-left: 3px solid ${blockquoteBorder}; margin: 8px 0; padding-left: 12px; }`,
     "pre { white-space: pre-wrap; }",
+    // Padding rather than a bottom margin: the chip is often the last thing in
+    // the body, where a margin would collapse out and sit flush on the edge.
+    `details.${NOCTUA_QUOTE_COLLAPSE_CLASS} { margin: 12px 0 0; padding-bottom: 18px; }`,
+    `details.${NOCTUA_QUOTE_COLLAPSE_CLASS} > summary { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 15px; border-radius: 8px; background: ${quoteChipBackground}; color: ${quoteChipColor}; font: 500 11px/1 system-ui, -apple-system, sans-serif; letter-spacing: 0.5px; cursor: pointer; list-style: none; user-select: none; transition: background-color 120ms ease; }`,
+    `details.${NOCTUA_QUOTE_COLLAPSE_CLASS} > summary:hover { background: ${quoteChipHoverBackground}; }`,
+    `details.${NOCTUA_QUOTE_COLLAPSE_CLASS} > summary::marker { content: ""; }`,
+    `details.${NOCTUA_QUOTE_COLLAPSE_CLASS} > summary::-webkit-details-marker { display: none; }`,
     injectedCss,
     "</style>",
     styleBlocks.join("\n"),
@@ -250,6 +461,10 @@ function HtmlMessage({
   zoom?: number;
 }) {
   const iframeRef = useRef<HTMLIFrameElement | null>(null);
+  // Theme, zoom and font changes rebuild the whole srcdoc, which would silently
+  // re-collapse a quote the reader had opened; keyed by html so a new message
+  // still starts collapsed.
+  const quoteStateRef = useRef({ html: "", expanded: false });
   const setLinkPreviewUrl = useMessageLinkPreview();
   const cleanedHtml = stripConditionalComments(html || "");
   const showViewerFrame = shouldShowHtmlViewerFrame(cleanedHtml);
@@ -257,6 +472,10 @@ function HtmlMessage({
   useEffect(() => {
     const iframe = iframeRef.current;
     if (!iframe) return;
+
+    if (quoteStateRef.current.html !== html) {
+      quoteStateRef.current = { html, expanded: false };
+    }
 
     const previewDocument = buildPreviewDocument({
       html,
@@ -270,6 +489,7 @@ function HtmlMessage({
     let documentObserver: ResizeObserver | null = null;
     let rafId: number | null = null;
     let removeDocumentListeners: (() => void) | null = null;
+    let removeQuoteToggleListener: (() => void) | null = null;
 
     const scheduleHeightUpdate = () => {
       if (rafId !== null) {
@@ -384,7 +604,31 @@ function HtmlMessage({
       };
     };
 
+    const applyQuoteCollapse = () => {
+      removeQuoteToggleListener?.();
+      removeQuoteToggleListener = null;
+
+      const doc = iframe.contentDocument;
+      if (!doc) return;
+
+      const collapsed = collapseQuotedContent(doc, quoteStateRef.current.expanded);
+      if (!collapsed) return;
+
+      const { details, content } = collapsed;
+      const handleToggle = () => {
+        quoteStateRef.current = { html, expanded: details.open };
+        scheduleHeightUpdate();
+      };
+      details.addEventListener("toggle", handleToggle);
+      const detachAnimation = attachQuoteAnimation(details, content, scheduleHeightUpdate);
+      removeQuoteToggleListener = () => {
+        detachAnimation?.();
+        details.removeEventListener("toggle", handleToggle);
+      };
+    };
+
     const handleLoad = () => {
+      applyQuoteCollapse();
       attachDocumentListeners();
       scheduleHeightUpdate();
     };
@@ -402,6 +646,7 @@ function HtmlMessage({
       if (rafId !== null) {
         cancelAnimationFrame(rafId);
       }
+      removeQuoteToggleListener?.();
       removeDocumentListeners?.();
       documentObserver?.disconnect();
       frameObserver?.disconnect();
