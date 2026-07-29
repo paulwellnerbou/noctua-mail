@@ -8,7 +8,8 @@
   --fc-bg-event-opacity: 0.3;
   --fc-highlight-color: var(--accent-a3);
   --fc-today-bg-color: var(--accent-a2);
-  --fc-now-indicator-color: var(--accent-9);
+  /* Red rather than the accent so "now" never reads as just another event. */
+  --fc-now-indicator-color: var(--red-9, #e5484d);
   --fc-event-bg-color: var(--accent-9);
   --fc-event-border-color: var(--accent-9);
   --fc-event-text-color: #fff;
@@ -155,6 +156,46 @@
 
 .fc .fc-event.fc-event-partstat-declined .fc-event-title {
   text-decoration: line-through;
+}
+
+.fc .fc-timegrid-now-indicator-line {
+  border-width: 2px 0 0;
+}
+
+/* Month cells have no time axis, so "now" is marked across today's cell at the
+   fraction of the day set on --noctua-now-day-fraction by CalendarView — hence
+   the .fc-now-scope gate, which only that component's wrapper carries. The mark
+   runs along the cell edges rather than straight through: month chips are
+   transparent, so a line crossing them strikes through their titles — which
+   already means "declined" here — and repainting them opaque would have to
+   guess at whatever the calendar happens to be sitting on. */
+.fc-now-scope .fc-dayGridMonth-view .fc-daygrid-day.fc-day-today .fc-daygrid-day-bg::after,
+.fc-now-scope .fc-dayGridMonth-view .fc-daygrid-day.fc-day-today .fc-daygrid-day-bg::before {
+  content: "";
+  pointer-events: none;
+  position: absolute;
+  top: calc(var(--noctua-now-day-fraction, 0) * 100%);
+  z-index: 3;
+}
+
+/* Arrow head at the day's left edge, as in the timegrid views. Chip titles
+   start well right of this, so it never lands on text. */
+.fc-now-scope .fc-dayGridMonth-view .fc-daygrid-day.fc-day-today .fc-daygrid-day-bg::before {
+  border: 4px solid transparent;
+  border-left: 5px solid var(--fc-now-indicator-color);
+  left: 0;
+  margin-top: -3px;
+}
+
+.fc-now-scope .fc-dayGridMonth-view .fc-daygrid-day.fc-day-today .fc-daygrid-day-bg::after {
+  border-top: 2px solid var(--fc-now-indicator-color);
+  right: 0;
+  width: 16px;
+}
+
+/* Reserve the strip the mark's right-hand end runs in. */
+.fc-now-scope .fc-dayGridMonth-view .fc-daygrid-day.fc-day-today .fc-daygrid-event-harness {
+  margin-right: 20px;
 }
 
 .fc .fc-timegrid-event-short .fc-event-main {
