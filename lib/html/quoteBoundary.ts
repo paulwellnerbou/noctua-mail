@@ -19,13 +19,18 @@ export type QuoteBoundaryCandidate = QuoteBoundaryMarkers & {
   text: string;
 };
 
+/** How far into an element's text the header and separator rules look. */
+const HEAD_SCAN_LENGTH = 1000;
+
 /**
- * Longest text prefix any rule inspects. Callers reading text out of a DOM can
- * stop here instead of materializing a whole subtree: the header and separator
- * rules only look at the first 1000 characters, and an attribution line longer
- * than ATTRIBUTION_MAX_LENGTH is rejected on length alone.
+ * Longest text prefix any rule inspects, so callers reading text out of a DOM
+ * can stop here instead of materializing a whole subtree. Truncating at exactly
+ * this length is lossless: the head rules read no further, and an attribution
+ * line is rejected on length alone well before it (ATTRIBUTION_MAX_LENGTH).
+ * Text handed in must already have its leading whitespace dropped, which trim()
+ * would otherwise remove after the budget was spent on it.
  */
-export const QUOTE_TEXT_SCAN_LIMIT = 1024;
+export const QUOTE_TEXT_SCAN_LIMIT = HEAD_SCAN_LENGTH;
 
 /** Both lengths count non-whitespace characters of visible text. */
 export type QuoteSizes = {
@@ -115,7 +120,7 @@ export function isQuoteBoundaryText(rawText: string): boolean {
     return false;
   }
 
-  const head = text.slice(0, 1000);
+  const head = text.slice(0, HEAD_SCAN_LENGTH);
   if (FORWARD_SEPARATOR.test(head)) {
     return true;
   }

@@ -125,6 +125,16 @@ describe("marker and text checks split apart", () => {
     expect(isQuoteBoundaryText(full.slice(0, QUOTE_TEXT_SCAN_LIMIT))).toBe(true);
   });
 
+  it("still sees a field sitting at the very end of the scan window", () => {
+    const head = "Von: ";
+    const tail = "Gesendet: Montag 27.04.2026Betreff: Re: Test";
+    const filler = `${"x".repeat(QUOTE_TEXT_SCAN_LIMIT - head.length - tail.length - 1)} `;
+    const text = `${head}${filler}${tail}`;
+
+    expect(text.length).toBe(QUOTE_TEXT_SCAN_LIMIT);
+    expect(isQuoteBoundaryText(text)).toBe(true);
+  });
+
   it("rejects an attribution line that only looks short once truncated", () => {
     const long = `On 20.12.19 11:36, Ada Lovelace wrote:${"x".repeat(2000)}`;
 

@@ -162,7 +162,9 @@ function readBoundedText(element: Element, limit: number) {
   const collect = (node: Node) => {
     for (let child = node.firstChild; child && text.length < limit; child = child.nextSibling) {
       if (child.nodeType === Node.TEXT_NODE) {
-        text += child.textContent ?? "";
+        // Indented markup leads with whitespace the rules trim away anyway;
+        // letting it use up the budget would cut real characters off the end.
+        text = (text + (child.textContent ?? "")).trimStart();
       } else if (child.nodeType === Node.ELEMENT_NODE) {
         collect(child);
       }
