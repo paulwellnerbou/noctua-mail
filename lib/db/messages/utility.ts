@@ -130,7 +130,7 @@ export async function listRecipientSuggestions(
   const sentMailboxPath = sentFolder ? folderMailboxPath(sentFolder, accountId) : null;
   const rows = db
     .prepare(
-      `SELECT toAddr, ccAddr, bccAddr, fromEmail, mailboxPath
+      `SELECT toAddr, ccAddr, bccAddr, fromAddr, fromEmail, mailboxPath
        FROM messages
        WHERE accountId = ?
        ORDER BY dateValue DESC
@@ -140,9 +140,18 @@ export async function listRecipientSuggestions(
       toAddr?: string | null;
       ccAddr?: string | null;
       bccAddr?: string | null;
+      fromAddr?: string | null;
       fromEmail?: string | null;
       mailboxPath?: string | null;
     }>;
+  // The upsert derives fromEmail only from an angle-bracket fromAddr, so a
+  // bare stored address leaves it NULL — fall back to fromAddr then.
+  const authorEmail = (row: { fromAddr?: string | null; fromEmail?: string | null }) => {
+    const direct = row.fromEmail?.trim();
+    if (direct) return direct.toLowerCase();
+    const raw = row.fromAddr?.trim() ?? "";
+    return raw && !raw.includes("<") ? raw.toLowerCase() : "";
+  };
   const counts = new Map<string, number>();
   const names = new Map<string, string>();
   const ownNames = new Map<string, string>();
@@ -191,7 +200,7 @@ export async function listRecipientSuggestions(
   };
   rows.forEach((row) => {
     const own =
-      (Boolean(accountEmail) && row.fromEmail?.trim().toLowerCase() === accountEmail) ||
+      (Boolean(accountEmail) && authorEmail(row) === accountEmail) ||
       (sentMailboxPath !== null && row.mailboxPath === sentMailboxPath);
     addEmails(row.toAddr, own);
     addEmails(row.ccAddr, own);

@@ -185,6 +185,37 @@ describe("listRecipientSuggestions", () => {
     expect(suggestions).not.toContain("Jule Oldemeier <julia@example.test>");
   });
 
+  test("classifies a bare stored from address as own mail", async () => {
+    // A bare fromAddr leaves the derived fromEmail column NULL, so this row
+    // is only recognized as own via the fromAddr fallback.
+    const { accountId, inbox, archive } = await setupAccount("acc-suggestion-bare-from");
+    await insertMessages(accountId, archive, [
+      buildMessage({
+        id: "own-archived-bare-from",
+        accountId,
+        folder: archive,
+        from: OWNER_EMAIL,
+        to: '"Julia Oldemeier" <julia@example.test>',
+        dateValue: Date.UTC(2026, 6, 29, 11, 0, 0)
+      })
+    ]);
+    await insertMessages(accountId, inbox, [
+      buildMessage({
+        id: "received-newer-bare-case",
+        accountId,
+        folder: inbox,
+        from: "colleague@example.test",
+        to: `"Jule Oldemeier" <julia@example.test>, Owner <${OWNER_EMAIL}>`,
+        dateValue: Date.UTC(2026, 6, 30, 10, 0, 0)
+      })
+    ]);
+
+    const { listRecipientSuggestions } = await dbModulePromise;
+    const suggestions = await listRecipientSuggestions(accountId, 10);
+    expect(suggestions).toContain("Julia Oldemeier <julia@example.test>");
+    expect(suggestions).not.toContain("Jule Oldemeier <julia@example.test>");
+  });
+
   test("falls back to names from received mail when the user never typed one", async () => {
     const { accountId, inbox, sent } = await setupAccount("acc-suggestion-fallback-name");
     await insertMessages(accountId, inbox, [
