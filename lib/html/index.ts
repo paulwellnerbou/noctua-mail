@@ -31,6 +31,7 @@ export { shouldShowHtmlViewerFrame, ensureHtmlDocumentTitle } from "./document";
 export { linkifyHtmlTextNodes } from "./linkify";
 export { enforceSafeLinks } from "./safeLinks";
 export {
+  isInlineImageReferenced,
   replaceInlineImageSources,
   stripRedundantInlineImageFallbacks,
   appendUnreferencedInlineImages

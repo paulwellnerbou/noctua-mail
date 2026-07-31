@@ -48,6 +48,22 @@ function buildInlineImageSnippet(attachment: InlineImageAttachment) {
   return `<div data-noctua-inline-image="1" style="margin:12px 0;"><img src="${escapedUrl}" alt="${alt}" loading="lazy" decoding="async" style="max-width:100%;height:auto;"></div>`;
 }
 
+export function isInlineImageReferenced(
+  html: string,
+  attachment: InlineImageAttachment
+) {
+  if (!html) return false;
+  if (
+    attachment.url &&
+    (html.includes(attachment.url) || html.includes(escapeHtml(attachment.url)))
+  ) {
+    return true;
+  }
+  return getInlineReferenceCandidates(attachment).some((candidate) =>
+    html.includes(`cid:${candidate}`)
+  );
+}
+
 export function replaceInlineImageSources(
   html: string,
   attachments: InlineImageAttachment[]
@@ -96,11 +112,7 @@ export function appendUnreferencedInlineImages(
   attachments.forEach((attachment) => {
     const snippet = buildInlineImageSnippet(attachment);
     if (!snippet || !attachment.url) return;
-    const escapedUrl = escapeHtml(attachment.url);
-    if (html.includes(attachment.url) || html.includes(escapedUrl)) return;
-    if (getInlineReferenceCandidates(attachment).some((candidate) => html.includes(`cid:${candidate}`))) {
-      return;
-    }
+    if (isInlineImageReferenced(html, attachment)) return;
     snippets.push(snippet);
   });
 
