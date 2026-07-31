@@ -10,6 +10,9 @@
  * do not participate in any of the write-path invariants of the sibling
  * modules.
  */
+import { folderMailboxPath } from "@/lib/mailboxPaths";
+import { findSentFolder } from "@/lib/specialFolders";
+import { getAccountEmail } from "../accounts";
 import { getAccountDb } from "../connection";
 
 /**
@@ -95,6 +98,11 @@ export async function getLatestMessageUid(accountId: string, mailboxPath?: strin
  * compose autocomplete. The sample is capped at the 2000 most recent
  * messages — anything older is unlikely to be a useful suggestion and
  * scanning further only slows down the feature.
+ *
+ * Display names are resolved newest-first, with names from the user's own
+ * messages (Sent folder or authored by the account address) taking
+ * priority: correcting a recipient's name in a sent mail must stick, even
+ * when incoming mail keeps mentioning the old variant in To/Cc.
  */
 export async function listRecipientSuggestions(
   accountId: string,
@@ -102,9 +110,27 @@ export async function listRecipientSuggestions(
   query?: string | null
 ) {
   const db = await getAccountDb(accountId);
+  const accountEmail = (await getAccountEmail(accountId)).trim();
+  // Not getFolders(): that recomputes per-folder message/unread counts with a
+  // whole-table aggregate, far too heavy for a per-keystroke autocomplete
+  // path. A bare folders-table read covers everything findSentFolder matches on.
+  const folderRows = db
+    .prepare(`SELECT id, name, specialUse FROM folders WHERE accountId = ?`)
+    .all(accountId) as Array<{ id: string; name?: string | null; specialUse?: string | null }>;
+  const sentFolder = findSentFolder(
+    folderRows.map((row) => ({
+      id: row.id,
+      name: String(row.name ?? ""),
+      accountId,
+      count: 0,
+      specialUse: row.specialUse ?? undefined
+    })),
+    accountId
+  );
+  const sentMailboxPath = sentFolder ? folderMailboxPath(sentFolder, accountId) : null;
   const rows = db
     .prepare(
-      `SELECT toAddr, ccAddr, bccAddr
+      `SELECT toAddr, ccAddr, bccAddr, fromAddr, fromEmail, mailboxPath
        FROM messages
        WHERE accountId = ?
        ORDER BY dateValue DESC
@@ -114,23 +140,40 @@ export async function listRecipientSuggestions(
       toAddr?: string | null;
       ccAddr?: string | null;
       bccAddr?: string | null;
+      fromAddr?: string | null;
+      fromEmail?: string | null;
+      mailboxPath?: string | null;
     }>;
+  // The upsert derives fromEmail only from an angle-bracket fromAddr, so a
+  // bare stored address leaves it NULL — fall back to fromAddr then.
+  const authorEmail = (row: { fromAddr?: string | null; fromEmail?: string | null }) => {
+    const direct = row.fromEmail?.trim();
+    if (direct) return direct.toLowerCase();
+    const raw = row.fromAddr?.trim() ?? "";
+    return raw && !raw.includes("<") ? raw.toLowerCase() : "";
+  };
   const counts = new Map<string, number>();
   const names = new Map<string, string>();
+  const ownNames = new Map<string, string>();
   const normalizeName = (name: string) =>
     name.replace(/^"|"$/g, "").replace(/\s+/g, " ").trim();
-  const addAddress = (emailRaw: string, nameRaw?: string) => {
+  const addAddress = (emailRaw: string, nameRaw: string | undefined, own: boolean) => {
     const email = emailRaw.trim().toLowerCase();
     if (!email) return;
     counts.set(email, (counts.get(email) ?? 0) + 1);
     if (nameRaw) {
       const cleaned = normalizeName(nameRaw);
-      if (cleaned && !names.get(email)) {
-        names.set(email, cleaned);
+      if (cleaned) {
+        if (!names.get(email)) {
+          names.set(email, cleaned);
+        }
+        if (own && !ownNames.get(email)) {
+          ownNames.set(email, cleaned);
+        }
       }
     }
   };
-  const addEmails = (value?: string | null) => {
+  const addEmails = (value: string | null | undefined, own: boolean) => {
     if (!value) return;
     const seen = new Set<string>();
     const pattern = /(?:"?([^"<]*)"?\s*)?<([^>]+)>/g;
@@ -142,7 +185,7 @@ export async function listRecipientSuggestions(
         const key = email.trim().toLowerCase();
         if (!seen.has(key)) {
           seen.add(key);
-          addAddress(email, name);
+          addAddress(email, name, own);
         }
       }
       match = pattern.exec(value);
@@ -152,19 +195,22 @@ export async function listRecipientSuggestions(
       const key = entry.trim().toLowerCase();
       if (seen.has(key)) return;
       seen.add(key);
-      addAddress(entry);
+      addAddress(entry, undefined, own);
     });
   };
   rows.forEach((row) => {
-    addEmails(row.toAddr);
-    addEmails(row.ccAddr);
-    addEmails(row.bccAddr);
+    const own =
+      (Boolean(accountEmail) && authorEmail(row) === accountEmail) ||
+      (sentMailboxPath !== null && row.mailboxPath === sentMailboxPath);
+    addEmails(row.toAddr, own);
+    addEmails(row.ccAddr, own);
+    addEmails(row.bccAddr, own);
   });
   const normalizedQuery = query?.trim().toLowerCase() ?? "";
   return [...counts.entries()]
     .sort((a, b) => b[1] - a[1])
     .map(([email]) => {
-      const name = names.get(email);
+      const name = ownNames.get(email) ?? names.get(email);
       return name ? `${name} <${email}>` : email;
     })
     .filter((value) => {
