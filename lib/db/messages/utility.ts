@@ -14,7 +14,6 @@ import { folderMailboxPath } from "@/lib/mailboxPaths";
 import { findSentFolder } from "@/lib/specialFolders";
 import { getAccountEmail } from "../accounts";
 import { getAccountDb } from "../connection";
-import { getFolders } from "../folders";
 
 /**
  * Returns a map of messageId → folderId for the given messages. Used by
@@ -112,7 +111,22 @@ export async function listRecipientSuggestions(
 ) {
   const db = await getAccountDb(accountId);
   const accountEmail = (await getAccountEmail(accountId)).trim();
-  const sentFolder = findSentFolder(await getFolders(accountId), accountId);
+  // Not getFolders(): that recomputes per-folder message/unread counts with a
+  // whole-table aggregate, far too heavy for a per-keystroke autocomplete
+  // path. findSentFolder only needs id/name/specialUse.
+  const folderRows = db
+    .prepare(`SELECT id, name, specialUse FROM folders WHERE accountId = ?`)
+    .all(accountId) as Array<{ id: string; name?: string | null; specialUse?: string | null }>;
+  const sentFolder = findSentFolder(
+    folderRows.map((row) => ({
+      id: row.id,
+      name: String(row.name ?? ""),
+      accountId,
+      count: 0,
+      specialUse: row.specialUse ?? undefined
+    })),
+    accountId
+  );
   const sentMailboxPath = sentFolder ? folderMailboxPath(sentFolder, accountId) : null;
   const rows = db
     .prepare(
