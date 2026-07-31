@@ -113,7 +113,7 @@ export async function listRecipientSuggestions(
   const accountEmail = (await getAccountEmail(accountId)).trim();
   // Not getFolders(): that recomputes per-folder message/unread counts with a
   // whole-table aggregate, far too heavy for a per-keystroke autocomplete
-  // path. findSentFolder only needs id/name/specialUse.
+  // path. A bare folders-table read covers everything findSentFolder matches on.
   const folderRows = db
     .prepare(`SELECT id, name, specialUse FROM folders WHERE accountId = ?`)
     .all(accountId) as Array<{ id: string; name?: string | null; specialUse?: string | null }>;

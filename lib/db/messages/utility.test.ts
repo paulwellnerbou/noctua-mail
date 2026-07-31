@@ -28,7 +28,7 @@ function buildAccount(accountId: string): Account {
   };
 }
 
-function buildFolders(accountId: string): { inbox: Folder; sent: Folder } {
+function buildFolders(accountId: string): { inbox: Folder; sent: Folder; archive: Folder } {
   return {
     inbox: {
       id: `${accountId}:INBOX`,
@@ -45,6 +45,14 @@ function buildFolders(accountId: string): { inbox: Folder; sent: Folder } {
       count: 0,
       unreadCount: 0,
       specialUse: "\\Sent"
+    },
+    archive: {
+      id: `${accountId}:Archive`,
+      accountId,
+      name: "Archive",
+      count: 0,
+      unreadCount: 0,
+      specialUse: "\\Archive"
     }
   };
 }
@@ -83,7 +91,7 @@ async function setupAccount(prefix: string) {
   const { saveFoldersForAccount, upsertAccount } = await dbModulePromise;
   await upsertAccount(buildAccount(accountId));
   const folders = buildFolders(accountId);
-  await saveFoldersForAccount(accountId, [folders.inbox, folders.sent]);
+  await saveFoldersForAccount(accountId, [folders.inbox, folders.sent, folders.archive]);
   return { accountId, ...folders };
 }
 
@@ -146,6 +154,35 @@ describe("listRecipientSuggestions", () => {
     const { listRecipientSuggestions } = await dbModulePromise;
     const suggestions = await listRecipientSuggestions(accountId, 10);
     expect(suggestions).toContain("Julia Oldemeier <julia@example.test>");
+  });
+
+  test("treats mail authored by the account as own outside the Sent folder", async () => {
+    const { accountId, inbox, archive } = await setupAccount("acc-suggestion-from-email");
+    await insertMessages(accountId, archive, [
+      buildMessage({
+        id: "own-archived",
+        accountId,
+        folder: archive,
+        from: `Owner <${OWNER_EMAIL}>`,
+        to: '"Julia Oldemeier" <julia@example.test>',
+        dateValue: Date.UTC(2026, 6, 29, 11, 0, 0)
+      })
+    ]);
+    await insertMessages(accountId, inbox, [
+      buildMessage({
+        id: "received-newer-variant",
+        accountId,
+        folder: inbox,
+        from: "colleague@example.test",
+        to: `"Jule Oldemeier" <julia@example.test>, Owner <${OWNER_EMAIL}>`,
+        dateValue: Date.UTC(2026, 6, 30, 10, 0, 0)
+      })
+    ]);
+
+    const { listRecipientSuggestions } = await dbModulePromise;
+    const suggestions = await listRecipientSuggestions(accountId, 10);
+    expect(suggestions).toContain("Julia Oldemeier <julia@example.test>");
+    expect(suggestions).not.toContain("Jule Oldemeier <julia@example.test>");
   });
 
   test("falls back to names from received mail when the user never typed one", async () => {
