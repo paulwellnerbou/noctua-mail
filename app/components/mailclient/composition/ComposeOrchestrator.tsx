@@ -40,7 +40,6 @@ import { useComposeController } from "./useComposeController";
 import { useComposeDraftAutoSave } from "./useComposeDraftAutoSave";
 import {
   pruneUnreferencedInlineAttachments,
-  restoreComposeMessageAttachmentDataUrls,
   useComposeHandlers
 } from "./useComposeHandlers";
 import { useComposeState } from "./useComposeState";
@@ -458,8 +457,7 @@ function ComposeOrchestratorImpl(
     handleComposeDragOver,
     handleComposeDrop,
     handleComposeAttachmentPick,
-    hydrateComposeAttachments,
-    loadForwardAttachments
+    loadComposeSourceAttachments
   } = useComposeHandlers({
     composeDirtyRef,
     composeDragDepthRef,
@@ -907,22 +905,11 @@ function ComposeOrchestratorImpl(
 
     const afterOpen = async (msg: Message) => {
       const messageWithDraftMetadata = await hydrateDraftComposeMetadata(msg);
-      if (mode === "edit" && (msg.attachments?.length ?? 0) > 0) {
-        const attachments = await hydrateComposeAttachments(messageWithDraftMetadata);
-        const hydratedMessage = restoreComposeMessageAttachmentDataUrls(
-          messageWithDraftMetadata,
-          attachments
-        );
-        openComposeInternal(mode, hydratedMessage, asNew, { preferredComposeTab });
-        setComposeAttachments(attachments);
-        return;
-      }
-
-      if (mode === "forward") {
-        const { attachments, message: hydratedForwardMessage } = await loadForwardAttachments(
+      if (mode === "edit" || mode === "forward") {
+        const { attachments, message: hydratedMessage } = await loadComposeSourceAttachments(
           messageWithDraftMetadata
         );
-        openComposeInternal(mode, hydratedForwardMessage, asNew, { preferredComposeTab });
+        openComposeInternal(mode, hydratedMessage, asNew, { preferredComposeTab });
         setComposeAttachments(attachments);
         return;
       }

@@ -1,7 +1,7 @@
 import { useCallback } from "react";
 import { buildAccountAttachmentPath } from "@/lib/accountApiPaths";
 import type { Message, Attachment } from "@/lib/data";
-import { replaceInlineImageSources } from "@/lib/html";
+import { isInlineImageReferenced, replaceInlineImageSources } from "@/lib/html";
 import { createComposeAttachment } from "@/lib/mail/composeAttachment";
 import { isEmbeddableImage } from "@/lib/mail/embeddableImage";
 import type { PendingImageDrop } from "./composeTypes";
@@ -82,6 +82,22 @@ export function routeDroppedFiles(
   const others = files.filter((file) => !isEmbeddableImage(file.type));
   if (others.length > 0) addComposeFiles(others, false);
   if (images.length > 0) setPendingImageDrop({ files: images, x, y });
+}
+
+// Attachments with an inline disposition that the source body never references
+// (Apple Mail attaches files this way, and text-only mails have no body to
+// reference them from) would be invisible in the composer and deleted by the
+// inline prune. Demote them to regular attachments so they stay visible and
+// survive to the outgoing mail.
+export function promoteUnreferencedInlineAttachments(
+  attachments: Attachment[],
+  html: string
+) {
+  return attachments.map((attachment) =>
+    attachment.inline && !isInlineImageReferenced(html, attachment)
+      ? { ...attachment, inline: false }
+      : attachment
+  );
 }
 
 export function pruneUnreferencedInlineAttachments(attachments: Attachment[], html: string) {
@@ -199,8 +215,11 @@ export function useComposeHandlers({
     event.target.value = "";
   };
 
-  const loadForwardAttachments = async (message: Message) => {
-    const attachments = await hydrateComposeAttachments(message);
+  const loadComposeSourceAttachments = async (message: Message) => {
+    const attachments = promoteUnreferencedInlineAttachments(
+      await hydrateComposeAttachments(message),
+      message.htmlBody ?? ""
+    );
     return {
       attachments,
       message: restoreComposeMessageAttachmentDataUrls(message, attachments)
@@ -218,6 +237,6 @@ export function useComposeHandlers({
     handleComposeDrop,
     handleComposeAttachmentPick,
     hydrateComposeAttachments,
-    loadForwardAttachments
+    loadComposeSourceAttachments
   };
 }

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import {
+  promoteUnreferencedInlineAttachments,
   pruneUnreferencedInlineAttachments,
   restoreComposeMessageAttachmentDataUrls,
   restoreInlineAttachmentDataUrls,
@@ -145,6 +146,60 @@ describe("restoreComposeMessageAttachmentDataUrls", () => {
 
     expect(output.htmlBody).toContain("data:image/png;base64,AAAA");
     expect(output.htmlBody).not.toContain("/api/accounts/acc-1/messages/msg-1/attachments/att-inline");
+  });
+});
+
+describe("promoteUnreferencedInlineAttachments", () => {
+  const inlineAttachment = (overrides: Record<string, unknown> = {}) => ({
+    id: "att-inline",
+    filename: "Flyer Kochevent.jpeg",
+    contentType: "image/jpeg",
+    size: 503944,
+    inline: true,
+    url: "/api/accounts/acc-1/messages/msg-1/attachments/att-inline",
+    ...overrides
+  });
+
+  it("demotes inline attachments of a mail without an html body", () => {
+    expect(promoteUnreferencedInlineAttachments([inlineAttachment()], "")).toEqual([
+      inlineAttachment({ inline: false })
+    ]);
+  });
+
+  it("demotes inline attachments the html body never references", () => {
+    expect(
+      promoteUnreferencedInlineAttachments(
+        [inlineAttachment()],
+        "<p>No image reference here</p>"
+      )
+    ).toEqual([inlineAttachment({ inline: false })]);
+  });
+
+  it("keeps inline attachments referenced by attachment url", () => {
+    const attachments = [inlineAttachment()];
+    expect(
+      promoteUnreferencedInlineAttachments(
+        attachments,
+        '<img src="/api/accounts/acc-1/messages/msg-1/attachments/att-inline">'
+      )
+    ).toEqual(attachments);
+  });
+
+  it("keeps inline attachments referenced via cid", () => {
+    const attachments = [inlineAttachment({ cid: "logo-cid@example.test" })];
+    expect(
+      promoteUnreferencedInlineAttachments(
+        attachments,
+        '<img src="cid:logo-cid@example.test">'
+      )
+    ).toEqual(attachments);
+  });
+
+  it("leaves regular attachments untouched", () => {
+    const attachments = [
+      inlineAttachment({ id: "att-file", filename: "contract.pdf", inline: false })
+    ];
+    expect(promoteUnreferencedInlineAttachments(attachments, "")).toEqual(attachments);
   });
 });
 
