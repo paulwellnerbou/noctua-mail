@@ -484,6 +484,14 @@ export function useSyncController({
     return (await response.json()) as FolderConsistencyResponse;
   }, [activeAccountId, apiFetch, readErrorMessage]);
 
+  // Virtual-folder and account-wide search views list mail from every folder,
+  // so new mail anywhere belongs in them — only a folder-scoped view is
+  // limited to the folder that was synced.
+  const currentViewIncludesFolder = (folderId: string) =>
+    searchScope !== "folder" || Boolean(activeVirtualFolderId) || activeFolderId === folderId;
+  const currentViewIncludesFolderRef = useRef(currentViewIncludesFolder);
+  currentViewIncludesFolderRef.current = currentViewIncludesFolder;
+
   const syncFolderWithBackground = async (
     folderId: string,
     allowRefresh = true,
@@ -505,9 +513,7 @@ export function useSyncController({
       });
       if (allowRefresh && currentKeyRef.current === selectionKey) {
         setSyncCompletionVersion((v) => v + 1);
-        if (searchScope === "folder" && activeFolderId === folderId) {
-          await refreshMailboxData();
-        } else if (activeVirtualFolderId) {
+        if (currentViewIncludesFolder(folderId)) {
           await refreshMailboxData();
         }
       }
@@ -656,58 +662,73 @@ export function useSyncController({
       const accountWideMode: "new" | "full" = mode === "new" ? "new" : "full";
       const resolvedInboxFolderId =
         inboxFolder?.id ?? findInboxFolder(accountFolders, activeAccountId)?.id;
-      const sortedFolders =
-        accountWideMode === "new"
-          ? prioritizeFolders(accountFolders, [resolvedInboxFolderId, activeFolderId])
-          : prioritizeFolders(accountFolders, [activeFolderId || resolvedInboxFolderId]);
 
       if (accountWideMode === "new") {
-        const plannedFolders = accountFolders.map((folder) => folder.id);
-        let foldersToSync = plannedFolders;
-        try {
-          const decisions = await planNewSyncCandidates(plannedFolders);
-          const decisionMap = new Map(decisions.map((item) => [item.folderId, item]));
-          foldersToSync = plannedFolders.filter((id) => {
-            const decision = decisionMap.get(id);
-            if (!decision) return true;
-            return !decision.skip;
-          });
-        } catch (error) {
-          if (isMailServerUnreachableError(error) || isNetworkFetchError(error)) {
-            // Per-folder syncs would hit the same unreachable server; skip
-            // the round instead of fanning out follow-up failures.
-            console.warn("[noctua] New-message sync skipped: mail server unreachable", error);
-            notifyMailServerUnreachable();
-            setIsSyncing(false);
-            return;
-          }
-          reportError(
-            error instanceof Error
-              ? error.message
-              : "Could not determine new-message sync candidates."
-          );
-        }
+        const folderIds = accountFolders.map((folder) => folder.id);
+        const folderIdSet = new Set(folderIds);
+        // The folder on screen, then INBOX. These are what the user is waiting
+        // for, so they get planned, synced and rendered before the account-wide
+        // sweep — which walks every remaining folder — is even started.
+        const priorityFolderIds = Array.from(
+          new Set([activeFolderId, resolvedInboxFolderId])
+        ).filter((id): id is string => typeof id === "string" && folderIdSet.has(id));
+        const remainingFolderIds = folderIds.filter((id) => !priorityFolderIds.includes(id));
 
-        const foldersToSyncSet = new Set(foldersToSync);
-        for (const folder of sortedFolders) {
-          if (!foldersToSyncSet.has(folder.id)) {
-            continue;
+        const runNewSyncRound = async (
+          roundFolderIds: string[],
+          refreshPerFolder: boolean
+        ): Promise<"synced" | "unreachable"> => {
+          if (roundFolderIds.length === 0) return "synced";
+          let candidateIds = roundFolderIds;
+          try {
+            const decisions = await planNewSyncCandidates(roundFolderIds);
+            const skippedIds = new Set(
+              decisions.filter((decision) => decision.skip).map((decision) => decision.folderId)
+            );
+            candidateIds = roundFolderIds.filter((id) => !skippedIds.has(id));
+          } catch (error) {
+            if (isMailServerUnreachableError(error) || isNetworkFetchError(error)) {
+              // Per-folder syncs would hit the same unreachable server; skip
+              // the round instead of fanning out follow-up failures.
+              console.warn("[noctua] New-message sync skipped: mail server unreachable", error);
+              notifyMailServerUnreachable();
+              return "unreachable";
+            }
+            reportError(
+              error instanceof Error
+                ? error.message
+                : "Could not determine new-message sync candidates."
+            );
           }
-          const refreshThis =
-            searchScope === "folder" && activeFolderId === folder.id ? true : false;
-          await syncFolderWithBackground(folder.id, refreshThis, "new");
+          for (const folderId of candidateIds) {
+            await syncFolderWithBackground(folderId, refreshPerFolder, "new");
+          }
+          return "synced";
+        };
+
+        if ((await runNewSyncRound(priorityFolderIds, true)) === "unreachable") {
+          setIsSyncing(false);
+          return;
+        }
+        // Unread badges for INBOX and the priority folders land here, well
+        // before the remaining folders have been contacted.
+        await refreshFolders();
+
+        if ((await runNewSyncRound(remainingFolderIds, false)) === "unreachable") {
+          setIsSyncing(false);
+          return;
         }
         await syncNewlyDetectedFolders(knownFolderIds, "new");
-        if (
-          currentKeyRef.current === selectionKey &&
-          searchScope === "folder" &&
-          activeFolderId
-        ) {
+        if (currentKeyRef.current === selectionKey && (searchScope !== "folder" || activeFolderId)) {
           await refreshMailboxData();
         }
         setIsSyncing(false);
         return;
       }
+
+      const sortedFolders = prioritizeFolders(accountFolders, [
+        activeFolderId || resolvedInboxFolderId
+      ]);
       for (const folder of sortedFolders) {
         await syncFolderWithBackground(
           folder.id,
@@ -992,27 +1013,46 @@ export function useSyncController({
         });
       });
       if (externalItems.length === 0) return;
-      const foldersToSync = prioritizeFolderIds(
-        Array.from(
-          new Set(
-            externalItems
-              .map((item) => item.folderId ?? fallbackFolderId)
-              .filter((id): id is string => Boolean(id))
-          )
-        ),
-        [fallbackFolderId]
-      );
+      const uidsByFolder = new Map<string, number[]>();
+      for (const item of externalItems) {
+        const folderId = item.folderId ?? fallbackFolderId;
+        if (!folderId) continue;
+        const uids = uidsByFolder.get(folderId);
+        if (uids) uids.push(item.uid);
+        else uidsByFolder.set(folderId, [item.uid]);
+      }
+      const foldersToSync = prioritizeFolderIds(Array.from(uidsByFolder.keys()), [
+        activeFolderId,
+        fallbackFolderId
+      ]);
       if (foldersToSync.length === 0) return;
 
       const syncedMessages: SyncNotificationMessage[] = [];
       for (const fId of foldersToSync) {
         // The stream/poll effect is intentionally long-lived; use the ref-backed
         // sync function so active-folder refreshes follow the latest list state.
-        const result = await syncFolderWithBackgroundRef.current(fId, true, "new");
+        // The announced UIDs go along as an explicit fetch list: a plain "new"
+        // sync derives its range from the stored watermark, which an already
+        // running sync for the same folder may have advanced past these UIDs.
+        const result = await syncFolderWithBackgroundRef.current(fId, true, "new", {
+          backfillUids: uidsByFolder.get(fId)
+        });
         if (!result?.newMessages?.length) continue;
         syncedMessages.push(...result.newMessages);
       }
       if (syncedMessages.length === 0) return;
+
+      // A sync job can be coalesced server-side and come back carrying mail for
+      // a folder we never asked about; that folder's list refresh never ran, so
+      // notifying now would announce mail the list does not have yet.
+      const requestedFolderIds = new Set(foldersToSync);
+      const unrefreshedFolderIds = syncedMessages
+        .map((message) => message.folderId)
+        .filter((folderId) => Boolean(folderId) && !requestedFolderIds.has(folderId));
+      if (unrefreshedFolderIds.some((folderId) => currentViewIncludesFolderRef.current(folderId))) {
+        await refreshMailboxData();
+      }
+
       await refreshPendingCalendarReminders();
       await notifyNewMessages(syncedMessages);
     };

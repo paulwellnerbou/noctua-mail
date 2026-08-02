@@ -23,10 +23,14 @@ export type SyncJob = {
   progress?: SyncOperationProgress;
 };
 
+type QueuedSyncEntry = {
+  jobId: string;
+  clientId?: string;
+};
+
 type AccountSyncState = {
   runningJobId: string;
-  queuedJobId?: string;
-  queuedClientId?: string;
+  queue: QueuedSyncEntry[];
 };
 
 type SyncJobsRuntimeState = {
@@ -76,6 +80,10 @@ const MODE_PRIORITY: Record<SyncMode, number> = {
   full: 4
 };
 
+// Backstop against a client looping on /sync; an account-wide sweep only ever
+// enqueues one folder at a time, so real traffic stays far below this.
+const MAX_QUEUED_SYNC_JOBS = 64;
+
 const scheduleCleanup = (jobId: string) => {
   setTimeout(() => {
     const job = jobs.get(jobId);
@@ -122,6 +130,12 @@ function isSameSyncIntent(a: SyncPayload, b: SyncPayload) {
   );
 }
 
+/**
+ * Last-resort queue-overflow merge. Lossy on purpose: two different-folder
+ * syncs collapse to a folderless payload, which `runSyncOperationBatched`
+ * resolves to INBOX for every mode but `full` — so the other folder is skipped.
+ * Only reachable once the queue is saturated.
+ */
 function coalesceSyncPayload(existing: SyncPayload, incoming: SyncPayload): SyncPayload {
   const normalizedExisting = normalizeSyncPayload(existing);
   const normalizedIncoming = normalizeSyncPayload(incoming);
@@ -319,44 +333,46 @@ async function readPipedOutput(
   return output;
 }
 
+/** Start the next queued job, or drop the account state when nothing is left. */
+function promoteNextQueuedJob(accountId: string, state: AccountSyncState) {
+  while (state.queue.length > 0) {
+    const next = state.queue.shift();
+    if (!next) break;
+    const nextJob = jobs.get(next.jobId);
+    // Entries whose job was cleaned up by the TTL timer are stale; keep
+    // draining so one expired entry can't strand the rest of the queue.
+    if (!nextJob) continue;
+
+    state.runningJobId = nextJob.id;
+
+    nextJob.status = "running";
+    nextJob.startedAt = Date.now();
+    nextJob.finishedAt = undefined;
+    nextJob.error = undefined;
+    nextJob.pid = undefined;
+    nextJob.result = undefined;
+    nextJob.progress = buildSyncProgressFromJob(nextJob, {
+      phase: "starting",
+      processed: 0,
+      batchNumber: undefined,
+      batchSize: undefined,
+      estimatedTotal: undefined,
+      percent: undefined,
+      message: "Sync starting."
+    });
+
+    spawnSyncWorker(nextJob, next.clientId);
+    return;
+  }
+
+  accountStates.delete(accountId);
+}
+
 function handleCompletedRunningJob(job: SyncJob) {
-  const accountId = job.payload.accountId;
-  const state = accountStates.get(accountId);
+  const state = accountStates.get(job.payload.accountId);
   if (!state) return;
   if (state.runningJobId !== job.id) return;
-  if (!state.queuedJobId) {
-    accountStates.delete(accountId);
-    return;
-  }
-
-  const nextJob = jobs.get(state.queuedJobId);
-  if (!nextJob) {
-    accountStates.delete(accountId);
-    return;
-  }
-
-  const nextClientId = state.queuedClientId;
-  state.runningJobId = nextJob.id;
-  state.queuedJobId = undefined;
-  state.queuedClientId = undefined;
-
-  nextJob.status = "running";
-  nextJob.startedAt = Date.now();
-  nextJob.finishedAt = undefined;
-  nextJob.error = undefined;
-  nextJob.pid = undefined;
-  nextJob.result = undefined;
-  nextJob.progress = buildSyncProgressFromJob(nextJob, {
-    phase: "starting",
-    processed: 0,
-    batchNumber: undefined,
-    batchSize: undefined,
-    estimatedTotal: undefined,
-    percent: undefined,
-    message: "Sync starting."
-  });
-
-  spawnSyncWorker(nextJob, nextClientId);
+  promoteNextQueuedJob(job.payload.accountId, state);
 }
 
 function spawnSyncWorker(job: SyncJob, clientId?: string) {
@@ -550,6 +566,31 @@ export function getSyncJob(jobId: string) {
   return job;
 }
 
+/**
+ * Insert before the first queued entry of strictly lower mode priority, so a
+ * latency-sensitive `new` sync (the user is waiting for mail to appear) is not
+ * stuck behind a queued `repair`/`full` sweep. Equal priorities keep FIFO order
+ * — an account-wide sweep drives its own folder ordering and must not be
+ * reshuffled.
+ */
+function insertQueuedEntry(
+  queue: QueuedSyncEntry[],
+  entry: QueuedSyncEntry,
+  payload: SyncPayload
+) {
+  const priority = MODE_PRIORITY[getSyncMode(payload)];
+  const index = queue.findIndex((queued) => {
+    const queuedJob = jobs.get(queued.jobId);
+    if (!queuedJob) return false;
+    return MODE_PRIORITY[getSyncMode(queuedJob.payload)] > priority;
+  });
+  if (index === -1) {
+    queue.push(entry);
+    return;
+  }
+  queue.splice(index, 0, entry);
+}
+
 export function startSyncJob(payload: SyncPayload, clientId?: string) {
   const normalizedPayload = normalizeSyncPayload(payload);
   const accountId = normalizedPayload.accountId;
@@ -558,45 +599,72 @@ export function startSyncJob(payload: SyncPayload, clientId?: string) {
   if (!existingState) {
     const job = createRunningJob(normalizedPayload);
     jobs.set(job.id, job);
-    accountStates.set(accountId, { runningJobId: job.id });
+    accountStates.set(accountId, { runningJobId: job.id, queue: [] });
     spawnSyncWorker(job, clientId);
     return job;
   }
 
+  // A stalled or vanished running job must hand the slot to whatever is queued
+  // behind it — dropping the account state instead would leave those jobs
+  // "queued" forever with clients polling them until they time out.
   const runningJob = jobs.get(existingState.runningJobId);
-  if (!runningJob || runningJob.status !== "running") {
-    accountStates.delete(accountId);
+  if (!runningJob) {
+    promoteNextQueuedJob(accountId, existingState);
+    return startSyncJob(normalizedPayload, clientId);
+  }
+  if (runningJob.status !== "running") {
+    handleCompletedRunningJob(runningJob);
     return startSyncJob(normalizedPayload, clientId);
   }
   if (typeof runningJob.pid === "number" && !isProcessAlive(runningJob.pid)) {
     markJobFailed(runningJob, "Sync worker process is no longer running.");
     scheduleCleanup(runningJob.id);
-    accountStates.delete(accountId);
+    handleCompletedRunningJob(runningJob);
     return startSyncJob(normalizedPayload, clientId);
   }
 
-  if (!existingState.queuedJobId && isSameSyncIntent(runningJob.payload, normalizedPayload)) {
+  // Drop entries whose job the TTL timer already reaped.
+  existingState.queue = existingState.queue.filter((entry) => jobs.has(entry.jobId));
+
+  // Joining the in-flight job is only safe while nothing is queued behind it.
+  // Once work has piled up the running job is likely past the point where it
+  // would have picked this request up, and joining it would silently drop the
+  // requested folder instead of syncing it.
+  if (existingState.queue.length === 0 && isSameSyncIntent(runningJob.payload, normalizedPayload)) {
     return runningJob;
   }
 
-  if (existingState.queuedJobId) {
-    const queuedJob = jobs.get(existingState.queuedJobId);
-    if (queuedJob) {
-      if (!isSameSyncIntent(queuedJob.payload, normalizedPayload)) {
-        queuedJob.payload = coalesceSyncPayload(queuedJob.payload, normalizedPayload);
-      }
-      if (clientId) {
-        existingState.queuedClientId = clientId;
-      }
-      return queuedJob;
+  for (const entry of existingState.queue) {
+    const queuedJob = jobs.get(entry.jobId);
+    if (!queuedJob || !isSameSyncIntent(queuedJob.payload, normalizedPayload)) continue;
+    if (clientId) {
+      entry.clientId = clientId;
     }
-    existingState.queuedJobId = undefined;
-    existingState.queuedClientId = undefined;
+    return queuedJob;
+  }
+
+  const tail = existingState.queue[existingState.queue.length - 1];
+  const tailJob = tail ? jobs.get(tail.jobId) : undefined;
+  if (tail && tailJob && existingState.queue.length >= MAX_QUEUED_SYNC_JOBS) {
+    // Folding into the tail loses the distinct folder scope, so this is a last
+    // resort rather than the normal path — see `coalesceSyncPayload`.
+    console.warn(
+      `[sync] queue full, coalescing request ${JSON.stringify({
+        accountId,
+        queueLength: existingState.queue.length,
+        folderId: normalizedPayload.folderId,
+        mode: getSyncMode(normalizedPayload)
+      })}`
+    );
+    tailJob.payload = coalesceSyncPayload(tailJob.payload, normalizedPayload);
+    if (clientId) {
+      tail.clientId = clientId;
+    }
+    return tailJob;
   }
 
   const queuedJob = createQueuedJob(normalizedPayload);
   jobs.set(queuedJob.id, queuedJob);
-  existingState.queuedJobId = queuedJob.id;
-  existingState.queuedClientId = clientId;
+  insertQueuedEntry(existingState.queue, { jobId: queuedJob.id, clientId }, normalizedPayload);
   return queuedJob;
 }
