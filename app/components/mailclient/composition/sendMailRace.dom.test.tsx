@@ -16,6 +16,18 @@ function deferred<T>() {
   return { promise, resolve };
 }
 
+/**
+ * Every caller passes a path string today, but reading `.url`/`.href` keeps the
+ * stub from silently matching nothing (and the test from silently passing) if
+ * one ever switches to a Request or URL — `String(new Request(...))` is
+ * "[object Request]".
+ */
+function requestUrl(input: RequestInfo | URL): string {
+  if (typeof input === "string") return input;
+  if (input instanceof URL) return input.href;
+  return input.url;
+}
+
 function jsonResponse(body: unknown) {
   return new Response(JSON.stringify(body), {
     status: 200,
@@ -33,7 +45,7 @@ function renderCompose() {
   const draftSaveGate = deferred<void>();
 
   const apiFetch = async (input: RequestInfo | URL, init?: RequestInit) => {
-    const url = typeof input === "string" ? input : String(input);
+    const url = requestUrl(input);
     calls.push({ url, method: init?.method ?? "GET" });
 
     if (url.includes("/drafts/save")) {
@@ -152,13 +164,18 @@ describe("send while a draft save is still in flight", () => {
       draftSaveGate.resolve();
     });
 
-    await waitFor(() => expect(countSmtpSends()).toBeGreaterThan(0), { timeout: 5000 });
-
-    // Give any extra handler still parked on the flush a chance to fire its own
-    // send before the count is treated as final.
-    await act(async () => {
-      await new Promise((resolve) => setTimeout(resolve, 50));
-    });
+    // Settle on observable state rather than a delay: the handler clears
+    // `sendingMail` in its finally, so an enabled button means the send ran to
+    // completion. Any duplicate handler was parked on the same gate and calls
+    // apiFetch well before it finishes, so its call is already counted here.
+    await waitFor(
+      () => {
+        const button = sendButton();
+        expect(button).toBeDefined();
+        expect((button as HTMLButtonElement).disabled).toBe(false);
+      },
+      { timeout: 5000 }
+    );
 
     // The bug: every click that landed during the flush sent its own copy.
     expect(countSmtpSends()).toBe(1);
