@@ -18,8 +18,9 @@
     "build": "bun --bun build-scripts/generateBuildVersion.ts && bun --bun next build",
     "start": "ENV_FILE=${ENV_FILE:-.env.local} bun --bun build-scripts/generateRuntimeConfig.ts && bun --env-file=${ENV_FILE:-.env.local} --bun next start",
     "lint": "eslint .",
-    "test": "bun test",
-    "test:ci": "bun test",
+    "test": "bun test && bun run test:dom",
+    "test:ci": "bun test && bun run test:dom",
+    "test:dom": "bun test --config=bunfig.dom.toml dom.test",
     "test:stress": "bun test --randomize --seed=1337 --rerun-each=3",
     "test:standalone-workers": "bun run build && bun --bun build-scripts/verifyStandaloneWorkerBuild.ts",
     "test:docker-workers": "bun --bun build-scripts/verifyDockerWorkerImage.ts",
@@ -73,7 +74,10 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@happy-dom/global-registrator": "^20.11.1",
     "@tauri-apps/cli": "^2.10.1",
+    "@testing-library/dom": "^10.4.1",
+    "@testing-library/react": "^16.3.2",
     "@types/html-to-text": "^9.0.4",
     "@types/mailparser": "^3.4.6",
     "@types/node": "^25.6.0",
