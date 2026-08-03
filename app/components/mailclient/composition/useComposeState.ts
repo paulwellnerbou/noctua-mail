@@ -77,6 +77,9 @@ export function useComposeState() {
   const composeDragDepthRef = useRef(0);
   const composeCardRef = useRef<HTMLDivElement | null>(null);
   const [sendingMail, setSendingMail] = useState(false);
+  // Mirrors `sendingMail` synchronously so the send handler can claim the send
+  // before React re-renders the disabled button.
+  const sendingMailRef = useRef(false);
   const [draftSaving, setDraftSaving] = useState(false);
   const [draftSavedAt, setDraftSavedAt] = useState<number | null>(null);
   const [draftSaveError, setDraftSaveError] = useState<string | null>(null);
@@ -183,6 +186,7 @@ export function useComposeState() {
     composeCardRef,
     sendingMail,
     setSendingMail,
+    sendingMailRef,
     draftSaving,
     setDraftSaving,
     draftSavedAt,

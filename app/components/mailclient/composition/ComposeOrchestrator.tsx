@@ -359,6 +359,7 @@ function ComposeOrchestratorImpl(
     composeCardRef,
     sendingMail,
     setSendingMail,
+    sendingMailRef,
     draftSaving,
     setDraftSaving,
     draftSavedAt,
@@ -677,6 +678,12 @@ function ComposeOrchestratorImpl(
   ]);
 
   const handleSendMail = async () => {
+    // The draft flush below can take seconds while an auto-save's IMAP APPEND
+    // settles. Claim the send here, synchronously, so clicks landing in that
+    // window bail out instead of each starting their own SMTP send — the
+    // button's `disabled` alone is too late, it only applies once React has
+    // re-rendered.
+    if (sendingMailRef.current) return;
     const composeInviteDraft = currentComposeInviteDraft;
     if (!composeTo.trim() && !composeCc.trim() && !composeBcc.trim()) {
       reportError("Please add at least one recipient.");
@@ -688,21 +695,22 @@ function ComposeOrchestratorImpl(
       reportError("Please complete the event invitation details before sending.");
       return;
     }
-    // Stop new debounced saves from being scheduled, then let any save that
-    // is already running (or queued) finish before we touch the draft. A
-    // forward/reply auto-saves a draft on open; if its IMAP APPEND is still
-    // in flight when send fires, cancelling outright would orphan that draft
-    // on the server (the discard below would run against a not-yet-known
-    // draft id). Flushing first lets the save settle and populate
-    // `composeDraftIdRef`, so the discard can delete both copies.
-    if (draftSaveTimerRef.current !== null) {
-      clearTimeout(draftSaveTimerRef.current);
-      draftSaveTimerRef.current = null;
-    }
-    await flushPendingDraftSaves();
-    cancelDraftAutoSave();
+    sendingMailRef.current = true;
     setSendingMail(true);
     try {
+      // Stop new debounced saves from being scheduled, then let any save that
+      // is already running (or queued) finish before we touch the draft. A
+      // forward/reply auto-saves a draft on open; if its IMAP APPEND is still
+      // in flight when send fires, cancelling outright would orphan that draft
+      // on the server (the discard below would run against a not-yet-known
+      // draft id). Flushing first lets the save settle and populate
+      // `composeDraftIdRef`, so the discard can delete both copies.
+      if (draftSaveTimerRef.current !== null) {
+        clearTimeout(draftSaveTimerRef.current);
+        draftSaveTimerRef.current = null;
+      }
+      await flushPendingDraftSaves();
+      cancelDraftAutoSave();
       const { text, html, markdown, attachments, composeFormat } = buildComposePayload();
       const smtpPayload = buildSendPayload(composeMode, {
         composeTo,
@@ -831,6 +839,7 @@ function ComposeOrchestratorImpl(
     } catch {
       reportError("Failed to send email.");
     } finally {
+      sendingMailRef.current = false;
       setSendingMail(false);
     }
   };

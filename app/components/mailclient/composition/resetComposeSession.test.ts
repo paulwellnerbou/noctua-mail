@@ -95,6 +95,7 @@ describe("resetComposeSession", () => {
       setComposeQuotedParts: createSetter({ get value() { return state.composeQuotedParts; }, set value(value) { state.composeQuotedParts = value as { styles: string; headerHtml: string; bodyHtml: string } | null; } }),
       setComposeResizing: createSetter({ get value() { return state.composeResizing; }, set value(value) { state.composeResizing = value as boolean; } }),
       setSendingMail: createSetter({ get value() { return state.sendingMail; }, set value(value) { state.sendingMail = value as boolean; } }),
+      sendingMailRef: { current: true },
       setDraftSaving: createSetter({ get value() { return state.draftSaving; }, set value(value) { state.draftSaving = value as boolean; } }),
       setDraftSavedAt: createSetter({ get value() { return state.draftSavedAt; }, set value(value) { state.draftSavedAt = value as number | null; } }),
       setDraftSaveError: createSetter({ get value() { return state.draftSaveError; }, set value(value) { state.draftSaveError = value as string | null; } }),
@@ -162,6 +163,7 @@ describe("resetComposeSession", () => {
     expect(state.draftSaveError).toBeNull();
     expect(state.discardingDraft).toBe(false);
 
+    expect(compose.sendingMailRef.current).toBe(false);
     expect(compose.composeBodyDebounceRef.current).toBeNull();
     expect(compose.draftSaveTimerRef.current).toBeNull();
     expect(compose.draftSaveInFlightRef.current).toBe(false);

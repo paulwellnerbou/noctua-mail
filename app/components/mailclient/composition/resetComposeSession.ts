@@ -41,6 +41,7 @@ type ResettableComposeState = Pick<
   | "setComposeQuotedParts"
   | "setComposeResizing"
   | "setSendingMail"
+  | "sendingMailRef"
   | "setDraftSaving"
   | "setDraftSavedAt"
   | "setDraftSaveError"
@@ -127,6 +128,7 @@ export function resetComposeSession(compose: ResettableComposeState) {
   compose.setComposeQuotedParts(null);
   compose.setComposeResizing(false);
   compose.setSendingMail(false);
+  compose.sendingMailRef.current = false;
   compose.setDraftSaving(false);
   compose.setDraftSavedAt(null);
   compose.setDraftSaveError(null);
