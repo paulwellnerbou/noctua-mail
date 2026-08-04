@@ -1,0 +1,9 @@
+# Config for the DOM test run (`bun run test:dom`). Separate from bunfig.toml
+# so happy-dom is registered only for `*.dom.test.tsx`; the default suite must
+# stay window-free or server-side modules take their browser branches.
+[test]
+preload = ["./lib/testSetupDom.ts"]
+pathIgnorePatterns = [
+  ".next/**",
+  "src-tauri/target/**",
+]
