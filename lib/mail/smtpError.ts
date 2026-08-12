@@ -1,7 +1,7 @@
 type SmtpErrorLike = {
-  code?: string;
-  command?: string;
-  message?: string;
+  code?: unknown;
+  command?: unknown;
+  message?: unknown;
 };
 
 const SMTP_UPSTREAM_FAILURE_FLAG = "noctuaSmtpUpstreamFailure";
@@ -51,8 +51,8 @@ export function isSmtpUpstreamFailure(error: unknown): boolean {
 
 export function getSmtpHttpError(error: unknown): SmtpHttpError | null {
   const candidate = error as SmtpErrorLike | null | undefined;
-  const code = candidate?.code?.trim().toUpperCase() ?? "";
-  const message = candidate?.message?.trim() ?? "";
+  const code = typeof candidate?.code === "string" ? candidate.code.trim().toUpperCase() : "";
+  const message = typeof candidate?.message === "string" ? candidate.message.trim() : "";
   const normalizedMessage = message.toLowerCase();
   const isTimeout =
     code === "ETIMEDOUT" ||

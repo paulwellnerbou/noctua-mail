@@ -59,6 +59,10 @@ describe("getSmtpHttpError", () => {
   it("leaves unrelated application errors unmapped", () => {
     expect(getSmtpHttpError(new Error("database is locked"))).toBeNull();
   });
+
+  it("safely ignores non-string error fields", () => {
+    expect(getSmtpHttpError({ code: 504, message: { reason: "timeout" } })).toBeNull();
+  });
 });
 
 describe("markSmtpUpstreamFailure / isSmtpUpstreamFailure", () => {
