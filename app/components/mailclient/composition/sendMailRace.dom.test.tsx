@@ -8,6 +8,12 @@ import ComposeOrchestrator from "./ComposeOrchestrator";
 
 type ApiCall = { url: string; method: string };
 
+type RenderComposeOptions = {
+  smtpResponse?: Response | (() => Response | Promise<Response>);
+  reportError?: (message: string) => void;
+  readErrorMessage?: (response: Response) => Promise<string>;
+};
+
 function deferred<T>() {
   let resolve!: (value: T) => void;
   const promise = new Promise<T>((res) => {
@@ -40,7 +46,7 @@ function jsonResponse(body: unknown) {
  * send path touches arrives through props, so the draft-save and SMTP calls can
  * be driven from the test without touching the network.
  */
-function renderCompose() {
+function renderCompose(options: RenderComposeOptions = {}) {
   const calls: ApiCall[] = [];
   const draftSaveGate = deferred<void>();
 
@@ -55,6 +61,10 @@ function renderCompose() {
       return jsonResponse({ draftId: "draft-1", message: null });
     }
     if (url.includes("/smtp/send")) {
+      if (typeof options.smtpResponse === "function") {
+        return options.smtpResponse();
+      }
+      if (options.smtpResponse) return options.smtpResponse;
       return jsonResponse({ ok: true, sentFolderId: null, sentMessageUid: null });
     }
     return jsonResponse({ ok: true });
@@ -100,8 +110,8 @@ function renderCompose() {
     formatRelativeTime: () => "just now",
     fromValue: "me@example.test",
     apiFetch,
-    reportError: () => {},
-    readErrorMessage: async () => "error",
+    reportError: options.reportError ?? (() => {}),
+    readErrorMessage: options.readErrorMessage ?? (async () => "error"),
     stripHtml: (value: string) => value,
     showComposeInline: false,
     showComposeModal: true,
@@ -185,6 +195,51 @@ describe("send while a draft save is still in flight", () => {
     expect(labels[0]).toEqual({ label: "Send", disabled: false });
     expect(labels[1]).toEqual({ label: "Sending...", disabled: true });
     expect(labels[2]).toEqual({ label: "Sending...", disabled: true });
+
+    cleanup();
+  }, 20000);
+
+  it("surfaces an SMTP timeout and re-enables Send after the request fails", async () => {
+    const errors: string[] = [];
+    const timeoutMessage =
+      "Timed out while connecting to the outgoing mail server. Check the SMTP server and firewall settings, then try again.";
+    const { view, handleRef, draftSaveGate, sendButton, countSmtpSends } = renderCompose({
+      smtpResponse: new Response(
+        JSON.stringify({
+          ok: false,
+          message: timeoutMessage,
+          code: "smtp_connection_timeout"
+        }),
+        { status: 504, headers: { "Content-Type": "application/json" } }
+      ),
+      reportError: (message) => errors.push(message),
+      readErrorMessage: async (response) => {
+        const body = (await response.json()) as { message?: string };
+        return body.message ?? `Request failed (${response.status})`;
+      }
+    });
+
+    await act(async () => {
+      handleRef.current?.openCompose("new");
+    });
+
+    const toField = view.baseElement.querySelector<HTMLInputElement>("#compose-modal-to");
+    expect(toField).not.toBeNull();
+    await act(async () => {
+      fireEvent.change(toField!, { target: { value: "someone@example.test" } });
+    });
+    await act(async () => {
+      fireEvent.click(sendButton()!);
+    });
+
+    await act(async () => {
+      draftSaveGate.resolve();
+    });
+
+    await waitFor(() => expect(errors).toEqual([timeoutMessage]), { timeout: 5000 });
+    expect(countSmtpSends()).toBe(1);
+    expect((sendButton()?.textContent ?? "").trim()).toBe("Send");
+    expect((sendButton() as HTMLButtonElement).disabled).toBe(false);
 
     cleanup();
   }, 20000);

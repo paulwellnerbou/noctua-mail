@@ -14,6 +14,7 @@ import {
   type AccountRouteParams
 } from "@/app/api/_helpers/accountContext";
 import { toFiniteNumber } from "@/app/api/_helpers/numberParsing";
+import { smtpUpstreamErrorResponse } from "@/app/api/_helpers/smtpUpstreamError";
 
 function buildMessageId(address: string) {
   const domain = address.split("@")[1]?.trim();
@@ -125,21 +126,31 @@ export async function POST(request: Request, { params }: AccountRouteParams) {
   }
 
   const messageId = buildMessageId(account.email);
-  const result = await sendSmtpMessage(account, {
-    to: outboundTo || undefined,
-    cc: cc || undefined,
-    bcc: bcc || undefined,
-    keepBcc: true,
-    subject: payload.subject,
-    text: payload.text,
-    html,
-    messageId,
-    inReplyTo: payload.inReplyTo,
-    references: payload.references,
-    replyTo: payload.replyTo,
-    xForwardedMessageId: payload.xForwardedMessageId,
-    ...(attachments.length > 0 ? { attachments } : {})
-  });
+  let result: Awaited<ReturnType<typeof sendSmtpMessage>>;
+  try {
+    result = await sendSmtpMessage(account, {
+      to: outboundTo || undefined,
+      cc: cc || undefined,
+      bcc: bcc || undefined,
+      keepBcc: true,
+      subject: payload.subject,
+      text: payload.text,
+      html,
+      messageId,
+      inReplyTo: payload.inReplyTo,
+      references: payload.references,
+      replyTo: payload.replyTo,
+      xForwardedMessageId: payload.xForwardedMessageId,
+      ...(attachments.length > 0 ? { attachments } : {})
+    });
+  } catch (error) {
+    const upstreamResponse = smtpUpstreamErrorResponse(error, {
+      accountId: account.id,
+      op: "send-message"
+    });
+    if (upstreamResponse) return upstreamResponse;
+    throw error;
+  }
 
   const folders = await getFolders(account.id);
   const sentFolder = findSentFolder(folders, account.id);

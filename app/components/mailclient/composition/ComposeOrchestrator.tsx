@@ -836,8 +836,12 @@ function ComposeOrchestratorImpl(
       } else {
         reportError(await readErrorMessage(res));
       }
-    } catch {
-      reportError("Failed to send email.");
+    } catch (error) {
+      reportError(
+        error instanceof Error && error.message.trim()
+          ? error.message
+          : "Failed to send email."
+      );
     } finally {
       sendingMailRef.current = false;
       setSendingMail(false);

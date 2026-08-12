@@ -1,6 +1,8 @@
 import type { Account } from "@/lib/data";
 import nodemailer from "nodemailer";
 import MailComposer from "nodemailer/lib/mail-composer/index.js";
+import { markSmtpUpstreamFailure } from "./smtpError";
+import { getSmtpTimeoutOptions } from "./smtpTimeouts";
 
 const PROJECT_URL = "https://github.com/paulwellnerbou/noctua-mail";
 const MAILER_ID = `Noctua Mail (${PROJECT_URL})`;
@@ -65,6 +67,19 @@ function buildMailOptions(account: Account, mail: MailPayload) {
   };
 }
 
+function createSmtpTransport(account: Account) {
+  return nodemailer.createTransport({
+    host: account.smtp.host,
+    port: account.smtp.port,
+    secure: account.smtp.secure,
+    auth: {
+      user: account.smtp.user,
+      pass: account.smtp.password
+    },
+    ...getSmtpTimeoutOptions()
+  });
+}
+
 export async function buildRawMessage(account: Account, mail: MailPayload) {
   const mailOptions = buildMailOptions(account, mail);
   const raw = await new Promise<Buffer>((resolve, reject) => {
@@ -86,20 +101,17 @@ export async function buildRawMessage(account: Account, mail: MailPayload) {
 }
 
 export async function sendSmtpMessage(account: Account, mail: MailPayload) {
-  const transporter = nodemailer.createTransport({
-    host: account.smtp.host,
-    port: account.smtp.port,
-    secure: account.smtp.secure,
-    auth: {
-      user: account.smtp.user,
-      pass: account.smtp.password
-    }
-  });
+  const transporter = createSmtpTransport(account);
 
   const mailOptions = buildMailOptions(account, mail);
   const raw = await buildRawMessage(account, mail);
 
-  const info = await transporter.sendMail(mailOptions);
+  let info: unknown;
+  try {
+    info = await transporter.sendMail(mailOptions);
+  } catch (error) {
+    throw markSmtpUpstreamFailure(error);
+  }
   return { messageId: (info as any)?.messageId ?? null, raw };
 }
 
@@ -125,22 +137,19 @@ export async function sendRawSmtpMessage(
   raw: Buffer | string,
   envelope: { from: string; to: string[] }
 ) {
-  const transporter = nodemailer.createTransport({
-    host: account.smtp.host,
-    port: account.smtp.port,
-    secure: account.smtp.secure,
-    auth: {
-      user: account.smtp.user,
-      pass: account.smtp.password
-    }
-  });
+  const transporter = createSmtpTransport(account);
 
-  const info = await transporter.sendMail({
-    envelope: {
-      from: envelope.from,
-      to: envelope.to
-    },
-    raw
-  });
+  let info: unknown;
+  try {
+    info = await transporter.sendMail({
+      envelope: {
+        from: envelope.from,
+        to: envelope.to
+      },
+      raw
+    });
+  } catch (error) {
+    throw markSmtpUpstreamFailure(error);
+  }
   return { messageId: (info as any)?.messageId ?? null };
 }
