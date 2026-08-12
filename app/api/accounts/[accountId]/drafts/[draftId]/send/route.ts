@@ -6,6 +6,7 @@ import {
   type AccountRouteParams
 } from "@/app/api/_helpers/accountContext";
 import { errorResponse, okResponse } from "@/app/api/_helpers/response";
+import { smtpUpstreamErrorResponse } from "@/app/api/_helpers/smtpUpstreamError";
 
 /**
  * POST /api/accounts/[accountId]/drafts/[draftId]/send
@@ -50,6 +51,11 @@ export async function POST(request: Request, { params }: Params) {
     if (error instanceof DraftSendError) {
       return errorResponse(error.message, error.status);
     }
+    const upstreamResponse = smtpUpstreamErrorResponse(error, {
+      accountId: resolvedAccountId,
+      op: "send-draft"
+    });
+    if (upstreamResponse) return upstreamResponse;
     throw error;
   }
 }

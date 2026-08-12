@@ -20,6 +20,7 @@ import type {
 } from "@/lib/data";
 import { buildCalendarReplyPayload } from "@/lib/calendarReply";
 import { sendSmtpMessage } from "@/lib/mail/smtp";
+import { smtpUpstreamErrorResponse } from "@/app/api/_helpers/smtpUpstreamError";
 import { appendImapMessage } from "@/lib/mail/imap";
 import { folderMailboxPath } from "@/lib/mailboxPaths";
 import { findSentFolder } from "@/lib/specialFolders";
@@ -212,6 +213,11 @@ export async function POST(request: Request, { params }: Params) {
 
     return NextResponse.json({ ok: true, event: updatedEvent, participation, inviteProcessing });
   } catch (error) {
+    const upstreamResponse = smtpUpstreamErrorResponse(error, {
+      accountId,
+      op: "send-calendar-response"
+    });
+    if (upstreamResponse) return upstreamResponse;
     return NextResponse.json(
       {
         ok: false,
