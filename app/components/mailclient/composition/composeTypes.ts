@@ -43,6 +43,10 @@ export type PendingImageDrop = {
   files: File[];
   x: number;
   y: number;
+  // Editor drops capture their Lexical insertion point before the choice menu
+  // takes focus. Keeping the insertion operation with the pending drop avoids
+  // losing that exact position while the user chooses Embed or Attach.
+  insertInlineImages?: (files: File[]) => void;
 };
 
 export type ComposeSelectionState = {

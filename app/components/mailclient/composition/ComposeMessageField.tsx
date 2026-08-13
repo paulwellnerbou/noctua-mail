@@ -113,7 +113,12 @@ type ComposeMessageFieldProps = {
   pendingImageDrop: PendingImageDrop | null;
   setPendingImageDrop: (drop: PendingImageDrop | null) => void;
   addComposeFiles: (files: File[], inline?: boolean) => Promise<void>;
-  addDroppedFiles: (files: File[], x: number, y: number) => void;
+  addDroppedFiles: (
+    files: File[],
+    x: number,
+    y: number,
+    insertInlineImages?: (files: File[]) => void
+  ) => void;
 };
 
 export default function ComposeMessageField({
@@ -216,6 +221,11 @@ export default function ComposeMessageField({
     const drop = pendingImageDrop;
     setPendingImageDrop(null);
     if (!drop || drop.files.length === 0) return;
+    if (drop.insertInlineImages) {
+      composeDirtyRef.current = true;
+      drop.insertInlineImages(drop.files);
+      return;
+    }
     pendingEmbedRef.current = { files: drop.files, session: composeSessionVersionRef.current };
     composeDirtyRef.current = true;
     if (composeTab === "html") {

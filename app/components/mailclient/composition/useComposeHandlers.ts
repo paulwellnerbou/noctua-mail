@@ -75,13 +75,21 @@ export function routeDroppedFiles(
   }: {
     addComposeFiles: (files: File[], inline?: boolean) => unknown;
     setPendingImageDrop: (drop: PendingImageDrop | null) => void;
-  }
+  },
+  insertInlineImages?: (files: File[]) => void
 ) {
   if (files.length === 0) return;
   const images = files.filter((file) => isEmbeddableImage(file.type));
   const others = files.filter((file) => !isEmbeddableImage(file.type));
   if (others.length > 0) addComposeFiles(others, false);
-  if (images.length > 0) setPendingImageDrop({ files: images, x, y });
+  if (images.length > 0) {
+    setPendingImageDrop({
+      files: images,
+      x,
+      y,
+      ...(insertInlineImages ? { insertInlineImages } : {})
+    });
+  }
 }
 
 // Attachments with an inline disposition that the source body never references
@@ -187,13 +195,24 @@ export function useComposeHandlers({
     event.dataTransfer.dropEffect = "copy";
   };
 
-  const addDroppedFiles = (files: File[], x: number, y: number) => {
+  const addDroppedFiles = (
+    files: File[],
+    x: number,
+    y: number,
+    insertInlineImages?: (files: File[]) => void
+  ) => {
     // Clear the drag-active outline here so it resets for editor drops too,
     // where the compose-surface drop handler never runs (its onDrop stops
     // propagation).
     composeDragDepthRef.current = 0;
     setComposeDragActive(false);
-    routeDroppedFiles(files, x, y, { addComposeFiles, setPendingImageDrop });
+    routeDroppedFiles(
+      files,
+      x,
+      y,
+      { addComposeFiles, setPendingImageDrop },
+      insertInlineImages
+    );
   };
 
   const handleComposeDrop = (event: React.DragEvent) => {

@@ -41,6 +41,7 @@ import { useLexicalComposerContext } from "@lexical/react/LexicalComposerContext
 import { TablePlugin } from "@lexical/react/LexicalTablePlugin";
 import {
   $createParagraphNode,
+  $createRangeSelectionFromDom,
   $getRoot,
   $getSelection,
   $isDecoratorNode,
@@ -48,12 +49,14 @@ import {
   $isNodeSelection,
   $isRangeSelection,
   $isTextNode,
+  $setSelection,
   COMMAND_PRIORITY_LOW,
   KEY_BACKSPACE_COMMAND,
   KEY_DELETE_COMMAND,
   SELECTION_CHANGE_COMMAND,
   FORMAT_TEXT_COMMAND,
-  type LexicalEditor
+  type LexicalEditor,
+  type RangeSelection
 } from "lexical";
 import { $generateHtmlFromNodes, $generateNodesFromDOM } from "@lexical/html";
 import { TRANSFORMERS } from "@lexical/markdown";
@@ -136,7 +139,12 @@ type ComposeEditorProps = {
   quotedMessage?: QuotedMessageConfig;
   onChange: (html: string, text: string) => void;
   onInlineImage?: (file: File, dataUrl: string) => void;
-  onFilesDrop?: (files: File[], x: number, y: number) => void;
+  onFilesDrop?: (
+    files: File[],
+    x: number,
+    y: number,
+    insertInlineImages?: (files: File[]) => void
+  ) => void;
 };
 
 const theme = {
@@ -569,29 +577,91 @@ function ComposeToolbar({
   );
 }
 
+function readFileAsDataUrl(file: File): Promise<string | null> {
+  return new Promise((resolve) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || "") || null);
+    reader.onerror = () => resolve(null);
+    reader.readAsDataURL(file);
+  });
+}
+
 function insertImageFilesIntoEditor(
   editor: LexicalEditor,
   files: File[],
-  onInlineImage?: (file: File, dataUrl: string) => void
+  onInlineImage?: (file: File, dataUrl: string) => void,
+  insertionSelection?: RangeSelection | null
 ) {
-  files.forEach((file) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const dataUrl = String(reader.result || "");
-      if (!dataUrl) return;
-      onInlineImage?.(file, dataUrl);
-      const alt = file.name || "image";
-      editor.update(() => {
-        const imageNode = $createImageNode(dataUrl, alt);
-        const selection = $getSelection();
-        if ($isRangeSelection(selection)) {
-          selection.insertNodes([imageNode]);
-        } else {
-          $getRoot().append(imageNode);
-        }
-      });
-    };
-    reader.readAsDataURL(file);
+  void Promise.all(
+    files.map(async (file) => ({ file, dataUrl: await readFileAsDataUrl(file) }))
+  ).then((results) => {
+    const images = results.filter(
+      (result): result is { file: File; dataUrl: string } => Boolean(result.dataUrl)
+    );
+    if (images.length === 0) return;
+    images.forEach(({ file, dataUrl }) => onInlineImage?.(file, dataUrl));
+    editor.update(() => {
+      if (insertionSelection) {
+        $setSelection(insertionSelection.clone());
+      }
+      const imageNodes = images.map(({ file, dataUrl }) =>
+        $createImageNode(dataUrl, file.name || "image")
+      );
+      const selection = $getSelection();
+      if ($isRangeSelection(selection)) {
+        selection.insertNodes(imageNodes);
+      } else {
+        $getRoot().append(...imageNodes);
+      }
+    });
+  });
+}
+
+function caretRangeFromPoint(ownerDocument: Document, x: number, y: number): Range | null {
+  if (typeof ownerDocument.caretPositionFromPoint === "function") {
+    const position = ownerDocument.caretPositionFromPoint(x, y);
+    if (position) {
+      const range = ownerDocument.createRange();
+      range.setStart(position.offsetNode, position.offset);
+      range.collapse(true);
+      return range;
+    }
+  }
+
+  // Safari still exposes the older WebKit API instead of caretPositionFromPoint.
+  const webkitDocument = ownerDocument as Document & {
+    caretRangeFromPoint?: (clientX: number, clientY: number) => Range | null;
+  };
+  return webkitDocument.caretRangeFromPoint?.(x, y) ?? null;
+}
+
+function captureEditorSelectionAtPoint(
+  editor: LexicalEditor,
+  x: number,
+  y: number
+): RangeSelection | null {
+  const rootElement = editor.getRootElement();
+  const ownerDocument = rootElement?.ownerDocument;
+  const range = ownerDocument ? caretRangeFromPoint(ownerDocument, x, y) : null;
+  const rangeIsInsideEditor = Boolean(
+    range &&
+      rootElement &&
+      (range.startContainer === rootElement || rootElement.contains(range.startContainer))
+  );
+
+  return editor.getEditorState().read(() => {
+    if (range && rangeIsInsideEditor) {
+      const domSelection = {
+        anchorNode: range.startContainer,
+        anchorOffset: range.startOffset,
+        focusNode: range.startContainer,
+        focusOffset: range.startOffset
+      } as Selection;
+      const selection = $createRangeSelectionFromDom(domSelection, editor);
+      if (selection) return selection.clone();
+    }
+    const selection = $getSelection();
+    return $isRangeSelection(selection) ? selection.clone() : null;
   });
 }
 
@@ -600,7 +670,12 @@ function ComposeEditable({
   onFilesDrop
 }: {
   onInlineImage?: (file: File, dataUrl: string) => void;
-  onFilesDrop?: (files: File[], x: number, y: number) => void;
+  onFilesDrop?: (
+    files: File[],
+    x: number,
+    y: number,
+    insertInlineImages?: (files: File[]) => void
+  ) => void;
 }) {
   const [editor] = useLexicalComposerContext();
 
@@ -634,7 +709,23 @@ function ComposeEditable({
         // Hand the whole drop to the embed-vs-attach router when wired so a mixed
         // drop attaches non-images too; otherwise embed any images directly.
         if (onFilesDrop) {
-          onFilesDrop(files, event.clientX, event.clientY);
+          const insertionSelection = captureEditorSelectionAtPoint(
+            editor,
+            event.clientX,
+            event.clientY
+          );
+          onFilesDrop(
+            files,
+            event.clientX,
+            event.clientY,
+            (imageFiles) =>
+              insertImageFilesIntoEditor(
+                editor,
+                imageFiles,
+                onInlineImage,
+                insertionSelection
+              )
+          );
         } else {
           handleImageFiles(files.filter((file) => isEmbeddableImage(file.type)));
         }
@@ -727,6 +818,21 @@ function AppendPlugin({
   onInlineImage?: (file: File, dataUrl: string) => void;
 }) {
   const [editor] = useLexicalComposerContext();
+  const lastRangeSelectionRef = useRef<RangeSelection | null>(null);
+
+  useEffect(() => {
+    const rememberRangeSelection = () => {
+      const selection = $getSelection();
+      if ($isRangeSelection(selection)) {
+        lastRangeSelectionRef.current = selection.clone();
+      }
+    };
+    editor.getEditorState().read(rememberRangeSelection);
+    return editor.registerUpdateListener(({ editorState }) => {
+      editorState.read(rememberRangeSelection);
+    });
+  }, [editor]);
+
   useImperativeHandle(
     handleRef,
     () => ({
@@ -746,7 +852,13 @@ function AppendPlugin({
         });
       },
       insertInlineImages(files: File[]) {
-        insertImageFilesIntoEditor(editor, files, onInlineImage);
+        const insertionSelection = editor.getEditorState().read(() => {
+          const selection = $getSelection();
+          return $isRangeSelection(selection)
+            ? selection.clone()
+            : lastRangeSelectionRef.current?.clone() ?? null;
+        });
+        insertImageFilesIntoEditor(editor, files, onInlineImage, insertionSelection);
       },
       exportCurrentHtml() {
         return editor.getEditorState().read(() => ({
