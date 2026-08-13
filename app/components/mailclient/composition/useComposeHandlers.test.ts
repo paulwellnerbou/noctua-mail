@@ -296,6 +296,18 @@ describe("routeDroppedFiles", () => {
     expect(pending).toEqual([{ files: [a, b], x: 10, y: 20 }]);
   });
 
+  it("keeps the editor insertion operation with the pending image drop", () => {
+    const { pending, deps } = setup();
+    const image = imageFile("photo.png");
+    const insertInlineImages = () => {};
+
+    routeDroppedFiles([image], 10, 20, deps, insertInlineImages);
+
+    expect(pending).toEqual([
+      { files: [image], x: 10, y: 20, insertInlineImages }
+    ]);
+  });
+
   it("attaches non-images immediately without queuing a drop", () => {
     const { attached, pending, deps } = setup();
     const doc = otherFile("contract.pdf");
