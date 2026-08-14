@@ -284,6 +284,7 @@ export function useDraftManager(params: UseDraftManagerParams) {
     pendingDraftSaveRef.current = null;
     composeSessionVersionRef.current += 1;
     const draftId = composeDraftIdRef.current;
+    let discarded = true;
     if (draftId && activeAccountId) {
       try {
         setDiscardingDraft(true);
@@ -295,6 +296,7 @@ export function useDraftManager(params: UseDraftManagerParams) {
         });
         if (!res.ok) {
           reportError(await readErrorMessage(res));
+          discarded = false;
         } else {
           removeDraftFromUi(draftId);
           if (searchScope === "folder" && activeFolderId) {
@@ -304,10 +306,12 @@ export function useDraftManager(params: UseDraftManagerParams) {
         await refreshFolders();
       } catch {
         reportError("Failed to discard draft.");
+        discarded = false;
       } finally {
         setDiscardingDraft(false);
       }
     }
+    if (!discarded) return false;
     lastDraftHashRef.current = "";
     currentDraftHashRef.current = "";
     composeBaselineHashRef.current = null;
@@ -317,6 +321,7 @@ export function useDraftManager(params: UseDraftManagerParams) {
     setComposeDraftId(null);
     setComposeOpen(false);
     setComposeView("inline");
+    return true;
   };
 
   const handleSaveDraft = () => {
@@ -351,5 +356,56 @@ export function useDraftManager(params: UseDraftManagerParams) {
     saveDraft(payload, hash);
   };
 
-  return { saveDraft, handleDiscardDraft, handleSaveDraft, flushPendingDraftSaves };
+  const saveDraftForHandoff = async () => {
+    if (!composeOpen || !activeAccountId) {
+      return { draftId: null, hasContent: false, saved: false };
+    }
+    const preferText = composeTab === "html" && composeLastEditedRef.current === "text";
+    const composePayload = buildComposePayload({ preferText });
+    const changeState = getDraftChangeState({
+      draftId: composeDraftIdRef.current,
+      lastSavedHash: lastDraftHashRef.current,
+      to: composeTo,
+      cc: composeCc,
+      bcc: composeBcc,
+      subject: composeSubject,
+      text: composePayload.text,
+      html: composePayload.html,
+      attachments: composePayload.attachments,
+      invite: composeInvite
+    });
+
+    if (changeState.canManualSave) {
+      const payload = buildDraftSavePayload(
+        {
+          to: composeTo,
+          cc: composeCc,
+          bcc: composeBcc,
+          subject: composeSubject,
+          composeQuotedHtmlEdited,
+          composeReplyHeaders,
+          invite: composeInvite
+        },
+        composePayload
+      );
+      saveDraft(payload, changeState.hash);
+    }
+    await flushPendingDraftSaves();
+    return {
+      draftId: composeDraftIdRef.current,
+      hasContent: changeState.hasContent,
+      saved:
+        (!changeState.hasContent && !composeDraftIdRef.current) ||
+        !changeState.hasUnsavedChanges ||
+        lastDraftHashRef.current === changeState.hash
+    };
+  };
+
+  return {
+    saveDraft,
+    handleDiscardDraft,
+    handleSaveDraft,
+    saveDraftForHandoff,
+    flushPendingDraftSaves
+  };
 }

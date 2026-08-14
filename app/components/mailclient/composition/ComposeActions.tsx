@@ -10,6 +10,7 @@ type ComposeActionsProps = {
   draftSavedAt: number | null;
   sendingMail: boolean;
   discardingDraft: boolean;
+  busy?: boolean;
   handleDiscardDraft: () => void;
   handleSaveDraft: () => void;
   handleCancel: () => void;
@@ -26,6 +27,7 @@ export default function ComposeActions({
   draftSavedAt,
   sendingMail,
   discardingDraft,
+  busy = false,
   handleDiscardDraft,
   handleSaveDraft,
   handleCancel,
@@ -65,7 +67,7 @@ export default function ComposeActions({
               variant="soft"
               color="red"
               onClick={handleDiscardDraft}
-              disabled={discardingDraft || draftSaving}
+              disabled={busy || discardingDraft || draftSaving}
             >
               Discard Draft
             </Button>
@@ -74,16 +76,22 @@ export default function ComposeActions({
               variant="soft"
               color="blue"
               onClick={handleSaveDraft}
-              disabled={draftSaving || !canSaveDraft}
+              disabled={busy || draftSaving || !canSaveDraft}
             >
               {draftSaving ? "Saving..." : "Save draft"}
             </Button>
           </>
         )}
-        <Button size="2" variant="soft" color="gray" onClick={handleCancel}>
+        <Button
+          size="2"
+          variant="soft"
+          color="gray"
+          onClick={handleCancel}
+          disabled={busy || sendingMail || discardingDraft || draftSaving}
+        >
           Cancel
         </Button>
-        <Button size="2" onClick={handleSendMail} disabled={sendingMail}>
+        <Button size="2" onClick={handleSendMail} disabled={busy || sendingMail}>
           {sendingMail ? "Sending..." : "Send"}
         </Button>
       </div>

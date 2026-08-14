@@ -418,8 +418,17 @@ export function computeComposeInitState(
         bcc: message.bcc ?? "",
         subject: message.subject ?? "",
         text: message.body ?? "",
-        html: nextHtml,
-        attachments: message.attachments ?? []
+        // Markdown rendering happens on the server. The client save payload
+        // carries only supplemental quoted HTML, not the rendered markdown
+        // preview, so dirty tracking must hash that same representation.
+        html:
+          composeTab === "markdown"
+            ? (composeQuotedHtml || undefined)
+            : composeTab === "html"
+              ? nextHtml
+              : undefined,
+        attachments: message.attachments ?? [],
+        invite: draftInvite
       })
     : null;
 
@@ -438,7 +447,7 @@ export function computeComposeInitState(
     composeInviteRecurrenceRule: draftInvite?.recurrenceRule ?? "",
     composeHtml,
     composeHtmlText,
-    composeMarkdown: "",
+    composeMarkdown: composeTab === "markdown" ? (message.body ?? "") : "",
     composeQuotedHtml,
     composeQuotedHtmlEdited,
     composeQuotedParts: null,

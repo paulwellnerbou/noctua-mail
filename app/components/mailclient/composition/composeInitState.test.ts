@@ -522,6 +522,26 @@ describe("computeComposeInitState — edit", () => {
     expect(fields.composeShowBcc).toBe(true);
   });
 
+  it("restores markdown source when editing a markdown draft", () => {
+    const fields = computeComposeInitState(
+      "edit",
+      makeMessage({
+        body: "# Heading\n\n**Important** details",
+        htmlBody: "<h1>Heading</h1><p><strong>Important</strong> details</p>",
+        xComposeFormat: "markdown"
+      }),
+      false,
+      opts,
+      deps
+    );
+    expect(fields.composeTab).toBe("markdown");
+    expect(fields.composeMarkdown).toBe("# Heading\n\n**Important** details");
+    expect(JSON.parse(fields.initialDraftHash!)).toMatchObject({
+      text: "# Heading\n\n**Important** details",
+      html: ""
+    });
+  });
+
   it("sets initialDraftHash for dirty tracking", () => {
     const fields = computeComposeInitState("edit", makeMessage(), false, opts, deps);
     expect(fields.initialDraftHash).not.toBeNull();

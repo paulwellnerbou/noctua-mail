@@ -130,6 +130,10 @@ import {
   DETACHED_MESSAGE_DELETE_EVENT_STORAGE_KEY,
   parseDetachedMessageDeleteEvent
 } from "@/lib/ui/detachedMessageEvents";
+import {
+  DETACHED_COMPOSE_EVENT_STORAGE_KEY,
+  parseDetachedComposeEvent
+} from "@/lib/ui/detachedComposeHandoff";
 import { getImapFlagBadges, hasHtmlContent } from "@/lib/ui/messageView";
 import {
   SEARCH_BADGE_ORDER,
@@ -617,7 +621,11 @@ export default function MailClient({
     composeView: "inline",
     composeMode: "new",
     composeDraftId: null,
-    composeReplyMessage: null
+    composeReplyMessage: null,
+    hasUnsavedChanges: false,
+    draftSaving: false,
+    sendingMail: false,
+    discardingDraft: false
   });
   const {
     composeOpen,
@@ -4877,6 +4885,30 @@ export default function MailClient({
       window.removeEventListener("storage", handleDetachedMessageDelete);
     };
   }, [activeAccountId, activeMessageId, evictMessageCaches, refreshFolders, viewMessage?.id]);
+
+  useEffect(() => {
+    const handleDetachedComposeEvent = (event: StorageEvent) => {
+      if (event.key !== DETACHED_COMPOSE_EVENT_STORAGE_KEY) return;
+      const payload = parseDetachedComposeEvent(event.newValue);
+      if (!payload || payload.accountId !== activeAccountId) return;
+      const affectedIds = [payload.draftId, payload.sourceMessageId].filter(
+        (messageId): messageId is string => Boolean(messageId)
+      );
+      if (affectedIds.length > 0) evictMessageCaches(affectedIds);
+      if (
+        (payload.outcome === "sent" || payload.outcome === "discarded") &&
+        payload.draftId &&
+        (activeMessageId === payload.draftId || viewMessage?.id === payload.draftId)
+      ) {
+        setViewMessage(null);
+        setActiveMessageId("");
+      }
+      void refreshFolders();
+      void refreshMailboxDataRef.current();
+    };
+    window.addEventListener("storage", handleDetachedComposeEvent);
+    return () => window.removeEventListener("storage", handleDetachedComposeEvent);
+  }, [activeAccountId, activeMessageId, evictMessageCaches, refreshFolders, viewMessage?.id]);
   // Auto-repair empty folders: if a folder shows no messages after loading,
   // check if raw messages exist in DB (threading issue → recompute) or not (missing → sync).
   useEffect(() => {
@@ -5491,7 +5523,6 @@ export default function MailClient({
         onUpdateAlias={updateRecipientAliasForAccount}
         onDeleteAlias={deleteRecipientAliasForAccount}
       />
-
       <ComposeOrchestrator
         ref={composeHandleRef}
         activeAccountId={activeAccountId}
