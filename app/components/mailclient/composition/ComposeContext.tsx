@@ -45,6 +45,8 @@ export type ComposeContextValue = {
   draftSavedAt: number | null;
   sendingMail: boolean;
   discardingDraft: boolean;
+  detachingCompose: boolean;
+  detachedWindow: boolean;
 
   // Refs
   composeModalRef: React.RefObject<HTMLDivElement | null>;
@@ -65,6 +67,8 @@ export type ComposeContextValue = {
   popOutCompose: () => void;
   popInCompose: () => void;
   minimizeCompose: () => void;
+  openComposeInNewWindow: () => void;
+  closeDetachedCompose: () => void;
 
   // Send / draft / dirty
   handleSendMail: () => void;

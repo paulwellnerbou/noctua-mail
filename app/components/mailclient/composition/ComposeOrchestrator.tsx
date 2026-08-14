@@ -25,6 +25,13 @@ import {
   buildAccountSmtpSendPath
 } from "@/lib/accountApiPaths";
 import { hasHtmlContent } from "@/lib/ui/messageView";
+import {
+  removeDetachedComposeHandoff,
+  pruneExpiredDetachedComposeHandoffs,
+  writeDetachedComposeHandoff,
+  type DetachedComposeOutcome
+} from "@/lib/ui/detachedComposeHandoff";
+import { openDetachedWindowConfirmed } from "@/lib/ui/openDetachedWindow";
 import { decidePostSendSentSync, type SyncMode } from "@/lib/syncPolicy";
 import { logSyncPolicyCall } from "@/lib/syncPolicyLogging";
 import { buildSendPayload } from "./buildSendPayload";
@@ -111,7 +118,12 @@ export type ComposeOrchestratorHandle = {
     message?: Message,
     asNew?: boolean,
     prefill?: ComposeOpenPrefill
-  ) => void;
+  ) => Promise<void>;
+  /** Restore a saved handoff while retaining reply/forward send semantics. */
+  openDetachedCompose: (
+    draft: Message | null,
+    context: { mode: ComposeMode; sourceMessage: Message | null }
+  ) => Promise<void>;
   /** Imperative setter used by MailClient's list selection auto-minimize. */
   setComposeView: React.Dispatch<React.SetStateAction<"inline" | "modal" | "minimized">>;
 };
@@ -211,6 +223,15 @@ export type ComposeOrchestratorProps = {
    * keep their dependency semantics.
    */
   onComposeMirrorChange?: (mirror: ComposeMirror) => void;
+
+  /** Run the compose session inside its own browser/native window. */
+  detachedWindow?: boolean;
+
+  /** Called synchronously before a detached window closes successfully. */
+  onDetachedComposeOutcome?: (
+    outcome: DetachedComposeOutcome,
+    draftId: string | null
+  ) => void;
 };
 
 /**
@@ -223,6 +244,10 @@ export type ComposeMirror = {
   composeMode: ComposeMode;
   composeDraftId: string | null;
   composeReplyMessage: Message | null;
+  hasUnsavedChanges: boolean;
+  draftSaving: boolean;
+  sendingMail: boolean;
+  discardingDraft: boolean;
 };
 
 function ComposeOrchestratorImpl(
@@ -271,11 +296,17 @@ function ComposeOrchestratorImpl(
     showComposeModal,
     showComposeMinimized,
     onDraftSavedAtChange,
-    onComposeMirrorChange
+    onComposeMirrorChange,
+    detachedWindow = false,
+    onDetachedComposeOutcome
   }: ComposeOrchestratorProps,
   ref: React.ForwardedRef<ComposeOrchestratorHandle>
 ) {
   const compose = useComposeState();
+  const [detachingCompose, setDetachingCompose] = useState(false);
+  const detachingComposeRef = useRef(false);
+  const closingDetachedComposeRef = useRef(false);
+  const discardingDraftRequestRef = useRef(false);
   const {
     composeOpen,
     setComposeOpen,
@@ -387,7 +418,10 @@ function ComposeOrchestratorImpl(
   // Cleanup debounce timer on unmount
   useEffect(() => {
     return () => {
+      // Intentionally read the latest timer at unmount; it may have been
+      // replaced after this cleanup was registered.
       if (composeBodyDebounceRef.current) {
+        // eslint-disable-next-line react-hooks/exhaustive-deps
         clearTimeout(composeBodyDebounceRef.current);
       }
     };
@@ -403,24 +437,6 @@ function ComposeOrchestratorImpl(
   useEffect(() => {
     onDraftSavedAtChange?.(draftSavedAt);
   }, [draftSavedAt, onDraftSavedAtChange]);
-
-  // Mirror the slice of compose state that MailClient consumes reactively.
-  useEffect(() => {
-    onComposeMirrorChange?.({
-      composeOpen,
-      composeView,
-      composeMode,
-      composeDraftId,
-      composeReplyMessage
-    });
-  }, [
-    composeOpen,
-    composeView,
-    composeMode,
-    composeDraftId,
-    composeReplyMessage,
-    onComposeMirrorChange
-  ]);
 
   const selectedSignature =
     accountSignatures.find((signature) => signature.id === composeSignatureId) ?? null;
@@ -547,7 +563,13 @@ function ComposeOrchestratorImpl(
     setComposeResizing
   });
 
-  const { saveDraft, handleDiscardDraft, handleSaveDraft, flushPendingDraftSaves } = useDraftManager({
+  const {
+    saveDraft,
+    handleDiscardDraft,
+    handleSaveDraft,
+    saveDraftForHandoff,
+    flushPendingDraftSaves
+  } = useDraftManager({
     activeAccountId,
     composeOpen,
     composeTab,
@@ -643,6 +665,8 @@ function ComposeOrchestratorImpl(
   ]);
 
   const handleDiscardDraftWithCancel = useCallback(async () => {
+    if (discardingDraftRequestRef.current || sendingMailRef.current) return;
+    discardingDraftRequestRef.current = true;
     // Cancel a pending debounced auto-save before discarding, mirroring the
     // send path. Without this, a timer scheduled just before the user clicks
     // Discard can fire mid-discard and enqueue a fresh save, re-creating the
@@ -650,12 +674,150 @@ function ComposeOrchestratorImpl(
     // session version) so the discard's own `flushPendingDraftSaves` can still
     // settle any already-running save and learn the final draft id; the
     // version bump that neutralizes a late save happens inside the discard.
+    const discardedDraftId = composeDraftIdRef.current;
     if (draftSaveTimerRef.current !== null) {
       clearTimeout(draftSaveTimerRef.current);
       draftSaveTimerRef.current = null;
     }
-    await handleDiscardDraft();
-  }, [draftSaveTimerRef, handleDiscardDraft]);
+    try {
+      const discarded = await handleDiscardDraft();
+      if (discarded && detachedWindow) {
+        onDetachedComposeOutcome?.("discarded", discardedDraftId);
+        window.close();
+      }
+    } finally {
+      discardingDraftRequestRef.current = false;
+    }
+  }, [
+    detachedWindow,
+    composeDraftIdRef,
+    draftSaveTimerRef,
+    handleDiscardDraft,
+    onDetachedComposeOutcome,
+    sendingMailRef
+  ]);
+
+  const openComposeInNewWindow = useCallback(async () => {
+    if (
+      detachedWindow ||
+      !activeAccountId ||
+      detachingComposeRef.current ||
+      sendingMailRef.current ||
+      discardingDraftRequestRef.current
+    ) return;
+    detachingComposeRef.current = true;
+    setDetachingCompose(true);
+    const handoffId = window.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`;
+    const createdAtMs = Date.now();
+    const baseHandoff = {
+      version: 1 as const,
+      accountId: activeAccountId,
+      mode: composeMode,
+      sourceMessageId: composeReplyMessage?.id ?? null,
+      draftId: composeDraftIdRef.current,
+      createdAtMs,
+      updatedAtMs: createdAtMs
+    };
+    try {
+      pruneExpiredDetachedComposeHandoffs(createdAtMs);
+      writeDetachedComposeHandoff(handoffId, {
+        ...baseHandoff,
+        status: "preparing"
+      });
+      const openResult = await openDetachedWindowConfirmed(
+        `/compose/window?handoff=${encodeURIComponent(handoffId)}`,
+        { width: 1040, height: 840 }
+      );
+      if (!openResult.opened) {
+        removeDetachedComposeHandoff(handoffId);
+        pushNotice({
+          type: "warning",
+          title: "Could not open composer window",
+          description: openResult.error
+            ? "The desktop window could not be created. Your message remains open here."
+            : "Allow pop-ups to open the composer in a new window."
+        });
+        return;
+      }
+
+      const handoff = await saveDraftForHandoff();
+      if (!handoff.saved || (handoff.hasContent && !handoff.draftId)) {
+        writeDetachedComposeHandoff(handoffId, {
+          ...baseHandoff,
+          status: "error",
+          draftId: handoff.draftId,
+          message: "The draft could not be saved before opening the new window.",
+          updatedAtMs: Date.now()
+        });
+        return;
+      }
+      writeDetachedComposeHandoff(handoffId, {
+        ...baseHandoff,
+        status: "ready",
+        draftId: handoff.draftId,
+        updatedAtMs: Date.now()
+      });
+      cancelDraftAutoSave();
+      setComposeOpen(false);
+      setComposeView("inline");
+    } catch (error) {
+      removeDetachedComposeHandoff(handoffId);
+      reportError("The composer handoff could not be created.");
+      if (error instanceof Error) {
+        console.error("[noctua] detached composer handoff failed:", error);
+      }
+    } finally {
+      detachingComposeRef.current = false;
+      setDetachingCompose(false);
+    }
+  }, [
+    activeAccountId,
+    cancelDraftAutoSave,
+    composeDraftIdRef,
+    composeMode,
+    composeReplyMessage,
+    detachedWindow,
+    pushNotice,
+    reportError,
+    saveDraftForHandoff,
+    sendingMailRef,
+    setComposeOpen,
+    setComposeView
+  ]);
+
+  const closeDetachedCompose = useCallback(async () => {
+    if (
+      !detachedWindow ||
+      closingDetachedComposeRef.current ||
+      sendingMailRef.current ||
+      discardingDraftRequestRef.current
+    ) return;
+    closingDetachedComposeRef.current = true;
+    setDetachingCompose(true);
+    try {
+      const saved = await saveDraftForHandoff();
+      if (!saved.saved || (saved.hasContent && !saved.draftId)) {
+        reportError("The draft could not be saved. Keep this window open and try again.");
+        closingDetachedComposeRef.current = false;
+        setDetachingCompose(false);
+        return;
+      }
+      cancelDraftAutoSave();
+      onDetachedComposeOutcome?.("saved", saved.draftId);
+      window.close();
+    } catch {
+      closingDetachedComposeRef.current = false;
+      setDetachingCompose(false);
+      reportError("The draft could not be saved. Keep this window open and try again.");
+    }
+  }, [
+    cancelDraftAutoSave,
+    detachedWindow,
+    onDetachedComposeOutcome,
+    reportError,
+    saveDraftForHandoff,
+    sendingMailRef
+  ]);
 
   const resetAfterSend = useCallback(() => {
     setComposeOpen(false);
@@ -774,10 +936,10 @@ function ComposeOrchestratorImpl(
           (composeMode === "reply" || composeMode === "replyAll") &&
           composeReplyMessage
         ) {
-          updateFlagState(composeReplyMessage, "answered", true);
+          await updateFlagState(composeReplyMessage, "answered", true);
         }
         if (composeMode === "forward" && composeReplyMessage) {
-          updateKeywordFlag(composeReplyMessage, "$Forwarded", true);
+          await updateKeywordFlag(composeReplyMessage, "$Forwarded", true);
         }
         const sentFolder =
           accountFolders.find((folder) => folder.id === sendResult?.sentFolderId) ?? findSentFolder();
@@ -833,6 +995,10 @@ function ComposeOrchestratorImpl(
             description: sendResult.inviteWarning
           });
         }
+        if (detachedWindow) {
+          onDetachedComposeOutcome?.("sent", sentDraftId);
+          window.close();
+        }
       } else {
         reportError(await readErrorMessage(res));
       }
@@ -872,7 +1038,7 @@ function ComposeOrchestratorImpl(
     }
   };
 
-  const openCompose = (
+  const initializeCompose = async (
     mode: ComposeMode,
     message?: Message,
     asNew = false,
@@ -934,18 +1100,54 @@ function ComposeOrchestratorImpl(
     const hasText = Boolean((resolved.body ?? "").trim());
     const hasHtml = hasHtmlContent(resolved.htmlBody);
     if (hasText || hasHtml) {
-      void afterOpen(resolved);
+      await afterOpen(resolved);
       return;
     }
 
-    void (async () => {
-      const hydrated = await ensureMessageContent(resolved, { manual: true });
-      await afterOpen(hydrated ?? resolved);
-    })();
+    const hydrated = await ensureMessageContent(resolved, { manual: true });
+    await afterOpen(hydrated ?? resolved);
   };
 
-  const canSaveCurrentDraft = (() => {
-    if (!composeOpen || !composeDraftId) return false;
+  // Most UI entry points intentionally open compose fire-and-forget. Keep that
+  // public action rejection-safe while allowing the detached-window bootstrap
+  // below to observe initialization failures and replace its loading surface
+  // with an error state.
+  const openCompose = async (
+    mode: ComposeMode,
+    message?: Message,
+    asNew = false,
+    prefill?: ComposeOpenPrefill
+  ) => {
+    try {
+      await initializeCompose(mode, message, asNew, prefill);
+    } catch (error) {
+      console.error("[noctua] failed to open composer:", error);
+      reportError(
+        error instanceof Error && error.message.trim()
+          ? `Failed to open composer: ${error.message}`
+          : "Failed to open composer."
+      );
+    }
+  };
+
+  const openDetachedCompose = async (
+    draft: Message | null,
+    context: { mode: ComposeMode; sourceMessage: Message | null }
+  ) => {
+    if (!draft) {
+      await initializeCompose(context.mode, context.sourceMessage ?? undefined);
+    } else {
+      // Draft fields and attachments must be initialized through edit mode,
+      // but reply/forward behavior is semantic state that is not encoded
+      // completely in the RFC draft. Restore it explicitly after hydration.
+      await initializeCompose("edit", draft);
+      compose.setComposeMode(context.mode);
+      compose.setComposeReplyMessage(context.sourceMessage);
+    }
+    setComposeView("inline");
+  };
+
+  const currentDraftChangeState = (() => {
     const preferText = composeTab === "html" && composeLastEditedRef.current === "text";
     const composePayload = buildComposePayload({ preferText });
     return getDraftChangeState({
@@ -959,8 +1161,41 @@ function ComposeOrchestratorImpl(
       html: composePayload.html,
       attachments: composePayload.attachments,
       invite: currentComposeInviteDraft
-    }).canManualSave;
+    });
   })();
+  const canSaveCurrentDraft =
+    composeOpen && Boolean(composeDraftId) && currentDraftChangeState.canManualSave;
+  const hasUnsavedChanges =
+    composeOpen &&
+    composeDirtyRef.current &&
+    (currentDraftChangeState.hasContent || Boolean(composeDraftId));
+
+  // Mirror the slice of compose state consumed by the owning window. The
+  // detached host also uses the persistence flags for native-close protection.
+  useEffect(() => {
+    onComposeMirrorChange?.({
+      composeOpen,
+      composeView,
+      composeMode,
+      composeDraftId,
+      composeReplyMessage,
+      hasUnsavedChanges,
+      draftSaving,
+      sendingMail,
+      discardingDraft
+    });
+  }, [
+    composeOpen,
+    composeView,
+    composeMode,
+    composeDraftId,
+    composeReplyMessage,
+    hasUnsavedChanges,
+    draftSaving,
+    sendingMail,
+    discardingDraft,
+    onComposeMirrorChange
+  ]);
 
   const markComposeDirty = useCallback(() => {
     composeDirtyRef.current = true;
@@ -1110,6 +1345,8 @@ function ComposeOrchestratorImpl(
     draftSavedAt,
     sendingMail,
     discardingDraft,
+    detachingCompose,
+    detachedWindow,
     composeModalRef,
     composeResizeRef,
     setComposeTo,
@@ -1124,6 +1361,8 @@ function ComposeOrchestratorImpl(
     popOutCompose,
     popInCompose,
     minimizeCompose,
+    openComposeInNewWindow,
+    closeDetachedCompose,
     handleSendMail,
     handleSaveDraft,
     handleDiscardDraft: handleDiscardDraftWithCancel,
@@ -1143,11 +1382,7 @@ function ComposeOrchestratorImpl(
 
   // Inline card variant uses `jumpToMessage` (no view switch) while the modal
   // variant docks back into the thread view after jumping.
-  const inlineContextValue = useMemo<ComposeContextValue>(
-    () => ({ ...contextValue, jumpToMessage }),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [contextValue, jumpToMessage]
-  );
+  const inlineContextValue: ComposeContextValue = { ...contextValue, jumpToMessage };
 
   // The inline card stays in this component's render tree so state updates
   // propagate via context; its DOM is portalled into a caller-supplied slot.
@@ -1168,9 +1403,9 @@ function ComposeOrchestratorImpl(
         resetComposeTranslation();
       },
       openCompose,
+      openDetachedCompose,
       setComposeView
-    }),
-    [composeCardRef, openCompose, resetComposeTranslation, setComposeView]
+    })
   );
 
   return (

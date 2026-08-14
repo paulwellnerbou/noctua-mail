@@ -4,14 +4,20 @@ import { describe, expect, it } from "bun:test";
 import React from "react";
 import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { Theme } from "@radix-ui/themes";
+import type { Message } from "@/lib/data";
 import ComposeOrchestrator from "./ComposeOrchestrator";
 
-type ApiCall = { url: string; method: string };
+type ApiCall = { url: string; method: string; body?: unknown };
 
 type RenderComposeOptions = {
   smtpResponse?: Response | (() => Response | Promise<Response>);
   reportError?: (message: string) => void;
   readErrorMessage?: (response: Response) => Promise<string>;
+  updateKeywordFlag?: (message: Message, keyword: string, value: boolean) => void | Promise<void>;
+  ensureMessageContent?: (message: Message) => Promise<Message | null | undefined>;
+  detachedWindow?: boolean;
+  showComposeInline?: boolean;
+  showComposeModal?: boolean;
 };
 
 function deferred<T>() {
@@ -52,7 +58,10 @@ function renderCompose(options: RenderComposeOptions = {}) {
 
   const apiFetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = requestUrl(input);
-    calls.push({ url, method: init?.method ?? "GET" });
+    const body = typeof init?.body === "string"
+      ? JSON.parse(init.body) as unknown
+      : undefined;
+    calls.push({ url, method: init?.method ?? "GET", body });
 
     if (url.includes("/drafts/save")) {
       // Hold the save open so the pre-send flush blocks, reproducing the slow
@@ -96,13 +105,13 @@ function renderCompose(options: RenderComposeOptions = {}) {
     pushNotice: () => {},
     evictThreadCache: () => {},
     updateFlagState: () => {},
-    updateKeywordFlag: () => {},
+    updateKeywordFlag: options.updateKeywordFlag ?? (() => {}),
     accountFolders: [],
     findSentFolder: () => null,
     syncFolderWithBackgroundRef: { current: async () => {} },
     getPreferredComposeTab: () => undefined,
     isDraftMessage: () => false,
-    ensureMessageContent: async () => null,
+    ensureMessageContent: options.ensureMessageContent ?? (async () => null),
     applyRecipientSelection: (current: string) => current,
     loadRecipientOptions: async () => [],
     clearRecipientSuggestionCache: () => {},
@@ -113,9 +122,10 @@ function renderCompose(options: RenderComposeOptions = {}) {
     reportError: options.reportError ?? (() => {}),
     readErrorMessage: options.readErrorMessage ?? (async () => "error"),
     stripHtml: (value: string) => value,
-    showComposeInline: false,
-    showComposeModal: true,
-    showComposeMinimized: false
+    showComposeInline: options.showComposeInline ?? false,
+    showComposeModal: options.showComposeModal ?? true,
+    showComposeMinimized: false,
+    detachedWindow: options.detachedWindow ?? false
   } as unknown as React.ComponentProps<typeof ComposeOrchestrator>;
 
   const view = render(
@@ -132,7 +142,16 @@ function renderCompose(options: RenderComposeOptions = {}) {
   const countSmtpSends = () => calls.filter((call) => call.url.includes("/smtp/send")).length;
   const countDraftSaves = () => calls.filter((call) => call.url.includes("/drafts/save")).length;
 
-  return { view, handleRef, calls, draftSaveGate, sendButton, countSmtpSends, countDraftSaves };
+  return {
+    view,
+    props,
+    handleRef,
+    calls,
+    draftSaveGate,
+    sendButton,
+    countSmtpSends,
+    countDraftSaves
+  };
 }
 
 describe("send while a draft save is still in flight", () => {
@@ -243,4 +262,129 @@ describe("send while a draft save is still in flight", () => {
 
     cleanup();
   }, 20000);
+});
+
+describe("detached compose semantics", () => {
+  it("renders the existing inline compose card without the modal header", async () => {
+    const { view, props, handleRef } = renderCompose({
+      detachedWindow: true,
+      showComposeInline: true,
+      showComposeModal: false
+    });
+    const inlineCard = handleRef.current?.renderInlineCard();
+    view.rerender(
+      <Theme>
+        <ComposeOrchestrator ref={handleRef} {...props} />
+        {inlineCard}
+      </Theme>
+    );
+
+    await act(async () => {
+      await handleRef.current?.openDetachedCompose(null, {
+        mode: "new",
+        sourceMessage: null
+      });
+    });
+
+    await waitFor(() => {
+      expect(view.baseElement.querySelector("#compose-inline-to")).not.toBeNull();
+    });
+    expect(view.baseElement.querySelector("#compose-modal-to")).toBeNull();
+    expect(view.getByText("New message")).toBeTruthy();
+    expect(view.queryByLabelText("Close composer")).toBeNull();
+    expect(view.queryByLabelText("Open composer in new window")).toBeNull();
+    expect(view.getByLabelText("Open in modal")).toBeTruthy();
+
+    cleanup();
+  });
+
+  it("retains forward metadata when a saved handoff is reopened", async () => {
+    const forwardedFlags: Array<{ messageId: string; keyword: string; value: boolean }> = [];
+    const { view, handleRef, calls, sendButton } = renderCompose({
+      updateKeywordFlag: (message, keyword, value) => {
+        forwardedFlags.push({ messageId: message.id, keyword, value });
+      }
+    });
+    const source = {
+      id: "source-1",
+      accountId: "acc-test",
+      folderId: "folder-inbox",
+      threadId: "thread-1",
+      messageId: "<source-1@example.test>",
+      subject: "Original",
+      from: "sender@example.test",
+      to: "me@example.test",
+      preview: "Original body",
+      date: "2026-08-14T10:00:00.000Z",
+      dateValue: 1,
+      body: "Original body"
+    } as Message;
+    const draft = {
+      ...source,
+      id: "draft-forward-1",
+      folderId: "folder-drafts",
+      draft: true,
+      to: "recipient@example.test",
+      subject: "Fwd: Original",
+      body: "Forwarded note",
+      xComposeFormat: "text",
+      xForwardedMessageId: source.messageId
+    } as Message;
+
+    await act(async () => {
+      await handleRef.current?.openDetachedCompose(draft, {
+        mode: "forward",
+        sourceMessage: source
+      });
+    });
+    await act(async () => {
+      fireEvent.click(sendButton()!);
+    });
+
+    await waitFor(() => {
+      expect(calls.filter((call) => call.url.includes("/smtp/send"))).toHaveLength(1);
+    });
+    const smtpCall = calls.find((call) => call.url.includes("/smtp/send"));
+    expect(smtpCall?.body).toMatchObject({
+      to: "recipient@example.test",
+      xForwardedMessageId: "<source-1@example.test>"
+    });
+    expect(forwardedFlags).toEqual([
+      { messageId: "source-1", keyword: "$Forwarded", value: true }
+    ]);
+
+    cleanup();
+  });
+});
+
+describe("compose initialization errors", () => {
+  it("reports hydration failures without rejecting fire-and-forget callers", async () => {
+    const errors: string[] = [];
+    const { view, handleRef } = renderCompose({
+      ensureMessageContent: async () => {
+        throw new Error("hydration failed");
+      },
+      reportError: (message) => errors.push(message)
+    });
+    const source = {
+      id: "source-without-content",
+      accountId: "acc-test",
+      folderId: "folder-inbox",
+      subject: "Needs hydration",
+      from: "sender@example.test",
+      to: "me@example.test",
+      preview: "",
+      date: "2026-08-14T10:00:00.000Z",
+      dateValue: 1,
+      body: "",
+      htmlBody: ""
+    } as Message;
+
+    await act(async () => {
+      await handleRef.current?.openCompose("reply", source);
+    });
+
+    expect(errors).toEqual(["Failed to open composer: hydration failed"]);
+    cleanup();
+  });
 });

@@ -1,4 +1,4 @@
-import { ArrowUpRight } from "lucide-react";
+import { ArrowUpRight, ExternalLink } from "lucide-react";
 import { Badge, Card, IconButton } from "@radix-ui/themes";
 import { badgeColors } from "@/lib/ui/badgeColors";
 import ComposeFields from "./ComposeFields";
@@ -27,9 +27,13 @@ export default function ComposeInlineCard() {
     sendingMail,
     discardingDraft,
     composeDragActive,
+    detachedWindow,
     fromValue,
     inReplyToMessage,
     popOutCompose,
+    openComposeInNewWindow,
+    closeDetachedCompose,
+    detachingCompose,
     setComposeSubject,
     setComposeTo,
     setComposeCc,
@@ -99,6 +103,18 @@ export default function ComposeInlineCard() {
               >
                 <ArrowUpRight size={14} />
               </IconButton>
+              {!detachedWindow && (
+                <IconButton
+                  variant="ghost"
+                  size="2"
+                  title="Open in new window"
+                  aria-label="Open composer in new window"
+                  onClick={openComposeInNewWindow}
+                  disabled={detachingCompose || sendingMail || discardingDraft}
+                >
+                  <ExternalLink size={14} />
+                </IconButton>
+              )}
             </div>
           </div>
           <div className={`${threadStyles.info} ${styles.info}`}>
@@ -136,9 +152,14 @@ export default function ComposeInlineCard() {
           draftSavedAt={draftSavedAt}
           sendingMail={sendingMail}
           discardingDraft={discardingDraft}
+          busy={detachingCompose}
           handleDiscardDraft={handleDiscardDraft}
           handleSaveDraft={handleSaveDraft}
           handleCancel={() => {
+            if (detachedWindow) {
+              closeDetachedCompose();
+              return;
+            }
             setComposeOpen(false);
             setComposeView("inline");
           }}

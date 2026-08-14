@@ -1,4 +1,4 @@
-import { Dock, X } from "lucide-react";
+import { Dock, ExternalLink, X } from "lucide-react";
 import { MinusIcon } from "@radix-ui/react-icons";
 import ComposeFields from "./ComposeFields";
 import ComposeActions from "./ComposeActions";
@@ -30,6 +30,7 @@ export default function ComposeModal({ open }: ComposeModalProps) {
     sendingMail,
     discardingDraft,
     composeDragActive,
+    detachedWindow,
     fromValue,
     composeSize,
     inReplyToMessage,
@@ -51,6 +52,9 @@ export default function ComposeModal({ open }: ComposeModalProps) {
     markComposeDirty,
     popInCompose,
     minimizeCompose,
+    openComposeInNewWindow,
+    closeDetachedCompose,
+    detachingCompose,
     jumpToMessage,
     getComposeToken,
     formatRelativeTime,
@@ -81,6 +85,10 @@ export default function ComposeModal({ open }: ComposeModalProps) {
       className="modal-backdrop"
       onClick={(event) => {
         if (event.target === event.currentTarget) {
+          if (detachedWindow) {
+            setComposeView("inline");
+            return;
+          }
           setComposeOpen(false);
           setComposeView("inline");
         }
@@ -117,24 +125,45 @@ export default function ComposeModal({ open }: ComposeModalProps) {
               title="Dock in thread view"
               aria-label="Dock in thread view"
               onClick={popInCompose}
+              disabled={detachingCompose || sendingMail || discardingDraft}
             >
               <Dock size={16} />
             </IconButton>
-            <IconButton
-              variant="ghost"
-              size="2"
-              title="Minimize composer"
-              aria-label="Minimize composer"
-              onClick={minimizeCompose}
-            >
-              <MinusIcon width={16} height={16} />
-            </IconButton>
+            {!detachedWindow && (
+              <>
+                <IconButton
+                  variant="ghost"
+                  size="2"
+                  title="Open in new window"
+                  aria-label="Open composer in new window"
+                  onClick={openComposeInNewWindow}
+                  disabled={detachingCompose || sendingMail || discardingDraft}
+                >
+                  <ExternalLink size={16} />
+                </IconButton>
+                <IconButton
+                  variant="ghost"
+                  size="2"
+                  title="Minimize composer"
+                  aria-label="Minimize composer"
+                  onClick={minimizeCompose}
+                  disabled={detachingCompose}
+                >
+                  <MinusIcon width={16} height={16} />
+                </IconButton>
+              </>
+            )}
             <IconButton
               variant="ghost"
               size="2"
               title="Close composer"
               aria-label="Close composer"
+              disabled={detachingCompose}
               onClick={() => {
+                if (detachedWindow) {
+                  setComposeView("inline");
+                  return;
+                }
                 setComposeOpen(false);
                 setComposeView("inline");
               }}
@@ -177,9 +206,14 @@ export default function ComposeModal({ open }: ComposeModalProps) {
           draftSavedAt={draftSavedAt}
           sendingMail={sendingMail}
           discardingDraft={discardingDraft}
+          busy={detachingCompose}
           handleDiscardDraft={handleDiscardDraft}
           handleSaveDraft={handleSaveDraft}
           handleCancel={() => {
+            if (detachedWindow) {
+              closeDetachedCompose();
+              return;
+            }
             setComposeOpen(false);
             setComposeView("inline");
           }}

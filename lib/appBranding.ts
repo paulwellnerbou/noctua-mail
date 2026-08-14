@@ -10,3 +10,7 @@ export function formatMessagePageTitle(subject?: string | null) {
   const trimmedSubject = subject?.trim() ?? "";
   return trimmedSubject ? `${trimmedSubject} - ${DEFAULT_APP_TITLE}` : DEFAULT_APP_TITLE;
 }
+
+export function formatComposePageTitle() {
+  return `Compose - ${DEFAULT_APP_TITLE}`;
+}
