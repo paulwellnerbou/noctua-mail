@@ -204,7 +204,12 @@ export default function DetachedComposeWindowClient({
         setFolders(nextFolders.filter((folder) => folder.accountId === handoff.accountId));
         setDraft(nextDraft);
         setSourceMessage(nextSource);
-        setMessages([nextDraft, nextSource].filter((message): message is Message => Boolean(message)));
+        const loadedMessages = [nextDraft, nextSource].filter(
+          (message): message is Message => Boolean(message)
+        );
+        setMessages(Array.from(
+          new Map(loadedMessages.map((message) => [message.id, message])).values()
+        ));
         setViewMessage(nextDraft);
         setActiveMessageId(nextDraft?.id ?? "");
         setStatus("ready");

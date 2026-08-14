@@ -1038,7 +1038,7 @@ function ComposeOrchestratorImpl(
     }
   };
 
-  const openCompose = async (
+  const initializeCompose = async (
     mode: ComposeMode,
     message?: Message,
     asNew = false,
@@ -1108,17 +1108,39 @@ function ComposeOrchestratorImpl(
     await afterOpen(hydrated ?? resolved);
   };
 
+  // Most UI entry points intentionally open compose fire-and-forget. Keep that
+  // public action rejection-safe while allowing the detached-window bootstrap
+  // below to observe initialization failures and replace its loading surface
+  // with an error state.
+  const openCompose = async (
+    mode: ComposeMode,
+    message?: Message,
+    asNew = false,
+    prefill?: ComposeOpenPrefill
+  ) => {
+    try {
+      await initializeCompose(mode, message, asNew, prefill);
+    } catch (error) {
+      console.error("[noctua] failed to open composer:", error);
+      reportError(
+        error instanceof Error && error.message.trim()
+          ? `Failed to open composer: ${error.message}`
+          : "Failed to open composer."
+      );
+    }
+  };
+
   const openDetachedCompose = async (
     draft: Message | null,
     context: { mode: ComposeMode; sourceMessage: Message | null }
   ) => {
     if (!draft) {
-      await openCompose(context.mode, context.sourceMessage ?? undefined);
+      await initializeCompose(context.mode, context.sourceMessage ?? undefined);
     } else {
       // Draft fields and attachments must be initialized through edit mode,
       // but reply/forward behavior is semantic state that is not encoded
       // completely in the RFC draft. Restore it explicitly after hydration.
-      await openCompose("edit", draft);
+      await initializeCompose("edit", draft);
       compose.setComposeMode(context.mode);
       compose.setComposeReplyMessage(context.sourceMessage);
     }

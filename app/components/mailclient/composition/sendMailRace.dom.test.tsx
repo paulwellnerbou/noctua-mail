@@ -14,6 +14,7 @@ type RenderComposeOptions = {
   reportError?: (message: string) => void;
   readErrorMessage?: (response: Response) => Promise<string>;
   updateKeywordFlag?: (message: Message, keyword: string, value: boolean) => void | Promise<void>;
+  ensureMessageContent?: (message: Message) => Promise<Message | null | undefined>;
   detachedWindow?: boolean;
   showComposeInline?: boolean;
   showComposeModal?: boolean;
@@ -110,7 +111,7 @@ function renderCompose(options: RenderComposeOptions = {}) {
     syncFolderWithBackgroundRef: { current: async () => {} },
     getPreferredComposeTab: () => undefined,
     isDraftMessage: () => false,
-    ensureMessageContent: async () => null,
+    ensureMessageContent: options.ensureMessageContent ?? (async () => null),
     applyRecipientSelection: (current: string) => current,
     loadRecipientOptions: async () => [],
     clearRecipientSuggestionCache: () => {},
@@ -352,6 +353,38 @@ describe("detached compose semantics", () => {
       { messageId: "source-1", keyword: "$Forwarded", value: true }
     ]);
 
+    cleanup();
+  });
+});
+
+describe("compose initialization errors", () => {
+  it("reports hydration failures without rejecting fire-and-forget callers", async () => {
+    const errors: string[] = [];
+    const { view, handleRef } = renderCompose({
+      ensureMessageContent: async () => {
+        throw new Error("hydration failed");
+      },
+      reportError: (message) => errors.push(message)
+    });
+    const source = {
+      id: "source-without-content",
+      accountId: "acc-test",
+      folderId: "folder-inbox",
+      subject: "Needs hydration",
+      from: "sender@example.test",
+      to: "me@example.test",
+      preview: "",
+      date: "2026-08-14T10:00:00.000Z",
+      dateValue: 1,
+      body: "",
+      htmlBody: ""
+    } as Message;
+
+    await act(async () => {
+      await handleRef.current?.openCompose("reply", source);
+    });
+
+    expect(errors).toEqual(["Failed to open composer: hydration failed"]);
     cleanup();
   });
 });
