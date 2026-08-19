@@ -28,6 +28,10 @@ const NOCTUA_QUOTE_COLLAPSE_CLASS = "noctua-quote-collapse";
 const NOCTUA_QUOTE_CONTENT_CLASS = "noctua-quote-collapse-content";
 const QUOTE_ANIMATION_MS = 220;
 
+// Stamped on every generated document so an effect run can recognise its own
+// srcdoc in the frame and ignore whatever is still loaded there.
+let previewDocumentSequence = 0;
+
 function scaleFontSizes(input: string) {
   return input
     .replace(
@@ -351,13 +355,15 @@ function buildPreviewDocument({
   darkMode,
   fontScale,
   zoom,
-  showViewerFrame
+  showViewerFrame,
+  token
 }: {
   html: string;
   darkMode: boolean;
   fontScale: number;
   zoom: number;
   showViewerFrame: boolean;
+  token: string;
 }) {
   const cleanedHtml = stripConditionalComments(html || "");
   const hasExplicitColor = /(^|[^-])color\s*:/i.test(cleanedHtml);
@@ -403,7 +409,7 @@ function buildPreviewDocument({
 
   return [
     "<!doctype html>",
-    `<html data-theme="${darkMode ? "dark" : "light"}">`,
+    `<html data-theme="${darkMode ? "dark" : "light"}" data-noctua-preview="${token}">`,
     "<head>",
     '<meta charset="utf-8">',
     '<meta name="viewport" content="width=device-width, initial-scale=1">',
@@ -477,19 +483,36 @@ function HtmlMessage({
       quoteStateRef.current = { html, expanded: false };
     }
 
+    const previewToken = `preview-${(previewDocumentSequence += 1)}`;
     const previewDocument = buildPreviewDocument({
       html,
       darkMode,
       fontScale,
       zoom,
-      showViewerFrame
+      showViewerFrame,
+      token: previewToken
     });
 
     let frameObserver: ResizeObserver | null = null;
     let documentObserver: ResizeObserver | null = null;
     let rafId: number | null = null;
+    let bindRafId: number | null = null;
+    let boundDocument: Document | null = null;
     let removeDocumentListeners: (() => void) | null = null;
     let removeQuoteToggleListener: (() => void) | null = null;
+
+    // Assigning srcdoc navigates asynchronously, so until it commits the frame
+    // still holds the outgoing document — about:blank on mount, the previous
+    // preview on a rebuild. Sizing against that one writes a height for content
+    // that is already gone, and a ResizeObserver reports nothing when the size
+    // it would report is unchanged, so the wrong height can stick.
+    const getPreviewDocument = () => {
+      const doc = iframe.contentDocument;
+      if (doc?.documentElement?.dataset.noctuaPreview !== previewToken) return null;
+      // Everything below walks the whole document; a parser still filling it in
+      // would hand out an incomplete set of links, images and quote candidates.
+      return doc.readyState === "loading" ? null : doc;
+    };
 
     const scheduleHeightUpdate = () => {
       if (rafId !== null) {
@@ -497,7 +520,7 @@ function HtmlMessage({
       }
       rafId = requestAnimationFrame(() => {
         rafId = null;
-        const doc = iframe.contentDocument;
+        const doc = getPreviewDocument();
         if (!doc) return;
         const body = doc.body;
         const root = doc.documentElement;
@@ -511,14 +534,11 @@ function HtmlMessage({
       });
     };
 
-    const attachDocumentListeners = () => {
+    const attachDocumentListeners = (doc: Document) => {
       removeDocumentListeners?.();
       removeDocumentListeners = null;
       documentObserver?.disconnect();
       documentObserver = null;
-
-      const doc = iframe.contentDocument;
-      if (!doc) return;
 
       doc.querySelectorAll("a").forEach((link) => {
         // The email's own markup may carry target="_blank"; strip it so hash
@@ -604,12 +624,9 @@ function HtmlMessage({
       };
     };
 
-    const applyQuoteCollapse = () => {
+    const applyQuoteCollapse = (doc: Document) => {
       removeQuoteToggleListener?.();
       removeQuoteToggleListener = null;
-
-      const doc = iframe.contentDocument;
-      if (!doc) return;
 
       const collapsed = collapseQuotedContent(doc, quoteStateRef.current.expanded);
       if (!collapsed) return;
@@ -627,9 +644,38 @@ function HtmlMessage({
       };
     };
 
+    const bindPreviewDocument = () => {
+      const doc = getPreviewDocument();
+      if (!doc) return false;
+      if (bindRafId !== null) {
+        cancelAnimationFrame(bindRafId);
+        bindRafId = null;
+      }
+      if (doc === boundDocument) return true;
+      boundDocument = doc;
+      applyQuoteCollapse(doc);
+      attachDocumentListeners(doc);
+      scheduleHeightUpdate();
+      return true;
+    };
+
+    // Polled per frame instead of waiting for the frame's load event: load only
+    // fires once every remote asset the mail pulls has settled, and a request
+    // that never answers (tracking pixels are the usual culprit) would hold the
+    // first measurement back for as long as it hangs, leaving the message
+    // collapsed to nothing on screen.
+    const pollForPreviewDocument = () => {
+      bindRafId = requestAnimationFrame(() => {
+        bindRafId = null;
+        if (bindPreviewDocument()) return;
+        pollForPreviewDocument();
+      });
+    };
+
+    // Still worth listening to: a hidden tab gets no animation frames, so the
+    // poll stalls there while load keeps firing.
     const handleLoad = () => {
-      applyQuoteCollapse();
-      attachDocumentListeners();
+      bindPreviewDocument();
       scheduleHeightUpdate();
     };
 
@@ -641,10 +687,14 @@ function HtmlMessage({
       frameObserver.observe(iframe);
     }
     iframe.srcdoc = previewDocument;
+    pollForPreviewDocument();
 
     return () => {
       if (rafId !== null) {
         cancelAnimationFrame(rafId);
+      }
+      if (bindRafId !== null) {
+        cancelAnimationFrame(bindRafId);
       }
       removeQuoteToggleListener?.();
       removeDocumentListeners?.();
