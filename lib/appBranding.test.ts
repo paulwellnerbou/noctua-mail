@@ -92,21 +92,32 @@ describe("installed app windows", () => {
   ) {
     const g = globalThis as Record<string, unknown>;
     const originalWindow = g.window;
-    const originalNavigator = g.navigator;
+    // `navigator` can be a read-only global, so it is swapped by descriptor
+    // rather than assignment.
+    const originalNavigatorDescriptor = Object.getOwnPropertyDescriptor(
+      globalThis,
+      "navigator"
+    );
     g.window = {
       __NOCTUA_RUNTIME_CONFIG__: { appEnvironmentLabel: "DEV" },
       matchMedia: (query: string) => ({
         matches: opts.displayMode !== null && query.includes(opts.displayMode)
       })
     };
-    g.navigator = opts.chromium ? { userAgentData: { brands: [] } } : {};
+    Object.defineProperty(globalThis, "navigator", {
+      value: opts.chromium ? { userAgentData: { brands: [] } } : {},
+      configurable: true
+    });
     try {
       run();
     } finally {
       if (originalWindow === undefined) delete g.window;
       else g.window = originalWindow;
-      if (originalNavigator === undefined) delete g.navigator;
-      else g.navigator = originalNavigator;
+      if (originalNavigatorDescriptor) {
+        Object.defineProperty(globalThis, "navigator", originalNavigatorDescriptor);
+      } else {
+        delete g.navigator;
+      }
     }
   }
 
