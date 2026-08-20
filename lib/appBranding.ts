@@ -28,12 +28,33 @@ export const DEFAULT_APP_TITLE = resolveAppTitle();
 
 const TITLE_SEPARATOR = " — ";
 
+// Display modes that mean "running as an installed app window" rather than
+// as a browser tab.
+const INSTALLED_DISPLAY_MODES = ["standalone", "minimal-ui", "window-controls-overlay"];
+
+/**
+ * Chromium requires an installed web app's window title to begin with the app
+ * name and prepends `<app name> - ` when it does not, so naming the app again
+ * at the end spends the window title's truncation budget saying it twice.
+ * Safari's web apps add no such prefix and keep the suffix.
+ */
+function browserPrependsAppTitle() {
+  if (typeof window === "undefined" || typeof navigator === "undefined") return false;
+  if (!("userAgentData" in navigator)) return false;
+  if (typeof window.matchMedia !== "function") return false;
+  return INSTALLED_DISPLAY_MODES.some(
+    (mode) => window.matchMedia(`(display-mode: ${mode})`).matches
+  );
+}
+
 /**
  * Window titles lead with the segment that distinguishes one window from
  * another, because tab strips and taskbar buttons truncate the tail.
  */
 function buildPageTitle(...segments: Array<string | null | undefined>) {
   const parts = segments.map((segment) => segment?.trim() ?? "").filter(Boolean);
+  if (!parts.length) return resolveAppTitle();
+  if (browserPrependsAppTitle()) return parts.join(TITLE_SEPARATOR);
   return [...parts, resolveAppTitle()].join(TITLE_SEPARATOR);
 }
 

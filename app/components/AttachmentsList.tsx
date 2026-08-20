@@ -71,9 +71,9 @@ export function getAttachmentPreviewHref(
 }
 
 function openAttachmentPreview(url: string, filename?: string) {
-  // Browsers title a preview window from Content-Disposition; the desktop
-  // shell has no such hint and needs the filename passed explicitly.
   const options = { width: 920, height: 760, title: formatAttachmentPageTitle(filename) };
+  // A data: attachment has no server URL to wrap, so it keeps the blob route
+  // and the window stays named after the blob.
   if (url.startsWith("data:")) {
     fetch(url)
       .then((response) => response.blob())
@@ -82,7 +82,9 @@ function openAttachmentPreview(url: string, filename?: string) {
     return;
   }
 
-  openDetachedWindow(url, options);
+  // `preview=1` asks the route for a titled shell so the window is named
+  // after the file rather than the attachment id in the URL.
+  openDetachedWindow(appendQueryParam(url, "preview", "1"), options);
 }
 
 function triggerDownload(href: string, filename?: string) {
