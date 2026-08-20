@@ -5,6 +5,11 @@ type OpenDetachedWindowOptions = {
   height?: number;
   left?: number;
   top?: number;
+  /**
+   * Native window title for the desktop shell, which cannot read the page's
+   * own `document.title`. Browsers ignore it — the page titles itself there.
+   */
+  title?: string;
 };
 
 type TauriInternals = {
@@ -61,9 +66,11 @@ export function openDetachedWindow(
     const tauri = (window as unknown as { __TAURI_INTERNALS__?: TauriInternals }).__TAURI_INTERNALS__;
     if (tauri?.invoke) {
       const label = createDetachedWindowLabel();
-      tauri.invoke("open_detached_window", { label, url, width, height }).catch((err) => {
-        console.error("[noctua] open_detached_window failed:", err);
-      });
+      tauri
+        .invoke("open_detached_window", { label, url, width, height, title: options.title })
+        .catch((err) => {
+          console.error("[noctua] open_detached_window failed:", err);
+        });
       // Return a non-null truthy value so callers don't show "pop-up blocked"
       // notices. Callers only check truthiness — no Window methods are called.
       return {} as Window;
@@ -116,7 +123,7 @@ export function openDetachedWindowConfirmed(
     if (tauri?.invoke) {
       const label = createDetachedWindowLabel();
       return tauri
-        .invoke("open_detached_window", { label, url, width, height })
+        .invoke("open_detached_window", { label, url, width, height, title: options.title })
         .then(() => ({ opened: true, window: null }))
         .catch((error) => {
           console.error("[noctua] open_detached_window failed:", error);

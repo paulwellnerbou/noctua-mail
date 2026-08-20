@@ -8,6 +8,8 @@ import CalendarDropOverlay from "@/app/components/calendar/CalendarDropOverlay";
 import { useCalendarIcsDrop } from "@/app/components/calendar/useCalendarIcsDrop";
 import { AccountDateFormatProvider } from "@/app/components/AccountDateFormatContext";
 import type { Account, AccountDateFormat } from "@/lib/data";
+import { formatCalendarPageTitle } from "@/lib/appBranding";
+import { useWindowTitle } from "@/lib/ui/windowTitle";
 import { normalizeAccountDateFormat } from "@/lib/dateFormatting";
 import styles from "./page.module.css";
 
@@ -16,6 +18,9 @@ function CalendarWindowContent() {
   const accountId = searchParams.get("accountId") ?? "";
   const { dropProps, isDragOver, status, resetStatus } = useCalendarIcsDrop({ accountId });
   const [dateFormat, setDateFormat] = useState<AccountDateFormat | undefined>();
+  const [accountEmail, setAccountEmail] = useState("");
+
+  useWindowTitle(formatCalendarPageTitle(accountEmail));
 
   useEffect(() => {
     if (!accountId) return;
@@ -25,6 +30,7 @@ function CalendarWindowContent() {
       .then((body: { accounts?: Account[] } | null) => {
         if (cancelled || !body?.accounts) return;
         const account = body.accounts.find((a) => a.id === accountId);
+        setAccountEmail(account?.email ?? "");
         setDateFormat(
           normalizeAccountDateFormat(account?.settings?.appearance?.dateFormat)
         );

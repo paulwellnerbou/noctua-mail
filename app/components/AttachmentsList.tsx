@@ -4,6 +4,7 @@ import { X, Download } from "lucide-react";
 import { FileIcon, defaultStyles } from "react-file-icon";
 import type { Attachment } from "@/lib/data";
 import { openDetachedWindow } from "@/lib/ui/openDetachedWindow";
+import { formatAttachmentPageTitle } from "@/lib/appBranding";
 import { shouldHideAttachmentFromList } from "@/lib/messageFlags";
 
 const PREVIEW_MIME_PREFIXES = ["image/", "text/"];
@@ -69,16 +70,19 @@ export function getAttachmentPreviewHref(
   return attachment.url ?? attachment.dataUrl ?? null;
 }
 
-function openAttachmentPreview(url: string) {
+function openAttachmentPreview(url: string, filename?: string) {
+  // Browsers title a preview window from Content-Disposition; the desktop
+  // shell has no such hint and needs the filename passed explicitly.
+  const options = { width: 920, height: 760, title: formatAttachmentPageTitle(filename) };
   if (url.startsWith("data:")) {
     fetch(url)
       .then((response) => response.blob())
-      .then((blob) => openDetachedWindow(URL.createObjectURL(blob), { width: 920, height: 760 }))
+      .then((blob) => openDetachedWindow(URL.createObjectURL(blob), options))
       .catch(() => {});
     return;
   }
 
-  openDetachedWindow(url, { width: 920, height: 760 });
+  openDetachedWindow(url, options);
 }
 
 function triggerDownload(href: string, filename?: string) {
@@ -326,7 +330,7 @@ export default function AttachmentsList({
                   onClick={(event) => {
                     if (previewHref) {
                       event.preventDefault();
-                      openAttachmentPreview(previewHref);
+                      openAttachmentPreview(previewHref, file.filename);
                       return;
                     }
                     if (!downloadHref) {

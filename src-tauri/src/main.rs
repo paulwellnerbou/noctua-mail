@@ -75,12 +75,19 @@ fn open_detached_window(
     url: String,
     width: u32,
     height: u32,
+    title: Option<String>,
 ) -> Result<(), String> {
     let port = app.state::<ServerPort>().0.lock().unwrap().to_owned();
     let webview_url = resolve_webview_url(&url, port)?;
+    // Titles the window before its page loads; pages that know more refine it
+    // later via `set_window_title`.
+    let title = title
+        .map(|value| value.trim().to_owned())
+        .filter(|value| !value.is_empty())
+        .unwrap_or_else(|| "Noctua Mail".to_owned());
 
     tauri::WebviewWindowBuilder::new(&app, label, webview_url)
-        .title("Noctua Mail")
+        .title(title)
         .inner_size(f64::from(width), f64::from(height))
         .resizable(true)
         .build()
@@ -89,10 +96,23 @@ fn open_detached_window(
     Ok(())
 }
 
+/// Retitles the calling window. Tauri window titles are independent of
+/// `document.title`, so the frontend has to push every change explicitly.
+#[tauri::command]
+fn set_window_title(window: tauri::WebviewWindow, title: String) -> Result<(), String> {
+    let title = title.trim();
+    if title.is_empty() {
+        return Ok(());
+    }
+    window
+        .set_title(title)
+        .map_err(|e| format!("Failed to set window title: {e}"))
+}
+
 fn main() {
     let builder = tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
-        .invoke_handler(tauri::generate_handler![open_detached_window])
+        .invoke_handler(tauri::generate_handler![open_detached_window, set_window_title])
         .manage(ServerPort(Mutex::new(None)));
 
     // Only register ServerProcess state in release builds (sidecar is not used in dev)
