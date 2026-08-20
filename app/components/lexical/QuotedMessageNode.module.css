@@ -62,7 +62,8 @@
   margin-top: 8px;
   border-top: 1px solid var(--gray-a5);
   padding-top: 8px;
-  max-height: min(260px, 30vh);
+  /* Uncapped so the editor stays the only vertical scroller: resizing the
+     compose box taller reveals more of the quote instead of empty space. */
   overflow: auto;
   user-select: text;
 }
