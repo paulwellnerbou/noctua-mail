@@ -43,13 +43,18 @@ export async function GET(request: Request, { params }: Params) {
   if (searchParams.get("preview") === "1") {
     const frameUrl = new URL(request.url);
     frameUrl.searchParams.delete("preview");
-    const body = [
+    const shell = [
+      '<!doctype html><html lang="en"><head>',
+      '<meta charset="utf-8">',
+      '<meta name="viewport" content="width=device-width,initial-scale=1">',
       "<style>html,body{margin:0;height:100%;background:#1f1d1a}",
       "iframe{border:0;display:block;width:100%;height:100%}</style>",
-      `<iframe src="${escapeHtml(frameUrl.pathname + frameUrl.search)}"></iframe>`
+      "</head><body>",
+      `<iframe src="${escapeHtml(frameUrl.pathname + frameUrl.search)}"></iframe>`,
+      "</body></html>"
     ].join("");
     return new NextResponse(
-      ensureHtmlDocumentTitle(body, formatAttachmentPageTitle(attachment.filename)),
+      ensureHtmlDocumentTitle(shell, formatAttachmentPageTitle(attachment.filename)),
       { headers: { "Content-Type": "text/html; charset=utf-8" } }
     );
   }
