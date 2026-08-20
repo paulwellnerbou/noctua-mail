@@ -32,6 +32,7 @@ import {
   type DetachedComposeOutcome
 } from "@/lib/ui/detachedComposeHandoff";
 import { openDetachedWindowConfirmed } from "@/lib/ui/openDetachedWindow";
+import { formatComposePageTitle } from "@/lib/appBranding";
 import { decidePostSendSentSync, type SyncMode } from "@/lib/syncPolicy";
 import { logSyncPolicyCall } from "@/lib/syncPolicyLogging";
 import { buildSendPayload } from "./buildSendPayload";
@@ -242,6 +243,7 @@ export type ComposeMirror = {
   composeOpen: boolean;
   composeView: "inline" | "modal" | "minimized";
   composeMode: ComposeMode;
+  composeSubject: string;
   composeDraftId: string | null;
   composeReplyMessage: Message | null;
   hasUnsavedChanges: boolean;
@@ -726,7 +728,7 @@ function ComposeOrchestratorImpl(
       });
       const openResult = await openDetachedWindowConfirmed(
         `/compose/window?handoff=${encodeURIComponent(handoffId)}`,
-        { width: 1040, height: 840 }
+        { width: 1040, height: 840, title: formatComposePageTitle(composeSubject) }
       );
       if (!openResult.opened) {
         removeDetachedComposeHandoff(handoffId);
@@ -776,6 +778,7 @@ function ComposeOrchestratorImpl(
     composeDraftIdRef,
     composeMode,
     composeReplyMessage,
+    composeSubject,
     detachedWindow,
     pushNotice,
     reportError,
@@ -1177,6 +1180,7 @@ function ComposeOrchestratorImpl(
       composeOpen,
       composeView,
       composeMode,
+      composeSubject,
       composeDraftId,
       composeReplyMessage,
       hasUnsavedChanges,
@@ -1188,6 +1192,7 @@ function ComposeOrchestratorImpl(
     composeOpen,
     composeView,
     composeMode,
+    composeSubject,
     composeDraftId,
     composeReplyMessage,
     hasUnsavedChanges,

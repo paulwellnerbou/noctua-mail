@@ -3,6 +3,7 @@
 import { Flex, Heading, IconButton } from "@radix-ui/themes";
 import { X, ExternalLink } from "lucide-react";
 import { openDetachedWindow } from "@/lib/ui/openDetachedWindow";
+import { formatCalendarPageTitle } from "@/lib/appBranding";
 import CalendarEventBrowser from "./CalendarEventBrowser";
 import CalendarDropOverlay from "./CalendarDropOverlay";
 import { useCalendarIcsDrop } from "./useCalendarIcsDrop";
@@ -26,7 +27,9 @@ export default function CalendarSidebarPanel({
   const { dropProps, isDragOver, status, resetStatus } = useCalendarIcsDrop({ accountId });
 
   const handleOpenWindow = () => {
-    openDetachedWindow(`/calendar/window?accountId=${encodeURIComponent(accountId)}`);
+    openDetachedWindow(`/calendar/window?accountId=${encodeURIComponent(accountId)}`, {
+      title: formatCalendarPageTitle()
+    });
   };
 
   return (

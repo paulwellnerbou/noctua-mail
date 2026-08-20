@@ -6,6 +6,7 @@ import { useSearchParams } from "next/navigation";
 import { Text } from "@radix-ui/themes";
 import DetachedComposeWindowClient from "@/app/components/mailclient/composition/DetachedComposeWindowClient";
 import { formatComposePageTitle } from "@/lib/appBranding";
+import { useWindowTitle } from "@/lib/ui/windowTitle";
 import {
   buildDetachedComposeHandoffStorageKey,
   readDetachedComposeHandoff,
@@ -18,10 +19,9 @@ function ComposeWindowContent() {
   const handoffId = searchParams.get("handoff")?.trim() ?? "";
   const [handoff, setHandoff] = useState<DetachedComposeHandoff | null>(null);
   const [missingHandoff, setMissingHandoff] = useState(false);
+  const [composeSubject, setComposeSubject] = useState("");
 
-  useEffect(() => {
-    document.title = formatComposePageTitle();
-  }, []);
+  useWindowTitle(formatComposePageTitle(composeSubject));
 
   useEffect(() => {
     if (!handoffId || (handoff && handoff.status !== "preparing")) return;
@@ -75,7 +75,11 @@ function ComposeWindowContent() {
   }
   return (
     <div className={styles.page}>
-      <DetachedComposeWindowClient handoffId={handoffId} handoff={handoff} />
+      <DetachedComposeWindowClient
+        handoffId={handoffId}
+        handoff={handoff}
+        onSubjectChange={setComposeSubject}
+      />
     </div>
   );
 }

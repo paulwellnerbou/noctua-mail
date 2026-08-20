@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { type AccountRouteParams, getAccountIdFromParams } from "@/app/api/_helpers/accountContext";
 import { getMessageById } from "@/lib/db";
 import { requireSessionAccountOr403, requireSessionOr401 } from "@/lib/auth";
-import { formatMessagePageTitle } from "@/lib/appBranding";
+import { formatMessageHtmlPageTitle } from "@/lib/appBranding";
 import { appendMessageIdToError } from "@/app/api/_helpers/message/errorFormatting";
 import {
   appendUnreferencedInlineImages,
@@ -45,13 +45,13 @@ function postprocessHtml(
 }
 
 function asHtmlDocument(subject: string, html: string) {
-  return ensureHtmlDocumentTitle(html, formatMessagePageTitle(subject || "Message HTML"));
+  return ensureHtmlDocumentTitle(html, formatMessageHtmlPageTitle(subject));
 }
 
 function htmlError(status: number, message: string) {
   return new NextResponse(
     asHtmlDocument(
-      "HTML Debug View",
+      "",
       `<main><h1>HTML Debug View</h1><p>${escapeHtml(message)}</p></main>`
     ),
     {

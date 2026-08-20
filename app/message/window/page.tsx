@@ -13,7 +13,8 @@ import {
 } from "@/lib/accountApiPaths";
 import { normalizeAccountDateFormat } from "@/lib/dateFormatting";
 import type { Account, AccountDateFormat, Folder, Message } from "@/lib/data";
-import { formatMessagePageTitle } from "@/lib/appBranding";
+import { formatMessageHtmlPageTitle, formatMessagePageTitle } from "@/lib/appBranding";
+import { useWindowTitle } from "@/lib/ui/windowTitle";
 import { notifyDetachedMessageDeleted } from "@/lib/ui/detachedMessageEvents";
 import { getImapFlagBadges, hasHtmlContent } from "@/lib/ui/messageView";
 import { openDetachedWindow } from "@/lib/ui/openDetachedWindow";
@@ -66,10 +67,7 @@ export default function MessageWindowPage() {
   const sourceFetchRef = useRef<Map<string, Promise<string | null>>>(new Map());
   const missingParams = !accountId || !messageId;
 
-  useEffect(() => {
-    if (typeof document === "undefined") return;
-    document.title = formatMessagePageTitle(message?.subject);
-  }, [message?.subject]);
+  useWindowTitle(formatMessagePageTitle(message?.subject));
 
   useEffect(() => {
     let active = true;
@@ -249,7 +247,9 @@ export default function MessageWindowPage() {
   );
 
   const handleOpenHtmlInNewWindow = useCallback((target: Message) => {
-    openDetachedWindow(buildAccountMessageHtmlPath(target.accountId, target.id));
+    openDetachedWindow(buildAccountMessageHtmlPath(target.accountId, target.id), {
+      title: formatMessageHtmlPageTitle(target.subject)
+    });
   }, []);
 
   const readErrorMessage = useCallback(async (res: Response) => {

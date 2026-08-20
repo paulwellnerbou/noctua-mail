@@ -36,6 +36,8 @@ type ReadyHandoff = Extract<DetachedComposeHandoff, { status: "ready" }>;
 type DetachedComposeWindowClientProps = {
   handoffId: string;
   handoff: ReadyHandoff;
+  /** Lets the hosting page title the window after the message being written. */
+  onSubjectChange?: (subject: string) => void;
 };
 
 function getAccountFromValue(account: Account) {
@@ -60,7 +62,8 @@ function makeNoticeId() {
 
 export default function DetachedComposeWindowClient({
   handoffId,
-  handoff
+  handoff,
+  onSubjectChange
 }: DetachedComposeWindowClientProps) {
   const composeHandleRef = useRef<ComposeOrchestratorHandle | null>(null);
   const openedRef = useRef(false);
@@ -80,6 +83,7 @@ export default function DetachedComposeWindowClient({
     composeOpen: false,
     composeView: "modal",
     composeMode: handoff.mode,
+    composeSubject: "",
     composeDraftId: handoff.draftId,
     composeReplyMessage: null,
     hasUnsavedChanges: false,
@@ -238,8 +242,9 @@ export default function DetachedComposeWindowClient({
   const handleComposeMirrorChange = useCallback((mirror: ComposeMirror) => {
     composeMirrorRef.current = mirror;
     setComposeMirror(mirror);
+    onSubjectChange?.(mirror.composeSubject);
     updateDetachedComposeDraftId(handoffId, mirror.composeDraftId);
-  }, [handoffId]);
+  }, [handoffId, onSubjectChange]);
 
   const handleDraftSavedAtChange = useCallback((timestamp: number | null) => {
     if (!timestamp) return;

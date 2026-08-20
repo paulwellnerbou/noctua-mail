@@ -4,6 +4,8 @@ import { useEffect, useState, useSyncExternalStore } from "react";
 import { useRouter } from "next/navigation";
 import { Text } from "@radix-ui/themes";
 import { postIcsImport } from "@/lib/calendarImportClient";
+import { formatCalendarImportPageTitle } from "@/lib/appBranding";
+import { useWindowTitle } from "@/lib/ui/windowTitle";
 
 type LaunchParams = {
   files?: FileSystemFileHandle[];
@@ -33,6 +35,9 @@ async function readFile(handle: FileSystemFileHandle): Promise<{ name: string; t
 export default function CalendarImportPage() {
   const router = useRouter();
   const [state, setState] = useState<ImportState>({ kind: "waiting" });
+  useWindowTitle(
+    formatCalendarImportPageTitle(state.kind === "importing" ? state.filename : null)
+  );
   const launchQueue = useSyncExternalStore(
     () => () => {},
     () => window.launchQueue ?? null,

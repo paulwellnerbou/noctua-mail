@@ -126,6 +126,12 @@ import {
   buildAccountTopicsPath
 } from "@/lib/accountApiPaths";
 import { openDetachedWindow } from "@/lib/ui/openDetachedWindow";
+import { useWindowTitle } from "@/lib/ui/windowTitle";
+import {
+  formatMailboxPageTitle,
+  formatMessageHtmlPageTitle,
+  formatMessagePageTitle
+} from "@/lib/appBranding";
 import {
   DETACHED_MESSAGE_DELETE_EVENT_STORAGE_KEY,
   parseDetachedMessageDeleteEvent
@@ -620,6 +626,7 @@ export default function MailClient({
     composeOpen: false,
     composeView: "inline",
     composeMode: "new",
+    composeSubject: "",
     composeDraftId: null,
     composeReplyMessage: null,
     hasUnsavedChanges: false,
@@ -1755,6 +1762,31 @@ export default function MailClient({
 
   const currentAccount = accounts.find((account) => account.id === activeAccountId) ?? null;
   const reloginAccount = accounts.find((account) => account.id === reloginAccountId) ?? null;
+
+  // The mail window is the one window that stays open, so its title names the
+  // mailbox it is showing to keep it apart from detached message/compose windows.
+  const mailboxTitle = useMemo(() => {
+    const folder = activeFolderId ? folderById.get(activeFolderId) : undefined;
+    const virtualUnreadCount =
+      activeVirtualFolder?.id === "virtual:focused"
+        ? focusedUnreadCount
+        : activeVirtualFolder?.id === "virtual:invite-deck"
+          ? inviteDeckUnreadCount
+          : null;
+    return formatMailboxPageTitle({
+      folderName: activeVirtualFolder?.name ?? folder?.name,
+      accountEmail: currentAccount?.email,
+      unreadCount: activeVirtualFolder ? virtualUnreadCount : folder?.unreadCount
+    });
+  }, [
+    activeFolderId,
+    activeVirtualFolder,
+    currentAccount?.email,
+    focusedUnreadCount,
+    folderById,
+    inviteDeckUnreadCount
+  ]);
+  useWindowTitle(mailboxTitle);
   const handleOpenReloginFromException = useCallback(
     (entry: ExceptionEntry) => {
       const targetAccountId = getExceptionAccountId(entry.message) ?? activeAccountId;
@@ -4833,7 +4865,9 @@ export default function MailClient({
       accountId: message.accountId,
       messageId: message.id
     });
-    const opened = openDetachedWindow(`/message/window?${params.toString()}`);
+    const opened = openDetachedWindow(`/message/window?${params.toString()}`, {
+      title: formatMessagePageTitle(message.subject)
+    });
     if (!opened) {
       pushNotice({
         type: "warning",
@@ -4845,7 +4879,10 @@ export default function MailClient({
 
   const handleOpenHtmlInNewWindow = (message: Message) => {
     if (typeof window === "undefined") return;
-    const opened = openDetachedWindow(buildAccountMessageHtmlPath(message.accountId, message.id));
+    const opened = openDetachedWindow(
+      buildAccountMessageHtmlPath(message.accountId, message.id),
+      { title: formatMessageHtmlPageTitle(message.subject) }
+    );
     if (!opened) {
       pushNotice({
         type: "warning",
