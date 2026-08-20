@@ -84,3 +84,56 @@ describe("environment label on the client", () => {
     }
   });
 });
+
+describe("installed app windows", () => {
+  function withFakeWindow(
+    opts: { chromium: boolean; displayMode: string | null },
+    run: () => void
+  ) {
+    const g = globalThis as Record<string, unknown>;
+    const originalWindow = g.window;
+    const originalNavigator = g.navigator;
+    g.window = {
+      __NOCTUA_RUNTIME_CONFIG__: { appEnvironmentLabel: "DEV" },
+      matchMedia: (query: string) => ({
+        matches: opts.displayMode !== null && query.includes(opts.displayMode)
+      })
+    };
+    g.navigator = opts.chromium ? { userAgentData: { brands: [] } } : {};
+    try {
+      run();
+    } finally {
+      if (originalWindow === undefined) delete g.window;
+      else g.window = originalWindow;
+      if (originalNavigator === undefined) delete g.navigator;
+      else g.navigator = originalNavigator;
+    }
+  }
+
+  it("drops the app name Chromium already prepends to installed app windows", () => {
+    withFakeWindow({ chromium: true, displayMode: "standalone" }, () => {
+      expect(
+        formatMailboxPageTitle({ folderName: "INBOX", accountEmail: "paul@example.com" })
+      ).toBe("INBOX — paul@example.com");
+      expect(formatComposePageTitle("Quarterly report")).toBe("Quarterly report — Compose");
+    });
+  });
+
+  it("keeps the app name in a browser tab", () => {
+    withFakeWindow({ chromium: true, displayMode: null }, () => {
+      expect(formatMailboxPageTitle({ folderName: "INBOX" })).toBe("INBOX — Noctua Mail (DEV)");
+    });
+  });
+
+  it("keeps the app name in a Safari web app, which adds no prefix of its own", () => {
+    withFakeWindow({ chromium: false, displayMode: "standalone" }, () => {
+      expect(formatMailboxPageTitle({ folderName: "INBOX" })).toBe("INBOX — Noctua Mail (DEV)");
+    });
+  });
+
+  it("still names the app when there is nothing to distinguish", () => {
+    withFakeWindow({ chromium: true, displayMode: "standalone" }, () => {
+      expect(formatMessagePageTitle(null)).toBe("Noctua Mail (DEV)");
+    });
+  });
+});

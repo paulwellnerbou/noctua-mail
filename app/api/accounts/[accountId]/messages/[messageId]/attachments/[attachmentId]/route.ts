@@ -4,6 +4,8 @@ import { getAttachmentData, getMessageSource, saveAttachmentData } from "@/lib/s
 import { getAttachmentMeta } from "@/lib/db";
 import { requireSessionAccountOr403, requireSessionOr401 } from "@/lib/auth";
 import { extractAttachmentBufferFromSource } from "@/lib/mail/attachmentFromSource";
+import { ensureHtmlDocumentTitle, escapeHtml } from "@/lib/html";
+import { formatAttachmentPageTitle } from "@/lib/appBranding";
 
 type Params = AccountRouteParams & {
   params: Promise<{
@@ -32,6 +34,24 @@ export async function GET(request: Request, { params }: Params) {
   const attachment = await getAttachmentMeta(accountId, messageId, attachmentId);
   if (!attachment) {
     return NextResponse.json({ ok: false, message: "Attachment not found" }, { status: 404 });
+  }
+
+  // A directly served attachment is titled by the browser from the URL's last
+  // segment — the opaque attachment id — so a preview window asks for a
+  // titled shell around it instead. The data is not touched here; the frame
+  // fetches it from this same route without the flag.
+  if (searchParams.get("preview") === "1") {
+    const frameUrl = new URL(request.url);
+    frameUrl.searchParams.delete("preview");
+    const body = [
+      "<style>html,body{margin:0;height:100%;background:#1f1d1a}",
+      "iframe{border:0;display:block;width:100%;height:100%}</style>",
+      `<iframe src="${escapeHtml(frameUrl.pathname + frameUrl.search)}"></iframe>`
+    ].join("");
+    return new NextResponse(
+      ensureHtmlDocumentTitle(body, formatAttachmentPageTitle(attachment.filename)),
+      { headers: { "Content-Type": "text/html; charset=utf-8" } }
+    );
   }
 
   let data = await getAttachmentData(accountId, messageId, attachmentId);
