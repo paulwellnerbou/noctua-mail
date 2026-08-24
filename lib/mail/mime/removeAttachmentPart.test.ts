@@ -107,6 +107,50 @@ describe("removeAttachmentPartFromRawMessage", () => {
     expect((parsed.attachments ?? []).map((a) => a.filename)).toEqual(["invoice.pdf"]);
   });
 
+  it("aligns the positional index with the parser when a bare non-text part precedes the target", async () => {
+    // A dispositionless application/octet-stream part has no filename/cid, but
+    // the parser still counts it as attachment index 0. The two image/png parts
+    // are then indexes 1 and 2. Removing index 1 must drop the FIRST png; a
+    // predicate that skipped the octet part would offset and drop the second.
+    const message = crlf([
+      "From: sender@example.com",
+      "Subject: Bare binary part before images",
+      "MIME-Version: 1.0",
+      'Content-Type: multipart/mixed; boundary="outer"',
+      "",
+      "--outer",
+      "Content-Type: text/plain; charset=utf-8",
+      "",
+      "Body text",
+      "--outer",
+      "Content-Type: application/octet-stream",
+      "Content-Transfer-Encoding: base64",
+      "",
+      "T0NURVREQVRB", // "OCTETDATA"
+      "--outer",
+      "Content-Type: image/png",
+      "Content-Transfer-Encoding: base64",
+      "",
+      "UE5HT05FREFUQQ==", // "PNGONEDATA"
+      "--outer",
+      "Content-Type: image/png",
+      "Content-Transfer-Encoding: base64",
+      "",
+      "UE5HVFdPREFUQQ==", // "PNGTWODATA"
+      "--outer--",
+      ""
+    ]);
+    const { raw, removed } = removeAttachmentPartFromRawMessage(message, {
+      id: "att-1", // parser index 1 → first image/png
+      contentType: "image/png" // non-unique, so selection falls through to index
+    });
+    expect(removed).toBe(true);
+    const text = raw.toString("latin1");
+    expect(text).not.toContain("UE5HT05FREFUQQ=="); // first png removed
+    expect(text).toContain("T0NURVREQVRB"); // octet part kept
+    expect(text).toContain("UE5HVFdPREFUQQ=="); // second png kept
+  });
+
   it("returns removed=false and the untouched buffer when the target is absent", () => {
     const result = removeAttachmentPartFromRawMessage(MIXED_TWO_ATTACHMENTS, {
       id: "att-9",

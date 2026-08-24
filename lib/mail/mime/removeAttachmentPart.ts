@@ -188,6 +188,8 @@ function collectLeaves(
       if (childMeta.boundary) {
         collectLeaves(text, childStart, childEnd, childMeta, leaves);
       } else {
+        const isTextPlain = childMeta.contentType === "text/plain";
+        const isTextHtml = childMeta.contentType === "text/html";
         leaves.push({
           start: childStart,
           end: childEnd,
@@ -196,11 +198,16 @@ function collectLeaves(
           contentType: childMeta.contentType,
           filename: childMeta.filename,
           cid: childMeta.cid,
+          // Mirror shouldTreatAsAttachment in lib/mail/imap/parser.ts exactly:
+          // the parser's attachment index (which the `att-<N>` id fallback keys
+          // into) counts any non-text part with a content type, even without a
+          // filename/cid/disposition. Diverging here would offset the index and
+          // splice the wrong leaf.
           isAttachmentLike:
-            Boolean(childMeta.filename) ||
-            Boolean(childMeta.cid) ||
             childMeta.disposition === "attachment" ||
-            childMeta.disposition === "inline"
+            Boolean(childMeta.filename) ||
+            (Boolean(childMeta.cid) && !isTextPlain && !isTextHtml) ||
+            (childMeta.contentType.length > 0 && !isTextPlain && !isTextHtml)
         });
       }
     }

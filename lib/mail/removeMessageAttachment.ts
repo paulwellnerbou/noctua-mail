@@ -30,6 +30,30 @@ import {
   saveMessageSource
 } from "@/lib/storage";
 
+// IO dependencies are injected (defaulting to the real implementations) so tests
+// can exercise the destructive append-then-delete sequence and its error paths
+// with plain fakes — no global mock.module(), which leaks across Bun's
+// single-process test suite. The pure MIME surgery stays a direct call.
+export type RemoveAttachmentDeps = {
+  getMessageSourceBuffer: typeof getMessageSourceBuffer;
+  fetchImapMessageSource: typeof fetchImapMessageSource;
+  appendImapMessage: typeof appendImapMessage;
+  deleteImapMessage: typeof deleteImapMessage;
+  saveMessageSource: typeof saveMessageSource;
+  deleteAttachmentData: typeof deleteAttachmentData;
+  removeMessageAttachmentRow: typeof removeMessageAttachmentRow;
+};
+
+const defaultDeps: RemoveAttachmentDeps = {
+  getMessageSourceBuffer,
+  fetchImapMessageSource,
+  appendImapMessage,
+  deleteImapMessage,
+  saveMessageSource,
+  deleteAttachmentData,
+  removeMessageAttachmentRow
+};
+
 type RemovableMessage = Message & {
   mailboxPath?: string | null;
   imapUid?: number | null;
@@ -44,7 +68,8 @@ export async function removeMessageAttachmentEverywhere(
   account: Account,
   message: RemovableMessage,
   attachmentId: string,
-  clientId?: string
+  clientId?: string,
+  deps: RemoveAttachmentDeps = defaultDeps
 ): Promise<RemoveMessageAttachmentResult> {
   const attachment = (message.attachments ?? []).find((item) => item.id === attachmentId);
   if (!attachment) {
@@ -57,9 +82,9 @@ export async function removeMessageAttachmentEverywhere(
     throw new Error("Message is missing IMAP metadata");
   }
 
-  let raw: Buffer | null = await getMessageSourceBuffer(account.id, message.id);
+  let raw: Buffer | null = await deps.getMessageSourceBuffer(account.id, message.id);
   if (!raw) {
-    raw = await fetchImapMessageSource(account, mailboxPath, uid, clientId);
+    raw = await deps.fetchImapMessageSource(account, mailboxPath, uid, clientId);
   }
   if (!raw) {
     throw new Error("Message source is unavailable");
@@ -83,7 +108,7 @@ export async function removeMessageAttachmentEverywhere(
       ? new Date(message.dateValue)
       : new Date();
 
-  const newUid = await appendImapMessage(
+  const newUid = await deps.appendImapMessage(
     account,
     mailboxPath,
     strippedRaw,
@@ -91,12 +116,14 @@ export async function removeMessageAttachmentEverywhere(
     clientId,
     internalDate
   );
-  await deleteImapMessage(account, mailboxPath, uid, clientId);
+  await deps.deleteImapMessage(account, mailboxPath, uid, clientId);
 
-  await saveMessageSource(account.id, message.id, strippedRaw);
-  await deleteAttachmentData(account.id, message.id, attachmentId);
+  await deps.saveMessageSource(account.id, message.id, strippedRaw);
+  await deps.deleteAttachmentData(account.id, message.id, attachmentId);
 
-  await removeMessageAttachmentRow(account.id, message.id, attachmentId, { imapUid: newUid });
+  await deps.removeMessageAttachmentRow(account.id, message.id, attachmentId, {
+    imapUid: newUid
+  });
 
   return {
     attachments: (message.attachments ?? []).filter((item) => item.id !== attachmentId),
