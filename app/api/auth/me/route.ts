@@ -4,8 +4,7 @@ import {
   getSessionTtlSeconds,
   refreshSession,
   sessionFromCookie,
-  setSessionCookie,
-  shouldRotateSession
+  setSessionCookie
 } from "@/lib/auth";
 import { sanitizeAccountsForClient } from "@/lib/accountPresentation";
 
@@ -24,8 +23,10 @@ export async function GET(request: Request) {
     getAccountsForUser(session.userId)
   ]);
   const user = users.find((u) => u.id === session.userId);
-  const rotated = shouldRotateSession(session);
-  const nextSession = rotated ? refreshSession(session) : session;
+  // Rotate on every poll so an idle session survives a full TTL of inactivity,
+  // not just its final refresh window — the cookie is only refreshed while a tab
+  // is open, so it must be near-full whenever the app is closed for the night.
+  const nextSession = refreshSession(session);
   const response = NextResponse.json({
     ok: true,
     user: user ?? null,
@@ -34,8 +35,6 @@ export async function GET(request: Request) {
     exp: nextSession.exp,
     ttlSeconds: getSessionTtlSeconds()
   });
-  if (rotated) {
-    setSessionCookie(response, nextSession);
-  }
+  setSessionCookie(response, nextSession);
   return response;
 }

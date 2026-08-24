@@ -11,7 +11,7 @@ This project uses a lightweight, server-side session cookie for access control. 
 
 ## Session lifetime
 
-- Default session duration is 12 hours (`SESSION_TTL_SECONDS`).
+- Default session duration is 24 hours (`SESSION_TTL_SECONDS`).
 - When a request returns 401, the frontend automatically switches to the login modal.
 
 ## IMAP credential handling
@@ -32,11 +32,11 @@ We support three modes, controlled by `IMAP_CREDENTIALS_STORAGE`:
 
 ## Session rotation
 
-When the client calls `/api/auth/me`, the server refreshes the cookie if it is nearing expiry (sliding session). The UI polls `/api/auth/me` periodically to keep active sessions fresh while the app is open.
+When the client calls `/api/auth/me`, the server rotates the cookie (issues a fresh full-TTL cookie), giving a sliding session. The UI polls `/api/auth/me` roughly every 30 minutes while the app is open, so an idle session stays valid for up to a full TTL after the last poll — long enough to bridge an overnight gap when the app is closed.
 
 ## Environment variables
 
-- `SESSION_TTL_SECONDS` (default: 43200)
+- `SESSION_TTL_SECONDS` (default: 86400)
 - `SESSION_SEAL_KEY` (required in production) – key used to seal/unseal session cookies
 - `IMAP_CREDENTIALS_STORAGE` (default: `both`)
 - `IMAP_SECRET_KEY` (required) – master key for encrypting DB‑stored IMAP credentials

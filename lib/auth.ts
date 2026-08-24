@@ -10,21 +10,14 @@ const SESSION_COOKIE = "noctua_session";
 const MCP_TOKEN_PREFIX = "mcp_";
 const NEVER_EXPIRES_AT_SECONDS = 253402300799;
 const SESSION_TTL_SECONDS = (() => {
-  const raw = process.env.SESSION_TTL_SECONDS ?? "43200";
+  const raw = process.env.SESSION_TTL_SECONDS ?? "86400";
   const parsed = Number.parseInt(raw, 10);
-  if (!Number.isFinite(parsed) || parsed <= 0) return 60 * 60 * 12;
+  if (!Number.isFinite(parsed) || parsed <= 0) return 60 * 60 * 24;
   return parsed;
 })();
 
 export function getSessionTtlSeconds() {
   return SESSION_TTL_SECONDS;
-}
-
-export function shouldRotateSession(session: SessionData) {
-  if (!session?.exp) return true;
-  const remainingMs = session.exp * 1000 - Date.now();
-  const refreshWindowMs = SESSION_TTL_SECONDS * 1000 * 0.3;
-  return remainingMs <= refreshWindowMs;
 }
 
 export function refreshSession(session: SessionData): SessionData {
