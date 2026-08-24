@@ -9,6 +9,13 @@
 // one byte; string offsets are therefore byte offsets and slicing the original
 // Buffer by them is exact for binary attachment payloads too.
 
+import {
+  normalizeCid,
+  normalizeContentType,
+  normalizeText,
+  resolveAttachmentIndex
+} from "@/lib/mail/attachmentMatch";
+
 type AttachmentTarget = {
   id?: string | null;
   filename?: string | null;
@@ -30,25 +37,6 @@ type LeafPart = {
   cid: string;
   isAttachmentLike: boolean;
 };
-
-function normalizeCid(value?: string | null) {
-  return (value ?? "").trim().toLowerCase().replace(/[<>]/g, "");
-}
-
-function normalizeText(value?: string | null) {
-  return (value ?? "").trim().toLowerCase();
-}
-
-function normalizeContentType(value?: string | null) {
-  return normalizeText((value ?? "").split(";")[0]);
-}
-
-function resolveAttachmentIndex(attachmentId?: string | null) {
-  const match = (attachmentId ?? "").match(/-(\d+)$/);
-  if (!match?.[1]) return -1;
-  const parsed = Number.parseInt(match[1], 10);
-  return Number.isFinite(parsed) ? parsed : -1;
-}
 
 // Finds the blank line that separates a part's headers from its body. Handles
 // both CRLF and bare-LF sources; returns the offset where the body begins.

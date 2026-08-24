@@ -1,6 +1,12 @@
 import { simpleParser } from "mailparser";
 import type { Attachment } from "@/lib/data";
 import { getAttachmentContentBuffer } from "@/lib/mail/syncMessageSanitizer";
+import {
+  normalizeCid,
+  normalizeContentType,
+  normalizeText,
+  resolveAttachmentIndex
+} from "@/lib/mail/attachmentMatch";
 import { isCalendarAttachment } from "@/lib/messageFlags";
 
 type ParsedAttachmentCandidate = {
@@ -12,27 +18,10 @@ type ParsedAttachmentCandidate = {
   dataUrl?: string | null;
 };
 
-function normalizeText(value?: string | null) {
-  return (value ?? "").trim().toLowerCase();
-}
-
-function normalizeContentType(value?: string | null) {
-  return normalizeText((value ?? "").split(";")[0]);
-}
-
-function normalizeCid(value?: string | null) {
-  return normalizeText(value).replace(/[<>]/g, "");
-}
-
+// Preserves the original cid casing (unlike normalizeCid), for merging metadata
+// back onto the stored attachment record.
 function cleanCid(value?: string | null) {
   return (value ?? "").trim().replace(/[<>]/g, "");
-}
-
-function resolveAttachmentIndex(attachmentId: string) {
-  const match = attachmentId.match(/-(\d+)$/);
-  if (!match?.[1]) return -1;
-  const parsed = Number.parseInt(match[1], 10);
-  return Number.isFinite(parsed) ? parsed : -1;
 }
 
 function resolveCandidateBuffer(candidate?: ParsedAttachmentCandidate | null) {
