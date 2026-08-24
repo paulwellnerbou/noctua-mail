@@ -19,11 +19,12 @@ import {
   needsMessageContentHydration
 } from "@/lib/ui/messageView";
 import { getMessageDateDisplay } from "@/lib/dateFormatting";
-import type { AccountDateFormat, Folder, Message, RecipientAlias } from "@/lib/data";
+import type { AccountDateFormat, Attachment, Folder, Message, RecipientAlias } from "@/lib/data";
 import {
   appendUnreferencedInlineImages,
   replaceInlineImageSources,
-  stripRedundantInlineImageFallbacks
+  stripRedundantInlineImageFallbacks,
+  stripUnresolvedCidImages
 } from "@/lib/html";
 import { countRecipientEntries } from "@/lib/recipientLists";
 import type {
@@ -43,6 +44,7 @@ import HtmlMessage from "../../HtmlMessage";
 import QuoteRenderer from "../../QuoteRenderer";
 import FolderBadges from "../folder/FolderBadges";
 import CalendarEventPreview from "./CalendarEventPreview";
+import { InlineImageRemovalList, RemoveAttachmentConfirmDialog } from "./AttachmentRemoval";
 import MessageRecipientMetaField from "./MessageRecipientMetaField";
 import CategoryBadge from "../CategoryBadge";
 import FlagBadge from "./FlagBadge";
@@ -112,6 +114,7 @@ type ThreadMessageCardProps = {
   ) => void;
   onFindRelatedByCalendarInviteUid?: (uid: string) => void;
   onInviteStateChange?: (messageId: string, patches: InviteProcessingStatePatch[]) => void;
+  onRemoveAttachment?: (message: Message, attachmentId: string) => Promise<void>;
   handleUnsubscribe: (message: Message) => void;
   readErrorMessage: (res: Response) => Promise<string>;
   reportError: (message: string) => void;
@@ -179,6 +182,7 @@ export default function ThreadMessageCard({
   onOpenRecipientAlias,
   onFindRelatedByCalendarInviteUid,
   onInviteStateChange,
+  onRemoveAttachment,
   handleUnsubscribe,
   readErrorMessage,
   reportError,
@@ -196,6 +200,36 @@ export default function ThreadMessageCard({
   onChangeTranslationLang
 }: ThreadMessageCardProps) {
   const [menuOpen, setMenuOpen] = useState(false);
+  const [pendingRemoval, setPendingRemoval] = useState<Attachment | null>(null);
+  const [removingAttachment, setRemovingAttachment] = useState(false);
+
+  const canRemoveAttachments = Boolean(onRemoveAttachment);
+  // The inline images the HTML viewer renders (footers/signatures) are hidden
+  // from the attachment list, so they get their own removal surface.
+  const removableInlineImages = canRemoveAttachments
+    ? (message.attachments ?? []).filter((attachment) =>
+        isRenderableInlineAttachment(attachment, message.htmlBody)
+      )
+    : [];
+
+  const requestAttachmentRemoval = (attachmentId: string) => {
+    const attachment = (message.attachments ?? []).find((item) => item.id === attachmentId);
+    if (attachment) setPendingRemoval(attachment);
+  };
+
+  const confirmAttachmentRemoval = async () => {
+    if (!pendingRemoval || !onRemoveAttachment) return;
+    setRemovingAttachment(true);
+    try {
+      await onRemoveAttachment(message, pendingRemoval.id);
+      setPendingRemoval(null);
+    } catch {
+      // The handler surfaces its own error; keep the dialog open so the user
+      // can retry or cancel.
+    } finally {
+      setRemovingAttachment(false);
+    }
+  };
   const toValue = (message.to ?? "").trim() || "(no recipients)";
   const ccValue = message.cc ?? "";
   const bccValue = message.bcc ?? "";
@@ -429,6 +463,8 @@ export default function ThreadMessageCard({
     let html = replaceInlineImageSources(overrideHtml ?? message.htmlBody ?? "", attachments);
     html = stripRedundantInlineImageFallbacks(html, attachments);
     html = appendUnreferencedInlineImages(html, attachments);
+    // Drops inline images the user removed: their cid no longer resolves.
+    html = stripUnresolvedCidImages(html);
 
     return (
       <div>
@@ -1023,12 +1059,27 @@ export default function ThreadMessageCard({
                   attachments={message.attachments ?? []}
                   htmlBody={message.htmlBody}
                   showDownloadAll
+                  onRemove={canRemoveAttachments ? requestAttachmentRemoval : undefined}
                 />
+                {canRemoveAttachments && (
+                  <InlineImageRemovalList
+                    images={removableInlineImages}
+                    onRequestRemove={(attachment) => setPendingRemoval(attachment)}
+                  />
+                )}
               </div>
             </Collapsible.Content>
           </Collapsible.Root>
         </div>
       </article>
+      {canRemoveAttachments && (
+        <RemoveAttachmentConfirmDialog
+          attachment={pendingRemoval}
+          removing={removingAttachment}
+          onCancel={() => setPendingRemoval(null)}
+          onConfirm={confirmAttachmentRemoval}
+        />
+      )}
     </Card>
   );
 }

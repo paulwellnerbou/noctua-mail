@@ -102,6 +102,21 @@ export function stripRedundantInlineImageFallbacks(
   return nextHtml.replace(/<div data-noctua-inline-images="1"><\/div>/g, "");
 }
 
+// Drops <img> tags whose `cid:` source no longer resolves to an attachment.
+// Run this AFTER replaceInlineImageSources (which rewrites every resolvable cid
+// to a URL), so any surviving `cid:` reference is genuinely dangling — e.g. an
+// inline image the user removed. Without this the viewer would render a broken
+// image both immediately and again after the next sync re-parses the source.
+export function stripUnresolvedCidImages(html: string) {
+  if (!html) return html;
+  const next = html.replace(/<img\b[^>]*>/gi, (tag) =>
+    /\bsrc\s*=\s*["']?\s*cid:/i.test(tag) ? "" : tag
+  );
+  return next
+    .replace(/<div data-noctua-inline-image="1"[^>]*>\s*<\/div>/gi, "")
+    .replace(/<div data-noctua-inline-images="1">\s*<\/div>/gi, "");
+}
+
 export function appendUnreferencedInlineImages(
   html: string,
   attachments: InlineImageAttachment[]

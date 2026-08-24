@@ -116,6 +116,7 @@ import {
   buildAccountDraftDiscardPath,
   buildAccountFoldersPath,
   buildAccountMessageTopicsPath,
+  buildAccountAttachmentPath,
   buildAccountMessageTopicSuggestionsPath,
   buildAccountMessagesActionPath,
   buildAccountMessageHtmlPath,
@@ -1533,6 +1534,69 @@ export default function MailClient({
     },
     [
       messageById,
+      setActiveTopicSuggestionMessages,
+      setThreadRelatedMessages,
+      updateThreadCacheWithMessage,
+      viewMessage
+    ]
+  );
+
+  const handleRemoveAttachment = useCallback(
+    async (message: Message, attachmentId: string) => {
+      const res = await apiFetch(
+        buildAccountAttachmentPath(message.accountId, message.id, attachmentId),
+        { method: "DELETE" }
+      );
+      if (!res.ok) {
+        reportError(await readErrorMessage(res));
+        throw new Error("remove-attachment-failed");
+      }
+      const data = (await res.json().catch(() => ({}))) as {
+        imapUid?: number | null;
+      };
+      const applyPatch = (item: Message): Message => {
+        if (item.id !== message.id) return item;
+        return {
+          ...item,
+          attachments: (item.attachments ?? []).filter(
+            (attachment) => attachment.id !== attachmentId
+          ),
+          imapUid: data.imapUid === null ? undefined : data.imapUid ?? item.imapUid
+        };
+      };
+      updateMessagesRef.current(applyPatch, { source: "remove-attachment" });
+      setViewMessage((prev) => (prev?.id === message.id ? applyPatch(prev) : prev));
+      setThreadRelatedMessages((prev) => {
+        let changed = false;
+        const next = prev.map((item) => {
+          const updated = applyPatch(item);
+          if (updated !== item) changed = true;
+          return updated;
+        });
+        return changed ? next : prev;
+      });
+      setActiveTopicSuggestionMessages((prev) => {
+        let changed = false;
+        const next = prev.map((item) => {
+          const updated = applyPatch(item);
+          if (updated !== item) changed = true;
+          return updated;
+        });
+        return changed ? next : prev;
+      });
+      const cachedMessage =
+        threadMessagesRef.current.find((item) => item.id === message.id) ??
+        messageById.get(message.id) ??
+        (viewMessage?.id === message.id ? viewMessage : null);
+      if (cachedMessage) {
+        updateThreadCacheWithMessage(applyPatch(cachedMessage));
+      }
+    },
+    [
+      apiFetch,
+      messageById,
+      readErrorMessage,
+      reportError,
       setActiveTopicSuggestionMessages,
       setThreadRelatedMessages,
       updateThreadCacheWithMessage,
@@ -5461,6 +5525,7 @@ export default function MailClient({
               onOpenRecipientAlias: openRecipientAliasDialog,
               onFindRelatedByCalendarInviteUid: handleFindRelatedByCalendarInviteUid,
               onInviteStateChange: handleInviteStateChange,
+              onRemoveAttachment: handleRemoveAttachment,
               readErrorMessage,
               reportError,
               dateFormat: accountDateFormat,

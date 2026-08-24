@@ -180,7 +180,7 @@ export async function saveMessages(nextMessages: Message[]) {
 export async function saveMessageSource(
   accountId: string,
   messageId: string,
-  source: string
+  source: string | Buffer
 ) {
   await ensureSourcesDir();
   const filePath = sourceFilePath(accountId, messageId);
@@ -194,6 +194,22 @@ export async function getMessageSource(accountId: string, messageId: string) {
   for (const candidateId of candidates) {
     try {
       return await fs.readFile(sourceFilePath(accountId, candidateId), "utf-8");
+    } catch {
+      // try next candidate
+    }
+  }
+  return null;
+}
+
+// Raw-bytes variant of getMessageSource. Rewriting a message's MIME must
+// operate on the exact bytes (binary/8bit parts included); reading as utf-8
+// would mangle them before the surgery even runs.
+export async function getMessageSourceBuffer(accountId: string, messageId: string) {
+  await ensureSourcesDir();
+  const candidates = buildMessageRowIdLookupCandidates(messageId);
+  for (const candidateId of candidates) {
+    try {
+      return await fs.readFile(sourceFilePath(accountId, candidateId));
     } catch {
       // try next candidate
     }

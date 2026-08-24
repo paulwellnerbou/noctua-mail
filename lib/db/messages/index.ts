@@ -49,6 +49,8 @@ export {
   updateMessageFlags
 } from "./flags";
 
+export { removeMessageAttachment } from "./attachments";
+
 export {
   getFolderIdsByMessageIds,
   getLatestMessageDate,

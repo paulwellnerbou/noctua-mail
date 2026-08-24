@@ -34,6 +34,7 @@ export {
   isInlineImageReferenced,
   replaceInlineImageSources,
   stripRedundantInlineImageFallbacks,
+  stripUnresolvedCidImages,
   appendUnreferencedInlineImages
 } from "./inlineImages";
 export type { QuoteBoundaryCandidate, QuoteBoundaryMarkers, QuoteSizes } from "./quoteBoundary";

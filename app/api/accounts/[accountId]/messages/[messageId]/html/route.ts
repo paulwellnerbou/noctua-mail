@@ -11,6 +11,7 @@ import {
   replaceInlineImageSources,
   sanitizeHtmlForDisplay,
   stripRedundantInlineImageFallbacks,
+  stripUnresolvedCidImages,
   stripConditionalComments
 } from "@/lib/html";
 
@@ -38,6 +39,7 @@ function postprocessHtml(
   nextHtml = replaceInlineImageSources(nextHtml, attachments);
   nextHtml = stripRedundantInlineImageFallbacks(nextHtml, attachments);
   nextHtml = appendUnreferencedInlineImages(nextHtml, attachments);
+  nextHtml = stripUnresolvedCidImages(nextHtml);
   return sanitizeHtmlForDisplay(stripConditionalComments(nextHtml)).replace(
     /data:(?!image\/)[^'")\s]+/gi,
     "about:blank"

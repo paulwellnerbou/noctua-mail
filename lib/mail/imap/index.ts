@@ -44,6 +44,7 @@ export {
   appendImapMessage,
   deleteImapMessage,
   deleteImapMessages,
+  fetchImapMessageSource,
   moveImapMessage,
   moveImapMessages,
   updateImapFlags,

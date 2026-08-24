@@ -2,7 +2,8 @@ import { describe, expect, it } from "bun:test";
 import {
   appendUnreferencedInlineImages,
   replaceInlineImageSources,
-  stripRedundantInlineImageFallbacks
+  stripRedundantInlineImageFallbacks,
+  stripUnresolvedCidImages
 } from "./html";
 
 describe("appendUnreferencedInlineImages", () => {
@@ -155,5 +156,38 @@ describe("appendUnreferencedInlineImages", () => {
     ]);
 
     expect(output).toBe(input);
+  });
+});
+
+describe("stripUnresolvedCidImages", () => {
+  it("removes an <img> whose cid: source was never resolved to a url", () => {
+    const input = '<p>Hi</p><img src="cid:sig@noctua" alt="sig"><p>Bye</p>';
+    const output = stripUnresolvedCidImages(input);
+    expect(output).not.toContain("cid:sig@noctua");
+    expect(output).toContain("<p>Hi</p>");
+    expect(output).toContain("<p>Bye</p>");
+  });
+
+  it("keeps <img> tags that already resolved to attachment urls", () => {
+    const url = "/api/accounts/a/messages/m/attachments/1";
+    const input = `<div><img src="${url}" alt="logo"></div>`;
+    const output = stripUnresolvedCidImages(input);
+    expect(output).toContain(url);
+  });
+
+  it("collapses a now-empty inline-image wrapper", () => {
+    const input =
+      '<div data-noctua-inline-image="1" style="margin:12px 0;"><img src="cid:sig@noctua"></div>';
+    const output = stripUnresolvedCidImages(input);
+    expect(output).not.toContain("data-noctua-inline-image");
+    expect(output.trim()).toBe("");
+  });
+
+  it("strips only the dangling cid image, leaving the rest", () => {
+    const url = "/api/accounts/a/messages/m/attachments/2";
+    const input = `<img src="cid:gone@x"><img src="${url}">`;
+    const output = stripUnresolvedCidImages(input);
+    expect(output).not.toContain("cid:gone@x");
+    expect(output).toContain(url);
   });
 });
