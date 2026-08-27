@@ -116,7 +116,23 @@ export async function removeMessageAttachmentEverywhere(
     clientId,
     internalDate
   );
-  await deps.deleteImapMessage(account, mailboxPath, uid, clientId);
+  try {
+    await deps.deleteImapMessage(account, mailboxPath, uid, clientId);
+  } catch (deleteError) {
+    // The append landed but the delete didn't (e.g. a transient IMAP/TLS
+    // blip). Roll back the copy we just appended so the failure leaves the
+    // original intact instead of a stripped duplicate. If we have no
+    // APPENDUID we can't target the copy — the caller surfaces the error and
+    // a duplicate may linger until the next full reconcile.
+    if (typeof newUid === "number") {
+      try {
+        await deps.deleteImapMessage(account, mailboxPath, newUid, clientId);
+      } catch {
+        // Best effort; leave the original error as the surfaced failure.
+      }
+    }
+    throw deleteError;
+  }
 
   await deps.saveMessageSource(account.id, message.id, strippedRaw);
   await deps.deleteAttachmentData(account.id, message.id, attachmentId);

@@ -1554,6 +1554,14 @@ export default function MailClient({
       const data = (await res.json().catch(() => ({}))) as {
         imapUid?: number | null;
       };
+      // The removal appended a rewritten copy with the same Message-ID; the
+      // next sync sees its new UID and would otherwise fire a "new mail"
+      // notification. Seed the dedup ring so the planner skips it (same
+      // mechanism the undo-move path uses).
+      const dedupKeys: string[] = [];
+      if (message.messageId) dedupKeys.push(message.messageId);
+      if (typeof data.imapUid === "number") dedupKeys.push(`uid:${data.imapUid}`);
+      if (dedupKeys.length > 0) seedNotificationDedupKeys(dedupKeys);
       const applyPatch = (item: Message): Message => {
         if (item.id !== message.id) return item;
         return {
@@ -1597,6 +1605,7 @@ export default function MailClient({
       messageById,
       readErrorMessage,
       reportError,
+      seedNotificationDedupKeys,
       setActiveTopicSuggestionMessages,
       setThreadRelatedMessages,
       updateThreadCacheWithMessage,

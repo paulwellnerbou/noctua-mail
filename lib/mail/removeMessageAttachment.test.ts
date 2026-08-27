@@ -73,13 +73,15 @@ function makeDeps(
     fetchedSource?: Buffer | null;
     appendResult?: number | null;
     appendThrows?: boolean;
+    deleteThrowsForUid?: number | null;
   } = {}
 ): Recorder {
   const {
     storedSource = Buffer.from(RAW, "latin1"),
     fetchedSource = null,
     appendResult = 99,
-    appendThrows = false
+    appendThrows = false,
+    deleteThrowsForUid = null
   } = overrides;
   const calls: string[] = [];
   const appendArgs: Array<{ flags: string[]; internalDate?: Date }> = [];
@@ -106,6 +108,9 @@ function makeDeps(
     deleteImapMessage: async (_account, _mailbox, uid) => {
       calls.push("delete");
       deleteArgs.push({ uid });
+      if (deleteThrowsForUid !== null && uid === deleteThrowsForUid) {
+        throw new Error(`delete failed for ${uid}`);
+      }
     },
     saveMessageSource: async (_accountId, _messageId, source) => {
       calls.push("saveSource");
@@ -176,6 +181,19 @@ describe("removeMessageAttachmentEverywhere", () => {
     );
     expect(rec.rowPatch[0]?.imapUid).toBeNull();
     expect(result.imapUid).toBeNull();
+  });
+
+  it("rolls back the appended copy when deleting the original fails", async () => {
+    // deleteImapMessage throws for the original uid (42) but not for the
+    // appended copy (99), so the rollback delete of 99 must run.
+    const rec = makeDeps({ deleteThrowsForUid: 42 });
+    await expect(
+      removeMessageAttachmentEverywhere(account, makeMessage(), "att-1", undefined, rec.deps)
+    ).rejects.toThrow("delete failed for 42");
+    // First the original (42, throws), then the rollback of the copy (99).
+    expect(rec.deleteArgs.map((d) => d.uid)).toEqual([42, 99]);
+    // No local cleanup after a failed rewrite.
+    expect(rec.calls).not.toContain("removeRow");
   });
 
   it("does not delete the original or touch local state when the append fails", async () => {
