@@ -6,6 +6,9 @@ import { requireSessionAccountOr403, requireSessionOr401 } from "@/lib/auth";
 import { extractAttachmentBufferFromSource } from "@/lib/mail/attachmentFromSource";
 import { ensureHtmlDocumentTitle, escapeHtml } from "@/lib/html";
 import { formatAttachmentPageTitle } from "@/lib/appBranding";
+import { removeMessageAttachmentEverywhere } from "@/lib/mail/removeMessageAttachment";
+import { requireAccountAndMessageContext } from "@/app/api/_helpers/message/routeHelpers";
+import { appendMessageIdToError } from "@/app/api/_helpers/message/errorFormatting";
 
 type Params = AccountRouteParams & {
   params: Promise<{
@@ -98,4 +101,54 @@ export async function GET(request: Request, { params }: Params) {
       "Content-Security-Policy": "default-src 'none'"
     }
   });
+}
+
+// Maps orchestrator failures to HTTP status codes: validation problems the
+// client can't retry away (400/404/422) vs. an IMAP round-trip that failed
+// mid-rewrite (502).
+function statusForRemovalError(message: string) {
+  if (message === "Attachment not found") return 404;
+  if (message === "Message is missing IMAP metadata") return 400;
+  if (
+    message === "Message source is unavailable" ||
+    message === "Could not locate the attachment in the message source"
+  ) {
+    return 422;
+  }
+  return 502;
+}
+
+export async function DELETE(request: Request, { params }: Params) {
+  const accountId = await getAccountIdFromParams(params);
+  const { messageId: messageIdParam, attachmentId: attachmentIdParam } = await params;
+  const messageId = (messageIdParam ?? "").trim();
+  const attachmentId = (attachmentIdParam ?? "").trim();
+
+  const context = await requireAccountAndMessageContext(
+    request,
+    { accountId, messageId },
+    {
+      missingFieldsMessage: "Missing accountId/messageId",
+      missingMessageMessage: "Message not found in local cache.",
+      requireImapMetadata: true,
+      missingImapMetadataMessage: "Message is missing IMAP metadata to rewrite."
+    }
+  );
+  if (context instanceof NextResponse) return context;
+
+  if (!attachmentId) {
+    return NextResponse.json({ ok: false, message: "Missing attachmentId" }, { status: 400 });
+  }
+
+  const { account, clientId, message } = context;
+  try {
+    const result = await removeMessageAttachmentEverywhere(account, message, attachmentId, clientId);
+    return NextResponse.json({ ok: true, ...result });
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : "Failed to remove attachment";
+    return NextResponse.json(
+      { ok: false, message: appendMessageIdToError(detail, messageId) },
+      { status: statusForRemovalError(detail) }
+    );
+  }
 }

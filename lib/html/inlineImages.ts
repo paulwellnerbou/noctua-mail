@@ -6,6 +6,7 @@ import { escapeHtml } from "./strip";
 // to reference the image after all.
 
 type InlineImageAttachment = {
+  id?: string;
   inline?: boolean;
   contentType?: string;
   filename?: string;
@@ -29,6 +30,17 @@ function normalizeInlineReferenceCandidate(value?: string | null) {
 
 function escapeRegExp(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+// decodeURIComponent throws URIError on malformed percent-encoding (e.g. a lone
+// `%`). Callers here run over untrusted message HTML, so fall back to the raw
+// value rather than let it propagate.
+function safeDecodeURIComponent(value: string) {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
 }
 
 function getInlineReferenceCandidates(attachment: InlineImageAttachment) {
@@ -100,6 +112,44 @@ export function stripRedundantInlineImageFallbacks(
   });
 
   return nextHtml.replace(/<div data-noctua-inline-images="1"><\/div>/g, "");
+}
+
+// Drops <img> tags that point at an attachment the message no longer has —
+// either a dangling `cid:` reference (unresolvable once replaceInlineImageSources
+// has rewritten every *surviving* cid to a URL) or a stored attachment URL whose
+// id isn't in `attachments` (the stored htmlBody bakes in resolved
+// `/attachments/<id>` URLs at sync time, so a removed inline image leaves one of
+// those, not a cid). Run this LAST in the render pipeline. Without it the viewer
+// shows a broken-image placeholder for a removed inline image.
+export function stripRemovedInlineImages(
+  html: string,
+  attachments: InlineImageAttachment[]
+) {
+  if (!html) return html;
+  const survivingIds = new Set(
+    attachments.map((attachment) => attachment.id).filter((id): id is string => Boolean(id))
+  );
+  const next = html.replace(/<img\b[^>]*>/gi, (tag) => {
+    const src = (tag.match(/\bsrc\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i) ?? [])
+      .slice(1)
+      .find((value) => value !== undefined);
+    if (!src) return tag;
+    if (/^\s*cid:/i.test(src)) return "";
+    // Match only our own attachment URLs — the /messages/<id>/attachments/<attId>
+    // shape with an att- id. A bare /attachments/ would also strip vendor/CDN
+    // images that merely have that path segment. decodeURIComponent runs over
+    // untrusted, pre-sanitization HTML, so guard it: a malformed `%` in some
+    // other image's URL must not throw out of the replace and break the render.
+    const attId = src.match(/\/messages\/[^/"'?#\s]+\/attachments\/([^/"'?#\s]+)/i)?.[1];
+    if (attId) {
+      const decoded = safeDecodeURIComponent(attId);
+      if (decoded.startsWith("att-") && !survivingIds.has(decoded)) return "";
+    }
+    return tag;
+  });
+  return next
+    .replace(/<div data-noctua-inline-image="1"[^>]*>\s*<\/div>/gi, "")
+    .replace(/<div data-noctua-inline-images="1">\s*<\/div>/gi, "");
 }
 
 export function appendUnreferencedInlineImages(

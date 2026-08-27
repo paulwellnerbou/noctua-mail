@@ -38,18 +38,44 @@ export async function appendImapMessage(
   mailboxPath: string,
   rawMessage: Buffer,
   flags: string[] = ["\\Seen"],
-  clientId?: string
+  clientId?: string,
+  internalDate: Date = new Date()
 ) {
   const logContext = buildLogContext(account, clientId);
   return withPooledImapClient(account, logContext, async (client) => {
     const result = await logImapOp(
       "append",
       { mailbox: mailboxPath, ...logContext },
-      () => client.append(mailboxPath, rawMessage, flags, new Date())
+      () => client.append(mailboxPath, rawMessage, flags, internalDate)
     );
     if (!result) return null;
     const uid = (result as any).uid;
     return typeof uid === "number" ? uid : null;
+  });
+}
+
+// Fetches the full RFC 2822 source of a single message. Used as a fallback when
+// the raw `.eml` isn't cached locally (e.g. it was never downloaded or was
+// pruned), so callers that need to rewrite the message can still get the bytes.
+export async function fetchImapMessageSource(
+  account: Account,
+  mailboxPath: string,
+  uid: number,
+  clientId?: string
+): Promise<Buffer | null> {
+  if (!Number.isFinite(uid) || uid <= 0) return null;
+  const logContext = buildLogContext(account, clientId);
+  return withPooledImapClient(account, logContext, async (client) => {
+    await logImapOp("mailboxOpen", { mailbox: mailboxPath, ...logContext }, () =>
+      client.mailboxOpen(mailboxPath)
+    );
+    const item = await logImapOp(
+      "fetchOne",
+      { mailbox: mailboxPath, uid, ...logContext },
+      () => client.fetchOne(String(uid), { source: true }, { uid: true })
+    );
+    const source = item && (item as { source?: Buffer }).source;
+    return Buffer.isBuffer(source) ? source : null;
   });
 }
 

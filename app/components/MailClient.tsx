@@ -116,6 +116,7 @@ import {
   buildAccountDraftDiscardPath,
   buildAccountFoldersPath,
   buildAccountMessageTopicsPath,
+  buildAccountAttachmentPath,
   buildAccountMessageTopicSuggestionsPath,
   buildAccountMessagesActionPath,
   buildAccountMessageHtmlPath,
@@ -157,6 +158,7 @@ import { useReminderNotifications } from "./mailclient/useReminderNotifications"
 import { useMessageData } from "./mailclient/useMessageData";
 import { useThreadContent } from "./mailclient/useThreadContent";
 import { useSyncController } from "./mailclient/useSyncController";
+import { registerRecentLocalDraftSave } from "./mailclient/recentLocalDraftSaves";
 import { useTopics } from "./mailclient/useTopics";
 import { useRecipientAliases } from "./mailclient/useRecipientAliases";
 import { useAccountController } from "./mailclient/useAccountController";
@@ -188,6 +190,7 @@ import CalendarSidebarPanel from "./calendar/CalendarSidebarPanel";
 import { type UndoMoveTarget } from "./mailclient/useMessageMoveActions";
 import type {
   Account,
+  Attachment,
   Folder,
   Message,
   RecipientAlias,
@@ -1533,6 +1536,110 @@ export default function MailClient({
     },
     [
       messageById,
+      setActiveTopicSuggestionMessages,
+      setThreadRelatedMessages,
+      updateThreadCacheWithMessage,
+      viewMessage
+    ]
+  );
+
+  const handleRemoveAttachment = useCallback(
+    async (message: Message, attachmentId: string) => {
+      // The removal appends a rewritten copy with the same Message-ID, in the
+      // same folder. The server's IMAP IDLE push can reach the notification
+      // stream BEFORE the DELETE response returns, so both suppressions are
+      // primed up front, matched by the preserved Message-ID, to win that race:
+      //   - recentLocalDraftSave: the self-made-mail filter that runs before the
+      //     notification planner (same path draft autosave uses);
+      //   - the dedup ring: a durable backstop for when the stream is polling
+      //     and first detects the copy after recentLocalDraftSave's 15s window.
+      if (message.messageId) {
+        registerRecentLocalDraftSave({
+          accountId: message.accountId,
+          folderId: message.folderId,
+          messageId: message.messageId
+        });
+        seedNotificationDedupKeys([message.messageId]);
+      } else {
+        registerRecentLocalDraftSave({
+          accountId: message.accountId,
+          folderId: message.folderId,
+          messageId: null
+        });
+      }
+      const res = await apiFetch(
+        buildAccountAttachmentPath(message.accountId, message.id, attachmentId),
+        { method: "DELETE" }
+      );
+      if (!res.ok) {
+        reportError(await readErrorMessage(res));
+        throw new Error("remove-attachment-failed");
+      }
+      const data = (await res.json().catch(() => ({}))) as {
+        imapUid?: number | null;
+        attachments?: Attachment[];
+        htmlBody?: string | null;
+      };
+      // Refresh the window and add the copy's UID, so a message without a
+      // Message-ID (both suppressions fall back to the UID) is covered too.
+      registerRecentLocalDraftSave({
+        accountId: message.accountId,
+        folderId: message.folderId,
+        messageId: message.messageId ?? null,
+        uid: typeof data.imapUid === "number" ? data.imapUid : null
+      });
+      if (!message.messageId && typeof data.imapUid === "number") {
+        seedNotificationDedupKeys([`uid:${data.imapUid}`]);
+      }
+      const applyPatch = (item: Message): Message => {
+        if (item.id !== message.id) return item;
+        return {
+          ...item,
+          // Prefer the server's re-synced attachments + htmlBody: after the
+          // rewrite the surviving attachments have new UID-derived ids, and the
+          // htmlBody references them by URL. Applying only the filtered old list
+          // would break the next removal and drop the remaining inline images.
+          attachments:
+            data.attachments ??
+            (item.attachments ?? []).filter((attachment) => attachment.id !== attachmentId),
+          htmlBody: data.htmlBody === undefined ? item.htmlBody : data.htmlBody ?? undefined,
+          imapUid: data.imapUid === null ? undefined : data.imapUid ?? item.imapUid
+        };
+      };
+      updateMessagesRef.current(applyPatch, { source: "remove-attachment" });
+      setViewMessage((prev) => (prev?.id === message.id ? applyPatch(prev) : prev));
+      setThreadRelatedMessages((prev) => {
+        let changed = false;
+        const next = prev.map((item) => {
+          const updated = applyPatch(item);
+          if (updated !== item) changed = true;
+          return updated;
+        });
+        return changed ? next : prev;
+      });
+      setActiveTopicSuggestionMessages((prev) => {
+        let changed = false;
+        const next = prev.map((item) => {
+          const updated = applyPatch(item);
+          if (updated !== item) changed = true;
+          return updated;
+        });
+        return changed ? next : prev;
+      });
+      const cachedMessage =
+        threadMessagesRef.current.find((item) => item.id === message.id) ??
+        messageById.get(message.id) ??
+        (viewMessage?.id === message.id ? viewMessage : null);
+      if (cachedMessage) {
+        updateThreadCacheWithMessage(applyPatch(cachedMessage));
+      }
+    },
+    [
+      apiFetch,
+      messageById,
+      readErrorMessage,
+      reportError,
+      seedNotificationDedupKeys,
       setActiveTopicSuggestionMessages,
       setThreadRelatedMessages,
       updateThreadCacheWithMessage,
@@ -5461,6 +5568,7 @@ export default function MailClient({
               onOpenRecipientAlias: openRecipientAliasDialog,
               onFindRelatedByCalendarInviteUid: handleFindRelatedByCalendarInviteUid,
               onInviteStateChange: handleInviteStateChange,
+              onRemoveAttachment: handleRemoveAttachment,
               readErrorMessage,
               reportError,
               dateFormat: accountDateFormat,

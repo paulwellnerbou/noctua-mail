@@ -2,7 +2,8 @@ import { describe, expect, it } from "bun:test";
 import {
   appendUnreferencedInlineImages,
   replaceInlineImageSources,
-  stripRedundantInlineImageFallbacks
+  stripRedundantInlineImageFallbacks,
+  stripRemovedInlineImages
 } from "./html";
 
 describe("appendUnreferencedInlineImages", () => {
@@ -154,6 +155,60 @@ describe("appendUnreferencedInlineImages", () => {
       }
     ]);
 
+    expect(output).toBe(input);
+  });
+});
+
+describe("stripRemovedInlineImages", () => {
+  it("removes an <img> whose cid: source was never resolved to a url", () => {
+    const input = '<p>Hi</p><img src="cid:sig@noctua" alt="sig"><p>Bye</p>';
+    const output = stripRemovedInlineImages(input, []);
+    expect(output).not.toContain("cid:sig@noctua");
+    expect(output).toContain("<p>Hi</p>");
+    expect(output).toContain("<p>Bye</p>");
+  });
+
+  it("removes an <img> whose /attachments/<id> url is no longer among the attachments", () => {
+    const removed = "/api/accounts/a/messages/m/attachments/att-a-71066-0";
+    const kept = "/api/accounts/a/messages/m/attachments/att-a-71066-1";
+    const input = `<img src="${removed}"><img src="${kept}">`;
+    const output = stripRemovedInlineImages(input, [
+      { id: "att-a-71066-1", inline: true, contentType: "image/png", url: kept }
+    ]);
+    expect(output).not.toContain(removed);
+    expect(output).toContain(kept);
+  });
+
+  it("keeps an <img> whose attachment id is still present", () => {
+    const url = "/api/accounts/a/messages/m/attachments/att-a-1-0";
+    const input = `<div><img src="${url}" alt="logo"></div>`;
+    const output = stripRemovedInlineImages(input, [
+      { id: "att-a-1-0", inline: true, contentType: "image/png", url }
+    ]);
+    expect(output).toContain(url);
+  });
+
+  it("collapses a now-empty inline-image wrapper", () => {
+    const input =
+      '<div data-noctua-inline-image="1" style="margin:12px 0;"><img src="cid:sig@noctua"></div>';
+    const output = stripRemovedInlineImages(input, []);
+    expect(output).not.toContain("data-noctua-inline-image");
+    expect(output.trim()).toBe("");
+  });
+
+  it("does not throw on a malformed percent-encoded url and leaves it in place", () => {
+    // A lone `%` makes decodeURIComponent throw; it must not break rendering.
+    const input = '<img src="https://cdn.example/messages/x/attachments/50%">';
+    let output = "";
+    expect(() => {
+      output = stripRemovedInlineImages(input, []);
+    }).not.toThrow();
+    expect(output).toBe(input);
+  });
+
+  it("leaves vendor images that merely contain /attachments/ untouched", () => {
+    const input = '<img src="https://cdn.example/attachments/logo.png"><img src="https://cdn.example/messages/1/attachments/promo.png">';
+    const output = stripRemovedInlineImages(input, []);
     expect(output).toBe(input);
   });
 });
