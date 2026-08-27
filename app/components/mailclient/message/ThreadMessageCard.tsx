@@ -44,7 +44,7 @@ import HtmlMessage from "../../HtmlMessage";
 import QuoteRenderer from "../../QuoteRenderer";
 import FolderBadges from "../folder/FolderBadges";
 import CalendarEventPreview from "./CalendarEventPreview";
-import { InlineImageRemovalList, RemoveAttachmentConfirmDialog } from "./AttachmentRemoval";
+import { RemoveAttachmentConfirmDialog } from "./AttachmentRemoval";
 import MessageRecipientMetaField from "./MessageRecipientMetaField";
 import CategoryBadge from "../CategoryBadge";
 import FlagBadge from "./FlagBadge";
@@ -204,13 +204,6 @@ export default function ThreadMessageCard({
   const [removingAttachment, setRemovingAttachment] = useState(false);
 
   const canRemoveAttachments = Boolean(onRemoveAttachment);
-  // The inline images the HTML viewer renders (footers/signatures) are hidden
-  // from the attachment list, so they get their own removal surface.
-  const removableInlineImages = canRemoveAttachments
-    ? (message.attachments ?? []).filter((attachment) =>
-        isRenderableInlineAttachment(attachment, message.htmlBody)
-      )
-    : [];
 
   const requestAttachmentRemoval = (attachmentId: string) => {
     const attachment = (message.attachments ?? []).find((item) => item.id === attachmentId);
@@ -1062,12 +1055,6 @@ export default function ThreadMessageCard({
                   showDownloadAll
                   onRemove={canRemoveAttachments ? requestAttachmentRemoval : undefined}
                 />
-                {canRemoveAttachments && (
-                  <InlineImageRemovalList
-                    images={removableInlineImages}
-                    onRequestRemove={(attachment) => setPendingRemoval(attachment)}
-                  />
-                )}
               </div>
             </Collapsible.Content>
           </Collapsible.Root>
