@@ -195,4 +195,20 @@ describe("stripRemovedInlineImages", () => {
     expect(output).not.toContain("data-noctua-inline-image");
     expect(output.trim()).toBe("");
   });
+
+  it("does not throw on a malformed percent-encoded url and leaves it in place", () => {
+    // A lone `%` makes decodeURIComponent throw; it must not break rendering.
+    const input = '<img src="https://cdn.example/messages/x/attachments/50%">';
+    let output = "";
+    expect(() => {
+      output = stripRemovedInlineImages(input, []);
+    }).not.toThrow();
+    expect(output).toBe(input);
+  });
+
+  it("leaves vendor images that merely contain /attachments/ untouched", () => {
+    const input = '<img src="https://cdn.example/attachments/logo.png"><img src="https://cdn.example/messages/1/attachments/promo.png">';
+    const output = stripRemovedInlineImages(input, []);
+    expect(output).toBe(input);
+  });
 });

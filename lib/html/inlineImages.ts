@@ -32,6 +32,17 @@ function escapeRegExp(value: string) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+// decodeURIComponent throws URIError on malformed percent-encoding (e.g. a lone
+// `%`). Callers here run over untrusted message HTML, so fall back to the raw
+// value rather than let it propagate.
+function safeDecodeURIComponent(value: string) {
+  try {
+    return decodeURIComponent(value);
+  } catch {
+    return value;
+  }
+}
+
 function getInlineReferenceCandidates(attachment: InlineImageAttachment) {
   return Array.from(
     new Set(
@@ -124,8 +135,16 @@ export function stripRemovedInlineImages(
       .find((value) => value !== undefined);
     if (!src) return tag;
     if (/^\s*cid:/i.test(src)) return "";
-    const attId = src.match(/\/attachments\/([^/"'?#\s]+)/i)?.[1];
-    if (attId && !survivingIds.has(decodeURIComponent(attId))) return "";
+    // Match only our own attachment URLs — the /messages/<id>/attachments/<attId>
+    // shape with an att- id. A bare /attachments/ would also strip vendor/CDN
+    // images that merely have that path segment. decodeURIComponent runs over
+    // untrusted, pre-sanitization HTML, so guard it: a malformed `%` in some
+    // other image's URL must not throw out of the replace and break the render.
+    const attId = src.match(/\/messages\/[^/"'?#\s]+\/attachments\/([^/"'?#\s]+)/i)?.[1];
+    if (attId) {
+      const decoded = safeDecodeURIComponent(attId);
+      if (decoded.startsWith("att-") && !survivingIds.has(decoded)) return "";
+    }
     return tag;
   });
   return next
