@@ -89,7 +89,7 @@ export {
   setMessageCategory,
   updateMessageFlags
 } from "./db/messages";
-export { removeMessageAttachment } from "./db/messages";
+export { removeMessageAttachment, updateMessageImapUid } from "./db/messages";
 
 export {
   getFolderIdsByMessageIds,

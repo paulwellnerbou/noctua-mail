@@ -1,13 +1,5 @@
 import { NextResponse } from "next/server";
-import {
-  getAttachmentIds,
-  resolveThreadingForAccountMessages,
-  upsertMessages
-} from "@/lib/db";
-import { syncImapMessage } from "@/lib/mail/imap";
-import { mergeLocalOnlyMessageState } from "@/lib/messageLocalState";
-import { sanitizeSyncedMessage } from "@/lib/mail/syncMessageSanitizer";
-import { deleteAttachmentData } from "@/lib/storage";
+import { resyncImapMessageIntoDb } from "@/lib/mail/resyncMessage";
 import { appendMessageIdToError } from "@/app/api/_helpers/message/errorFormatting";
 import { requireAccountAndMessageContext } from "@/app/api/_helpers/message/routeHelpers";
 import { getAccountIdFromParams, type AccountRouteParams } from "@/app/api/_helpers/accountContext";
@@ -30,13 +22,7 @@ export async function POST(request: Request, { params }: Params) {
     }
   );
   if (context instanceof NextResponse) return context;
-  const {
-    account,
-    accountId: resolvedAccountId,
-    clientId,
-    message: existing,
-    messageId: resolvedMessageId
-  } = context;
+  const { account, clientId, message: existing, messageId: resolvedMessageId } = context;
 
   const mailboxPath = existing?.mailboxPath;
   const imapUid = typeof existing?.imapUid === "number" ? existing.imapUid : undefined;
@@ -53,8 +39,8 @@ export async function POST(request: Request, { params }: Params) {
     );
   }
 
-  const message = await syncImapMessage(account, mailboxPath, imapUid, clientId);
-  if (!message) {
+  const resynced = await resyncImapMessageIntoDb(account, existing, imapUid, clientId);
+  if (!resynced) {
     return NextResponse.json(
       {
         ok: false,
@@ -63,25 +49,6 @@ export async function POST(request: Request, { params }: Params) {
       { status: 404 }
     );
   }
-
-  const attachmentIds = await getAttachmentIds(resolvedAccountId, existing.id);
-  await Promise.all(
-    attachmentIds.map((attachmentId) =>
-      deleteAttachmentData(resolvedAccountId, existing.id, attachmentId)
-    )
-  );
-
-  const [resolved] = await resolveThreadingForAccountMessages(account.id, [message]);
-  const sanitized = await sanitizeSyncedMessage(
-    {
-      ...message,
-      threadId: resolved.threadId,
-      parentId: resolved.parentId
-    },
-    account.id
-  );
-  const merged = mergeLocalOnlyMessageState(sanitized, existing);
-  await upsertMessages(account.id, message.folderId, [merged], false);
 
   return NextResponse.json({ ok: true });
 }

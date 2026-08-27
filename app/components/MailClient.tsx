@@ -190,6 +190,7 @@ import CalendarSidebarPanel from "./calendar/CalendarSidebarPanel";
 import { type UndoMoveTarget } from "./mailclient/useMessageMoveActions";
 import type {
   Account,
+  Attachment,
   Folder,
   Message,
   RecipientAlias,
@@ -1576,6 +1577,8 @@ export default function MailClient({
       }
       const data = (await res.json().catch(() => ({}))) as {
         imapUid?: number | null;
+        attachments?: Attachment[];
+        htmlBody?: string | null;
       };
       // Refresh the window and add the copy's UID, so a message without a
       // Message-ID (both suppressions fall back to the UID) is covered too.
@@ -1592,9 +1595,14 @@ export default function MailClient({
         if (item.id !== message.id) return item;
         return {
           ...item,
-          attachments: (item.attachments ?? []).filter(
-            (attachment) => attachment.id !== attachmentId
-          ),
+          // Prefer the server's re-synced attachments + htmlBody: after the
+          // rewrite the surviving attachments have new UID-derived ids, and the
+          // htmlBody references them by URL. Applying only the filtered old list
+          // would break the next removal and drop the remaining inline images.
+          attachments:
+            data.attachments ??
+            (item.attachments ?? []).filter((attachment) => attachment.id !== attachmentId),
+          htmlBody: data.htmlBody === undefined ? item.htmlBody : data.htmlBody ?? undefined,
           imapUid: data.imapUid === null ? undefined : data.imapUid ?? item.imapUid
         };
       };

@@ -19,6 +19,7 @@ import {
   fetchImapMessageSource
 } from "@/lib/mail/imap";
 import { removeAttachmentPartFromRawMessage } from "@/lib/mail/mime/removeAttachmentPart";
+import { resyncImapMessageIntoDb } from "@/lib/mail/resyncMessage";
 import {
   RECENT_IMAP_FLAG,
   isLocalOnlyMessageFlag,
@@ -39,6 +40,7 @@ export type RemoveAttachmentDeps = {
   fetchImapMessageSource: typeof fetchImapMessageSource;
   appendImapMessage: typeof appendImapMessage;
   deleteImapMessage: typeof deleteImapMessage;
+  resyncMessage: typeof resyncImapMessageIntoDb;
   saveMessageSource: typeof saveMessageSource;
   deleteAttachmentData: typeof deleteAttachmentData;
   removeMessageAttachmentRow: typeof removeMessageAttachmentRow;
@@ -49,6 +51,7 @@ const defaultDeps: RemoveAttachmentDeps = {
   fetchImapMessageSource,
   appendImapMessage,
   deleteImapMessage,
+  resyncMessage: resyncImapMessageIntoDb,
   saveMessageSource,
   deleteAttachmentData,
   removeMessageAttachmentRow
@@ -61,6 +64,10 @@ type RemovableMessage = Message & {
 
 export type RemoveMessageAttachmentResult = {
   attachments: Attachment[];
+  // The re-synced htmlBody carries the new UID-derived attachment URLs; the
+  // client must apply it alongside `attachments` or the surviving inline
+  // images (still referenced by their old URLs) would drop out at render.
+  htmlBody: string | null;
   imapUid: number | null;
 };
 
@@ -134,15 +141,29 @@ export async function removeMessageAttachmentEverywhere(
     throw deleteError;
   }
 
+  // Re-fetch the rewritten copy so the row picks up its new UID-derived
+  // attachment ids (att-<account>-<uid>-<n>). Returning the pre-rewrite ids
+  // would make a follow-up removal on the same message fail to match with
+  // "Attachment not found". Requires APPENDUID (newUid); without it we patch
+  // locally and let the next full sync reconcile the ids.
+  if (typeof newUid === "number") {
+    const resynced = await deps.resyncMessage(account, message, newUid, clientId);
+    if (resynced) {
+      return {
+        attachments: resynced.attachments ?? [],
+        htmlBody: resynced.htmlBody ?? null,
+        imapUid: newUid
+      };
+    }
+  }
+
   await deps.saveMessageSource(account.id, message.id, strippedRaw);
   await deps.deleteAttachmentData(account.id, message.id, attachmentId);
-
-  await deps.removeMessageAttachmentRow(account.id, message.id, attachmentId, {
-    imapUid: newUid
-  });
+  await deps.removeMessageAttachmentRow(account.id, message.id, attachmentId, { imapUid: newUid });
 
   return {
     attachments: (message.attachments ?? []).filter((item) => item.id !== attachmentId),
+    htmlBody: message.htmlBody ?? null,
     imapUid: newUid
   };
 }

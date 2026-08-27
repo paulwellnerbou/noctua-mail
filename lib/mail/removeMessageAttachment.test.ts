@@ -67,6 +67,13 @@ type Recorder = { calls: string[]; deps: RemoveAttachmentDeps } & {
   deletedBlobs: string[];
 };
 
+const RESYNCED = {
+  attachments: [
+    { id: "att-1-99-0", filename: "keep.pdf", contentType: "application/pdf", size: 3, inline: false }
+  ],
+  htmlBody: "<p>fresh</p>"
+} as unknown as Message;
+
 function makeDeps(
   overrides: {
     storedSource?: Buffer | null;
@@ -74,6 +81,7 @@ function makeDeps(
     appendResult?: number | null;
     appendThrows?: boolean;
     deleteThrowsForUid?: number | null;
+    resyncResult?: Message | null;
   } = {}
 ): Recorder {
   const {
@@ -81,7 +89,8 @@ function makeDeps(
     fetchedSource = null,
     appendResult = 99,
     appendThrows = false,
-    deleteThrowsForUid = null
+    deleteThrowsForUid = null,
+    resyncResult = RESYNCED
   } = overrides;
   const calls: string[] = [];
   const appendArgs: Array<{ flags: string[]; internalDate?: Date }> = [];
@@ -112,6 +121,10 @@ function makeDeps(
         throw new Error(`delete failed for ${uid}`);
       }
     },
+    resyncMessage: async () => {
+      calls.push("resync");
+      return resyncResult;
+    },
     saveMessageSource: async (_accountId, _messageId, source) => {
       calls.push("saveSource");
       savedSource.push(source as Buffer);
@@ -130,7 +143,7 @@ function makeDeps(
 }
 
 describe("removeMessageAttachmentEverywhere", () => {
-  it("appends before deleting, preserves date, filters local-only/recent flags, and patches the new uid", async () => {
+  it("appends before deleting, preserves date/flags, then re-syncs and returns fresh attachments", async () => {
     const rec = makeDeps();
     const result = await removeMessageAttachmentEverywhere(
       account,
@@ -142,35 +155,22 @@ describe("removeMessageAttachmentEverywhere", () => {
 
     // Append must run before delete so a failure can't destroy the original.
     expect(rec.calls.indexOf("append")).toBeLessThan(rec.calls.indexOf("delete"));
-    // Local writes only after the server rewrite succeeds.
-    expect(rec.calls).toEqual([
-      "getSource",
-      "append",
-      "delete",
-      "saveSource",
-      "deleteBlob",
-      "removeRow"
-    ]);
+    // On success we re-sync to pick up the new UID-derived ids; no manual patch.
+    expect(rec.calls).toEqual(["getSource", "append", "delete", "resync"]);
+    expect(rec.calls).not.toContain("removeRow");
 
     expect(rec.appendArgs[0]?.flags).toEqual(["\\Seen", "\\Flagged"]);
     expect(rec.appendArgs[0]?.internalDate).toEqual(new Date(1_000_000));
     expect(rec.deleteArgs[0]?.uid).toBe(42);
-    expect(rec.rowPatch[0]?.imapUid).toBe(99);
-    expect(rec.deletedBlobs).toEqual(["att-1"]);
 
-    expect(result.attachments).toEqual([]);
+    // The response carries the re-synced list + htmlBody (fresh ids), not the
+    // pre-rewrite one — this is what keeps a follow-up removal working.
+    expect(result.attachments).toEqual(RESYNCED.attachments);
+    expect(result.htmlBody).toBe("<p>fresh</p>");
     expect(result.imapUid).toBe(99);
-    // The rewritten source that gets persisted no longer carries the part.
-    expect(rec.savedSource[0]?.toString("latin1")).not.toContain("invoice.pdf");
   });
 
-  it("falls back to fetching the source from the server when it isn't cached", async () => {
-    const rec = makeDeps({ storedSource: null, fetchedSource: Buffer.from(RAW, "latin1") });
-    await removeMessageAttachmentEverywhere(account, makeMessage(), "att-1", undefined, rec.deps);
-    expect(rec.calls.slice(0, 3)).toEqual(["getSource", "fetchSource", "append"]);
-  });
-
-  it("carries a null imapUid through when the server gives no APPENDUID", async () => {
+  it("falls back to a local patch when the server gives no APPENDUID (no re-sync possible)", async () => {
     const rec = makeDeps({ appendResult: null });
     const result = await removeMessageAttachmentEverywhere(
       account,
@@ -179,8 +179,17 @@ describe("removeMessageAttachmentEverywhere", () => {
       undefined,
       rec.deps
     );
+    // No newUid to re-fetch: patch locally and let the next full sync reconcile.
+    expect(rec.calls).toEqual(["getSource", "append", "delete", "saveSource", "deleteBlob", "removeRow"]);
     expect(rec.rowPatch[0]?.imapUid).toBeNull();
+    expect(result.attachments).toEqual([]);
     expect(result.imapUid).toBeNull();
+  });
+
+  it("falls back to fetching the source from the server when it isn't cached", async () => {
+    const rec = makeDeps({ storedSource: null, fetchedSource: Buffer.from(RAW, "latin1") });
+    await removeMessageAttachmentEverywhere(account, makeMessage(), "att-1", undefined, rec.deps);
+    expect(rec.calls.slice(0, 3)).toEqual(["getSource", "fetchSource", "append"]);
   });
 
   it("rolls back the appended copy when deleting the original fails", async () => {

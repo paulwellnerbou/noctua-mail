@@ -49,7 +49,7 @@ export {
   updateMessageFlags
 } from "./flags";
 
-export { removeMessageAttachment } from "./attachments";
+export { removeMessageAttachment, updateMessageImapUid } from "./attachments";
 
 export {
   getFolderIdsByMessageIds,
