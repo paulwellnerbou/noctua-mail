@@ -13,6 +13,12 @@ export {
 } from "./query";
 
 export {
+  backfillMessageSourceSizes,
+  ensureMessageSourceSizes,
+  type MessageSizeBackfillResult
+} from "./sizes";
+
+export {
   getAttachmentIds,
   getAttachmentMeta,
   getMessageById,

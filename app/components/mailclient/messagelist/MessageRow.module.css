@@ -206,6 +206,14 @@
   font-size: 10px;
 }
 
+.size {
+  white-space: nowrap;
+  font-size: 11px;
+  text-align: right;
+  color: var(--gray-11);
+  font-variant-numeric: tabular-nums;
+}
+
 .subjectRow {
   display: flex;
   align-items: center;

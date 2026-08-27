@@ -3,7 +3,7 @@ import type { AccountDateFormat, Message, RecipientAlias, Topic } from "@/lib/da
 import type { MessageGroup, ThreadNode, VisibleMessageEntry } from "./listModel";
 import type { SelectionStore } from "./selectionStore";
 
-export type SortKey = "date" | "from" | "subject";
+export type SortKey = "date" | "from" | "subject" | "size";
 
 /**
  * The four layouts the message list can render in. This list is the
@@ -52,6 +52,8 @@ export type MessageListViewState = {
   suggestedThreadIds: ReadonlySet<string>;
   pendingSuggestedThreadIds: ReadonlySet<string>;
   sortDir: "asc" | "desc";
+  /** Render each row's stored-source size; on while the list is size-ordered. */
+  showMessageSize: boolean;
   listIsNarrow: boolean;
   preferToDisplay: boolean;
   activeTopic: Topic | null;

@@ -202,6 +202,16 @@
   width: 138px;
 }
 
+.cellSize {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  width: 76px;
+  flex: 0 0 auto;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
 .cellActions {
   display: flex;
   align-items: center;

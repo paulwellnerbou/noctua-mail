@@ -135,6 +135,8 @@ export type Message = {
   htmlBody?: string;
   source?: string;
   hasSource?: boolean;
+  /** Byte length of the stored raw RFC822 source. */
+  sizeBytes?: number;
   hasAttachments?: boolean;
   hasInlineAttachments?: boolean;
   attachments?: Attachment[];

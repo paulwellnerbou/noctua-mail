@@ -52,6 +52,7 @@ export default function MessageCardList({
     userEmail,
     findRecipientAlias,
     dateFormat,
+    showMessageSize,
     messageTopicsById,
     topicColorRows,
     senderIconsEnabled
@@ -437,6 +438,7 @@ export default function MessageCardList({
                 isCollapsedThreadRoot ? item.fullFlat.map((entry) => entry.message) : undefined
               }
               dateFormat={dateFormat}
+              showSize={showMessageSize}
               topicColorRows={topicColorRows}
               senderIconsEnabled={senderIconsEnabled}
             />

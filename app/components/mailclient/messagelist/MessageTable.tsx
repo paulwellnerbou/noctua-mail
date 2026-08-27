@@ -5,6 +5,7 @@ import { GitBranch, MoveRight, Search, Trash2 } from "lucide-react";
 import { Badge, Checkbox, IconButton, Text } from "@radix-ui/themes";
 import { CaretRightIcon } from "@radix-ui/react-icons";
 import { badgeColors } from "@/lib/ui/badgeColors";
+import { describeMessageSize } from "@/lib/ui/byteSize";
 import type { Message } from "@/lib/data";
 import SenderIcon from "../SenderIcon";
 import TopicBadge from "../TopicBadge";
@@ -55,6 +56,7 @@ export default function MessageTable({
     messageById,
     messageTopicsById,
     sortDir,
+    showMessageSize,
     preferToDisplay,
     activeTopic,
     userEmail,
@@ -208,6 +210,14 @@ export default function MessageTable({
             Subject
           </button>
         </div>
+        {showMessageSize && (
+          <div
+            className={styles.cellSize}
+            title="Largest first across the whole folder — change it with the Sort control"
+          >
+            Size
+          </div>
+        )}
         <div className={styles.cellDate}>
           <button
             className={styles.sortButton}
@@ -508,6 +518,13 @@ export default function MessageTable({
                     <TopicBadge key={topic.id} topic={topic} size="1" preferShortName />
                   ))}
                 </span>
+                {showMessageSize && (
+                  <span className={styles.cellSize}>
+                    <Text as="span" size="1" title={describeMessageSize(message.sizeBytes).title}>
+                      {describeMessageSize(message.sizeBytes).label}
+                    </Text>
+                  </span>
+                )}
                 <span className={styles.cellDate}>
                   <Text as="span" size="1" title={dateDisplay.tooltip}>
                     {dateDisplay.text}

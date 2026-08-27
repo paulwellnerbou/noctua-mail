@@ -43,8 +43,9 @@ export function getAttachmentContentBuffer(attachment: Attachment) {
 }
 
 export async function sanitizeSyncedMessage(message: Message, accountId: string): Promise<Message> {
+  let sizeBytes = message.sizeBytes;
   if (message.source) {
-    await saveMessageSource(accountId, message.id, message.source);
+    sizeBytes = await saveMessageSource(accountId, message.id, message.source);
   }
   let htmlBody = message.htmlBody;
   const dataUrlReplacements = new Map<string, string>();
@@ -79,6 +80,7 @@ export async function sanitizeSyncedMessage(message: Message, accountId: string)
     ...rest,
     htmlBody,
     attachments,
-    hasSource: Boolean(source ?? message.hasSource)
+    hasSource: Boolean(source ?? message.hasSource),
+    sizeBytes
   };
 }

@@ -3,6 +3,7 @@ import type { CSSProperties } from "react";
 import { CalendarDays, GitBranch, MoveRight, Paperclip, Trash2 } from "lucide-react";
 import { Badge, IconButton, Text } from "@radix-ui/themes";
 import { badgeColors } from "@/lib/ui/badgeColors";
+import { describeMessageSize } from "@/lib/ui/byteSize";
 import type { Message } from "@/lib/data";
 import SenderIcon from "../SenderIcon";
 import { CALENDAR_INVITE_FLAG, hasMessageFlag } from "@/lib/messageFlags";
@@ -65,6 +66,7 @@ export default function MessageThreadList({
     userEmail,
     findRecipientAlias,
     dateFormat,
+    showMessageSize,
     topicColorRows,
     senderIconsEnabled
   } = state;
@@ -434,6 +436,14 @@ export default function MessageThreadList({
                     <TopicBadge key={topic.id} topic={topic} size="1" preferShortName />
                   ))}
                 </span>
+
+                {showMessageSize && (
+                  <span className={styles.cellSize}>
+                    <Text as="span" size="1" title={describeMessageSize(message.sizeBytes).title}>
+                      {describeMessageSize(message.sizeBytes).label}
+                    </Text>
+                  </span>
+                )}
 
                 <span className={styles.cellDate}>
                   <Text as="span" size="1" title={dateDisplay.tooltip}>

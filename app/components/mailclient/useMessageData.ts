@@ -14,6 +14,7 @@ import { logListDebug, summarizeMessageForListDebug } from "./messagelist/listDe
 import type { SearchBadgesState } from "./useSearchState";
 import { buildMessageListQueryUrl } from "./messageListQueryUrl";
 import type { ThreadDateSource } from "@/lib/threadDate";
+import type { MessageListSortBy } from "@/lib/messageListSort";
 
 type ApiFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
@@ -33,6 +34,7 @@ export type UseMessageDataParams = {
   supportsThreads: boolean;
   groupBy: string;
   threadDateSource: ThreadDateSource;
+  sortBy: MessageListSortBy;
   query: string;
   authState: "loading" | "ok" | "unauth";
   apiFetch: ApiFetch;
@@ -59,6 +61,7 @@ export function useMessageData({
   supportsThreads,
   groupBy,
   threadDateSource,
+  sortBy,
   query,
   authState,
   apiFetch,
@@ -163,6 +166,7 @@ export function useMessageData({
       currentSearchExcludedFolderIds,
       supportsThreads,
       threadDateSource,
+      sortBy,
       isRelatedSearch,
       relatedQueryId,
       query,

@@ -79,6 +79,7 @@ export async function getMessageById(accountId: string, messageId: string) {
     htmlBody: row.htmlBody ?? undefined,
     priority: row.priority ?? undefined,
     hasSource: Boolean(row.hasSource),
+    sizeBytes: typeof row.sizeBytes === "number" ? row.sizeBytes : undefined,
     attachments: attachments.map((att) => hydrateAttachment(accountId, row.id, att)),
     unread: Boolean(row.unread),
     flags: safeParseJson<string[]>(row.flags),

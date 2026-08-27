@@ -751,7 +751,8 @@ export function initAccountSchema(db: any) {
       categoryScore REAL,
       categorySignals TEXT,
       categoryManualState TEXT,
-      listId TEXT
+      listId TEXT,
+      sizeBytes INTEGER
     );
 
     CREATE TABLE IF NOT EXISTS attachments (
@@ -1141,11 +1142,18 @@ export function initAccountSchema(db: any) {
   if (!messageColumns.has("replyToAddr")) {
     db.prepare(`ALTER TABLE messages ADD COLUMN replyToAddr TEXT`).run();
   }
+  if (!messageColumns.has("sizeBytes")) {
+    db.prepare(`ALTER TABLE messages ADD COLUMN sizeBytes INTEGER`).run();
+  }
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_messages_account_pending_move_source
       ON messages(accountId, pendingMoveSourceFolderId, pendingMoveSourceUid);
     CREATE INDEX IF NOT EXISTS idx_messages_account_pending_move_destination
       ON messages(accountId, folderId, pendingMoveSourceFolderId);
+    CREATE INDEX IF NOT EXISTS idx_messages_account_size
+      ON messages(accountId, sizeBytes DESC);
+    CREATE INDEX IF NOT EXISTS idx_messages_account_folder_size
+      ON messages(accountId, folderId, sizeBytes DESC);
   `);
   ensureThreadOptionalColumns(db);
   ensureTopicOptionalColumns(db);

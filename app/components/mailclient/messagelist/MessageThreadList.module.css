@@ -362,6 +362,16 @@
   flex-shrink: 0;
 }
 
+.cellSize {
+  min-width: 68px;
+  text-align: right;
+  font-size: 12px;
+  color: var(--gray-11);
+  flex-shrink: 0;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
 .cellActions {
   display: flex;
   align-items: center;

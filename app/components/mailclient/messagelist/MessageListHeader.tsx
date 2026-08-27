@@ -3,6 +3,7 @@ import type React from "react";
 import { ChevronsDown, ChevronsUp, Folder, GitBranch, RefreshCw } from "lucide-react";
 import { IconButton, SegmentedControl, Select, Text } from "@radix-ui/themes";
 import type { ThreadDateSource } from "@/lib/threadDate";
+import { isFlatMessageListSort, type MessageListSortBy } from "@/lib/messageListSort";
 import type { MessageGroup } from "./listModel";
 import type { MessageViewMode, ThreadsMode } from "./messageListViewTypes";
 import styles from "./MessageListHeader.module.css";
@@ -20,6 +21,7 @@ export type MessageListHeaderProps = {
     hasMoreMessages: boolean;
     messageView: MessageViewMode;
     groupBy: "none" | "date" | "week" | "sender" | "domain" | "year" | "folder" | "event";
+    messageSort: MessageListSortBy;
     eventGroupingAvailable: boolean;
     threadDateSource: ThreadDateSource;
     threadsMode: ThreadsMode;
@@ -34,6 +36,7 @@ export type MessageListHeaderProps = {
     setGroupBy: React.Dispatch<
       React.SetStateAction<"none" | "date" | "week" | "sender" | "domain" | "year" | "folder" | "event">
     >;
+    setMessageSort: (sortBy: MessageListSortBy) => void;
     setThreadDateSource: React.Dispatch<React.SetStateAction<ThreadDateSource>>;
     setThreadsMode: React.Dispatch<React.SetStateAction<ThreadsMode>>;
     toggleAllGroups: () => void;
@@ -53,6 +56,7 @@ export default function MessageListHeader({ state, actions }: MessageListHeaderP
     hasMoreMessages,
     messageView,
     groupBy,
+    messageSort,
     eventGroupingAvailable,
     threadDateSource,
     threadsMode,
@@ -65,15 +69,18 @@ export default function MessageListHeader({ state, actions }: MessageListHeaderP
     setMessagesPage,
     setMessageView,
     setGroupBy,
+    setMessageSort,
     setThreadDateSource,
     setThreadsMode,
     toggleAllGroups
   } = actions;
   const [localView, setLocalView] = useState(messageView);
   const [localGroupBy, setLocalGroupBy] = useState(groupBy);
+  const [localSort, setLocalSort] = useState(messageSort);
   const [localThreadDateSource, setLocalThreadDateSource] = useState(threadDateSource);
   const viewFrameRef = useRef<number | null>(null);
   const groupFrameRef = useRef<number | null>(null);
+  const sortFrameRef = useRef<number | null>(null);
   const threadDateFrameRef = useRef<number | null>(null);
 
   useEffect(() => {
@@ -83,6 +90,10 @@ export default function MessageListHeader({ state, actions }: MessageListHeaderP
   useEffect(() => {
     setLocalGroupBy(groupBy);
   }, [groupBy]);
+
+  useEffect(() => {
+    setLocalSort(messageSort);
+  }, [messageSort]);
 
   useEffect(() => {
     setLocalThreadDateSource(threadDateSource);
@@ -106,6 +117,12 @@ export default function MessageListHeader({ state, actions }: MessageListHeaderP
     const next = value as "none" | "date" | "week" | "sender" | "domain" | "year" | "folder" | "event";
     setLocalGroupBy(next);
     scheduleCommit(groupFrameRef, () => setGroupBy(next));
+  };
+
+  const handleSortChange = (value: string) => {
+    const next = value as MessageListSortBy;
+    setLocalSort(next);
+    scheduleCommit(sortFrameRef, () => setMessageSort(next));
   };
 
   const handleThreadDateSourceChange = (value: string) => {
@@ -132,7 +149,11 @@ export default function MessageListHeader({ state, actions }: MessageListHeaderP
   const title =
     activeVirtualFolderName?.trim() ||
     (searchScope === "folder" ? activeFolderName?.trim() || "Everything" : "Everything");
-  const showThreadDateSelect = ["date", "week", "year"].includes(localGroupBy);
+  // Size ordering is a flat ranking of the whole mailbox, so grouping and the
+  // thread-date choice have nothing to act on.
+  const groupingDisabled = isFlatMessageListSort(localSort);
+  const showThreadDateSelect =
+    !groupingDisabled && ["date", "week", "year"].includes(localGroupBy);
 
   const threadsScopeInactive = threadsMode === "scope" && !threadsScopeAvailable;
   const threadsButtonColor: "gray" | "blue" | "indigo" =
@@ -141,15 +162,17 @@ export default function MessageListHeader({ state, actions }: MessageListHeaderP
       : threadsMode === "scope"
         ? "blue"
         : "indigo";
-  const threadsButtonTitle = !threadsAllowed
-    ? "Threads require Date/Week/Year grouping"
-    : threadsMode === "off"
-      ? "Threads off"
-      : threadsMode === "on"
-        ? "Threads on"
-        : threadsScopeInactive
-          ? "Threads on (scoped views) - inactive while searching everywhere"
-          : "Threads on (scoped views)";
+  const threadsButtonTitle = groupingDisabled
+    ? "Threads are off while sorting by size"
+    : !threadsAllowed
+      ? "Threads require Date/Week/Year grouping"
+      : threadsMode === "off"
+        ? "Threads off"
+        : threadsMode === "on"
+          ? "Threads on"
+          : threadsScopeInactive
+            ? "Threads on (scoped views) - inactive while searching everywhere"
+            : "Threads on (scoped views)";
 
   return (
     <div className={styles.header}>
@@ -213,12 +236,24 @@ export default function MessageListHeader({ state, actions }: MessageListHeaderP
           </SegmentedControl.Root>
         )}
         <div className={styles.rightActions}>
+          <Select.Root size="2" value={localSort} onValueChange={handleSortChange}>
+            <Select.Trigger className={styles.sortSelectTrigger} color="gray" />
+            <Select.Content position="popper">
+              <Select.Item value="date">Sort: Date</Select.Item>
+              <Select.Item value="size">Sort: Size</Select.Item>
+            </Select.Content>
+          </Select.Root>
           <Select.Root
             size="2"
-            value={localGroupBy}
+            value={groupingDisabled ? "none" : localGroupBy}
             onValueChange={handleGroupChange}
+            disabled={groupingDisabled}
           >
-            <Select.Trigger className={styles.groupSelectTrigger} color="gray" />
+            <Select.Trigger
+              className={styles.groupSelectTrigger}
+              color="gray"
+              title={groupingDisabled ? "Grouping is off while sorting by size" : undefined}
+            />
             <Select.Content position="popper">
               <Select.Item value="date">Group: Date</Select.Item>
               <Select.Item value="week">Group: Week</Select.Item>

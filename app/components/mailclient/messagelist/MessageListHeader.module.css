@@ -51,6 +51,10 @@
   justify-content: flex-end;
 }
 
+.sortSelectTrigger {
+  min-width: 118px;
+}
+
 .groupSelectTrigger {
   min-width: 170px;
 }

@@ -84,6 +84,11 @@ export function sortMessages(
     let cmp = 0;
     if (sortKey === "date") {
       cmp = a.dateValue - b.dateValue;
+    } else if (sortKey === "size") {
+      // Messages with no recorded size rank below every known size, matching
+      // the server's NULLs-last ordering.
+      cmp = (a.sizeBytes ?? -1) - (b.sizeBytes ?? -1);
+      if (cmp === 0) cmp = a.dateValue - b.dateValue;
     } else if (sortKey === "from") {
       cmp = a.from.localeCompare(b.from);
     } else {

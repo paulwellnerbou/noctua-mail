@@ -11,6 +11,7 @@ import {
   type FromParticipant
 } from "./threadGroupUtils";
 import { isFlaggedMessage } from "../utils/messageHelpers";
+import type { MessageListSortBy } from "@/lib/messageListSort";
 import { getCollapsedThreadRepresentativeMessage } from "./threadRepresentativeMessage";
 import type { ThreadNode } from "./threadTree";
 export type { ThreadNode } from "./threadTree";
@@ -137,6 +138,7 @@ export function buildGroupedMessages(params: {
   computeGroupMeta: (items: Message[]) => MessageGroupMeta[];
   includeFlaggedGroup?: boolean;
   includeDoneGroup?: boolean;
+  sortBy?: MessageListSortBy;
 }): MessageGroup[] {
   const {
     listScopeMessages,
@@ -149,9 +151,15 @@ export function buildGroupedMessages(params: {
     hasDoneFlag,
     computeGroupMeta,
     includeFlaggedGroup = true,
-    includeDoneGroup = false
+    includeDoneGroup = false,
+    sortBy = "date"
   } = params;
-  const base = [...listScopeMessages].sort((a, b) => b.dateValue - a.dateValue);
+  // Any ordering other than date arrives already sorted by the caller;
+  // re-sorting here would throw that ranking away.
+  const base =
+    sortBy === "date"
+      ? [...listScopeMessages].sort((a, b) => b.dateValue - a.dateValue)
+      : [...listScopeMessages];
   const groups = new Map<string, Message[]>();
   const threadGroupKey = new Map<string, string>();
   const isDoneMessage = (message: Message) => includeDoneGroup && hasDoneFlag?.(message);
