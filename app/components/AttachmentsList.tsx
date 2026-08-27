@@ -285,6 +285,8 @@ export default function AttachmentsList({
     const downloadHref = getAttachmentDownloadHref(file);
     const defaultHref = previewHref ?? downloadHref ?? "#";
     const defaultActionLabel = previewHref ? "Preview attachment" : "Download attachment";
+    const removeNoun = isImage(file.contentType) ? "image" : "attachment";
+    const removeLabel = `Remove ${removeNoun}${file.filename ? `: ${file.filename}` : ""}`;
     return (
       <div key={file.id} className="attachment-item">
         <div
@@ -347,7 +349,8 @@ export default function AttachmentsList({
           <button
             type="button"
             className="icon-button ghost"
-            title="Remove attachment"
+            title={removeLabel}
+            aria-label={removeLabel}
             onClick={(event) => {
               event.preventDefault();
               event.stopPropagation();
