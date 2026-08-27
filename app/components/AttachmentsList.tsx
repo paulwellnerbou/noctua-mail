@@ -4,8 +4,9 @@ import { X, Download } from "lucide-react";
 import { FileIcon, defaultStyles } from "react-file-icon";
 import type { Attachment } from "@/lib/data";
 import { openDetachedWindow } from "@/lib/ui/openDetachedWindow";
+import { formatByteSize } from "@/lib/ui/byteSize";
 import { formatAttachmentPageTitle } from "@/lib/appBranding";
-import { shouldHideAttachmentFromList } from "@/lib/messageFlags";
+import { isRenderableInlineAttachment, shouldHideAttachmentFromList } from "@/lib/messageFlags";
 
 const PREVIEW_MIME_PREFIXES = ["image/", "text/"];
 const PREVIEW_MIME_TYPES = new Set([
@@ -269,114 +270,132 @@ export default function AttachmentsList({
     (attachment) => Boolean(getAttachmentDownloadHref(attachment))
   );
 
-  if (!visibleAttachments.length) return null;
+  // The inline footer/signature images are hidden from the main list (they
+  // render in the body). When removal is enabled, surface them in their own
+  // section using the exact same compact rows + hover preview as attachments.
+  const removableInlineImages = onRemove
+    ? attachments.filter((attachment) => isRenderableInlineAttachment(attachment, htmlBody))
+    : [];
+
+  const renderItem = (file: Attachment) => {
+    const ext = getIconExtension(file.contentType, file.filename);
+    const iconStyle = ext in defaultStyles ? defaultStyles[ext] : {};
+    const showImagePreview = isImage(file.contentType) && (file.url || file.dataUrl);
+    const previewHref = getAttachmentPreviewHref(file);
+    const downloadHref = getAttachmentDownloadHref(file);
+    const defaultHref = previewHref ?? downloadHref ?? "#";
+    const defaultActionLabel = previewHref ? "Preview attachment" : "Download attachment";
+    return (
+      <div key={file.id} className="attachment-item">
+        <div
+          className="attachment-icon-wrapper"
+          onMouseEnter={(event) => {
+            if (!showImagePreview) return;
+            setHoveredImagePreview({
+              alt: file.filename || "Attachment preview",
+              anchorEl: event.currentTarget,
+              src: file.url ?? file.dataUrl ?? ""
+            });
+          }}
+          onMouseLeave={() => {
+            setHoveredImagePreview((current) =>
+              current?.src === (file.url ?? file.dataUrl ?? "") ? null : current
+            );
+          }}
+        >
+          <div className="attachment-icon">
+            <FileIcon extension={ext} {...iconStyle} />
+          </div>
+        </div>
+        <a
+          className="attachment-link"
+          href={defaultHref}
+          download={!previewHref ? (file.filename || true) : undefined}
+          aria-label={defaultActionLabel}
+          title={defaultActionLabel}
+          onClick={(event) => {
+            if (previewHref) {
+              event.preventDefault();
+              openAttachmentPreview(previewHref, file.filename);
+              return;
+            }
+            if (!downloadHref) {
+              event.preventDefault();
+            }
+          }}
+        >
+          <span className="attachment-name">
+            {file.filename}{" "}
+            <span className="attachment-meta">
+              ({file.contentType || "unknown"}
+              {formatByteSize(file.size) ? `, ${formatByteSize(file.size)}` : ""})
+            </span>
+          </span>
+        </a>
+        {downloadHref && (
+          <a
+            className="icon-button ghost attachment-preview"
+            href={downloadHref}
+            download={file.filename || true}
+            aria-label="Download attachment"
+            title="Download attachment"
+          >
+            <Download size={12} />
+          </a>
+        )}
+        {onRemove && (
+          <button
+            type="button"
+            className="icon-button ghost"
+            title="Remove attachment"
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              onRemove(file.id);
+            }}
+          >
+            <X size={12} />
+          </button>
+        )}
+      </div>
+    );
+  };
+
+  if (!visibleAttachments.length && !removableInlineImages.length) return null;
   return (
     <>
-      <div className="attachments">
-        <div className="attachments-header">
-          <h4>Attachments</h4>
-          {showDownloadAll && downloadableAttachments.length > 1 && (
-            <button
-              type="button"
-              className="attachments-download-all"
-              onClick={() => {
-                downloadableAttachments.forEach((attachment) => {
-                  const href = getAttachmentDownloadHref(attachment);
-                  if (!href) return;
-                  triggerDownload(href, attachment.filename);
-                });
-              }}
-            >
-              <Download size={12} />
-              <span>Download all</span>
-            </button>
-          )}
+      {visibleAttachments.length > 0 && (
+        <div className="attachments">
+          <div className="attachments-header">
+            <h4>Attachments</h4>
+            {showDownloadAll && downloadableAttachments.length > 1 && (
+              <button
+                type="button"
+                className="attachments-download-all"
+                onClick={() => {
+                  downloadableAttachments.forEach((attachment) => {
+                    const href = getAttachmentDownloadHref(attachment);
+                    if (!href) return;
+                    triggerDownload(href, attachment.filename);
+                  });
+                }}
+              >
+                <Download size={12} />
+                <span>Download all</span>
+              </button>
+            )}
+          </div>
+          <div className="attachment-list">{visibleAttachments.map(renderItem)}</div>
         </div>
-        <div className="attachment-list">
-          {visibleAttachments.map((file) => {
-            const ext = getIconExtension(file.contentType, file.filename);
-            const iconStyle = ext in defaultStyles ? defaultStyles[ext] : {};
-            const showImagePreview = isImage(file.contentType) && (file.url || file.dataUrl);
-            const previewHref = getAttachmentPreviewHref(file);
-            const downloadHref = getAttachmentDownloadHref(file);
-            const defaultHref = previewHref ?? downloadHref ?? "#";
-            const defaultActionLabel = previewHref ? "Preview attachment" : "Download attachment";
-            return (
-              <div key={file.id} className="attachment-item">
-                <div
-                  className="attachment-icon-wrapper"
-                  onMouseEnter={(event) => {
-                    if (!showImagePreview) return;
-                    setHoveredImagePreview({
-                      alt: file.filename || "Attachment preview",
-                      anchorEl: event.currentTarget,
-                      src: file.url ?? file.dataUrl ?? ""
-                    });
-                  }}
-                  onMouseLeave={() => {
-                    setHoveredImagePreview((current) =>
-                      current?.src === (file.url ?? file.dataUrl ?? "") ? null : current
-                    );
-                  }}
-                >
-                  <div className="attachment-icon">
-                    <FileIcon extension={ext} {...iconStyle} />
-                  </div>
-                </div>
-                <a
-                  className="attachment-link"
-                  href={defaultHref}
-                  download={!previewHref ? (file.filename || true) : undefined}
-                  aria-label={defaultActionLabel}
-                  title={defaultActionLabel}
-                  onClick={(event) => {
-                    if (previewHref) {
-                      event.preventDefault();
-                      openAttachmentPreview(previewHref, file.filename);
-                      return;
-                    }
-                    if (!downloadHref) {
-                      event.preventDefault();
-                    }
-                  }}
-                >
-                  <span className="attachment-name">
-                    {file.filename}{" "}
-                    <span className="attachment-meta">
-                      ({file.contentType || "unknown"}, {Math.round(file.size / 1024)} KB)
-                    </span>
-                  </span>
-                </a>
-                {downloadHref && (
-                  <a
-                    className="icon-button ghost attachment-preview"
-                    href={downloadHref}
-                    download={file.filename || true}
-                    aria-label="Download attachment"
-                    title="Download attachment"
-                  >
-                    <Download size={12} />
-                  </a>
-                )}
-                {onRemove && (
-                  <button
-                    type="button"
-                    className="icon-button ghost"
-                    title="Remove attachment"
-                    onClick={(event) => {
-                      event.preventDefault();
-                      event.stopPropagation();
-                      onRemove(file.id);
-                    }}
-                  >
-                    <X size={12} />
-                  </button>
-                )}
-              </div>
-            );
-          })}
+      )}
+      {removableInlineImages.length > 0 && (
+        <div className="attachments">
+          <div className="attachments-header">
+            <h4>Images in message</h4>
+          </div>
+          <div className="attachment-list">{removableInlineImages.map(renderItem)}</div>
         </div>
-      </div>
+      )}
       <AttachmentImagePreviewPortal preview={hoveredImagePreview} />
     </>
   );
