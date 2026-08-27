@@ -200,6 +200,41 @@ describe("sortMessages", () => {
     ]);
   });
 
+  test("by size descending (largest first)", () => {
+    const messages = [
+      makeMessage({ id: "small", sizeBytes: 1_024 }),
+      makeMessage({ id: "huge", sizeBytes: 9_000_000 }),
+      makeMessage({ id: "medium", sizeBytes: 64_000 })
+    ];
+    expect(sortMessages(messages, "size", "desc").map((m) => m.id)).toEqual([
+      "huge",
+      "medium",
+      "small"
+    ]);
+  });
+
+  test("by size — messages with no recorded size rank last when descending", () => {
+    const messages = [
+      makeMessage({ id: "unknown" }),
+      makeMessage({ id: "tiny", sizeBytes: 1 })
+    ];
+    expect(sortMessages(messages, "size", "desc").map((m) => m.id)).toEqual([
+      "tiny",
+      "unknown"
+    ]);
+  });
+
+  test("by size — equal sizes fall back to date", () => {
+    const messages = [
+      makeMessage({ id: "older", sizeBytes: 500, dateValue: oldDate }),
+      makeMessage({ id: "newer", sizeBytes: 500, dateValue: newDate })
+    ];
+    expect(sortMessages(messages, "size", "desc").map((m) => m.id)).toEqual([
+      "newer",
+      "older"
+    ]);
+  });
+
   test("does not mutate the input array", () => {
     const messages = [
       makeMessage({ id: "m1", dateValue: newDate }),

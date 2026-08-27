@@ -10,6 +10,7 @@ import {
   type VisibleMessageEntry
 } from "./listModel";
 import { isTopicSuggestionGroupKey } from "./topicSuggestionGroup";
+import type { MessageListSortBy } from "@/lib/messageListSort";
 
 type UseMessageListDerivedStateParams = {
   sortedMessages: Message[];
@@ -18,6 +19,7 @@ type UseMessageListDerivedStateParams = {
   isThreadExcludedFolder: (folderId?: string | null) => boolean;
   supportsThreads: boolean;
   groupBy: string;
+  sortBy?: MessageListSortBy;
   groupMeta: MessageGroupMeta[];
   isFlaggedMessage: (message: Message) => boolean;
   hasDoneFlag?: (message: Message) => boolean;
@@ -106,6 +108,7 @@ export function useMessageListDerivedState({
   isThreadExcludedFolder,
   supportsThreads,
   groupBy,
+  sortBy = "date",
   groupMeta,
   isFlaggedMessage,
   hasDoneFlag,
@@ -165,7 +168,8 @@ export function useMessageListDerivedState({
         hasDoneFlag,
         computeGroupMeta,
         includeFlaggedGroup,
-        includeDoneGroup
+        includeDoneGroup,
+        sortBy
       }),
     [
       buildThreadTree,
@@ -178,6 +182,7 @@ export function useMessageListDerivedState({
       hasDoneFlag,
       isFlaggedMessage,
       listScopeMessages,
+      sortBy,
       supportsThreads
     ]
   );

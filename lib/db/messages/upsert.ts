@@ -142,7 +142,7 @@ export async function upsertMessages(
     );
     const deleteMessageById = db.prepare(`DELETE FROM messages WHERE accountId = ? AND id = ?`);
     const findMessageById = db.prepare(
-      `SELECT id, folderId, mailboxPath, imapUid, flags
+      `SELECT id, folderId, mailboxPath, imapUid, flags, sizeBytes
        FROM messages
        WHERE accountId = ? AND id = ?`
     );
@@ -185,8 +185,8 @@ export async function upsertMessages(
         id, accountId, folderId, threadId, parentId, messageId, inReplyTo, "references", xForwardedMessageId, xComposeFormat, quotedHtmlEdited,
         subject, fromAddr, fromEmail, replyToAddr, toAddr, ccAddr, bccAddr, mailboxPath, imapUid, preview, date, dateValue,
         body, htmlBody, priority, hasSource, unread, flags, seen, answered, flagged, deleted, draft, recent,
-        category, categoryScore, categorySignals, categoryManualState, listUnsubscribe, listId
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        category, categoryScore, categorySignals, categoryManualState, listUnsubscribe, listId, sizeBytes
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     const insertFts = db.prepare(`
       INSERT INTO message_fts (messageId, subject, fromAddr, toAddr, ccAddr, bccAddr, body, preview)
@@ -288,8 +288,10 @@ export async function upsertMessages(
               mailboxPath?: string | null;
               imapUid?: number | null;
               flags?: string | null;
+              sizeBytes?: number | null;
             }
           | undefined;
+        let existingRow = existingById;
         if (existingById && !isSameMailboxMessageCopy(existingById, message)) {
           rowId = buildMessageCollisionVariantId(
             message.id,
@@ -304,6 +306,7 @@ export async function upsertMessages(
           // `buildMessageRowIdLookupCandidates`); the reverse direction is
           // not guaranteed. The newly-assigned variant row is fresh and
           // will fetch its own source/attachments on first access.
+          existingRow = findMessageById.get(accountId, rowId) as typeof existingById;
         }
         if (message.messageId) {
           const duplicates = findFolderMessageDuplicates.all(
@@ -451,6 +454,15 @@ export async function upsertMessages(
           manualCategoryStateByMessageId.get(rowId) ??
           manualCategoryStateByMessageId.get(message.id) ??
           null;
+        // INSERT OR REPLACE rewrites the whole row, so a source-less upsert
+        // (envelope-only sync fallback) would otherwise drop a size the
+        // stored .eml still backs.
+        const sizeBytes =
+          typeof message.sizeBytes === "number" && Number.isFinite(message.sizeBytes)
+            ? message.sizeBytes
+            : typeof existingRow?.sizeBytes === "number"
+              ? existingRow.sizeBytes
+              : null;
         const category =
           manualCategoryState === "cleared" ? null : normalizeCategory(message.category) ?? null;
         const categoryScore =
@@ -522,7 +534,8 @@ export async function upsertMessages(
           categorySignals ? JSON.stringify(categorySignals) : null,
           manualCategoryState,
           message.listUnsubscribe ?? null,
-          message.listId ?? null
+          message.listId ?? null,
+          sizeBytes
         );
         deleteFts.run(rowId);
         insertFts.run(

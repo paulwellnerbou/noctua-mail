@@ -35,6 +35,7 @@ import {
   INVITE_DECK_GROUP_BY,
   sortGroupsForGroupBy
 } from "../../messageGrouping";
+import type { MessageListSortBy } from "../../messageListSort";
 import {
   DEFAULT_THREAD_DATE_SOURCE,
   isThreadDateSensitiveGroupBy,
@@ -1590,6 +1591,7 @@ export async function listRelatedMessages(params: {
         m.dateValue,
         m.priority,
         m.hasSource,
+        m.sizeBytes,
         m.unread,
         m.flags,
         m.seen,
@@ -1755,6 +1757,7 @@ export async function listRelatedMessages(params: {
       htmlBody: undefined,
       priority: row.priority ?? undefined,
       hasSource: Boolean(row.hasSource),
+      sizeBytes: typeof row.sizeBytes === "number" ? row.sizeBytes : undefined,
       hasAttachments: Boolean(row.hasAttachments),
       hasInlineAttachments: Boolean(row.hasInlineAttachments),
       attachments: [],
@@ -1859,6 +1862,7 @@ export async function listMessages(params: {
   from?: string[] | null;
   recipients?: string[] | null;
   participants?: string[] | null;
+  sortBy?: MessageListSortBy;
 }) {
   const {
     accountId,
@@ -1873,7 +1877,8 @@ export async function listMessages(params: {
     excludedFolderIds,
     from,
     recipients,
-    participants
+    participants,
+    sortBy = "date"
   } = params;
   const db = await getAccountDb(accountId);
   const offset = (page - 1) * pageSize;
@@ -1960,6 +1965,7 @@ export async function listMessages(params: {
     where += ` AND ${buildMeaningfulAttachmentExistsSql("m")}`;
   }
   const shouldPrioritizeFlaggedMessages =
+    sortBy === "date" &&
     !hasQuery &&
     !hasInviteUidQuery &&
     !hasIdQuery &&
@@ -1969,9 +1975,15 @@ export async function listMessages(params: {
     threadTerms.length === 0 &&
     (badges?.length ?? 0) === 0 &&
     !attachmentsFilter;
-  const orderBySql = shouldPrioritizeFlaggedMessages
-    ? "m.flagged DESC, m.dateValue DESC"
-    : "m.dateValue DESC";
+  // SQLite ranks NULL below every value, so `sizeBytes DESC` parks rows with
+  // no recorded size at the end without a COALESCE that would shut the
+  // (accountId, sizeBytes DESC) index out.
+  const orderBySql =
+    sortBy === "size"
+      ? "m.sizeBytes DESC, m.dateValue DESC"
+      : shouldPrioritizeFlaggedMessages
+        ? "m.flagged DESC, m.dateValue DESC"
+        : "m.dateValue DESC";
   const rows = db
     .prepare(
       `
@@ -2000,6 +2012,7 @@ export async function listMessages(params: {
         m.dateValue,
         m.priority,
         m.hasSource,
+        m.sizeBytes,
         m.unread,
         m.flags,
         m.seen,
@@ -2076,6 +2089,7 @@ export async function listMessages(params: {
       htmlBody: undefined,
       priority: row.priority ?? undefined,
       hasSource: Boolean(row.hasSource),
+      sizeBytes: typeof row.sizeBytes === "number" ? row.sizeBytes : undefined,
       hasAttachments: Boolean(row.hasAttachments),
       hasInlineAttachments: Boolean(row.hasInlineAttachments),
       attachments: [],
@@ -2521,6 +2535,7 @@ export async function listThreads(params: {
               m.dateValue,
               m.priority,
               m.hasSource,
+              m.sizeBytes,
               m.unread,
               m.flags,
               m.seen,
@@ -2598,6 +2613,7 @@ export async function listThreads(params: {
       htmlBody: undefined,
       priority: row.priority ?? undefined,
       hasSource: Boolean(row.hasSource),
+      sizeBytes: typeof row.sizeBytes === "number" ? row.sizeBytes : undefined,
       hasAttachments: Boolean(row.hasAttachments),
       hasInlineAttachments: Boolean(row.hasInlineAttachments),
       attachments: [],
@@ -2817,6 +2833,7 @@ export async function listThreadMessages(params: {
       htmlBody: row.htmlBody ?? undefined,
       priority: row.priority ?? undefined,
       hasSource: Boolean(row.hasSource),
+      sizeBytes: typeof row.sizeBytes === "number" ? row.sizeBytes : undefined,
       attachments: attachmentsByMessage.get(row.id) ?? [],
       unread: Boolean(row.unread),
       flags: safeParseJson<string[]>(row.flags),

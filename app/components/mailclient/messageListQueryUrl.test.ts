@@ -21,7 +21,8 @@ const baseOpts: BuildMessageListQueryUrlOptions = {
   query: "",
   selectedSearchFields: ["subject", "from"],
   searchBadges: { attachments: false },
-  effectiveSearchBadges: []
+  effectiveSearchBadges: [],
+  sortBy: "date"
 };
 
 function parseQuery(url: string): Record<string, string> {
@@ -187,6 +188,25 @@ describe("buildMessageListQueryUrl — search badges", () => {
     const params = parseQuery(url);
     expect(params.attachments).toBeUndefined();
     expect(params.badges).toBeUndefined();
+  });
+});
+
+describe("buildMessageListQueryUrl — sort", () => {
+  test("size sort → sortBy=size", () => {
+    const url = buildMessageListQueryUrl({ ...baseOpts, sortBy: "size" });
+    expect(parseQuery(url).sortBy).toBe("size");
+  });
+
+  test("date sort is the default and stays out of the query string", () => {
+    expect(parseQuery(buildMessageListQueryUrl(baseOpts)).sortBy).toBeUndefined();
+  });
+
+  test("size sort survives the search endpoint", () => {
+    const url = buildMessageListQueryUrl({ ...baseOpts, sortBy: "size", query: "invoice" });
+    expect(url).toMatch(/^\/api\/accounts\/acc-1\/search\?/);
+    const params = parseQuery(url);
+    expect(params.sortBy).toBe("size");
+    expect(params.q).toBe("invoice");
   });
 });
 

@@ -4,6 +4,7 @@ import {
   buildAccountSearchPath,
   buildAccountThreadsPath
 } from "@/lib/accountApiPaths";
+import type { MessageListSortBy } from "@/lib/messageListSort";
 import { INVITE_DECK_GROUP_BY } from "@/lib/messageGrouping";
 import type { ThreadDateSource } from "@/lib/threadDate";
 import type { SearchBadgesState } from "./useSearchState";
@@ -42,6 +43,7 @@ export type BuildMessageListQueryUrlOptions = {
   selectedSearchFields: string[];
   searchBadges: Pick<SearchBadgesState, "attachments">;
   effectiveSearchBadges: string[];
+  sortBy: MessageListSortBy;
 };
 
 export function resolveMessageListPageSize(
@@ -65,6 +67,10 @@ export function buildMessageListQueryUrl(opts: BuildMessageListQueryUrlOptions):
 
   if (opts.supportsThreads) {
     params.set("threadDateSource", opts.threadDateSource);
+  }
+
+  if (opts.sortBy !== "date") {
+    params.set("sortBy", opts.sortBy);
   }
 
   if (!opts.isRelatedSearch && trimmedQuery) {

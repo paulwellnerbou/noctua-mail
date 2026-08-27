@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { enrichMessagesWithThreadTopics } from "@/app/api/_helpers/enrichMessagesWithThreadTopics";
 import { rejectOverlongSearchQuery } from "@/app/api/_helpers/searchQueryLength";
-import { listMessages } from "@/lib/db";
+import { ensureMessageSourceSizes, listMessages } from "@/lib/db";
+import { normalizeMessageListSortBy } from "@/lib/messageListSort";
 import { requireSessionAccountOr403, requireSessionOr401 } from "@/lib/auth";
 
 type ListMessagesHandlerOptions = {
@@ -35,11 +36,22 @@ export async function handleListMessagesRequest(
   const page = Math.max(1, Number(searchParams.get("page") ?? 1) || 1);
   const pageSize = Math.max(1, Math.min(1000, Number(searchParams.get("pageSize") ?? 200) || 200));
   const groupBy = searchParams.get("groupBy") ?? "date";
+  const sortBy = normalizeMessageListSortBy(searchParams.get("sortBy"));
   if (!accountId) {
     return NextResponse.json({ ok: false, message: "Missing accountId" }, { status: 400 });
   }
   const access = await requireSessionAccountOr403(session, accountId);
   if (access instanceof NextResponse) return access;
+  // Rows synced before `sizeBytes` existed have no size and would sink to the
+  // bottom of a size-ordered page, so fill them in before the first such query.
+  // A failed pass only costs ranking accuracy, so the list still renders.
+  if (sortBy === "size") {
+    try {
+      await ensureMessageSourceSizes(accountId);
+    } catch (error) {
+      console.error(`[messages] size backfill failed account=${accountId}`, error);
+    }
+  }
   const data = await listMessages({
     accountId,
     folderId,
@@ -50,7 +62,8 @@ export async function handleListMessagesRequest(
     fields,
     badges,
     attachmentsOnly,
-    excludedFolderIds
+    excludedFolderIds,
+    sortBy
   });
   await enrichMessagesWithThreadTopics(data.items, { accountId });
   return NextResponse.json({

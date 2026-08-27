@@ -177,6 +177,7 @@ export async function saveMessages(nextMessages: Message[]) {
   await writeJson("messages.json", nextMessages);
 }
 
+/** Writes the raw source and returns the number of bytes it occupies on disk. */
 export async function saveMessageSource(
   accountId: string,
   messageId: string,
@@ -186,6 +187,45 @@ export async function saveMessageSource(
   const filePath = sourceFilePath(accountId, messageId);
   await ensureParentDir(filePath);
   await fs.writeFile(filePath, source);
+  return Buffer.byteLength(source);
+}
+
+/** Concurrent stat calls per chunk while walking an account's source directory. */
+const SOURCE_STAT_CONCURRENCY = 64;
+
+/**
+ * Byte size of every stored source for an account, keyed by the message id its
+ * filename encodes. One directory walk instead of a stat per database row, so
+ * rows whose source is long gone cost a map miss rather than a failed syscall.
+ */
+export async function listMessageSourceSizes(accountId: string) {
+  const dir = getSourcesAccountDir(accountId);
+  let fileNames: string[];
+  try {
+    fileNames = await fs.readdir(dir);
+  } catch {
+    return new Map<string, number>();
+  }
+  const sizes = new Map<string, number>();
+  const sourceFiles = fileNames.filter((name) => name.endsWith(".eml"));
+  for (let start = 0; start < sourceFiles.length; start += SOURCE_STAT_CONCURRENCY) {
+    const chunk = sourceFiles.slice(start, start + SOURCE_STAT_CONCURRENCY);
+    const stats = await Promise.all(
+      chunk.map(async (name) => {
+        try {
+          return await fs.stat(path.join(dir, name));
+        } catch {
+          return null;
+        }
+      })
+    );
+    chunk.forEach((name, index) => {
+      const stat = stats[index];
+      if (!stat?.isFile()) return;
+      sizes.set(decodeURIComponent(name.slice(0, -".eml".length)), stat.size);
+    });
+  }
+  return sizes;
 }
 
 export async function getMessageSource(accountId: string, messageId: string) {

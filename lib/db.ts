@@ -6,6 +6,7 @@ export {
 import {
   type GroupMeta,
   type StoredMessageSummary,
+  ensureMessageSourceSizes,
   getAttachmentIds,
   getAttachmentMeta,
   getMessageById,
@@ -22,6 +23,7 @@ import {
 export {
   type GroupMeta,
   type StoredMessageSummary,
+  ensureMessageSourceSizes,
   getAttachmentIds,
   getAttachmentMeta,
   getMessageById,

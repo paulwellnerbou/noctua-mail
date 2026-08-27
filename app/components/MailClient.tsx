@@ -80,6 +80,7 @@ import {
 import type { MessageGroup } from "./mailclient/messagelist/listModel";
 import {
   isThreadsScopeAvailable,
+  type SortKey,
   type ThreadsMode
 } from "./mailclient/messagelist/messageListViewTypes";
 import {
@@ -101,6 +102,11 @@ import {
   DEFAULT_THREAD_DATE_SOURCE,
   type ThreadDateSource
 } from "@/lib/threadDate";
+import {
+  DEFAULT_MESSAGE_LIST_SORT,
+  isFlatMessageListSort,
+  type MessageListSortBy
+} from "@/lib/messageListSort";
 import { stripHtmlToText } from "@/lib/html";
 import {
   CALENDAR_EVENTS_UPDATED_EVENT,
@@ -345,7 +351,7 @@ export default function MailClient({
   const [calendarSidebarWidth] = useState(400);
   const containerRef = useRef<HTMLDivElement | null>(null);
   const dragImageRef = useRef<HTMLDivElement | null>(null);
-  const [sortKey, setSortKey] = useState<"date" | "from" | "subject">("date");
+  const [sortKey, setSortKey] = useState<SortKey>("date");
   const [sortDir, setSortDir] = useState<"desc" | "asc">("desc");
   const [messageTopicsById, setMessageTopicsById] = useState<Map<string, Topic[]>>(new Map());
   const [topicPickerOpen, setTopicPickerOpen] = useState(false);
@@ -539,6 +545,7 @@ export default function MailClient({
   const [groupBy, setGroupBy] = useState<
     "none" | "date" | "week" | "sender" | "domain" | "year" | "folder" | "event"
   >("date");
+  const [messageSort, setMessageSort] = useState<MessageListSortBy>(DEFAULT_MESSAGE_LIST_SORT);
   const [threadDateSource, setThreadDateSource] =
     useState<ThreadDateSource>(DEFAULT_THREAD_DATE_SOURCE);
   const [collapsedThreads, setCollapsedThreads] = useState<Record<string, boolean>>({});
@@ -921,7 +928,7 @@ export default function MailClient({
   );
   const messagesKey = useMemo(
     () =>
-      `${activeAccountId}|${searchScope}|${everywhereExclusionKey}|${activeFolderId}|${activeVirtualFolder?.id ?? ""}|${trimmedQuery}|${groupBy}|${threadDateSource}|threads-${threadsMode}|${searchFieldKey}|${Object.entries(searchBadges)
+      `${activeAccountId}|${searchScope}|${everywhereExclusionKey}|${activeFolderId}|${activeVirtualFolder?.id ?? ""}|${trimmedQuery}|${groupBy}|${threadDateSource}|sort-${messageSort}|threads-${threadsMode}|${searchFieldKey}|${Object.entries(searchBadges)
         .filter(([, enabled]) => enabled)
         .map(([key]) => key)
         .join(",")}`,
@@ -931,6 +938,7 @@ export default function MailClient({
       activeVirtualFolder?.id,
       everywhereExclusionKey,
       groupBy,
+      messageSort,
       threadDateSource,
       trimmedQuery,
       threadsMode,
@@ -993,16 +1001,27 @@ export default function MailClient({
   );
   const isCalendarGroupByAvailable = effectiveSearchBadges.includes("calendar");
   const effectiveGroupBy = useMemo(
-    () =>
-      activeVirtualFolder?.id === "virtual:invite-deck" && groupBy === "date"
+    () => {
+      // Size ordering ranks the whole mailbox; bucketing it by date or sender
+      // would scatter the biggest messages across group headers.
+      if (isFlatMessageListSort(messageSort)) return "none";
+      return activeVirtualFolder?.id === "virtual:invite-deck" && groupBy === "date"
         ? INVITE_DECK_GROUP_BY
-        : groupBy,
-    [activeVirtualFolder?.id, groupBy]
+        : groupBy;
+    },
+    [activeVirtualFolder?.id, groupBy, messageSort]
   );
   useEffect(() => {
     if (groupBy !== EVENT_GROUP_BY || isCalendarGroupByAvailable) return;
     setGroupBy("date");
   }, [groupBy, isCalendarGroupByAvailable]);
+  // The in-page sort has to follow the server ordering, or re-sorting the
+  // fetched page would scramble the ranking the request just asked for.
+  const handleMessageSortChange = useCallback((next: MessageListSortBy) => {
+    setMessageSort(next);
+    setSortKey(next === "size" ? "size" : "date");
+    setSortDir("desc");
+  }, []);
   const selectedSearchBadgeLabels = useMemo(
     () =>
       activeVirtualFolder
@@ -1235,6 +1254,7 @@ export default function MailClient({
   );
 
   const threadsAllowed =
+    !isFlatMessageListSort(messageSort) &&
     ["date", "week", "year"].includes(groupBy) &&
     !isDraftsFolder(activeFolderId) &&
     !checkIsThreadExcludedFolder(activeFolderId);
@@ -1280,6 +1300,7 @@ export default function MailClient({
     supportsThreads,
     groupBy: effectiveGroupBy,
     threadDateSource,
+    sortBy: messageSort,
     query,
     authState,
     apiFetch,
@@ -2482,11 +2503,14 @@ export default function MailClient({
     isThreadExcludedFolder: checkIsThreadExcludedFolder,
     supportsThreads,
     groupBy: effectiveGroupBy,
+    sortBy: messageSort,
     groupMeta,
     isFlaggedMessage,
     hasDoneFlag,
     computeGroupMeta,
-    includeFlaggedGroup: !(searchScope === "folder" && isTrashFolder(activeFolderId)),
+    includeFlaggedGroup:
+      !isFlatMessageListSort(messageSort) &&
+      !(searchScope === "folder" && isTrashFolder(activeFolderId)),
     includeDoneGroup: activeVirtualFolderId === "virtual:action-queue",
     prependedGroups: activeTopicSuggestionGroups,
     collapsedGroups,
@@ -5264,6 +5288,7 @@ export default function MailClient({
               loadingMessages,
               hasMoreMessages,
               groupBy,
+              messageSort,
               eventGroupingAvailable: isCalendarGroupByAvailable,
               threadDateSource,
               threadsMode,
@@ -5275,6 +5300,7 @@ export default function MailClient({
             actions: {
               setMessagesPage,
               setGroupBy,
+              setMessageSort: handleMessageSortChange,
               setThreadDateSource,
               setThreadsMode,
               toggleAllGroups
@@ -5302,6 +5328,7 @@ export default function MailClient({
             suggestedThreadIds,
             pendingSuggestedThreadIds: pendingTopicSuggestionThreadIds,
             sortDir,
+            showMessageSize: messageSort === "size",
             listIsNarrow,
             preferToDisplay,
             activeTopic,

@@ -4,6 +4,7 @@ import { CalendarDays, GitBranch, MoveRight, Paperclip, Search, Trash2 } from "l
 import { Badge, Checkbox, IconButton, Text } from "@radix-ui/themes";
 import { CaretRightIcon } from "@radix-ui/react-icons";
 import { badgeColors } from "@/lib/ui/badgeColors";
+import { describeMessageSize } from "@/lib/ui/byteSize";
 import type { AccountDateFormat, Message } from "@/lib/data";
 import SenderIcon from "../SenderIcon";
 import { hasAiModifiedFlag, hasTodoFlag, hasDoneFlag } from "../utils/messageHelpers";
@@ -91,6 +92,7 @@ type MessageRowProps = {
   messageTopics?: Topic[];
   collapsedThreadMessages?: Message[];
   dateFormat?: AccountDateFormat;
+  showSize?: boolean;
   topicColorRows?: boolean;
   senderIconsEnabled?: boolean;
 };
@@ -166,6 +168,7 @@ function MessageRow({
   messageTopics,
   collapsedThreadMessages,
   dateFormat,
+  showSize = false,
   topicColorRows,
   senderIconsEnabled = true
 }: MessageRowProps) {
@@ -236,6 +239,7 @@ function MessageRow({
     displayDate ?? message.date,
     dateFormat
   );
+  const size = showSize ? describeMessageSize(message.sizeBytes) : null;
   const firstTopicColor = topicColorRows ? (messageTopics?.[0]?.color ?? null) : null;
   const topicTintVar = firstTopicColor ? ({ "--topic-tint": `var(--${firstTopicColor}-a3)`, "--topic-tint-selected": `var(--${firstTopicColor}-a4)` } as React.CSSProperties) : undefined;
 
@@ -365,6 +369,11 @@ function MessageRow({
             <Badge size="1" variant="soft" color={badgeColors.new} className={badgeStyles.badge}>
               New
             </Badge>
+          )}
+          {size && (
+            <Text as="span" size="1" className={styles.size} title={size.title}>
+              {size.label}
+            </Text>
           )}
           <Text as="span" size="1" className={dateClassName} title={dateDisplay.tooltip}>
             {dateDisplay.text}
@@ -575,6 +584,7 @@ const areEqual = (prev: MessageRowProps, next: MessageRowProps) =>
   prev.threadHasDone === next.threadHasDone &&
   prev.threadHasAiModified === next.threadHasAiModified &&
   prev.messageTopics === next.messageTopics &&
+  prev.showSize === next.showSize &&
   prev.senderIconsEnabled === next.senderIconsEnabled;
 
 export default memo(MessageRow, areEqual);
