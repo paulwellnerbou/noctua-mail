@@ -158,6 +158,7 @@ import { useReminderNotifications } from "./mailclient/useReminderNotifications"
 import { useMessageData } from "./mailclient/useMessageData";
 import { useThreadContent } from "./mailclient/useThreadContent";
 import { useSyncController } from "./mailclient/useSyncController";
+import { registerRecentLocalDraftSave } from "./mailclient/recentLocalDraftSaves";
 import { useTopics } from "./mailclient/useTopics";
 import { useRecipientAliases } from "./mailclient/useRecipientAliases";
 import { useAccountController } from "./mailclient/useAccountController";
@@ -1543,6 +1544,16 @@ export default function MailClient({
 
   const handleRemoveAttachment = useCallback(
     async (message: Message, attachmentId: string) => {
+      // The removal appends a rewritten copy with the same Message-ID, in the
+      // same folder. The server's IMAP IDLE push can reach the notification
+      // stream BEFORE the DELETE response returns, so mark it as a self-made
+      // save up front — matched by Message-ID — to win that race. This is the
+      // same suppression path draft autosave uses (filtered before the planner).
+      registerRecentLocalDraftSave({
+        accountId: message.accountId,
+        folderId: message.folderId,
+        messageId: message.messageId ?? null
+      });
       const res = await apiFetch(
         buildAccountAttachmentPath(message.accountId, message.id, attachmentId),
         { method: "DELETE" }
@@ -1554,14 +1565,14 @@ export default function MailClient({
       const data = (await res.json().catch(() => ({}))) as {
         imapUid?: number | null;
       };
-      // The removal appended a rewritten copy with the same Message-ID; the
-      // next sync sees its new UID and would otherwise fire a "new mail"
-      // notification. Seed the dedup ring so the planner skips it (same
-      // mechanism the undo-move path uses).
-      const dedupKeys: string[] = [];
-      if (message.messageId) dedupKeys.push(message.messageId);
-      if (typeof data.imapUid === "number") dedupKeys.push(`uid:${data.imapUid}`);
-      if (dedupKeys.length > 0) seedNotificationDedupKeys(dedupKeys);
+      // Refresh the window and add the copy's UID, so a message without a
+      // Message-ID (planner falls back to the UID) is covered too.
+      registerRecentLocalDraftSave({
+        accountId: message.accountId,
+        folderId: message.folderId,
+        messageId: message.messageId ?? null,
+        uid: typeof data.imapUid === "number" ? data.imapUid : null
+      });
       const applyPatch = (item: Message): Message => {
         if (item.id !== message.id) return item;
         return {
@@ -1605,7 +1616,6 @@ export default function MailClient({
       messageById,
       readErrorMessage,
       reportError,
-      seedNotificationDedupKeys,
       setActiveTopicSuggestionMessages,
       setThreadRelatedMessages,
       updateThreadCacheWithMessage,
