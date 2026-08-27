@@ -11,7 +11,7 @@ import {
   replaceInlineImageSources,
   sanitizeHtmlForDisplay,
   stripRedundantInlineImageFallbacks,
-  stripUnresolvedCidImages,
+  stripRemovedInlineImages,
   stripConditionalComments
 } from "@/lib/html";
 
@@ -22,6 +22,7 @@ type Params = AccountRouteParams & {
 function postprocessHtml(
   html: string,
   attachments: Array<{
+    id?: string;
     inline?: boolean;
     cid?: string;
     url?: string;
@@ -39,7 +40,7 @@ function postprocessHtml(
   nextHtml = replaceInlineImageSources(nextHtml, attachments);
   nextHtml = stripRedundantInlineImageFallbacks(nextHtml, attachments);
   nextHtml = appendUnreferencedInlineImages(nextHtml, attachments);
-  nextHtml = stripUnresolvedCidImages(nextHtml);
+  nextHtml = stripRemovedInlineImages(nextHtml, attachments);
   return sanitizeHtmlForDisplay(stripConditionalComments(nextHtml)).replace(
     /data:(?!image\/)[^'")\s]+/gi,
     "about:blank"

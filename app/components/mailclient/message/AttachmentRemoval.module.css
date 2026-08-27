@@ -24,6 +24,13 @@
   background: var(--gray-a3);
 }
 
+.inlineImageMeta {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  gap: 1px;
+}
+
 .inlineImageName {
   font-size: var(--font-size-1);
   color: var(--gray-11);
@@ -31,4 +38,9 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   min-width: 0;
+}
+
+.inlineImageSize {
+  font-size: var(--font-size-1);
+  color: var(--gray-9);
 }

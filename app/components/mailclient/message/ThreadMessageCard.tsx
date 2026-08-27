@@ -24,7 +24,7 @@ import {
   appendUnreferencedInlineImages,
   replaceInlineImageSources,
   stripRedundantInlineImageFallbacks,
-  stripUnresolvedCidImages
+  stripRemovedInlineImages
 } from "@/lib/html";
 import { countRecipientEntries } from "@/lib/recipientLists";
 import type {
@@ -463,8 +463,9 @@ export default function ThreadMessageCard({
     let html = replaceInlineImageSources(overrideHtml ?? message.htmlBody ?? "", attachments);
     html = stripRedundantInlineImageFallbacks(html, attachments);
     html = appendUnreferencedInlineImages(html, attachments);
-    // Drops inline images the user removed: their cid no longer resolves.
-    html = stripUnresolvedCidImages(html);
+    // Drops <img> tags for inline images the user removed (dangling cid or a
+    // stored /attachments/<id> URL no longer in the attachment list).
+    html = stripRemovedInlineImages(html, attachments);
 
     return (
       <div>

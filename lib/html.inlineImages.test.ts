@@ -3,7 +3,7 @@ import {
   appendUnreferencedInlineImages,
   replaceInlineImageSources,
   stripRedundantInlineImageFallbacks,
-  stripUnresolvedCidImages
+  stripRemovedInlineImages
 } from "./html";
 
 describe("appendUnreferencedInlineImages", () => {
@@ -159,35 +159,40 @@ describe("appendUnreferencedInlineImages", () => {
   });
 });
 
-describe("stripUnresolvedCidImages", () => {
+describe("stripRemovedInlineImages", () => {
   it("removes an <img> whose cid: source was never resolved to a url", () => {
     const input = '<p>Hi</p><img src="cid:sig@noctua" alt="sig"><p>Bye</p>';
-    const output = stripUnresolvedCidImages(input);
+    const output = stripRemovedInlineImages(input, []);
     expect(output).not.toContain("cid:sig@noctua");
     expect(output).toContain("<p>Hi</p>");
     expect(output).toContain("<p>Bye</p>");
   });
 
-  it("keeps <img> tags that already resolved to attachment urls", () => {
-    const url = "/api/accounts/a/messages/m/attachments/1";
+  it("removes an <img> whose /attachments/<id> url is no longer among the attachments", () => {
+    const removed = "/api/accounts/a/messages/m/attachments/att-a-71066-0";
+    const kept = "/api/accounts/a/messages/m/attachments/att-a-71066-1";
+    const input = `<img src="${removed}"><img src="${kept}">`;
+    const output = stripRemovedInlineImages(input, [
+      { id: "att-a-71066-1", inline: true, contentType: "image/png", url: kept }
+    ]);
+    expect(output).not.toContain(removed);
+    expect(output).toContain(kept);
+  });
+
+  it("keeps an <img> whose attachment id is still present", () => {
+    const url = "/api/accounts/a/messages/m/attachments/att-a-1-0";
     const input = `<div><img src="${url}" alt="logo"></div>`;
-    const output = stripUnresolvedCidImages(input);
+    const output = stripRemovedInlineImages(input, [
+      { id: "att-a-1-0", inline: true, contentType: "image/png", url }
+    ]);
     expect(output).toContain(url);
   });
 
   it("collapses a now-empty inline-image wrapper", () => {
     const input =
       '<div data-noctua-inline-image="1" style="margin:12px 0;"><img src="cid:sig@noctua"></div>';
-    const output = stripUnresolvedCidImages(input);
+    const output = stripRemovedInlineImages(input, []);
     expect(output).not.toContain("data-noctua-inline-image");
     expect(output.trim()).toBe("");
-  });
-
-  it("strips only the dangling cid image, leaving the rest", () => {
-    const url = "/api/accounts/a/messages/m/attachments/2";
-    const input = `<img src="cid:gone@x"><img src="${url}">`;
-    const output = stripUnresolvedCidImages(input);
-    expect(output).not.toContain("cid:gone@x");
-    expect(output).toContain(url);
   });
 });

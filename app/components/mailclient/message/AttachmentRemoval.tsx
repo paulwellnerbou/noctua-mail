@@ -7,6 +7,14 @@ import styles from "./AttachmentRemoval.module.css";
 const isImageAttachment = (attachment: Attachment) =>
   (attachment.contentType ?? "").toLowerCase().startsWith("image/");
 
+function formatAttachmentSize(bytes: number) {
+  if (!Number.isFinite(bytes) || bytes <= 0) return null;
+  if (bytes < 1024) return `${bytes} B`;
+  const kb = bytes / 1024;
+  if (kb < 1024) return `${Math.round(kb)} KB`;
+  return `${(kb / 1024).toFixed(1)} MB`;
+}
+
 // The inline footer/signature images are hidden from the normal attachment list
 // (they render inside the HTML body), so removing them needs its own surface.
 export function InlineImageRemovalList({
@@ -34,8 +42,13 @@ export function InlineImageRemovalList({
                 decoding="async"
               />
             ) : null}
-            <span className={styles.inlineImageName} title={image.filename || undefined}>
-              {image.filename || "inline image"}
+            <span className={styles.inlineImageMeta}>
+              <span className={styles.inlineImageName} title={image.filename || undefined}>
+                {image.filename || "inline image"}
+              </span>
+              {formatAttachmentSize(image.size) && (
+                <span className={styles.inlineImageSize}>{formatAttachmentSize(image.size)}</span>
+              )}
             </span>
             <IconButton
               size="1"
