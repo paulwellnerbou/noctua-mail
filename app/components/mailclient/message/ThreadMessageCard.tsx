@@ -1071,15 +1071,17 @@ export default function ThreadMessageCard({
             </Collapsible.Content>
           </Collapsible.Root>
         </div>
+        {/* Rendered inside <article> so <Card asChild> keeps its single child;
+            the AlertDialog portals its content regardless of DOM placement. */}
+        {canRemoveAttachments && (
+          <RemoveAttachmentConfirmDialog
+            attachment={pendingRemoval}
+            removing={removingAttachment}
+            onCancel={() => setPendingRemoval(null)}
+            onConfirm={confirmAttachmentRemoval}
+          />
+        )}
       </article>
-      {canRemoveAttachments && (
-        <RemoveAttachmentConfirmDialog
-          attachment={pendingRemoval}
-          removing={removingAttachment}
-          onCancel={() => setPendingRemoval(null)}
-          onConfirm={confirmAttachmentRemoval}
-        />
-      )}
     </Card>
   );
 }
