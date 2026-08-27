@@ -1,8 +1,11 @@
 import { randomUUID } from "crypto";
+import { promises as fs } from "fs";
+import path from "path";
 import { describe, expect, test } from "bun:test";
 import type { Account, Folder, Message } from "./data";
 import { buildImapMessageRowId } from "./messageIds";
-import { saveMessageSource } from "./storage";
+import { listMessageSourceSizes, saveMessageSource } from "./storage";
+import { getSourcesAccountDir } from "./runtimePaths";
 import { dbModulePromise } from "./testDbHarness";
 import { backfillMessageSourceSizes, ensureMessageSourceSizes } from "./db/messages/sizes";
 
@@ -304,6 +307,41 @@ describe("backfillMessageSourceSizes", () => {
     // The already-filled row is not revisited; only the missing one remains.
     const second = await backfillMessageSourceSizes(accountId);
     expect(second).toEqual({ filled: 0, missing: 1 });
+  });
+
+  test("a filename with malformed percent-escapes does not abort the walk", async () => {
+    const accountId = uniqueAccountId("acc-size-badname");
+    const messageId = "<good@example.test>";
+    const inbox = await seedAccount(accountId, [
+      buildMessage({
+        accountId,
+        folderId: `${accountId}:INBOX`,
+        imapUid: 1,
+        messageId,
+        subject: "Good",
+        dateValue: BASE_DATE,
+        hasSource: true
+      })
+    ]);
+    await saveMessageSource(accountId, buildImapMessageRowId(messageId), "bytes");
+    // A stray `%` is not a valid escape, so decodeURIComponent throws on it.
+    await fs.writeFile(path.join(getSourcesAccountDir(accountId), "100%-broken.eml"), "junk");
+
+    const sizes = await listMessageSourceSizes(accountId);
+    expect(sizes.size).toBe(1);
+
+    const result = await backfillMessageSourceSizes(accountId);
+    expect(result).toEqual({ filled: 1, missing: 0 });
+
+    const { listMessages } = await dbModulePromise;
+    const listed = await listMessages({
+      accountId,
+      folderId: inbox.id,
+      page: 1,
+      pageSize: 50,
+      sortBy: "size"
+    });
+    expect(listed.items[0]?.sizeBytes).toBe(5);
   });
 
   test("ensureMessageSourceSizes runs one pass per account", async () => {

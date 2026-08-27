@@ -36,8 +36,13 @@ function countMissingSizes(db: AccountDb, accountId: string) {
 
 /**
  * Fill `sizeBytes` for every row of `accountId` that claims a stored source
- * but has no recorded size. Idempotent: once every row is either filled or
- * known-missing this costs a single COUNT.
+ * but has no recorded size.
+ *
+ * Safe to re-run, but not free: a row whose source file is gone stays NULL, so
+ * it is counted and re-examined on every call. That costs one directory walk
+ * plus a map miss per such row — `ensureMessageSourceSizes` is what keeps a
+ * request path from paying it twice. Only when every row is filled does this
+ * short-circuit on the opening COUNT.
  *
  * `onProgress` is called after each flushed batch.
  */

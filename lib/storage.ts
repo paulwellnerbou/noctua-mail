@@ -194,6 +194,19 @@ export async function saveMessageSource(
 const SOURCE_STAT_CONCURRENCY = 64;
 
 /**
+ * `decodeURIComponent` throws on malformed percent-escapes, and the sources
+ * directory can hold files this code never wrote. One stray name must not
+ * abort the whole walk, so an undecodable one is skipped.
+ */
+function decodeSourceFileName(name: string) {
+  try {
+    return decodeURIComponent(name);
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Byte size of every stored source for an account, keyed by the message id its
  * filename encodes. One directory walk instead of a stat per database row, so
  * rows whose source is long gone cost a map miss rather than a failed syscall.
@@ -222,7 +235,9 @@ export async function listMessageSourceSizes(accountId: string) {
     chunk.forEach((name, index) => {
       const stat = stats[index];
       if (!stat?.isFile()) return;
-      sizes.set(decodeURIComponent(name.slice(0, -".eml".length)), stat.size);
+      const messageId = decodeSourceFileName(name.slice(0, -".eml".length));
+      if (messageId === null) return;
+      sizes.set(messageId, stat.size);
     });
   }
   return sizes;

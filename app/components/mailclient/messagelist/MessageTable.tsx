@@ -211,16 +211,11 @@ export default function MessageTable({
           </button>
         </div>
         {showMessageSize && (
-          <div className={styles.cellSize}>
-            <button
-              className={styles.sortButton}
-              onClick={() => {
-                setSortKey("size");
-                setSortDir(sortDir === "asc" ? "desc" : "asc");
-              }}
-            >
-              Size
-            </button>
+          <div
+            className={styles.cellSize}
+            title="Largest first across the whole folder — change it with the Sort control"
+          >
+            Size
           </div>
         )}
         <div className={styles.cellDate}>
