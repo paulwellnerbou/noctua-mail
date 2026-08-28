@@ -14,6 +14,30 @@ import {
   stripConditionalComments
 } from "./html";
 import { markdownToEmailHtml } from "./markdownEmail";
+import { type DefaultTreeAdapterMap, parseFragment } from "parse5";
+
+type Parse5Node = DefaultTreeAdapterMap["node"];
+
+// "Is the footer still inside the centering cell?" is a question about the tree
+// a browser builds from the sanitizer's output, not about tag order in the
+// string — an escaped element can still be followed by some other closing tag.
+// parse5 answers it directly.
+function ancestorTagsOfText(html: string, needle: string) {
+  const visit = (node: Parse5Node, trail: string[]): string[] | null => {
+    for (const child of "childNodes" in node ? node.childNodes : []) {
+      if (child.nodeName === "#text") {
+        if ("value" in child && child.value.includes(needle)) return trail;
+        continue;
+      }
+      const align = "attrs" in child ? child.attrs.find((attr) => attr.name === "align") : undefined;
+      const label = align ? `${child.nodeName}[align="${align.value}"]` : child.nodeName;
+      const found = visit(child, [...trail, label]);
+      if (found) return found;
+    }
+    return null;
+  };
+  return visit(parseFragment(html), []) ?? [];
+}
 
 describe("sanitizeHtmlForDisplay", () => {
   it("strips quoted inline event handlers", () => {
@@ -318,7 +342,7 @@ describe("html message regression", () => {
     const out = sanitizeHtmlForDisplay(html);
 
     expect(out).toContain("Example Corp SE");
-    expect(out.indexOf('class="footer"')).toBeLessThan(out.lastIndexOf("</table>"));
+    expect(ancestorTagsOfText(out, "Example Corp SE")).toContain('td[align="center"]');
     expect(out.match(/<table/g)?.length).toBe(out.match(/<\/table>/g)?.length);
   });
 });
