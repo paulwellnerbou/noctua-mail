@@ -1,4 +1,5 @@
 import sanitizeHtml from "sanitize-html";
+import { normalizeHtmlStructure } from "./normalize";
 
 // sanitize-html starts from a tight allowlist. Extend it to cover typical
 // HTML-email markup the viewer wants to render: tables, images, stylesheets,
@@ -77,5 +78,5 @@ const SANITIZE_HTML_OPTIONS: sanitizeHtml.IOptions = {
 
 export function sanitizeHtmlForDisplay(input: string) {
   if (!input) return input;
-  return sanitizeHtml(input, SANITIZE_HTML_OPTIONS);
+  return sanitizeHtml(normalizeHtmlStructure(input), SANITIZE_HTML_OPTIONS);
 }

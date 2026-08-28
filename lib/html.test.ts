@@ -282,6 +282,29 @@ describe("html message regression", () => {
     expect(out).toContain("Matt Dahlberg");
     expect(out).toContain("In this session");
   });
+
+  it("keeps the footer inside the centering cell when a layout table is malformed", () => {
+    // XING newsletters open a <tr> straight inside a <td> and then close the
+    // row twice. htmlparser2 unwinds the enclosing layout tables on that and
+    // drops the end tags left over, which lets everything after the damaged
+    // table escape the <td align="center"> and render full-width.
+    const html = [
+      '<table class="page"><tr><td align="center">',
+      '<table class="column" style="max-width:600px;"><tr><td>',
+      "<table><tr><td>",
+      "<tr><td><table><tr><td>29</td><tr></table></td></tr>",
+      "</td></tr></table>",
+      "</td></tr></table>",
+      '<div class="footer">Example Corp SE, Example Street 1</div>',
+      "</td></tr></table>"
+    ].join("");
+
+    const out = sanitizeHtmlForDisplay(html);
+
+    expect(out).toContain("Example Corp SE");
+    expect(out.indexOf('class="footer"')).toBeLessThan(out.lastIndexOf("</table>"));
+    expect(out.match(/<table/g)?.length).toBe(out.match(/<\/table>/g)?.length);
+  });
 });
 
 describe("selectPreferredHtmlDocument", () => {
