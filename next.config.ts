@@ -17,7 +17,10 @@ const nextConfig: NextConfig = {
       "./node_modules/is-plain-object/**",
       "./node_modules/parse-srcset/**",
       "./node_modules/escape-string-regexp/**",
-      "./node_modules/entities/**"
+      "./node_modules/entities/**",
+      // parse5 resolves its own entities major from a nested node_modules,
+      // which the glob covers.
+      "./node_modules/parse5/**"
     ],
     "/api/accounts/*/threads/recompute": workerRuntimeTraceFiles,
     "/api/accounts/*/categories/recompute": workerRuntimeTraceFiles

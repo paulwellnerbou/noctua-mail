@@ -2,6 +2,7 @@
 //
 // Implementation is split across sibling files:
 //   - sanitize.ts: sanitizeHtmlForDisplay (security allowlist for the viewer)
+//   - normalize.ts: rebuild malformed markup the way an HTML5 parser would
 //   - strip.ts: escape / decode / strip helpers + stripHtmlToText
 //   - extract.ts: pull visible text, preferred document, or body out of raw HTML
 //   - document.ts: viewer-frame heuristic + ensureHtmlDocumentTitle
@@ -14,6 +15,7 @@
 // the re-exports here keep the surface stable for the rest of the codebase.
 
 export { sanitizeHtmlForDisplay } from "./sanitize";
+export { normalizeHtmlStructure } from "./normalize";
 export {
   escapeHtml,
   decodeHtmlEntities,
