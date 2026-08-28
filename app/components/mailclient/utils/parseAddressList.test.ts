@@ -74,6 +74,21 @@ describe("formatAddressList", () => {
     );
   });
 
+  test("leaves RFC 5322 group headers untouched", () => {
+    expect(formatAddressList("Team: Alice <a@x.test>, Bob <b@x.test>;")).toBe(
+      "Team: Alice <a@x.test>, Bob <b@x.test>;"
+    );
+    expect(formatAddressList("Jane Roe <jane@example.com>, Team: Alice <a@x.test>;")).toBe(
+      "Jane Roe <jane@example.com>, Team: Alice <a@x.test>;"
+    );
+  });
+
+  test("still formats display names that contain a quoted colon", () => {
+    expect(formatAddressList(`"Roe: Jane" <jane@example.com>`)).toBe(
+      `"Roe: Jane" <jane@example.com>`
+    );
+  });
+
   test("returns an empty string for blank input", () => {
     expect(formatAddressList("")).toBe("");
     expect(formatAddressList(null)).toBe("");
