@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { parseAddressList, splitAddressList } from "./parseAddressList";
+import { formatAddress, formatAddressList, parseAddressList, splitAddressList } from "./parseAddressList";
 
 describe("splitAddressList", () => {
   test("returns empty array for blank input", () => {
@@ -40,5 +40,42 @@ describe("parseAddressList", () => {
       { raw: `"Doe, John" <john@doe.com>`, displayName: "Doe, John", email: "john@doe.com" },
       { raw: "jane@example.com", displayName: "", email: "jane@example.com" }
     ]);
+  });
+});
+
+describe("formatAddress", () => {
+  test("returns the bare address when there is no display name", () => {
+    expect(formatAddress("", "jane@example.com")).toBe("jane@example.com");
+    expect(formatAddress("   ", "jane@example.com")).toBe("jane@example.com");
+  });
+
+  test("combines display name and address", () => {
+    expect(formatAddress("Jane Roe", "jane@example.com")).toBe("Jane Roe <jane@example.com>");
+  });
+
+  test("quotes display names containing RFC 5322 specials", () => {
+    expect(formatAddress("Doe, John", "john@doe.com")).toBe(`"Doe, John" <john@doe.com>`);
+    expect(formatAddress('Anne "Ann" O\\Connor', "anne@example.test")).toBe(
+      `"Anne \\"Ann\\" O\\\\Connor" <anne@example.test>`
+    );
+  });
+});
+
+describe("formatAddressList", () => {
+  test("formats every entry as name + address", () => {
+    expect(formatAddressList(`"Doe, John" <john@doe.com>, Jane Roe <jane@example.com>`)).toBe(
+      `"Doe, John" <john@doe.com>, Jane Roe <jane@example.com>`
+    );
+  });
+
+  test("keeps bare addresses and unparsable entries as-is", () => {
+    expect(formatAddressList("jane@example.com, undisclosed-recipients:;")).toBe(
+      "jane@example.com, undisclosed-recipients:;"
+    );
+  });
+
+  test("returns an empty string for blank input", () => {
+    expect(formatAddressList("")).toBe("");
+    expect(formatAddressList(null)).toBe("");
   });
 });

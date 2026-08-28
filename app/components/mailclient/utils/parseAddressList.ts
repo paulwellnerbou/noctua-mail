@@ -51,3 +51,20 @@ export function parseAddressList(value: string | null | undefined): ParsedAddres
     email: extractPrimaryEmail(raw)
   }));
 }
+
+const RFC5322_SPECIALS = /[(),.:;<>@[\]\\"]/;
+
+/** Renders `Name <email>`, quoting display names that contain RFC 5322 specials. */
+export function formatAddress(displayName: string, email: string): string {
+  const name = displayName.trim();
+  if (!name) return email;
+  if (!RFC5322_SPECIALS.test(name)) return `${name} <${email}>`;
+  return `"${name.replace(/(["\\])/g, "\\$1")}" <${email}>`;
+}
+
+/** Comma-joined `Name <email>` list; entries without a parsable address keep their raw text. */
+export function formatAddressList(value: string | null | undefined): string {
+  return parseAddressList(value)
+    .map((addr) => (addr.email ? formatAddress(addr.displayName, addr.email) : addr.raw))
+    .join(", ");
+}

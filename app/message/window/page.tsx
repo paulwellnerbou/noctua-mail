@@ -476,7 +476,6 @@ export default function MessageWindowPage() {
                   safeMessage.messageId ? [[safeMessage.messageId, safeMessage]] : []
                 ),
                 getPrimaryEmail,
-                extractEmails,
                 findRecipientAlias: () => null,
                 onOpenRecipientAlias: noop as (
                   fieldLabel: "To" | "Cc",

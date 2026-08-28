@@ -3,6 +3,7 @@ import { ArrowLeft, ArrowRight, Check, Copy, PenLine, Search } from "lucide-reac
 import { DropdownMenu } from "@radix-ui/themes";
 import menuStyles from "./MessageMenu.module.css";
 import styles from "./EmailAddressMenu.module.css";
+import { formatAddress } from "../utils/parseAddressList";
 
 export type EmailAddressMenuAction = "with" | "from" | "to";
 
@@ -19,7 +20,7 @@ export default function EmailAddressMenu({
   onSearchByAddress,
   onComposeTo
 }: EmailAddressMenuProps) {
-  const [copied, setCopied] = useState(false);
+  const [copiedItem, setCopiedItem] = useState<"full" | "email" | null>(null);
   const resetTimer = useRef<number | null>(null);
 
   useEffect(
@@ -31,14 +32,15 @@ export default function EmailAddressMenu({
 
   const label = displayName || email;
   const tooltip = displayName ? `${displayName} <${email}>` : email;
+  const fullAddress = formatAddress(displayName, email);
 
-  const handleCopy = async () => {
+  const handleCopy = async (item: "full" | "email", value: string) => {
     try {
-      await navigator.clipboard.writeText(email);
-      setCopied(true);
+      await navigator.clipboard.writeText(value);
+      setCopiedItem(item);
       if (resetTimer.current !== null) window.clearTimeout(resetTimer.current);
       resetTimer.current = window.setTimeout(() => {
-        setCopied(false);
+        setCopiedItem(null);
         resetTimer.current = null;
       }, 1200);
     } catch {
@@ -84,7 +86,7 @@ export default function EmailAddressMenu({
         {onComposeTo && (
           <>
             <DropdownMenu.Separator />
-            <DropdownMenu.Item onSelect={() => onComposeTo(email)}>
+            <DropdownMenu.Item onSelect={() => onComposeTo(fullAddress)}>
               <span className={menuStyles.menuIcon}>
                 <PenLine size={14} />
               </span>
@@ -93,16 +95,33 @@ export default function EmailAddressMenu({
           </>
         )}
         <DropdownMenu.Separator />
+        {displayName && (
+          <DropdownMenu.Item
+            onSelect={(event) => {
+              event.preventDefault();
+              handleCopy("full", fullAddress);
+            }}
+          >
+            <span className={menuStyles.menuIcon}>
+              {copiedItem === "full" ? <Check size={14} /> : <Copy size={14} />}
+            </span>
+            <span className={menuStyles.menuLabel}>
+              {copiedItem === "full" ? "Copied!" : "Copy name and email address"}
+            </span>
+          </DropdownMenu.Item>
+        )}
         <DropdownMenu.Item
           onSelect={(event) => {
             event.preventDefault();
-            handleCopy();
+            handleCopy("email", email);
           }}
         >
           <span className={menuStyles.menuIcon}>
-            {copied ? <Check size={14} /> : <Copy size={14} />}
+            {copiedItem === "email" ? <Check size={14} /> : <Copy size={14} />}
           </span>
-          <span className={menuStyles.menuLabel}>{copied ? "Copied!" : "Copy email address"}</span>
+          <span className={menuStyles.menuLabel}>
+            {copiedItem === "email" ? "Copied!" : "Copy email address only"}
+          </span>
         </DropdownMenu.Item>
       </DropdownMenu.Content>
     </DropdownMenu.Root>

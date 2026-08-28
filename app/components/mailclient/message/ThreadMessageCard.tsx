@@ -52,6 +52,7 @@ import MessageBadge from "./MessageBadge";
 import SenderIcon from "../SenderIcon";
 import InReplyToReferenceRow from "../InReplyToReferenceRow";
 import { hasNonInlineAttachments, getUnsubscribeCapability, resolveInReplyToRef } from "../utils/messageHelpers";
+import { formatAddressList } from "../utils/parseAddressList";
 import { getMessageFromDisplay } from "../messagelist/threadGroupUtils";
 import type { InviteProcessingStatePatch } from "../utils/calendarInviteState";
 import { isRenderableInlineAttachment } from "@/lib/messageFlags";
@@ -105,7 +106,6 @@ type ThreadMessageCardProps = {
   handleSelectMessage: (message: Message) => void;
   messageByMessageId: Map<string, Message>;
   getPrimaryEmail: (value?: string) => string | null;
-  extractEmails: (value?: string) => string[];
   findRecipientAlias: (value?: string | null) => RecipientAlias | null;
   onOpenRecipientAlias: (
     fieldLabel: "To" | "Cc",
@@ -177,7 +177,6 @@ export default function ThreadMessageCard({
   handleSelectMessage,
   messageByMessageId,
   getPrimaryEmail,
-  extractEmails,
   findRecipientAlias,
   onOpenRecipientAlias,
   onFindRelatedByCalendarInviteUid,
@@ -973,7 +972,7 @@ export default function ThreadMessageCard({
                   <MessageRecipientMetaField
                     label="From"
                     value={message.from}
-                    copyValue={getPrimaryEmail(message.from) ?? ""}
+                    copyValue={formatAddressList(message.from)}
                     variant="segment"
                     className={styles.metaSegmentField}
                     onSearchByAddress={onSearchByAddress}
@@ -992,7 +991,7 @@ export default function ThreadMessageCard({
                   key={field.label}
                   label={field.label}
                   value={field.value}
-                  copyValue={extractEmails(field.value).join(", ")}
+                  copyValue={formatAddressList(field.value)}
                   aliasName={field.alias?.name ?? null}
                   showAliasAction={field.showAliasAction}
                   onAliasAction={
