@@ -114,6 +114,22 @@ describe("sanitizeHtmlForDisplay", () => {
     expect(out).toContain("<p>hi</p>");
   });
 
+  it("keeps the document skeleton when only a doctype marks the input as one", () => {
+    const out = sanitizeHtmlForDisplay("<!doctype html><p>hi</p>");
+    expect(out).toMatch(/<html[\s>]/i);
+    expect(out).toMatch(/<body[\s>]/i);
+    expect(out).toContain("<p>hi</p>");
+  });
+
+  it("leaves a fragment opening with <meta> unwrapped", () => {
+    // Calendar descriptions and quoted parts arrive as bare fragments; a
+    // <meta charset> lead-in must not promote one to a full document.
+    const out = sanitizeHtmlForDisplay('<meta charset="utf-8"><div>note</div>');
+    expect(out).not.toMatch(/<html[\s>]/i);
+    expect(out).not.toMatch(/<body[\s>]/i);
+    expect(out).toContain("<div>note</div>");
+  });
+
   it("strips <link> tags (used for stylesheet exfiltration in emails)", () => {
     const out = sanitizeHtmlForDisplay(
       '<html><head><link rel="stylesheet" href="http://attacker/x.css"></head><body>x</body></html>'

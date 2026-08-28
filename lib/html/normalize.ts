@@ -12,6 +12,10 @@ export function normalizeHtmlStructure(input: string) {
   if (!input) return input;
   // parse() imposes an html/head/body skeleton that callers passing bare
   // fragments don't expect; parseFragment() drops one that is already there.
-  const isDocument = /<(?:html|body)[\s>]/i.test(input);
+  // Only markers a fragment cannot carry count as a document: a leading
+  // doctype, or an <html>/<body> tag. A <head>/<meta>/<title> lead-in does
+  // not — email fragments open with <meta charset> often enough that treating
+  // it as a document would wrap ordinary fragments in a skeleton.
+  const isDocument = /^\s*<!doctype\b/i.test(input) || /<(?:html|body)[\s>]/i.test(input);
   return serialize(isDocument ? parse(input) : parseFragment(input));
 }
