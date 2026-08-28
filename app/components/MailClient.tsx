@@ -5590,7 +5590,6 @@ export default function MailClient({
               renderSourcePanel,
               handleSelectMessage,
               getPrimaryEmail,
-              extractEmails,
               findRecipientAlias,
               onOpenRecipientAlias: openRecipientAliasDialog,
               onFindRelatedByCalendarInviteUid: handleFindRelatedByCalendarInviteUid,

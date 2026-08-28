@@ -146,8 +146,8 @@ export default function MessageRecipientMetaField({
           variant="ghost"
           color="gray"
           className={`${styles.toCopy} ${copyActive ? styles.copyOk : ""}`}
-          title={copyActive ? "Copied" : "Copy emails"}
-          aria-label={copyActive ? "Copied" : "Copy emails"}
+          title={copyActive ? "Copied" : "Copy addresses"}
+          aria-label={copyActive ? "Copied" : "Copy addresses"}
           onClick={handleCopy}
         >
           <span className={styles.copyIconSwap} aria-hidden>
