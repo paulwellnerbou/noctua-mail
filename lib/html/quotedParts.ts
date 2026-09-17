@@ -1,4 +1,4 @@
-import { escapeHtml, stripConditionalComments } from "./strip";
+import { decodeHtmlEntities, escapeHtml, stripConditionalComments } from "./strip";
 import { extractHtmlBody } from "./extract";
 
 // Building and disassembling the "quoted original message" block that our
@@ -10,7 +10,60 @@ export type QuotedHtmlParts = {
   styles: string;
   headerHtml: string;
   bodyHtml: string;
+  /** Header table of the forwarded original (From/To/Cc/Date/...), removable on its own. */
+  metaHtml?: string;
 };
+
+export type ForwardMetaRow = {
+  label: string;
+  value: string;
+};
+
+const FORWARD_META_ATTR = "data-noctua-forward-meta";
+const FORWARD_META_TABLE_PATTERN = `<table\\b[^>]*\\b${FORWARD_META_ATTR}=["']1["'][^>]*>[\\s\\S]*?<\\/table>`;
+
+/**
+ * Renders the forwarded message's header fields as a small table. Inline styles
+ * only, since the markup ends up in the outgoing mail where stylesheets are
+ * unreliable. Rows with an empty value are dropped.
+ */
+export function buildForwardMetaHtml(rows: ForwardMetaRow[]): string {
+  const cells = rows
+    .filter((row) => row.value.trim().length > 0)
+    .map(
+      (row) =>
+        `<tr><th align="left" valign="baseline" style="padding:0 8px 2px 0;font-weight:600;white-space:nowrap;">${escapeHtml(row.label)}:</th>` +
+        `<td valign="baseline" style="padding:0 0 2px 0;">${escapeHtml(row.value.trim())}</td></tr>`
+    );
+  if (cells.length === 0) return "";
+  return (
+    `<table ${FORWARD_META_ATTR}="1" cellspacing="0" cellpadding="0" border="0" style="border-collapse:collapse;margin:0 0 12px 0;">` +
+    `<tbody>${cells.join("")}</tbody></table>`
+  );
+}
+
+export function hasForwardMetaHtml(html: string): boolean {
+  return new RegExp(FORWARD_META_TABLE_PATTERN, "i").test(html);
+}
+
+/** Removes the forward header table; the cells never contain nested tables. */
+export function stripForwardMetaHtml(html: string): string {
+  return html.replace(new RegExp(FORWARD_META_TABLE_PATTERN, "gi"), "");
+}
+
+/** One "Label: value" line per row of a table built by buildForwardMetaHtml. */
+export function forwardMetaHtmlToText(html: string): string {
+  const table = html.match(new RegExp(FORWARD_META_TABLE_PATTERN, "i"))?.[0] ?? "";
+  const lines: string[] = [];
+  for (const row of table.matchAll(/<tr[^>]*>([\s\S]*?)<\/tr>/gi)) {
+    const cells = Array.from(row[1].matchAll(/<t[hd][^>]*>([\s\S]*?)<\/t[hd]>/gi), (cell) =>
+      decodeHtmlEntities(cell[1]).trim()
+    );
+    const line = cells.filter(Boolean).join(" ");
+    if (line) lines.push(line);
+  }
+  return lines.join("\n");
+}
 
 function splitCssSelectorList(selectors: string): string[] {
   const parts: string[] = [];
@@ -275,7 +328,7 @@ export function assembleQuotedHtml(parts: QuotedHtmlParts, quoteHtml: boolean) {
   // Wrap the entire quoted section (styles + header + body) in a div for easy extraction.
   // Scope the original message CSS to the quoted email body only so the reply header
   // stays visually outside the original message's own layout and styling.
-  return `<div id="noctua-quoted-html">${scopedStyles}${parts.headerHtml}${bodyHtml}</div>`;
+  return `<div id="noctua-quoted-html">${scopedStyles}${parts.headerHtml}${parts.metaHtml ?? ""}${bodyHtml}</div>`;
 }
 
 /**

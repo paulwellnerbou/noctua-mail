@@ -1,4 +1,4 @@
-import { escapeHtml } from "@/lib/html";
+import { escapeHtml, forwardMetaHtmlToText } from "@/lib/html";
 import { htmlToMarkdown, markdownToHtml, textToMarkdown } from "@/lib/markdownConvert";
 import { formatQuotedBody } from "./composeContentBuilder";
 import type { ComposeTab } from "./composeTypes";
@@ -7,6 +7,7 @@ export type QuotedParts = {
   styles: string;
   headerHtml: string;
   bodyHtml: string;
+  metaHtml?: string;
 };
 
 export type TextBodyParams = {
@@ -45,7 +46,12 @@ export function computeBodyOnSwitchToText(
   const buildQuotedText = (): string => {
     if (!composeIncludeOriginal) return "";
     if (composeQuotedParts) {
-      const header = stripHtml(composeQuotedParts.headerHtml);
+      const header = [
+        stripHtml(composeQuotedParts.headerHtml),
+        forwardMetaHtmlToText(composeQuotedParts.metaHtml ?? "")
+      ]
+        .filter(Boolean)
+        .join("\n");
       const body = stripHtml(composeQuotedParts.bodyHtml);
       return formatQuotedBody(body, header).trimStart();
     }

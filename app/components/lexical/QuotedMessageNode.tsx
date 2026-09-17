@@ -27,12 +27,16 @@ export const QUOTED_MESSAGE_TOGGLE_QUOTE_COMMAND: LexicalCommand<void> = createC
 export const QUOTED_MESSAGE_STRIP_IMAGES_COMMAND: LexicalCommand<void> = createCommand(
   "QUOTED_MESSAGE_STRIP_IMAGES_COMMAND"
 );
+export const QUOTED_MESSAGE_REMOVE_META_COMMAND: LexicalCommand<void> = createCommand(
+  "QUOTED_MESSAGE_REMOVE_META_COMMAND"
+);
 
 export type QuotedMessagePayload = {
   html: string;
   quoteHtml: boolean;
   canToggleQuote: boolean;
   canStripImages: boolean;
+  canRemoveMeta: boolean;
   darkMode: boolean;
 };
 
@@ -41,6 +45,7 @@ type SerializedQuotedMessageNode = {
   quoteHtml: boolean;
   canToggleQuote: boolean;
   canStripImages: boolean;
+  canRemoveMeta: boolean;
   darkMode: boolean;
   type: "quoted-message";
   version: 1;
@@ -58,6 +63,7 @@ export class QuotedMessageNode extends DecoratorNode<JSX.Element> {
   __quoteHtml: boolean;
   __canToggleQuote: boolean;
   __canStripImages: boolean;
+  __canRemoveMeta: boolean;
   __darkMode: boolean;
 
   static getType(): string {
@@ -74,6 +80,7 @@ export class QuotedMessageNode extends DecoratorNode<JSX.Element> {
       quoteHtml: serializedNode.quoteHtml,
       canToggleQuote: serializedNode.canToggleQuote,
       canStripImages: serializedNode.canStripImages,
+      canRemoveMeta: serializedNode.canRemoveMeta,
       darkMode: serializedNode.darkMode
     });
   }
@@ -92,6 +99,7 @@ export class QuotedMessageNode extends DecoratorNode<JSX.Element> {
     this.__quoteHtml = payload.quoteHtml;
     this.__canToggleQuote = payload.canToggleQuote;
     this.__canStripImages = payload.canStripImages;
+    this.__canRemoveMeta = payload.canRemoveMeta;
     this.__darkMode = payload.darkMode;
   }
 
@@ -105,6 +113,7 @@ export class QuotedMessageNode extends DecoratorNode<JSX.Element> {
       quoteHtml: this.__quoteHtml,
       canToggleQuote: this.__canToggleQuote,
       canStripImages: this.__canStripImages,
+      canRemoveMeta: this.__canRemoveMeta,
       darkMode: this.__darkMode
     };
   }
@@ -115,6 +124,7 @@ export class QuotedMessageNode extends DecoratorNode<JSX.Element> {
     writable.__quoteHtml = payload.quoteHtml;
     writable.__canToggleQuote = payload.canToggleQuote;
     writable.__canStripImages = payload.canStripImages;
+    writable.__canRemoveMeta = payload.canRemoveMeta;
     writable.__darkMode = payload.darkMode;
   }
 
@@ -124,6 +134,7 @@ export class QuotedMessageNode extends DecoratorNode<JSX.Element> {
       this.__quoteHtml === payload.quoteHtml &&
       this.__canToggleQuote === payload.canToggleQuote &&
       this.__canStripImages === payload.canStripImages &&
+      this.__canRemoveMeta === payload.canRemoveMeta &&
       this.__darkMode === payload.darkMode
     );
   }
@@ -150,6 +161,7 @@ function QuotedMessageBlock({
   quoteHtml,
   canToggleQuote,
   canStripImages,
+  canRemoveMeta,
   darkMode
 }: QuotedMessagePayload) {
   const [editor] = useLexicalComposerContext();
@@ -205,6 +217,20 @@ function QuotedMessageBlock({
               }
             >
               Remove images
+            </Button>
+          )}
+          {canRemoveMeta && (
+            <Button
+              type="button"
+              size="1"
+              variant="soft"
+              color="gray"
+              title="Remove the header details (From, To, Cc, Date, ...) of the forwarded message"
+              onClick={() =>
+                editor.dispatchCommand(QUOTED_MESSAGE_REMOVE_META_COMMAND, undefined)
+              }
+            >
+              Remove details
             </Button>
           )}
           <Button

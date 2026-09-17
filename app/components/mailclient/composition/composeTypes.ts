@@ -23,6 +23,7 @@ export type ComposeQuotedParts = {
   styles: string;
   headerHtml: string;
   bodyHtml: string;
+  metaHtml?: string;
 };
 
 export type ComposeSize = {

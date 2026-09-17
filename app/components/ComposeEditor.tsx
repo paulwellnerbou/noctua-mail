@@ -95,6 +95,7 @@ import {
   QUOTED_MESSAGE_EDIT_COMMAND,
   QUOTED_MESSAGE_REMOVE_COMMAND,
   QUOTED_MESSAGE_STRIP_IMAGES_COMMAND,
+  QUOTED_MESSAGE_REMOVE_META_COMMAND,
   QUOTED_MESSAGE_TOGGLE_QUOTE_COMMAND
 } from "./lexical/QuotedMessageNode";
 import {
@@ -125,11 +126,13 @@ export type QuotedMessageConfig = {
   quoteHtml: boolean;
   canToggleQuote: boolean;
   canStripImages: boolean;
+  canRemoveMeta: boolean;
   darkMode: boolean;
   onEdit: () => void;
   onRemove: () => void;
   onToggleQuote: () => void;
   onStripImages: () => void;
+  onRemoveMeta: () => void;
 };
 
 type ComposeEditorProps = {
@@ -886,9 +889,9 @@ function QuotedMessagePlugin({ config }: { config: QuotedMessageConfig }) {
   });
 
   const syncNode = useCallback(() => {
-    const { visible, html, quoteHtml, canToggleQuote, canStripImages, darkMode } =
+    const { visible, html, quoteHtml, canToggleQuote, canStripImages, canRemoveMeta, darkMode } =
       configRef.current;
-    const payload = { html, quoteHtml, canToggleQuote, canStripImages, darkMode };
+    const payload = { html, quoteHtml, canToggleQuote, canStripImages, canRemoveMeta, darkMode };
     editor.update(
       () => {
         const node = $getRoot().getChildren().find($isQuotedMessageNode);
@@ -915,6 +918,7 @@ function QuotedMessagePlugin({ config }: { config: QuotedMessageConfig }) {
     config.quoteHtml,
     config.canToggleQuote,
     config.canStripImages,
+    config.canRemoveMeta,
     config.darkMode
   ]);
 
@@ -968,6 +972,14 @@ function QuotedMessagePlugin({ config }: { config: QuotedMessageConfig }) {
         QUOTED_MESSAGE_STRIP_IMAGES_COMMAND,
         () => {
           configRef.current.onStripImages();
+          return true;
+        },
+        COMMAND_PRIORITY_LOW
+      ),
+      editor.registerCommand(
+        QUOTED_MESSAGE_REMOVE_META_COMMAND,
+        () => {
+          configRef.current.onRemoveMeta();
           return true;
         },
         COMMAND_PRIORITY_LOW

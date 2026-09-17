@@ -3,9 +3,11 @@ import { createDefaultComposeInviteDraft } from "@/lib/composeInvite";
 import { formatMessageDate } from "@/lib/dateFormatting";
 import {
   assembleQuotedHtml,
+  buildForwardMetaHtml,
   buildQuotedHtmlPartsFromHtml,
   escapeHtml,
-  extractQuotedHtmlFromDraft
+  extractQuotedHtmlFromDraft,
+  type ForwardMetaRow
 } from "@/lib/html";
 import { prefixSubject } from "@/lib/mail/subjectPrefix";
 import { splitRecipientEntries } from "@/lib/recipientLists";
@@ -321,7 +323,22 @@ export function computeComposeInitState(
   // forward
   // -------------------------------------------------------------------------
   if (mode === "forward") {
-    const forwardHeader = `Forwarded message from ${message.from} on ${formattedDate}:`;
+    // Dashed marker rather than a sentence: the header table carries the sender
+    // and date, and lib/html/quoteBoundary recognises this form as a boundary.
+    const forwardHeader = "-------- Forwarded message --------";
+    // Bcc is deliberately left out: forwarding one's own sent mail must not
+    // reveal who was blind-copied.
+    const forwardMetaRows: ForwardMetaRow[] = [
+      { label: "From", value: message.from },
+      { label: "Reply-To", value: replyToRaw },
+      { label: "Date", value: formattedDate },
+      { label: "Subject", value: message.subject ?? "" },
+      { label: "To", value: message.to ?? "" },
+      { label: "Cc", value: message.cc ?? "" }
+    ];
+    const forwardMetaLines = forwardMetaRows
+      .filter((row) => row.value.trim().length > 0)
+      .map((row) => `${row.label}: ${row.value.trim()}`);
     const replyHeaders: ComposeReplyHeaders = {
       inReplyTo: replyMessageId,
       references: replyReferences,
@@ -331,9 +348,21 @@ export function computeComposeInitState(
     // For HTML/Markdown forwards, the prefix lives in the editor and the quoted
     // block holds the original HTML as-is, so the user can add a note above the
     // forwarded content. Text mode has no separate quoted block, so the header
-    // stays embedded in the textarea body.
+    // and the header details stay embedded in the textarea body.
     const isRichForward = preferredComposeTab !== "text" && hasHtmlContent(message.htmlBody);
-    const replyContent = buildReplyContent(isRichForward ? "" : forwardHeader);
+    const baseContent = buildReplyContent(
+      isRichForward ? "" : `${forwardHeader}\n${forwardMetaLines.join("\n")}\n`
+    );
+    const forwardQuotedParts = baseContent.composeQuotedParts
+      ? { ...baseContent.composeQuotedParts, metaHtml: buildForwardMetaHtml(forwardMetaRows) }
+      : null;
+    const replyContent = forwardQuotedParts
+      ? {
+          ...baseContent,
+          composeQuotedParts: forwardQuotedParts,
+          composeQuotedHtml: assembleQuotedHtml(forwardQuotedParts, true)
+        }
+      : baseContent;
 
     const editorFields: Partial<ComposeInitFields> =
       replyContent.composeTab === "html"

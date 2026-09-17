@@ -56,6 +56,22 @@ describe("computeBodyOnSwitchToText – from HTML", () => {
     expect(result).toContain("World");
   });
 
+  it("includes the forward header table as text lines above the quoted body", () => {
+    const result = computeBodyOnSwitchToText(
+      textParams({
+        composeQuotedParts: {
+          ...QUOTED_PARTS,
+          headerHtml: "<p></p>",
+          metaHtml:
+            '<table data-noctua-forward-meta="1"><tbody><tr><th>From:</th><td>Alice &lt;a@example.com&gt;</td></tr><tr><th>To:</th><td>Bob</td></tr></tbody></table>'
+        }
+      }),
+      stripDeps
+    );
+
+    expect(result).toBe("From: Alice <a@example.com>\nTo: Bob\n> Hello World");
+  });
+
   it("HTML reply with user content: combines user text and quoted text", () => {
     const result = computeBodyOnSwitchToText(
       textParams({

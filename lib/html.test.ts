@@ -1,7 +1,10 @@
 import { describe, expect, it } from "bun:test";
 import {
   assembleQuotedHtml,
+  buildForwardMetaHtml,
   buildQuotedHtmlPartsFromHtml,
+  hasForwardMetaHtml,
+  stripForwardMetaHtml,
   extractBodyContent,
   extractVisibleHtmlText,
   decodeHtmlEntities,
@@ -675,6 +678,66 @@ describe("assembleQuotedHtml", () => {
     expect(linkRule).toBe(
       "#noctua-quoted-html .noctua-quoted-email-body .wmde-markdown a{background-color:transparent}"
     );
+  });
+});
+
+describe("forward meta table", () => {
+  const rows = [
+    { label: "From", value: 'Alice "A" <alice@example.com>' },
+    { label: "Reply-To", value: "" },
+    { label: "To", value: "  bob@example.com  " },
+    { label: "Subject", value: "Hello <world>" }
+  ];
+
+  it("renders one row per non-empty field with escaped values", () => {
+    const html = buildForwardMetaHtml(rows);
+
+    expect(html).toContain('data-noctua-forward-meta="1"');
+    expect(html).toContain("From:</th>");
+    expect(html).toContain("Alice &quot;A&quot; &lt;alice@example.com&gt;");
+    expect(html).toContain("To:</th>");
+    expect(html).toContain(">bob@example.com</td>");
+    expect(html).toContain("Hello &lt;world&gt;");
+    expect(html).not.toContain("Reply-To");
+  });
+
+  it("renders nothing when every field is empty", () => {
+    expect(buildForwardMetaHtml([{ label: "Cc", value: " " }])).toBe("");
+  });
+
+  it("is placed between the header and the quoted body", () => {
+    const parts = {
+      ...buildQuotedHtmlPartsFromHtml("<p>Quoted</p>", "", false),
+      metaHtml: buildForwardMetaHtml(rows)
+    };
+
+    const result = assembleQuotedHtml(parts, true);
+    const metaIndex = result.indexOf("data-noctua-forward-meta");
+    const bodyIndex = result.indexOf("<blockquote");
+
+    expect(metaIndex).toBeGreaterThan(result.indexOf("<p></p>"));
+    expect(bodyIndex).toBeGreaterThan(metaIndex);
+    expect(hasForwardMetaHtml(result)).toBe(true);
+  });
+
+  it("strips only the meta table, leaving other tables intact", () => {
+    const parts = {
+      ...buildQuotedHtmlPartsFromHtml("<table><tr><td>Layout</td></tr></table>", "", false),
+      metaHtml: buildForwardMetaHtml(rows)
+    };
+    const assembled = assembleQuotedHtml(parts, true);
+
+    const stripped = stripForwardMetaHtml(assembled);
+
+    expect(hasForwardMetaHtml(stripped)).toBe(false);
+    expect(stripped).not.toContain("alice@example.com");
+    expect(stripped).toContain("<table><tr><td>Layout</td></tr></table>");
+    expect(stripped).toContain('<div id="noctua-quoted-html">');
+  });
+
+  it("reports no meta table for ordinary quoted html", () => {
+    const parts = buildQuotedHtmlPartsFromHtml("<table><tr><td>Layout</td></tr></table>", "Header", false);
+    expect(hasForwardMetaHtml(assembleQuotedHtml(parts, true))).toBe(false);
   });
 });
 

@@ -49,10 +49,14 @@ export {
   canWrapQuoteInParent,
   isTableLayoutTag
 } from "./quoteBoundary";
-export type { QuotedHtmlParts } from "./quotedParts";
+export type { ForwardMetaRow, QuotedHtmlParts } from "./quotedParts";
 export {
   buildQuotedHtmlPartsFromText,
   buildQuotedHtmlPartsFromHtml,
+  buildForwardMetaHtml,
+  forwardMetaHtmlToText,
+  hasForwardMetaHtml,
+  stripForwardMetaHtml,
   assembleQuotedHtml,
   extractQuotedHtmlFromDraft
 } from "./quotedParts";
