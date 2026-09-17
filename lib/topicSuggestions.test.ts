@@ -1233,7 +1233,8 @@ describe("topic suggestions", () => {
     await upsertAccount(buildAccount(accountId));
     await saveFoldersForAccount(accountId, [inboxFolder, archiveFolder]);
 
-    const now = Date.UTC(2026, 2, 18, 12, 0, 0);
+    // The suggestion cutoff is measured from the real clock, so a fixed anchor would age out of the window.
+    const now = Date.now();
     const oldDate = now - 181 * 24 * 60 * 60 * 1000;
 
     await upsertMessages(
