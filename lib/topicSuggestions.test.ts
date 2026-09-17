@@ -1233,7 +1233,7 @@ describe("topic suggestions", () => {
     await upsertAccount(buildAccount(accountId));
     await saveFoldersForAccount(accountId, [inboxFolder, archiveFolder]);
 
-    // Relative to the wall clock so the fixtures stay inside maxAgeDays.
+    // The suggestion cutoff is measured from the real clock, so a fixed anchor would age out of the window.
     const now = Date.now();
     const oldDate = now - 181 * 24 * 60 * 60 * 1000;
 

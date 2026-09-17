@@ -4,6 +4,7 @@ import { getFolders, upsertCalendarEvent } from "@/lib/db";
 import type { ComposeInvitePayload } from "@/lib/composeInvite";
 import { appendImapMessage } from "@/lib/mail/imap";
 import {
+  normalizeCalendarAttachments,
   parseComposeAttachments,
   resolveComposeHtml,
   resolveComposeText
@@ -103,7 +104,7 @@ export async function POST(request: Request, { params }: AccountRouteParams) {
     }
   }
 
-  const attachments = parseComposeAttachments(payload.attachments);
+  const attachments = normalizeCalendarAttachments(parseComposeAttachments(payload.attachments));
   const html = await resolveComposeHtml({
     composeFormat: payload.composeFormat,
     markdown: payload.markdown,
