@@ -3,6 +3,7 @@ import {
   assembleQuotedHtml,
   buildForwardMetaHtml,
   buildQuotedHtmlPartsFromHtml,
+  forwardMetaHtmlToText,
   hasForwardMetaHtml,
   stripForwardMetaHtml,
   extractBodyContent,
@@ -738,6 +739,30 @@ describe("forward meta table", () => {
   it("reports no meta table for ordinary quoted html", () => {
     const parts = buildQuotedHtmlPartsFromHtml("<table><tr><td>Layout</td></tr></table>", "Header", false);
     expect(hasForwardMetaHtml(assembleQuotedHtml(parts, true))).toBe(false);
+  });
+
+  it("converts the table back into one line per row", () => {
+    expect(forwardMetaHtmlToText(buildForwardMetaHtml(rows))).toBe(
+      'From: Alice "A" <alice@example.com>\nTo: bob@example.com\nSubject: Hello <world>'
+    );
+  });
+
+  it("ignores a header table that belongs to the quoted original", () => {
+    const inner = buildForwardMetaHtml([{ label: "From", value: "Carol <carol@example.com>" }]);
+    const parts = buildQuotedHtmlPartsFromHtml(`<p>Fwd</p>${inner}<p>Body</p>`, "", false);
+    const withoutOuter = assembleQuotedHtml(parts, true);
+
+    expect(hasForwardMetaHtml(withoutOuter)).toBe(false);
+    expect(stripForwardMetaHtml(withoutOuter)).toBe(withoutOuter);
+    expect(forwardMetaHtmlToText(withoutOuter)).toBe("");
+
+    const withOuter = assembleQuotedHtml({ ...parts, metaHtml: buildForwardMetaHtml(rows) }, true);
+    const stripped = stripForwardMetaHtml(withOuter);
+
+    expect(hasForwardMetaHtml(withOuter)).toBe(true);
+    expect(stripped).not.toContain("alice@example.com");
+    expect(stripped).toContain("carol@example.com");
+    expect(forwardMetaHtmlToText(withOuter)).not.toContain("carol");
   });
 });
 

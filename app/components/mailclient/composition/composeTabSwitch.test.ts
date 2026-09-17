@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { stripHtmlToText } from "@/lib/html";
+import { assembleQuotedHtml, buildForwardMetaHtml, stripHtmlToText } from "@/lib/html";
 import {
   computeBodyOnSwitchToText,
   computeHtmlOnSwitchToHtml,
@@ -56,20 +56,34 @@ describe("computeBodyOnSwitchToText – from HTML", () => {
     expect(result).toContain("World");
   });
 
+  const FORWARD_META_HTML = buildForwardMetaHtml([
+    { label: "From", value: "Alice <a@example.com>" },
+    { label: "To", value: "Bob" }
+  ]);
+
   it("includes the forward header table as text lines above the quoted body", () => {
     const result = computeBodyOnSwitchToText(
       textParams({
-        composeQuotedParts: {
-          ...QUOTED_PARTS,
-          headerHtml: "<p></p>",
-          metaHtml:
-            '<table data-noctua-forward-meta="1"><tbody><tr><th>From:</th><td>Alice &lt;a@example.com&gt;</td></tr><tr><th>To:</th><td>Bob</td></tr></tbody></table>'
-        }
+        composeQuotedParts: { ...QUOTED_PARTS, headerHtml: "<p></p>", metaHtml: FORWARD_META_HTML }
       }),
       stripDeps
     );
 
-    expect(result).toBe("From: Alice <a@example.com>\nTo: Bob\n> Hello World");
+    expect(result).toBe("From: Alice <a@example.com>\nTo: Bob\n\n> Hello World");
+  });
+
+  it("converts the header table of a restored draft the same way", () => {
+    const result = computeBodyOnSwitchToText(
+      textParams({
+        composeQuotedHtml: assembleQuotedHtml(
+          { ...QUOTED_PARTS, headerHtml: "<p></p>", metaHtml: FORWARD_META_HTML },
+          true
+        )
+      }),
+      stripDeps
+    );
+
+    expect(result).toBe("From: Alice <a@example.com>\nTo: Bob\n\nHello World");
   });
 
   it("HTML reply with user content: combines user text and quoted text", () => {

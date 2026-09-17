@@ -19,8 +19,21 @@ export type ForwardMetaRow = {
   value: string;
 };
 
-const FORWARD_META_ATTR = "data-noctua-forward-meta";
-const FORWARD_META_TABLE_PATTERN = `<table\\b[^>]*\\b${FORWARD_META_ATTR}=["']1["'][^>]*>[\\s\\S]*?<\\/table>`;
+export const FORWARD_META_ATTR = "data-noctua-forward-meta";
+// Non-greedy up to the first </table>: the cells never contain nested tables.
+const FORWARD_META_TABLE_RE = new RegExp(
+  `<table\\b[^>]*\\b${FORWARD_META_ATTR}=["']1["'][^>]*>[\\s\\S]*?<\\/table>`,
+  "i"
+);
+const QUOTED_EMAIL_BODY_OPEN = '<div class="noctua-quoted-email-body">';
+
+// The header table sits between the quoted header and the body wrapper. A mail
+// that was itself forwarded through Noctua carries its own table inside the
+// body, so only the part before the wrapper counts as ours.
+function splitAtQuotedBody(html: string): [string, string] {
+  const index = html.indexOf(QUOTED_EMAIL_BODY_OPEN);
+  return index === -1 ? [html, ""] : [html.slice(0, index), html.slice(index)];
+}
 
 /**
  * Renders the forwarded message's header fields as a small table. Inline styles
@@ -43,17 +56,17 @@ export function buildForwardMetaHtml(rows: ForwardMetaRow[]): string {
 }
 
 export function hasForwardMetaHtml(html: string): boolean {
-  return new RegExp(FORWARD_META_TABLE_PATTERN, "i").test(html);
+  return FORWARD_META_TABLE_RE.test(splitAtQuotedBody(html)[0]);
 }
 
-/** Removes the forward header table; the cells never contain nested tables. */
 export function stripForwardMetaHtml(html: string): string {
-  return html.replace(new RegExp(FORWARD_META_TABLE_PATTERN, "gi"), "");
+  const [head, tail] = splitAtQuotedBody(html);
+  return head.replace(FORWARD_META_TABLE_RE, "") + tail;
 }
 
 /** One "Label: value" line per row of a table built by buildForwardMetaHtml. */
 export function forwardMetaHtmlToText(html: string): string {
-  const table = html.match(new RegExp(FORWARD_META_TABLE_PATTERN, "i"))?.[0] ?? "";
+  const table = splitAtQuotedBody(html)[0].match(FORWARD_META_TABLE_RE)?.[0] ?? "";
   const lines: string[] = [];
   for (const row of table.matchAll(/<tr[^>]*>([\s\S]*?)<\/tr>/gi)) {
     const cells = Array.from(row[1].matchAll(/<t[hd][^>]*>([\s\S]*?)<\/t[hd]>/gi), (cell) =>

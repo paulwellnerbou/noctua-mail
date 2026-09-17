@@ -6,6 +6,7 @@ import remarkParse from "remark-parse";
 import remarkRehype from "remark-rehype";
 import TurndownService from "turndown";
 import { unified } from "unified";
+import { FORWARD_META_ATTR, forwardMetaHtmlToText } from "./html";
 
 /*
  * Text-format conversion map (source → destination)
@@ -105,7 +106,17 @@ export function htmlToMarkdown(html: string): string {
     codeBlockStyle: "fenced",
     bulletListMarker: "-",
   });
-  return td.turndown(html);
+  // Turndown has no table rule, so the forward header table would degrade to
+  // one paragraph per cell.
+  td.addRule("noctuaForwardMeta", {
+    filter: (node: HTMLElement) =>
+      node.nodeName === "TABLE" && node.getAttribute(FORWARD_META_ATTR) === "1",
+    replacement: (_content: string, node: Node) =>
+      `\n\n${forwardMetaHtmlToText((node as HTMLElement).outerHTML)}\n\n`
+  });
+  // Turndown escapes every line-leading hyphen, but only "- " list markers and
+  // dash-only rules need it; "-- " signatures and dashed separators do not.
+  return td.turndown(html).replace(/^\\-(?=-)(?!-{2,}\s*$)/gm, "-");
 }
 
 /**

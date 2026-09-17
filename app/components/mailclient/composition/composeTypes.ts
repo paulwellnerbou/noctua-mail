@@ -1,5 +1,6 @@
 import type { Attachment } from "@/lib/data";
 import type { ComposeInviteDraft, ComposeInvitePayload } from "@/lib/composeInvite";
+import type { QuotedHtmlParts } from "@/lib/html";
 
 export type ComposeView = "inline" | "modal" | "minimized";
 
@@ -19,12 +20,7 @@ export type ComposeReplyHeaders = {
   xForwardedMessageId?: string;
 };
 
-export type ComposeQuotedParts = {
-  styles: string;
-  headerHtml: string;
-  bodyHtml: string;
-  metaHtml?: string;
-};
+export type ComposeQuotedParts = QuotedHtmlParts;
 
 export type ComposeSize = {
   width: number;

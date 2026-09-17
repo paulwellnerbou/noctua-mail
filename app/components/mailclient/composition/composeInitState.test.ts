@@ -9,6 +9,7 @@ import {
 import type { ComposeInviteDraft } from "@/lib/composeInvite";
 import type { Message } from "@/lib/data";
 import { formatMessageDate } from "@/lib/dateFormatting";
+import { FORWARDED_MESSAGE_MARKER, hasForwardMetaHtml } from "@/lib/html";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -440,8 +441,8 @@ describe("computeComposeInitState — forward", () => {
       deps
     );
     expect(fields.composeTab).toBe("html");
-    expect(fields.composeHtml).toBe("<p>-------- Forwarded message --------</p>");
-    expect(fields.composeHtmlText).toBe("-------- Forwarded message --------");
+    expect(fields.composeHtml).toBe(`<p>${FORWARDED_MESSAGE_MARKER}</p>`);
+    expect(fields.composeHtmlText).toBe(FORWARDED_MESSAGE_MARKER);
     expect(fields.composeQuotedHtml).not.toContain("Forwarded message");
     expect(fields.composeQuotedHtml).toContain("<p>Hello</p>");
   });
@@ -454,7 +455,7 @@ describe("computeComposeInitState — forward", () => {
       opts,
       deps
     );
-    expect(fields.composeHtml).not.toContain("script");
+    expect(fields.composeHtml).toBe(`<p>${FORWARDED_MESSAGE_MARKER}</p>`);
     expect(fields.composeQuotedHtml).not.toContain("<script>");
     expect(fields.composeQuotedHtml).toContain("&lt;script&gt;");
   });
@@ -468,7 +469,7 @@ describe("computeComposeInitState — forward", () => {
       deps
     );
     expect(fields.composeTab).toBe("markdown");
-    expect(fields.composeMarkdown).toBe("-------- Forwarded message --------\n\n");
+    expect(fields.composeMarkdown).toBe(`${FORWARDED_MESSAGE_MARKER}\n\n`);
     expect(fields.composeHtml).toBe("");
     expect(fields.composeQuotedHtml).not.toContain("Forwarded message");
   });
@@ -482,7 +483,7 @@ describe("computeComposeInitState — forward", () => {
       deps
     );
     expect(fields.composeTab).toBe("text");
-    expect(fields.composeBody).toContain("-------- Forwarded message --------");
+    expect(fields.composeBody).toContain(FORWARDED_MESSAGE_MARKER);
     expect(fields.composeBody).toContain("> Original");
     expect(fields.composeHtml).toBe("");
     expect(fields.composeMarkdown).toBe("");
@@ -519,11 +520,66 @@ describe("computeComposeInitState — forward", () => {
     expect(meta).toContain("Cc:</th>");
     expect(meta).not.toContain("secret@example.com");
     expect(meta).not.toContain("Bcc");
-    // The assembled quoted HTML (used by the payload) carries the table too,
-    // after the empty header paragraph and before the quoted body.
-    expect(fields.composeQuotedHtml.indexOf("data-noctua-forward-meta")).toBeLessThan(
-      fields.composeQuotedHtml.indexOf("<p>Hello</p>")
+    // The assembled quoted HTML (used by the payload) carries the table too.
+    expect(fields.composeQuotedHtml).toContain('data-noctua-forward-meta="1"');
+  });
+
+  it("omits Reply-To when it only repeats the sender", () => {
+    const fields = computeComposeInitState(
+      "forward",
+      makeMessage({
+        from: '"Katharina Jockusch" <k@example.com>',
+        replyTo: "Katharina Jockusch <K@example.com>",
+        htmlBody: "<p>Hello</p>"
+      }),
+      false,
+      opts,
+      deps
     );
+    const meta = fields.composeQuotedParts?.metaHtml ?? "";
+
+    expect(meta).not.toContain("Reply-To");
+    expect(meta).toContain("Katharina Jockusch &lt;k@example.com&gt;");
+  });
+
+  it("shows display names without the stored quoting", () => {
+    const fields = computeComposeInitState(
+      "forward",
+      makeMessage({
+        from: '"Alice Example" <alice@example.com>',
+        to: '"Example, Nadine" <nadine@example.test>, bob@example.com',
+        htmlBody: "<p>Hello</p>"
+      }),
+      false,
+      opts,
+      deps
+    );
+    const meta = fields.composeQuotedParts?.metaHtml ?? "";
+
+    expect(meta).toContain("Alice Example &lt;alice@example.com&gt;");
+    expect(meta).toContain("Example, Nadine &lt;nadine@example.test&gt;, bob@example.com");
+    expect(meta).not.toContain("&quot;");
+  });
+
+  it("does not treat a header table inside the quoted body as removable", () => {
+    const forwarded = computeComposeInitState(
+      "forward",
+      makeMessage({ htmlBody: "<p>Hello</p>" }),
+      false,
+      opts,
+      deps
+    );
+    const reply = computeComposeInitState(
+      "reply",
+      makeMessage({ htmlBody: forwarded.composeQuotedHtml }),
+      false,
+      opts,
+      deps
+    );
+
+    expect(reply.composeQuotedParts?.metaHtml).toBeUndefined();
+    expect(reply.composeQuotedHtml).toContain('data-noctua-forward-meta="1"');
+    expect(hasForwardMetaHtml(reply.composeQuotedHtml)).toBe(false);
   });
 
   it("omits header rows whose value is unknown", () => {
@@ -562,7 +618,7 @@ describe("computeComposeInitState — forward", () => {
       [
         "",
         "",
-        "-------- Forwarded message --------",
+        FORWARDED_MESSAGE_MARKER,
         "From: Alice <alice@example.com>",
         `Date: ${date}`,
         "Subject: Hello",

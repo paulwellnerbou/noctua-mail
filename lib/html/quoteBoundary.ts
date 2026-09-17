@@ -75,6 +75,8 @@ const HEADER_BLOCK_SUBJECT = /(?:^|[^\p{L}])(?:betreff|subject)\s*:/iu;
 
 const FORWARD_SEPARATOR =
   /^-{2,}\s*(?:original message|ursprüngliche nachricht|weitergeleitete nachricht|forwarded message)\s*-{2,}/i;
+/** Prefix of Noctua's own forwards; kept beside the regex that has to match it. */
+export const FORWARDED_MESSAGE_MARKER = "-------- Forwarded message --------";
 
 // The attribution line is its own paragraph, so requiring it to be the whole
 // text keeps "wrote:" inside a running sentence from matching.

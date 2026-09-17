@@ -1,4 +1,5 @@
 import { describe, expect, it } from "bun:test";
+import { assembleQuotedHtml, buildForwardMetaHtml } from "@/lib/html";
 import { buildComposePayload, buildTextReplyBody, formatQuotedBody } from "./composeContentBuilder";
 import type { ComposeContentState } from "./composeContentBuilder";
 
@@ -262,6 +263,27 @@ describe("buildComposePayload — markdown mode", () => {
       deps
     );
     expect(result.text).toBe("Hello world");
+  });
+
+  it("carries the forwarded header details into the text/plain part", () => {
+    const result = buildComposePayload(
+      makeState({
+        composeTab: "markdown",
+        composeMarkdown: "-------- Forwarded message --------",
+        composeQuotedHtml: assembleQuotedHtml(
+          {
+            styles: "",
+            headerHtml: "<p></p>",
+            bodyHtml: "<p>Original</p>",
+            metaHtml: buildForwardMetaHtml([{ label: "From", value: "Alice <a@example.com>" }])
+          },
+          true
+        )
+      }),
+      deps
+    );
+    expect(result.text).toBe("-------- Forwarded message --------\nFrom: Alice <a@example.com>");
+    expect(result.html).toContain('data-noctua-forward-meta="1"');
   });
 
   it("includes quoted html when composeIncludeOriginal is true and not edited", () => {

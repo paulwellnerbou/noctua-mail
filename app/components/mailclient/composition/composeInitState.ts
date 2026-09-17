@@ -7,6 +7,7 @@ import {
   buildQuotedHtmlPartsFromHtml,
   escapeHtml,
   extractQuotedHtmlFromDraft,
+  FORWARDED_MESSAGE_MARKER,
   type ForwardMetaRow
 } from "@/lib/html";
 import { prefixSubject } from "@/lib/mail/subjectPrefix";
@@ -187,12 +188,15 @@ export function computeComposeInitState(
 
   const formattedDate = formatMessageDate(message.dateValue, message.date, accountDateFormat);
 
-  const buildReplyContent = (header: string) => {
+  const buildReplyContent = (header: string, metaHtml?: string) => {
     const hasValidHtml = prefersHtml && hasHtmlContent(message.htmlBody);
     const wantsRichReply = preferredComposeTab !== "text";
 
     if (wantsRichReply && hasValidHtml && message.htmlBody) {
-      const parts = buildQuotedHtmlPartsFromHtml(message.htmlBody, header, false);
+      const parts = {
+        ...buildQuotedHtmlPartsFromHtml(message.htmlBody, header, false),
+        ...(metaHtml ? { metaHtml } : {})
+      };
       return {
         composeBody: "",
         composeQuotedHtml: assembleQuotedHtml(parts, true),
@@ -323,18 +327,20 @@ export function computeComposeInitState(
   // forward
   // -------------------------------------------------------------------------
   if (mode === "forward") {
-    // Dashed marker rather than a sentence: the header table carries the sender
-    // and date, and lib/html/quoteBoundary recognises this form as a boundary.
-    const forwardHeader = "-------- Forwarded message --------";
+    const formatAddresses = (value?: string | null) =>
+      splitRecipientEntries(value).map(getDisplayRecipient).filter(Boolean).join(", ");
+    const replyToDiffersFromSender = replyToEmails.some(
+      (email) => !fromEmails.some((from) => from.toLowerCase() === email.toLowerCase())
+    );
     // Bcc is deliberately left out: forwarding one's own sent mail must not
     // reveal who was blind-copied.
     const forwardMetaRows: ForwardMetaRow[] = [
-      { label: "From", value: message.from },
-      { label: "Reply-To", value: replyToRaw },
+      { label: "From", value: formatAddresses(message.from) },
+      { label: "Reply-To", value: replyToDiffersFromSender ? formatAddresses(replyToRaw) : "" },
       { label: "Date", value: formattedDate },
       { label: "Subject", value: message.subject ?? "" },
-      { label: "To", value: message.to ?? "" },
-      { label: "Cc", value: message.cc ?? "" }
+      { label: "To", value: formatAddresses(message.to) },
+      { label: "Cc", value: formatAddresses(message.cc) }
     ];
     const forwardMetaLines = forwardMetaRows
       .filter((row) => row.value.trim().length > 0)
@@ -350,28 +356,19 @@ export function computeComposeInitState(
     // forwarded content. Text mode has no separate quoted block, so the header
     // and the header details stay embedded in the textarea body.
     const isRichForward = preferredComposeTab !== "text" && hasHtmlContent(message.htmlBody);
-    const baseContent = buildReplyContent(
-      isRichForward ? "" : `${forwardHeader}\n${forwardMetaLines.join("\n")}\n`
+    const replyContent = buildReplyContent(
+      isRichForward ? "" : `${FORWARDED_MESSAGE_MARKER}\n${forwardMetaLines.join("\n")}\n`,
+      buildForwardMetaHtml(forwardMetaRows)
     );
-    const forwardQuotedParts = baseContent.composeQuotedParts
-      ? { ...baseContent.composeQuotedParts, metaHtml: buildForwardMetaHtml(forwardMetaRows) }
-      : null;
-    const replyContent = forwardQuotedParts
-      ? {
-          ...baseContent,
-          composeQuotedParts: forwardQuotedParts,
-          composeQuotedHtml: assembleQuotedHtml(forwardQuotedParts, true)
-        }
-      : baseContent;
 
     const editorFields: Partial<ComposeInitFields> =
       replyContent.composeTab === "html"
         ? {
-            composeHtml: `<p>${escapeHtml(forwardHeader)}</p>`,
-            composeHtmlText: forwardHeader
+            composeHtml: `<p>${escapeHtml(FORWARDED_MESSAGE_MARKER)}</p>`,
+            composeHtmlText: FORWARDED_MESSAGE_MARKER
           }
         : replyContent.composeTab === "markdown"
-          ? { composeMarkdown: `${forwardHeader}\n\n` }
+          ? { composeMarkdown: `${FORWARDED_MESSAGE_MARKER}\n\n` }
           : {};
 
     return {
