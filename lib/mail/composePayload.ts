@@ -20,6 +20,7 @@ export type ComposeResolvedAttachment = {
 const GENERIC_ATTACHMENT_FILENAME = /^attachment-\d+$/i;
 const TEXT_CALENDAR_CONTENT_TYPE = /^\s*text\/calendar\s*(?:;|$)/i;
 const FILENAME_EXTENSION = /\.[^.]+$/;
+const CONTENT_TYPE_CHARSET = /;\s*charset=("?)([^";]+)\1/i;
 
 function parseDataUrl(dataUrl: string) {
   const match = dataUrl.match(/^data:([^;]+);base64,(.+)$/);
@@ -61,6 +62,26 @@ export function parseComposeAttachments(
   ) ?? [];
 }
 
+function decodeCalendarPart(content: Buffer) {
+  try {
+    return { text: new TextDecoder("utf-8", { fatal: true }).decode(content), utf8: true };
+  } catch {
+    return { text: content.toString("latin1"), utf8: false };
+  }
+}
+
+/**
+ * A declared charset describes the stored bytes and must survive the rewrite.
+ * Without one, RFC 5545's UTF-8 default is only asserted when the bytes
+ * really are UTF-8, so a mislabelled part is never made worse.
+ */
+function buildCalendarContentType(contentType: string, method: string, utf8: boolean) {
+  const charset = contentType.match(CONTENT_TYPE_CHARSET)?.[2]?.trim() || (utf8 ? "UTF-8" : "");
+  return charset
+    ? `text/calendar; method=${method}; charset=${charset}`
+    : `text/calendar; method=${method}`;
+}
+
 /**
  * Synced calendar parts carry only the bare MIME type and, when the sender
  * set no filename, a generic `attachment-N` name. Outlook only recognises an
@@ -76,7 +97,7 @@ export function normalizeCalendarAttachments(
 ): ComposeResolvedAttachment[] {
   return attachments.map((attachment) => {
     if (!TEXT_CALENDAR_CONTENT_TYPE.test(attachment.contentType)) return attachment;
-    const ics = attachment.content.toString("utf8");
+    const { text: ics, utf8 } = decodeCalendarPart(attachment.content);
     if (!ics.trimStart().toUpperCase().startsWith("BEGIN:VCALENDAR")) return attachment;
     const method = extractCalendarIcsMethod(ics);
     if (!method) return attachment;
@@ -88,7 +109,7 @@ export function normalizeCalendarAttachments(
       ...attachment,
       contentType: hasMethodParameter
         ? attachment.contentType
-        : `text/calendar; method=${method}; charset=UTF-8`,
+        : buildCalendarContentType(attachment.contentType, method, utf8),
       filename: hasUsableFilename ? attachment.filename : buildCalendarIcsFilename()
     };
   });

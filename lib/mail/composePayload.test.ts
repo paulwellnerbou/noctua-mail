@@ -6,6 +6,16 @@ import {
   resolveComposeHtml
 } from "./composePayload";
 import { buildRawMessage } from "./smtp";
+import { simpleParser } from "mailparser";
+
+const testAccount: Account = {
+  id: "acc-compose-test",
+  name: "Owner",
+  email: "owner@example.test",
+  avatar: "",
+  imap: { host: "imap.example.test", port: 993, secure: true, user: "owner", password: "x" },
+  smtp: { host: "smtp.example.test", port: 465, secure: true, user: "owner", password: "x" }
+};
 
 function buildIcs(method?: string) {
   return [
@@ -20,8 +30,9 @@ function buildIcs(method?: string) {
   ].join("\r\n");
 }
 
-function toDataUrl(contentType: string, text: string) {
-  return `data:${contentType};base64,${Buffer.from(text, "utf8").toString("base64")}`;
+function toDataUrl(contentType: string, text: string | Buffer) {
+  const bytes = typeof text === "string" ? Buffer.from(text, "utf8") : text;
+  return `data:${contentType};base64,${bytes.toString("base64")}`;
 }
 
 function buildCalendarPayload(options: {
@@ -200,15 +211,55 @@ describe("normalizeCalendarAttachments", () => {
     expect(outputs[2]?.cid).toBe("image-1");
   });
 
+  it("preserves a declared charset instead of relabelling the bytes as UTF-8", async () => {
+    const ics = buildIcs("REQUEST").replace("SUMMARY:Weekly sync", "SUMMARY:Café");
+    const latin1 = Buffer.from(ics, "latin1");
+    const [output] = normalizeCalendarAttachments(
+      parseComposeAttachments([
+        {
+          filename: "attachment-1",
+          contentType: "text/calendar; charset=iso-8859-1",
+          dataUrl: toDataUrl("text/calendar", latin1)
+        }
+      ])
+    );
+    expect(output?.contentType).toBe("text/calendar; method=REQUEST; charset=iso-8859-1");
+    expect(output?.content.equals(latin1)).toBe(true);
+
+    const raw = await buildRawMessage(testAccount, {
+      to: "peer@example.test",
+      subject: "Fwd: Café",
+      text: "Forwarding the invite",
+      attachments: [output!]
+    });
+    const parsed = await simpleParser(raw);
+    const part = parsed.attachments.find(
+      (attachment: { contentType: string }) => attachment.contentType === "text/calendar"
+    );
+    const header = part?.headers.get("content-type") as
+      | { value: string; params: Record<string, string> }
+      | undefined;
+    expect(header?.params.method).toBe("REQUEST");
+    expect(header?.params.charset).toBe("iso-8859-1");
+    expect(new TextDecoder("iso-8859-1").decode(part!.content)).toContain("SUMMARY:Café");
+  });
+
+  it("omits the charset when none is declared and the bytes are not UTF-8", () => {
+    const ics = buildIcs("REQUEST").replace("SUMMARY:Weekly sync", "SUMMARY:Café");
+    const [output] = normalizeCalendarAttachments(
+      parseComposeAttachments([
+        {
+          filename: "attachment-1",
+          contentType: "text/calendar",
+          dataUrl: toDataUrl("text/calendar", Buffer.from(ics, "latin1"))
+        }
+      ])
+    );
+    expect(output?.contentType).toBe("text/calendar; method=REQUEST");
+    expect(output?.filename).toBe("invite.ics");
+  });
+
   it("produces a text/calendar part with the method parameter in the built MIME", async () => {
-    const account: Account = {
-      id: "acc-compose-test",
-      name: "Owner",
-      email: "owner@example.test",
-      avatar: "",
-      imap: { host: "imap.example.test", port: 993, secure: true, user: "owner", password: "x" },
-      smtp: { host: "smtp.example.test", port: 465, secure: true, user: "owner", password: "x" }
-    };
     const attachments = normalizeCalendarAttachments(
       parseComposeAttachments([
         buildCalendarPayload({
@@ -219,7 +270,7 @@ describe("normalizeCalendarAttachments", () => {
       ])
     );
     const raw = (
-      await buildRawMessage(account, {
+      await buildRawMessage(testAccount, {
         to: "peer@example.test",
         subject: "Fwd: Weekly sync",
         text: "Forwarding the invite",
