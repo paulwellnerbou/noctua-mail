@@ -11,7 +11,11 @@ import {
   upsertMessages
 } from "./serverDb";
 import { deleteMessageFiles, getMessageSource } from "@/lib/storage";
-import { parseComposeAttachments, resolveComposeHtml } from "@/lib/mail/composePayload";
+import {
+  normalizeCalendarAttachments,
+  parseComposeAttachments,
+  resolveComposeHtml
+} from "@/lib/mail/composePayload";
 import { prefixSubject } from "@/lib/mail/subjectPrefix";
 import { appendImapMessage, deleteImapMessage, syncImapMessage } from "./serverImap";
 import { buildRawMessage, sendRawSmtpMessage } from "./serverSmtp";
@@ -211,7 +215,7 @@ export async function saveDraftForAccount(params: {
   }
 
   const draftsMailbox = folderMailboxPath(draftsFolder, account.id);
-  const attachments = parseComposeAttachments(payload.attachments);
+  const attachments = normalizeCalendarAttachments(parseComposeAttachments(payload.attachments));
   const html = await resolveComposeHtml({
     composeFormat: payload.composeFormat,
     markdown: payload.markdown,

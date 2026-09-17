@@ -3,7 +3,11 @@ import { randomUUID } from "crypto";
 import { getFolders, upsertCalendarEvent } from "@/lib/db";
 import type { ComposeInvitePayload } from "@/lib/composeInvite";
 import { appendImapMessage } from "@/lib/mail/imap";
-import { parseComposeAttachments, resolveComposeHtml } from "@/lib/mail/composePayload";
+import {
+  normalizeCalendarAttachments,
+  parseComposeAttachments,
+  resolveComposeHtml
+} from "@/lib/mail/composePayload";
 import { buildSentInvite } from "@/lib/mail/sentInvite";
 import { sendSmtpMessage } from "@/lib/mail/smtp";
 import { folderMailboxPath } from "@/lib/mailboxPaths";
@@ -99,7 +103,7 @@ export async function POST(request: Request, { params }: AccountRouteParams) {
     }
   }
 
-  const attachments = parseComposeAttachments(payload.attachments);
+  const attachments = normalizeCalendarAttachments(parseComposeAttachments(payload.attachments));
   const html = await resolveComposeHtml({
     composeFormat: payload.composeFormat,
     markdown: payload.markdown,

@@ -16,6 +16,7 @@ type BuiltDraftMail = {
   references?: string[];
   xForwardedMessageId?: string;
   headers?: Record<string, string>;
+  attachments?: Array<{ filename: string; contentType: string; content: Buffer }>;
 };
 
 let lastBuiltDraftMail: BuiltDraftMail | null = null;
@@ -283,5 +284,59 @@ describe("saveDraftForAccount", () => {
     expect(lastBuiltDraftMail?.messageId).toBe(existingDraft.messageId);
     expect(result.message?.messageId).toBe(existingDraft.messageId);
     expect(result.message?.threadId).toBe(existingDraft.threadId);
+  });
+});
+
+describe("saveDraftForAccount calendar attachments", () => {
+  beforeEach(() => {
+    lastBuiltDraftMail = null;
+    buildRawMessage.mockClear();
+  });
+
+  test("stores forwarded calendar parts with their iTIP method and a usable filename", async () => {
+    const accountId = `acc-drafts-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const account = buildAccount(accountId);
+    const drafts = buildDraftsFolder(accountId);
+    const ics = [
+      "BEGIN:VCALENDAR",
+      "VERSION:2.0",
+      "METHOD:REQUEST",
+      "BEGIN:VEVENT",
+      "UID:evt-1@example.test",
+      "SUMMARY:Weekly sync",
+      "END:VEVENT",
+      "END:VCALENDAR"
+    ].join("\r\n");
+
+    await upsertAccount(account);
+    await saveFoldersForAccount(accountId, [drafts]);
+
+    await saveDraftForAccount({
+      account,
+      accountId,
+      clientId: "draft-test-client",
+      payload: {
+        to: "peer@example.test",
+        subject: "Fwd: Weekly sync",
+        text: "Forwarding the invite",
+        attachments: [
+          {
+            filename: "attachment-1",
+            contentType: "text/calendar",
+            dataUrl: `data:text/calendar;base64,${Buffer.from(ics, "utf8").toString("base64")}`
+          },
+          {
+            filename: "notes.txt",
+            contentType: "text/plain",
+            dataUrl: "data:text/plain;base64,SGVsbG8="
+          }
+        ]
+      }
+    });
+
+    expect(lastBuiltDraftMail?.attachments?.map((attachment) => [attachment.filename, attachment.contentType])).toEqual([
+      ["invite.ics", "text/calendar; method=REQUEST; charset=UTF-8"],
+      ["notes.txt", "text/plain"]
+    ]);
   });
 });
