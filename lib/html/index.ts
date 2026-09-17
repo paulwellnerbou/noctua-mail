@@ -41,6 +41,7 @@ export {
 } from "./inlineImages";
 export type { QuoteBoundaryCandidate, QuoteBoundaryMarkers, QuoteSizes } from "./quoteBoundary";
 export {
+  FORWARDED_MESSAGE_MARKER,
   QUOTE_TEXT_SCAN_LIMIT,
   hasQuoteBoundaryMarker,
   isQuoteBoundary,
@@ -49,10 +50,15 @@ export {
   canWrapQuoteInParent,
   isTableLayoutTag
 } from "./quoteBoundary";
-export type { QuotedHtmlParts } from "./quotedParts";
+export type { ForwardMetaRow, QuotedHtmlParts } from "./quotedParts";
 export {
+  FORWARD_META_ATTR,
   buildQuotedHtmlPartsFromText,
   buildQuotedHtmlPartsFromHtml,
+  buildForwardMetaHtml,
+  forwardMetaHtmlToText,
+  hasForwardMetaHtml,
+  stripForwardMetaHtml,
   assembleQuotedHtml,
   extractQuotedHtmlFromDraft
 } from "./quotedParts";

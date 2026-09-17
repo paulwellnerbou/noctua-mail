@@ -1,4 +1,5 @@
 import { describe, expect, it } from "bun:test";
+import { buildForwardMetaHtml } from "./html";
 import { htmlToMarkdown, markdownToHtml, textToMarkdown } from "./markdownConvert";
 
 describe("markdownToHtml", () => {
@@ -166,6 +167,26 @@ describe("markdownToHtml", () => {
 });
 
 describe("htmlToMarkdown", () => {
+  it("keeps dashed separators unescaped while still escaping list markers and rules", () => {
+    expect(htmlToMarkdown("<p>-------- Forwarded message --------</p>")).toBe(
+      "-------- Forwarded message --------"
+    );
+    expect(htmlToMarkdown("<p>-- <br>Paul</p>")).toMatch(/^-- /);
+    expect(htmlToMarkdown("<p>---</p>")).toBe("\\---");
+    expect(htmlToMarkdown("<p>- item</p>")).toBe("\\- item");
+  });
+
+  it("renders the forward header table as label lines", () => {
+    const table = buildForwardMetaHtml([
+      { label: "From", value: "Alice <a@example.com>" },
+      { label: "To", value: "Bob *B*" }
+    ]);
+
+    expect(htmlToMarkdown(`<p>Hi</p>${table}<p>Body</p>`)).toBe(
+      "Hi\n\nFrom: Alice <a@example.com>\nTo: Bob *B*\n\nBody"
+    );
+  });
+
   it("converts basic HTML to markdown", () => {
     const result = htmlToMarkdown("<h1>Hello</h1><p>World</p>");
     expect(result).toContain("# Hello");

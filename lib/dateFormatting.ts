@@ -42,6 +42,16 @@ const SHORT_TIME_OPTIONS: Intl.DateTimeFormatOptions = {
   timeStyle: "short"
 };
 
+const FORWARDED_MESSAGE_DATE_OPTIONS: Intl.DateTimeFormatOptions = {
+  weekday: "short",
+  year: "numeric",
+  month: "short",
+  day: "numeric",
+  hour: "2-digit",
+  minute: "2-digit",
+  timeZoneName: "short"
+};
+
 const FORMAT_LOCALE_BY_PRESET: Record<Exclude<AccountDateFormat, "locale" | "ymd">, string> = {
   mdy: "en-US",
   dmy: "en-GB"
@@ -169,6 +179,22 @@ export function formatMessageDate(
 ) {
   const display = getMessageDateDisplay(dateValue, fallbackDate, preferredFormat);
   return includeSeconds ? display.tooltip : display.text;
+}
+
+/**
+ * Date line of a forwarded message's header block. It leaves the account, so
+ * weekday, spelled-out month and time zone keep a recipient in another locale
+ * from misreading day and month or the hour.
+ */
+export function formatForwardedMessageDate(
+  dateValue: number,
+  fallbackDate: string,
+  preferredFormat?: AccountDateFormat
+): string {
+  if (!Number.isFinite(dateValue)) return fallbackDate;
+  const parsed = new Date(dateValue);
+  if (Number.isNaN(parsed.getTime())) return fallbackDate;
+  return formatAccountIntl(parsed, preferredFormat, FORWARDED_MESSAGE_DATE_OPTIONS);
 }
 
 /**

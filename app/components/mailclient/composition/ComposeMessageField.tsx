@@ -11,9 +11,9 @@ import type { ComposeEditorHandle } from "../../ComposeEditor";
 import type { ComposeTranslationUi } from "./useComposeTranslation";
 import { DEEPL_TARGET_LANGUAGES, deeplTargetLanguageLabel } from "@/lib/deeplLanguages";
 import type { ComposeInviteDraft } from "@/lib/composeInvite";
-import type { PendingImageDrop } from "./composeTypes";
+import type { ComposeQuotedParts, PendingImageDrop } from "./composeTypes";
 import type { Attachment } from "@/lib/data";
-import { assembleQuotedHtml } from "@/lib/html";
+import { assembleQuotedHtml, hasForwardMetaHtml, stripForwardMetaHtml } from "@/lib/html";
 import {
   computeBodyOnSwitchToText,
   computeHtmlOnSwitchToHtml,
@@ -44,12 +44,6 @@ type Signature = {
   body: string;
 };
 
-type QuotedParts = {
-  styles: string;
-  headerHtml: string;
-  bodyHtml: string;
-};
-
 type ComposeMessageFieldProps = {
   darkMode: boolean;
   composeMode: ComposeMode;
@@ -63,7 +57,7 @@ type ComposeMessageFieldProps = {
   composeQuoteHtml: boolean;
   composeQuotedHtml: string;
   composeQuotedText: string;
-  composeQuotedParts: QuotedParts | null;
+  composeQuotedParts: ComposeQuotedParts | null;
   composeStripImages: boolean;
   composeEditorReset: number;
   visibleComposeAttachments: Attachment[];
@@ -102,7 +96,7 @@ type ComposeMessageFieldProps = {
   setComposeQuotedHtml: React.Dispatch<React.SetStateAction<string>>;
   setComposeQuotedText: React.Dispatch<React.SetStateAction<string>>;
   setComposeQuotedHtmlEdited: React.Dispatch<React.SetStateAction<boolean>>;
-  setComposeQuotedParts: React.Dispatch<React.SetStateAction<QuotedParts | null>>;
+  setComposeQuotedParts: React.Dispatch<React.SetStateAction<ComposeQuotedParts | null>>;
   setComposeStripImages: React.Dispatch<React.SetStateAction<boolean>>;
   setComposeSignatureId: React.Dispatch<React.SetStateAction<string>>;
   setSignatureMenuOpen: React.Dispatch<React.SetStateAction<boolean>>;
@@ -250,6 +244,9 @@ export default function ComposeMessageField({
     }
     return composeQuotedHtml;
   }, [composeQuotedParts, composeQuotedHtml, composeQuoteHtml]);
+  const canRemoveForwardMeta = composeQuotedParts
+    ? Boolean(composeQuotedParts.metaHtml)
+    : hasForwardMetaHtml(composeQuotedHtml);
   const switchComposeTab = (nextTab: ComposeTab) => {
     if (nextTab === composeTab) return;
     const lastEdited = composeLastEditedRef.current;
@@ -352,6 +349,16 @@ export default function ComposeMessageField({
 
   const handleRemoveQuoted = () => {
     setComposeIncludeOriginal(false);
+    composeDirtyRef.current = true;
+  };
+
+  // Restored drafts carry the quoted block only as assembled HTML. That string
+  // is stripped on both paths: it is what the draft autosave watches.
+  const handleRemoveForwardMeta = () => {
+    if (composeQuotedParts) {
+      setComposeQuotedParts({ ...composeQuotedParts, metaHtml: "" });
+    }
+    setComposeQuotedHtml((prev) => stripForwardMetaHtml(prev));
     composeDirtyRef.current = true;
   };
 
@@ -637,11 +644,13 @@ export default function ComposeMessageField({
               canToggleQuote: hasQuotedParts,
               canStripImages:
                 hasQuotedParts && !composeStripImages && /<img\b/i.test(previewQuotedHtml),
+              canRemoveMeta: canRemoveForwardMeta,
               darkMode,
               onEdit: handleEditQuotedHtml,
               onRemove: handleRemoveQuoted,
               onToggleQuote: handleToggleQuotedHtml,
-              onStripImages: handleStripImages
+              onStripImages: handleStripImages,
+              onRemoveMeta: handleRemoveForwardMeta
             }}
             onInlineImage={handleInlineImage}
             onFilesDrop={addDroppedFiles}
@@ -727,6 +736,18 @@ export default function ComposeMessageField({
                 >
                   Strip images
                 </Button>
+                {canRemoveForwardMeta && (
+                  <Button
+                    type="button"
+                    size="1"
+                    variant="soft"
+                    color="gray"
+                    title="Remove the header details (From, To, Cc, Date, ...) of the forwarded message"
+                    onClick={handleRemoveForwardMeta}
+                  >
+                    Remove details
+                  </Button>
+                )}
                 <Button
                   type="button"
                   size="1"

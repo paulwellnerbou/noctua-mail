@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import {
+  FORWARDED_MESSAGE_MARKER,
   QUOTE_TEXT_SCAN_LIMIT,
   canWrapQuoteInParent,
   hasQuoteBoundaryMarker,
@@ -93,6 +94,7 @@ describe("isQuoteBoundary", () => {
   });
 
   it("matches forward separators", () => {
+    expect(isQuoteBoundary(candidate({ text: FORWARDED_MESSAGE_MARKER }))).toBe(true);
     expect(isQuoteBoundary(candidate({ text: "-----Original Message-----" }))).toBe(true);
     expect(isQuoteBoundary(candidate({ text: "-------- Weitergeleitete Nachricht --------" }))).toBe(
       true

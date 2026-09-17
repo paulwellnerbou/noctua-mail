@@ -92,7 +92,9 @@ export function buildComposePayload(
     const currentMd = state.composeMarkdown.trim();
     const quoted = buildQuoted();
     let html: string | undefined = quoted || undefined;
-    // Strip any embedded HTML from markdown for the text/plain part, keeping markdown syntax intact
+    // Strip any embedded HTML from markdown for the text/plain part, keeping
+    // markdown syntax intact. Nothing else may be added here: a saved draft
+    // restores this part as the editable markdown.
     const textBody = currentMd.replace(/<[^>]+>/g, "").trim();
     if (html) {
       html = normalizeOutboundTableMarkup(html);

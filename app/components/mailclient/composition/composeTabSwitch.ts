@@ -1,20 +1,14 @@
-import { escapeHtml } from "@/lib/html";
+import { escapeHtml, forwardMetaHtmlToText, stripForwardMetaHtml } from "@/lib/html";
 import { htmlToMarkdown, markdownToHtml, textToMarkdown } from "@/lib/markdownConvert";
 import { formatQuotedBody } from "./composeContentBuilder";
-import type { ComposeTab } from "./composeTypes";
-
-export type QuotedParts = {
-  styles: string;
-  headerHtml: string;
-  bodyHtml: string;
-};
+import type { ComposeQuotedParts, ComposeTab } from "./composeTypes";
 
 export type TextBodyParams = {
   lastEdited: ComposeTab;
   composeHtml: string;
   composeHtmlText: string;
   composeMarkdown: string;
-  composeQuotedParts: QuotedParts | null;
+  composeQuotedParts: ComposeQuotedParts | null;
   composeQuotedHtml: string;
   composeIncludeOriginal: boolean;
 };
@@ -45,12 +39,17 @@ export function computeBodyOnSwitchToText(
   const buildQuotedText = (): string => {
     if (!composeIncludeOriginal) return "";
     if (composeQuotedParts) {
-      const header = stripHtml(composeQuotedParts.headerHtml);
+      const meta = forwardMetaHtmlToText(composeQuotedParts.metaHtml ?? "");
+      const header = [stripHtml(composeQuotedParts.headerHtml), meta && `${meta}\n`]
+        .filter(Boolean)
+        .join("\n");
       const body = stripHtml(composeQuotedParts.bodyHtml);
       return formatQuotedBody(body, header).trimStart();
     }
     if (composeQuotedHtml) {
-      return stripHtml(composeQuotedHtml);
+      const meta = forwardMetaHtmlToText(composeQuotedHtml);
+      const body = stripHtml(stripForwardMetaHtml(composeQuotedHtml));
+      return [meta, body].filter(Boolean).join("\n\n");
     }
     return "";
   };

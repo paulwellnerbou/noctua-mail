@@ -1,9 +1,11 @@
 import { describe, expect, it } from "bun:test";
 import type { Account } from "@/lib/data";
+import { assembleQuotedHtml, buildForwardMetaHtml } from "@/lib/html";
 import {
   normalizeCalendarAttachments,
   parseComposeAttachments,
-  resolveComposeHtml
+  resolveComposeHtml,
+  resolveComposeText
 } from "./composePayload";
 import { buildRawMessage } from "./smtp";
 import { simpleParser } from "mailparser";
@@ -320,5 +322,43 @@ describe("resolveComposeHtml", () => {
     });
     expect(output).toContain("cid:image-1");
     expect(output).not.toContain("data:image/png;base64,AAAA");
+  });
+});
+
+describe("resolveComposeText", () => {
+  const quotedWithTable = assembleQuotedHtml(
+    {
+      styles: "",
+      headerHtml: "<p></p>",
+      bodyHtml: "<p>Original</p>",
+      metaHtml: buildForwardMetaHtml([
+        { label: "From", value: "Alice <alice@example.com>" },
+        { label: "To", value: "Bob <bob@example.com>" }
+      ])
+    },
+    true
+  );
+
+  it("appends the forwarded header details for markdown sends", () => {
+    expect(
+      resolveComposeText({
+        composeFormat: "markdown",
+        text: "-------- Forwarded message --------",
+        html: quotedWithTable
+      })
+    ).toBe(
+      "-------- Forwarded message --------\nFrom: Alice <alice@example.com>\nTo: Bob <bob@example.com>"
+    );
+  });
+
+  it("leaves markdown text alone when the quoted html has no header table", () => {
+    expect(resolveComposeText({ composeFormat: "markdown", text: "Hi", html: "<p>Quoted</p>" })).toBe(
+      "Hi"
+    );
+  });
+
+  it("passes html and text sends through untouched", () => {
+    expect(resolveComposeText({ composeFormat: "html", text: "Hi", html: quotedWithTable })).toBe("Hi");
+    expect(resolveComposeText({ composeFormat: "text", text: "Hi" })).toBe("Hi");
   });
 });

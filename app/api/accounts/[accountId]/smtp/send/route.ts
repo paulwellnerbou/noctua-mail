@@ -6,7 +6,8 @@ import { appendImapMessage } from "@/lib/mail/imap";
 import {
   normalizeCalendarAttachments,
   parseComposeAttachments,
-  resolveComposeHtml
+  resolveComposeHtml,
+  resolveComposeText
 } from "@/lib/mail/composePayload";
 import { buildSentInvite } from "@/lib/mail/sentInvite";
 import { sendSmtpMessage } from "@/lib/mail/smtp";
@@ -110,6 +111,11 @@ export async function POST(request: Request, { params }: AccountRouteParams) {
     html: payload.html,
     attachments: payload.attachments
   });
+  const text = resolveComposeText({
+    composeFormat: payload.composeFormat,
+    text: payload.text,
+    html: payload.html
+  });
 
   const inviteResult = payload.invite
     ? buildSentInvite({
@@ -118,7 +124,7 @@ export async function POST(request: Request, { params }: AccountRouteParams) {
         subject: payload.subject,
         to,
         cc,
-        descriptionText: payload.text ?? ""
+        descriptionText: text
       })
     : null;
   if (inviteResult) {
@@ -138,7 +144,7 @@ export async function POST(request: Request, { params }: AccountRouteParams) {
       bcc: bcc || undefined,
       keepBcc: true,
       subject: payload.subject,
-      text: payload.text,
+      text,
       html,
       messageId,
       inReplyTo: payload.inReplyTo,
