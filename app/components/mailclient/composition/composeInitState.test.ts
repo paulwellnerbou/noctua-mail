@@ -8,7 +8,7 @@ import {
 } from "./composeInitState";
 import type { ComposeInviteDraft } from "@/lib/composeInvite";
 import type { Message } from "@/lib/data";
-import { formatMessageDate } from "@/lib/dateFormatting";
+import { formatForwardedMessageDate } from "@/lib/dateFormatting";
 import { FORWARDED_MESSAGE_MARKER, hasForwardMetaHtml } from "@/lib/html";
 
 // ---------------------------------------------------------------------------
@@ -21,7 +21,7 @@ const opts = { accountEmail: "me@example.com", accountDateFormat: "MMM d, yyyy" 
 
 function formattedFixtureDate() {
   const message = makeMessage();
-  return formatMessageDate(message.dateValue, message.date, opts.accountDateFormat);
+  return formatForwardedMessageDate(message.dateValue, message.date, opts.accountDateFormat);
 }
 
 function makeMessage(overrides: Partial<Message> = {}): Message {

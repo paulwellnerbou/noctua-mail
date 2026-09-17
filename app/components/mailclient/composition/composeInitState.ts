@@ -1,6 +1,6 @@
 import type { AccountDateFormat, Message } from "@/lib/data";
 import { createDefaultComposeInviteDraft } from "@/lib/composeInvite";
-import { formatMessageDate } from "@/lib/dateFormatting";
+import { formatForwardedMessageDate, formatMessageDate } from "@/lib/dateFormatting";
 import {
   assembleQuotedHtml,
   buildForwardMetaHtml,
@@ -337,7 +337,10 @@ export function computeComposeInitState(
     const forwardMetaRows: ForwardMetaRow[] = [
       { label: "From", value: formatAddresses(message.from) },
       { label: "Reply-To", value: replyToDiffersFromSender ? formatAddresses(replyToRaw) : "" },
-      { label: "Date", value: formattedDate },
+      {
+        label: "Date",
+        value: formatForwardedMessageDate(message.dateValue, message.date, accountDateFormat)
+      },
       { label: "Subject", value: message.subject ?? "" },
       { label: "To", value: formatAddresses(message.to) },
       { label: "Cc", value: formatAddresses(message.cc) }

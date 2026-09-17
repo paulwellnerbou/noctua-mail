@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   formatAccountDateValue,
   formatAccountMediumDate,
+  formatForwardedMessageDate,
   formatAccountMediumDateTime,
   formatAccountShortTime,
   formatAccountTimestampLabel,
@@ -35,6 +36,17 @@ function formatUpcomingDateLabelInSubprocess(timeZone: string) {
 }
 
 describe("dateFormatting helpers", () => {
+  test("formatForwardedMessageDate spells out weekday, month and time zone", () => {
+    const zone = /(?:GMT[+\-]\d{1,2}(?::\d{2})?|UTC|[A-Z]{2,5})$/;
+    expect(formatForwardedMessageDate(SAMPLE_MS, "Wed, 15 Apr 2026", "mdy")).toMatch(
+      /^Wed, Apr 15, 2026 at 03:45 PM /
+    );
+    expect(formatForwardedMessageDate(SAMPLE_MS, "", "mdy")).toMatch(zone);
+    expect(formatForwardedMessageDate(SAMPLE_MS, "", "dmy")).toMatch(/^Wed, 15 Apr 2026 at 15:45 /);
+    expect(formatForwardedMessageDate(SAMPLE_MS, "", "ymd")).toMatch(/^\w{2,3}\.?, 2026-04-15 15:45 /);
+    expect(formatForwardedMessageDate(Number.NaN, "Wed, 15 Apr 2026", "mdy")).toBe("Wed, 15 Apr 2026");
+  });
+
   test("formatAccountDateValue honors ymd preset", () => {
     expect(formatAccountDateValue(SAMPLE_MS, "ymd")).toBe("2026-04-15 15:45");
   });
