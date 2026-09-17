@@ -265,7 +265,7 @@ describe("buildComposePayload — markdown mode", () => {
     expect(result.text).toBe("Hello world");
   });
 
-  it("carries the forwarded header details into the text/plain part", () => {
+  it("keeps the text/plain part equal to the markdown source so drafts round-trip", () => {
     const result = buildComposePayload(
       makeState({
         composeTab: "markdown",
@@ -282,7 +282,7 @@ describe("buildComposePayload — markdown mode", () => {
       }),
       deps
     );
-    expect(result.text).toBe("-------- Forwarded message --------\nFrom: Alice <a@example.com>");
+    expect(result.text).toBe("-------- Forwarded message --------");
     expect(result.html).toContain('data-noctua-forward-meta="1"');
   });
 

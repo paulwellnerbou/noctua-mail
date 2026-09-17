@@ -1,5 +1,5 @@
 import type { Attachment } from "@/lib/data";
-import { forwardMetaHtmlToText, stripStyleTags } from "@/lib/html";
+import { stripStyleTags } from "@/lib/html";
 import { htmlToMarkdown } from "@/lib/markdownConvert";
 import type { ComposeTab } from "./composeTypes";
 
@@ -93,11 +93,9 @@ export function buildComposePayload(
     const quoted = buildQuoted();
     let html: string | undefined = quoted || undefined;
     // Strip any embedded HTML from markdown for the text/plain part, keeping
-    // markdown syntax intact. The quoted original never reaches text/plain in
-    // markdown mode, so at least the forwarded header details do.
-    const textBody = [currentMd.replace(/<[^>]+>/g, "").trim(), forwardMetaHtmlToText(quoted)]
-      .filter(Boolean)
-      .join("\n");
+    // markdown syntax intact. Nothing else may be added here: a saved draft
+    // restores this part as the editable markdown.
+    const textBody = currentMd.replace(/<[^>]+>/g, "").trim();
     if (html) {
       html = normalizeOutboundTableMarkup(html);
     }

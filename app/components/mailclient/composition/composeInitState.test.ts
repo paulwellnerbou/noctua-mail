@@ -9,7 +9,7 @@ import {
 import type { ComposeInviteDraft } from "@/lib/composeInvite";
 import type { Message } from "@/lib/data";
 import { formatForwardedMessageDate } from "@/lib/dateFormatting";
-import { FORWARDED_MESSAGE_MARKER, hasForwardMetaHtml } from "@/lib/html";
+import { FORWARDED_MESSAGE_MARKER, hasForwardMetaHtml, stripForwardMetaHtml } from "@/lib/html";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -649,6 +649,32 @@ describe("computeComposeInitState — forward", () => {
 // ---------------------------------------------------------------------------
 
 describe("computeComposeInitState — edit", () => {
+  it("restores a markdown forward draft without leaking the header details into the editor", () => {
+    const forwarded = computeComposeInitState(
+      "forward",
+      makeMessage({ htmlBody: "<p>Hello</p>" }),
+      false,
+      { ...opts, preferredComposeTab: "markdown" },
+      deps
+    );
+    // What the draft save stores: the markdown source as text/plain and the
+    // rendered markdown followed by the quoted block as html.
+    const draft = makeMessage({
+      id: "draft-1",
+      xComposeFormat: "markdown",
+      body: forwarded.composeMarkdown.trim(),
+      htmlBody: `<p>${FORWARDED_MESSAGE_MARKER}</p>${forwarded.composeQuotedHtml}`
+    });
+
+    const fields = computeComposeInitState("edit", draft, false, opts, deps);
+
+    expect(fields.composeTab).toBe("markdown");
+    expect(fields.composeMarkdown).toBe(FORWARDED_MESSAGE_MARKER);
+    expect(fields.composeMarkdown).not.toContain("From:");
+    expect(hasForwardMetaHtml(fields.composeQuotedHtml)).toBe(true);
+    expect(hasForwardMetaHtml(stripForwardMetaHtml(fields.composeQuotedHtml))).toBe(false);
+  });
+
   it("sets composeDraftId to message id", () => {
     const fields = computeComposeInitState(
       "edit",
