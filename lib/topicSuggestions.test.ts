@@ -1233,7 +1233,8 @@ describe("topic suggestions", () => {
     await upsertAccount(buildAccount(accountId));
     await saveFoldersForAccount(accountId, [inboxFolder, archiveFolder]);
 
-    const now = Date.UTC(2026, 2, 18, 12, 0, 0);
+    // Relative to the wall clock so the fixtures stay inside maxAgeDays.
+    const now = Date.now();
     const oldDate = now - 181 * 24 * 60 * 60 * 1000;
 
     await upsertMessages(
