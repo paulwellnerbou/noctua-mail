@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { X, Download } from "lucide-react";
+import { X, Download, Loader2, RotateCw } from "lucide-react";
 import { FileIcon, defaultStyles } from "react-file-icon";
 import type { Attachment } from "@/lib/data";
 import { openDetachedWindow } from "@/lib/ui/openDetachedWindow";
@@ -257,11 +257,13 @@ export default function AttachmentsList({
   attachments,
   htmlBody,
   onRemove,
+  onRetryLoad,
   showDownloadAll = false
 }: {
   attachments: Attachment[];
   htmlBody?: string | null;
   onRemove?: (id: string) => void;
+  onRetryLoad?: (id: string) => void;
   showDownloadAll?: boolean;
 }) {
   const [hoveredImagePreview, setHoveredImagePreview] = useState<HoveredImagePreview | null>(null);
@@ -306,7 +308,11 @@ export default function AttachmentsList({
           }}
         >
           <div className="attachment-icon">
-            <FileIcon extension={ext} {...iconStyle} />
+            {file.loadStatus === "loading" ? (
+              <Loader2 size={14} className="attachment-load-spinner" aria-label="Loading attachment" />
+            ) : (
+              <FileIcon extension={ext} {...iconStyle} />
+            )}
           </div>
         </div>
         <a
@@ -332,8 +338,29 @@ export default function AttachmentsList({
               ({file.contentType || "unknown"}
               {formatByteSize(file.size) ? `, ${formatByteSize(file.size)}` : ""})
             </span>
+            {file.loadStatus === "loading" && (
+              <span className="attachment-meta"> · Loading…</span>
+            )}
+            {file.loadStatus === "error" && (
+              <span className="attachment-load-error" role="alert"> · Failed to load</span>
+            )}
           </span>
         </a>
+        {file.loadStatus === "error" && onRetryLoad && (
+          <button
+            type="button"
+            className="icon-button ghost"
+            title="Retry loading attachment"
+            aria-label={`Retry loading attachment${file.filename ? `: ${file.filename}` : ""}`}
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              onRetryLoad(file.id);
+            }}
+          >
+            <RotateCw size={12} />
+          </button>
+        )}
         {downloadHref && (
           <a
             className="icon-button ghost attachment-preview"

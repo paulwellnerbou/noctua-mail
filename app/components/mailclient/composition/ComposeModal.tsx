@@ -24,6 +24,7 @@ export default function ComposeModal({ open }: ComposeModalProps) {
     composeOpen,
     composeFieldsReset,
     canSaveDraft,
+    attachmentLoadState,
     draftSaving,
     draftSaveError,
     draftSavedAt,
@@ -207,6 +208,7 @@ export default function ComposeModal({ open }: ComposeModalProps) {
           sendingMail={sendingMail}
           discardingDraft={discardingDraft}
           busy={detachingCompose}
+          attachmentLoadState={attachmentLoadState}
           handleDiscardDraft={handleDiscardDraft}
           handleSaveDraft={handleSaveDraft}
           handleCancel={() => {

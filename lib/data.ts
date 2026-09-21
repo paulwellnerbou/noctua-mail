@@ -260,6 +260,10 @@ export type Attachment = {
   cid?: string;
   dataUrl?: string;
   url?: string;
+  // Composer only: bytes of a source-message attachment are still being
+  // fetched (or the fetch failed). The server drops attachments without a
+  // `dataUrl`, so send and draft saves must wait until this is cleared.
+  loadStatus?: "loading" | "error";
 };
 
 export type CalendarReminder = {

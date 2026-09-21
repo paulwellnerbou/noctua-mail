@@ -21,6 +21,7 @@ export default function ComposeInlineCard() {
     composeOpen,
     composeFieldsReset,
     canSaveDraft,
+    attachmentLoadState,
     draftSaving,
     draftSaveError,
     draftSavedAt,
@@ -153,6 +154,7 @@ export default function ComposeInlineCard() {
           sendingMail={sendingMail}
           discardingDraft={discardingDraft}
           busy={detachingCompose}
+          attachmentLoadState={attachmentLoadState}
           handleDiscardDraft={handleDiscardDraft}
           handleSaveDraft={handleSaveDraft}
           handleCancel={() => {

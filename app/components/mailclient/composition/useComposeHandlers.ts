@@ -1,4 +1,4 @@
-import { useCallback } from "react";
+import { useCallback, useRef } from "react";
 import { buildAccountAttachmentPath } from "@/lib/accountApiPaths";
 import type { Message, Attachment } from "@/lib/data";
 import { isInlineImageReferenced, replaceInlineImageSources } from "@/lib/html";
@@ -108,6 +108,47 @@ export function promoteUnreferencedInlineAttachments(
   );
 }
 
+// Body-referenced inline images must be data URLs before the editor
+// initializes, so they are hydrated up front. Everything else opens as a
+// `loading` placeholder and is fetched in the background; source order is kept
+// because the draft hash depends on it.
+export function planComposeSourceAttachments(
+  source: Attachment[],
+  html: string,
+  hydratedInline: Attachment[]
+) {
+  const hydratedById = new Map(hydratedInline.map((attachment) => [attachment.id, attachment]));
+  const deferred: Attachment[] = [];
+  const attachments = promoteUnreferencedInlineAttachments(source, html).flatMap(
+    (attachment) => {
+      if (attachment.inline) return hydratedById.get(attachment.id) ?? [];
+      const placeholder = { ...attachment, loadStatus: "loading" as const };
+      deferred.push(placeholder);
+      return placeholder;
+    }
+  );
+  return { attachments, deferred };
+}
+
+export function applyComposeAttachmentLoadResult(
+  attachments: Attachment[],
+  attachmentId: string,
+  dataUrl: string | null
+) {
+  return attachments.map((attachment) => {
+    if (attachment.id !== attachmentId || !attachment.loadStatus) return attachment;
+    if (dataUrl === null) return { ...attachment, loadStatus: "error" as const };
+    const { loadStatus: _loadStatus, ...loaded } = attachment;
+    return { ...loaded, dataUrl };
+  });
+}
+
+export function getComposeAttachmentLoadState(attachments: Attachment[]) {
+  if (attachments.some((attachment) => attachment.loadStatus === "loading")) return "loading";
+  if (attachments.some((attachment) => attachment.loadStatus === "error")) return "error";
+  return null;
+}
+
 export function pruneUnreferencedInlineAttachments(attachments: Attachment[], html: string) {
   const inlineAttachments = attachments.filter((attachment) => attachment.inline);
   if (inlineAttachments.length === 0) return attachments;
@@ -165,7 +206,60 @@ export function useComposeHandlers({
     setComposeAttachments((prev) => [...prev, ...attachments]);
   };
 
+  // One controller per in-flight background load. Doubles as the staleness
+  // token: a result is applied only while its controller is still registered,
+  // so aborted, superseded and removed loads can never patch the composer.
+  const attachmentLoadsRef = useRef(new Map<string, AbortController>());
+  const attachmentLoadSourceRef = useRef<{ accountId: string; messageId: string } | null>(null);
+
+  const abortComposeAttachmentLoads = useCallback(() => {
+    attachmentLoadsRef.current.forEach((controller) => controller.abort());
+    attachmentLoadsRef.current.clear();
+  }, []);
+
+  const loadComposeAttachment = useCallback(async (attachmentId: string) => {
+    const source = attachmentLoadSourceRef.current;
+    if (!source) return;
+    attachmentLoadsRef.current.get(attachmentId)?.abort();
+    const controller = new AbortController();
+    attachmentLoadsRef.current.set(attachmentId, controller);
+
+    let dataUrl: string | null = null;
+    try {
+      const res = await apiFetch(
+        buildAccountAttachmentPath(source.accountId, source.messageId, attachmentId),
+        { signal: controller.signal }
+      );
+      if (res.ok) dataUrl = await readBlobAsDataUrl(await res.blob());
+    } catch {
+      dataUrl = null;
+    }
+
+    if (attachmentLoadsRef.current.get(attachmentId) !== controller) return;
+    attachmentLoadsRef.current.delete(attachmentId);
+    setComposeAttachments((prev) => applyComposeAttachmentLoadResult(prev, attachmentId, dataUrl));
+  }, [apiFetch, setComposeAttachments]);
+
+  const startComposeAttachmentLoads = useCallback((message: Message, deferred: Attachment[]) => {
+    abortComposeAttachmentLoads();
+    attachmentLoadSourceRef.current = { accountId: message.accountId, messageId: message.id };
+    deferred.forEach((attachment) => void loadComposeAttachment(attachment.id));
+  }, [abortComposeAttachmentLoads, loadComposeAttachment]);
+
+  const retryComposeAttachmentLoad = useCallback((attachmentId: string) => {
+    setComposeAttachments((prev) =>
+      prev.map((attachment) =>
+        attachment.id === attachmentId && attachment.loadStatus === "error"
+          ? { ...attachment, loadStatus: "loading" as const }
+          : attachment
+      )
+    );
+    void loadComposeAttachment(attachmentId);
+  }, [loadComposeAttachment, setComposeAttachments]);
+
   const removeComposeAttachment = (attachmentId: string) => {
+    attachmentLoadsRef.current.get(attachmentId)?.abort();
+    attachmentLoadsRef.current.delete(attachmentId);
     composeDirtyRef.current = true;
     setComposeAttachments((prev) => prev.filter((item) => item.id !== attachmentId));
   };
@@ -235,13 +329,19 @@ export function useComposeHandlers({
   };
 
   const loadComposeSourceAttachments = async (message: Message) => {
-    const attachments = promoteUnreferencedInlineAttachments(
-      await hydrateComposeAttachments(message),
-      message.htmlBody ?? ""
+    const html = message.htmlBody ?? "";
+    const hydratedInline = await hydrateComposeAttachments(message, {
+      filter: (attachment) => attachment.inline && isInlineImageReferenced(html, attachment)
+    });
+    const { attachments, deferred } = planComposeSourceAttachments(
+      message.attachments ?? [],
+      html,
+      hydratedInline
     );
     return {
       attachments,
-      message: restoreComposeMessageAttachmentDataUrls(message, attachments)
+      deferred,
+      message: restoreComposeMessageAttachmentDataUrls(message, hydratedInline)
     };
   };
 
@@ -256,6 +356,9 @@ export function useComposeHandlers({
     handleComposeDrop,
     handleComposeAttachmentPick,
     hydrateComposeAttachments,
-    loadComposeSourceAttachments
+    loadComposeSourceAttachments,
+    startComposeAttachmentLoads,
+    retryComposeAttachmentLoad,
+    abortComposeAttachmentLoads
   };
 }

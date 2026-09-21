@@ -7,7 +7,7 @@ import { Theme } from "@radix-ui/themes";
 import type { Message } from "@/lib/data";
 import ComposeOrchestrator from "./ComposeOrchestrator";
 
-type ApiCall = { url: string; method: string; body?: unknown };
+type ApiCall = { url: string; method: string; body?: unknown; signal?: AbortSignal | null };
 
 type RenderComposeOptions = {
   smtpResponse?: Response | (() => Response | Promise<Response>);
@@ -15,6 +15,8 @@ type RenderComposeOptions = {
   readErrorMessage?: (response: Response) => Promise<string>;
   updateKeywordFlag?: (message: Message, keyword: string, value: boolean) => void | Promise<void>;
   ensureMessageContent?: (message: Message) => Promise<Message | null | undefined>;
+  attachmentResponse?: () => Response | Promise<Response>;
+  holdDraftSaves?: boolean;
   detachedWindow?: boolean;
   showComposeInline?: boolean;
   showComposeModal?: boolean;
@@ -61,12 +63,15 @@ function renderCompose(options: RenderComposeOptions = {}) {
     const body = typeof init?.body === "string"
       ? JSON.parse(init.body) as unknown
       : undefined;
-    calls.push({ url, method: init?.method ?? "GET", body });
+    calls.push({ url, method: init?.method ?? "GET", body, signal: init?.signal });
 
+    if (url.includes("/attachments/") && options.attachmentResponse) {
+      return options.attachmentResponse();
+    }
     if (url.includes("/drafts/save")) {
       // Hold the save open so the pre-send flush blocks, reproducing the slow
       // IMAP APPEND the user hit.
-      await draftSaveGate.promise;
+      if (options.holdDraftSaves ?? true) await draftSaveGate.promise;
       return jsonResponse({ draftId: "draft-1", message: null });
     }
     if (url.includes("/smtp/send")) {
@@ -355,6 +360,154 @@ describe("detached compose semantics", () => {
 
     cleanup();
   });
+});
+
+describe("forwarding a mail with a large attachment", () => {
+  const source = {
+    id: "source-big",
+    accountId: "acc-test",
+    folderId: "folder-inbox",
+    threadId: "thread-big",
+    messageId: "<source-big@example.test>",
+    subject: "Big file",
+    from: "sender@example.test",
+    to: "me@example.test",
+    preview: "See attached",
+    date: "2026-08-14T10:00:00.000Z",
+    dateValue: 1,
+    body: "See attached",
+    attachments: [
+      {
+        id: "att-big",
+        filename: "big.pdf",
+        contentType: "application/pdf",
+        size: 25_000_000,
+        inline: false
+      }
+    ]
+  } as Message;
+
+  const attachmentFetches = (calls: ApiCall[]) =>
+    calls.filter((call) => call.url.includes("/attachments/att-big"));
+  // Plain snapshot rather than the element: a failed matcher on a DOM node
+  // makes bun pretty-print the whole happy-dom graph, which stalls `waitFor`.
+  const sendState = (root: HTMLElement) => {
+    const button = [...root.querySelectorAll("button")].find((candidate) =>
+      /^(Send|Loading attachments…)$/.test((candidate.textContent ?? "").trim())
+    );
+    return button
+      ? { label: (button.textContent ?? "").trim(), disabled: button.disabled }
+      : null;
+  };
+
+  it("opens at once, blocks Send and auto-save until the bytes arrive, then saves them", async () => {
+    const download = deferred<Response>();
+    const { view, handleRef, calls, countDraftSaves } = renderCompose({
+      attachmentResponse: () => download.promise,
+      holdDraftSaves: false
+    });
+
+    // Three impatient clicks while the first open is still initializing.
+    await act(async () => {
+      handleRef.current?.openCompose("forward", source);
+      handleRef.current?.openCompose("forward", source);
+      handleRef.current?.openCompose("forward", source);
+    });
+
+    const toField = view.baseElement.querySelector<HTMLInputElement>("#compose-modal-to");
+    expect(toField).not.toBeNull();
+    expect(attachmentFetches(calls)).toHaveLength(1);
+    expect(view.getByText(/Loading…/)).toBeTruthy();
+    expect(sendState(view.baseElement)).toEqual({
+      label: "Loading attachments…",
+      disabled: true
+    });
+
+    await act(async () => {
+      fireEvent.change(toField!, { target: { value: "someone@example.test" } });
+    });
+    // Longer than the auto-save debounce: a save here would store a draft
+    // without the file.
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 2500));
+    });
+    expect(countDraftSaves()).toBe(0);
+
+    await act(async () => {
+      download.resolve(new Response(new Blob(["%PDF"], { type: "application/pdf" })));
+    });
+
+    await waitFor(() => {
+      expect(sendState(view.baseElement)).toEqual({ label: "Send", disabled: false });
+    });
+    await waitFor(() => expect(countDraftSaves()).toBe(1), { timeout: 5000 });
+    const saved = calls.find((call) => call.url.includes("/drafts/save"))?.body as {
+      attachments?: Array<{ id: string; dataUrl?: string; loadStatus?: string }>;
+    };
+    expect(saved.attachments).toHaveLength(1);
+    expect(saved.attachments?.[0]?.dataUrl).toMatch(/^data:application\/pdf;base64,/);
+    expect(saved.attachments?.[0]?.loadStatus).toBeUndefined();
+
+    cleanup();
+  }, 20000);
+
+  it("aborts the download on Cancel and never saves a draft", async () => {
+    const download = deferred<Response>();
+    const { view, handleRef, calls, countDraftSaves } = renderCompose({
+      attachmentResponse: () => download.promise,
+      holdDraftSaves: false
+    });
+
+    await act(async () => {
+      await handleRef.current?.openCompose("forward", source);
+    });
+    const [fetchCall] = attachmentFetches(calls);
+    expect(fetchCall?.signal?.aborted).toBe(false);
+
+    await act(async () => {
+      fireEvent.click(view.getByText("Cancel"));
+    });
+    expect(fetchCall?.signal?.aborted).toBe(true);
+
+    await act(async () => {
+      download.resolve(new Response(new Blob(["%PDF"], { type: "application/pdf" })));
+      await new Promise((resolve) => setTimeout(resolve, 2500));
+    });
+    expect(countDraftSaves()).toBe(0);
+
+    cleanup();
+  }, 20000);
+
+  it("keeps Send blocked after a failed download until it is retried", async () => {
+    const errors: string[] = [];
+    let attempts = 0;
+    const { view, handleRef } = renderCompose({
+      attachmentResponse: () => {
+        attempts += 1;
+        return attempts === 1
+          ? new Response("nope", { status: 502 })
+          : new Response(new Blob(["%PDF"], { type: "application/pdf" }));
+      },
+      reportError: (message) => errors.push(message)
+    });
+
+    await act(async () => {
+      await handleRef.current?.openCompose("forward", source);
+    });
+    await waitFor(() => expect(view.getByText(/Failed to load/)).toBeTruthy());
+    expect(sendState(view.baseElement)).toEqual({ label: "Send", disabled: true });
+
+    await act(async () => {
+      fireEvent.click(view.getByLabelText("Retry loading attachment: big.pdf"));
+    });
+    await waitFor(() => {
+      expect(sendState(view.baseElement)).toEqual({ label: "Send", disabled: false });
+    });
+    expect(view.queryByText(/Failed to load/)).toBeNull();
+    expect(errors).toEqual([]);
+
+    cleanup();
+  }, 20000);
 });
 
 describe("compose initialization errors", () => {

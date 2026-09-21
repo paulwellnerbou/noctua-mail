@@ -4,6 +4,7 @@ import type { Attachment } from "@/lib/data";
 import type { ComposePayload } from "./composeContentBuilder";
 import { getDraftAutoSaveState } from "./draftAutoSaveState";
 import { buildDraftSavePayload, getDraftChangeState } from "./draftSaveUtils";
+import { getComposeAttachmentLoadState } from "./useComposeHandlers";
 import type { ComposeReplyHeaders, ComposeTab, DraftSavePayload } from "./composeTypes";
 
 export type UseComposeDraftAutoSaveParams = {
@@ -123,6 +124,11 @@ export function useComposeDraftAutoSave({
       }
       return;
     }
+
+    // A draft saved now would lose the attachments still loading, and the
+    // hash ignores their bytes, so it would never be saved again once they
+    // arrive. This effect re-runs when `composeAttachments` settles.
+    if (getComposeAttachmentLoadState(attachments)) return;
 
     composeDirtyRef.current = autoSaveState.nextComposeDirty;
     if (autoSaveState.shouldClearDirty || !autoSaveState.shouldScheduleSave) {

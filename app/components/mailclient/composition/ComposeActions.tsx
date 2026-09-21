@@ -11,6 +11,7 @@ type ComposeActionsProps = {
   sendingMail: boolean;
   discardingDraft: boolean;
   busy?: boolean;
+  attachmentLoadState?: "loading" | "error" | null;
   handleDiscardDraft: () => void;
   handleSaveDraft: () => void;
   handleCancel: () => void;
@@ -28,6 +29,7 @@ export default function ComposeActions({
   sendingMail,
   discardingDraft,
   busy = false,
+  attachmentLoadState = null,
   handleDiscardDraft,
   handleSaveDraft,
   handleCancel,
@@ -91,8 +93,21 @@ export default function ComposeActions({
         >
           Cancel
         </Button>
-        <Button size="2" onClick={handleSendMail} disabled={busy || sendingMail}>
-          {sendingMail ? "Sending..." : "Send"}
+        <Button
+          size="2"
+          onClick={handleSendMail}
+          disabled={busy || sendingMail || Boolean(attachmentLoadState)}
+          title={
+            attachmentLoadState === "error"
+              ? "Retry or remove the attachments that failed to load"
+              : undefined
+          }
+        >
+          {sendingMail
+            ? "Sending..."
+            : attachmentLoadState === "loading"
+              ? "Loading attachments…"
+              : "Send"}
         </Button>
       </div>
     </div>

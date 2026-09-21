@@ -104,6 +104,7 @@ type ComposeMessageFieldProps = {
   handleInlineImage: (file: File, dataUrl: string) => Promise<void>;
   handleComposeAttachmentPick: (event: React.ChangeEvent<HTMLInputElement>) => Promise<void>;
   removeComposeAttachment: (attachmentId: string) => void;
+  retryComposeAttachmentLoad: (attachmentId: string) => void;
   pendingImageDrop: PendingImageDrop | null;
   setPendingImageDrop: (drop: PendingImageDrop | null) => void;
   addComposeFiles: (files: File[], inline?: boolean) => Promise<void>;
@@ -175,6 +176,7 @@ export default function ComposeMessageField({
   handleInlineImage,
   handleComposeAttachmentPick,
   removeComposeAttachment,
+  retryComposeAttachmentLoad,
   pendingImageDrop,
   setPendingImageDrop,
   addComposeFiles,
@@ -675,6 +677,7 @@ export default function ComposeMessageField({
           <AttachmentsList
             attachments={visibleComposeAttachments}
             onRemove={removeComposeAttachment}
+            onRetryLoad={retryComposeAttachmentLoad}
           />
         </div>
       )}

@@ -47,6 +47,7 @@ import { resetComposeSession } from "./resetComposeSession";
 import { useComposeController } from "./useComposeController";
 import { useComposeDraftAutoSave } from "./useComposeDraftAutoSave";
 import {
+  getComposeAttachmentLoadState,
   pruneUnreferencedInlineAttachments,
   useComposeHandlers
 } from "./useComposeHandlers";
@@ -55,6 +56,11 @@ import { useComposeTranslation } from "./useComposeTranslation";
 import { useComposeViewEffects } from "./useComposeViewEffects";
 import { useDraftManager } from "./useDraftManager";
 import type { ComposeMode } from "./composeTypes";
+
+const ATTACHMENT_LOAD_BLOCK_MESSAGE = {
+  loading: "Attachments are still loading. Try again in a moment.",
+  error: "Some attachments could not be loaded. Retry or remove them first."
+} as const;
 
 type Signature = {
   id: string;
@@ -309,6 +315,7 @@ function ComposeOrchestratorImpl(
   const detachingComposeRef = useRef(false);
   const closingDetachedComposeRef = useRef(false);
   const discardingDraftRequestRef = useRef(false);
+  const composeInitRef = useRef<{ token: number; key: string | null }>({ token: 0, key: null });
   const {
     composeOpen,
     setComposeOpen,
@@ -476,7 +483,10 @@ function ComposeOrchestratorImpl(
     handleComposeDragOver,
     handleComposeDrop,
     handleComposeAttachmentPick,
-    loadComposeSourceAttachments
+    loadComposeSourceAttachments,
+    startComposeAttachmentLoads,
+    retryComposeAttachmentLoad,
+    abortComposeAttachmentLoads
   } = useComposeHandlers({
     composeDirtyRef,
     composeDragDepthRef,
@@ -505,7 +515,16 @@ function ComposeOrchestratorImpl(
     setComposeAttachments
   ]);
 
-  const currentComposeInviteDraft = useMemo<ComposeInviteDraft | null>(
+  const attachmentLoadState = getComposeAttachmentLoadState(composeAttachments);
+
+  // Every way of closing the composer (cancel, discard, send, session reset,
+  // hand-off) ends here, so background downloads never outlive it.
+  useEffect(() => {
+    if (!composeOpen) abortComposeAttachmentLoads();
+  }, [abortComposeAttachmentLoads, composeOpen]);
+  useEffect(() => abortComposeAttachmentLoads, [abortComposeAttachmentLoads]);
+
+  const currentComposeInviteDraft =useMemo<ComposeInviteDraft | null>(
     () =>
       composeIncludeInvite
         ? normalizeComposeInviteDraft({
@@ -707,6 +726,10 @@ function ComposeOrchestratorImpl(
       sendingMailRef.current ||
       discardingDraftRequestRef.current
     ) return;
+    if (attachmentLoadState) {
+      reportError(ATTACHMENT_LOAD_BLOCK_MESSAGE[attachmentLoadState]);
+      return;
+    }
     detachingComposeRef.current = true;
     setDetachingCompose(true);
     const handoffId = window.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`;
@@ -774,6 +797,7 @@ function ComposeOrchestratorImpl(
     }
   }, [
     activeAccountId,
+    attachmentLoadState,
     cancelDraftAutoSave,
     composeDraftIdRef,
     composeMode,
@@ -795,6 +819,10 @@ function ComposeOrchestratorImpl(
       sendingMailRef.current ||
       discardingDraftRequestRef.current
     ) return;
+    if (attachmentLoadState) {
+      reportError(ATTACHMENT_LOAD_BLOCK_MESSAGE[attachmentLoadState]);
+      return;
+    }
     closingDetachedComposeRef.current = true;
     setDetachingCompose(true);
     try {
@@ -814,6 +842,7 @@ function ComposeOrchestratorImpl(
       reportError("The draft could not be saved. Keep this window open and try again.");
     }
   }, [
+    attachmentLoadState,
     cancelDraftAutoSave,
     detachedWindow,
     onDetachedComposeOutcome,
@@ -849,6 +878,10 @@ function ComposeOrchestratorImpl(
     // button's `disabled` alone is too late, it only applies once React has
     // re-rendered.
     if (sendingMailRef.current) return;
+    if (attachmentLoadState) {
+      reportError(ATTACHMENT_LOAD_BLOCK_MESSAGE[attachmentLoadState]);
+      return;
+    }
     const composeInviteDraft = currentComposeInviteDraft;
     if (!composeTo.trim() && !composeCc.trim() && !composeBcc.trim()) {
       reportError("Please add at least one recipient.");
@@ -1047,6 +1080,16 @@ function ComposeOrchestratorImpl(
     asNew = false,
     prefill?: ComposeOpenPrefill
   ) => {
+    // Opening a forward or draft awaits network fetches. Impatient repeat
+    // clicks must not each open their own compose session (every one would
+    // auto-save its own draft), and a different open must supersede this one.
+    const initKey = `${mode}:${message?.id ?? ""}:${asNew ? "new" : ""}`;
+    if (message && composeInitRef.current.key === initKey) return;
+    const initToken = composeInitRef.current.token + 1;
+    composeInitRef.current = { token: initToken, key: message ? initKey : null };
+    const isStale = () => composeInitRef.current.token !== initToken;
+
+    abortComposeAttachmentLoads();
     resetComposeTranslation();
     if (!message) {
       openComposeInternal(mode, undefined, asNew);
@@ -1088,27 +1131,37 @@ function ComposeOrchestratorImpl(
     const afterOpen = async (msg: Message) => {
       const messageWithDraftMetadata = await hydrateDraftComposeMetadata(msg);
       if (mode === "edit" || mode === "forward") {
-        const { attachments, message: hydratedMessage } = await loadComposeSourceAttachments(
-          messageWithDraftMetadata
-        );
+        const {
+          attachments,
+          deferred,
+          message: hydratedMessage
+        } = await loadComposeSourceAttachments(messageWithDraftMetadata);
+        if (isStale()) return;
         openComposeInternal(mode, hydratedMessage, asNew, { preferredComposeTab });
         setComposeAttachments(attachments);
+        startComposeAttachmentLoads(messageWithDraftMetadata, deferred);
         return;
       }
 
+      if (isStale()) return;
       openComposeInternal(mode, messageWithDraftMetadata, asNew, { preferredComposeTab });
     };
 
-    const resolved = getComposeSourceMessage(message);
-    const hasText = Boolean((resolved.body ?? "").trim());
-    const hasHtml = hasHtmlContent(resolved.htmlBody);
-    if (hasText || hasHtml) {
-      await afterOpen(resolved);
-      return;
-    }
+    try {
+      const resolved = getComposeSourceMessage(message);
+      const hasText = Boolean((resolved.body ?? "").trim());
+      const hasHtml = hasHtmlContent(resolved.htmlBody);
+      if (hasText || hasHtml) {
+        await afterOpen(resolved);
+        return;
+      }
 
-    const hydrated = await ensureMessageContent(resolved, { manual: true });
-    await afterOpen(hydrated ?? resolved);
+      const hydrated = await ensureMessageContent(resolved, { manual: true });
+      if (isStale()) return;
+      await afterOpen(hydrated ?? resolved);
+    } finally {
+      if (!isStale()) composeInitRef.current.key = null;
+    }
   };
 
   // Most UI entry points intentionally open compose fire-and-forget. Keep that
@@ -1167,7 +1220,10 @@ function ComposeOrchestratorImpl(
     });
   })();
   const canSaveCurrentDraft =
-    composeOpen && Boolean(composeDraftId) && currentDraftChangeState.canManualSave;
+    composeOpen &&
+    Boolean(composeDraftId) &&
+    !attachmentLoadState &&
+    currentDraftChangeState.canManualSave;
   const hasUnsavedChanges =
     composeOpen &&
     composeDirtyRef.current &&
@@ -1319,6 +1375,7 @@ function ComposeOrchestratorImpl(
       handleInlineImage={handleInlineImage}
       handleComposeAttachmentPick={handleComposeAttachmentPick}
       removeComposeAttachment={removeComposeAttachment}
+      retryComposeAttachmentLoad={retryComposeAttachmentLoad}
       pendingImageDrop={pendingImageDrop}
       setPendingImageDrop={setPendingImageDrop}
       addComposeFiles={addComposeFiles}
@@ -1345,6 +1402,7 @@ function ComposeOrchestratorImpl(
     composeDragActive,
     composeSize,
     canSaveDraft: canSaveCurrentDraft,
+    attachmentLoadState,
     draftSaving,
     draftSaveError,
     draftSavedAt,

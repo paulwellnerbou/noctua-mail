@@ -1,5 +1,8 @@
 import { describe, expect, it } from "bun:test";
 import {
+  applyComposeAttachmentLoadResult,
+  getComposeAttachmentLoadState,
+  planComposeSourceAttachments,
   promoteUnreferencedInlineAttachments,
   pruneUnreferencedInlineAttachments,
   restoreComposeMessageAttachmentDataUrls,
@@ -7,6 +10,7 @@ import {
   routeDroppedFiles
 } from "./useComposeHandlers";
 import type { PendingImageDrop } from "./composeTypes";
+import { computeDraftHash } from "./draftSaveUtils";
 
 describe("restoreInlineAttachmentDataUrls", () => {
   it("replaces inline attachment URLs with hydrated data URLs", () => {
@@ -346,5 +350,94 @@ describe("routeDroppedFiles", () => {
 
     expect(attached).toEqual([{ files: [psd], inline: false }]);
     expect(pending).toEqual([]);
+  });
+});
+
+describe("background attachment loading", () => {
+  const pdf = {
+    id: "att-pdf",
+    filename: "big.pdf",
+    contentType: "application/pdf",
+    size: 25_000_000,
+    inline: false
+  };
+  const logo = {
+    id: "att-logo",
+    filename: "logo.png",
+    contentType: "image/png",
+    size: 123,
+    inline: true,
+    cid: "logo@example.test"
+  };
+  const orphanInline = {
+    id: "att-orphan",
+    filename: "scan.jpg",
+    contentType: "image/jpeg",
+    size: 456,
+    inline: true,
+    cid: "scan@example.test"
+  };
+  const html = '<p>Hi</p><img src="cid:logo@example.test">';
+
+  it("defers everything but body-referenced inline images, keeping source order", () => {
+    const hydratedLogo = { ...logo, dataUrl: "data:image/png;base64,AAAA" };
+    const { attachments, deferred } = planComposeSourceAttachments(
+      [pdf, logo, orphanInline],
+      html,
+      [hydratedLogo]
+    );
+
+    expect(attachments).toEqual([
+      { ...pdf, loadStatus: "loading" },
+      hydratedLogo,
+      { ...orphanInline, inline: false, loadStatus: "loading" }
+    ]);
+    expect(deferred.map((attachment) => attachment.id)).toEqual(["att-pdf", "att-orphan"]);
+  });
+
+  it("drops a referenced inline image whose hydration failed", () => {
+    const { attachments, deferred } = planComposeSourceAttachments([logo], html, []);
+
+    expect(attachments).toEqual([]);
+    expect(deferred).toEqual([]);
+  });
+
+  it("keeps the draft hash stable across a load, so arriving bytes never look like an edit", () => {
+    const { attachments } = planComposeSourceAttachments([pdf], "", []);
+    const loaded = applyComposeAttachmentLoadResult(attachments, "att-pdf", "data:application/pdf;base64,AAAA");
+    const hash = (list: typeof attachments) =>
+      computeDraftHash({ to: "", cc: "", bcc: "", subject: "", text: "", attachments: list });
+
+    expect(loaded).toEqual([{ ...pdf, dataUrl: "data:application/pdf;base64,AAAA" }]);
+    expect(hash(loaded)).toBe(hash(attachments));
+  });
+
+  it("marks a failed load and lets a retry result replace it", () => {
+    const { attachments } = planComposeSourceAttachments([pdf], "", []);
+    const failed = applyComposeAttachmentLoadResult(attachments, "att-pdf", null);
+
+    expect(failed).toEqual([{ ...pdf, loadStatus: "error" }]);
+    expect(
+      applyComposeAttachmentLoadResult(failed, "att-pdf", "data:application/pdf;base64,AAAA")
+    ).toEqual([{ ...pdf, dataUrl: "data:application/pdf;base64,AAAA" }]);
+  });
+
+  it("ignores a late result for an attachment that was removed or is already loaded", () => {
+    const loaded = [{ ...pdf, dataUrl: "data:application/pdf;base64,AAAA" }];
+
+    expect(applyComposeAttachmentLoadResult([], "att-pdf", "data:x;base64,BBBB")).toEqual([]);
+    expect(applyComposeAttachmentLoadResult(loaded, "att-pdf", "data:x;base64,BBBB")).toEqual(loaded);
+    expect(applyComposeAttachmentLoadResult(loaded, "att-pdf", null)).toEqual(loaded);
+  });
+
+  it("reports loading before error, and null once everything settled", () => {
+    expect(
+      getComposeAttachmentLoadState([
+        { ...pdf, loadStatus: "error" },
+        { ...orphanInline, loadStatus: "loading" }
+      ])
+    ).toBe("loading");
+    expect(getComposeAttachmentLoadState([{ ...pdf, loadStatus: "error" }])).toBe("error");
+    expect(getComposeAttachmentLoadState([{ ...pdf, dataUrl: "data:x;base64,AAAA" }])).toBeNull();
   });
 });

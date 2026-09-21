@@ -40,6 +40,7 @@ export type ComposeContextValue = {
 
   // Draft/send status
   canSaveDraft: boolean;
+  attachmentLoadState: "loading" | "error" | null;
   draftSaving: boolean;
   draftSaveError: string | null;
   draftSavedAt: number | null;
