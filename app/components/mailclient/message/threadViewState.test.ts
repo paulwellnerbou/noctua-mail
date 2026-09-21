@@ -4,6 +4,7 @@ import {
   doesCachedThreadCoverMessages,
   getComposeThreadFocusMessageId,
   getInlineComposePlacement,
+  getRenderedThreadMessages,
   getVisibleThreadMessages
 } from "./threadViewState";
 
@@ -62,6 +63,62 @@ describe("getVisibleThreadMessages", () => {
     });
 
     expect(result).toEqual([original, draft]);
+  });
+});
+
+describe("getRenderedThreadMessages", () => {
+  const original = makeMessage({ id: "original" });
+  const draft = makeMessage({ id: "draft-1", draft: true, folderId: "acc:Drafts" });
+  const base = {
+    activeMessage: draft,
+    activeThread: [original, draft],
+    supportsThreads: true,
+    threadContentById: { t1: [original, draft] },
+    threadContentLoading: null,
+    showComposeInline: false,
+    composeDraftId: null
+  };
+
+  it("renders the whole thread when threads are supported", () => {
+    expect(getRenderedThreadMessages(base)).toEqual([original, draft]);
+  });
+
+  it("renders only the active message when threads are off", () => {
+    expect(getRenderedThreadMessages({ ...base, supportsThreads: false })).toEqual([draft]);
+  });
+
+  it("renders only the active message while the full thread is still loading", () => {
+    expect(
+      getRenderedThreadMessages({ ...base, threadContentById: {}, threadContentLoading: "t1" })
+    ).toEqual([draft]);
+  });
+
+  it("renders nothing without an active message", () => {
+    expect(getRenderedThreadMessages({ ...base, activeMessage: null })).toEqual([]);
+  });
+
+  // Editing a reply/forward draft from the Drafts folder: threads are off
+  // there, but the cached thread still contains the original message.
+  it("places compose at the top when the reply target is cached but not rendered", () => {
+    const rendered = getRenderedThreadMessages({
+      ...base,
+      supportsThreads: false,
+      showComposeInline: true,
+      composeDraftId: "draft-1"
+    });
+
+    expect(rendered).toEqual([]);
+    expect(
+      getInlineComposePlacement({
+        activeThread: rendered,
+        showComposeInline: true,
+        composeReplyMessage: original
+      })
+    ).toEqual({
+      replyMessageInThread: false,
+      showComposeAtTop: true,
+      composeReplyMessageId: null
+    });
   });
 });
 
