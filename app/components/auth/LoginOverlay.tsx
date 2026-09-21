@@ -6,12 +6,12 @@ import {
   Callout,
   Dialog,
   Flex,
-  IconButton,
   Text,
   TextField
 } from "@radix-ui/themes";
 import AccountSettingsModal from "@/app/components/AccountSettingsModal";
 import type { Account } from "@/lib/data";
+import TooltipIconButton from "@/app/components/TooltipIconButton";
 
 // Generate deterministic account ID from email address
 // This ensures the same email always gets the same account ID across environments
@@ -231,13 +231,13 @@ export default function LoginOverlay({ onAuthenticated }: Props) {
                     Enter your invite code to configure a new account.
                   </Dialog.Description>
                 </div>
-                <IconButton
+                <TooltipIconButton
                   variant="ghost"
-                  aria-label="Close"
+                  tooltip="Close"
                   onClick={() => setInviteOpen(false)}
                 >
                   <X size={18} />
-                </IconButton>
+                </TooltipIconButton>
               </Flex>
               <form
                 onSubmit={(event) => {

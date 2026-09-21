@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { Flex, Heading, IconButton } from "@radix-ui/themes";
+import { Flex, Heading } from "@radix-ui/themes";
 import { CalendarDays, ExternalLink, PanelRight, X } from "lucide-react";
 import { openDetachedWindow } from "@/lib/ui/openDetachedWindow";
 import { formatCalendarPageTitle } from "@/lib/appBranding";
@@ -18,6 +18,7 @@ import {
   type ResizeHandle,
   type Rect
 } from "./calendarPopoverResize";
+import TooltipIconButton from "@/app/components/TooltipIconButton";
 
 type Props = {
   open: boolean;
@@ -283,15 +284,15 @@ export default function CalendarPopover({
           <Heading size="3">Calendar</Heading>
         </Flex>
         <Flex gap="2" align="center">
-          <IconButton size="1" variant="ghost" color="gray" title="Open in sidebar" aria-label="Open calendar in sidebar" onClick={handleOpenSidebar}>
+          <TooltipIconButton size="1" variant="ghost" color="gray" tooltip="Open in sidebar" aria-label="Open calendar in sidebar" onClick={handleOpenSidebar}>
             <PanelRight size={14} />
-          </IconButton>
-          <IconButton size="1" variant="ghost" color="gray" title="Open in window" aria-label="Open calendar in window" onClick={handleOpenWindow}>
+          </TooltipIconButton>
+          <TooltipIconButton size="1" variant="ghost" color="gray" tooltip="Open in window" aria-label="Open calendar in window" onClick={handleOpenWindow}>
             <ExternalLink size={14} />
-          </IconButton>
-          <IconButton size="1" variant="ghost" color="gray" aria-label="Close calendar" onClick={() => onOpenChange(false)}>
+          </TooltipIconButton>
+          <TooltipIconButton size="1" variant="ghost" color="gray" tooltip="Close calendar" onClick={() => onOpenChange(false)}>
             <X size={14} />
-          </IconButton>
+          </TooltipIconButton>
         </Flex>
       </Flex>
 

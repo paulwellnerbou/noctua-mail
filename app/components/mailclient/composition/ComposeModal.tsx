@@ -2,9 +2,10 @@ import { Dock, ExternalLink, X } from "lucide-react";
 import { MinusIcon } from "@radix-ui/react-icons";
 import ComposeFields from "./ComposeFields";
 import ComposeActions from "./ComposeActions";
-import { Heading, IconButton, Text } from "@radix-ui/themes";
+import { Heading, Text } from "@radix-ui/themes";
 import { useComposeContext } from "./ComposeContext";
 import styles from "./Compose.module.css";
+import TooltipIconButton from "@/app/components/TooltipIconButton";
 
 type ComposeModalProps = {
   open: boolean;
@@ -120,45 +121,42 @@ export default function ComposeModal({ open }: ComposeModalProps) {
             </Text>
           </div>
           <div className={styles.composeHeaderActions}>
-            <IconButton
+            <TooltipIconButton
               variant="ghost"
               size="2"
-              title="Dock in thread view"
-              aria-label="Dock in thread view"
+              tooltip="Dock in thread view"
               onClick={popInCompose}
               disabled={detachingCompose || sendingMail || discardingDraft}
             >
               <Dock size={16} />
-            </IconButton>
+            </TooltipIconButton>
             {!detachedWindow && (
               <>
-                <IconButton
+                <TooltipIconButton
                   variant="ghost"
                   size="2"
-                  title="Open in new window"
+                  tooltip="Open in new window"
                   aria-label="Open composer in new window"
                   onClick={openComposeInNewWindow}
                   disabled={detachingCompose || sendingMail || discardingDraft}
                 >
                   <ExternalLink size={16} />
-                </IconButton>
-                <IconButton
+                </TooltipIconButton>
+                <TooltipIconButton
                   variant="ghost"
                   size="2"
-                  title="Minimize composer"
-                  aria-label="Minimize composer"
+                  tooltip="Minimize composer"
                   onClick={minimizeCompose}
                   disabled={detachingCompose}
                 >
                   <MinusIcon width={16} height={16} />
-                </IconButton>
+                </TooltipIconButton>
               </>
             )}
-            <IconButton
+            <TooltipIconButton
               variant="ghost"
               size="2"
-              title="Close composer"
-              aria-label="Close composer"
+              tooltip="Close composer"
               disabled={detachingCompose}
               onClick={() => {
                 if (detachedWindow) {
@@ -170,7 +168,7 @@ export default function ComposeModal({ open }: ComposeModalProps) {
               }}
             >
               <X size={16} />
-            </IconButton>
+            </TooltipIconButton>
           </div>
         </div>
         <div className={styles.composeBody}>

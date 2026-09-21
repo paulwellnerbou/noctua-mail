@@ -6,7 +6,7 @@ import {
   useRef,
   useState
 } from "react";
-import { Badge, Card, Flex, IconButton, Text } from "@radix-ui/themes";
+import { Badge, Card, Flex, Text } from "@radix-ui/themes";
 import { Search, X } from "lucide-react";
 
 import listMetaStyles from "./MessageListMeta.module.css";
@@ -33,6 +33,7 @@ import {
 } from "../useMessageMoveActions";
 import { useMessageDeleteActions } from "../useMessageDeleteActions";
 import { useMessageMutations } from "../useMessageMutations";
+import TooltipIconButton from "@/app/components/TooltipIconButton";
 
 function isValidMessageViewMode(value: unknown): value is MessageViewMode {
   return (
@@ -598,16 +599,15 @@ export default function MessageListOrchestrator({
                   </>
                 )}
               </Flex>
-              <IconButton
+              <TooltipIconButton
                 size="1"
                 variant="ghost"
                 color="gray"
                 onClick={onClearSearch}
-                title="Clear search"
-                aria-label="Clear search"
+                tooltip="Clear search"
               >
                 <X size={12} />
-              </IconButton>
+              </TooltipIconButton>
             </Flex>
           </Card>
         )}

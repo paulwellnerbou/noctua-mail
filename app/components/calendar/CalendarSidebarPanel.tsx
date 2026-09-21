@@ -1,6 +1,6 @@
 "use client";
 
-import { Flex, Heading, IconButton } from "@radix-ui/themes";
+import { Flex, Heading } from "@radix-ui/themes";
 import { X, ExternalLink } from "lucide-react";
 import { openDetachedWindow } from "@/lib/ui/openDetachedWindow";
 import { formatCalendarPageTitle } from "@/lib/appBranding";
@@ -8,6 +8,7 @@ import CalendarEventBrowser from "./CalendarEventBrowser";
 import CalendarDropOverlay from "./CalendarDropOverlay";
 import { useCalendarIcsDrop } from "./useCalendarIcsDrop";
 import styles from "./CalendarSidebarPanel.module.css";
+import TooltipIconButton from "@/app/components/TooltipIconButton";
 
 type Props = {
   accountId: string;
@@ -37,25 +38,25 @@ export default function CalendarSidebarPanel({
       <Flex align="center" justify="between" className={styles.header}>
         <Heading size="2">Calendar</Heading>
         <Flex gap="1" align="center">
-          <IconButton
+          <TooltipIconButton
             size="1"
             variant="ghost"
             color="gray"
-            title="Open in window"
+            tooltip="Open in window"
             aria-label="Open calendar in window"
             onClick={handleOpenWindow}
           >
             <ExternalLink size={13} />
-          </IconButton>
-          <IconButton
+          </TooltipIconButton>
+          <TooltipIconButton
             size="1"
             variant="ghost"
             color="gray"
             onClick={onClose}
-            aria-label="Close calendar"
+            tooltip="Close calendar"
           >
             <X size={15} />
-          </IconButton>
+          </TooltipIconButton>
         </Flex>
       </Flex>
       <div className={styles.calendarContainer}>

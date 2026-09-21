@@ -2,13 +2,14 @@
 
 import { useMemo } from "react";
 import { X } from "lucide-react";
-import { Badge, Box, Card, Flex, Heading, IconButton, Popover, Text } from "@radix-ui/themes";
+import { Badge, Box, Card, Flex, Heading, Popover, Text } from "@radix-ui/themes";
 import type { Folder } from "@/lib/data";
 import type { SyncJobProgress } from "../types";
 import {
   BottomStatusTriggerButton,
   type BottomStatusTone
 } from "./BottomStatusSection";
+import TooltipIconButton from "@/app/components/TooltipIconButton";
 
 type ProcessStatusPopoverProps = {
   open: boolean;
@@ -197,16 +198,15 @@ export default function ProcessStatusPopover({
               {activeProcessCount}
             </Badge>
           </Flex>
-          <IconButton
+          <TooltipIconButton
             variant="ghost"
             color="gray"
             size="2"
-            title="Close processes"
-            aria-label="Close processes"
+            tooltip="Close processes"
             onClick={() => onOpenChange(false)}
           >
             <X size={16} />
-          </IconButton>
+          </TooltipIconButton>
         </Flex>
         <Box className="popover-body">
           {activeProcessCount > 0 ? (

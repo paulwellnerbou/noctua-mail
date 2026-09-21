@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Check, Copy } from "lucide-react";
-import { IconButton } from "@radix-ui/themes";
 import styles from "./RawTextPanel.module.css";
+import TooltipIconButton from "@/app/components/TooltipIconButton";
 
 type RawTextField = {
   label: string;
@@ -66,7 +66,7 @@ export default function RawTextPanel({
         </div>
       ) : null}
       <pre className={joinClassNames(styles.view, preClassName)}>{displayText}</pre>
-      <IconButton
+      <TooltipIconButton
         size="1"
         variant="surface"
         className={joinClassNames(styles.copyButton, copyOk && styles.copyOk)}
@@ -86,12 +86,11 @@ export default function RawTextPanel({
             // ignore
           }
         }}
-        aria-label={copyLabel}
-        title={copyLabel}
+        tooltip={copyLabel}
         disabled={!hasCopyText}
       >
         {copyOk ? <Check size={14} /> : <Copy size={14} />}
-      </IconButton>
+      </TooltipIconButton>
     </div>
   );
 }

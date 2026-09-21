@@ -1,5 +1,5 @@
 import { ArrowUpRight, ExternalLink } from "lucide-react";
-import { Badge, Card, IconButton } from "@radix-ui/themes";
+import { Badge, Card } from "@radix-ui/themes";
 import { badgeColors } from "@/lib/ui/badgeColors";
 import ComposeFields from "./ComposeFields";
 import ComposeActions from "./ComposeActions";
@@ -7,6 +7,7 @@ import { useComposeContext } from "./ComposeContext";
 import threadStyles from "../message/ThreadMessageCard.module.css";
 import styles from "./ComposeInlineCard.module.css";
 import composeStyles from "./Compose.module.css";
+import TooltipIconButton from "@/app/components/TooltipIconButton";
 
 export default function ComposeInlineCard() {
   const {
@@ -95,26 +96,25 @@ export default function ComposeInlineCard() {
               </Badge>
             </div>
             <div className={threadStyles.actions}>
-              <IconButton
+              <TooltipIconButton
                 variant="ghost"
                 size="2"
-                title="Open in modal"
-                aria-label="Open in modal"
+                tooltip="Open in modal"
                 onClick={popOutCompose}
               >
                 <ArrowUpRight size={14} />
-              </IconButton>
+              </TooltipIconButton>
               {!detachedWindow && (
-                <IconButton
+                <TooltipIconButton
                   variant="ghost"
                   size="2"
-                  title="Open in new window"
+                  tooltip="Open in new window"
                   aria-label="Open composer in new window"
                   onClick={openComposeInNewWindow}
                   disabled={detachingCompose || sendingMail || discardingDraft}
                 >
                   <ExternalLink size={14} />
-                </IconButton>
+                </TooltipIconButton>
               )}
             </div>
           </div>

@@ -2,13 +2,14 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { X, Folder as FolderIcon, Check } from "lucide-react";
-import { Dialog, IconButton, TextField } from "@radix-ui/themes";
+import { Dialog, TextField } from "@radix-ui/themes";
 import type { Folder } from "@/lib/data";
 import { buildAccountDestinationFoldersPath } from "@/lib/accountApiPaths";
 import FolderPickerNode from "../folder/FolderPickerNode";
 import { buildFolderTree } from "../utils/folderHelpers";
 import { folderSpecialIcon } from "../RenderHelpers";
 import styles from "./MoveToDialog.module.css";
+import TooltipIconButton from "@/app/components/TooltipIconButton";
 
 export type CopyToAccountTarget = {
   id: string;
@@ -141,9 +142,9 @@ export default function CopyToAccountDialog({
         <div className={styles.dialogHeader}>
           <Dialog.Title className={styles.dialogTitle}>{title}</Dialog.Title>
           <Dialog.Close>
-            <IconButton variant="ghost" size="1" aria-label="Close">
+            <TooltipIconButton variant="ghost" size="1" tooltip="Close">
               <X size={14} />
-            </IconButton>
+            </TooltipIconButton>
           </Dialog.Close>
         </div>
 
@@ -181,14 +182,14 @@ export default function CopyToAccountDialog({
           >
             {query ? (
               <TextField.Slot side="right">
-                <IconButton
+                <TooltipIconButton
                   size="1"
                   variant="ghost"
                   onClick={() => setQuery("")}
-                  aria-label="Clear search"
+                  tooltip="Clear search"
                 >
                   <X size={12} />
-                </IconButton>
+                </TooltipIconButton>
               </TextField.Slot>
             ) : null}
           </TextField.Root>

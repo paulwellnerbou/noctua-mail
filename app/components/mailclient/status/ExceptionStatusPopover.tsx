@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from "react";
 import { X } from "lucide-react";
-import { Box, Button, Flex, IconButton, Popover, Text } from "@radix-ui/themes";
+import { Box, Button, Flex, Popover, Text } from "@radix-ui/themes";
 import RawTextPanel from "../message/RawTextPanel";
 import {
   getExceptionDetail,
@@ -14,6 +14,7 @@ import {
   BottomStatusTriggerButton,
   type BottomStatusTone
 } from "./BottomStatusSection";
+import TooltipIconButton from "@/app/components/TooltipIconButton";
 
 type ExceptionStatusPopoverProps = {
   open: boolean;
@@ -74,12 +75,11 @@ export default function ExceptionStatusPopover({
           <Text size="1" weight="medium" className="bottom-popover-heading">
             Exceptions
           </Text>
-          <IconButton
+          <TooltipIconButton
             variant="soft"
             color="gray"
             size="1"
-            title="Clear exceptions"
-            aria-label="Clear exceptions"
+            tooltip="Clear exceptions"
             onClick={() => {
               onClearExceptions();
               setSelectedExceptionId(null);
@@ -87,7 +87,7 @@ export default function ExceptionStatusPopover({
             }}
           >
             <X size={12} />
-          </IconButton>
+          </TooltipIconButton>
         </Flex>
         <Box className="popover-body">
           {exceptionEntries.length > 0 ? (

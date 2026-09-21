@@ -2,8 +2,9 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Pencil, Plus, Trash2 } from "lucide-react";
-import { Button, Card, Flex, IconButton, Text, TextArea, TextField } from "@radix-ui/themes";
+import { Button, Card, Flex, Text, TextArea, TextField } from "@radix-ui/themes";
 import type { RecipientAlias } from "@/lib/data";
+import TooltipIconButton from "@/app/components/TooltipIconButton";
 
 type RecipientAliasManagerProps = {
   aliases: RecipientAlias[];
@@ -166,24 +167,24 @@ export default function RecipientAliasManager({
                   </Text>
                 </Flex>
                 <Flex gap="2" flexShrink="0">
-                  <IconButton
+                  <TooltipIconButton
                     size="2"
                     variant="ghost"
-                    title="Edit alias"
+                    tooltip="Edit alias"
                     onClick={() => startEdit(alias)}
                   >
                     <Pencil size={14} />
-                  </IconButton>
-                  <IconButton
+                  </TooltipIconButton>
+                  <TooltipIconButton
                     size="2"
                     variant="ghost"
                     color="red"
-                    title="Delete alias"
+                    tooltip="Delete alias"
                     disabled={deletingId === alias.id}
                     onClick={() => void handleDelete(alias.id)}
                   >
                     <Trash2 size={14} />
-                  </IconButton>
+                  </TooltipIconButton>
                 </Flex>
               </Flex>
             ))}

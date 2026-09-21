@@ -1,7 +1,7 @@
 import type React from "react";
 import type { CSSProperties } from "react";
 import { CalendarDays, GitBranch, MoveRight, Paperclip, Trash2 } from "lucide-react";
-import { Badge, IconButton, Text } from "@radix-ui/themes";
+import { Badge, Text } from "@radix-ui/themes";
 import { badgeColors } from "@/lib/ui/badgeColors";
 import { describeMessageSize } from "@/lib/ui/byteSize";
 import type { Message } from "@/lib/data";
@@ -40,6 +40,7 @@ import { isTopicSuggestionGroupKey } from "./topicSuggestionGroup";
 import TopicSuggestionAcceptButton from "./TopicSuggestionAcceptButton";
 import groupStyles from "./MessageCardList.module.css";
 import styles from "./MessageThreadList.module.css";
+import TooltipIconButton from "@/app/components/TooltipIconButton";
 
 export default function MessageThreadList({
   state,
@@ -452,11 +453,11 @@ export default function MessageThreadList({
                 </span>
 
                 <div className={styles.cellActions}>
-                  <IconButton
+                  <TooltipIconButton
                     size="1"
                     variant="ghost"
                     color="gray"
-                    title={
+                    tooltip={
                       isTrashFolder(message.folderId)
                         ? "Delete permanently"
                         : "Move to Trash"
@@ -469,7 +470,7 @@ export default function MessageThreadList({
                     }}
                   >
                     <Trash2 size={14} />
-                  </IconButton>
+                  </TooltipIconButton>
                   {renderMessageMenu(message, "table")}
                   {showAddSuggestionAction && (
                     <TopicSuggestionAcceptButton

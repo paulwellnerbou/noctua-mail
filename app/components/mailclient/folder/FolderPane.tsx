@@ -1,9 +1,10 @@
 import type React from "react";
 import { MoreVertical, X } from "lucide-react";
-import { Badge, DropdownMenu, IconButton, TextField } from "@radix-ui/themes";
+import { Badge, DropdownMenu, TextField } from "@radix-ui/themes";
 import { badgeColors } from "@/lib/ui/badgeColors";
 import type { SyncTriggerOptions } from "../types";
 import styles from "./FolderTree.module.css";
+import TooltipIconButton from "@/app/components/TooltipIconButton";
 type FolderPaneProps = {
   state: {
     leftWidth: number;
@@ -99,15 +100,14 @@ export default function FolderPane({ state, actions, topSlot, children }: Folder
             <div className={styles.treeHeaderActions}>
               <DropdownMenu.Root>
                 <DropdownMenu.Trigger>
-                  <IconButton
+                  <TooltipIconButton
                     variant="ghost"
                     size="1"
                     className={styles.treeAction}
-                    title="Folder actions"
-                    aria-label="Folder actions"
+                    tooltip="Folder actions"
                   >
                     <MoreVertical size={14} />
-                  </IconButton>
+                  </TooltipIconButton>
                 </DropdownMenu.Trigger>
                 <DropdownMenu.Content align="end" className={styles.menuContent}>
                   <DropdownMenu.Item onSelect={() => syncAccount(undefined, "new")}>
@@ -150,15 +150,14 @@ export default function FolderPane({ state, actions, topSlot, children }: Folder
             >
               {folderQuery ? (
                 <TextField.Slot side="right">
-                  <IconButton
+                  <TooltipIconButton
                     size="1"
                     variant="ghost"
                     onClick={() => setFolderQuery("")}
-                    aria-label="Clear folder search"
-                    title="Clear folder search"
+                    tooltip="Clear folder search"
                   >
                     <X size={12} />
-                  </IconButton>
+                  </TooltipIconButton>
                 </TextField.Slot>
               ) : null}
             </TextField.Root>

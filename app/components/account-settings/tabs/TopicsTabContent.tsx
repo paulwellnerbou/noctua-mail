@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState, type ChangeEvent } from "react";
 import { Pencil, Plus, Trash2, X } from "lucide-react";
-import { Badge, Button, Card, Flex, IconButton, Switch, Text, TextField } from "@radix-ui/themes";
+import { Badge, Button, Card, Flex, Switch, Text, TextField } from "@radix-ui/themes";
 import {
   buildAccountTopicPath,
   buildAccountTopicSignalsPath,
@@ -16,6 +16,7 @@ import type { TopicStat, TopicTransferImportSummary } from "@/lib/topics";
 import TopicColorPicker from "@/app/components/mailclient/TopicColorPicker";
 import ImportReplaceConfirmDialog from "./ImportReplaceConfirmDialog";
 import styles from "./TopicsTabContent.module.css";
+import TooltipIconButton from "@/app/components/TooltipIconButton";
 
 type Props = {
   accountId?: string;
@@ -481,12 +482,12 @@ export default function TopicsTabContent({
                         {stat ? `${stat.threadCount} ${stat.threadCount === 1 ? "thread" : "threads"}` : ""}
                       </span>
                       <Flex gap="4">
-                        <IconButton size="2" variant="ghost" onClick={() => startEdit(topic)} title="Edit">
+                        <TooltipIconButton size="2" variant="ghost" onClick={() => startEdit(topic)} tooltip="Edit">
                           <Pencil size={14} />
-                        </IconButton>
-                        <IconButton size="2" variant="ghost" color="red" onClick={() => handleDelete(topic.id)} title="Delete">
+                        </TooltipIconButton>
+                        <TooltipIconButton size="2" variant="ghost" color="red" onClick={() => handleDelete(topic.id)} tooltip="Delete">
                           <Trash2 size={14} />
-                        </IconButton>
+                        </TooltipIconButton>
                       </Flex>
                     </div>
                   );
@@ -562,18 +563,17 @@ export default function TopicsTabContent({
                               <Text size="1" color="gray" className={styles.signalText}>
                                 {TOPIC_SIGNAL_LABELS[s.type]}: {s.value} · {s.count} {s.count === 1 ? "thread" : "threads"}
                               </Text>
-                              <IconButton
+                              <TooltipIconButton
                                 size="1"
                                 variant="ghost"
                                 color="gray"
                                 className={styles.signalRemoveButton}
                                 disabled={removing}
                                 onClick={() => void handleRemoveSignal(topic.id, s.type, s.value)}
-                                title={`Remove ${TOPIC_SIGNAL_LABELS[s.type]} signal`}
-                                aria-label={`Remove ${TOPIC_SIGNAL_LABELS[s.type]} signal`}
+                                tooltip={`Remove ${TOPIC_SIGNAL_LABELS[s.type]} signal`}
                               >
                                 <X size={10} />
-                              </IconButton>
+                              </TooltipIconButton>
                             </Flex>
                           );
                         })}

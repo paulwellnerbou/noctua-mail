@@ -1,8 +1,8 @@
 import type React from "react";
 import { Edit3, Forward, Reply, ReplyAll, Search, Send, Trash2 } from "lucide-react";
-import { IconButton } from "@radix-ui/themes";
 import type { Message } from "@/lib/data";
 import { hasSendableRecipients } from "../utils/messageHelpers";
+import TooltipIconButton from "@/app/components/TooltipIconButton";
 
 type ComposeMode = "new" | "reply" | "replyAll" | "forward" | "edit" | "editAsNew";
 type MessageQuickAction =
@@ -51,12 +51,11 @@ export default function MessageQuickActions({
     return (
       <>
         {isVisible("editDraft") ? (
-          <IconButton
+          <TooltipIconButton
             size={buttonSize}
             variant="ghost"
             color="gray"
-            title="Edit draft"
-            aria-label="Edit draft"
+            tooltip="Edit draft"
             disabled={pendingMessageActions.has(message.id)}
             onClick={(event) => {
               event.stopPropagation();
@@ -64,15 +63,14 @@ export default function MessageQuickActions({
             }}
           >
             <Edit3 size={iconSize} />
-          </IconButton>
+          </TooltipIconButton>
         ) : null}
         {isVisible("sendDraft") && onSendDraft ? (
-          <IconButton
+          <TooltipIconButton
             size={buttonSize}
             variant="ghost"
             color="gray"
-            title="Send draft"
-            aria-label="Send draft"
+            tooltip="Send draft"
             disabled={pendingMessageActions.has(message.id) || !canSendDraft}
             onClick={(event) => {
               event.stopPropagation();
@@ -80,15 +78,14 @@ export default function MessageQuickActions({
             }}
           >
             <Send size={iconSize} />
-          </IconButton>
+          </TooltipIconButton>
         ) : null}
         {isVisible("showRelated") ? (
-          <IconButton
+          <TooltipIconButton
             size={buttonSize}
             variant="ghost"
             color="gray"
-            title="Find related"
-            aria-label="Find related"
+            tooltip="Find related"
             disabled={pendingMessageActions.has(message.id)}
             onClick={(event) => {
               event.stopPropagation();
@@ -96,14 +93,14 @@ export default function MessageQuickActions({
             }}
           >
             <Search size={iconSize} />
-          </IconButton>
+          </TooltipIconButton>
         ) : null}
         {isVisible("delete") ? (
-          <IconButton
+          <TooltipIconButton
             size={buttonSize}
             variant="ghost"
             color="gray"
-            title={isTrashFolder(message.folderId) ? "Delete permanently" : "Move to Trash"}
+            tooltip={isTrashFolder(message.folderId) ? "Delete permanently" : "Move to Trash"}
             aria-label="Delete"
             disabled={pendingMessageActions.has(message.id)}
             onClick={(event) => {
@@ -112,7 +109,7 @@ export default function MessageQuickActions({
             }}
           >
             <Trash2 size={iconSize} />
-          </IconButton>
+          </TooltipIconButton>
         ) : null}
       </>
     );
@@ -121,12 +118,11 @@ export default function MessageQuickActions({
   return (
     <>
       {isVisible("reply") ? (
-        <IconButton
+        <TooltipIconButton
           size={buttonSize}
           variant="ghost"
           color="gray"
-          title="Reply"
-          aria-label="Reply"
+          tooltip="Reply"
           disabled={pendingMessageActions.has(message.id)}
           onClick={(event) => {
             event.stopPropagation();
@@ -134,15 +130,14 @@ export default function MessageQuickActions({
           }}
         >
           <Reply size={iconSize} />
-        </IconButton>
+        </TooltipIconButton>
       ) : null}
       {isVisible("replyAll") ? (
-        <IconButton
+        <TooltipIconButton
           size={buttonSize}
           variant="ghost"
           color="gray"
-          title="Reply all"
-          aria-label="Reply all"
+          tooltip="Reply all"
           disabled={pendingMessageActions.has(message.id)}
           onClick={(event) => {
             event.stopPropagation();
@@ -150,15 +145,14 @@ export default function MessageQuickActions({
           }}
         >
           <ReplyAll size={iconSize} />
-        </IconButton>
+        </TooltipIconButton>
       ) : null}
       {isVisible("forward") ? (
-        <IconButton
+        <TooltipIconButton
           size={buttonSize}
           variant="ghost"
           color="gray"
-          title="Forward"
-          aria-label="Forward"
+          tooltip="Forward"
           disabled={pendingMessageActions.has(message.id)}
           onClick={(event) => {
             event.stopPropagation();
@@ -166,15 +160,14 @@ export default function MessageQuickActions({
           }}
         >
           <Forward size={iconSize} />
-        </IconButton>
+        </TooltipIconButton>
       ) : null}
       {isVisible("showRelated") ? (
-        <IconButton
+        <TooltipIconButton
           size={buttonSize}
           variant="ghost"
           color="gray"
-          title="Find related"
-          aria-label="Find related"
+          tooltip="Find related"
           disabled={pendingMessageActions.has(message.id)}
           onClick={(event) => {
             event.stopPropagation();
@@ -182,14 +175,14 @@ export default function MessageQuickActions({
           }}
         >
           <Search size={iconSize} />
-        </IconButton>
+        </TooltipIconButton>
       ) : null}
       {isVisible("delete") ? (
-        <IconButton
+        <TooltipIconButton
           size={buttonSize}
           variant="ghost"
           color="gray"
-          title={isTrashFolder(message.folderId) ? "Delete permanently" : "Move to Trash"}
+          tooltip={isTrashFolder(message.folderId) ? "Delete permanently" : "Move to Trash"}
           aria-label="Delete"
           disabled={pendingMessageActions.has(message.id)}
           onClick={(event) => {
@@ -198,7 +191,7 @@ export default function MessageQuickActions({
           }}
         >
           <Trash2 size={iconSize} />
-        </IconButton>
+        </TooltipIconButton>
       ) : null}
     </>
   );
