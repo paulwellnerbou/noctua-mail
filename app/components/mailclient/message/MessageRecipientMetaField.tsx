@@ -1,9 +1,9 @@
 import { Fragment, useEffect, useRef, useState } from "react";
 import { Check, Copy, List } from "lucide-react";
-import { IconButton } from "@radix-ui/themes";
 import styles from "./ThreadMessageCard.module.css";
 import EmailAddressMenu, { type EmailAddressMenuAction } from "./EmailAddressMenu";
 import { parseAddressList } from "../utils/parseAddressList";
+import TooltipIconButton from "@/app/components/TooltipIconButton";
 
 type MessageRecipientMetaFieldProps = {
   label: "From" | "To" | "Cc" | "Bcc";
@@ -141,13 +141,12 @@ export default function MessageRecipientMetaField({
           ))
         : text}
       {hasCopy && (
-        <IconButton
+        <TooltipIconButton
           size="1"
           variant="ghost"
           color="gray"
           className={`${styles.toCopy} ${copyActive ? styles.copyOk : ""}`}
-          title={copyActive ? "Copied" : "Copy addresses"}
-          aria-label={copyActive ? "Copied" : "Copy addresses"}
+          tooltip={copyActive ? "Copied" : "Copy addresses"}
           onClick={handleCopy}
         >
           <span className={styles.copyIconSwap} aria-hidden>
@@ -164,20 +163,19 @@ export default function MessageRecipientMetaField({
               }`}
             />
           </span>
-        </IconButton>
+        </TooltipIconButton>
       )}
       {showAliasAction && (
-        <IconButton
+        <TooltipIconButton
           size="1"
           variant="ghost"
           color="gray"
           className={styles.toCopy}
-          title={aliasName ? "Manage recipient alias" : "Create recipient alias"}
-          aria-label={aliasName ? "Manage recipient alias" : "Create recipient alias"}
+          tooltip={aliasName ? "Manage recipient alias" : "Create recipient alias"}
           onClick={onAliasAction}
         >
           <List size={12} />
-        </IconButton>
+        </TooltipIconButton>
       )}
     </span>
   );

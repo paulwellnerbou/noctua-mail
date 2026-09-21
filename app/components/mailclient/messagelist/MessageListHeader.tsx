@@ -1,12 +1,13 @@
 import { startTransition, useEffect, useRef, useState } from "react";
 import type React from "react";
 import { ChevronsDown, ChevronsUp, Folder, GitBranch, RefreshCw } from "lucide-react";
-import { IconButton, SegmentedControl, Select, Text } from "@radix-ui/themes";
+import { SegmentedControl, Select, Text } from "@radix-ui/themes";
 import type { ThreadDateSource } from "@/lib/threadDate";
 import { isFlatMessageListSort, type MessageListSortBy } from "@/lib/messageListSort";
 import type { MessageGroup } from "./listModel";
 import type { MessageViewMode, ThreadsMode } from "./messageListViewTypes";
 import styles from "./MessageListHeader.module.css";
+import TooltipIconButton from "@/app/components/TooltipIconButton";
 
 export type MessageListHeaderProps = {
   state: {
@@ -194,16 +195,15 @@ export default function MessageListHeader({ state, actions }: MessageListHeaderP
             })()}
           </Text>
           {hasMoreMessages && !loadingMessages && (
-            <IconButton
+            <TooltipIconButton
               size="1"
               variant="ghost"
               color="gray"
               onClick={() => setMessagesPage((prev) => prev + 1)}
-              title="Load more"
-              aria-label="Load more"
+              tooltip="Load more"
             >
               <RefreshCw size={12} />
-            </IconButton>
+            </TooltipIconButton>
           )}
         </div>
       </div>
@@ -278,24 +278,24 @@ export default function MessageListHeader({ state, actions }: MessageListHeaderP
               </Select.Content>
             </Select.Root>
           )}
-          <IconButton
+          <TooltipIconButton
             size="2"
             variant="soft"
             color={threadsButtonColor}
             onClick={handleThreadsToggle}
-            title={threadsButtonTitle}
+            tooltip={threadsButtonTitle}
             disabled={!threadsAllowed}
             className={threadsMode === "scope" ? styles.threadsToggle : undefined}
           >
             <GitBranch size={14} />
             {threadsMode === "scope" && <Folder size={10} className={styles.threadsScopeIcon} />}
-          </IconButton>
-          <IconButton
+          </TooltipIconButton>
+          <TooltipIconButton
             size="2"
             variant="soft"
             color="gray"
             onClick={handleToggleGroups}
-            title={
+            tooltip={
               groupedMessages.some(
                 (group) => !(collapsedGroups[group.key] ?? (group.variant === "topic-suggestions"))
               )
@@ -310,7 +310,7 @@ export default function MessageListHeader({ state, actions }: MessageListHeaderP
             ) : (
               <ChevronsDown size={14} />
             )}
-          </IconButton>
+          </TooltipIconButton>
         </div>
       </div>
     </div>

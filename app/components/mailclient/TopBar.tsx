@@ -17,12 +17,13 @@ import {
   Trash2,
   X
 } from "lucide-react";
-import { Badge, Button, DropdownMenu, IconButton, TextField } from "@radix-ui/themes";
+import { Badge, Button, DropdownMenu, TextField } from "@radix-ui/themes";
 import { badgeColors } from "@/lib/ui/badgeColors";
 import { SEARCH_BADGE_OPTIONS, SEARCH_FIELD_OPTIONS } from "@/lib/ui/searchFilters";
 import type { Account, Folder } from "@/lib/data";
 import type { SyncTriggerOptions } from "./types";
 import styles from "./TopBar.module.css";
+import TooltipIconButton from "@/app/components/TooltipIconButton";
 
 type SearchFields = {
   sender: boolean;
@@ -245,15 +246,14 @@ export default function TopBar({
           >
             {query ? (
               <TextField.Slot side="right">
-                <IconButton
+                <TooltipIconButton
                   size="1"
                   variant="ghost"
                   onClick={() => (isRelatedSearch ? clearSearch() : setQuery(""))}
-                  aria-label="Clear search"
-                  title="Clear search"
+                  tooltip="Clear search"
                 >
                   <X size={12} />
-                </IconButton>
+                </TooltipIconButton>
               </TextField.Slot>
             ) : null}
           </TextField.Root>
@@ -437,16 +437,16 @@ export default function TopBar({
               {`${draftsCount} Draft${draftsCount === 1 ? "" : "s"}`}
             </Button>
           )}
-          <IconButton
+          <TooltipIconButton
             size="2"
             variant="surface"
             onClick={() => syncAccount(undefined, "new")}
             disabled={isSyncing}
             aria-label="Check new mail"
-            title="Check for new mail"
+            tooltip="Check for new mail"
           >
             <RefreshCw size={18} className={isSyncing ? styles.spin : undefined} />
-          </IconButton>
+          </TooltipIconButton>
         </div>
 
         <div className={styles.accountSlot}>
@@ -523,16 +523,15 @@ export default function TopBar({
         </div>
 
         <div className={`${styles.actionGroup} ${styles.utilitySlot}`}>
-          <IconButton
+          <TooltipIconButton
             size="3"
             variant="ghost"
             className={styles.themeButton}
             onClick={toggleDarkMode}
-            title={darkMode ? "Switch to light mode" : "Switch to dark mode"}
-            aria-label={darkMode ? "Switch to light mode" : "Switch to dark mode"}
+            tooltip={darkMode ? "Switch to light mode" : "Switch to dark mode"}
           >
             {darkMode ? <Sun size={16} /> : <Moon size={16} />}
-          </IconButton>
+          </TooltipIconButton>
         </div>
       </div>
     </header>

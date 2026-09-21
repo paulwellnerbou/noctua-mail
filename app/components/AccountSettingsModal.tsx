@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { X } from "lucide-react";
-import { Dialog, Flex, IconButton, Tabs } from "@radix-ui/themes";
+import { Dialog, Flex, Tabs } from "@radix-ui/themes";
 import type { Account, AccountSettings, RecipientAlias, Topic } from "@/lib/data";
 import { hasSavableAccountSettingsChanges } from "@/lib/accountSettings";
 import AccountTabContent from "@/app/components/account-settings/tabs/AccountTabContent";
@@ -14,6 +14,7 @@ import RecipientAliasesTabContent from "@/app/components/account-settings/tabs/R
 import McpTabContent from "@/app/components/account-settings/tabs/McpTabContent";
 import TranslationTabContent from "@/app/components/account-settings/tabs/TranslationTabContent";
 import OverflowTabsList, { type OverflowTabItem } from "@/app/components/account-settings/OverflowTabsList";
+import TooltipIconButton from "@/app/components/TooltipIconButton";
 export type ManageTab =
   | "account"
   | "signatures"
@@ -222,9 +223,9 @@ export default function AccountSettingsModal({
             <Dialog.Title size="5" weight="bold">
               Account settings
             </Dialog.Title>
-            <IconButton variant="ghost" aria-label="Close" onClick={onClose}>
+            <TooltipIconButton variant="ghost" tooltip="Close" onClick={onClose}>
               <X size={18} />
-            </IconButton>
+            </TooltipIconButton>
           </Flex>
 
           <Tabs.Root

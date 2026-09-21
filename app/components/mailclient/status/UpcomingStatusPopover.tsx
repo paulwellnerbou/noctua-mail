@@ -8,7 +8,6 @@ import {
   Card,
   Flex,
   Heading,
-  IconButton,
   Popover,
   Text
 } from "@radix-ui/themes";
@@ -32,6 +31,7 @@ import {
   type BottomStatusTone
 } from "./BottomStatusSection";
 import { buildUpcomingEntries, type UpcomingEntry } from "./upcomingEntries";
+import TooltipIconButton from "@/app/components/TooltipIconButton";
 
 type UpcomingStatusPopoverProps = {
   open: boolean;
@@ -240,16 +240,15 @@ export default function UpcomingStatusPopover({
             </Badge>
           </Flex>
           <Flex align="center" gap="2">
-            <IconButton
+            <TooltipIconButton
               variant="ghost"
               color="gray"
               size="2"
-              title="Close upcoming"
-              aria-label="Close upcoming"
+              tooltip="Close upcoming"
               onClick={() => onOpenChange(false)}
             >
               <X size={16} />
-            </IconButton>
+            </TooltipIconButton>
           </Flex>
         </Flex>
         <Box className="popover-body">
@@ -387,12 +386,11 @@ export default function UpcomingStatusPopover({
                               </Flex>
                             </button>
                             {reminder ? (
-                              <IconButton
+                              <TooltipIconButton
                                 variant="ghost"
                                 color="gray"
                                 size="1"
-                                title="Delete reminder"
-                                aria-label="Delete reminder"
+                                tooltip="Delete reminder"
                                 className="reminder-delete-btn"
                                 disabled={isDeletingReminder}
                                 onClick={() => {
@@ -404,7 +402,7 @@ export default function UpcomingStatusPopover({
                                 ) : (
                                   <Trash2 size={14} />
                                 )}
-                              </IconButton>
+                              </TooltipIconButton>
                             ) : null}
                           </Flex>
                         </Card>

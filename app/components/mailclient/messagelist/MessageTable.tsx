@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type React from "react";
 import type { CSSProperties } from "react";
 import { GitBranch, MoveRight, Search, Trash2 } from "lucide-react";
-import { Badge, Checkbox, IconButton, Text } from "@radix-ui/themes";
+import { Badge, Checkbox, Text } from "@radix-ui/themes";
 import { CaretRightIcon } from "@radix-ui/react-icons";
 import { badgeColors } from "@/lib/ui/badgeColors";
 import { describeMessageSize } from "@/lib/ui/byteSize";
@@ -33,6 +33,7 @@ import TopicSuggestionAcceptButton from "./TopicSuggestionAcceptButton";
 import FromAddressHoverCard from "./FromAddressHoverCard";
 import groupStyles from "./MessageCardList.module.css";
 import styles from "./MessageTable.module.css";
+import TooltipIconButton from "@/app/components/TooltipIconButton";
 
 export default function MessageTable({
   state,
@@ -531,11 +532,11 @@ export default function MessageTable({
                   </Text>
                 </span>
                 <div className={styles.cellActions}>
-                  <IconButton
+                  <TooltipIconButton
                     size="1"
                     variant="ghost"
                     color="gray"
-                    title={
+                    tooltip={
                       isTrashFolder(message.folderId)
                         ? "Delete permanently"
                         : "Move to Trash"
@@ -548,13 +549,12 @@ export default function MessageTable({
                     }}
                   >
                     <Trash2 size={14} />
-                  </IconButton>
-                  <IconButton
+                  </TooltipIconButton>
+                  <TooltipIconButton
                     size="1"
                     variant="ghost"
                     color="gray"
-                    title="Find related"
-                    aria-label="Find related"
+                    tooltip="Find related"
                     disabled={pendingMessageActions.has(message.id)}
                     onClick={(event) => {
                       event.stopPropagation();
@@ -562,7 +562,7 @@ export default function MessageTable({
                     }}
                   >
                     <Search size={14} />
-                  </IconButton>
+                  </TooltipIconButton>
                   {renderMessageMenu(message, "table")}
                   {showAddSuggestionAction && (
                     <TopicSuggestionAcceptButton

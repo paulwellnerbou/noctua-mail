@@ -2,8 +2,9 @@
 
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { Clock } from "lucide-react";
-import { IconButton, Popover, TextField } from "@radix-ui/themes";
+import { Popover, TextField } from "@radix-ui/themes";
 import styles from "./TimePicker.module.css";
+import TooltipIconButton from "@/app/components/TooltipIconButton";
 
 type Props = {
   /** Current time as "HH:MM" (24h). Empty string when unset. */
@@ -194,17 +195,17 @@ export default function TimePicker({
         <TextField.Slot side="right">
           <Popover.Root open={open} onOpenChange={setOpen}>
             <Popover.Trigger>
-              <IconButton
+              <TooltipIconButton
                 type="button"
                 size="1"
                 variant="ghost"
                 color="gray"
                 disabled={disabled}
-                aria-label="Open time picker"
+                tooltip="Open time picker"
                 className={styles.triggerButton}
               >
                 <Clock size={14} />
-              </IconButton>
+              </TooltipIconButton>
             </Popover.Trigger>
             <Popover.Content className={styles.popoverContent} size="1">
               <div ref={listRef} className={styles.optionList} role="listbox">

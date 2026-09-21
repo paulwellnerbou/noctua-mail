@@ -9,7 +9,7 @@ import {
   ZoomIn,
   ZoomOut
 } from "lucide-react";
-import { Badge, Button, Card, Flex, IconButton, Select, Tabs, Text } from "@radix-ui/themes";
+import { Badge, Button, Card, Flex, Select, Tabs, Text } from "@radix-ui/themes";
 import { CaretRightIcon } from "@radix-ui/react-icons";
 import * as Collapsible from "@radix-ui/react-collapsible";
 import { badgeColors, getFlagBadgeColor, getPriorityBadgeColor } from "@/lib/ui/badgeColors";
@@ -56,6 +56,7 @@ import { formatAddressList } from "../utils/parseAddressList";
 import { getMessageFromDisplay } from "../messagelist/threadGroupUtils";
 import type { InviteProcessingStatePatch } from "../utils/calendarInviteState";
 import { isRenderableInlineAttachment } from "@/lib/messageFlags";
+import TooltipIconButton from "@/app/components/TooltipIconButton";
 
 type MessageTab = "html" | "text" | "markdown" | "source";
 
@@ -379,16 +380,15 @@ export default function ThreadMessageCard({
           </div>
           {currentTab === "html" ? (
             <div className={styles.buttonGroup}>
-              <IconButton
+              <TooltipIconButton
                 size="1"
                 variant="surface"
                 color="gray"
-                title="Zoom out"
-                aria-label="Zoom out"
+                tooltip="Zoom out"
                 onClick={() => adjustMessageZoom(message.id, -0.1)}
               >
                 <ZoomOut size={12} />
-              </IconButton>
+              </TooltipIconButton>
               <Button
                 size="1"
                 variant="surface"
@@ -399,16 +399,15 @@ export default function ThreadMessageCard({
               >
                 100%
               </Button>
-              <IconButton
+              <TooltipIconButton
                 size="1"
                 variant="surface"
                 color="gray"
-                title="Zoom in"
-                aria-label="Zoom in"
+                tooltip="Zoom in"
                 onClick={() => adjustMessageZoom(message.id, 0.1)}
               >
                 <ZoomIn size={12} />
-              </IconButton>
+              </TooltipIconButton>
             </div>
           ) : null}
           {translationEnabled && translationFormatForTab(currentTab)
@@ -468,16 +467,15 @@ export default function ThreadMessageCard({
 
   const renderLoadContentPanel = () => (
     <div className={styles.bodyEmpty} role="status" aria-live="polite">
-      <IconButton
+      <TooltipIconButton
         size="2"
         variant="soft"
         color="gray"
-        title="Load message content"
-        aria-label="Load message content"
+        tooltip="Load message content"
         onClick={() => ensureMessageContent(message, { manual: true })}
       >
         <RefreshCw size={18} />
-      </IconButton>
+      </TooltipIconButton>
     </div>
   );
 

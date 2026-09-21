@@ -31,7 +31,7 @@ import {
   Tags,
   Trash2
 } from "lucide-react";
-import { DropdownMenu, IconButton } from "@radix-ui/themes";
+import { DropdownMenu } from "@radix-ui/themes";
 import type { Message, Topic, Folder } from "@/lib/data";
 import {
   hasTodoFlag,
@@ -42,6 +42,7 @@ import {
 import styles from "./MessageMenu.module.css";
 import TopicBadge from "../TopicBadge";
 import MoveToSubmenu from "./MoveToSubmenu";
+import TooltipIconButton from "@/app/components/TooltipIconButton";
 
 type ComposeMode = "new" | "reply" | "replyAll" | "forward" | "edit" | "editAsNew";
 type MessageMenuAction =
@@ -232,16 +233,15 @@ export default function MessageMenu({
   return (
     <DropdownMenu.Root onOpenChange={onOpenChange}>
       <DropdownMenu.Trigger>
-        <IconButton
+        <TooltipIconButton
           variant="ghost"
           size="1"
-          title="Message actions"
-          aria-label="Message actions"
+          tooltip="Message actions"
           disabled={pendingMessageActions.has(message.id)}
           onClick={(event) => event.stopPropagation()}
         >
           <MoreVertical size={14} />
-        </IconButton>
+        </TooltipIconButton>
       </DropdownMenu.Trigger>
       <DropdownMenu.Content
         align="end"

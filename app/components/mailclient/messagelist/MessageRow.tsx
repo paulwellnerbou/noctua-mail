@@ -1,7 +1,7 @@
 import { memo, useEffect, useRef, useState } from "react";
 import type React from "react";
 import { CalendarDays, GitBranch, MoveRight, Paperclip, Search, Trash2 } from "lucide-react";
-import { Badge, Checkbox, IconButton, Text } from "@radix-ui/themes";
+import { Badge, Checkbox, Text } from "@radix-ui/themes";
 import { CaretRightIcon } from "@radix-ui/react-icons";
 import { badgeColors } from "@/lib/ui/badgeColors";
 import { describeMessageSize } from "@/lib/ui/byteSize";
@@ -20,6 +20,7 @@ import type { Topic } from "@/lib/data";
 import TopicSuggestionAcceptButton from "./TopicSuggestionAcceptButton";
 import FromAddressHoverCard from "./FromAddressHoverCard";
 import type { FromParticipant } from "./threadGroupUtils";
+import TooltipIconButton from "@/app/components/TooltipIconButton";
 
 type MessageRowProps = {
   message: Message;
@@ -380,28 +381,27 @@ function MessageRow({
           </Text>
           {isCompactView ? (
             <>
-              <IconButton
+              <TooltipIconButton
                 size="1"
                 variant="ghost"
                 color="gray"
-                title={deleteTitle}
+                tooltip={deleteTitle}
                 aria-label="Delete"
                 disabled={isDisabled}
                 onClick={onDelete}
               >
                 <Trash2 size={14} />
-              </IconButton>
-              <IconButton
+              </TooltipIconButton>
+              <TooltipIconButton
                 size="1"
                 variant="ghost"
                 color="gray"
-                title="Find related"
-                aria-label="Find related"
+                tooltip="Find related"
                 disabled={isDisabled}
                 onClick={onShowRelated}
               >
                 <Search size={14} />
-              </IconButton>
+              </TooltipIconButton>
               {messageMenu}
               {showAddSuggestionAction && (
                 <TopicSuggestionAcceptButton

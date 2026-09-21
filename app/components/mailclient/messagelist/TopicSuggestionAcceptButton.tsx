@@ -1,7 +1,7 @@
 import type React from "react";
 import { Check } from "lucide-react";
-import { IconButton } from "@radix-ui/themes";
 import { topicColorToScale } from "@/lib/data";
+import TooltipIconButton from "@/app/components/TooltipIconButton";
 
 type TopicSuggestionAcceptButtonProps = {
   topicColor?: string | null;
@@ -17,16 +17,16 @@ export default function TopicSuggestionAcceptButton({
   onClick
 }: TopicSuggestionAcceptButtonProps) {
   return (
-    <IconButton
+    <TooltipIconButton
       size="1"
       variant="soft"
       color={topicColorToScale(topicColor) as any}
-      title={isPending ? "Adding topic…" : "Add to topic"}
+      tooltip={isPending ? "Adding topic…" : "Add to topic"}
       aria-label="Add to topic"
       disabled={disabled || isPending}
       onClick={onClick}
     >
       <Check size={14} />
-    </IconButton>
+    </TooltipIconButton>
   );
 }

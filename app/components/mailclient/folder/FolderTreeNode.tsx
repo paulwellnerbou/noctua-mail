@@ -1,13 +1,14 @@
 import { useState } from "react";
 import type React from "react";
 import { Folder as FolderIcon, MoreVertical } from "lucide-react";
-import { Badge, DropdownMenu, IconButton } from "@radix-ui/themes";
+import { Badge, DropdownMenu } from "@radix-ui/themes";
 import { CaretRightIcon } from "@radix-ui/react-icons";
 import { badgeColors } from "@/lib/ui/badgeColors";
 import type { Folder } from "@/lib/data";
 import type { SyncTriggerOptions } from "../types";
 import { getFolderCountTitle } from "./folderBadgePresentation";
 import styles from "./FolderTree.module.css";
+import TooltipIconButton from "@/app/components/TooltipIconButton";
 
 type FolderTreeNodeProps = {
   folder: Folder;
@@ -196,17 +197,16 @@ export default function FolderTreeNode({
         <span className={styles.treeActions}>
           <DropdownMenu.Root open={isMenuOpen} onOpenChange={setIsMenuOpen}>
             <DropdownMenu.Trigger>
-              <IconButton
+              <TooltipIconButton
                 className={styles.treeAction}
                 variant="ghost"
                 size="1"
-                title="Folder actions"
-                aria-label="Folder actions"
+                tooltip="Folder actions"
                 disabled={isDeleting}
                 onClick={(event) => event.stopPropagation()}
               >
                 <MoreVertical size={14} />
-              </IconButton>
+              </TooltipIconButton>
             </DropdownMenu.Trigger>
             <DropdownMenu.Content align="end" className={styles.menuContent}>
               <DropdownMenu.Item

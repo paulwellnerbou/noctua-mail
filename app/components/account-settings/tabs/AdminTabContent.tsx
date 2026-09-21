@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Check, Copy } from "lucide-react";
-import { Button, Card, Flex, IconButton, Text } from "@radix-ui/themes";
+import { Button, Card, Flex, Text } from "@radix-ui/themes";
 import type { AccountDateFormat } from "@/lib/data";
 import { formatAccountMediumDateTime } from "@/lib/dateFormatting";
 import { useIsDesktop } from "@/lib/desktop";
+import TooltipIconButton from "@/app/components/TooltipIconButton";
 
 type StorageInfo = {
   dataDir: string;
@@ -15,11 +16,11 @@ type StorageInfo = {
 function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
   return (
-    <IconButton
+    <TooltipIconButton
       size="1"
       variant="soft"
       color="gray"
-      aria-label="Copy path"
+      tooltip="Copy path"
       onClick={() => {
         navigator.clipboard.writeText(text).then(() => {
           setCopied(true);
@@ -28,7 +29,7 @@ function CopyButton({ text }: { text: string }) {
       }}
     >
       {copied ? <Check size={13} /> : <Copy size={13} />}
-    </IconButton>
+    </TooltipIconButton>
   );
 }
 
@@ -301,16 +302,15 @@ export default function AdminTabContent({
                   <Text size="2" weight="bold" style={{ overflowWrap: "anywhere" }}>
                     {latestGeneratedInviteCode}
                   </Text>
-                  <IconButton
+                  <TooltipIconButton
                     size="1"
                     variant="soft"
                     color="gray"
-                    aria-label="Copy invite code"
-                    title="Copy invite code"
+                    tooltip="Copy invite code"
                     onClick={() => void copyInviteCode(latestGeneratedInviteCode)}
                   >
                     {copiedCode === latestGeneratedInviteCode ? <Check size={14} /> : <Copy size={14} />}
-                  </IconButton>
+                  </TooltipIconButton>
                 </Flex>
               </Flex>
             </Card>
@@ -402,16 +402,15 @@ export default function AdminTabContent({
                               <Text size="2" weight="medium" style={{ overflowWrap: "anywhere" }}>
                                 {invite.code}
                               </Text>
-                              <IconButton
+                              <TooltipIconButton
                                 size="1"
                                 variant="soft"
                                 color="gray"
-                                aria-label="Copy invite code"
-                                title="Copy invite code"
+                                tooltip="Copy invite code"
                                 onClick={() => void copyInviteCode(invite.code)}
                               >
                                 {copiedCode === invite.code ? <Check size={14} /> : <Copy size={14} />}
-                              </IconButton>
+                              </TooltipIconButton>
                             </Flex>
                             <Text size="1" color={invite.isUsed ? "green" : "gray"}>
                               {statusText}

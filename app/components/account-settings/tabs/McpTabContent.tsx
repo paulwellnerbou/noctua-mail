@@ -2,13 +2,14 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Check, Copy } from "lucide-react";
-import { Badge, Button, Card, Flex, IconButton, Select, Text, TextField } from "@radix-ui/themes";
+import { Badge, Button, Card, Flex, Select, Text, TextField } from "@radix-ui/themes";
 import {
   buildAccountMcpTokenPath,
   buildAccountMcpTokensPath
 } from "@/lib/accountApiPaths";
 import type { AccountDateFormat, McpTokenMetadata } from "@/lib/data";
 import { formatAccountTimestampLabel } from "@/lib/dateFormatting";
+import TooltipIconButton from "@/app/components/TooltipIconButton";
 
 type Props = {
   accountId?: string;
@@ -228,15 +229,14 @@ export default function McpTabContent({
               <Text size="2" style={{ fontFamily: "var(--default-mono-font-family)" }}>
                 {serverUrl}
               </Text>
-              <IconButton
+              <TooltipIconButton
                 size="1"
                 variant="soft"
                 onClick={() => void handleCopy(serverUrl)}
-                aria-label={copiedValue === serverUrl ? "Copied server URL" : "Copy server URL"}
-                title={copiedValue === serverUrl ? "Copied server URL" : "Copy server URL"}
+                tooltip={copiedValue === serverUrl ? "Copied server URL" : "Copy server URL"}
               >
                 {copiedValue === serverUrl ? <Check size={14} /> : <Copy size={14} />}
-              </IconButton>
+              </TooltipIconButton>
             </Flex>
           </Flex>
         </Card>
@@ -303,15 +303,14 @@ export default function McpTabContent({
                     {createdSecret}
                   </Text>
                   <Flex>
-                    <IconButton
+                    <TooltipIconButton
                       size="1"
                       variant="soft"
                       onClick={() => void handleCopy(createdSecret)}
-                      aria-label={copiedValue === createdSecret ? "Copied token" : "Copy token"}
-                      title={copiedValue === createdSecret ? "Copied token" : "Copy token"}
+                      tooltip={copiedValue === createdSecret ? "Copied token" : "Copy token"}
                     >
                       {copiedValue === createdSecret ? <Check size={14} /> : <Copy size={14} />}
-                    </IconButton>
+                    </TooltipIconButton>
                   </Flex>
                 </Flex>
               </Card>

@@ -2,10 +2,11 @@
 
 import { memo, useMemo } from "react";
 import { QuestionMarkCircledIcon } from "@radix-ui/react-icons";
-import { Flex, IconButton, Popover, Text } from "@radix-ui/themes";
+import { Flex, Popover, Text } from "@radix-ui/themes";
 import type { Topic } from "@/lib/data";
 import TopicBadge from "../TopicBadge";
 import type { TopicSuggestionExplanation } from "./types";
+import TooltipIconButton from "@/app/components/TooltipIconButton";
 
 type ThreadTopicSuggestionsRowProps = {
   threadId: string;
@@ -109,15 +110,14 @@ function ThreadTopicSuggestionsRow({
         }}
       >
         <Popover.Trigger>
-          <IconButton
+          <TooltipIconButton
             size="1"
             variant="ghost"
             color="gray"
-            title="Why?"
-            aria-label="Why?"
+            tooltip="Why?"
           >
             <QuestionMarkCircledIcon width={14} height={14} />
-          </IconButton>
+          </TooltipIconButton>
         </Popover.Trigger>
         <Popover.Content size="1" className="topic-suggestion-explanation-popover">
           <Flex direction="column" gap="3" className="topic-suggestion-explanation-layout">
