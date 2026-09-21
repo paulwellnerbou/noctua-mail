@@ -172,7 +172,8 @@ import ThreadJsonModal from "./mailclient/message/ThreadJsonModal";
 import {
   doesCachedThreadCoverMessages,
   getComposeThreadFocusMessageId,
-  getInlineComposePlacement
+  getInlineComposePlacement,
+  getRenderedThreadMessages
 } from "./mailclient/message/threadViewState";
 import RecipientAliasDialog from "./mailclient/RecipientAliasDialog";
 import AccountReloginDialog from "./mailclient/AccountReloginDialog";
@@ -2861,11 +2862,28 @@ export default function MailClient({
   const inlineComposePlacement = useMemo(
     () =>
       getInlineComposePlacement({
-        activeThread,
+        activeThread: getRenderedThreadMessages({
+          activeMessage,
+          activeThread,
+          supportsThreads,
+          threadContentById,
+          threadContentLoading,
+          showComposeInline,
+          composeDraftId
+        }),
         showComposeInline,
         composeReplyMessage
       }),
-    [activeThread, composeReplyMessage, showComposeInline]
+    [
+      activeMessage,
+      activeThread,
+      composeDraftId,
+      composeReplyMessage,
+      showComposeInline,
+      supportsThreads,
+      threadContentById,
+      threadContentLoading
+    ]
   );
   const composeThreadFocusMessageId = useMemo(
     () =>

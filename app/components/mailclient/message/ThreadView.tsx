@@ -4,7 +4,7 @@ import { Text } from "@radix-ui/themes";
 import { needsMessageContentHydration } from "@/lib/ui/messageView";
 import ThreadMessageCard from "./ThreadMessageCard";
 import type { ThreadMessageCardProps } from "./ThreadMessageCard";
-import { getVisibleThreadMessages } from "./threadViewState";
+import { getRenderedThreadMessages } from "./threadViewState";
 import styles from "./ThreadView.module.css";
 
 type ThreadViewProps = {
@@ -40,9 +40,6 @@ export default function ThreadView({
         (() => {
           const activeThreadId =
             activeMessage.threadId ?? activeMessage.messageId ?? activeMessage.id;
-          const hasFullThread = Boolean(
-            activeThreadId && (threadContentById[activeThreadId]?.length ?? 0) > 0
-          );
           const isThreadLoading = Boolean(
             activeThreadId && threadContentLoading === activeThreadId
           );
@@ -55,18 +52,12 @@ export default function ThreadView({
             !isThreadLoading &&
             Boolean(activeThreadError) &&
             needsMessageContentHydration(activeMessageFromThread);
-          // When threads are disabled, the right pane shows only the
-          // selected message — `activeThread` may still contain siblings
-          // (from `threadContentById` cache or threadId matches in the
-          // visible list) and rendering them here surfaces them as
-          // collapsed cards from the selection-collapse effect.
-          const showOnlyActiveMessage =
-            !supportsThreads || (isThreadLoading && !hasFullThread);
-          const baseThread = showOnlyActiveMessage
-            ? [activeMessageFromThread]
-            : activeThread;
-          const visibleThread = getVisibleThreadMessages({
-            activeThread: baseThread,
+          const visibleThread = getRenderedThreadMessages({
+            activeMessage,
+            activeThread,
+            supportsThreads,
+            threadContentById,
+            threadContentLoading,
             showComposeInline,
             composeDraftId
           });
