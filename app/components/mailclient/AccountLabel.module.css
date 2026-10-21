@@ -1,0 +1,31 @@
+.root {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  /* Buttons center their text; the two lines must stay flush left. */
+  text-align: start;
+}
+
+.name,
+.email {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.name {
+  font-size: 13px;
+  line-height: 1.2;
+}
+
+.emphasized .name {
+  font-weight: 600;
+}
+
+/* Containers that invert their text (highlighted menu items) override the hook. */
+.email {
+  font-size: 11px;
+  line-height: 1.2;
+  color: var(--account-label-email-color, var(--gray-11));
+}

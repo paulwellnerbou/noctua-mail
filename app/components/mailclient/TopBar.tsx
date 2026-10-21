@@ -24,6 +24,7 @@ import type { Account, Folder } from "@/lib/data";
 import type { SyncTriggerOptions } from "./types";
 import styles from "./TopBar.module.css";
 import TooltipIconButton from "@/app/components/TooltipIconButton";
+import AccountLabel from "./AccountLabel";
 
 type SearchFields = {
   sender: boolean;
@@ -460,14 +461,12 @@ export default function TopBar({
           <DropdownMenu.Root>
             <DropdownMenu.Trigger>
               <Button size="2" variant="surface" className={styles.accountButton}>
-                <span className={styles.accountMeta}>
-                  <span className={styles.accountName}>
-                    {currentAccount?.name ?? currentAccount?.email ?? "Account"}
-                  </span>
-                  {currentAccount?.name && currentAccount?.email ? (
-                    <span className={styles.accountEmail}>{currentAccount.email}</span>
-                  ) : null}
-                </span>
+                <AccountLabel
+                  name={currentAccount ? currentAccount.name : "Account"}
+                  email={currentAccount?.email}
+                  emphasized
+                  className={styles.accountTriggerLabel}
+                />
               </Button>
             </DropdownMenu.Trigger>
             <DropdownMenu.Content className={styles.accountMenu}>
@@ -484,19 +483,7 @@ export default function TopBar({
                       value={account.id}
                       className={styles.accountMenuItem}
                     >
-                      <div className={styles.accountMenuInfo}>
-                        <span className={styles.accountMenuName}>
-                          {account.name || account.email}
-                        </span>
-                        {account.name && account.email ? (
-                          <span className={styles.accountMenuEmail}>{account.email}</span>
-                        ) : null}
-                      </div>
-                      {account.name && account.email ? (
-                        <Badge size="1" variant="soft" color={badgeColors.folder}>
-                          {account.email}
-                        </Badge>
-                      ) : null}
+                      <AccountLabel name={account.name} email={account.email} />
                     </DropdownMenu.RadioItem>
                   ))}
                 </DropdownMenu.RadioGroup>

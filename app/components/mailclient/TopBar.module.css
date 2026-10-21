@@ -201,29 +201,8 @@
   min-height: 32px;
 }
 
-.accountMeta {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  line-height: 1.2;
+.accountTriggerLabel {
   max-width: 220px;
-}
-
-.accountName {
-  font-weight: 600;
-  max-width: 220px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.accountEmail {
-  font-size: 11px;
-  color: var(--gray-11);
-  max-width: 220px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .accountMenu {
@@ -233,38 +212,14 @@
 .accountMenuItem {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 12px;
   height: auto;
   padding-top: var(--space-2);
   padding-bottom: var(--space-2);
 }
 
-.accountMenuInfo {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  min-width: 0;
-}
-
-.accountMenuName {
-  font-size: 13px;
-  line-height: 1.2;
-}
-
-.accountMenuEmail {
-  font-size: 11px;
-  color: var(--gray-11);
-  line-height: 1.2;
-}
-
 .accountMenu :global(.rt-DropdownMenuItem[data-highlighted]) {
   color: var(--accent-contrast);
-}
-
-.accountMenu :global(.rt-DropdownMenuItem[data-highlighted]) .accountMenuEmail {
-  color: var(--accent-contrast);
-  opacity: 0.8;
+  --account-label-email-color: color-mix(in srgb, var(--accent-contrast) 80%, transparent);
 }
 
 .spin {

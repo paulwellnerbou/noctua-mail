@@ -3,19 +3,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { X, Folder as FolderIcon, Check } from "lucide-react";
 import { Dialog, TextField } from "@radix-ui/themes";
-import type { Folder } from "@/lib/data";
+import type { Account, Folder } from "@/lib/data";
 import { buildAccountDestinationFoldersPath } from "@/lib/accountApiPaths";
+import AccountLabel from "../AccountLabel";
 import FolderPickerNode from "../folder/FolderPickerNode";
 import { buildFolderTree } from "../utils/folderHelpers";
 import { folderSpecialIcon } from "../RenderHelpers";
 import styles from "./MoveToDialog.module.css";
 import TooltipIconButton from "@/app/components/TooltipIconButton";
 
-export type CopyToAccountTarget = {
-  id: string;
-  name?: string;
-  email?: string;
-};
+export type CopyToAccountTarget = Pick<Account, "id" | "name" | "email">;
 
 type CopyToAccountDialogProps = {
   open: boolean;
@@ -26,10 +23,6 @@ type CopyToAccountDialogProps = {
   onOpenChange: (open: boolean) => void;
   onConfirm: (destinationAccountId: string, destinationFolderId: string) => void;
 };
-
-function accountLabel(account: CopyToAccountTarget) {
-  return account.name?.trim() || account.email?.trim() || account.id;
-}
 
 export default function CopyToAccountDialog({
   open,
@@ -164,7 +157,7 @@ export default function CopyToAccountDialog({
                 <span className={styles.recentIcon} aria-hidden>
                   {selected ? <Check size={14} /> : <FolderIcon size={14} />}
                 </span>
-                {accountLabel(account)}
+                <AccountLabel name={account.name} email={account.email} />
               </button>
             );
           })}
