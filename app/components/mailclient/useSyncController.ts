@@ -1332,6 +1332,11 @@ export function useSyncController({
           }, 15000);
         }
       });
+      // The server ends every stream after its maximum lifetime; reopening
+      // right away avoids the polling fallback the error path would start.
+      source.addEventListener("reconnect", () => {
+        if (!disposed) startStream();
+      });
     };
 
     // Suppress unused variable warning for streamMaxIdle

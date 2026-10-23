@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { NextResponse } from "next/server";
 
 import {
@@ -29,6 +30,16 @@ type Envelope = { subject?: string | null; from?: EnvelopeAddress[] | null; date
 
 const DEFAULT_MAX_IDLE = 3;
 const DEFAULT_BACKGROUND_POLL_INTERVAL = 900_000; // 15 minutes
+const KEEPALIVE_INTERVAL_MS = 25_000;
+// Neither the request abort signal nor stream cancellation is guaranteed to
+// fire for a dropped SSE client on this runtime, so every stream also ends
+// itself and asks the client to reconnect. That bounds how long an orphaned
+// stream can keep its IMAP sessions and poll timer alive.
+const MAX_STREAM_LIFETIME_MS = 60 * 60 * 1000;
+
+// Streams currently open in this process, logged on open/close so a leak shows
+// up in the log instead of in latency.
+let openStreamCount = 0;
 
 function formatAddress(addresses?: EnvelopeAddress[] | null) {
   if (!addresses || addresses.length === 0) return "";
@@ -66,6 +77,8 @@ export async function GET(request: Request, { params }: AccountRouteParams) {
   const inboxFolder = findInboxFolder(folders, accountId) ?? folders[0];
 
   const encoder = new TextEncoder();
+  const streamId = randomUUID().slice(0, 8);
+  let teardown: ((reason: string) => Promise<void>) | null = null;
 
   let ImapFlow: typeof import("imapflow").ImapFlow;
   try {
@@ -79,12 +92,36 @@ export async function GET(request: Request, { params }: AccountRouteParams) {
 
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
+      let closed = false;
+      const openedAt = Date.now();
+      const timers = new Set<ReturnType<typeof setTimeout>>();
+      const addTimer = (timer: ReturnType<typeof setTimeout>) => {
+        if (closed) {
+          clearInterval(timer);
+          return;
+        }
+        timers.add(timer);
+      };
+      openStreamCount += 1;
+      console.info(
+        `[imap-stream] open ${JSON.stringify({
+          streamId,
+          accountId,
+          clientId,
+          activeFolderId,
+          openStreams: openStreamCount
+        })}`
+      );
+
       const send = (event: string, data: unknown) => {
+        if (closed) return;
         try {
           controller.enqueue(encoder.encode(`event: ${event}\n`));
           controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
         } catch {
-          // Stream already closed — in-flight watchers/polls may outlive it.
+          // The consumer is gone; nothing else would stop the IMAP sessions
+          // and timers serving it.
+          void stopAll("enqueue-failed");
         }
       };
 
@@ -106,7 +143,12 @@ export async function GET(request: Request, { params }: AccountRouteParams) {
         }
       });
 
-      const stopAll = async () => {
+      const stopAll = async (reason: string) => {
+        if (closed) return;
+        closed = true;
+        openStreamCount -= 1;
+        for (const timer of timers) clearInterval(timer);
+        timers.clear();
         for (const item of sessions.values()) {
           await safeLogoutImapClient(
             item.client,
@@ -114,16 +156,28 @@ export async function GET(request: Request, { params }: AccountRouteParams) {
             "imap.logout"
           );
         }
+        sessions.clear();
         try {
           controller.close();
         } catch {
           // already closed
         }
         unregister();
+        console.info(
+          `[imap-stream] close ${JSON.stringify({
+            streamId,
+            accountId,
+            clientId,
+            reason,
+            lifetimeMs: Date.now() - openedAt,
+            openStreams: openStreamCount
+          })}`
+        );
       };
+      teardown = stopAll;
 
       request.signal.addEventListener("abort", () => {
-        void stopAll();
+        void stopAll("abort");
       });
 
       const closeSession = async (folderId: string) => {
@@ -383,6 +437,7 @@ export async function GET(request: Request, { params }: AccountRouteParams) {
 
         // Polling loop for remaining folders
           const pollFolders = async () => {
+            if (closed) return;
             const watchIds = new Set(Array.from(sessions.keys()));
             const toPoll = folders.filter(
               (f) => !watchIds.has(f.id) && !removedFolderIds.has(f.id)
@@ -445,28 +500,36 @@ export async function GET(request: Request, { params }: AccountRouteParams) {
           }
         };
 
-        const pollTimer = setInterval(pollFolders, pollIntervalMs);
+        addTimer(setInterval(pollFolders, pollIntervalMs));
 
         // Send SSE comment pings to keep the connection alive in environments
         // (e.g. WKWebView/Tauri) that aggressively time out idle SSE streams.
         // Without this, frequent reconnects cause repeated IMAP TLS handshakes
         // which can fail on servers with CN-only certificates (no SAN fields).
-        const keepaliveTimer = setInterval(() => {
-          try {
-            controller.enqueue(encoder.encode(":ping\n\n"));
-          } catch {
-            // stream already closed
-          }
-        }, 25_000);
+        addTimer(
+          setInterval(() => {
+            if (closed) return;
+            try {
+              controller.enqueue(encoder.encode(":ping\n\n"));
+            } catch {
+              void stopAll("enqueue-failed");
+            }
+          }, KEEPALIVE_INTERVAL_MS)
+        );
 
-        request.signal.addEventListener("abort", () => {
-          clearInterval(pollTimer);
-          clearInterval(keepaliveTimer);
-        });
+        addTimer(
+          setTimeout(() => {
+            send("reconnect", { streamId });
+            void stopAll("max-lifetime");
+          }, MAX_STREAM_LIFETIME_MS)
+        );
       } catch (error) {
         send("error", { message: (error as Error).message ?? "Stream failed" });
-        await stopAll();
+        await stopAll("start-failed");
       }
+    },
+    cancel() {
+      return teardown?.("cancel");
     }
   });
 
