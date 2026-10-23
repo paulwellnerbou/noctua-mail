@@ -87,6 +87,8 @@ DOCKER_ARGS=(
   --restart unless-stopped
   --memory=1g
   --memory-reservation=512m
+  --log-opt=max-size=100m
+  --log-opt=max-file=5
   -v "$DEPLOY_PATH/data-$INSTANCE:/app/.data"
   -p "$HOST_BIND_IP:$HOST_PORT_VALUE:$PORT_VALUE"
   -e PORT="$PORT_VALUE"
