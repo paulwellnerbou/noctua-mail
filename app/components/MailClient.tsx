@@ -135,6 +135,7 @@ import {
 import { openDetachedWindow } from "@/lib/ui/openDetachedWindow";
 import { useWindowTitle } from "@/lib/ui/windowTitle";
 import { useSyncedRef } from "@/lib/ui/latestRef";
+import { useStableByKey } from "@/lib/ui/stableByKey";
 import {
   formatMailboxPageTitle,
   formatMessageHtmlPageTitle,
@@ -1152,24 +1153,21 @@ export default function MailClient({
   const isSpamFolder = (folderId?: string | null) => checkIsSpamFolder(folderId, folders);
   const isSentFolder = (folderId?: string | null) => checkIsSentFolder(folderId, folders);
 
-  // Keyed by the excluded ids rather than the folders array, which is replaced
-  // on every folder refresh, so the Set keeps its identity while they hold.
-  const excludedFolderIdsForThreadsKey = useMemo(
+  const threadExcludedFolderIds = useMemo(
     () =>
       folders
         .filter((folder) => {
           const special = (folder.specialUse ?? "").toLowerCase();
           return special === "\\trash" || special === "\\junk" || special === "\\spam";
         })
-        .map((folder) => folder.id)
-        .sort()
-        .join(","),
+        .map((folder) => folder.id),
     [folders]
   );
-  const excludedFolderIdsForThreads = useMemo(
-    () =>
-      new Set(excludedFolderIdsForThreadsKey ? excludedFolderIdsForThreadsKey.split(",") : []),
-    [excludedFolderIdsForThreadsKey]
+  // `folders` is replaced on every refresh; the Set keeps its identity while
+  // the excluded ids hold, which keeps checkIsThreadExcludedFolder stable.
+  const excludedFolderIdsForThreads = useStableByKey(
+    useMemo(() => new Set(threadExcludedFolderIds), [threadExcludedFolderIds]),
+    [...threadExcludedFolderIds].sort().join("\n")
   );
 
   // CRITICAL: This IS passed to useMessageListDerivedState and MUST be stable
