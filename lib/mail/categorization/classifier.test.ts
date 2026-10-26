@@ -8,12 +8,21 @@ function toHeaderMap(headers: HeaderInput) {
   return new Map(Object.entries(headers));
 }
 
-function makeParsed(overrides?: Partial<any>) {
+type ParsedMailFixture = {
+  from: { value: Array<{ address: string }> };
+  to: { value: Array<{ address: string }> };
+  subject: string;
+  text: string;
+  attachments: Array<{ filename: string }>;
+};
+
+function makeParsed(overrides: Partial<ParsedMailFixture> = {}): ParsedMailFixture {
   return {
     from: { value: [{ address: "no-reply@example.com" }] },
     to: { value: [{ address: "user@example.com" }] },
     subject: "Hello",
     text: "",
+    attachments: [],
     ...overrides
   };
 }
@@ -35,7 +44,7 @@ describe("categorization classifier linear-only behavior", () => {
       {
         subject: parsed.subject,
         from: parsed.from,
-        attachments: parsed.attachments ?? [],
+        attachments: parsed.attachments,
         headers: headers as Map<string, unknown>
       }
     );
@@ -63,7 +72,7 @@ describe("categorization classifier linear-only behavior", () => {
       {
         subject: parsed.subject,
         from: parsed.from,
-        attachments: parsed.attachments ?? [],
+        attachments: parsed.attachments,
         headers: headers as Map<string, unknown>
       },
       { linearModel: model }
@@ -90,7 +99,7 @@ describe("categorization classifier linear-only behavior", () => {
       {
         subject: parsed.subject,
         from: parsed.from,
-        attachments: parsed.attachments ?? [],
+        attachments: parsed.attachments,
         headers: headers as Map<string, unknown>
       },
       { linearModel: model }
@@ -117,7 +126,7 @@ describe("categorization classifier seeded baseline model", () => {
       {
         subject: parsed.subject,
         from: parsed.from,
-        attachments: parsed.attachments ?? [],
+        attachments: parsed.attachments,
         headers: headers as Map<string, unknown>
       },
       { linearModel: createSeededLinearModel() }
@@ -149,7 +158,7 @@ describe("categorization classifier seeded baseline model", () => {
       {
         subject: parsed.subject,
         from: parsed.from,
-        attachments: parsed.attachments ?? [],
+        attachments: parsed.attachments,
         headers: headers as Map<string, unknown>
       },
       { linearModel: createSeededLinearModel() }
@@ -176,7 +185,7 @@ describe("categorization classifier seeded baseline model", () => {
       {
         subject: parsed.subject,
         from: parsed.from,
-        attachments: parsed.attachments ?? [],
+        attachments: parsed.attachments,
         headers: headers as Map<string, unknown>
       },
       { linearModel: createSeededLinearModel() }
@@ -201,7 +210,7 @@ describe("categorization classifier seeded baseline model", () => {
       {
         subject: parsed.subject,
         from: parsed.from,
-        attachments: parsed.attachments ?? [],
+        attachments: parsed.attachments,
         headers: headers as Map<string, unknown>
       },
       { linearModel: createSeededLinearModel() }
@@ -225,7 +234,7 @@ describe("categorization classifier seeded baseline model", () => {
       {
         subject: parsed.subject,
         from: parsed.from,
-        attachments: parsed.attachments ?? [],
+        attachments: parsed.attachments,
         headers: headers as Map<string, unknown>
       },
       {
@@ -254,7 +263,7 @@ describe("categorization classifier seeded baseline model", () => {
       {
         subject: parsed.subject,
         from: parsed.from,
-        attachments: parsed.attachments ?? [],
+        attachments: parsed.attachments,
         headers: headers as Map<string, unknown>
       },
       {

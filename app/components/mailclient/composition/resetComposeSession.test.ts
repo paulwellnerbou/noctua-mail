@@ -1,6 +1,82 @@
 import { describe, expect, it } from "bun:test";
+import type { Attachment, Message } from "@/lib/data";
+import type {
+  ComposeMode,
+  ComposeQuotedParts,
+  ComposeReplyHeaders,
+  ComposeTab,
+  ComposeView,
+  PendingImageDrop
+} from "./composeTypes";
 import type { ResettableComposeState } from "./resetComposeSession";
 import { resetComposeSession } from "./resetComposeSession";
+
+const replyMessage: Message = {
+  id: "message-1",
+  threadId: "thread-1",
+  subject: "Subject",
+  from: "alice@example.test",
+  to: "me@example.test",
+  preview: "Body",
+  date: "Mon, 1 Jan 2024 12:00:00 +0000",
+  dateValue: 1704110400000,
+  folderId: "acc-1:INBOX",
+  accountId: "acc-1",
+  body: "Body"
+};
+
+const attachment: Attachment = {
+  id: "att-1",
+  filename: "notes.txt",
+  contentType: "text/plain",
+  size: 5,
+  inline: false
+};
+
+type ComposeSessionValues = {
+  composeOpen: boolean;
+  composeView: ComposeView;
+  composeDraftId: string | null;
+  composeMode: ComposeMode;
+  composeTo: string;
+  composeCc: string;
+  composeBcc: string;
+  composeSubject: string;
+  composeBody: string;
+  composeIncludeInvite: boolean;
+  composeInviteLocation: string;
+  composeInviteStart: string;
+  composeInviteEnd: string;
+  composeInviteAllDay: boolean;
+  composeInviteRecurrenceRule: string;
+  composeHtml: string;
+  composeHtmlText: string;
+  composeMarkdown: string;
+  composeOpenedAt: string;
+  composeSignatureId: string;
+  signatureMenuOpen: boolean;
+  composeReplyMessage: Message | null;
+  composeTab: ComposeTab;
+  composeShowBcc: boolean;
+  composeStripImages: boolean;
+  composeIncludeOriginal: boolean;
+  composeQuoteHtml: boolean;
+  composeQuotedHtml: string;
+  composeQuotedText: string;
+  composeQuotedHtmlEdited: boolean;
+  composeReplyHeaders: ComposeReplyHeaders | null;
+  composeAttachments: Attachment[];
+  composeDragActive: boolean;
+  pendingImageDrop: PendingImageDrop | null;
+  composeEditorReset: number;
+  composeQuotedParts: ComposeQuotedParts | null;
+  composeResizing: boolean;
+  sendingMail: boolean;
+  draftSaving: boolean;
+  draftSavedAt: number | null;
+  draftSaveError: string | null;
+  discardingDraft: boolean;
+};
 
 function createSetter<T>(store: { value: T }) {
   return (next: T | ((prev: T) => T)) => {
@@ -10,7 +86,7 @@ function createSetter<T>(store: { value: T }) {
 
 describe("resetComposeSession", () => {
   it("clears compose state and transient draft tracking", () => {
-    const state = {
+    const state: ComposeSessionValues = {
       composeOpen: true,
       composeView: "minimized",
       composeDraftId: "draft-1",
@@ -32,7 +108,7 @@ describe("resetComposeSession", () => {
       composeOpenedAt: "Yesterday",
       composeSignatureId: "sig-1",
       signatureMenuOpen: true,
-      composeReplyMessage: { id: "message-1" },
+      composeReplyMessage: replyMessage,
       composeTab: "markdown",
       composeShowBcc: true,
       composeStripImages: true,
@@ -42,7 +118,7 @@ describe("resetComposeSession", () => {
       composeQuotedText: "quoted",
       composeQuotedHtmlEdited: true,
       composeReplyHeaders: { inReplyTo: "message-id" },
-      composeAttachments: [{ id: "att-1" }],
+      composeAttachments: [attachment],
       composeDragActive: true,
       pendingImageDrop: { files: [], x: 1, y: 2 },
       composeEditorReset: 4,
@@ -56,52 +132,52 @@ describe("resetComposeSession", () => {
     };
 
     const compose: ResettableComposeState = {
-      setComposeOpen: createSetter({ get value() { return state.composeOpen; }, set value(value) { state.composeOpen = value as boolean; } }),
-      setComposeView: createSetter({ get value() { return state.composeView; }, set value(value) { state.composeView = value as "inline" | "modal" | "minimized"; } }),
-      setComposeDraftId: createSetter({ get value() { return state.composeDraftId; }, set value(value) { state.composeDraftId = value as string | null; } }),
-      setComposeMode: createSetter({ get value() { return state.composeMode; }, set value(value) { state.composeMode = value as "new" | "reply" | "replyAll" | "forward" | "edit" | "editAsNew"; } }),
-      setComposeTo: createSetter({ get value() { return state.composeTo; }, set value(value) { state.composeTo = value as string; } }),
-      setComposeCc: createSetter({ get value() { return state.composeCc; }, set value(value) { state.composeCc = value as string; } }),
-      setComposeBcc: createSetter({ get value() { return state.composeBcc; }, set value(value) { state.composeBcc = value as string; } }),
-      setComposeSubject: createSetter({ get value() { return state.composeSubject; }, set value(value) { state.composeSubject = value as string; } }),
-      setComposeBody: createSetter({ get value() { return state.composeBody; }, set value(value) { state.composeBody = value as string; } }),
-      setComposeIncludeInvite: createSetter({ get value() { return state.composeIncludeInvite; }, set value(value) { state.composeIncludeInvite = value as boolean; } }),
-      setComposeInviteLocation: createSetter({ get value() { return state.composeInviteLocation; }, set value(value) { state.composeInviteLocation = value as string; } }),
-      setComposeInviteStart: createSetter({ get value() { return state.composeInviteStart; }, set value(value) { state.composeInviteStart = value as string; } }),
-      setComposeInviteEnd: createSetter({ get value() { return state.composeInviteEnd; }, set value(value) { state.composeInviteEnd = value as string; } }),
-      setComposeInviteAllDay: createSetter({ get value() { return state.composeInviteAllDay; }, set value(value) { state.composeInviteAllDay = value as boolean; } }),
-      setComposeInviteRecurrenceRule: createSetter({ get value() { return state.composeInviteRecurrenceRule; }, set value(value) { state.composeInviteRecurrenceRule = value as string; } }),
-      setComposeHtml: createSetter({ get value() { return state.composeHtml; }, set value(value) { state.composeHtml = value as string; } }),
-      setComposeHtmlText: createSetter({ get value() { return state.composeHtmlText; }, set value(value) { state.composeHtmlText = value as string; } }),
-      setComposeMarkdown: createSetter({ get value() { return state.composeMarkdown; }, set value(value) { state.composeMarkdown = value as string; } }),
+      setComposeOpen: createSetter({ get value() { return state.composeOpen; }, set value(value) { state.composeOpen = value; } }),
+      setComposeView: createSetter({ get value() { return state.composeView; }, set value(value) { state.composeView = value; } }),
+      setComposeDraftId: createSetter({ get value() { return state.composeDraftId; }, set value(value) { state.composeDraftId = value; } }),
+      setComposeMode: createSetter({ get value() { return state.composeMode; }, set value(value) { state.composeMode = value; } }),
+      setComposeTo: createSetter({ get value() { return state.composeTo; }, set value(value) { state.composeTo = value; } }),
+      setComposeCc: createSetter({ get value() { return state.composeCc; }, set value(value) { state.composeCc = value; } }),
+      setComposeBcc: createSetter({ get value() { return state.composeBcc; }, set value(value) { state.composeBcc = value; } }),
+      setComposeSubject: createSetter({ get value() { return state.composeSubject; }, set value(value) { state.composeSubject = value; } }),
+      setComposeBody: createSetter({ get value() { return state.composeBody; }, set value(value) { state.composeBody = value; } }),
+      setComposeIncludeInvite: createSetter({ get value() { return state.composeIncludeInvite; }, set value(value) { state.composeIncludeInvite = value; } }),
+      setComposeInviteLocation: createSetter({ get value() { return state.composeInviteLocation; }, set value(value) { state.composeInviteLocation = value; } }),
+      setComposeInviteStart: createSetter({ get value() { return state.composeInviteStart; }, set value(value) { state.composeInviteStart = value; } }),
+      setComposeInviteEnd: createSetter({ get value() { return state.composeInviteEnd; }, set value(value) { state.composeInviteEnd = value; } }),
+      setComposeInviteAllDay: createSetter({ get value() { return state.composeInviteAllDay; }, set value(value) { state.composeInviteAllDay = value; } }),
+      setComposeInviteRecurrenceRule: createSetter({ get value() { return state.composeInviteRecurrenceRule; }, set value(value) { state.composeInviteRecurrenceRule = value; } }),
+      setComposeHtml: createSetter({ get value() { return state.composeHtml; }, set value(value) { state.composeHtml = value; } }),
+      setComposeHtmlText: createSetter({ get value() { return state.composeHtmlText; }, set value(value) { state.composeHtmlText = value; } }),
+      setComposeMarkdown: createSetter({ get value() { return state.composeMarkdown; }, set value(value) { state.composeMarkdown = value; } }),
       composeMarkdownRef: { current: "**Body**" },
-      setComposeOpenedAt: createSetter({ get value() { return state.composeOpenedAt; }, set value(value) { state.composeOpenedAt = value as string; } }),
-      setComposeSignatureId: createSetter({ get value() { return state.composeSignatureId; }, set value(value) { state.composeSignatureId = value as string; } }),
-      setSignatureMenuOpen: createSetter({ get value() { return state.signatureMenuOpen; }, set value(value) { state.signatureMenuOpen = value as boolean; } }),
-      setComposeReplyMessage: createSetter({ get value() { return state.composeReplyMessage; }, set value(value) { state.composeReplyMessage = value as { id: string } | null; } }),
-      setComposeTab: createSetter({ get value() { return state.composeTab; }, set value(value) { state.composeTab = value as "text" | "html" | "markdown"; } }),
-      setComposeShowBcc: createSetter({ get value() { return state.composeShowBcc; }, set value(value) { state.composeShowBcc = value as boolean; } }),
-      setComposeStripImages: createSetter({ get value() { return state.composeStripImages; }, set value(value) { state.composeStripImages = value as boolean; } }),
-      setComposeIncludeOriginal: createSetter({ get value() { return state.composeIncludeOriginal; }, set value(value) { state.composeIncludeOriginal = value as boolean; } }),
-      setComposeQuoteHtml: createSetter({ get value() { return state.composeQuoteHtml; }, set value(value) { state.composeQuoteHtml = value as boolean; } }),
-      setComposeQuotedHtml: createSetter({ get value() { return state.composeQuotedHtml; }, set value(value) { state.composeQuotedHtml = value as string; } }),
-      setComposeQuotedText: createSetter({ get value() { return state.composeQuotedText; }, set value(value) { state.composeQuotedText = value as string; } }),
-      setComposeQuotedHtmlEdited: createSetter({ get value() { return state.composeQuotedHtmlEdited; }, set value(value) { state.composeQuotedHtmlEdited = value as boolean; } }),
-      setComposeReplyHeaders: createSetter({ get value() { return state.composeReplyHeaders; }, set value(value) { state.composeReplyHeaders = value as { inReplyTo: string } | null; } }),
-      setComposeAttachments: createSetter({ get value() { return state.composeAttachments; }, set value(value) { state.composeAttachments = value as Array<{ id: string }>; } }),
-      setComposeDragActive: createSetter({ get value() { return state.composeDragActive; }, set value(value) { state.composeDragActive = value as boolean; } }),
-      setPendingImageDrop: createSetter({ get value() { return state.pendingImageDrop; }, set value(value) { state.pendingImageDrop = value as { files: unknown[]; x: number; y: number } | null; } }),
-      setComposeEditorReset: createSetter({ get value() { return state.composeEditorReset; }, set value(value) { state.composeEditorReset = value as number; } }),
-      setComposeQuotedParts: createSetter({ get value() { return state.composeQuotedParts; }, set value(value) { state.composeQuotedParts = value as { styles: string; headerHtml: string; bodyHtml: string } | null; } }),
-      setComposeResizing: createSetter({ get value() { return state.composeResizing; }, set value(value) { state.composeResizing = value as boolean; } }),
-      setSendingMail: createSetter({ get value() { return state.sendingMail; }, set value(value) { state.sendingMail = value as boolean; } }),
+      setComposeOpenedAt: createSetter({ get value() { return state.composeOpenedAt; }, set value(value) { state.composeOpenedAt = value; } }),
+      setComposeSignatureId: createSetter({ get value() { return state.composeSignatureId; }, set value(value) { state.composeSignatureId = value; } }),
+      setSignatureMenuOpen: createSetter({ get value() { return state.signatureMenuOpen; }, set value(value) { state.signatureMenuOpen = value; } }),
+      setComposeReplyMessage: createSetter({ get value() { return state.composeReplyMessage; }, set value(value) { state.composeReplyMessage = value; } }),
+      setComposeTab: createSetter({ get value() { return state.composeTab; }, set value(value) { state.composeTab = value; } }),
+      setComposeShowBcc: createSetter({ get value() { return state.composeShowBcc; }, set value(value) { state.composeShowBcc = value; } }),
+      setComposeStripImages: createSetter({ get value() { return state.composeStripImages; }, set value(value) { state.composeStripImages = value; } }),
+      setComposeIncludeOriginal: createSetter({ get value() { return state.composeIncludeOriginal; }, set value(value) { state.composeIncludeOriginal = value; } }),
+      setComposeQuoteHtml: createSetter({ get value() { return state.composeQuoteHtml; }, set value(value) { state.composeQuoteHtml = value; } }),
+      setComposeQuotedHtml: createSetter({ get value() { return state.composeQuotedHtml; }, set value(value) { state.composeQuotedHtml = value; } }),
+      setComposeQuotedText: createSetter({ get value() { return state.composeQuotedText; }, set value(value) { state.composeQuotedText = value; } }),
+      setComposeQuotedHtmlEdited: createSetter({ get value() { return state.composeQuotedHtmlEdited; }, set value(value) { state.composeQuotedHtmlEdited = value; } }),
+      setComposeReplyHeaders: createSetter({ get value() { return state.composeReplyHeaders; }, set value(value) { state.composeReplyHeaders = value; } }),
+      setComposeAttachments: createSetter({ get value() { return state.composeAttachments; }, set value(value) { state.composeAttachments = value; } }),
+      setComposeDragActive: createSetter({ get value() { return state.composeDragActive; }, set value(value) { state.composeDragActive = value; } }),
+      setPendingImageDrop: createSetter({ get value() { return state.pendingImageDrop; }, set value(value) { state.pendingImageDrop = value; } }),
+      setComposeEditorReset: createSetter({ get value() { return state.composeEditorReset; }, set value(value) { state.composeEditorReset = value; } }),
+      setComposeQuotedParts: createSetter({ get value() { return state.composeQuotedParts; }, set value(value) { state.composeQuotedParts = value; } }),
+      setComposeResizing: createSetter({ get value() { return state.composeResizing; }, set value(value) { state.composeResizing = value; } }),
+      setSendingMail: createSetter({ get value() { return state.sendingMail; }, set value(value) { state.sendingMail = value; } }),
       sendingMailRef: { current: true },
-      setDraftSaving: createSetter({ get value() { return state.draftSaving; }, set value(value) { state.draftSaving = value as boolean; } }),
-      setDraftSavedAt: createSetter({ get value() { return state.draftSavedAt; }, set value(value) { state.draftSavedAt = value as number | null; } }),
-      setDraftSaveError: createSetter({ get value() { return state.draftSaveError; }, set value(value) { state.draftSaveError = value as string | null; } }),
-      setDiscardingDraft: createSetter({ get value() { return state.discardingDraft; }, set value(value) { state.discardingDraft = value as boolean; } }),
+      setDraftSaving: createSetter({ get value() { return state.draftSaving; }, set value(value) { state.draftSaving = value; } }),
+      setDraftSavedAt: createSetter({ get value() { return state.draftSavedAt; }, set value(value) { state.draftSavedAt = value; } }),
+      setDraftSaveError: createSetter({ get value() { return state.draftSaveError; }, set value(value) { state.draftSaveError = value; } }),
+      setDiscardingDraft: createSetter({ get value() { return state.discardingDraft; }, set value(value) { state.discardingDraft = value; } }),
       composeBodyDebounceRef: { current: setTimeout(() => undefined, 0) },
-      draftSaveTimerRef: { current: setTimeout(() => undefined, 0) },
+      draftSaveTimerRef: { current: 1 },
       draftSaveInFlightRef: { current: true },
       pendingDraftSaveRef: { current: { payload: { to: "", subject: "", text: "" }, hash: "hash-1" } },
       composeSessionVersionRef: { current: 4 },

@@ -44,7 +44,7 @@ function baseParams(message: Message) {
   };
 }
 
-type AppendCall = { mailboxPath: string; raw: Buffer; flags: string[] };
+type AppendCall = { mailboxPath: string; raw: Buffer; flags: string[] | undefined };
 
 function makeCopyDeps(
   overrides: {
@@ -66,7 +66,7 @@ function makeCopyDeps(
   const deps: CopyDeps = {
     getMessageSource: async () => storedSource,
     appendImapMessage: async (_account, mailboxPath, raw, flags) => {
-      appendCalls.push({ mailboxPath, raw: raw as Buffer, flags });
+      appendCalls.push({ mailboxPath, raw, flags });
       return appendResult;
     },
     // The source account fetches through the SOURCE mailbox; the destination
@@ -167,17 +167,20 @@ describe("copyMessageToAccount", () => {
 });
 
 describe("ingestCopiedMessages", () => {
+  type ThreadingBatch = Parameters<IngestDeps["resolveThreadingForAccountMessages"]>[1];
+
   function makeIngestDeps() {
-    const resolveThreadingCalls: Message[][] = [];
+    const resolveThreadingCalls: ThreadingBatch[] = [];
     const upsertCalls: Message[][] = [];
     const deps: IngestDeps = {
       resolveThreadingForAccountMessages: async (_accountId, messages) => {
-        resolveThreadingCalls.push(messages as Message[]);
-        return (messages as Message[]).map((m) => ({ ...m, threadId: "thread-1" }));
+        resolveThreadingCalls.push(messages);
+        return messages.map((m) => ({ ...m, threadId: "thread-1" }));
       },
       sanitizeSyncedMessage: async (message) => message,
       upsertMessages: async (_accountId, _folderId, messages) => {
         upsertCalls.push(messages);
+        return { affectedThreadIds: [], requiresFullRecompute: false };
       }
     };
     return { deps, resolveThreadingCalls, upsertCalls };

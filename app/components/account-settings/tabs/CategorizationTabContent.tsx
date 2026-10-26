@@ -136,6 +136,8 @@ export default function CategorizationTabContent({
 
   useEffect(() => {
     if (!isActive || !accountId || !isExistingAccount) return;
+    // The loader updates state synchronously before its request starts.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void loadCategorizationDebug();
   }, [accountId, isActive, isExistingAccount, loadCategorizationDebug]);
 

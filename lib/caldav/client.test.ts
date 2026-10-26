@@ -5,7 +5,8 @@ import type { LookupFn } from "@/lib/net/urlSafety";
 // never tries to reach the network. `assertPublicUrl` catches SSRF-ish URLs
 // before `tsdav` is invoked at all; these tests verify that chokepoint is in
 // place and that a valid URL does get handed through.
-const createDAVClient = mock(async () => ({
+type CreateDAVClientParams = Parameters<typeof import("tsdav")["createDAVClient"]>[0];
+const createDAVClient = mock(async (_params: CreateDAVClientParams) => ({
   fetchCalendars: async () => []
 }));
 mock.module("tsdav", () => ({ createDAVClient }));
@@ -16,6 +17,8 @@ const {
   createCaldavClient,
   testCaldavConnection
 } = await import("./client");
+
+type CaldavUrlRejectedErrorInstance = InstanceType<typeof CaldavUrlRejectedError>;
 
 describe("assertSafeCaldavUrl", () => {
   const denyLookup: LookupFn = async () => {
@@ -70,7 +73,7 @@ describe("assertSafeCaldavUrl", () => {
         (e: Error) => e
       );
       expect(err).toBeInstanceOf(CaldavUrlRejectedError);
-      expect((err as CaldavUrlRejectedError).reason).toBe("unsupported-protocol");
+      expect((err as CaldavUrlRejectedErrorInstance).reason).toBe("unsupported-protocol");
     }
   });
 
@@ -80,7 +83,7 @@ describe("assertSafeCaldavUrl", () => {
       lookup
     }).catch((e: Error) => e);
     expect(err).toBeInstanceOf(CaldavUrlRejectedError);
-    expect((err as CaldavUrlRejectedError).reason).toBe("private-ip");
+    expect((err as CaldavUrlRejectedErrorInstance).reason).toBe("private-ip");
   });
 
   test("rejects hostnames where *any* resolved record is private (rebinding-style)", async () => {
@@ -92,7 +95,7 @@ describe("assertSafeCaldavUrl", () => {
       lookup
     }).catch((e: Error) => e);
     expect(err).toBeInstanceOf(CaldavUrlRejectedError);
-    expect((err as CaldavUrlRejectedError).reason).toBe("private-ip");
+    expect((err as CaldavUrlRejectedErrorInstance).reason).toBe("private-ip");
   });
 
   test("rejects malformed URLs", async () => {
@@ -100,7 +103,7 @@ describe("assertSafeCaldavUrl", () => {
       (e: Error) => e
     );
     expect(err).toBeInstanceOf(CaldavUrlRejectedError);
-    expect((err as CaldavUrlRejectedError).reason).toBe("invalid-url");
+    expect((err as CaldavUrlRejectedErrorInstance).reason).toBe("invalid-url");
   });
 });
 
@@ -138,7 +141,7 @@ describe("createCaldavClient — SSRF guard", () => {
       { lookup }
     );
     const lastCall = createDAVClient.mock.calls[createDAVClient.mock.calls.length - 1];
-    const arg = lastCall[0] as { serverUrl: string };
+    const arg = lastCall[0];
     // `new URL("https://caldav.example.com/dav").toString()` canonicalizes to
     // the same value for this input; the point is that tsdav receives a
     // URL-parsed string rather than the unvalidated raw config field.

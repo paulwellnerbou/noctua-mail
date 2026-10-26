@@ -61,6 +61,8 @@ export default function EventDialog({
     const now = defaultStart ?? new Date();
     const end = defaultEnd ?? new Date(now.getTime() + 60 * 60 * 1000);
     const isAllDay = defaultAllDay ?? false;
+    // Form fields are seeded from the event each time the dialog opens.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setSummary(event?.summary ?? "");
     setDescription(event?.description ?? "");
     setLocation(event?.location ?? "");

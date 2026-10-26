@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useSyncedState } from "@/lib/ui/syncedState";
 import {
   buildAccountCalendarEventRespondPath,
   buildAccountCalendarParticipationPath
@@ -90,18 +91,17 @@ export function useEventResponseState({
   const [responseDialogOpen, setResponseDialogOpen] = useState(false);
   const [draftPartstat, setDraftPartstat] = useState<CalendarParticipationStatus>("NEEDS-ACTION");
   const [draftScope, setDraftScope] = useState<CalendarParticipationScope>("series");
-  const [sendReply, setSendReply] = useState(replyRequested !== false);
+  const [sendReply, setSendReply] = useSyncedState(replyRequested !== false);
   const [submittingResponse, setSubmittingResponse] = useState(false);
 
   useEffect(() => {
+    // Re-seeded from the viewed event or occurrence; in between, the values hold
+    // what the user saved locally.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setCurrentMyPartstat(myPartstat);
     setCurrentParticipationScope(forceOccurrenceResponse ? "occurrence" : "series");
     setIsRecurringParticipation(Boolean(recurrenceRule?.trim()));
   }, [eventId, resolvedStartMs, myPartstat, recurrenceRule, forceOccurrenceResponse]);
-
-  useEffect(() => {
-    setSendReply(replyRequested !== false);
-  }, [replyRequested]);
 
   useEffect(() => {
     let active = true;

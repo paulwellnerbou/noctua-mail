@@ -37,6 +37,11 @@ function createStubClient(): StubClient {
   return stub;
 }
 
+function requireLastCreatedStub(): StubClient {
+  if (!lastCreatedStub) throw new Error("No stub client has been created.");
+  return lastCreatedStub;
+}
+
 mock.module("./_shared", () => ({
   ...realShared,
   connectImapClient: async () => {
@@ -95,7 +100,7 @@ describe("acquirePooledImapClient", () => {
   test("empty pool → creates a fresh connection", async () => {
     const client = await acquirePooledImapClient(makeAccount("acc-1"), logCtx);
     expect(connectCount).toBe(1);
-    expect(client).toBe(lastCreatedStub);
+    expect(client).toBe(requireLastCreatedStub());
   });
 
   test("release then acquire same account → reuses cached connection", async () => {
@@ -223,12 +228,12 @@ describe("withPooledImapClient", () => {
   test("success path → client returns to pool", async () => {
     const account = makeAccount("acc-1");
     const result = await withPooledImapClient(account, logCtx, async (client) => {
-      expect(client).toBe(lastCreatedStub);
+      expect(client).toBe(requireLastCreatedStub());
       return 42;
     });
     expect(result).toBe(42);
     expect(getImapConnectionPoolSize()).toBe(1);
-    expect((lastCreatedStub as StubClient).__logoutCount).toBe(0);
+    expect(requireLastCreatedStub().__logoutCount).toBe(0);
   });
 
   test("thrown error path → client is evicted, not returned to pool", async () => {

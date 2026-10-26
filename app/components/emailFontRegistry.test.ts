@@ -10,6 +10,7 @@ import {
   resetEmailFontRegistryForTests,
   stripPromotedFontImports
 } from "./emailFontRegistry";
+import { createFetchStub } from "@/lib/testFetchStub";
 
 type FakeStyleElement = {
   attributes: Map<string, string>;
@@ -68,16 +69,14 @@ function createFakeDocument() {
   };
 }
 
-const globalWithDom = globalThis as typeof globalThis & {
-  document?: {
-    head: { append: (style: FakeStyleElement) => void; querySelector: (selector: string) => FakeStyleElement | null };
-    createElement: (tag: string) => FakeStyleElement;
-  };
-  fetch?: typeof fetch;
-};
+// These tests run without a DOM, so the fake document is installed on the
+// global object directly and removed again afterwards.
+const originalDocument: unknown = Reflect.get(globalThis, "document");
+const originalFetch = globalThis.fetch;
 
-const originalDocument = globalWithDom.document;
-const originalFetch = globalWithDom.fetch;
+function installFakeDocument(document: ReturnType<typeof createFakeDocument>["document"]) {
+  Reflect.set(globalThis, "document", document);
+}
 
 beforeEach(() => {
   resetEmailFontRegistryForTests();
@@ -85,16 +84,12 @@ beforeEach(() => {
 
 afterEach(() => {
   resetEmailFontRegistryForTests();
-  if (originalDocument) {
-    globalWithDom.document = originalDocument;
+  if (originalDocument === undefined) {
+    Reflect.deleteProperty(globalThis, "document");
   } else {
-    delete globalWithDom.document;
+    Reflect.set(globalThis, "document", originalDocument);
   }
-  if (originalFetch) {
-    globalWithDom.fetch = originalFetch;
-  } else {
-    delete globalWithDom.fetch;
-  }
+  globalThis.fetch = originalFetch;
 });
 
 describe("emailFontRegistry helpers", () => {
@@ -194,12 +189,14 @@ describe("emailFontRegistry helpers", () => {
 describe("emailFontRegistry lifecycle", () => {
   it("registers and removes promoted font-face rules in document head", async () => {
     const fakeDocument = createFakeDocument();
-    globalWithDom.document = fakeDocument.document;
-    globalWithDom.fetch = mock(async () => ({
-      ok: true,
-      text: async () =>
-        "@font-face { font-family: 'Roboto Slab'; src: url('https://fonts.gstatic.com/s/robotoslab.woff2') format('woff2'); } .x{color:red;}"
-    })) as typeof fetch;
+    installFakeDocument(fakeDocument.document);
+    globalThis.fetch = createFetchStub(
+      async () =>
+        new Response(
+          "@font-face { font-family: 'Roboto Slab'; src: url('https://fonts.gstatic.com/s/robotoslab.woff2') format('woff2'); } .x{color:red;}",
+          { status: 200, headers: { "Content-Type": "text/css" } }
+        )
+    );
 
     await acquireEmailFonts(["https://fonts.googleapis.com/css2?family=Roboto+Slab"]);
 
@@ -215,13 +212,15 @@ describe("emailFontRegistry lifecycle", () => {
 
   it("deduplicates acquisition and keeps rules alive until the last release", async () => {
     const fakeDocument = createFakeDocument();
-    globalWithDom.document = fakeDocument.document;
-    const fetchMock = mock(async () => ({
-      ok: true,
-      text: async () =>
-        "@font-face { font-family: 'Roboto Slab'; src: url('https://fonts.gstatic.com/s/robotoslab.woff2') format('woff2'); }"
-    }));
-    globalWithDom.fetch = fetchMock as typeof fetch;
+    installFakeDocument(fakeDocument.document);
+    const fetchMock = mock(
+      async () =>
+        new Response(
+          "@font-face { font-family: 'Roboto Slab'; src: url('https://fonts.gstatic.com/s/robotoslab.woff2') format('woff2'); }",
+          { status: 200, headers: { "Content-Type": "text/css" } }
+        )
+    );
+    globalThis.fetch = createFetchStub(fetchMock);
 
     await Promise.all([
       acquireEmailFonts(["https://fonts.googleapis.com/css2?family=Roboto+Slab"]),

@@ -53,7 +53,14 @@ describe("detectSyncEscalation", () => {
 describe("normalizeSyncJobProgress", () => {
   test("stamps the jobId onto the progress blob", () => {
     const progress = normalizeSyncJobProgress({
-      progress: { mode: "recent", updatedAt: 42 },
+      progress: {
+        accountId: "acc-1",
+        mailboxPath: "INBOX",
+        mode: "recent",
+        phase: "fetching",
+        processed: 0,
+        updatedAt: 42
+      },
       jobId: "job-1"
     });
     expect(progress.jobId).toBe("job-1");
@@ -62,7 +69,13 @@ describe("normalizeSyncJobProgress", () => {
 
   test("fills missing updatedAt with the caller-supplied clock", () => {
     const progress = normalizeSyncJobProgress({
-      progress: { mode: "recent" },
+      progress: {
+        accountId: "acc-1",
+        mailboxPath: "INBOX",
+        mode: "recent",
+        phase: "fetching",
+        processed: 0
+      },
       jobId: "job-2",
       now: 1234
     });
@@ -71,7 +84,15 @@ describe("normalizeSyncJobProgress", () => {
 
   test("preserves other fields verbatim", () => {
     const progress = normalizeSyncJobProgress({
-      progress: { mode: "full", folderId: "inbox", updatedAt: 1 },
+      progress: {
+        accountId: "acc-1",
+        mailboxPath: "INBOX",
+        mode: "full",
+        folderId: "inbox",
+        phase: "fetching",
+        processed: 0,
+        updatedAt: 1
+      },
       jobId: "job-3"
     });
     expect(progress.mode).toBe("full");

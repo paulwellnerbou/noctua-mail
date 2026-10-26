@@ -1,9 +1,11 @@
 import { describe, expect, it } from "bun:test";
-import { isValidElement, type ReactNode } from "react";
+import { isValidElement, type ReactElement, type ReactNode } from "react";
 import { linkifyText } from "./LinkifiedText";
 
 function findAnchor(nodes: ReactNode[]) {
-  return nodes.find((node) => isValidElement(node) && node.type === "a");
+  return nodes.find(
+    (node): node is ReactElement<{ href?: string }> => isValidElement(node) && node.type === "a"
+  );
 }
 
 describe("linkifyText", () => {
@@ -11,9 +13,7 @@ describe("linkifyText", () => {
     const nodes = linkifyText("Open https://example.com/test");
     const anchor = findAnchor(nodes);
 
-    expect(anchor && isValidElement(anchor) ? anchor.props.href : undefined).toBe(
-      "https://example.com/test"
-    );
+    expect(anchor?.props.href).toBe("https://example.com/test");
   });
 
   it("joins newline-split urls used in calendar descriptions", () => {
@@ -26,7 +26,7 @@ describe("linkifyText", () => {
       ].join("\n")
     );
     const anchor = findAnchor(nodes);
-    const href = anchor && isValidElement(anchor) ? anchor.props.href : undefined;
+    const href = anchor?.props.href;
 
     expect(href).toBe(
       "https://teams.microsoft.com/l/meetup-join/19%3ameeting_YTgxNDMyMDAtMzc4ZS00YTYyLWFmOTgtNmlzMTZmNWVhZTVj%40thread.v2/0?context=%7b%22Tid%22%3a%220d3556e8-200e-4613-bd00-e12ab9775303%22%7d"
@@ -37,8 +37,6 @@ describe("linkifyText", () => {
     const nodes = linkifyText("https://meet.google.com/err-sosa-trk\nOr");
     const anchor = findAnchor(nodes);
 
-    expect(anchor && isValidElement(anchor) ? anchor.props.href : undefined).toBe(
-      "https://meet.google.com/err-sosa-trk"
-    );
+    expect(anchor?.props.href).toBe("https://meet.google.com/err-sosa-trk");
   });
 });

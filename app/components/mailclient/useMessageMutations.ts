@@ -560,6 +560,7 @@ export function useMessageMutations({
     requestBulkFlagMutation
   ]);
 
+  const viewMessageId = viewMessage?.id;
   const handleSetCategory = useCallback(async (
     message: Message,
     category: "newsletter" | "notification" | "transactional" | null
@@ -609,7 +610,7 @@ export function useMessageMutations({
         typeof updated.categoryScore === "number" ? updated.categoryScore : null,
         updated.categorySignals ?? []
       );
-      if (viewMessage?.id === message.id && !shouldKeepUpdatedMessage) {
+      if (viewMessageId === message.id && !shouldKeepUpdatedMessage) {
         setViewMessage(null);
         setActiveMessageId("");
       }
@@ -632,7 +633,7 @@ export function useMessageMutations({
     activeAccountId, apiFetch, hasFilteredSearchCriteria, pushNotice, queueFilteredSearchRefresh, readErrorMessage,
     reportError, setActiveMessageId, setActiveTopicSuggestionMessages, setPendingMessageActions, setViewMessage,
     shouldKeepMessageInCurrentResults, updateMessagesWithCurrentResultPrune, updateThreadCacheWithCategory,
-    viewMessage?.id
+    viewMessageId
   ]);
 
   const transitionTodoState = useCallback(async (

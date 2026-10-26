@@ -86,6 +86,14 @@ type UseSearchStateOptions = {
   virtualDefaultExcludedFolderIdsKey: string;
   apiFetch: (url: string, options?: RequestInit) => Promise<Response>;
   syncCompletionVersion?: number;
+  // Owned by the caller: the sync controller consumes them and this hook
+  // consumes the controller's sync version.
+  searchScope: "folder" | "all";
+  setSearchScope: React.Dispatch<React.SetStateAction<"folder" | "all">>;
+  activeVirtualFolderId: VirtualFolderDefinition["id"] | null;
+  setActiveVirtualFolderId: React.Dispatch<
+    React.SetStateAction<VirtualFolderDefinition["id"] | null>
+  >;
 };
 
 export type SearchState = {
@@ -123,15 +131,16 @@ export function useSearchState(options: UseSearchStateOptions) {
     relatedQueryId,
     virtualDefaultExcludedFolderIdsKey,
     apiFetch,
-    syncCompletionVersion
+    syncCompletionVersion,
+    searchScope,
+    setSearchScope,
+    activeVirtualFolderId,
+    setActiveVirtualFolderId
   } = options;
 
   const trimmedQuery = query.trim();
-  const [searchScope, setSearchScope] = useState<"folder" | "all">("folder");
   const [searchFields, setSearchFields] = useState<SearchFieldsState>(DEFAULT_SEARCH_FIELDS);
   const [searchBadges, setSearchBadges] = useState<SearchBadgesState>(DEFAULT_SEARCH_BADGES);
-  const [activeVirtualFolderId, setActiveVirtualFolderId] =
-    useState<VirtualFolderDefinition["id"] | null>(null);
   const [focusedUnreadCount, setFocusedUnreadCount] = useState<number | null>(null);
   const [actionQueueTodoCount, setActionQueueTodoCount] = useState<number | null>(null);
   const [inviteDeckTotalCount, setInviteDeckTotalCount] = useState<number | null>(null);
@@ -180,6 +189,8 @@ export function useSearchState(options: UseSearchStateOptions) {
     relatedQueryId,
     setQuery,
     setActiveFolderId,
+    setActiveVirtualFolderId,
+    setSearchScope,
     accountFolders
   ]);
 
@@ -197,7 +208,7 @@ export function useSearchState(options: UseSearchStateOptions) {
       setActiveFolderId("");
       setSearchBadges({ ...DEFAULT_SEARCH_BADGES });
     },
-    [activeFolderId, searchScope, setQuery, setActiveFolderId]
+    [activeFolderId, searchScope, setQuery, setActiveFolderId, setActiveVirtualFolderId, setSearchScope]
   );
 
   // Fetch virtual folder counts
@@ -260,7 +271,14 @@ export function useSearchState(options: UseSearchStateOptions) {
       const timer = setTimeout(() => setActiveVirtualFolderId(null), 0);
       return () => clearTimeout(timer);
     }
-  }, [activeVirtualFolderId, isRelatedSearch, searchBadges, searchScope, trimmedQuery]);
+  }, [
+    activeVirtualFolderId,
+    isRelatedSearch,
+    searchBadges,
+    searchScope,
+    setActiveVirtualFolderId,
+    trimmedQuery
+  ]);
 
   const state: SearchState = {
     searchScope,

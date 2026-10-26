@@ -2,6 +2,7 @@ import { randomUUID } from "crypto";
 import { describe, expect, mock, test } from "bun:test";
 import type { Account } from "@/lib/data";
 import { sealSession, type SessionData } from "@/lib/auth";
+import type { NewSyncFolderDecision } from "@/lib/mail/imap";
 import { markImapConnectFailure } from "@/lib/mail/imapError";
 import { dbModulePromise } from "@/lib/testDbHarness";
 import { MAIL_SERVER_UNREACHABLE_MESSAGE } from "@/app/api/_helpers/imapUpstreamError";
@@ -74,7 +75,7 @@ async function setUpAccount() {
 describe("sync new-candidates route", () => {
   test("returns planned decisions", async () => {
     const accountId = await setUpAccount();
-    const decision = {
+    const decision: NewSyncFolderDecision = {
       folderId: `${accountId}:INBOX`,
       mailboxPath: "INBOX",
       uidNext: 42,

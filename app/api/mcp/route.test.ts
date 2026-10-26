@@ -24,7 +24,9 @@ type BuiltDraftMail = {
 };
 
 let lastBuiltDraftMail: BuiltDraftMail | null = null;
-const updateImapFlags = mock(async () => {});
+const actualServerImap = await import("@/lib/serverImap");
+const actualServerSmtp = await import("@/lib/serverSmtp");
+const updateImapFlags = mock<typeof actualServerImap.updateImapFlags>(async () => {});
 const buildRawMessage = mock(async (_account: Account, mail: BuiltDraftMail) => {
   lastBuiltDraftMail = mail;
   return `raw:${mail.subject}`;
@@ -59,8 +61,6 @@ const syncImapMessage = mock(async (account: Account, mailboxPath: string, uid: 
     attachments: []
   } satisfies Message;
 });
-const actualServerImap = await import("@/lib/serverImap");
-const actualServerSmtp = await import("@/lib/serverSmtp");
 
 mock.module("@/lib/serverImap", () => ({
   ...actualServerImap,

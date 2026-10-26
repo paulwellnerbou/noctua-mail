@@ -25,6 +25,8 @@ import {
   buildAccountSmtpSendPath
 } from "@/lib/accountApiPaths";
 import { hasHtmlContent } from "@/lib/ui/messageView";
+import { useSyncedRef } from "@/lib/ui/latestRef";
+import { createRandomId } from "../utils/clientHelpers";
 import {
   removeDetachedComposeHandoff,
   pruneExpiredDetachedComposeHandoffs,
@@ -422,7 +424,7 @@ function ComposeOrchestratorImpl(
   } = compose;
 
   const composeRef = useRef(compose);
-  composeRef.current = compose;
+  useSyncedRef(composeRef, compose);
 
   // Cleanup debounce timer on unmount
   useEffect(() => {
@@ -732,7 +734,7 @@ function ComposeOrchestratorImpl(
     }
     detachingComposeRef.current = true;
     setDetachingCompose(true);
-    const handoffId = window.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`;
+    const handoffId = createRandomId();
     const createdAtMs = Date.now();
     const baseHandoff = {
       version: 1 as const,
@@ -1203,11 +1205,16 @@ function ComposeOrchestratorImpl(
     setComposeView("inline");
   };
 
+  // Dirty tracking and the last saved hash live in refs so keystrokes don't
+  // re-render the orchestrator; the flags derived here refresh on the next
+  // state-driven render, which is when the mirror effect and save gating read them.
   const currentDraftChangeState = (() => {
+    // eslint-disable-next-line react-hooks/refs
     const preferText = composeTab === "html" && composeLastEditedRef.current === "text";
     const composePayload = buildComposePayload({ preferText });
     return getDraftChangeState({
       draftId: composeDraftId,
+      // eslint-disable-next-line react-hooks/refs
       lastSavedHash: lastDraftHashRef.current,
       to: composeTo,
       cc: composeCc,
@@ -1226,6 +1233,7 @@ function ComposeOrchestratorImpl(
     currentDraftChangeState.canManualSave;
   const hasUnsavedChanges =
     composeOpen &&
+    // eslint-disable-next-line react-hooks/refs
     composeDirtyRef.current &&
     (currentDraftChangeState.hasContent || Boolean(composeDraftId));
 

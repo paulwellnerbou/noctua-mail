@@ -50,6 +50,8 @@ export default function RecipientAliasManager({
     if (initialAliasId) {
       const alias = initialAlias;
       if (alias) {
+        // The form is seeded from the requested alias or recipients; resetKey re-seeds it.
+        // eslint-disable-next-line react-hooks/set-state-in-effect
         setFormMode("edit");
         setEditingAliasId(alias.id);
         setName(alias.name);

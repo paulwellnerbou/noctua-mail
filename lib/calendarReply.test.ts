@@ -7,6 +7,7 @@ function buildAccount(): Account {
     id: "acc-1",
     name: "Paul",
     email: "paul@example.test",
+    avatar: "",
     settings: {},
     imap: { host: "imap.example.test", port: 993, secure: true, user: "paul", password: "pw" },
     smtp: { host: "smtp.example.test", port: 465, secure: true, user: "paul", password: "pw" }

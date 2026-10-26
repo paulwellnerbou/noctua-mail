@@ -6,6 +6,23 @@ export function makeClientId(): string {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
+/** Random id; `crypto.randomUUID` is missing in insecure (plain-http) contexts. */
+export function createRandomId(): string {
+  return globalThis.crypto?.randomUUID?.() ?? makeClientId();
+}
+
+const CLIENT_ID_STORAGE_KEY = "noctuaClientId";
+
+/** Per-browser id sent as `X-Noctua-Client`; empty during server rendering. */
+export function readOrCreateStoredClientId(): string {
+  if (typeof window === "undefined") return "";
+  const existing = window.localStorage.getItem(CLIENT_ID_STORAGE_KEY);
+  if (existing) return existing;
+  const next = createRandomId();
+  window.localStorage.setItem(CLIENT_ID_STORAGE_KEY, next);
+  return next;
+}
+
 export function buildNotificationUrl(messageId?: string | null, accountId?: string | null): string {
   const params = new URLSearchParams();
   if (typeof accountId === "string" && accountId.trim()) {

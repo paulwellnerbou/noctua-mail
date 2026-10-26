@@ -146,9 +146,11 @@ describe("buildMessageListItems", () => {
       buildThreadTree: (messages) => [
         {
           message: messages[0]!,
+          threadSize: 2,
           children: [
             {
               message: messages[1]!,
+              threadSize: 1,
               children: []
             }
           ]
@@ -196,12 +198,15 @@ describe("buildMessageListItems", () => {
       buildThreadTree: (messages) => [
         {
           message: messages[0]!,
+          threadSize: 3,
           children: [
             {
               message: messages[1]!,
+              threadSize: 2,
               children: [
                 {
                   message: messages[2]!,
+                  threadSize: 1,
                   children: []
                 }
               ]

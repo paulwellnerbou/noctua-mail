@@ -8,6 +8,7 @@ import {
 function buildMessage(overrides?: Partial<Message>): Message {
   return {
     id: "message-1",
+    threadId: "thread-1",
     accountId: "account-1",
     folderId: "folder-1",
     subject: "Subject",

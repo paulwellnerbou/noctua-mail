@@ -122,6 +122,8 @@ export default function TopicsTabContent({
   }, [accountId, request]);
 
   useEffect(() => {
+    // The loader updates state synchronously before its request starts.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (isActive && isExistingAccount) loadTopics();
   }, [isActive, isExistingAccount, loadTopics]);
 

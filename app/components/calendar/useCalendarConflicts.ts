@@ -55,6 +55,7 @@ export function useCalendarConflicts(accountId: string) {
   useEffect(() => {
     // Drop the previous account's conflicts immediately on switch so the banner
     // can't show the wrong account's data while the new fetch is in flight.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setConflicts([]);
     void refresh();
     const handler = () => void refresh();

@@ -81,6 +81,7 @@ export function useEventReminderState({
   // cheap enough that per-render evaluation is a non-issue.
   const canScheduleReminder = (() => {
     if (typeof canonicalStartMs !== "number" || !Number.isFinite(canonicalStartMs)) return false;
+    // eslint-disable-next-line react-hooks/purity
     const nowMs = Date.now();
     if (!recurrenceRule?.trim()) return canonicalStartMs > nowMs;
     const next = resolveNextReminderOccurrence({
@@ -120,7 +121,11 @@ export function useEventReminderState({
     }
   }, [accountId, eventUid, title, canonicalStartMs]);
 
-  useEffect(() => { void refreshReminder(); }, [refreshReminder]);
+  useEffect(() => {
+    // The lookup result is written once the request resolves.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    void refreshReminder();
+  }, [refreshReminder]);
 
   const handleScheduleReminder = async () => {
     if (

@@ -1,4 +1,4 @@
-import { useRef } from "react";
+import { useLayoutEffect, useRef } from "react";
 import type React from "react";
 import type { ComposeInviteDraft } from "@/lib/composeInvite";
 import {
@@ -133,10 +133,13 @@ export function useDraftManager(params: UseDraftManagerParams) {
   const activeAccountIdRef = useRef(activeAccountId);
   const accountScopeVersionRef = useRef(0);
   const draftSaveLoopPromiseRef = useRef<Promise<void> | null>(null);
-  if (activeAccountIdRef.current !== activeAccountId) {
+  // Bumped before any passive effect of the new account can start a save, so
+  // requests still in flight for the previous account fail the scope check.
+  useLayoutEffect(() => {
+    if (activeAccountIdRef.current === activeAccountId) return;
     activeAccountIdRef.current = activeAccountId;
     accountScopeVersionRef.current += 1;
-  }
+  }, [activeAccountId]);
 
   const saveDraftNow = async (payload: DraftSavePayload, hash: string) => {
     if (!activeAccountId) return;

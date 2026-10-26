@@ -230,6 +230,8 @@ export default function AdminTabContent({
 
   useEffect(() => {
     if (!isActive || !isAdminUser) return;
+    // The loader updates state synchronously before its request starts.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void loadAdminData();
   }, [isActive, isAdminUser, loadAdminData]);
 
@@ -245,6 +247,8 @@ export default function AdminTabContent({
 
   useEffect(() => {
     if (isAdminUser) return;
+    // Admin-only data is dropped as soon as the role goes away.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setUsers([]);
     setInvites([]);
     setError(null);

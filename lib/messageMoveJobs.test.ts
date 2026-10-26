@@ -2,7 +2,9 @@ import { beforeEach, describe, expect, mock, test } from "bun:test";
 import type { Account } from "@/lib/data";
 
 const updateMessageFolder = mock(async () => undefined);
-const moveImapMessages = mock(async () => new Map<number, number | null>());
+const moveImapMessages = mock<typeof import("./mail/imap")["moveImapMessages"]>(
+  async () => new Map<number, number | null>()
+);
 
 const actualDb = await import("./db");
 const actualImap = await import("./mail/imap");

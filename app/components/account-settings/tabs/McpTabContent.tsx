@@ -124,6 +124,8 @@ export default function McpTabContent({
 
   useEffect(() => {
     if (isActive && isExistingAccount) {
+      // The loader updates state synchronously before its request starts.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       void loadTokens();
     }
   }, [isActive, isExistingAccount, loadTokens]);

@@ -49,6 +49,8 @@ function makeRow(
     groupKey: "Today",
     isFirstInGroup: false,
     message,
+    displayDateValue: message.dateValue,
+    displayDate: message.date,
     depth,
     threadGroupId: message.threadId ?? message.id,
     threadSize: fullFlat.length,
@@ -264,7 +266,7 @@ describe("list selection behavior", () => {
     const b1 = makeMessage("b1", 3000, { threadId: "thread-b" });
     const b2 = makeMessage("b2", 3100, { threadId: "thread-b", parentId: "b1" });
     const store = createSelectionStore(null);
-    let lastSelectedId: string | null = null;
+    const selection: { lastId: string | null } = { lastId: null };
 
     const visibleMessages: VisibleMessageEntry[] = [
       { message: a1, depth: 0, threadId: "thread-a" },
@@ -279,12 +281,12 @@ describe("list selection behavior", () => {
       supportsThreads: true,
       selectionStore: store,
       setLastSelectedId: (id) => {
-        lastSelectedId = id;
+        selection.lastId = id;
       }
     });
 
     expect(Array.from(store.getIds()).sort()).toEqual(["a1", "a2", "b1", "b2", "mid"]);
-    expect(lastSelectedId).toBe("b1");
+    expect(selection.lastId).toBe("b1");
   });
 
   it("does not expand thread siblings during range selection when supportsThreads is false", () => {
@@ -325,8 +327,10 @@ describe("list selection behavior", () => {
 });
 
 describe("list toggle animation helpers", () => {
+  type ToggleRecord = { key: string; open: boolean; at: number };
+
   it("records toggle metadata and flips collapsed state for opened groups", () => {
-    let lastToggle: { key: string; open: boolean; at: number } | null = null;
+    const toggle: { last: ToggleRecord | null } = { last: null };
     let animationClock = 0;
     let collapsedState: Record<string, boolean> = { groupA: true };
 
@@ -334,7 +338,7 @@ describe("list toggle animation helpers", () => {
       key: "groupA",
       open: true,
       setLastToggle: (next) => {
-        lastToggle = typeof next === "function" ? next(lastToggle) : next;
+        toggle.last = typeof next === "function" ? next(toggle.last) : next;
       },
       setAnimationClock: (next) => {
         animationClock = typeof next === "function" ? next(animationClock) : next;
@@ -344,16 +348,16 @@ describe("list toggle animation helpers", () => {
       }
     });
 
-    expect(lastToggle).not.toBeNull();
-    expect(lastToggle?.key).toBe("groupA");
-    expect(lastToggle?.open).toBe(true);
-    expect(typeof lastToggle?.at).toBe("number");
-    expect(animationClock).toBe(lastToggle?.at);
+    expect(toggle.last).not.toBeNull();
+    expect(toggle.last?.key).toBe("groupA");
+    expect(toggle.last?.open).toBe(true);
+    expect(typeof toggle.last?.at).toBe("number");
+    expect(toggle.last?.at).toBe(animationClock);
     expect(collapsedState.groupA).toBe(false);
   });
 
   it("marks targets collapsed when the toggle closes", () => {
-    let lastToggle: { key: string; open: boolean; at: number } | null = null;
+    const toggle: { last: ToggleRecord | null } = { last: null };
     let animationClock = 0;
     let collapsedState: Record<string, boolean> = { threadA: false };
 
@@ -361,7 +365,7 @@ describe("list toggle animation helpers", () => {
       key: "threadA",
       open: false,
       setLastToggle: (next) => {
-        lastToggle = typeof next === "function" ? next(lastToggle) : next;
+        toggle.last = typeof next === "function" ? next(toggle.last) : next;
       },
       setAnimationClock: (next) => {
         animationClock = typeof next === "function" ? next(animationClock) : next;
@@ -371,8 +375,8 @@ describe("list toggle animation helpers", () => {
       }
     });
 
-    expect(lastToggle?.open).toBe(false);
-    expect(animationClock).toBe(lastToggle?.at);
+    expect(toggle.last?.open).toBe(false);
+    expect(toggle.last?.at).toBe(animationClock);
     expect(collapsedState.threadA).toBe(true);
   });
 });
@@ -417,7 +421,7 @@ describe("thread subtree checkbox behavior", () => {
   it("toggles entire subtree when checking a subthread root", () => {
     const store = createSelectionStore(null);
     store.setSelection(new Set(["sub-child"]));
-    let lastSelected: string | null = null;
+    const selection: { lastId: string | null } = { lastId: null };
 
     handleRowCheckboxChange({
       shiftKey: false,
@@ -430,12 +434,12 @@ describe("thread subtree checkbox behavior", () => {
       selectRangeTo: () => {},
       toggleMessageSelection: () => {},
       setLastSelectedIdRef: (id) => {
-        lastSelected = id;
+        selection.lastId = id;
       }
     });
 
     expect(Array.from(store.getIds()).sort()).toEqual(["sub-child", "sub-root"]);
-    expect(lastSelected).toBe("sub-root");
+    expect(selection.lastId).toBe("sub-root");
   });
 
   it("keeps partial row highlight for collapsed root thread rows", () => {

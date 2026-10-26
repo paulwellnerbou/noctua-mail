@@ -134,7 +134,7 @@ function buildMessage(params: {
   to: string;
   dateValue: number;
   imapUid: number;
-}): Message {
+}): Message & { messageId: string } {
   return {
     id: params.id,
     accountId: params.accountId,

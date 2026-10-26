@@ -26,6 +26,7 @@ import {
   type DetachedComposeHandoff,
   type DetachedComposeOutcome
 } from "@/lib/ui/detachedComposeHandoff";
+import { createRandomId, readOrCreateStoredClientId } from "../utils/clientHelpers";
 import ComposeOrchestrator, {
   type ComposeMirror,
   type ComposeOrchestratorHandle
@@ -54,10 +55,6 @@ function formatRelativeTime(timestamp: number | null) {
   const hours = Math.floor(minutes / 60);
   if (hours < 24) return `${hours}h ago`;
   return `${Math.floor(hours / 24)}d ago`;
-}
-
-function makeNoticeId() {
-  return window.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`;
 }
 
 export default function DetachedComposeWindowClient({
@@ -95,15 +92,7 @@ export default function DetachedComposeWindowClient({
   const [darkMode] = useState(
     () => typeof window !== "undefined" && localStorage.getItem("noctua:theme") === "dark"
   );
-  const clientId = useMemo(() => {
-    if (typeof window === "undefined") return "";
-    const key = "noctuaClientId";
-    const existing = window.localStorage.getItem(key);
-    if (existing) return existing;
-    const next = window.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`;
-    window.localStorage.setItem(key, next);
-    return next;
-  }, []);
+  const [clientId] = useState(readOrCreateStoredClientId);
 
   const apiFetch = useCallback(async (input: RequestInfo | URL, init?: RequestInit) => {
     const headers = new Headers(init?.headers);
@@ -133,7 +122,7 @@ export default function DetachedComposeWindowClient({
     const now = Date.now();
     const notice: InAppNotice = {
       ...input,
-      id: makeNoticeId(),
+      id: createRandomId(),
       expiresAt: input.durationMs ? now + input.durationMs : null
     };
     setNotices((current) => [...current, notice].slice(-5));
@@ -482,9 +471,12 @@ export default function DetachedComposeWindowClient({
           onComposeMirrorChange={handleComposeMirrorChange}
           onDetachedComposeOutcome={finishDetachedCompose}
         />
-        {composeMirror.composeOpen && composeMirror.composeView === "inline"
-          ? composeHandleRef.current?.renderInlineCard("detached-compose-card-slot")
-          : null}
+        {composeMirror.composeOpen && composeMirror.composeView === "inline" ? (
+          // The orchestrator renders its own card through the handle; composeMirror
+          // changes with the card's state, so this re-renders in step with it.
+          // eslint-disable-next-line react-hooks/refs
+          composeHandleRef.current?.renderInlineCard("detached-compose-card-slot")
+        ) : null}
       </div>
     </AccountDateFormatProvider>
   );

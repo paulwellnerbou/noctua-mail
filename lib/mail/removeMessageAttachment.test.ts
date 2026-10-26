@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import type { Account, Message } from "@/lib/data";
+import type { Account, Attachment, Message } from "@/lib/data";
 import {
   removeMessageAttachmentEverywhere,
   type RemoveAttachmentDeps
@@ -60,23 +60,29 @@ function makeMessage(overrides: Partial<Message> = {}): Message {
 }
 
 type Recorder = { calls: string[]; deps: RemoveAttachmentDeps } & {
-  appendArgs: Array<{ flags: string[]; internalDate?: Date }>;
+  appendArgs: Array<{ flags?: string[]; internalDate?: Date }>;
   deleteArgs: Array<{ uid: number }>;
   rowPatch: Array<{ imapUid?: number | null }>;
   savedSource: Buffer[];
   deletedBlobs: string[];
 };
 
+// `fs.readFile` yields a non-shared buffer, so the stored-source fixture has
+// to carry that exact buffer type rather than the plain `Buffer`.
+type StoredSource = Awaited<ReturnType<RemoveAttachmentDeps["getMessageSourceBuffer"]>>;
+
+const RESYNCED_ATTACHMENTS: Attachment[] = [
+  { id: "att-1-99-0", filename: "keep.pdf", contentType: "application/pdf", size: 3, inline: false }
+];
+
 const RESYNCED = {
-  attachments: [
-    { id: "att-1-99-0", filename: "keep.pdf", contentType: "application/pdf", size: 3, inline: false }
-  ],
+  attachments: RESYNCED_ATTACHMENTS,
   htmlBody: "<p>fresh</p>"
 } as unknown as Message;
 
 function makeDeps(
   overrides: {
-    storedSource?: Buffer | null;
+    storedSource?: StoredSource;
     fetchedSource?: Buffer | null;
     appendResult?: number | null;
     appendThrows?: boolean;
@@ -93,7 +99,7 @@ function makeDeps(
     resyncResult = RESYNCED
   } = overrides;
   const calls: string[] = [];
-  const appendArgs: Array<{ flags: string[]; internalDate?: Date }> = [];
+  const appendArgs: Array<{ flags?: string[]; internalDate?: Date }> = [];
   const deleteArgs: Array<{ uid: number }> = [];
   const rowPatch: Array<{ imapUid?: number | null }> = [];
   const savedSource: Buffer[] = [];
@@ -128,6 +134,7 @@ function makeDeps(
     saveMessageSource: async (_accountId, _messageId, source) => {
       calls.push("saveSource");
       savedSource.push(source as Buffer);
+      return Buffer.byteLength(source);
     },
     deleteAttachmentData: async (_accountId, _messageId, attachmentId) => {
       calls.push("deleteBlob");
@@ -165,7 +172,7 @@ describe("removeMessageAttachmentEverywhere", () => {
 
     // The response carries the re-synced list + htmlBody (fresh ids), not the
     // pre-rewrite one — this is what keeps a follow-up removal working.
-    expect(result.attachments).toEqual(RESYNCED.attachments);
+    expect(result.attachments).toEqual(RESYNCED_ATTACHMENTS);
     expect(result.htmlBody).toBe("<p>fresh</p>");
     expect(result.imapUid).toBe(99);
   });

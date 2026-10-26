@@ -3,11 +3,17 @@ import type { CalendarEvent, Message } from "@/lib/data";
 import type { CalendarEventEmailSnapshot } from "@/lib/calendarEventEmailSnapshot";
 import { saveMessageSource } from "@/lib/storage";
 
-const getCalendarEventByUid = mock(() => Promise.resolve(null));
+type DbModule = typeof import("@/lib/db");
+
+const getCalendarEventByUid = mock<DbModule["getCalendarEventByUid"]>(() =>
+  Promise.resolve(null)
+);
 const listSiblingCalendarEventsByUidKey = mock((_acc: string, _uid: string) =>
   Promise.resolve([] as CalendarEvent[])
 );
-const listCalendarInviteSourceMessagesByEventUid = mock(() => Promise.resolve([]));
+const listCalendarInviteSourceMessagesByEventUid = mock<
+  DbModule["listCalendarInviteSourceMessagesByEventUid"]
+>(() => Promise.resolve([]));
 const upsertCalendarEventByUid = mock(
   async (
     accountId: string,
@@ -26,7 +32,9 @@ const upsertCalendarEventByUid = mock(
 const upsertMessageCalendarInviteStates = mock(() => Promise.resolve());
 const markMessageCalendarInviteStatesProcessed = mock(() => Promise.resolve(1));
 const markMessageCalendarInviteStatesUnprocessed = mock(() => Promise.resolve(1));
-const rescheduleCalendarRemindersByEventUid = mock(() => Promise.resolve(0));
+const rescheduleCalendarRemindersByEventUid = mock<
+  DbModule["rescheduleCalendarRemindersByEventUid"]
+>(() => Promise.resolve(0));
 const ensureCalendarReminder = mock(() => Promise.resolve(null));
 const cancelCalendarEventByUid = mock(() => Promise.resolve());
 const cancelCalendarRemindersByEventUid = mock(() => Promise.resolve());
@@ -555,9 +563,9 @@ describe("processCalendarInviteForMessage", () => {
     // it must see the capped rule, not the original one passed into
     // reconcileSeriesAnchorSiblings.
     const reminderCall = rescheduleCalendarRemindersByEventUid.mock.calls.find(
-      (args: unknown[]) => args[1] === "base_R20260320T094500@google.com"
+      (args) => args[1] === "base_R20260320T094500@google.com"
     );
-    const reminderFields = reminderCall?.[2] as { recurrenceRule?: string } | undefined;
+    const reminderFields = reminderCall?.[2];
     expect(reminderFields?.recurrenceRule).toBe(
       `FREQ=WEEKLY;INTERVAL=2;BYDAY=FR;UNTIL=${expectedUntilValue}`
     );

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useRef, useState } from "react";
+import { useSyncedRef } from "@/lib/ui/latestRef";
 import type React from "react";
 import { buildAccountComposeTranslatePath } from "@/lib/accountApiPaths";
 import { normalizeDeeplTargetLang } from "@/lib/deeplLanguages";
@@ -114,9 +115,9 @@ export function useComposeTranslation({
   // Ref mirrors so the async response handler sees current values, not the
   // ones captured when the request started.
   const composeTabRef = useRef(composeTab);
-  composeTabRef.current = composeTab;
+  useSyncedRef(composeTabRef, composeTab);
   const stateRef = useRef(state);
-  stateRef.current = state;
+  useSyncedRef(stateRef, state);
 
   const setTargetLang = useCallback((lang: string) => {
     const normalized = normalizeDeeplTargetLang(lang);

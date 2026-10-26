@@ -9,6 +9,7 @@ import {
   useRef,
   useState
 } from "react";
+import { useSyncedRef } from "@/lib/ui/latestRef";
 import { Flex, SegmentedControl } from "@radix-ui/themes";
 import type { Message, Topic } from "@/lib/data";
 
@@ -250,7 +251,7 @@ function MessageViewOrchestratorImpl(
   // Ref mirror so the async translate handler reads the latest results/target
   // language without being rebuilt on every state change.
   const messageTranslationsRef = useRef(messageTranslations);
-  messageTranslationsRef.current = messageTranslations;
+  useSyncedRef(messageTranslationsRef, messageTranslations);
   // Per-message request counter so a slow/out-of-order translate response can't
   // overwrite state from a newer request (or one issued after the map was
   // cleared on account change). Only the latest request per message commits.
@@ -259,12 +260,12 @@ function MessageViewOrchestratorImpl(
   // method (created with empty deps) reads the latest map without
   // rebuilding the handle object on every tab change.
   const messageTabsRef = useRef(messageTabs);
-  messageTabsRef.current = messageTabs;
+  useSyncedRef(messageTabsRef, messageTabs);
   // Ref mirror of `collapsedMessages` so the stable `getCollapsedMessages`
   // handle method reads the latest map without rebuilding the handle
   // object on every collapse/expand.
   const collapsedMessagesRef = useRef(collapsedMessages);
-  collapsedMessagesRef.current = collapsedMessages;
+  useSyncedRef(collapsedMessagesRef, collapsedMessages);
   // Dedupe key for the compose-thread-focus auto-collapse effect — one
   // focus change applies exactly one sibling-collapse sweep even as the
   // user expands individual siblings afterwards.
@@ -564,6 +565,7 @@ function MessageViewOrchestratorImpl(
     // short-circuit via the dedupe guard in
     // `handleLoadTopicSuggestionExplanation`.
     explanationRequestThreadIdRef.current = "";
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setTopicSuggestionExplanationOpen(false);
     setTopicSuggestionExplanationLoading(false);
     setTopicSuggestionExplanationError("");
@@ -574,6 +576,7 @@ function MessageViewOrchestratorImpl(
     // wipe the cached explanation and its threadId so the dedupe guard
     // can't short-circuit on a coincidental thread-id match and show one
     // account's explanation under another account's thread.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setTopicSuggestionExplanation(null);
     setTopicSuggestionExplanationThreadId("");
     // Message ids are only unique within an account, so clear per-message
@@ -602,6 +605,8 @@ function MessageViewOrchestratorImpl(
       onPendingSelectionCollapseConsumed(activeMessage.id);
       return;
     }
+    // The pending selection is a one-shot request from the list, consumed here.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setCollapsedMessages((prev) => {
       const next: Record<string, boolean> = { ...prev };
       activeThread.forEach((msg) => {
@@ -738,6 +743,9 @@ function MessageViewOrchestratorImpl(
           return (
             <>
               {inlineComposePlacement.showComposeAtTop &&
+                // Rendered through the orchestrator's imperative handle, which is
+                // attached before this view mounts; the card's components own their updates.
+                // eslint-disable-next-line react-hooks/refs
                 renderComposeCard(activeThread.length > 0 ? threadViewStyles.threadItem : undefined)}
               <ThreadView
                 showComposeInline={showComposeInline}
