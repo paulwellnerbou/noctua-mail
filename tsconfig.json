@@ -8,6 +8,7 @@
     ],
     "allowJs": false,
     "skipLibCheck": true,
+    "types": ["bun"],
     "strict": true,
     "noEmit": true,
     "module": "esnext",

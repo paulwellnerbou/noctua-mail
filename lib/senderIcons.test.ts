@@ -5,6 +5,7 @@ import {
   resolveSenderIcon
 } from "./senderIcons";
 import { getSenderIdentity } from "./senderIdentity";
+import { createFetchStub } from "@/lib/testFetchStub";
 
 const originalFetch = globalThis.fetch;
 
@@ -50,10 +51,10 @@ describe("senderIcons", () => {
 
   it("does not fetch remote providers when sender icons are disabled", async () => {
     let callCount = 0;
-    globalThis.fetch = (async () => {
+    globalThis.fetch = createFetchStub(async () => {
       callCount += 1;
       return new Response(null, { status: 500 });
-    }) as typeof fetch;
+    });
 
     const result = await resolveSenderIcon({
       from: "\"Apple\" <news@apple.com>",
@@ -66,13 +67,13 @@ describe("senderIcons", () => {
 
   it("caches successful remote fetches", async () => {
     let callCount = 0;
-    globalThis.fetch = (async () => {
+    globalThis.fetch = createFetchStub(async () => {
       callCount += 1;
       return new Response(new Uint8Array([1, 2, 3]), {
         status: 200,
         headers: { "Content-Type": "image/png" }
       });
-    }) as typeof fetch;
+    });
 
     const first = await resolveSenderIcon({
       from: "\"Apple\" <news@apple.com>",

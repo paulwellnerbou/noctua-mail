@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { EventEmitter } from "events";
+import type { ImapFlowOptions } from "imapflow";
+import type { Certificate, PeerCertificate } from "tls";
 
 import type { Account } from "@/lib/data";
 
@@ -20,6 +22,22 @@ const account = {
     password: "password"
   }
 } as Account;
+
+// Bun hands checkServerIdentity sparse certificates (an empty subject, no
+// issuer) that Node's PeerCertificate type does not admit; the fixtures mirror
+// that runtime shape and cross the type boundary once here.
+type SparsePeerCertificate = Partial<Omit<PeerCertificate, "subject" | "issuer">> & {
+  subject?: Partial<Certificate>;
+  issuer?: Partial<Certificate>;
+};
+
+function checkServerIdentity(
+  options: ImapFlowOptions,
+  hostname: string,
+  cert: SparsePeerCertificate
+) {
+  return options.tls?.checkServerIdentity?.(hostname, cert as PeerCertificate);
+}
 
 describe("buildImapFlowOptions TLS identity logging", () => {
   const originalLog = console.log;
@@ -89,7 +107,7 @@ describe("buildImapFlowOptions TLS identity logging", () => {
       mailbox: "INBOX"
     });
 
-    const error = options.tls?.checkServerIdentity?.("imap.example.test", {
+    const error = checkServerIdentity(options, "imap.example.test", {
       subject: {},
       issuer: undefined
     });
@@ -110,7 +128,7 @@ describe("buildImapFlowOptions TLS identity logging", () => {
       accountId: account.id
     });
 
-    const error = options.tls?.checkServerIdentity?.("imap.example.test", {
+    const error = checkServerIdentity(options, "imap.example.test", {
       subject: { O: "Legacy Mail" },
       issuer: { CN: "Legacy Issuer" },
       serialNumber: "02"
@@ -128,7 +146,7 @@ describe("buildImapFlowOptions TLS identity logging", () => {
       accountId: account.id
     });
 
-    const error = options.tls?.checkServerIdentity?.("imap.example.test", {
+    const error = checkServerIdentity(options, "imap.example.test", {
       subject: { CN: "unrelated.example.test" },
       subjectaltname: "DNS:unrelated.example.test",
       issuer: { CN: "Example Issuer" }

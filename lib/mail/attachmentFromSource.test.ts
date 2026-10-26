@@ -82,8 +82,8 @@ describe("extractAttachmentBufferFromSource", () => {
   it("can extract inline parts by cid", async () => {
     const buffer = await extractAttachmentBufferFromSource(SAMPLE_EML, {
       id: "att-acc-123-99",
-      filename: undefined,
-      contentType: undefined,
+      filename: "",
+      contentType: "",
       cid: "logo-cid@example.com"
     });
     expect(buffer).not.toBeNull();

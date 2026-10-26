@@ -406,7 +406,15 @@ describe("background attachment loading", () => {
     const { attachments } = planComposeSourceAttachments([pdf], "", []);
     const loaded = applyComposeAttachmentLoadResult(attachments, "att-pdf", "data:application/pdf;base64,AAAA");
     const hash = (list: typeof attachments) =>
-      computeDraftHash({ to: "", cc: "", bcc: "", subject: "", text: "", attachments: list });
+      computeDraftHash({
+        to: "",
+        cc: "",
+        bcc: "",
+        subject: "",
+        text: "",
+        html: undefined,
+        attachments: list
+      });
 
     expect(loaded).toEqual([{ ...pdf, dataUrl: "data:application/pdf;base64,AAAA" }]);
     expect(hash(loaded)).toBe(hash(attachments));

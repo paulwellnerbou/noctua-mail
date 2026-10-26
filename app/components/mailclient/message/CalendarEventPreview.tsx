@@ -167,6 +167,8 @@ export default function CalendarEventPreview({
   }, [attachment]);
 
   useEffect(() => {
+    // Invite state belongs to one message and attachment; it is dropped on switch.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setInviteStateOverrides({});
     setProcessingInviteUid(null);
     setStoredEventsByUid({});
@@ -267,6 +269,8 @@ export default function CalendarEventPreview({
   }, [accountId, eventUids]);
 
   useEffect(() => {
+    // The loader clears the stored events synchronously when there is nothing to fetch.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void refreshStoredEvents();
   }, [refreshStoredEvents]);
 

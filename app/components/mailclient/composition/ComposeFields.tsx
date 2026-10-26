@@ -1,4 +1,5 @@
 import { startTransition, useEffect, useState } from "react";
+import { useSyncedState } from "@/lib/ui/syncedState";
 import type React from "react";
 import { Button, Text, TextField } from "@radix-ui/themes";
 import type { Message, RecipientSuggestion } from "@/lib/data";
@@ -205,10 +206,10 @@ export default function ComposeFields({
   getComposeToken,
   markComposeDirty
 }: ComposeFieldsProps) {
-  const [localSubject, setLocalSubject] = useState(composeSubject);
-  const [localTo, setLocalTo] = useState(composeTo);
-  const [localCc, setLocalCc] = useState(composeCc);
-  const [localBcc, setLocalBcc] = useState(composeBcc);
+  const [localSubject, setLocalSubject] = useSyncedState(composeSubject);
+  const [localTo, setLocalTo] = useSyncedState(composeTo);
+  const [localCc, setLocalCc] = useSyncedState(composeCc);
+  const [localBcc, setLocalBcc] = useSyncedState(composeBcc);
   const [recipientOptions, setRecipientOptions] = useState<RecipientSuggestion[]>([]);
   const [recipientQuery, setRecipientQuery] = useState("");
   const [recipientLoading, setRecipientLoading] = useState(false);
@@ -216,23 +217,10 @@ export default function ComposeFields({
   const [recipientActiveIndex, setRecipientActiveIndex] = useState(0);
 
   useEffect(() => {
-    setLocalSubject(composeSubject);
-  }, [composeSubject]);
-
-  useEffect(() => {
-    setLocalTo(composeTo);
-  }, [composeTo]);
-
-  useEffect(() => {
-    setLocalCc(composeCc);
-  }, [composeCc]);
-
-  useEffect(() => {
-    setLocalBcc(composeBcc);
-  }, [composeBcc]);
-
-  useEffect(() => {
     if (!activeAccountId) {
+      // Lookup state follows the focused field; clearing it here keeps it in the
+      // same effect as the debounced request and its abort.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setRecipientOptions([]);
       setRecipientLoading(false);
       setRecipientActiveIndex(0);

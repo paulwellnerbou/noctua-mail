@@ -134,6 +134,8 @@ import {
 } from "@/lib/accountApiPaths";
 import { openDetachedWindow } from "@/lib/ui/openDetachedWindow";
 import { useWindowTitle } from "@/lib/ui/windowTitle";
+import { useSyncedRef } from "@/lib/ui/latestRef";
+import { useStableByKey } from "@/lib/ui/stableByKey";
 import {
   formatMailboxPageTitle,
   formatMessageHtmlPageTitle,
@@ -158,7 +160,8 @@ import {
   DEFAULT_SEARCH_BADGES,
   DEFAULT_SEARCH_FIELDS,
   useSearchState,
-  VIRTUAL_FOLDERS
+  VIRTUAL_FOLDERS,
+  type VirtualFolderDefinition
 } from "./mailclient/useSearchState";
 import { useReminderNotifications } from "./mailclient/useReminderNotifications";
 import { useMessageData } from "./mailclient/useMessageData";
@@ -233,6 +236,7 @@ import {
 import {
   extractEmails,
   getExceptionAccountId,
+  readOrCreateStoredClientId,
   shouldOfferExceptionRelogin
 } from "./mailclient/utils/clientHelpers";
 import {
@@ -357,7 +361,6 @@ export default function MailClient({
   const dragImageRef = useRef<HTMLDivElement | null>(null);
   const [sortKey, setSortKey] = useState<SortKey>("date");
   const [sortDir, setSortDir] = useState<"desc" | "asc">("desc");
-  const [messageTopicsById, setMessageTopicsById] = useState<Map<string, Topic[]>>(new Map());
   const [topicPickerOpen, setTopicPickerOpen] = useState(false);
   const [topicPickerMessage, setTopicPickerMessage] = useState<Message | null>(null);
   const [topicSuggestions, setTopicSuggestions] = useState<Topic[]>([]);
@@ -371,16 +374,7 @@ export default function MailClient({
     useState<RecipientAliasDialogState | null>(null);
   const previousAccountIdRef = useRef("");
 
-  const clientId = useMemo(() => {
-    if (typeof window === "undefined") return "";
-    const key = "noctuaClientId";
-    let id = window.localStorage.getItem(key);
-    if (!id) {
-      id = window.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`;
-      window.localStorage.setItem(key, id);
-    }
-    return id;
-  }, []);
+  const [clientId] = useState(readOrCreateStoredClientId);
   const apiFetch = useCallback(
     async (input: RequestInfo | URL, init?: RequestInit) => {
       const headers = new Headers(
@@ -432,6 +426,7 @@ export default function MailClient({
   const activeTopicSuggestionCacheKey =
     activeAccountId && activeTopicId ? `${activeAccountId}:${activeTopicId}` : "";
 
+  const [authState, setAuthState] = useState<"loading" | "ok" | "unauth">("loading");
   const readErrorMessage = useCallback(async (res: Response) => {
     const responsePath = (() => {
       if (!res.url) return null;
@@ -612,7 +607,6 @@ export default function MailClient({
   const [bulkContextMenuSelection, setBulkContextMenuSelection] = useState<string[]>([]);
   const bulkContextMenuReturnFocusRef = useRef<HTMLElement | null>(null);
   const messageViewHandleRef = useRef<MessageViewOrchestratorHandle | null>(null);
-  const [authState, setAuthState] = useState<"loading" | "ok" | "unauth">("loading");
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const isAdminUser = currentUser?.role === "admin";
   const [initialDataReady, setInitialDataReady] = useState(false);
@@ -625,7 +619,6 @@ export default function MailClient({
     confirmFullSyncStart,
     view: confirmDialogsView
   } = useConfirmDialogs();
-  // searchScope moved to useSearchState hook
   const [includeSentInEverywhere, setIncludeSentInEverywhere] = useState(false);
   const [lastFolderId, setLastFolderId] = useState("");
   // Mirror of the compose state slices that MailClient still consumes
@@ -675,8 +668,11 @@ export default function MailClient({
     },
     []
   );
-  const searchScopeRef = useRef<"folder" | "all">("folder");
-  const activeVirtualFolderIdRef = useRef("");
+  // Owned here rather than in useSearchState: useSyncController consumes them
+  // and useSearchState consumes the controller's sync version.
+  const [searchScope, setSearchScope] = useState<"folder" | "all">("folder");
+  const [activeVirtualFolderId, setActiveVirtualFolderId] =
+    useState<VirtualFolderDefinition["id"] | null>(null);
   const threadMessagesRef = useRef<Message[]>([]);
   const currentKeyRef = useRef("");
   const [, setRelativeTimeCounter] = useState(0);
@@ -836,8 +832,8 @@ export default function MailClient({
   } = useSyncController({
     activeAccountId,
     activeFolderId,
-    activeVirtualFolderId: activeVirtualFolderIdRef.current,
-    searchScope: searchScopeRef.current,
+    activeVirtualFolderId: activeVirtualFolderId ?? "",
+    searchScope,
     authState,
     inboxMailboxPath,
     accountFolders,
@@ -879,15 +875,17 @@ export default function MailClient({
     relatedQueryId,
     virtualDefaultExcludedFolderIdsKey,
     apiFetch,
-    syncCompletionVersion
+    syncCompletionVersion,
+    searchScope,
+    setSearchScope,
+    activeVirtualFolderId,
+    setActiveVirtualFolderId
   });
 
   // Destructure search state and actions
   const {
-    searchScope,
     searchFields,
     searchBadges,
-    activeVirtualFolderId,
     focusedUnreadCount,
     actionQueueTodoCount,
     inviteDeckTotalCount,
@@ -895,16 +893,11 @@ export default function MailClient({
     activeVirtualFolder
   } = searchState;
   const {
-    setSearchScope,
     setSearchFields,
     setSearchBadges,
-    setActiveVirtualFolderId,
     clearSearch,
     activateVirtualFolder
   } = searchActions;
-
-  searchScopeRef.current = searchScope;
-  activeVirtualFolderIdRef.current = activeVirtualFolderId ?? "";
 
   // Computed values that depend on search state
   const searchFieldKey = useMemo(() => {
@@ -951,7 +944,7 @@ export default function MailClient({
       searchScope
     ]
   );
-  currentKeyRef.current = messagesKey;
+  useSyncedRef(currentKeyRef, messagesKey);
 
   const findSentFolder = () => {
     const lowered = accountFolders.map((folder) => ({
@@ -1017,6 +1010,9 @@ export default function MailClient({
   );
   useEffect(() => {
     if (groupBy !== EVENT_GROUP_BY || isCalendarGroupByAvailable) return;
+    // The stored choice falls back so the selector and the list agree once
+    // calendar grouping is no longer available.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setGroupBy("date");
   }, [groupBy, isCalendarGroupByAvailable]);
   // The in-page sort has to follow the server ordering, or re-sorting the
@@ -1151,102 +1147,28 @@ export default function MailClient({
     return `${days}d ago`;
   };
 
-  const undoMoveOperation = async (
-    targets: UndoMoveTarget[],
-    accountId: string,
-    successTitle = "Move undone."
-  ) => {
-    if (targets.length === 0) return;
-    // IMAP MOVE/COPY assigns a new UID in the destination, so the next
-    // poll/stream tick would otherwise treat restored messages as new
-    // mail. Seed the dedup ring with each restored message's RFC 5322
-    // Message-ID (preserved across the move) so the planner skips them.
-    // Prefer the header captured on the UndoMoveTarget at move time —
-    // the message has typically already been pruned from local state by
-    // the time undo runs, so a `messageById` lookup would miss.
-    if (accountId === activeAccountId) {
-      const dedupKeys = targets
-        .map(
-          (target) =>
-            target.headerMessageId ?? messageById.get(target.messageId)?.messageId
-        )
-        .filter((key): key is string => Boolean(key));
-      if (dedupKeys.length > 0) {
-        seedNotificationDedupKeys(dedupKeys);
-      }
-    }
-    const grouped = new Map<string, string[]>();
-    targets.forEach((target) => {
-      const list = grouped.get(target.restoreFolderId);
-      if (list) {
-        list.push(target.messageId);
-        return;
-      }
-      grouped.set(target.restoreFolderId, [target.messageId]);
-    });
-    try {
-      for (const [destinationFolderId, messageIds] of grouped.entries()) {
-        const res = await apiFetch(buildAccountMessagesActionPath(accountId, "move"), {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            messageIds,
-            destinationFolderId
-          })
-        });
-        if (!res.ok) {
-          reportError(await readErrorMessage(res));
-          return;
-        }
-      }
-      setFolders((prev) =>
-        applyFolderTransferCounts(
-          prev,
-          targets.flatMap((target) => {
-            const message = messageById.get(target.messageId);
-            if (!message) return [];
-            return [
-              {
-                fromFolderId: message.folderId,
-                toFolderId: target.restoreFolderId,
-                unread: Boolean(message.unread ?? !message.seen)
-              }
-            ];
-          })
-        )
-      );
-      evictMessageCaches(targets.map((target) => target.messageId));
-      await refreshFolders();
-      if (accountId === activeAccountId) {
-        await refreshMailboxData();
-      }
-      pushNotice({
-        type: "success",
-        title: successTitle,
-        durationMs: 4500
-      });
-    } catch {
-      reportError("Failed to undo message move.");
-    }
-  };
-
   // Folder helper wrappers - these don't need memoization (not passed to hooks)
   const isDraftsFolder = (folderId?: string | null) => checkIsDraftsFolder(folderId, folders);
   const isTrashFolder = (folderId?: string | null) => checkIsTrashFolder(folderId, folders);
   const isSpamFolder = (folderId?: string | null) => checkIsSpamFolder(folderId, folders);
   const isSentFolder = (folderId?: string | null) => checkIsSentFolder(folderId, folders);
 
-  // Memoize Set of excluded folder IDs - only changes when folder structure changes
-  const excludedFolderIdsForThreads = useMemo(() => {
-    const ids = new Set<string>();
-    folders.forEach(folder => {
-      const special = (folder.specialUse ?? "").toLowerCase();
-      if (special === "\\trash" || special === "\\junk" || special === "\\spam") {
-        ids.add(folder.id);
-      }
-    });
-    return ids;
-  }, [folders.map(f => `${f.id}:${f.specialUse}`).join('|')]);
+  const threadExcludedFolderIds = useMemo(
+    () =>
+      folders
+        .filter((folder) => {
+          const special = (folder.specialUse ?? "").toLowerCase();
+          return special === "\\trash" || special === "\\junk" || special === "\\spam";
+        })
+        .map((folder) => folder.id),
+    [folders]
+  );
+  // `folders` is replaced on every refresh; the Set keeps its identity while
+  // the excluded ids hold, which keeps checkIsThreadExcludedFolder stable.
+  const excludedFolderIdsForThreads = useStableByKey(
+    useMemo(() => new Set(threadExcludedFolderIds), [threadExcludedFolderIds]),
+    [...threadExcludedFolderIds].sort().join("\n")
+  );
 
   // CRITICAL: This IS passed to useMessageListDerivedState and MUST be stable
   const checkIsThreadExcludedFolder = useMemo(
@@ -1316,34 +1238,37 @@ export default function MailClient({
     setCollapsedThreads,
     currentKeyRef
   });
-  refreshMailboxDataRef.current = refreshMailboxData;
-  setMessagesRef.current = setMessages;
+  useSyncedRef(refreshMailboxDataRef, refreshMailboxData);
+  useSyncedRef(setMessagesRef, setMessages);
 
-  const accountMessages = useMemo(() => {
-    const { deduped, duplicates } = dedupeAccountMessages(messages, activeAccountId);
-    if (duplicates.length > 0) {
-      // Summarize each duplicate's PRE-reassignment message so the log
-      // payload reports the original colliding id (e.g. "m1"), not the
-      // synthetic `m1-3` that went into `deduped`.
-      const sample = duplicates
-        .slice(0, LIST_DEBUG_SAMPLE_LIMIT)
-        .map((dup) => summarizeMessageForListDebug(dup.message));
-      const fingerprint = `${activeAccountId}|${duplicates.length}|${sample
-        .map((entry) => entry?.id ?? "")
-        .join(",")}`;
-      if (duplicateMessageIdLogFingerprintRef.current !== fingerprint) {
-        duplicateMessageIdLogFingerprintRef.current = fingerprint;
-        logListDebug("warn", "duplicate local message ids detected", {
-          activeAccountId,
-          duplicateCount: duplicates.length,
-          sample
-        });
-      }
-    } else if (duplicateMessageIdLogFingerprintRef.current) {
+  const dedupedAccountMessages = useMemo(
+    () => dedupeAccountMessages(messages, activeAccountId),
+    [activeAccountId, messages]
+  );
+  const accountMessages = dedupedAccountMessages.deduped;
+  useEffect(() => {
+    const { duplicates } = dedupedAccountMessages;
+    if (duplicates.length === 0) {
       duplicateMessageIdLogFingerprintRef.current = "";
+      return;
     }
-    return deduped;
-  }, [activeAccountId, messages]);
+    // Summarize each duplicate's PRE-reassignment message so the log
+    // payload reports the original colliding id (e.g. "m1"), not the
+    // synthetic `m1-3` that went into `deduped`.
+    const sample = duplicates
+      .slice(0, LIST_DEBUG_SAMPLE_LIMIT)
+      .map((dup) => summarizeMessageForListDebug(dup.message));
+    const fingerprint = `${activeAccountId}|${duplicates.length}|${sample
+      .map((entry) => entry?.id ?? "")
+      .join(",")}`;
+    if (duplicateMessageIdLogFingerprintRef.current === fingerprint) return;
+    duplicateMessageIdLogFingerprintRef.current = fingerprint;
+    logListDebug("warn", "duplicate local message ids detected", {
+      activeAccountId,
+      duplicateCount: duplicates.length,
+      sample
+    });
+  }, [activeAccountId, dedupedAccountMessages]);
 
   const filteredMessages = accountMessages;
 
@@ -1466,7 +1391,8 @@ export default function MailClient({
     ]
   );
   const listMessageById = useMemo(() => {
-    const map = new Map(messageById);
+    const map = new Map<string, Message>();
+    messageById.forEach((message, id) => map.set(id, message));
     activeTopicSuggestionRankedMessages.forEach((message) => {
       if (message.accountId !== activeAccountId) return;
       map.set(message.id, message);
@@ -2007,15 +1933,15 @@ export default function MailClient({
     composeHandleRef.current.openCompose("new", undefined, false, prefill);
   }, [currentAccount]);
 
-  // Derive topics map from messages (topics are now included in the messages API response)
-  useEffect(() => {
+  // Topics arrive with the messages API response; a thread's first message wins.
+  const messageTopicsById = useMemo(() => {
     const next = new Map<string, Topic[]>();
     for (const msg of messages) {
       if (msg.threadId && msg.topics && msg.topics.length > 0 && !next.has(msg.threadId)) {
         next.set(msg.threadId, msg.topics);
       }
     }
-    setMessageTopicsById(next);
+    return next;
   }, [messages]);
 
   const getAssignedThreadTopics = useCallback((message: Message) => {
@@ -2272,6 +2198,8 @@ export default function MailClient({
 
   useEffect(() => {
     if (!activeAccountId || !showActiveTopicSuggestionGroup || !activeTopicSuggestionGroupKey) {
+      // Fetched suggestions go with the group so its next appearance reloads them.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setActiveTopicSuggestions([]);
       setActiveTopicSuggestionMessages([]);
       setActiveTopicSuggestionsLoadedKey("");
@@ -2316,11 +2244,8 @@ export default function MailClient({
   ]);
 
   useEffect(() => {
+    // Hiding the group is handled by the effect above.
     if (!activeAccountId || !showActiveTopicSuggestionGroup || !activeTopicSuggestionGroupKey) {
-      setActiveTopicSuggestions([]);
-      setActiveTopicSuggestionMessages([]);
-      setActiveTopicSuggestionsLoadedKey("");
-      setActiveTopicSuggestionsLoading(false);
       return;
     }
     if (collapsedGroups[activeTopicSuggestionGroupKey] !== false) {
@@ -2331,6 +2256,8 @@ export default function MailClient({
     }
 
     const controller = new AbortController();
+    // The loader flips its loading flag synchronously before the request starts.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     void refreshActiveTopicSuggestions({ signal: controller.signal });
     return () => {
       controller.abort();
@@ -2525,18 +2452,98 @@ export default function MailClient({
     },
     [activeFolderId, applyDeleteReconcileSuppression]
   );
+  const viewMessageId = viewMessage?.id;
   const removeDraftFromUi = useCallback(
     (draftId: string | null) => {
       if (!draftId) return;
       evictMessageCaches([draftId]);
       setMessages((prev) => prev.filter((msg) => msg.id !== draftId));
-      if (viewMessage?.id === draftId) {
+      if (viewMessageId === draftId) {
         setViewMessage(null);
         setActiveMessageId("");
       }
     },
-    [evictMessageCaches, setMessages, viewMessage?.id]
+    [evictMessageCaches, setMessages, viewMessageId]
   );
+
+  const undoMoveOperation = async (
+    targets: UndoMoveTarget[],
+    accountId: string,
+    successTitle = "Move undone."
+  ) => {
+    if (targets.length === 0) return;
+    // IMAP MOVE/COPY assigns a new UID in the destination, so the next
+    // poll/stream tick would otherwise treat restored messages as new
+    // mail. Seed the dedup ring with each restored message's RFC 5322
+    // Message-ID (preserved across the move) so the planner skips them.
+    // Prefer the header captured on the UndoMoveTarget at move time —
+    // the message has typically already been pruned from local state by
+    // the time undo runs, so a `messageById` lookup would miss.
+    if (accountId === activeAccountId) {
+      const dedupKeys = targets
+        .map(
+          (target) =>
+            target.headerMessageId ?? messageById.get(target.messageId)?.messageId
+        )
+        .filter((key): key is string => Boolean(key));
+      if (dedupKeys.length > 0) {
+        seedNotificationDedupKeys(dedupKeys);
+      }
+    }
+    const grouped = new Map<string, string[]>();
+    targets.forEach((target) => {
+      const list = grouped.get(target.restoreFolderId);
+      if (list) {
+        list.push(target.messageId);
+        return;
+      }
+      grouped.set(target.restoreFolderId, [target.messageId]);
+    });
+    try {
+      for (const [destinationFolderId, messageIds] of grouped.entries()) {
+        const res = await apiFetch(buildAccountMessagesActionPath(accountId, "move"), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            messageIds,
+            destinationFolderId
+          })
+        });
+        if (!res.ok) {
+          reportError(await readErrorMessage(res));
+          return;
+        }
+      }
+      setFolders((prev) =>
+        applyFolderTransferCounts(
+          prev,
+          targets.flatMap((target) => {
+            const message = messageById.get(target.messageId);
+            if (!message) return [];
+            return [
+              {
+                fromFolderId: message.folderId,
+                toFolderId: target.restoreFolderId,
+                unread: Boolean(message.unread ?? !message.seen)
+              }
+            ];
+          })
+        )
+      );
+      evictMessageCaches(targets.map((target) => target.messageId));
+      await refreshFolders();
+      if (accountId === activeAccountId) {
+        await refreshMailboxData();
+      }
+      pushNotice({
+        type: "success",
+        title: successTitle,
+        durationMs: 4500
+      });
+    } catch {
+      reportError("Failed to undo message move.");
+    }
+  };
 
   const handleDiscardDraft = useCallback(
     async (message: Message) => {
@@ -2800,7 +2807,7 @@ export default function MailClient({
     return filteredMessages.find((m) => m.id === viewMessage.id) ?? viewMessage;
   }, [viewMessage, filteredMessages, composeOpen, composeMode, activeAccountId]);
   const activeMessageRef = useRef<Message | null>(null);
-  activeMessageRef.current = activeMessage ?? null;
+  useSyncedRef(activeMessageRef, activeMessage ?? null);
   const activeMessageThreadKey = (() => {
     if (!activeMessage) return "";
     const threadId = activeMessage.threadId ?? activeMessage.messageId ?? activeMessage.id;
@@ -3052,7 +3059,7 @@ export default function MailClient({
       setMessages
     ]
   );
-  updateMessagesRef.current = updateMessagesWithCurrentResultPrune;
+  useSyncedRef(updateMessagesRef, updateMessagesWithCurrentResultPrune);
   const reconcileSavedDraftInUi = useCallback(
     (savedDraft: Message, previousDraftId: string | null) => {
       const existingDraft =
@@ -3641,9 +3648,9 @@ export default function MailClient({
     message,
     pendingMessageActions,
     openCompose,
-    updateFlagStateRef.current,
-    toggleTodoFlagRef.current,
-    clearTodoFlagRef.current,
+    updateFlagState,
+    toggleTodoFlag,
+    clearTodoFlag,
     handleMarkSpam,
     handleMarkNotSpam,
     handleArchiveMessage,
@@ -3676,19 +3683,15 @@ export default function MailClient({
   );
 
   const updateFlagStateRef = useRef(updateFlagState);
-  updateFlagStateRef.current = updateFlagState;
-
+  useSyncedRef(updateFlagStateRef, updateFlagState);
   const updateFlagStateBulkRef = useRef(updateFlagStateBulk);
-  updateFlagStateBulkRef.current = updateFlagStateBulk;
-
+  useSyncedRef(updateFlagStateBulkRef, updateFlagStateBulk);
   const updateKeywordFlagBulkRef = useRef(updateKeywordFlagBulk);
-  updateKeywordFlagBulkRef.current = updateKeywordFlagBulk;
-
+  useSyncedRef(updateKeywordFlagBulkRef, updateKeywordFlagBulk);
   const toggleTodoFlagRef = useRef(toggleTodoFlag);
-  toggleTodoFlagRef.current = toggleTodoFlag;
-
+  useSyncedRef(toggleTodoFlagRef, toggleTodoFlag);
   const clearTodoFlagRef = useRef(clearTodoFlag);
-  clearTodoFlagRef.current = clearTodoFlag;
+  useSyncedRef(clearTodoFlagRef, clearTodoFlag);
 
   const { handleMessageDragStart, handleMessageDragEnd } = useMessageDragDrop({
     selectionStore,
@@ -3909,6 +3912,8 @@ export default function MailClient({
     const stored = localStorage.getItem("noctua:theme");
     if (stored) {
       const isDark = stored === "dark";
+      // Read after mount: localStorage is client-only and must not shape the hydrated markup.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setDarkMode(isDark);
       document.documentElement.classList.toggle("dark", isDark);
     }
@@ -3928,6 +3933,8 @@ export default function MailClient({
 
   useEffect(() => {
     if (!isRelatedSearch) {
+      // Leaving a related search drops its context together with the restore point.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setRelatedContext(null);
       relatedRestoreRef.current = null;
       return;
@@ -4003,6 +4010,8 @@ export default function MailClient({
       void switchAccount(accountIdParam);
     }
     if (scopeParam === "all" || scopeParam === "folder") {
+      // Deep-link parameters are applied once after mount; the URL is an external input.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setSearchScope(scopeParam);
     }
     if (queryParam?.trim()) {
@@ -4709,6 +4718,8 @@ export default function MailClient({
       prevAccountIdRef.current = activeAccountId;
       composeHandleRef.current?.resetSession();
       if (searchScope === "all") {
+        // The folder selection belonged to the previous account; it is re-seeded here.
+        // eslint-disable-next-line react-hooks/set-state-in-effect
         setActiveFolderId("");
       } else {
         setActiveFolderId(accountFolders[0]?.id ?? "");
@@ -4742,6 +4753,8 @@ export default function MailClient({
     const special = (folder?.specialUse ?? "").toLowerCase();
     if (special === "\\sent") {
       if (threadsMode !== "off") {
+        // Threads mode follows the selected folder; the saved per-folder choice is applied here.
+        // eslint-disable-next-line react-hooks/set-state-in-effect
         setThreadsMode("off");
       }
       return;
@@ -4754,6 +4767,8 @@ export default function MailClient({
 
   useEffect(() => {
     clearSelection();
+    // Selection and the open message reset on every folder or account switch.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setActiveMessageId("");
     const accountChanged =
       previousAccountIdRef.current !== activeAccountId &&
@@ -4891,7 +4906,7 @@ export default function MailClient({
     },
     [apiFetch]
   );
-  resolveMessageByExternalMessageIdRef.current = resolveMessageByExternalMessageId;
+  useSyncedRef(resolveMessageByExternalMessageIdRef, resolveMessageByExternalMessageId);
 
   const openMessageByExternalMessageId = (
     messageId: string,
@@ -4948,6 +4963,8 @@ export default function MailClient({
     if (typeof window === "undefined") return;
     const params = new URLSearchParams(window.location.search);
     if (params.get("openCalendar") !== "1") return;
+    // One-shot URL flag, consumed after mount.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setOpenBottomStatusPanel("calendar");
     params.delete("openCalendar");
     const query = params.toString();

@@ -104,6 +104,9 @@ export function useMessageData({
       window.clearTimeout(filteredSearchRefreshTimerRef.current);
       filteredSearchRefreshTimerRef.current = null;
     }
+    // The list is replaced wholesale for a new query key; the cleared state has
+    // to land before the key's first page request.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setMessages([]);
     setMessagesPage(1);
     setHasMoreMessages(true);

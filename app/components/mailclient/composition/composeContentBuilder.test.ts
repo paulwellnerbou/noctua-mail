@@ -228,6 +228,7 @@ describe("buildComposePayload — html mode", () => {
         composeHtml: `<p>Hello</p><img src="${dataUrl}">`,
         composeAttachments: [
           {
+            id: "att-inline",
             filename: "inline.png",
             contentType: "image/png",
             size: 100,

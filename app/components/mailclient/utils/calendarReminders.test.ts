@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test";
+import { createFetchStub } from "@/lib/testFetchStub";
 import {
   deleteCalendarReminder,
   dispatchCalendarRemindersUpdatedEvent,
@@ -45,7 +46,7 @@ beforeAll(() => {
     value: { onLine: true },
     configurable: true
   });
-  globalThis.fetch = (async () => {
+  globalThis.fetch = createFetchStub(async () => {
     serverFetchCount += 1;
     if (holdResponses) {
       await new Promise<void>((resolve) => pendingReleases.push(resolve));
@@ -54,7 +55,7 @@ beforeAll(() => {
       status: 200,
       headers: { "Content-Type": "application/json" }
     });
-  }) as typeof fetch;
+  });
 });
 
 afterAll(() => {

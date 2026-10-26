@@ -2,6 +2,7 @@
 
 import type React from "react";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useSyncedRef } from "@/lib/ui/latestRef";
 import {
   buildAccountApiPath,
   buildAccountFolderConsistencyPath,
@@ -490,7 +491,7 @@ export function useSyncController({
   const currentViewIncludesFolder = (folderId: string) =>
     searchScope !== "folder" || Boolean(activeVirtualFolderId) || activeFolderId === folderId;
   const currentViewIncludesFolderRef = useRef(currentViewIncludesFolder);
-  currentViewIncludesFolderRef.current = currentViewIncludesFolder;
+  useSyncedRef(currentViewIncludesFolderRef, currentViewIncludesFolder);
 
   const syncFolderWithBackground = async (
     folderId: string,
@@ -529,7 +530,7 @@ export function useSyncController({
       });
     }
   };
-  syncFolderWithBackgroundRef.current = syncFolderWithBackground;
+  useSyncedRef(syncFolderWithBackgroundRef, syncFolderWithBackground);
 
   const executeFolderSyncDecision = useCallback(
     async (
@@ -744,7 +745,7 @@ export function useSyncController({
       setIsSyncing(false);
     })();
   };
-  syncAccountRef.current = syncAccount;
+  useSyncedRef(syncAccountRef, syncAccount);
 
   // Clear the consistency-check guard when the user navigates to a different folder.
   // This is a separate effect so that unrelated callback identity changes don't
@@ -881,7 +882,7 @@ export function useSyncController({
       }
     });
   };
-  recomputeThreadsRef.current = recomputeThreads;
+  useSyncedRef(recomputeThreadsRef, recomputeThreads);
 
   const recomputeCategories = async () => {
     if (!activeAccountId) return;

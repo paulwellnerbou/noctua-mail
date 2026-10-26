@@ -8,11 +8,23 @@ type SpawnedWorker = {
   exited: boolean;
 };
 
-type BunGlobal = typeof globalThis & { Bun: { spawn: unknown } };
+// `spawnSyncWorker` only reads pid, the piped streams, `exited` and `kill`
+// off the child. A full `Subprocess` cannot be faked, so the global slot is
+// viewed as holding either the real spawn or this stand-in.
+type FakeSubprocess = {
+  pid: number;
+  stdout: null;
+  stderr: null;
+  exited: Promise<number>;
+  kill: () => void;
+};
+type FakeSpawn = (cmd: Parameters<typeof Bun.spawn>[0]) => FakeSubprocess;
+type BunGlobal = { Bun: { spawn: typeof Bun.spawn | FakeSpawn } };
 
+const bunGlobal: BunGlobal = globalThis;
 const spawned: SpawnedWorker[] = [];
 let nextWorkerToFinish = 0;
-let originalSpawn: unknown;
+let originalSpawn = bunGlobal.Bun.spawn;
 let accountSeq = 0;
 
 // The job registry is module-level and survives across tests, so every test
@@ -25,15 +37,14 @@ const nextAccountId = (label: string) => {
 // `spawnSyncWorker` reads `globalThis.Bun.spawn` at call time, so swapping it
 // out is enough to run the queue without launching real sync workers.
 const installFakeSpawn = () => {
-  const bun = globalThis as BunGlobal;
-  originalSpawn = bun.Bun.spawn;
-  bun.Bun.spawn = (args: string[]) => {
+  originalSpawn = bunGlobal.Bun.spawn;
+  const fakeSpawn: FakeSpawn = (cmd) => {
     let resolveExit: (code: number) => void = () => {};
     const exited = new Promise<number>((resolve) => {
       resolveExit = resolve;
     });
     const worker: SpawnedWorker = {
-      payload: JSON.parse(args[3]),
+      payload: JSON.parse(cmd[3]),
       exit: (code = 0) => {
         if (worker.exited) return;
         worker.exited = true;
@@ -52,6 +63,7 @@ const installFakeSpawn = () => {
       kill: () => {}
     };
   };
+  bunGlobal.Bun.spawn = fakeSpawn;
 };
 
 const flush = async () => {
@@ -82,7 +94,7 @@ afterEach(async () => {
     spawned.forEach((worker) => worker.exit(0));
     await flush();
   }
-  (globalThis as BunGlobal).Bun.spawn = originalSpawn;
+  bunGlobal.Bun.spawn = originalSpawn;
 });
 
 describe("sync job queue", () => {

@@ -37,6 +37,9 @@ export default function AccountReloginDialog({
 
   useEffect(() => {
     if (!open || !account) return;
+    // Fields are seeded from the account each time the dialog opens and keep
+    // the user's edits in between.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setImapUser(account.imap.user || account.email || "");
     setImapPassword("");
     setError("");

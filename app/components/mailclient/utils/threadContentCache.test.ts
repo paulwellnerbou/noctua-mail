@@ -127,7 +127,7 @@ describe("updateThreadCacheMapWithFlags", () => {
 describe("updateThreadCacheMapWithCategory", () => {
   it("returns the previous map when the message id is not cached", () => {
     const prev = { t1: [makeMessage({ id: "m1" })] };
-    const result = updateThreadCacheMapWithCategory(prev, "nope", "promotional", 0.5, null);
+    const result = updateThreadCacheMapWithCategory(prev, "nope", "promotional", 0.5, undefined);
     expect(result).toBe(prev);
   });
 

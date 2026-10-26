@@ -87,7 +87,7 @@ describe("buildReminderServiceWorkerPayload", () => {
       ["a", "b", "c"],
       "a",
       [reminder],
-      (accountId) => (accountId === "b" ? { r99: 1 } : {})
+      (accountId): Record<string, number> => (accountId === "b" ? { r99: 1 } : {})
     );
     expect(payload.type).toBe("noctua:reminder-state");
     expect(payload.accountIds).toEqual(["a", "b", "c"]);

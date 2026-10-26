@@ -3,11 +3,13 @@ import {
   DETACHED_COMPOSE_SESSION_MAX_AGE_MS,
   parseDetachedComposeEvent,
   parseDetachedComposeHandoff,
-  shouldProtectDetachedComposeWindow
+  shouldProtectDetachedComposeWindow,
+  type DetachedComposeEvent,
+  type DetachedComposeHandoff
 } from "./detachedComposeHandoff";
 
 const now = 2_000_000_000_000;
-const readySession = {
+const readySession: DetachedComposeHandoff = {
   version: 1,
   status: "ready",
   accountId: "account@example.test",
@@ -25,7 +27,7 @@ describe("detached compose handoff parsing", () => {
   });
 
   it("accepts a preparing session and an empty new-message draft", () => {
-    const preparing = {
+    const preparing: DetachedComposeHandoff = {
       ...readySession,
       status: "preparing",
       mode: "new",
@@ -54,7 +56,7 @@ describe("detached compose handoff parsing", () => {
 
 describe("detached compose event parsing", () => {
   it("accepts a valid completion event", () => {
-    const event = {
+    const event: DetachedComposeEvent = {
       version: 1,
       eventId: "event-1",
       handoffId: "handoff-1",

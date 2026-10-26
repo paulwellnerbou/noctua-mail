@@ -58,6 +58,8 @@ export default function TopicPickerDialog({
 
   useEffect(() => {
     if (open) {
+      // Selection is seeded from the message's topics each time the dialog opens.
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setSelected(new Set(messageTopics.map((t) => t.id)));
       setNewName("");
       setNewShortName("");

@@ -269,7 +269,9 @@ function ComposeToolbar({
     const unregisterSelectionChange = editor.registerCommand(
       SELECTION_CHANGE_COMMAND,
       () => {
-        editor.getEditorState().read(syncTableFocusState);
+        // Command listeners run inside the pending update, where
+        // editor.getEditorState() would still be the previous committed state.
+        syncTableFocusState();
         return false;
       },
       COMMAND_PRIORITY_LOW
@@ -652,7 +654,7 @@ function captureEditorSelectionAtPoint(
       (range.startContainer === rootElement || rootElement.contains(range.startContainer))
   );
 
-  return editor.getEditorState().read(() => {
+  return editor.read(() => {
     if (range && rangeIsInsideEditor) {
       const domSelection = {
         anchorNode: range.startContainer,

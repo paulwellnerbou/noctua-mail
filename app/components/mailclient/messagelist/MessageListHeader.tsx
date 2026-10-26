@@ -1,4 +1,5 @@
-import { startTransition, useEffect, useRef, useState } from "react";
+import { startTransition, useRef } from "react";
+import { useSyncedState } from "@/lib/ui/syncedState";
 import type React from "react";
 import { ChevronsDown, ChevronsUp, Folder, GitBranch, RefreshCw } from "lucide-react";
 import { SegmentedControl, Select, Text } from "@radix-ui/themes";
@@ -75,30 +76,14 @@ export default function MessageListHeader({ state, actions }: MessageListHeaderP
     setThreadsMode,
     toggleAllGroups
   } = actions;
-  const [localView, setLocalView] = useState(messageView);
-  const [localGroupBy, setLocalGroupBy] = useState(groupBy);
-  const [localSort, setLocalSort] = useState(messageSort);
-  const [localThreadDateSource, setLocalThreadDateSource] = useState(threadDateSource);
+  const [localView, setLocalView] = useSyncedState(messageView);
+  const [localGroupBy, setLocalGroupBy] = useSyncedState(groupBy);
+  const [localSort, setLocalSort] = useSyncedState(messageSort);
+  const [localThreadDateSource, setLocalThreadDateSource] = useSyncedState(threadDateSource);
   const viewFrameRef = useRef<number | null>(null);
   const groupFrameRef = useRef<number | null>(null);
   const sortFrameRef = useRef<number | null>(null);
   const threadDateFrameRef = useRef<number | null>(null);
-
-  useEffect(() => {
-    setLocalView(messageView);
-  }, [messageView]);
-
-  useEffect(() => {
-    setLocalGroupBy(groupBy);
-  }, [groupBy]);
-
-  useEffect(() => {
-    setLocalSort(messageSort);
-  }, [messageSort]);
-
-  useEffect(() => {
-    setLocalThreadDateSource(threadDateSource);
-  }, [threadDateSource]);
 
   const scheduleCommit = (ref: React.MutableRefObject<number | null>, fn: () => void) => {
     if (ref.current) window.cancelAnimationFrame(ref.current);

@@ -311,7 +311,8 @@ export async function GET(request: Request, { params }: AccountRouteParams) {
             { ...logContext, mailbox },
             async () => await client.status(mailbox, { uidNext: true })
           );
-          const uidNext = status?.uidNext ?? previousUidNext;
+          // status() yields false when the server rejects STATUS for the mailbox.
+          const uidNext = (status ? status.uidNext : undefined) ?? previousUidNext;
           if (uidNext <= previousUidNext) return;
           const range = { uid: `${previousUidNext}:${uidNext - 1}` };
           const items = await logImapOp(
@@ -476,6 +477,7 @@ export async function GET(request: Request, { params }: AccountRouteParams) {
                       unseen: true
                     })
                 );
+                if (!status) continue;
                 updates.push({
                   id: folder.id,
                   uidNext: status.uidNext,

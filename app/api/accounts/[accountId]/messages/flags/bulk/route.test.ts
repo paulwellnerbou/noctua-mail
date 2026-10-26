@@ -16,15 +16,15 @@ import { applyFlagMutationsToMessages } from "@/lib/messageFlagMutation";
 // the cross-file `mock.module` leakage that made splitting the suite
 // difficult.
 
-let storedRows: StoredMessageSummary[] = [];
-const getStoredMessagesByIds = mock(async () => storedRows);
-const updateImapFlagsBulk = mock(async () => {});
-const bulkUpdateMessageFlags = mock(async () => {});
-const recomputeThreadsForAccount = mock(async () => {});
-
 const actualDb = await import("@/lib/db");
 const actualServerImap = await import("@/lib/serverImap");
 const actualServerDb = await import("@/lib/serverDb");
+
+let storedRows: StoredMessageSummary[] = [];
+const getStoredMessagesByIds = mock<typeof actualDb.getStoredMessagesByIds>(async () => storedRows);
+const updateImapFlagsBulk = mock<typeof actualServerImap.updateImapFlagsBulk>(async () => {});
+const bulkUpdateMessageFlags = mock<typeof actualServerDb.bulkUpdateMessageFlags>(async () => {});
+const recomputeThreadsForAccount = mock<typeof actualServerDb.recomputeThreadsForAccount>(async () => {});
 
 mock.module("@/lib/db", () => ({
   ...actualDb,
@@ -285,8 +285,8 @@ describe("POST /messages/flags/bulk", () => {
     // All three messages share the same mailbox, so a single STORE covers them.
     expect(updateImapFlagsBulk).toHaveBeenCalledTimes(1);
     const [, bulkTargets] = updateImapFlagsBulk.mock.calls[0]!;
-    expect((bulkTargets as Array<{ uid: number }>).map((t) => t.uid).sort()).toEqual([101, 102, 103]);
-    expect((bulkTargets as Array<{ mailboxPath: string }>).every((t) => t.mailboxPath === "INBOX")).toBe(true);
+    expect(bulkTargets.map((t) => t.uid).sort()).toEqual([101, 102, 103]);
+    expect(bulkTargets.every((t) => t.mailboxPath === "INBOX")).toBe(true);
   });
 
   test("maps `Unknown flag` from the service layer to a 400", async () => {
@@ -367,12 +367,12 @@ describe("applyFlagMutationsToMessages", () => {
       flag: args[2],
       enable: args[3]
     }));
-    const inboxCall = calls.find((c) => (c.targets as Array<{ mailboxPath: string }>)[0].mailboxPath === "INBOX");
-    const archiveCall = calls.find((c) => (c.targets as Array<{ mailboxPath: string }>)[0].mailboxPath === "Archive");
+    const inboxCall = calls.find((c) => c.targets[0].mailboxPath === "INBOX");
+    const archiveCall = calls.find((c) => c.targets[0].mailboxPath === "Archive");
     expect(inboxCall?.flag).toBe("\\Seen");
     expect(inboxCall?.enable).toBe(true);
-    expect((inboxCall?.targets as Array<{ uid: number }>).map((t) => t.uid).sort()).toEqual([101, 102]);
-    expect((archiveCall?.targets as Array<{ uid: number }>).map((t) => t.uid)).toEqual([50]);
+    expect(inboxCall?.targets.map((t) => t.uid).sort()).toEqual([101, 102]);
+    expect(archiveCall?.targets.map((t) => t.uid)).toEqual([50]);
   });
 
   test("commits DB and recomputes threads after each successful mailbox group", async () => {

@@ -7,14 +7,18 @@ import { markImapConnectFailure } from "@/lib/mail/imapError";
 import { dbModulePromise } from "@/lib/testDbHarness";
 import { MAIL_SERVER_UNREACHABLE_MESSAGE } from "@/app/api/_helpers/imapUpstreamError";
 
-const getImapMailboxStatus = mock(async () => ({
-  messages: 0,
-  uidNext: null,
-  uidValidity: null,
-  highestModSeq: null
-}));
-
 const actualImap = await import("@/lib/mail/imap");
+
+const getImapMailboxStatus = mock<typeof actualImap.getImapMailboxStatus>(
+  async (_account, mailboxPath) => ({
+    mailboxPath,
+    messages: 0,
+    unseen: 0,
+    uidNext: null,
+    uidValidity: null,
+    highestModSeq: null
+  })
+);
 
 mock.module("@/lib/mail/imap", () => ({
   ...actualImap,
@@ -98,12 +102,14 @@ function uniqueAccountId(prefix: string) {
 
 beforeEach(() => {
   getImapMailboxStatus.mockReset();
-  getImapMailboxStatus.mockResolvedValue({
+  getImapMailboxStatus.mockImplementation(async (_account, mailboxPath) => ({
+    mailboxPath,
     messages: 10,
+    unseen: 4,
     uidNext: 56,
     uidValidity: "1",
     highestModSeq: "100"
-  });
+  }));
 });
 
 describe("folder consistency route pending moves", () => {

@@ -4,6 +4,9 @@ import { workerRuntimeTraceFiles } from "./build-scripts/workerRuntimeTraceFiles
 const nextConfig: NextConfig = {
   output: 'standalone',
   typedRoutes: false,
+  // Next 16.3+ rewrites AGENTS.md with a managed block whenever `next dev` runs
+  // under a detected coding agent; AGENTS.md here is hand-maintained.
+  agentRules: false,
   // Worker subprocesses execute TS entrypoints from ./scripts at runtime.
   // Standalone builds only ship traced files, so include the worker source tree
   // and its local TS dependencies explicitly for the routes that launch them.
@@ -18,8 +21,6 @@ const nextConfig: NextConfig = {
       "./node_modules/parse-srcset/**",
       "./node_modules/escape-string-regexp/**",
       "./node_modules/entities/**",
-      // parse5 resolves its own entities major from a nested node_modules,
-      // which the glob covers.
       "./node_modules/parse5/**"
     ],
     "/api/accounts/*/threads/recompute": workerRuntimeTraceFiles,
