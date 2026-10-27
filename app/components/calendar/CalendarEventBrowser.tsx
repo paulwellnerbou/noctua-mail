@@ -9,7 +9,7 @@ import InAppNoticeStack from "@/app/components/mailclient/InAppNoticeStack";
 import { NOTICE_TIMEOUTS } from "@/app/components/mailclient/constants";
 import { dispatchCalendarRemindersUpdatedEvent } from "@/app/components/mailclient/utils/calendarReminders";
 import { useInAppNotices } from "@/app/components/mailclient/useInAppNotices";
-import { dispatchCalendarEventsUpdatedEvent } from "./calendarEventsClient";
+import { dispatchCalendarEventsUpdatedEvent, fetchCalendarEventById } from "./calendarEventsClient";
 import CalendarConflictBanner from "./CalendarConflictBanner";
 import EventDetailPanel from "./EventDetailPanel";
 import EventDialog from "./EventDialog";
@@ -109,7 +109,7 @@ export default function CalendarEventBrowser({
     [pushNotice]
   );
 
-  const handleEventClick = (
+  const handleEventClick = async (
     event: CalendarEvent | CalendarReminder,
     kind: "event" | "reminder",
     occurrenceStartAtMs?: number
@@ -117,6 +117,18 @@ export default function CalendarEventBrowser({
     setSelectedEvent(event);
     setSelectedKind(kind);
     setSelectedOccurrenceStartAtMs(occurrenceStartAtMs);
+    if (kind !== "event") return;
+    // The calendar grid holds the range listing, which omits the raw ICS and
+    // the email snapshot. Show the event at once and swap in the full row
+    // when it arrives, unless the selection has moved on or a newer copy
+    // (e.g. from a response) has landed in the meantime.
+    const fullEvent = await fetchCalendarEventById(accountId, event.id);
+    if (!fullEvent) return;
+    setSelectedEvent((current) =>
+      current?.id === fullEvent.id && current.updatedAtMs <= fullEvent.updatedAtMs
+        ? fullEvent
+        : current
+    );
   };
 
   const handleBack = () => {

@@ -244,6 +244,27 @@ export async function resolveCalendarParticipation(
   };
 }
 
+// Every column except the large text blobs (raw ICS, source email body,
+// per-occurrence snapshots). The grid and the upcoming list never read
+// those, and they made a range listing ~20x larger than the rest of the
+// row; the detail view loads the full row via getCalendarEventById.
+const CALENDAR_EVENT_LIST_COLUMNS = [
+  "id", "accountId", "calendarId", "eventUid", "summary", "description", "location",
+  "startAtMs", "endAtMs", "allDay", "startTimezone", "endTimezone",
+  "recurrenceRule", "recurrenceDates", "excludedDates",
+  "status", "organizer", "attendees", "myPartstat", "myPartstatUpdatedAtMs",
+  "myAttendeeEmail", "replyRequested", "remoteEtag", "remoteHref", "pendingRemoteSync",
+  "sourceType", "messageId", "occurrenceMessageIds",
+  "sourceSubject", "sourceFromAddr", "sourceToAddr", "sourceCcAddr", "sourceBccAddr", "sourceDateMs",
+  "occurrenceRecurrenceIds", "eventUidKey", "createdAtMs", "updatedAtMs", "deletedAtMs"
+].join(", ");
+
+/**
+ * Live events overlapping [rangeStartMs, rangeEndMs), without `rawIcs`,
+ * `sourceBodyText`, `sourceBodyHtml` and `occurrenceSnapshots`. Recurring
+ * events are returned whenever they start before the range end, since the
+ * row carries no series end.
+ */
 export async function listCalendarEvents(
   accountId: string,
   rangeStartMs: number,
@@ -252,7 +273,7 @@ export async function listCalendarEvents(
   const db = await getAccountDb(accountId);
   const rows = db
     .prepare(
-      `SELECT * FROM calendar_events
+      `SELECT ${CALENDAR_EVENT_LIST_COLUMNS} FROM calendar_events
        WHERE accountId = ?
          AND deletedAtMs IS NULL
          AND startAtMs < ?
