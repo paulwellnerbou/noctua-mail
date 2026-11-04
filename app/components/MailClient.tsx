@@ -23,6 +23,8 @@ import {
   X
 } from "lucide-react";
 import { AccountDateFormatProvider } from "./AccountDateFormatContext";
+import { AccountCalendarTimeZoneProvider } from "./AccountCalendarTimeZoneContext";
+import { resolveAccountCalendarTimeZone } from "@/lib/accountSettings";
 import LoginOverlay from "./auth/LoginOverlay";
 import FolderSidebarPane from "./mailclient/folder/FolderSidebarPane";
 import MoveToDialog, { recordRecentMoveFolder, getRecentMoveFolderIds } from "./mailclient/message/MoveToDialog";
@@ -1902,6 +1904,7 @@ export default function MailClient({
   const accountDateFormat = normalizeAccountDateFormat(
     currentAccount?.settings?.appearance?.dateFormat
   );
+  const accountCalendarTimeZone = resolveAccountCalendarTimeZone(currentAccount?.settings);
 
   const openCompose = (
     mode: ComposeMode,
@@ -5292,6 +5295,7 @@ export default function MailClient({
 
   return (
     <AccountDateFormatProvider value={accountDateFormat}>
+    <AccountCalendarTimeZoneProvider value={accountCalendarTimeZone}>
     <div className="app-shell">
       <TopBar
         buildVersionLabel={buildVersionLabel}
@@ -5978,6 +5982,7 @@ export default function MailClient({
         accountDateFormat={accountDateFormat}
       />
     </div>
+    </AccountCalendarTimeZoneProvider>
     </AccountDateFormatProvider>
   );
 }

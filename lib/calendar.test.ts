@@ -3,21 +3,12 @@ import {
   buildCalendarRecurrenceSummary,
   formatCalendarEventDate,
   formatCalendarEventRange,
-  parseIcsEvents
+  parseIcsEvents,
+  parseIcsInvite,
+  type ParseIcsOptions
 } from "./calendar";
 
-function parseIcsEventInSubprocess(ics: string, timeZone: string) {
-  const evalSource = `
-    import { parseIcsEvents } from "./lib/calendar";
-    const ics = ${JSON.stringify(ics)};
-    const event = parseIcsEvents(ics)[0];
-    process.stdout.write(JSON.stringify({
-      startIso: event?.start?.toISOString(),
-      startTimezone: event?.startTimezone,
-      endIso: event?.end?.toISOString(),
-      endTimezone: event?.endTimezone
-    }));
-  `;
+function runBunInSubprocess(evalSource: string, timeZone: string) {
   const result = Bun.spawnSync({
     cmd: ["bun", "-e", evalSource],
     cwd: process.cwd(),
@@ -30,6 +21,33 @@ function parseIcsEventInSubprocess(ics: string, timeZone: string) {
     stdout: Buffer.from(result.stdout).toString("utf8").trim(),
     stderr: Buffer.from(result.stderr).toString("utf8").trim()
   };
+}
+
+function parseIcsEventInSubprocess(ics: string, timeZone: string, options?: ParseIcsOptions) {
+  return runBunInSubprocess(
+    `
+    import { parseIcsEvents } from "./lib/calendar";
+    const ics = ${JSON.stringify(ics)};
+    const event = parseIcsEvents(ics${options ? `, ${JSON.stringify(options)}` : ""})[0];
+    process.stdout.write(JSON.stringify({
+      startIso: event?.start?.toISOString(),
+      startTimezone: event?.startTimezone,
+      endIso: event?.end?.toISOString(),
+      endTimezone: event?.endTimezone
+    }));
+  `,
+    timeZone
+  );
+}
+
+function parseIcsUidInSubprocess(ics: string, timeZone: string) {
+  return runBunInSubprocess(
+    `
+    import { parseIcsInvite } from "./lib/calendar";
+    process.stdout.write(parseIcsInvite(${JSON.stringify(ics)}).events[0]?.uid ?? "");
+  `,
+    timeZone
+  );
 }
 
 describe("buildCalendarRecurrenceSummary", () => {
@@ -242,5 +260,142 @@ describe("parseIcsEvents", () => {
       })
     );
     expect(berlin.stdout).toBe(utc.stdout);
+  });
+});
+
+describe("parseIcsInvite without UID", () => {
+  const uidlessIcs = (overrides: { summary?: string; start?: string; end?: string } = {}) =>
+    [
+      "BEGIN:VCALENDAR",
+      "VERSION:2.0",
+      "METHOD:PUBLISH",
+      "BEGIN:VEVENT",
+      "CREATED:20260301T100000",
+      `SUMMARY:${overrides.summary ?? "Dental check-up"}`,
+      `DTSTART:${overrides.start ?? "20260305T083000"}`,
+      `DTEND:${overrides.end ?? "20260305T093000"}`,
+      "LOCATION:Example Practice\\, 1 Example Street",
+      "END:VEVENT",
+      "END:VCALENDAR"
+    ].join("\r\n");
+
+  test("derives a stable UID so the event is not dropped", () => {
+    const [event] = parseIcsInvite(uidlessIcs()).events;
+    expect(event?.uid).toMatch(/^noctua-derived-[0-9a-f]{14}$/);
+    expect(event?.summary).toBe("Dental check-up");
+    expect(parseIcsInvite(uidlessIcs()).events[0]?.uid).toBe(event!.uid!);
+  });
+
+  test("changes the derived UID when start, end or summary change", () => {
+    const base = parseIcsInvite(uidlessIcs()).events[0]?.uid;
+    expect(parseIcsInvite(uidlessIcs({ start: "20260306T083000" })).events[0]?.uid).not.toBe(base);
+    expect(parseIcsInvite(uidlessIcs({ end: "20260305T100000" })).events[0]?.uid).not.toBe(base);
+    expect(parseIcsInvite(uidlessIcs({ summary: "Follow-up" })).events[0]?.uid).not.toBe(base);
+  });
+
+  test("derives the same UID in every process time zone", () => {
+    const berlin = parseIcsUidInSubprocess(uidlessIcs(), "Europe/Berlin");
+    const tokyo = parseIcsUidInSubprocess(uidlessIcs(), "Asia/Tokyo");
+    expect(berlin.exitCode).toBe(0);
+    expect(tokyo.exitCode).toBe(0);
+    expect(berlin.stdout).toMatch(/^noctua-derived-[0-9a-f]{14}$/);
+    expect(tokyo.stdout).toBe(berlin.stdout);
+  });
+
+  test("keeps an explicit UID untouched", () => {
+    const ics = uidlessIcs().replace("BEGIN:VEVENT", "BEGIN:VEVENT\r\nUID:given-uid@example.test");
+    expect(parseIcsInvite(ics).events[0]?.uid).toBe("given-uid@example.test");
+  });
+
+  test("leaves the UID empty when there is no DTSTART to identify the event", () => {
+    const ics = uidlessIcs().replace(/DTSTART:[^\r]+\r\n/, "");
+    expect(parseIcsInvite(ics).events[0]?.uid).toBeUndefined();
+  });
+});
+
+describe("parseIcsEvents with a default time zone", () => {
+  const floatingIcs = (lines: string[] = []) =>
+    [
+      "BEGIN:VCALENDAR",
+      "VERSION:2.0",
+      "BEGIN:VEVENT",
+      "UID:floating@example.test",
+      "SUMMARY:Dental check-up",
+      "DTSTART:20261105T083000",
+      "DTEND:20261105T093000",
+      ...lines,
+      "END:VEVENT",
+      "END:VCALENDAR"
+    ].join("\r\n");
+  const berlin: ParseIcsOptions = { defaultTimeZone: "Europe/Berlin" };
+
+  test("resolves floating date-times in the default zone whatever the process zone is", () => {
+    const utc = parseIcsEventInSubprocess(floatingIcs(), "UTC", berlin);
+    const tokyo = parseIcsEventInSubprocess(floatingIcs(), "Asia/Tokyo", berlin);
+    expect(utc.exitCode).toBe(0);
+    expect(tokyo.exitCode).toBe(0);
+    expect(utc.stdout).toBe(
+      JSON.stringify({
+        startIso: "2026-11-05T07:30:00.000Z",
+        startTimezone: "Europe/Berlin",
+        endIso: "2026-11-05T08:30:00.000Z",
+        endTimezone: "Europe/Berlin"
+      })
+    );
+    expect(tokyo.stdout).toBe(utc.stdout);
+  });
+
+  test("keeps the process zone without a default, and ignores an unknown default", () => {
+    const plain = parseIcsEventInSubprocess(floatingIcs(), "Asia/Tokyo");
+    const unknown = parseIcsEventInSubprocess(floatingIcs(), "Asia/Tokyo", {
+      defaultTimeZone: "Mars/Olympus"
+    });
+    expect(JSON.parse(plain.stdout).startIso).toBe("2026-11-04T23:30:00.000Z");
+    expect(JSON.parse(plain.stdout).startTimezone).toBeUndefined();
+    expect(unknown.stdout).toBe(plain.stdout);
+  });
+
+  test("leaves TZID and UTC values to their own zone", () => {
+    const [withTzid] = parseIcsEvents(
+      floatingIcs().replace("DTSTART:20261105T083000", "DTSTART;TZID=America/New_York:20261105T083000"),
+      berlin
+    );
+    expect(withTzid?.start?.toISOString()).toBe("2026-11-05T13:30:00.000Z");
+    expect(withTzid?.startTimezone).toBe("America/New_York");
+
+    const [utcValue] = parseIcsEvents(
+      floatingIcs().replace("DTSTART:20261105T083000", "DTSTART:20261105T083000Z"),
+      berlin
+    );
+    expect(utcValue?.start?.toISOString()).toBe("2026-11-05T08:30:00.000Z");
+    expect(utcValue?.startTimezone).toBe("UTC");
+  });
+
+  test("does not touch all-day dates", () => {
+    const [event] = parseIcsEvents(
+      floatingIcs()
+        .replace("DTSTART:20261105T083000", "DTSTART;VALUE=DATE:20261105")
+        .replace("DTEND:20261105T093000", "DTEND;VALUE=DATE:20261106"),
+      berlin
+    );
+    expect(event?.allDay).toBe(true);
+    expect(event?.start?.toISOString()).toBe("2026-11-05T00:00:00.000Z");
+    expect(event?.startTimezone).toBeUndefined();
+  });
+
+  test("resolves floating EXDATE values in the same zone as the start", () => {
+    const exdate = parseIcsEventInSubprocess(
+      floatingIcs(["RRULE:FREQ=WEEKLY", "EXDATE:20261112T083000"]),
+      "UTC",
+      berlin
+    );
+    expect(exdate.exitCode).toBe(0);
+    const [event] = parseIcsEvents(
+      floatingIcs(["RRULE:FREQ=WEEKLY", "EXDATE:20261112T083000"]),
+      berlin
+    );
+    expect(event?.excludedDates?.map((date) => date.toISOString())).toEqual([
+      "2026-11-12T07:30:00.000Z"
+    ]);
   });
 });

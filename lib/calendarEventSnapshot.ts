@@ -11,7 +11,8 @@ import { createHash } from "crypto";
 import {
   parseIcsInvite,
   type CalendarEventPreview,
-  type ParsedCalendarInvite
+  type ParsedCalendarInvite,
+  type ParseIcsOptions
 } from "./calendar";
 
 export const CALENDAR_EVENT_SNAPSHOT_VERSION = 1;
@@ -389,9 +390,10 @@ export function buildCalendarEventSnapshotFromParsed(
  */
 export function buildCalendarEventSnapshot(
   icsSource: string,
-  eventUid: string
+  eventUid: string,
+  options?: ParseIcsOptions
 ): CalendarEventSnapshot | null {
-  return buildCalendarEventSnapshotFromParsed(parseIcsInvite(icsSource), eventUid);
+  return buildCalendarEventSnapshotFromParsed(parseIcsInvite(icsSource, options), eventUid);
 }
 
 export function serializeCalendarEventSnapshot(snapshot: CalendarEventSnapshot): string {

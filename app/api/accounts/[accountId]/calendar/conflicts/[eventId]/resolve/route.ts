@@ -15,6 +15,7 @@ import type { Account, CalendarEvent } from "@/lib/data";
 import { createCaldavClient, updateRemoteEvent } from "@/lib/caldav/client";
 import { mergeRemoteIcsIntoEvent } from "@/lib/caldav/remoteMerge";
 import { patchIcsForEvent } from "@/lib/caldav/icsSerializer";
+import { resolveAccountCalendarTimeZone } from "@/lib/accountSettings";
 
 type Params = AccountRouteParams & {
   params: Promise<{ accountId?: string; eventId?: string }>;
@@ -80,7 +81,8 @@ export async function applyConflictResolution(
       accountId,
       accountEmail: account?.email ?? "",
       remoteEtag: conflict.remoteEtag,
-      remoteHref: event.remoteHref
+      remoteHref: event.remoteHref,
+      defaultTimeZone: resolveAccountCalendarTimeZone(account?.settings)
     });
     if (!merged) {
       // Remote ICS has no usable VEVENT — adopting it would write an

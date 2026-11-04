@@ -15,11 +15,17 @@ import { calendarPreviewToDbEvent } from "./icsSerializer";
 export function mergeRemoteIcsIntoEvent(
   local: CalendarEvent,
   icsData: string,
-  opts: { accountId: string; accountEmail: string; remoteEtag?: string; remoteHref?: string }
+  opts: {
+    accountId: string;
+    accountEmail: string;
+    remoteEtag?: string;
+    remoteHref?: string;
+    defaultTimeZone?: string | null;
+  }
 ): CalendarEvent | null {
   let preview;
   try {
-    preview = parseIcsEvents(icsData)[0];
+    preview = parseIcsEvents(icsData, { defaultTimeZone: opts.defaultTimeZone })[0];
   } catch {
     // Malformed ICS — treat it as an unusable remote version rather than
     // throwing (the resolve route maps null to a 422 instead of a 500).

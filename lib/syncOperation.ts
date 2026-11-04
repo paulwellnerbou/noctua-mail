@@ -19,6 +19,7 @@ import {
   upsertMessages
 } from "@/lib/db";
 import { processCalendarInviteForMessage } from "@/lib/calendarInviteProcessor";
+import { resolveAccountCalendarTimeZone } from "@/lib/accountSettings";
 import { getAttachmentContentBuffer, sanitizeSyncedMessage } from "@/lib/mail/syncMessageSanitizer";
 import { hasMessageFlag, isCalendarAttachment, CALENDAR_INVITE_FLAG } from "@/lib/messageFlags";
 import type { SyncMode } from "@/lib/syncPolicy";
@@ -858,6 +859,7 @@ export async function runSyncOperationBatched(
       icsSource: invite.icsSource,
       process: invite.process && !fullyProcessedInviteMessageIds.has(invite.messageId),
       accountEmail: account.email,
+      defaultTimeZone: resolveAccountCalendarTimeZone(account.settings),
       reminderUserId: autoProcessCalendarInvites ? account.ownerUserId : undefined,
       processedByUserId: autoProcessCalendarInvites ? account.ownerUserId : undefined,
       processedAutomatically: autoProcessCalendarInvites ? true : undefined

@@ -1,11 +1,15 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { Badge, Button, Callout, Flex, Grid, Select, Text, TextField } from "@radix-ui/themes";
 import { CheckCircle, Info, XCircle } from "lucide-react";
 import Field from "@/app/components/account-settings/Field";
 import PasswordField from "@/app/components/PasswordField";
 import type { Account, CaldavConfig } from "@/lib/data";
+import {
+  listSupportedCalendarTimeZones,
+  resolveDeviceCalendarTimeZone
+} from "@/lib/calendarTimezones";
 
 type TestResult = { ok: true; calendars: { displayName?: string; url: string }[] } | { ok: false; message: string };
 
@@ -16,6 +20,24 @@ const SYNC_INTERVAL_OPTIONS = [
   { value: "1800000", label: "30 minutes" },
   { value: "3600000", label: "1 hour" }
 ];
+
+// Radix Select items need a non-empty value; no IANA zone looks like this.
+const DEVICE_TIME_ZONE_OPTION = "__device__";
+
+function groupTimeZonesByRegion(zones: string[]) {
+  const groups = new Map<string, string[]>();
+  zones.forEach((zone) => {
+    const slash = zone.indexOf("/");
+    const region = slash > 0 ? zone.slice(0, slash) : "Other";
+    const bucket = groups.get(region);
+    if (bucket) {
+      bucket.push(zone);
+    } else {
+      groups.set(region, [zone]);
+    }
+  });
+  return Array.from(groups.entries());
+}
 
 type Props = {
   editingAccount: Account;
@@ -81,6 +103,29 @@ export default function CalendarTabContent({
   const canTest = Boolean(caldav?.url?.trim() && caldav?.user?.trim() && caldav?.password?.trim());
 
   const weekStartsOn = editingAccount.settings?.calendar?.weekStartsOn ?? "monday";
+  const timeZone = editingAccount.settings?.calendar?.timeZone ?? "";
+  const deviceTimeZone = useMemo(resolveDeviceCalendarTimeZone, []);
+  const timeZoneGroups = useMemo(() => {
+    const zones = listSupportedCalendarTimeZones();
+    // A stored zone this browser does not list would otherwise render an empty trigger.
+    return groupTimeZonesByRegion(timeZone && !zones.includes(timeZone) ? [timeZone, ...zones] : zones);
+  }, [timeZone]);
+
+  const updateTimeZone = (value: string) => {
+    const nextCalendar = { ...editingAccount.settings?.calendar };
+    if (value === DEVICE_TIME_ZONE_OPTION) {
+      delete nextCalendar.timeZone;
+    } else {
+      nextCalendar.timeZone = value;
+    }
+    onUpdateAccount({
+      ...editingAccount,
+      settings: {
+        ...editingAccount.settings,
+        calendar: nextCalendar
+      }
+    });
+  };
 
   const updateWeekStartsOn = (value: "monday" | "sunday") => {
     onUpdateAccount({
@@ -108,6 +153,29 @@ export default function CalendarTabContent({
               <Select.Content position="popper">
                 <Select.Item value="monday">Monday</Select.Item>
                 <Select.Item value="sunday">Sunday</Select.Item>
+              </Select.Content>
+            </Select.Root>
+          </Field>
+          <Field
+            label="Time zone"
+            hint="Applied to invite times that carry no time zone of their own, such as appointment confirmations. Without a choice, mail imported on the server uses the server's zone."
+          >
+            <Select.Root value={timeZone || DEVICE_TIME_ZONE_OPTION} onValueChange={updateTimeZone}>
+              <Select.Trigger style={{ width: "100%" }} />
+              <Select.Content position="popper">
+                <Select.Item value={DEVICE_TIME_ZONE_OPTION}>
+                  {deviceTimeZone ? `Device time zone (${deviceTimeZone})` : "Device time zone"}
+                </Select.Item>
+                {timeZoneGroups.map(([region, zones]) => (
+                  <Select.Group key={region}>
+                    <Select.Label>{region}</Select.Label>
+                    {zones.map((zone) => (
+                      <Select.Item key={zone} value={zone}>
+                        {zone}
+                      </Select.Item>
+                    ))}
+                  </Select.Group>
+                ))}
               </Select.Content>
             </Select.Root>
           </Field>

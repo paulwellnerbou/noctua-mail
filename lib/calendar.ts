@@ -6,6 +6,7 @@ import {
   resolveCalendarTimeZoneId,
   toCalendarTimeZoneWallDate
 } from "./calendarTimezones";
+import { buildDerivedCalendarEventUid } from "./calendarEventUids";
 import { formatAccountIntl } from "./dateFormatting";
 
 export type CalendarEventPreview = {
@@ -42,6 +43,11 @@ export type CalendarAttendeePreview = {
 export type ParsedCalendarInvite = {
   method?: string;
   events: CalendarEventPreview[];
+};
+
+export type ParseIcsOptions = {
+  /** Zone for date-times that carry neither a TZID nor a Z suffix (floating times). */
+  defaultTimeZone?: string | null;
 };
 
 type ParsedLine = {
@@ -242,14 +248,18 @@ export function formatCalendarEventRange(
   return `${startLabel} – ${endLabel}`;
 }
 
-function parseMultiDateValues(value: string, tzid?: string) {
+function parseMultiDateValues(value: string, tzid?: string, floatingTimeZone?: string) {
   return value
     .split(",")
-    .map((part) => parseCalendarDate(part, tzid).date)
+    .map((part) => parseCalendarDate(part, tzid, floatingTimeZone).date)
     .filter((date): date is Date => Boolean(date));
 }
 
-function parseCalendarDate(value: string, tzid?: string): { date?: Date; allDay: boolean; tzid?: string } {
+function parseCalendarDate(
+  value: string,
+  tzid?: string,
+  floatingTimeZone?: string
+): { date?: Date; allDay: boolean; tzid?: string } {
   const trimmed = value.trim();
   if (!trimmed) return { allDay: false };
   const resolvedTimezone = resolveCalendarTimeZoneId(tzid);
@@ -288,6 +298,19 @@ function parseCalendarDate(value: string, tzid?: string): { date?: Date; allDay:
       allDay: false,
       date: fromCalendarTimeZoneWallDate(wallDate, resolvedTimezone),
       tzid: resolvedTimezone
+    };
+  }
+  // A floating time without any TZID means "local wall time"; on a server
+  // that is whatever zone the process happens to run in, so callers supply
+  // the zone the account lives in instead.
+  if (!tzid?.trim() && floatingTimeZone) {
+    const wallDate = new Date(
+      Date.UTC(Number(y), Number(m) - 1, Number(d), Number(hh), Number(mm), Number(ss))
+    );
+    return {
+      allDay: false,
+      date: fromCalendarTimeZoneWallDate(wallDate, floatingTimeZone),
+      tzid: floatingTimeZone
     };
   }
   return {
@@ -342,8 +365,9 @@ function parseAttendee(value: string, params: Record<string, string>): CalendarA
   };
 }
 
-export function parseIcsInvite(source: string): ParsedCalendarInvite {
+export function parseIcsInvite(source: string, options?: ParseIcsOptions): ParsedCalendarInvite {
   if (!source.trim()) return { events: [] };
+  const floatingTimeZone = resolveCalendarTimeZoneId(options?.defaultTimeZone ?? undefined);
   const lines = unfoldLines(source);
   const events: CalendarEventPreview[] = [];
   let method: string | undefined;
@@ -384,7 +408,8 @@ export function parseIcsInvite(source: string): ParsedCalendarInvite {
         if (pendingDates?.start) {
           const parsedDate = parseCalendarDate(
             pendingDates.start.value,
-            pendingDates.start.tzid ?? fallbackTimezone
+            pendingDates.start.tzid ?? fallbackTimezone,
+            floatingTimeZone
           );
           event.start = parsedDate.date;
           event.startTimezone = parsedDate.tzid;
@@ -393,7 +418,8 @@ export function parseIcsInvite(source: string): ParsedCalendarInvite {
         if (pendingDates?.end) {
           const parsedDate = parseCalendarDate(
             pendingDates.end.value,
-            pendingDates.end.tzid ?? fallbackTimezone
+            pendingDates.end.tzid ?? fallbackTimezone,
+            floatingTimeZone
           );
           event.end = parsedDate.date;
           event.endTimezone = parsedDate.tzid;
@@ -401,7 +427,8 @@ export function parseIcsInvite(source: string): ParsedCalendarInvite {
         if (pendingDates?.recurrenceId) {
           const parsedDate = parseCalendarDate(
             pendingDates.recurrenceId.value,
-            pendingDates.recurrenceId.tzid ?? fallbackTimezone
+            pendingDates.recurrenceId.tzid ?? fallbackTimezone,
+            floatingTimeZone
           );
           event.recurrenceId = parsedDate.date;
           event.recurrenceIdTimezone = parsedDate.tzid;
@@ -412,7 +439,8 @@ export function parseIcsInvite(source: string): ParsedCalendarInvite {
             .flatMap((entry) =>
               parseMultiDateValues(
                 entry.value,
-                entry.tzid ?? event.startTimezone ?? fallbackTimezone
+                entry.tzid ?? event.startTimezone ?? fallbackTimezone,
+                floatingTimeZone
               )
             );
           if (dates.length > 0) {
@@ -424,12 +452,23 @@ export function parseIcsInvite(source: string): ParsedCalendarInvite {
             .flatMap((entry) =>
               parseMultiDateValues(
                 entry.value,
-                entry.tzid ?? event.startTimezone ?? fallbackTimezone
+                entry.tzid ?? event.startTimezone ?? fallbackTimezone,
+                floatingTimeZone
               )
             );
           if (dates.length > 0) {
             event.recurrenceDates = dates;
           }
+        }
+        if (!event.uid?.trim() && pendingDates?.start) {
+          event.uid = buildDerivedCalendarEventUid({
+            startValue: pendingDates.start.value,
+            startTzid: pendingDates.start.tzid,
+            endValue: pendingDates.end?.value,
+            endTzid: pendingDates.end?.tzid,
+            recurrenceIdValue: pendingDates.recurrenceId?.value,
+            summary: event.summary
+          });
         }
         events.push(event);
       }
@@ -497,9 +536,9 @@ export function parseIcsInvite(source: string): ParsedCalendarInvite {
   return { method, events };
 }
 
-export function parseIcsEvents(source: string): CalendarEventPreview[] {
+export function parseIcsEvents(source: string, options?: ParseIcsOptions): CalendarEventPreview[] {
   if (!source.trim()) return [];
-  return parseIcsInvite(source).events;
+  return parseIcsInvite(source, options).events;
 }
 
 function parseRRuleFields(rule: string) {

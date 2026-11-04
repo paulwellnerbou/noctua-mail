@@ -1,5 +1,16 @@
 import type { Account, AccountSettings, CaldavConfig } from "./data";
+import { isValidCalendarTimeZone } from "./calendarTimezones";
 import { normalizeAccountDateFormat } from "./dateFormatting";
+
+export function normalizeAccountCalendarTimeZone(value: unknown) {
+  const trimmed = typeof value === "string" ? value.trim() : "";
+  return trimmed && isValidCalendarTimeZone(trimmed) ? trimmed : undefined;
+}
+
+/** Zone for floating invite times; undefined means the process-local zone. */
+export function resolveAccountCalendarTimeZone(settings?: AccountSettings | null) {
+  return normalizeAccountCalendarTimeZone(settings?.calendar?.timeZone);
+}
 
 export function normalizeAccountSettings(settings?: AccountSettings) {
   const next: AccountSettings = settings ? JSON.parse(JSON.stringify(settings)) : {};
@@ -18,6 +29,14 @@ export function normalizeAccountSettings(settings?: AccountSettings) {
   }
   if (next.appearance.senderIcons === undefined) {
     next.appearance.senderIcons = true;
+  }
+  if (next.calendar?.timeZone !== undefined) {
+    const timeZone = normalizeAccountCalendarTimeZone(next.calendar.timeZone);
+    if (timeZone) {
+      next.calendar.timeZone = timeZone;
+    } else {
+      delete next.calendar.timeZone;
+    }
   }
   if (!next.signatures) next.signatures = [];
   if (next.defaultSignatureId === undefined) {
@@ -49,7 +68,8 @@ function normalizeComparableSettings(settings?: AccountSettings) {
     },
     calendar: {
       ...normalized.calendar,
-      weekStartsOn: normalized.calendar?.weekStartsOn ?? "monday"
+      weekStartsOn: normalized.calendar?.weekStartsOn ?? "monday",
+      timeZone: normalized.calendar?.timeZone ?? ""
     }
   };
 }
