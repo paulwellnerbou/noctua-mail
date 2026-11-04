@@ -26,6 +26,7 @@ import { AccountDateFormatProvider } from "./AccountDateFormatContext";
 import { AccountCalendarTimeZoneProvider } from "./AccountCalendarTimeZoneContext";
 import { resolveAccountCalendarTimeZone } from "@/lib/accountSettings";
 import LoginOverlay from "./auth/LoginOverlay";
+import { useSearchInput } from "./mailclient/useSearchInput";
 import FolderSidebarPane from "./mailclient/folder/FolderSidebarPane";
 import MoveToDialog, { recordRecentMoveFolder, getRecentMoveFolderIds } from "./mailclient/message/MoveToDialog";
 import CopyToAccountDialog from "./mailclient/message/CopyToAccountDialog";
@@ -348,6 +349,7 @@ export default function MailClient({
   const [activeMessageId, setActiveMessageId] = useState("");
   const [viewMessage, setViewMessage] = useState<Message | null>(null);
   const [query, setQuery] = useState("");
+  const { searchInput, setSearchInput, submitSearchInput } = useSearchInput({ query, setQuery });
   const [darkMode, setDarkMode] = useState(false);
   const [manageOpen, setManageOpen] = useState(false);
   const [manageTab, setManageTab] = useState<ManageTab>("account");
@@ -5300,7 +5302,7 @@ export default function MailClient({
       <TopBar
         buildVersionLabel={buildVersionLabel}
         state={{
-          query,
+          searchInput,
           searchScope,
           includeSentInEverywhere,
           sentFolderName: sentFolderBySpecialUse?.name ?? null,
@@ -5319,7 +5321,8 @@ export default function MailClient({
         }}
         ui={{ searchFieldsLabel, searchBadgesLabel }}
         actions={{
-          setQuery,
+          setSearchInput,
+          submitSearchInput,
           setSearchScope,
           setIncludeSentInEverywhere,
           setSearchFields,
