@@ -29,7 +29,12 @@ function groupTimeZonesByRegion(zones: string[]) {
   zones.forEach((zone) => {
     const slash = zone.indexOf("/");
     const region = slash > 0 ? zone.slice(0, slash) : "Other";
-    groups.set(region, [...(groups.get(region) ?? []), zone]);
+    const bucket = groups.get(region);
+    if (bucket) {
+      bucket.push(zone);
+    } else {
+      groups.set(region, [zone]);
+    }
   });
   return Array.from(groups.entries());
 }
