@@ -51,7 +51,7 @@ type ComposeMode = "new" | "reply" | "replyAll" | "forward" | "edit" | "editAsNe
 type TopBarProps = {
   buildVersionLabel?: string;
   state: {
-    query: string;
+    searchInput: string;
     searchScope: "folder" | "all";
     includeSentInEverywhere: boolean;
     sentFolderName: string | null;
@@ -73,7 +73,8 @@ type TopBarProps = {
     searchBadgesLabel: string;
   };
   actions: {
-    setQuery: React.Dispatch<React.SetStateAction<string>>;
+    setSearchInput: (value: string) => void;
+    submitSearchInput: () => void;
     setSearchScope: React.Dispatch<React.SetStateAction<"folder" | "all">>;
     setIncludeSentInEverywhere: React.Dispatch<React.SetStateAction<boolean>>;
     setSearchFields: React.Dispatch<React.SetStateAction<SearchFields>>;
@@ -102,7 +103,7 @@ export default function TopBar({
   actions
 }: TopBarProps) {
   const {
-    query,
+    searchInput,
     searchScope,
     includeSentInEverywhere,
     sentFolderName,
@@ -120,7 +121,8 @@ export default function TopBar({
     isSyncing
   } = state;
   const {
-    setQuery,
+    setSearchInput,
+    submitSearchInput,
     setSearchScope,
     setIncludeSentInEverywhere,
     setSearchFields,
@@ -239,17 +241,22 @@ export default function TopBar({
                   ? `Search messages in ${currentFolder.name}`
                   : "Search messages"
             }
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
+            value={searchInput}
+            onChange={(event) => setSearchInput(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key !== "Enter" || event.nativeEvent.isComposing) return;
+              event.preventDefault();
+              submitSearchInput();
+            }}
             id="top-search-input"
             className={styles.searchInput}
           >
-            {query ? (
+            {searchInput ? (
               <TextField.Slot side="right">
                 <TooltipIconButton
                   size="1"
                   variant="ghost"
-                  onClick={() => (isRelatedSearch ? clearSearch() : setQuery(""))}
+                  onClick={() => (isRelatedSearch ? clearSearch() : setSearchInput(""))}
                   tooltip="Clear search"
                 >
                   <X size={12} />

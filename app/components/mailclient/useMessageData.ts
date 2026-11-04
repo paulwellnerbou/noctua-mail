@@ -85,6 +85,9 @@ export function useMessageData({
 
   const filteredSearchRefreshTimerRef = useRef<number | null>(null);
   const lastRequestRef = useRef<{ key: string; page: number } | null>(null);
+  // Page request in flight; a key change aborts it so the newest key is fetched
+  // right away instead of waiting for a superseded response.
+  const activeRequestAbortRef = useRef<AbortController | null>(null);
   const messageMutationVersionRef = useRef(0);
   const listReplacementLogFingerprintRef = useRef("");
 
@@ -95,6 +98,8 @@ export function useMessageData({
         window.clearTimeout(filteredSearchRefreshTimerRef.current);
         filteredSearchRefreshTimerRef.current = null;
       }
+      activeRequestAbortRef.current?.abort();
+      activeRequestAbortRef.current = null;
     };
   }, []);
 
@@ -104,6 +109,8 @@ export function useMessageData({
       window.clearTimeout(filteredSearchRefreshTimerRef.current);
       filteredSearchRefreshTimerRef.current = null;
     }
+    activeRequestAbortRef.current?.abort();
+    activeRequestAbortRef.current = null;
     // The list is replaced wholesale for a new query key; the cleared state has
     // to land before the key's first page request.
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -193,9 +200,13 @@ export function useMessageData({
       const requestKey = messagesKey;
       const requestMutationVersion = messageMutationVersionRef.current;
       lastRequestRef.current = { key: requestKey, page: messagesPage };
+      const controller = new AbortController();
+      activeRequestAbortRef.current = controller;
       try {
         setLoadingMessages(true);
-        const messagesRes = await apiFetch(buildQueryUrl(messagesPage));
+        const messagesRes = await apiFetch(buildQueryUrl(messagesPage), {
+          signal: controller.signal
+        });
         if (messagesRes.ok) {
           const data = (await messagesRes.json()) as {
             items: Message[];
@@ -271,10 +282,16 @@ export function useMessageData({
           setMessageListError(errorMessage || "Failed to load messages.");
         }
       } catch {
+        // Superseded by a newer key: the reset effect already cleared the list
+        // state, and `finally` releases the loading flag for the next request.
+        if (controller.signal.aborted) return;
         lastRequestRef.current = null;
         reportError("Failed to load messages.");
         setMessageListError("Failed to load messages.");
       } finally {
+        if (activeRequestAbortRef.current === controller) {
+          activeRequestAbortRef.current = null;
+        }
         setLoadingMessages(false);
       }
     };
