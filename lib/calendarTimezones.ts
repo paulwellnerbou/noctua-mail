@@ -193,3 +193,20 @@ export function fromCalendarTimeZoneWallDate(date: Date, timeZone: string) {
     return new Date(date.getTime());
   }
 }
+
+export function resolveDeviceCalendarTimeZone() {
+  try {
+    return new Intl.DateTimeFormat().resolvedOptions().timeZone || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export function listSupportedCalendarTimeZones(): string[] {
+  try {
+    return Intl.supportedValuesOf("timeZone");
+  } catch {
+    const device = resolveDeviceCalendarTimeZone();
+    return device ? [device] : [];
+  }
+}

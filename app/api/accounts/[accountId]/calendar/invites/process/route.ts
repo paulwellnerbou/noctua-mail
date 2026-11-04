@@ -6,6 +6,7 @@ import {
 } from "@/app/api/_helpers/accountContext";
 import { appendMessageIdToError } from "@/app/api/_helpers/message/errorFormatting";
 import { processCalendarInviteForMessage } from "@/lib/calendarInviteProcessor";
+import { resolveAccountCalendarTimeZone } from "@/lib/accountSettings";
 import { getMessageById } from "@/lib/db";
 
 export async function POST(request: Request, { params }: AccountRouteParams) {
@@ -44,6 +45,7 @@ export async function POST(request: Request, { params }: AccountRouteParams) {
     icsSource,
     process: true,
     accountEmail: accountContext.account.email,
+    defaultTimeZone: resolveAccountCalendarTimeZone(accountContext.account.settings),
     reminderUserId: accountContext.session.userId,
     processedByUserId: accountContext.session.userId,
     processedAutomatically: false

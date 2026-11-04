@@ -7,6 +7,7 @@ import {
 import { listUnresolvedCalendarEventConflicts } from "@/lib/db";
 import { buildCalendarEventSnapshot } from "@/lib/calendarEventSnapshot";
 import { diffCalendarEventSnapshots } from "@/lib/calendarEventDiff";
+import { resolveAccountCalendarTimeZone } from "@/lib/accountSettings";
 
 /**
  * List unresolved CalDAV write-back conflicts. Each entry carries two diffs
@@ -23,11 +24,16 @@ export async function GET(request: Request, { params }: AccountRouteParams) {
 
   try {
     const conflicts = await listUnresolvedCalendarEventConflicts(accountContext.accountId);
+    const parseOptions = {
+      defaultTimeZone: resolveAccountCalendarTimeZone(accountContext.account.settings)
+    };
     const items = conflicts.map((c) => {
       try {
-        const base = c.baseIcs ? buildCalendarEventSnapshot(c.baseIcs, c.eventUid) : null;
-        const local = buildCalendarEventSnapshot(c.localIcs, c.eventUid);
-        const remote = buildCalendarEventSnapshot(c.remoteIcs, c.eventUid);
+        const base = c.baseIcs
+          ? buildCalendarEventSnapshot(c.baseIcs, c.eventUid, parseOptions)
+          : null;
+        const local = buildCalendarEventSnapshot(c.localIcs, c.eventUid, parseOptions);
+        const remote = buildCalendarEventSnapshot(c.remoteIcs, c.eventUid, parseOptions);
         return {
           eventId: c.eventId,
           eventUid: c.eventUid,

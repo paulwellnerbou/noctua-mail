@@ -8,6 +8,7 @@ import {
   deleteCalendarEventConflict
 } from "@/lib/db";
 import { parseIcsEvents } from "@/lib/calendar";
+import { resolveAccountCalendarTimeZone } from "@/lib/accountSettings";
 import {
   calendarPreviewToDbEvent,
   calendarEventToIcs,
@@ -79,6 +80,7 @@ export async function syncCalendarEvents(
   }
 
   const config = account.caldav;
+  const defaultTimeZone = resolveAccountCalendarTimeZone(account.settings);
 
   try {
     const client = await deps.createCaldavClient(config);
@@ -123,7 +125,7 @@ export async function syncCalendarEvents(
           if (!local) {
             // Remote-new: parse and insert
             try {
-              const previews = parseIcsEvents(remote.icsData);
+              const previews = parseIcsEvents(remote.icsData, { defaultTimeZone });
               for (const preview of previews) {
                 if (!preview.start) continue;
                 const dbEvent = calendarPreviewToDbEvent(preview, accountId, "caldav", {
@@ -151,7 +153,8 @@ export async function syncCalendarEvents(
                 accountId,
                 accountEmail: account.email,
                 remoteEtag: remote.etag,
-                remoteHref: remote.href
+                remoteHref: remote.href,
+                defaultTimeZone
               });
               if (updated) {
                 await upsertCalendarEvent(accountId, updated);

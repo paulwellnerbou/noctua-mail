@@ -1,6 +1,10 @@
 import { describe, expect, it } from "bun:test";
 import type { Account } from "./data";
-import { hasSavableAccountSettingsChanges, normalizeAccountSettings } from "./accountSettings";
+import {
+  hasSavableAccountSettingsChanges,
+  normalizeAccountSettings,
+  resolveAccountCalendarTimeZone
+} from "./accountSettings";
 
 function makeAccount(overrides: Partial<Account> = {}): Account {
   return {
@@ -124,5 +128,43 @@ describe("hasSavableAccountSettingsChanges", () => {
     });
 
     expect(hasSavableAccountSettingsChanges(initial, current, "preferences")).toBe(false);
+  });
+});
+
+describe("calendar time zone setting", () => {
+  it("keeps a valid IANA zone and drops an unknown one", () => {
+    expect(normalizeAccountSettings({ calendar: { timeZone: " Europe/Berlin " } }).calendar).toEqual({
+      timeZone: "Europe/Berlin"
+    });
+    expect(normalizeAccountSettings({ calendar: { timeZone: "Mars/Olympus" } }).calendar).toEqual({});
+    expect(normalizeAccountSettings({ calendar: { weekStartsOn: "sunday" } }).calendar).toEqual({
+      weekStartsOn: "sunday"
+    });
+  });
+
+  it("resolves the zone used for floating invite times", () => {
+    expect(resolveAccountCalendarTimeZone({ calendar: { timeZone: "Europe/Berlin" } })).toBe(
+      "Europe/Berlin"
+    );
+    expect(resolveAccountCalendarTimeZone({ calendar: { timeZone: "" } })).toBeUndefined();
+    expect(resolveAccountCalendarTimeZone(undefined)).toBeUndefined();
+  });
+
+  it("counts a time zone change as a savable calendar change", () => {
+    const initial = makeAccount({ settings: {} });
+    expect(
+      hasSavableAccountSettingsChanges(
+        initial,
+        makeAccount({ settings: { calendar: { timeZone: "Europe/Berlin" } } }),
+        "calendar"
+      )
+    ).toBe(true);
+    expect(
+      hasSavableAccountSettingsChanges(
+        initial,
+        makeAccount({ settings: { calendar: { timeZone: "" } } }),
+        "calendar"
+      )
+    ).toBe(false);
   });
 });

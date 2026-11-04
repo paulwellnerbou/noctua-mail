@@ -1,4 +1,4 @@
-import { parseIcsInvite, type CalendarEventPreview } from "./calendar";
+import { parseIcsInvite, type CalendarEventPreview, type ParseIcsOptions } from "./calendar";
 
 export type CalendarInviteActionType = "invitation" | "update" | "cancellation";
 export type CalendarInviteUnprocessedReason = "event_series_not_found";
@@ -53,8 +53,11 @@ export function inferCalendarInviteMessageActionType(
   return "invitation";
 }
 
-export function collectCalendarInviteMutationGroups(icsSource: string): CalendarInviteMutationGroup[] {
-  const parsed = parseIcsInvite(icsSource);
+export function collectCalendarInviteMutationGroups(
+  icsSource: string,
+  options?: ParseIcsOptions
+): CalendarInviteMutationGroup[] {
+  const parsed = parseIcsInvite(icsSource, options);
   const method = parsed.method?.trim().toUpperCase() || "";
   if (method === "REPLY") return [];
   const groupsByUid = new Map<string, CalendarInviteMutationGroup>();

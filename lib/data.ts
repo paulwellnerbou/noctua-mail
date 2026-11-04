@@ -76,6 +76,8 @@ export type AccountSettings = {
   };
   calendar?: {
     weekStartsOn?: "monday" | "sunday";
+    /** IANA zone for invite times that carry neither a TZID nor a Z suffix. */
+    timeZone?: string;
   };
   signatures?: {
     id: string;

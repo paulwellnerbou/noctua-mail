@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { requireSessionAccountOr403, requireSessionOr401 } from "@/lib/auth";
 import { getAccountById } from "@/lib/serverDb";
 import { processStandaloneCalendarInvite } from "@/lib/calendarInviteProcessor";
+import { resolveAccountCalendarTimeZone } from "@/lib/accountSettings";
 
 /**
  * Imports a standalone .ics file (e.g. from the PWA file handler or an
@@ -52,7 +53,8 @@ export async function POST(request: Request) {
   const result = await processStandaloneCalendarInvite({
     accountId,
     icsSource,
-    accountEmail: account.email
+    accountEmail: account.email,
+    defaultTimeZone: resolveAccountCalendarTimeZone(account.settings)
   });
 
   if (result.eventUids.length === 0) {

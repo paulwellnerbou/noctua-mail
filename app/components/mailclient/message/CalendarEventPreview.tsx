@@ -31,6 +31,7 @@ import { groupItemsByRelativeTime } from "../utils/relativeTimeGroups";
 import type { InviteProcessingStatePatch } from "../utils/calendarInviteState";
 import EventDetailView from "@/app/components/calendar/EventDetailView";
 import InviteAttachmentControls from "@/app/components/calendar/InviteAttachmentControls";
+import { useAccountCalendarTimeZone } from "@/app/components/AccountCalendarTimeZoneContext";
 import CalendarEventDiffPanel from "./CalendarEventDiffPanel";
 import shellStyles from "../../calendar/EmbeddedPreviewShell.module.css";
 import styles from "./CalendarEventPreview.module.css";
@@ -118,6 +119,7 @@ export default function CalendarEventPreview({
     () => attachments.find((a) => isCalendarAttachment(a) && Boolean(a.url || a.dataUrl)) ?? null,
     [attachments]
   );
+  const calendarTimeZone = useAccountCalendarTimeZone();
 
   const [result, setResult] = useState<{
     attachmentId: string;
@@ -155,7 +157,7 @@ export default function CalendarEventPreview({
             ? await fetch(attachment.url).then((r) => (r.ok ? r.text() : ""))
             : "";
         if (!active) return;
-        const parsed = parseIcsEvents(source);
+        const parsed = parseIcsEvents(source, { defaultTimeZone: calendarTimeZone });
         setResult({ attachmentId: attachment.id, events: parsed, rawSource: source, error: parsed.length === 0 });
       } catch {
         if (!active) return;
@@ -164,7 +166,7 @@ export default function CalendarEventPreview({
     };
     void load();
     return () => { active = false; };
-  }, [attachment]);
+  }, [attachment, calendarTimeZone]);
 
   useEffect(() => {
     // Invite state belongs to one message and attachment; it is dropped on switch.
@@ -197,11 +199,13 @@ export default function CalendarEventPreview({
   const inviteMutationGroupByUid = useMemo(() => {
     const map = new Map<string, CalendarInviteMutationGroup>();
     if (!rawSource.trim()) return map;
-    collectCalendarInviteMutationGroups(rawSource).forEach((group) => {
-      map.set(group.eventUid.trim().toLowerCase(), group);
-    });
+    collectCalendarInviteMutationGroups(rawSource, { defaultTimeZone: calendarTimeZone }).forEach(
+      (group) => {
+        map.set(group.eventUid.trim().toLowerCase(), group);
+      }
+    );
     return map;
-  }, [rawSource]);
+  }, [rawSource, calendarTimeZone]);
 
   const inviteActionTypeByUid = useMemo(() => {
     const map = new Map<string, ReturnType<typeof inferCalendarInviteMessageActionType>>();

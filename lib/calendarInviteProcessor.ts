@@ -179,7 +179,8 @@ async function hydrateExistingEventFromPriorInviteSource(
   accountId: string,
   messageId: string,
   eventUid: string,
-  accountEmail?: string | null
+  accountEmail?: string | null,
+  defaultTimeZone?: string | null
 ) {
   const candidates = await listCalendarInviteSourceMessagesByEventUid(accountId, eventUid, {
     excludeMessageId: messageId
@@ -189,9 +190,9 @@ async function hydrateExistingEventFromPriorInviteSource(
     if (!emailSource?.trim()) continue;
     const icsSource = await extractIcsSourceFromEmailSource(emailSource);
     if (!icsSource?.trim()) continue;
-    const parsed = parseIcsInvite(icsSource);
+    const parsed = parseIcsInvite(icsSource, { defaultTimeZone });
     if (parsed.method?.trim().toUpperCase() !== "REQUEST") continue;
-    const candidateGroup = collectCalendarInviteMutationGroups(icsSource).find(
+    const candidateGroup = collectCalendarInviteMutationGroups(icsSource, { defaultTimeZone }).find(
       (group) => group.eventUid.trim().toLowerCase() === eventUid.trim().toLowerCase()
     );
     if (!candidateGroup?.baseEvent) continue;
@@ -225,6 +226,7 @@ export type ProcessCalendarInviteForMessageParams = {
   icsSource: string;
   process: boolean;
   accountEmail?: string | null;
+  defaultTimeZone?: string | null;
   reminderUserId?: string | null;
   processedByUserId?: string | null;
   processedAutomatically?: boolean | null;
@@ -249,6 +251,7 @@ export async function processCalendarInviteForMessage({
   icsSource,
   process,
   accountEmail,
+  defaultTimeZone,
   reminderUserId,
   processedByUserId,
   processedAutomatically
@@ -257,7 +260,7 @@ export async function processCalendarInviteForMessage({
     return { states: [] };
   }
 
-  const groups = collectCalendarInviteMutationGroups(icsSource);
+  const groups = collectCalendarInviteMutationGroups(icsSource, { defaultTimeZone });
   if (groups.length === 0) {
     return { states: [] };
   }
@@ -275,7 +278,7 @@ export async function processCalendarInviteForMessage({
   // Parse the ICS once; a single message can carry several UIDs (base
   // event + recurrence overrides) and we'd otherwise re-parse the whole
   // source N times in this map.
-  const parsedInvite = parseIcsInvite(icsSource);
+  const parsedInvite = parseIcsInvite(icsSource, { defaultTimeZone });
   const inviteStatesWithSnapshots = inviteStates.map((state) => {
     const snapshot = buildCalendarEventSnapshotFromParsed(parsedInvite, state.eventUid);
     return {
@@ -334,7 +337,8 @@ export async function processCalendarInviteForMessage({
           accountId,
           messageId,
           group.eventUid,
-          accountEmail
+          accountEmail,
+          defaultTimeZone
         );
         existingEventsByUid.set(group.eventUid, existingEvent);
       }
@@ -501,6 +505,7 @@ export type ProcessStandaloneCalendarInviteParams = {
   accountId: string;
   icsSource: string;
   accountEmail?: string | null;
+  defaultTimeZone?: string | null;
 };
 
 export type ProcessStandaloneCalendarInviteFailure = {
@@ -541,10 +546,11 @@ export type ProcessStandaloneCalendarInviteResult = {
 export async function processStandaloneCalendarInvite({
   accountId,
   icsSource,
-  accountEmail
+  accountEmail,
+  defaultTimeZone
 }: ProcessStandaloneCalendarInviteParams): Promise<ProcessStandaloneCalendarInviteResult> {
   if (!icsSource.trim()) return { eventUids: [], imports: [], failures: [] };
-  const groups = collectCalendarInviteMutationGroups(icsSource);
+  const groups = collectCalendarInviteMutationGroups(icsSource, { defaultTimeZone });
   if (groups.length === 0) return { eventUids: [], imports: [], failures: [] };
 
   const eventUids: string[] = [];

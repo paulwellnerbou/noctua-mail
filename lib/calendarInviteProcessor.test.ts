@@ -1411,3 +1411,54 @@ describe("processCalendarInviteForMessage suppression guard", () => {
     expect(upsertCalendarEventByUid).toHaveBeenCalled();
   });
 });
+
+describe("default time zone for floating invite times", () => {
+  const floatingIcs = (uid: string, method: string) =>
+    makeIcs([
+      `METHOD:${method}`,
+      "BEGIN:VEVENT",
+      `UID:${uid}`,
+      "SUMMARY:Dental check-up",
+      "DTSTART:20261105T083000",
+      "DTEND:20261105T093000",
+      "END:VEVENT"
+    ]);
+  const expectedStartAtMs = new Date("2026-11-05T07:30:00Z").getTime();
+  const expectedEndAtMs = new Date("2026-11-05T08:30:00Z").getTime();
+
+  test("stores a mail invite's floating times in the account's calendar zone", async () => {
+    const result = await processCalendarInviteForMessage({
+      accountId: "acc-1",
+      messageId: "msg-floating",
+      icsSource: floatingIcs("floating-msg@example.test", "REQUEST"),
+      process: true,
+      accountEmail: "paul@example.test",
+      defaultTimeZone: "Europe/Berlin",
+      reminderUserId: "user-1",
+      processedByUserId: "user-1",
+      processedAutomatically: false
+    });
+
+    expect(result.states[0]?.eventFirstStartAtMs).toBe(expectedStartAtMs);
+    expect(upsertCalendarEventByUid).toHaveBeenCalledTimes(1);
+    const [, fields] = upsertCalendarEventByUid.mock.calls[0];
+    expect(fields.startAtMs).toBe(expectedStartAtMs);
+    expect(fields.endAtMs).toBe(expectedEndAtMs);
+    expect(fields.startTimezone).toBe("Europe/Berlin");
+  });
+
+  test("applies the zone to a standalone import too", async () => {
+    const result = await processStandaloneCalendarInvite({
+      accountId: "acc-1",
+      icsSource: floatingIcs("floating-file@example.test", "PUBLISH"),
+      accountEmail: "paul@example.test",
+      defaultTimeZone: "Europe/Berlin"
+    });
+
+    expect(result.eventUids).toEqual(["floating-file@example.test"]);
+    expect(result.imports[0]?.startAtMs).toBe(expectedStartAtMs);
+    const [, fields] = upsertCalendarEventByUid.mock.calls[0];
+    expect(fields.startAtMs).toBe(expectedStartAtMs);
+    expect(fields.startTimezone).toBe("Europe/Berlin");
+  });
+});
