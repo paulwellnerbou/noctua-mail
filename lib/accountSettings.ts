@@ -7,9 +7,15 @@ export function normalizeAccountCalendarTimeZone(value: unknown) {
   return trimmed && isValidCalendarTimeZone(trimmed) ? trimmed : undefined;
 }
 
-/** Zone for floating invite times; undefined means the process-local zone. */
+/**
+ * Zone for floating invite times: the explicit setting, else the zone of the
+ * device the account was last used from; undefined means the process-local zone.
+ */
 export function resolveAccountCalendarTimeZone(settings?: AccountSettings | null) {
-  return normalizeAccountCalendarTimeZone(settings?.calendar?.timeZone);
+  return (
+    normalizeAccountCalendarTimeZone(settings?.calendar?.timeZone) ??
+    normalizeAccountCalendarTimeZone(settings?.calendar?.deviceTimeZone)
+  );
 }
 
 export function normalizeAccountSettings(settings?: AccountSettings) {
@@ -30,12 +36,13 @@ export function normalizeAccountSettings(settings?: AccountSettings) {
   if (next.appearance.senderIcons === undefined) {
     next.appearance.senderIcons = true;
   }
-  if (next.calendar?.timeZone !== undefined) {
-    const timeZone = normalizeAccountCalendarTimeZone(next.calendar.timeZone);
-    if (timeZone) {
-      next.calendar.timeZone = timeZone;
+  for (const key of ["timeZone", "deviceTimeZone"] as const) {
+    if (!next.calendar || next.calendar[key] === undefined) continue;
+    const zone = normalizeAccountCalendarTimeZone(next.calendar[key]);
+    if (zone) {
+      next.calendar[key] = zone;
     } else {
-      delete next.calendar.timeZone;
+      delete next.calendar[key];
     }
   }
   if (!next.signatures) next.signatures = [];
@@ -69,7 +76,9 @@ function normalizeComparableSettings(settings?: AccountSettings) {
     calendar: {
       ...normalized.calendar,
       weekStartsOn: normalized.calendar?.weekStartsOn ?? "monday",
-      timeZone: normalized.calendar?.timeZone ?? ""
+      timeZone: normalized.calendar?.timeZone ?? "",
+      // Reported by the client, never edited in the dialog.
+      deviceTimeZone: undefined
     }
   };
 }

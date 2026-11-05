@@ -78,6 +78,8 @@ export type AccountSettings = {
     weekStartsOn?: "monday" | "sunday";
     /** IANA zone for invite times that carry neither a TZID nor a Z suffix. */
     timeZone?: string;
+    /** Zone of the device the account was last used from; the fallback when timeZone is unset. */
+    deviceTimeZone?: string;
   };
   signatures?: {
     id: string;

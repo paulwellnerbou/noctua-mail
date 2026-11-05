@@ -158,7 +158,7 @@ export default function CalendarTabContent({
           </Field>
           <Field
             label="Time zone"
-            hint="Applied to invite times that carry no time zone of their own, such as appointment confirmations. Without a choice, mail imported on the server uses the server's zone."
+            hint="Applied to invite times that carry no time zone of their own, such as appointment confirmations. Device time zone means the zone of the device you last opened Noctua on."
           >
             <Select.Root value={timeZone || DEVICE_TIME_ZONE_OPTION} onValueChange={updateTimeZone}>
               <Select.Trigger style={{ width: "100%" }} />

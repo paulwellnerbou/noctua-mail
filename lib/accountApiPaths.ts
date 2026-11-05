@@ -123,6 +123,10 @@ export function buildAccountCalendarInvitesProcessPath(accountId: string) {
   return buildAccountApiPath(accountId, "/calendar/invites/process");
 }
 
+export function buildAccountCalendarDeviceTimeZonePath(accountId: string) {
+  return buildAccountApiPath(accountId, "/calendar/device-time-zone");
+}
+
 export function buildAccountCalendarSyncPath(accountId: string) {
   return buildAccountApiPath(accountId, "/calendar/sync");
 }
