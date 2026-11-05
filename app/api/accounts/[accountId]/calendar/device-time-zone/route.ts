@@ -19,7 +19,7 @@ export async function POST(request: Request, { params }: AccountRouteParams) {
   const payload = (await request.json().catch(() => null)) as { timeZone?: unknown } | null;
   const timeZone = normalizeAccountCalendarTimeZone(payload?.timeZone);
   if (!timeZone) {
-    return errorResponse("Invalid timeZone", 400);
+    return errorResponse("Invalid time zone", 400);
   }
   const { accountId, account } = accountContext;
   if (account.settings?.calendar?.deviceTimeZone === timeZone) {
