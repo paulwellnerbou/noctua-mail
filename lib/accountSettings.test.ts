@@ -168,3 +168,32 @@ describe("calendar time zone setting", () => {
     ).toBe(false);
   });
 });
+
+describe("device time zone fallback", () => {
+  it("falls back to the reported device zone and lets the explicit setting win", () => {
+    expect(
+      resolveAccountCalendarTimeZone({ calendar: { deviceTimeZone: "Europe/Berlin" } })
+    ).toBe("Europe/Berlin");
+    expect(
+      resolveAccountCalendarTimeZone({
+        calendar: { timeZone: "America/New_York", deviceTimeZone: "Europe/Berlin" }
+      })
+    ).toBe("America/New_York");
+    expect(
+      resolveAccountCalendarTimeZone({ calendar: { timeZone: "", deviceTimeZone: "Europe/Berlin" } })
+    ).toBe("Europe/Berlin");
+  });
+
+  it("drops an unknown device zone on normalization", () => {
+    expect(
+      normalizeAccountSettings({ calendar: { deviceTimeZone: "Mars/Olympus", weekStartsOn: "sunday" } })
+        .calendar
+    ).toEqual({ weekStartsOn: "sunday" });
+  });
+
+  it("is not a savable change on the calendar tab", () => {
+    const initial = makeAccount({ settings: { calendar: { deviceTimeZone: "Europe/Berlin" } } });
+    const current = makeAccount({ settings: { calendar: { deviceTimeZone: "Asia/Tokyo" } } });
+    expect(hasSavableAccountSettingsChanges(initial, current, "calendar")).toBe(false);
+  });
+});

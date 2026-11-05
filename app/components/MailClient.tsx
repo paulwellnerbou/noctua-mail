@@ -117,6 +117,7 @@ import {
 } from "@/app/components/calendar/calendarEventsClient";
 import {
   buildAccountApiPath,
+  buildAccountCalendarDeviceTimeZonePath,
   buildAccountCalendarSyncPath,
   buildAccountRecipientAliasPath,
   buildAccountRecipientAliasesPath,
@@ -135,6 +136,7 @@ import {
   buildAccountTopicSuggestionsPath,
   buildAccountTopicsPath
 } from "@/lib/accountApiPaths";
+import { resolveDeviceCalendarTimeZone } from "@/lib/calendarTimezones";
 import { openDetachedWindow } from "@/lib/ui/openDetachedWindow";
 import { useWindowTitle } from "@/lib/ui/windowTitle";
 import { useSyncedRef } from "@/lib/ui/latestRef";
@@ -4236,6 +4238,39 @@ export default function MailClient({
       window.removeEventListener(CALENDAR_EVENTS_UPDATED_EVENT, onLocalChange);
     };
   }, [activeAccountId, currentAccount?.caldav?.url, currentAccount?.caldav?.syncIntervalMs, initialDataReady, apiFetch]);
+
+  // Floating invite times are read in the zone of the device the account is
+  // used from unless an explicit calendar time zone is set; the server only
+  // learns that zone from here, so report it whenever it differs.
+  const reportedDeviceTimeZone = currentAccount?.settings?.calendar?.deviceTimeZone;
+  useEffect(() => {
+    if (!activeAccountId || !initialDataReady) return;
+    const deviceTimeZone = resolveDeviceCalendarTimeZone();
+    if (!deviceTimeZone || deviceTimeZone === reportedDeviceTimeZone) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const response = await apiFetch(buildAccountCalendarDeviceTimeZonePath(activeAccountId), {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ timeZone: deviceTimeZone })
+        });
+        if (!response.ok || cancelled) return;
+        const updated = (await response.json()) as Pick<Account, "id" | "settings">;
+        if (cancelled || !updated?.settings) return;
+        setAccounts((prev) =>
+          prev.map((account) =>
+            account.id === updated.id ? { ...account, settings: updated.settings } : account
+          )
+        );
+      } catch {
+        // Best effort: the next app load reports again.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeAccountId, initialDataReady, reportedDeviceTimeZone, apiFetch]);
 
   useEffect(() => {
     const loadThreadRelated = async () => {
