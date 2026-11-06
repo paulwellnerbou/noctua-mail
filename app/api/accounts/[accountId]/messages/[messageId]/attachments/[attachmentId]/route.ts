@@ -4,6 +4,7 @@ import { getAttachmentData, getMessageSource, saveAttachmentData } from "@/lib/s
 import { getAttachmentMeta } from "@/lib/db";
 import { requireSessionAccountOr403, requireSessionOr401 } from "@/lib/auth";
 import { extractAttachmentBufferFromSource } from "@/lib/mail/attachmentFromSource";
+import { normalizeContentType } from "@/lib/mail/attachmentMatch";
 import { ensureHtmlDocumentTitle, escapeHtml } from "@/lib/html";
 import { formatAttachmentPageTitle } from "@/lib/appBranding";
 import { removeMessageAttachmentEverywhere } from "@/lib/mail/removeMessageAttachment";
@@ -46,11 +47,17 @@ export async function GET(request: Request, { params }: Params) {
   if (searchParams.get("preview") === "1") {
     const frameUrl = new URL(request.url);
     frameUrl.searchParams.delete("preview");
+    // The browser's built-in text viewer draws default black text on a
+    // transparent canvas, so a text attachment needs a light backdrop behind
+    // the frame; images and PDFs sit on the dark one.
+    const backdrop = normalizeContentType(attachment.contentType).startsWith("text/")
+      ? "#fff"
+      : "#1f1d1a";
     const shell = [
       '<!doctype html><html lang="en"><head>',
       '<meta charset="utf-8">',
       '<meta name="viewport" content="width=device-width,initial-scale=1">',
-      "<style>html,body{margin:0;height:100%;background:#1f1d1a}",
+      `<style>html,body{margin:0;height:100%;background:${backdrop}}`,
       "iframe{border:0;display:block;width:100%;height:100%}</style>",
       "</head><body>",
       `<iframe src="${escapeHtml(frameUrl.pathname + frameUrl.search)}"></iframe>`,
