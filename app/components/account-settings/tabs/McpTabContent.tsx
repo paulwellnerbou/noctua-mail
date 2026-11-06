@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Check, Copy } from "lucide-react";
-import { Badge, Button, Card, Flex, Select, Text, TextField } from "@radix-ui/themes";
+import { Badge, Box, Button, Card, Flex, Select, Text, TextField } from "@radix-ui/themes";
 import {
   buildAccountMcpTokenPath,
   buildAccountMcpTokensPath
@@ -10,6 +10,7 @@ import {
 import type { AccountDateFormat, McpTokenMetadata } from "@/lib/data";
 import { formatAccountTimestampLabel } from "@/lib/dateFormatting";
 import TooltipIconButton from "@/app/components/TooltipIconButton";
+import McpClientSetup from "@/app/components/account-settings/McpClientSetup";
 
 type Props = {
   accountId?: string;
@@ -258,7 +259,7 @@ export default function McpTabContent({
               <Text size="2" color="gray">Expiry</Text>
               <Select.Root value={expiryPreset} onValueChange={(value) => setExpiryPreset(value as typeof expiryPreset)}>
                 <Select.Trigger />
-                <Select.Content>
+                <Select.Content position="popper">
                   {EXPIRY_PRESETS.map((preset) => (
                     <Select.Item key={preset.value} value={preset.value}>
                       {preset.label}
@@ -319,6 +320,10 @@ export default function McpTabContent({
             )}
           </Flex>
         </Card>
+
+        <Box mt="4">
+          <McpClientSetup serverUrl={serverUrl} token={createdSecret || null} />
+        </Box>
 
         <Flex direction="column" gap="3" style={{ marginTop: "var(--space-4)" }}>
           <Flex align="center" justify="between">
