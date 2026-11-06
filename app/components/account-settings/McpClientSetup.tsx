@@ -22,6 +22,7 @@ export default function McpClientSetup({ serverUrl, token }: Props) {
     [serverUrl, token]
   );
   const section = sections.find((item) => item.id === clientId) ?? sections[0];
+  const hasToken = Boolean(token?.trim());
 
   return (
     <Card>
@@ -41,7 +42,7 @@ export default function McpClientSetup({ serverUrl, token }: Props) {
           </SegmentedControl.Root>
         </Flex>
         <Text size="1" color="gray">
-          {token
+          {hasToken
             ? "The snippets below already contain the token you just created."
             : `Create a token above, then replace ${MCP_TOKEN_PLACEHOLDER} in the snippets with its secret.`}
         </Text>

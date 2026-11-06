@@ -70,6 +70,8 @@ export function buildMcpClientSetupSections({
                     "--transport",
                     "http-only",
                     "--header",
+                    // No space after the colon: Claude Desktop on Windows mangles
+                    // spaces inside args, so the full "Bearer ..." value lives in env.
                     `Authorization:\${${MCP_TOKEN_ENV_VAR}}`
                   ],
                   env: { [MCP_TOKEN_ENV_VAR]: bearer }
