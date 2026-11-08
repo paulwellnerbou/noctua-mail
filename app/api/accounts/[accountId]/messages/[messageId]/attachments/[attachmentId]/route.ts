@@ -1,9 +1,8 @@
 import { NextResponse } from "next/server";
 import { type AccountRouteParams, getAccountIdFromParams } from "@/app/api/_helpers/accountContext";
-import { getAttachmentData, getMessageSource, saveAttachmentData } from "@/lib/storage";
 import { getAttachmentMeta } from "@/lib/db";
 import { requireSessionAccountOr403, requireSessionOr401 } from "@/lib/auth";
-import { extractAttachmentBufferFromSource } from "@/lib/mail/attachmentFromSource";
+import { loadAttachmentData } from "@/lib/mail/attachmentData";
 import { normalizeContentType } from "@/lib/mail/attachmentMatch";
 import { ensureHtmlDocumentTitle, escapeHtml } from "@/lib/html";
 import { formatAttachmentPageTitle } from "@/lib/appBranding";
@@ -69,29 +68,14 @@ export async function GET(request: Request, { params }: Params) {
     );
   }
 
-  let data = await getAttachmentData(accountId, messageId, attachmentId);
+  const data = await loadAttachmentData(accountId, messageId, {
+    id: attachmentId,
+    filename: attachment.filename ?? undefined,
+    contentType: attachment.contentType ?? undefined,
+    cid: attachment.cid ?? undefined
+  });
   if (!data) {
-    const source = await getMessageSource(accountId, messageId);
-    if (!source) {
-      return NextResponse.json({ ok: false, message: "Attachment data not found" }, { status: 404 });
-    }
-
-    try {
-      const extractedContent = await extractAttachmentBufferFromSource(source, {
-        id: attachmentId,
-        filename: attachment.filename ?? undefined,
-        contentType: attachment.contentType ?? undefined,
-        cid: attachment.cid ?? undefined
-      });
-      if (!extractedContent) {
-        return NextResponse.json({ ok: false, message: "Attachment data not found" }, { status: 404 });
-      }
-      const normalizedContent = Buffer.from(extractedContent);
-      data = normalizedContent;
-      await saveAttachmentData(accountId, messageId, attachmentId, normalizedContent);
-    } catch {
-      return NextResponse.json({ ok: false, message: "Attachment data not found" }, { status: 404 });
-    }
+    return NextResponse.json({ ok: false, message: "Attachment data not found" }, { status: 404 });
   }
 
   const rawName = attachment.filename ?? "attachment";

@@ -6,6 +6,7 @@ import {
   isJSONRPCError,
   isJSONRPCRequest,
   isJSONRPCResponse,
+  type EmbeddedResource,
   type JSONRPCMessage,
   type MessageExtraInfo,
   type RequestId
@@ -13,7 +14,7 @@ import {
 import { z } from "zod";
 import { enrichMessagesWithThreadTopics } from "@/app/api/_helpers/enrichMessagesWithThreadTopics";
 import { runNewMailCheck } from "@/app/api/_helpers/newMailCheck";
-import type { Account, Folder, Message, McpTokenMetadata } from "@/lib/data";
+import type { Account, Attachment, Folder, Message, McpTokenMetadata } from "@/lib/data";
 import {
   getAccountsForUser,
   getFolders,
@@ -28,6 +29,7 @@ import {
   saveDraftForAccount,
   type DraftCreateMode
 } from "@/lib/drafts";
+import { loadAttachmentData } from "@/lib/mail/attachmentData";
 import { applyFlagMutationsToMessage } from "@/lib/messageFlagMutation";
 import {
   addThreadTopic,
@@ -169,6 +171,13 @@ const MESSAGE_ID_SCHEMA = {
   messageId: z.string().trim().min(1)
 };
 
+const GET_ATTACHMENT_SCHEMA = {
+  ...MESSAGE_ID_SCHEMA,
+  attachmentId: z.string().trim().min(1).describe(
+    "Attachment id as returned by list_message_attachments or on a message's attachments."
+  )
+};
+
 const CREATE_DRAFT_MESSAGE_SCHEMA = {
   ...ACCOUNT_ID_ARG,
   mode: z.enum(["new", "reply", "forward"]).optional(),
@@ -263,6 +272,27 @@ const SEARCH_RESULT_TOPIC_SCHEMA = {
   matchCount: z.number().optional()
 };
 
+const MESSAGE_ATTACHMENT_SCHEMA = {
+  id: z.string(),
+  filename: z.string(),
+  contentType: z.string(),
+  size: z.number(),
+  inline: z.boolean(),
+  cid: z.string().optional()
+};
+
+const LIST_MESSAGE_ATTACHMENTS_OUTPUT_SCHEMA = {
+  ok: z.boolean(),
+  messageId: z.string(),
+  attachments: z.array(z.object(MESSAGE_ATTACHMENT_SCHEMA))
+};
+
+const GET_ATTACHMENT_OUTPUT_SCHEMA = {
+  ok: z.boolean(),
+  messageId: z.string(),
+  attachment: z.object(MESSAGE_ATTACHMENT_SCHEMA)
+};
+
 const SEARCH_RESULT_MESSAGE_SCHEMA = {
   id: z.string(),
   accountId: z.string(),
@@ -281,6 +311,7 @@ const SEARCH_RESULT_MESSAGE_SCHEMA = {
   hasSource: z.boolean().optional(),
   hasAttachments: z.boolean().optional(),
   hasInlineAttachments: z.boolean().optional(),
+  attachments: z.array(z.object(MESSAGE_ATTACHMENT_SCHEMA)).optional(),
   unread: z.boolean().optional(),
   priority: z.string().optional(),
   flags: z.array(z.string()).optional(),
@@ -339,6 +370,53 @@ async function resolveAccountContext(
   return { ...baseContext, accountId: account.id, account };
 }
 
+async function requireMessage(accountId: string, messageId: string) {
+  const message = await getMessageById(accountId, messageId);
+  if (!message) {
+    throw new Error("Message not found");
+  }
+  return message;
+}
+
+// Hydrated attachments carry the web route's URL, which only the browser
+// session cookie can open; an MCP client fetches the bytes via get_attachment.
+function toMcpAttachment(attachment: Attachment) {
+  const { id, filename, contentType, size, inline, cid } = attachment;
+  return { id, filename, contentType, size, inline, cid };
+}
+
+type McpAttachment = ReturnType<typeof toMcpAttachment>;
+
+function withMcpAttachments(message: Message): Message {
+  if (!message.attachments) return message;
+  return { ...message, attachments: message.attachments.map(toMcpAttachment) };
+}
+
+function toMcpMessageListResult(result: MessageListResult): MessageListResult {
+  return { ...result, items: result.items.map(withMcpAttachments) };
+}
+
+function buildAttachmentResourceUri(accountId: string, messageId: string, attachmentId: string) {
+  return `mywebmail://accounts/${encodeURIComponent(accountId)}/messages/${encodeURIComponent(messageId)}/attachments/${encodeURIComponent(attachmentId)}`;
+}
+
+async function loadMessageAttachment(
+  context: McpAccountContext,
+  messageId: string,
+  attachmentId: string
+) {
+  const message = await requireMessage(context.accountId, messageId);
+  const attachment = message.attachments?.find((item) => item.id === attachmentId);
+  if (!attachment) {
+    throw new Error("Attachment not found");
+  }
+  const data = await loadAttachmentData(context.accountId, message.id, attachment);
+  if (!data) {
+    throw new Error("Attachment data not found");
+  }
+  return { message, attachment: toMcpAttachment(attachment), data };
+}
+
 function normalizeStringList(values?: string[] | null) {
   return Array.from(
     new Set((values ?? []).map((value) => value.trim()).filter(Boolean))
@@ -370,9 +448,13 @@ function buildSummary(result: MessageListResult) {
   return [`Returned ${result.items.length} messages from ${mode}.`, total, page].filter(Boolean).join(" ");
 }
 
-function buildToolResult(summary: string, structuredContent: Record<string, unknown>) {
+function buildToolResult(
+  summary: string,
+  structuredContent: Record<string, unknown>,
+  resources: EmbeddedResource[] = []
+) {
   return {
-    content: [{ type: "text" as const, text: summary }],
+    content: [{ type: "text" as const, text: summary }, ...resources],
     structuredContent
   };
 }
@@ -395,6 +477,26 @@ function formatFolderListContent(folders: Folder[]) {
   });
 
   return [`Returned ${folders.length} folders:`, ...lines].join("\n");
+}
+
+function formatAttachmentListContent(messageId: string, attachments: McpAttachment[]) {
+  if (attachments.length === 0) {
+    return `Message ${messageId} has no attachments.`;
+  }
+
+  const lines = attachments.map((attachment) => {
+    const parts = [
+      `id=${attachment.id}`,
+      `filename=${JSON.stringify(attachment.filename)}`,
+      `contentType=${attachment.contentType}`,
+      `size=${attachment.size}`
+    ];
+    if (attachment.inline) parts.push("inline=true");
+    if (attachment.cid) parts.push(`cid=${attachment.cid}`);
+    return `- ${parts.join(" ")}`;
+  });
+
+  return [`Returned ${attachments.length} attachments for message ${messageId}:`, ...lines].join("\n");
 }
 
 function makeJsonRpcError(id: RequestId | null, code: number, message: string) {
@@ -485,10 +587,7 @@ async function resolveThreadTarget(
   if (threadId) {
     return { threadId };
   }
-  const message = await getMessageById(context.accountId, messageId);
-  if (!message) {
-    throw new Error("Message not found");
-  }
+  const message = await requireMessage(context.accountId, messageId);
   if (!message.threadId?.trim()) {
     throw new Error("Message does not have a threadId.");
   }
@@ -530,10 +629,7 @@ async function updateTodoState(
   messageId: string,
   targetState: "todo" | "done" | "clear"
 ) {
-  const message = await getMessageById(context.accountId, messageId);
-  if (!message) {
-    throw new Error("Message not found");
-  }
+  const message = await requireMessage(context.accountId, messageId);
 
   const hasTodo = hasTodoFlag(message.flags);
   const hasDone = hasDoneFlag(message.flags);
@@ -799,7 +895,7 @@ async function createDraftMessage(
     mode: args.mode ?? "new",
     referenceMessageId: args.messageId?.trim() || null,
     draftId: result.draftId,
-    message
+    message: message ? withMcpAttachments(message) : message
   };
 }
 
@@ -1007,7 +1103,7 @@ export async function executeMcpHttpRequest(params: {
       excludedFolderIds?: string[];
     }) => {
       const ctx = await resolveAccountContext(context, args.accountId);
-      const result = await listMessagesForFolder(ctx, args);
+      const result = toMcpMessageListResult(await listMessagesForFolder(ctx, args));
       return buildToolResult(buildSummary(result), result as unknown as Record<string, unknown>);
     }
   );
@@ -1016,14 +1112,62 @@ export async function executeMcpHttpRequest(params: {
     "search_messages",
     {
       description:
-        "Search messages using standard, related, or thread-related modes. Standard mode supports query, topic, sender, recipient, participant, folder, badge, attachment, pagination, and grouping filters.",
+        "Search messages using standard, related, or thread-related modes. Standard mode supports query, topic, sender, recipient, participant, folder, badge, attachment, pagination, and grouping filters. Attachment metadata on returned messages carries no URL; fetch an attachment with get_attachment.",
       inputSchema: SEARCH_MESSAGES_SCHEMA,
       outputSchema: SEARCH_MESSAGES_OUTPUT_SCHEMA
     },
     async (args) => {
       const ctx = await resolveAccountContext(context, args.accountId);
-      const result = await searchMessages(ctx, args);
+      const result = toMcpMessageListResult(await searchMessages(ctx, args));
       return buildToolResult(buildSummary(result), result as unknown as Record<string, unknown>);
+    }
+  );
+
+  server.registerTool(
+    "list_message_attachments",
+    {
+      description:
+        "List the attachments of one message with their ids, filenames, content types, and sizes. Fetch an attachment's bytes with get_attachment.",
+      inputSchema: MESSAGE_ID_SCHEMA,
+      outputSchema: LIST_MESSAGE_ATTACHMENTS_OUTPUT_SCHEMA
+    },
+    async ({ accountId: requestedAccountId, messageId }) => {
+      const ctx = await resolveAccountContext(context, requestedAccountId);
+      const message = await requireMessage(ctx.accountId, messageId);
+      const attachments = (message.attachments ?? []).map(toMcpAttachment);
+      return buildToolResult(formatAttachmentListContent(message.id, attachments), {
+        ok: true,
+        messageId: message.id,
+        attachments
+      });
+    }
+  );
+
+  server.registerTool(
+    "get_attachment",
+    {
+      description:
+        "Download one attachment of a message. The result embeds the file as a resource whose mimeType is the attachment's content type and whose blob holds the raw bytes base64-encoded; the structured content carries the attachment metadata.",
+      inputSchema: GET_ATTACHMENT_SCHEMA,
+      outputSchema: GET_ATTACHMENT_OUTPUT_SCHEMA
+    },
+    async ({ accountId: requestedAccountId, messageId, attachmentId }) => {
+      const ctx = await resolveAccountContext(context, requestedAccountId);
+      const { message, attachment, data } = await loadMessageAttachment(ctx, messageId, attachmentId);
+      return buildToolResult(
+        `Attachment ${JSON.stringify(attachment.filename)} (${attachment.contentType}, ${data.length} bytes) of message ${message.id} is embedded as a base64 resource.`,
+        { ok: true, messageId: message.id, attachment },
+        [
+          {
+            type: "resource",
+            resource: {
+              uri: buildAttachmentResourceUri(ctx.accountId, message.id, attachment.id),
+              mimeType: attachment.contentType || "application/octet-stream",
+              blob: data.toString("base64")
+            }
+          }
+        ]
+      );
     }
   );
 
@@ -1089,10 +1233,7 @@ export async function executeMcpHttpRequest(params: {
     MESSAGE_ID_SCHEMA,
     async ({ accountId: requestedAccountId, messageId }) => {
       const ctx = await resolveAccountContext(context, requestedAccountId);
-      const message = await getMessageById(ctx.accountId, messageId);
-      if (!message) {
-        throw new Error("Message not found");
-      }
+      const message = await requireMessage(ctx.accountId, messageId);
       const nextFlags = await applyFlagMutationsToMessage({
         accountId: ctx.accountId,
         account: ctx.account,
@@ -1117,10 +1258,7 @@ export async function executeMcpHttpRequest(params: {
     MESSAGE_ID_SCHEMA,
     async ({ accountId: requestedAccountId, messageId }) => {
       const ctx = await resolveAccountContext(context, requestedAccountId);
-      const message = await getMessageById(ctx.accountId, messageId);
-      if (!message) {
-        throw new Error("Message not found");
-      }
+      const message = await requireMessage(ctx.accountId, messageId);
       const nextFlags = await applyFlagMutationsToMessage({
         accountId: ctx.accountId,
         account: ctx.account,

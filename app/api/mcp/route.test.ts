@@ -1,6 +1,6 @@
 import { randomUUID } from "crypto";
 import { beforeEach, describe, expect, mock, test } from "bun:test";
-import type { Account, Folder, Message } from "@/lib/data";
+import type { Account, Attachment, Folder, Message } from "@/lib/data";
 import {
   createMcpAccessToken,
   hashOpaqueToken,
@@ -10,6 +10,7 @@ import { dbModulePromise } from "@/lib/testDbHarness";
 import { createTopic, setThreadTopics } from "@/lib/topics";
 import { createRecipientAlias } from "@/lib/recipientAliases";
 import { AI_MODIFIED_FLAG, hasAiModifiedFlag } from "@/lib/messageFlags";
+import { ATTACHMENT_EML, ATTACHMENT_EML_INVOICE_TEXT } from "@/lib/testEmlFixtures";
 
 type BuiltDraftMail = {
   to?: string;
@@ -85,6 +86,7 @@ const {
   upsertMessages
 } = await dbModulePromise;
 const { POST } = await import("./route");
+const { getAttachmentData, saveAttachmentData, saveMessageSource } = await import("@/lib/storage");
 
 mock.restore();
 
@@ -148,6 +150,7 @@ function buildMessage(params: {
   messageId?: string;
   inReplyTo?: string;
   flags?: string[];
+  attachments?: Attachment[];
 }): Message {
   return {
     id: params.id,
@@ -167,7 +170,8 @@ function buildMessage(params: {
     body: params.subject,
     mailboxPath: "INBOX",
     imapUid: params.imapUid,
-    flags: params.flags ?? []
+    flags: params.flags ?? [],
+    attachments: params.attachments
   };
 }
 
@@ -457,6 +461,8 @@ describe("/api/mcp", () => {
         "list_mailing_list_aliases",
         "list_messages_by_folder",
         "search_messages",
+        "list_message_attachments",
+        "get_attachment",
         "assign_topics",
         "unassign_topics",
         "create_draft_message",
@@ -1043,6 +1049,177 @@ describe("/api/mcp", () => {
     const forwardDraft = await getMessageById(accountId, `${accountId}-draft-9002`);
     expect(forwardDraft?.xForwardedMessageId).toBe(`<${accountId}-msg-2@example.test>`);
     expect(forwardDraft?.flags).toContain(AI_MODIFIED_FLAG);
+  });
+
+  test("lists message attachments and downloads them as embedded resources", async () => {
+    const accountId = uniqueAccountId("acc-mcp-attachments");
+    const { account, folder } = await seedMailbox(accountId);
+    const messageId = `${accountId}-msg-attachments`;
+    const storedAttachment: Attachment = {
+      id: `att-${accountId}-stored`,
+      filename: "report.pdf",
+      contentType: "application/pdf",
+      size: 6,
+      inline: false
+    };
+    const sourceOnlyAttachment: Attachment = {
+      id: `att-${accountId}-0`,
+      filename: "invoice.pdf",
+      contentType: "application/pdf",
+      size: 10,
+      inline: false
+    };
+    await upsertMessages(accountId, folder.id, [
+      buildMessage({
+        id: messageId,
+        accountId,
+        folderId: folder.id,
+        threadId: `${accountId}-thread-attachments`,
+        subject: "Quarterly report",
+        from: "reports@example.test",
+        to: "owner@example.test",
+        dateValue: Date.UTC(2026, 2, 26, 9, 0, 0),
+        imapUid: 104,
+        attachments: [storedAttachment, sourceOnlyAttachment]
+      })
+    ]);
+    const storedBytes = Buffer.from([0x25, 0x50, 0x44, 0x46, 0x00, 0xff]);
+    await saveAttachmentData(accountId, messageId, storedAttachment.id, storedBytes);
+    await saveMessageSource(accountId, messageId, ATTACHMENT_EML);
+
+    const otherAccountId = uniqueAccountId("acc-mcp-attachments-other");
+    const other = await seedMailbox(otherAccountId);
+    const otherMessageId = `${otherAccountId}-msg-attachments`;
+    await upsertMessages(otherAccountId, other.folder.id, [
+      buildMessage({
+        id: otherMessageId,
+        accountId: otherAccountId,
+        folderId: other.folder.id,
+        threadId: `${otherAccountId}-thread-attachments`,
+        subject: "Private report",
+        from: "reports@example.test",
+        to: "someone-else@example.test",
+        dateValue: Date.UTC(2026, 2, 26, 9, 0, 0),
+        imapUid: 104,
+        attachments: [storedAttachment]
+      })
+    ]);
+    await saveAttachmentData(otherAccountId, otherMessageId, storedAttachment.id, storedBytes);
+
+    const rawToken = await createStoredToken({
+      account,
+      accountId,
+      tokenId: `${accountId}-token`,
+      expiresAt: Date.now() + 24 * 60 * 60 * 1000
+    });
+
+    type AttachmentToolBody = {
+      result?: {
+        isError?: boolean;
+        content?: Array<{
+          type?: string;
+          text?: string;
+          resource?: { uri?: string; mimeType?: string; blob?: string; text?: string };
+        }>;
+        structuredContent?: {
+          ok?: boolean;
+          messageId?: string;
+          attachments?: Array<Record<string, unknown>>;
+          attachment?: Record<string, unknown>;
+          items?: Array<{ attachments?: Array<Record<string, unknown>> }>;
+        };
+      };
+    };
+    const callTool = async (name: string, args: Record<string, unknown>, id: number) => {
+      const response = await postMcp(
+        { jsonrpc: "2.0", id, method: "tools/call", params: { name, arguments: args } },
+        rawToken
+      );
+      expect(response.status).toBe(200);
+      return (await response.json()) as AttachmentToolBody;
+    };
+
+    const listBody = await callTool("list_message_attachments", { messageId }, 40);
+    expect(listBody.result?.isError).toBeUndefined();
+    expect(listBody.result?.structuredContent).toEqual({
+      ok: true,
+      messageId,
+      attachments: [storedAttachment, sourceOnlyAttachment]
+    });
+    expect(listBody.result?.content?.[0]?.text).toContain(`filename=${JSON.stringify(storedAttachment.filename)}`);
+    expect(listBody.result?.content?.[0]?.text).toContain(`id=${sourceOnlyAttachment.id}`);
+
+    const threadSearchBody = await callTool("search_messages", { messageIds: [messageId] }, 41);
+    const searchedAttachments = threadSearchBody.result?.structuredContent?.items?.[0]?.attachments;
+    expect(searchedAttachments).toEqual([storedAttachment, sourceOnlyAttachment]);
+    expect(searchedAttachments?.some((item) => "url" in item)).toBe(false);
+
+    const storedBody = await callTool(
+      "get_attachment",
+      { messageId, attachmentId: storedAttachment.id },
+      42
+    );
+    expect(storedBody.result?.isError).toBeUndefined();
+    expect(storedBody.result?.structuredContent).toEqual({
+      ok: true,
+      messageId,
+      attachment: storedAttachment
+    });
+    expect(storedBody.result?.content?.[0]?.text).toContain(JSON.stringify(storedAttachment.filename));
+    const storedResource = storedBody.result?.content?.[1];
+    expect(storedResource?.type).toBe("resource");
+    expect(storedResource?.resource?.uri).toBe(
+      `mywebmail://accounts/${encodeURIComponent(accountId)}/messages/${encodeURIComponent(messageId)}/attachments/${encodeURIComponent(storedAttachment.id)}`
+    );
+    expect(storedResource?.resource?.mimeType).toBe("application/pdf");
+    expect(Buffer.from(storedResource?.resource?.blob ?? "", "base64").equals(storedBytes)).toBe(true);
+
+    const extractedBody = await callTool(
+      "get_attachment",
+      { messageId, attachmentId: sourceOnlyAttachment.id },
+      43
+    );
+    expect(extractedBody.result?.isError).toBeUndefined();
+    expect(
+      Buffer.from(extractedBody.result?.content?.[1]?.resource?.blob ?? "", "base64").toString("utf8")
+    ).toBe(ATTACHMENT_EML_INVOICE_TEXT);
+    expect(
+      (await getAttachmentData(accountId, messageId, sourceOnlyAttachment.id))?.toString("utf8")
+    ).toBe(ATTACHMENT_EML_INVOICE_TEXT);
+
+    const unknownAttachmentBody = await callTool(
+      "get_attachment",
+      { messageId, attachmentId: `att-${accountId}-missing` },
+      44
+    );
+    expect(unknownAttachmentBody.result?.isError).toBe(true);
+    expect(unknownAttachmentBody.result?.content?.[0]?.text).toContain("Attachment not found");
+
+    const unknownMessageBody = await callTool(
+      "get_attachment",
+      { messageId: `${accountId}-msg-missing`, attachmentId: storedAttachment.id },
+      45
+    );
+    expect(unknownMessageBody.result?.isError).toBe(true);
+    expect(unknownMessageBody.result?.content?.[0]?.text).toContain("Message not found");
+
+    const foreignAccountBody = await callTool(
+      "get_attachment",
+      { accountId: otherAccountId, messageId: otherMessageId, attachmentId: storedAttachment.id },
+      46
+    );
+    expect(foreignAccountBody.result?.isError).toBe(true);
+    expect(foreignAccountBody.result?.content?.[0]?.text).toContain(
+      `Account "${otherAccountId}" not found or not accessible.`
+    );
+
+    const foreignMessageBody = await callTool(
+      "get_attachment",
+      { messageId: otherMessageId, attachmentId: storedAttachment.id },
+      47
+    );
+    expect(foreignMessageBody.result?.isError).toBe(true);
+    expect(foreignMessageBody.result?.content?.[0]?.text).toContain("Message not found");
   });
 
   test("returns a clear error for ambiguous topic selectors", async () => {
