@@ -1,6 +1,6 @@
 import type { Attachment } from "@/lib/data";
 import { extractAttachmentBufferFromSource } from "@/lib/mail/attachmentFromSource";
-import { getAttachmentData, getMessageSource, saveAttachmentData } from "@/lib/storage";
+import { getAttachmentData, getMessageSourceBuffer, saveAttachmentData } from "@/lib/storage";
 
 /**
  * Bytes of one attachment. Sync only stores the parts it decoded at the
@@ -16,7 +16,9 @@ export async function loadAttachmentData(
   const stored = await getAttachmentData(accountId, messageId, attachment.id);
   if (stored) return stored;
 
-  const source = await getMessageSource(accountId, messageId);
+  // Raw bytes, not text: an 8bit or binary part would not survive a UTF-8
+  // round trip.
+  const source = await getMessageSourceBuffer(accountId, messageId);
   if (!source) return null;
 
   // A source mailparser cannot read yields no data, same as a missing one.

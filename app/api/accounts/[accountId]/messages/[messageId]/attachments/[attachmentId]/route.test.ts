@@ -3,7 +3,12 @@ import { describe, expect, test } from "bun:test";
 import type { Account, Attachment, Folder, Message } from "@/lib/data";
 import { sealSession, type SessionData } from "@/lib/auth";
 import { dbModulePromise } from "@/lib/testDbHarness";
-import { ATTACHMENT_EML, ATTACHMENT_EML_INVOICE_TEXT } from "@/lib/testEmlFixtures";
+import {
+  ATTACHMENT_EML,
+  ATTACHMENT_EML_INVOICE_TEXT,
+  BINARY_ATTACHMENT_EML,
+  BINARY_ATTACHMENT_EML_BYTES
+} from "@/lib/testEmlFixtures";
 
 const { saveFoldersForAccount, upsertAccount, upsertMessages } = await dbModulePromise;
 const { GET } = await import("./route");
@@ -143,6 +148,24 @@ describe("GET /api/accounts/[accountId]/messages/[messageId]/attachments/[attach
     expect((await getAttachmentData(accountId, messageId, attachmentId))?.toString("utf8")).toBe(
       ATTACHMENT_EML_INVOICE_TEXT
     );
+  });
+
+  test("keeps the bytes of a binary-encoded part intact when extracting from the source", async () => {
+    const attachmentId = "att-data-binary-0";
+    const { accountId, messageId } = await seedAttachments([
+      {
+        id: attachmentId,
+        filename: "blob.bin",
+        contentType: "application/octet-stream",
+        size: BINARY_ATTACHMENT_EML_BYTES.length,
+        inline: false
+      }
+    ]);
+    await saveMessageSource(accountId, messageId, BINARY_ATTACHMENT_EML);
+
+    const response = await fetchAttachment(accountId, messageId, attachmentId);
+    expect(response.status).toBe(200);
+    expect(Buffer.from(await response.arrayBuffer()).equals(BINARY_ATTACHMENT_EML_BYTES)).toBe(true);
   });
 
   test("answers 404 when neither stored bytes nor a source exist", async () => {
