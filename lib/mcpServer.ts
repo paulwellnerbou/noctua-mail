@@ -380,19 +380,22 @@ async function requireMessage(accountId: string, messageId: string) {
 
 // Hydrated attachments carry the web route's URL, which only the browser
 // session cookie can open; an MCP client fetches the bytes via get_attachment.
-function toMcpAttachment(attachment: Attachment) {
+type McpAttachment = Pick<Attachment, "id" | "filename" | "contentType" | "size" | "inline" | "cid">;
+
+function toMcpAttachment(attachment: Attachment): McpAttachment {
   const { id, filename, contentType, size, inline, cid } = attachment;
   return { id, filename, contentType, size, inline, cid };
 }
 
-type McpAttachment = ReturnType<typeof toMcpAttachment>;
+type McpMessage = Omit<Message, "attachments"> & { attachments?: McpAttachment[] };
+type McpMessageListResult = Omit<MessageListResult, "items"> & { items: McpMessage[] };
 
-function withMcpAttachments(message: Message): Message {
+function withMcpAttachments(message: Message): McpMessage {
   if (!message.attachments) return message;
   return { ...message, attachments: message.attachments.map(toMcpAttachment) };
 }
 
-function toMcpMessageListResult(result: MessageListResult): MessageListResult {
+function toMcpMessageListResult(result: MessageListResult): McpMessageListResult {
   return { ...result, items: result.items.map(withMcpAttachments) };
 }
 

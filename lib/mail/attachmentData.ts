@@ -21,14 +21,17 @@ export async function loadAttachmentData(
   const source = await getMessageSourceBuffer(accountId, messageId);
   if (!source) return null;
 
-  // A source mailparser cannot read yields no data, same as a missing one.
+  // A source mailparser cannot read yields no data, same as a missing one;
+  // a failed write of the stored copy below is a real error and propagates.
+  let extracted: Awaited<ReturnType<typeof extractAttachmentBufferFromSource>>;
   try {
-    const extracted = await extractAttachmentBufferFromSource(source, attachment);
-    if (!extracted) return null;
-    const data = Buffer.from(extracted);
-    await saveAttachmentData(accountId, messageId, attachment.id, data);
-    return data;
+    extracted = await extractAttachmentBufferFromSource(source, attachment);
   } catch {
     return null;
   }
+  if (!extracted) return null;
+
+  const data = Buffer.from(extracted);
+  await saveAttachmentData(accountId, messageId, attachment.id, data);
+  return data;
 }
