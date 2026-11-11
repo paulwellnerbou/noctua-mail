@@ -2,7 +2,7 @@ import type { ImapFlow, ImapFlowOptions } from "imapflow";
 import tls from "tls";
 
 import type { Account } from "@/lib/data";
-import { markImapConnectFailure } from "./imapError";
+import { isTemporaryImapAuthFailure, markImapConnectFailure } from "./imapError";
 import { getImapLogger, logImapOp } from "./imapLogger";
 
 export type ImapClientLogContext = {
@@ -189,6 +189,8 @@ function isRetryableImapConnectError(error: unknown) {
   const text = collectImapConnectErrorText(error);
   if (!text) return false;
 
+  if (isTemporaryImapAuthFailure(error)) return true;
+
   if (
     candidate?.authenticationFailed === true ||
     candidate?.serverResponseCode === "AUTHENTICATIONFAILED"
@@ -371,7 +373,7 @@ export async function connectImapClientWithRetry(params: {
             error: (error as Error | undefined)?.message ?? String(error ?? "")
           });
         }
-        throw error;
+        throw markImapConnectFailure(error);
       }
 
       const delayMs = getImapConnectDelayMs(

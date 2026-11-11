@@ -113,6 +113,28 @@ describe("sync new-candidates route", () => {
     expect(body.message).not.toContain("Peer certificate");
   });
 
+  test("reports a login the server could not process as an outage, not as bad credentials", async () => {
+    const accountId = await setUpAccount();
+    planImapNewSyncFolders.mockRejectedValueOnce(
+      markImapConnectFailure(
+        Object.assign(new Error("Command failed"), {
+          authenticationFailed: true,
+          responseStatus: "NO",
+          serverResponseCode: "UNAVAILABLE"
+        })
+      )
+    );
+
+    const response = await POST(buildRequest(accountId), {
+      params: Promise.resolve({ accountId })
+    });
+
+    expect(response.status).toBe(503);
+    const body = (await response.json()) as { message?: string; reauthRequired?: boolean };
+    expect(body.message).toBe(MAIL_SERVER_UNREACHABLE_MESSAGE);
+    expect(body.reauthRequired).toBeUndefined();
+  });
+
   test("rethrows local failures instead of misreporting them as an outage", async () => {
     const accountId = await setUpAccount();
     planImapNewSyncFolders.mockRejectedValueOnce(new Error("db is locked"));

@@ -6,6 +6,7 @@ type ImapErrorLike = {
   executedCommand?: string;
   serverResponseCode?: string;
   authenticationFailed?: boolean;
+  code?: string;
 };
 
 type ImapHttpError = {
@@ -62,6 +63,30 @@ export function isImapConnectFailure(error: unknown): boolean {
   );
 }
 
+// RFC 5530 codes for a command the server could not carry out; none of them
+// says anything about the credentials.
+const TEMPORARY_AUTH_RESPONSE_CODES = new Set(["UNAVAILABLE", "SERVERBUG", "INUSE", "LIMIT"]);
+
+/**
+ * imapflow sets `authenticationFailed` on every failed LOGIN/AUTHENTICATE,
+ * also when the server could not process the login or the connection died
+ * before it answered. Those are outages: asking for a new password would not
+ * help, retrying later does.
+ */
+export function isTemporaryImapAuthFailure(error: unknown): boolean {
+  const candidate = error as ImapErrorLike | null | undefined;
+  if (candidate?.authenticationFailed !== true) return false;
+  if (
+    typeof candidate.serverResponseCode === "string" &&
+    TEMPORARY_AUTH_RESPONSE_CODES.has(candidate.serverResponseCode.toUpperCase())
+  ) {
+    return true;
+  }
+  // No tagged reply but a transport code (NoConnection, ETIMEOUT, ...): the
+  // command was cut off, the server never judged the credentials.
+  return !candidate.responseStatus && typeof candidate.code === "string" && candidate.code !== "";
+}
+
 export function getImapHttpError(error: unknown): ImapHttpError | null {
   const candidate = error as ImapErrorLike | null | undefined;
   const text = collectImapErrorText(error);
@@ -74,6 +99,8 @@ export function getImapHttpError(error: unknown): ImapHttpError | null {
       reauthRequired: true
     };
   }
+
+  if (isTemporaryImapAuthFailure(error)) return null;
 
   const authCommand =
     typeof candidate?.executedCommand === "string" &&

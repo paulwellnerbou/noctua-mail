@@ -4,6 +4,7 @@ import { getAccounts, getUserAccounts, getUsers, patchAccount } from "@/lib/db";
 import { verifyImapCredentials } from "@/lib/mail/imapAuth";
 import { shouldStorePasswordInDb } from "@/lib/secret";
 import { createRateLimiter, getRequestIp } from "@/lib/rateLimit";
+import { imapCredentialsCheckErrorResponse } from "@/app/api/_helpers/imapUpstreamError";
 
 /** Rate-limit failed login attempts: 5 per minute per IP. */
 const loginLimiter = createRateLimiter({ windowMs: 60_000, max: 5 });
@@ -40,9 +41,9 @@ export async function POST(request: Request) {
   if (!account) {
     return NextResponse.json({ ok: false, message: "Account not found" }, { status: 404 });
   }
-  const ok = await verifyImapCredentials(account, password, clientId);
-  if (!ok) {
-    return NextResponse.json({ ok: false, message: "Invalid IMAP credentials" }, { status: 401 });
+  const check = await verifyImapCredentials(account, password, clientId);
+  if (check !== "ok") {
+    return imapCredentialsCheckErrorResponse(check);
   }
   const nextStoredPassword = shouldStorePasswordInDb() ? password : "";
   if (account.imap.password !== nextStoredPassword || account.smtp.password !== nextStoredPassword) {

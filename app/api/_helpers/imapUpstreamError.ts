@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import type { ImapCredentialsCheck } from "@/lib/mail/imapAuth";
 import { getImapHttpError, isImapConnectFailure } from "@/lib/mail/imapError";
 import { getImapLogger } from "@/lib/mail/imapLogger";
 import { errorResponse } from "./response";
@@ -43,4 +44,13 @@ export function imapUpstreamErrorResponse(
     );
   }
   return errorResponse(MAIL_SERVER_UNREACHABLE_MESSAGE, 503);
+}
+
+/** Response for credentials that `verifyImapCredentials` did not accept. */
+export function imapCredentialsCheckErrorResponse(
+  check: Exclude<ImapCredentialsCheck, "ok">
+): NextResponse {
+  return check === "unreachable"
+    ? errorResponse(MAIL_SERVER_UNREACHABLE_MESSAGE, 503)
+    : errorResponse("Invalid IMAP credentials", 401);
 }

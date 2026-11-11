@@ -8,6 +8,7 @@ import {
   requireAccountContextFromParams,
   type AccountRouteParams
 } from "@/app/api/_helpers/accountContext";
+import { imapCredentialsCheckErrorResponse } from "@/app/api/_helpers/imapUpstreamError";
 import { errorResponse, okResponse } from "@/app/api/_helpers/response";
 
 type ReloginPayload = {
@@ -36,9 +37,9 @@ export async function POST(request: Request, { params }: AccountRouteParams) {
       user: imapUser
     }
   };
-  const verified = await verifyImapCredentials(verifiedAccount, imapPassword, clientId);
-  if (!verified) {
-    return errorResponse("Invalid IMAP credentials", 401);
+  const check = await verifyImapCredentials(verifiedAccount, imapPassword, clientId);
+  if (check !== "ok") {
+    return imapCredentialsCheckErrorResponse(check);
   }
 
   const nextStoredImapPassword = shouldStorePasswordInDb() ? imapPassword : "";
