@@ -6,12 +6,16 @@ import {
   connectImapClientWithRetry,
   safeLogoutImapClient
 } from "./imapClientOptions";
+import { isImapConnectFailure } from "./imapError";
+
+/** `unreachable`: the server could not be asked, so the credentials are unjudged. */
+export type ImapCredentialsCheck = "ok" | "invalid" | "unreachable";
 
 export async function verifyImapCredentials(
   account: Account,
   password: string,
   clientId?: string
-) {
+): Promise<ImapCredentialsCheck> {
   const logContext = { accountId: account.id, clientId };
   try {
     const client = await connectImapClientWithRetry({
@@ -32,8 +36,8 @@ export async function verifyImapCredentials(
       }
     });
     await safeLogoutImapClient(client, { accountId: account.id, clientId });
-    return true;
-  } catch {
-    return false;
+    return "ok";
+  } catch (error) {
+    return isImapConnectFailure(error) ? "unreachable" : "invalid";
   }
 }

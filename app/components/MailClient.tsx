@@ -185,6 +185,7 @@ import {
 } from "./mailclient/message/threadViewState";
 import RecipientAliasDialog from "./mailclient/RecipientAliasDialog";
 import AccountReloginDialog from "./mailclient/AccountReloginDialog";
+import { useReloginPrompt } from "./mailclient/useReloginPrompt";
 import TopicBadge from "./mailclient/TopicBadge";
 import { applyActiveTopicSuggestion } from "./mailclient/topicSuggestionActions";
 import { parseSimpleTopicSearchMode } from "./mailclient/topicSearch";
@@ -356,7 +357,8 @@ export default function MailClient({
   const [manageOpen, setManageOpen] = useState(false);
   const [manageTab, setManageTab] = useState<ManageTab>("account");
   const [editingAccount, setEditingAccount] = useState<Account | null>(null);
-  const [reloginAccountId, setReloginAccountId] = useState("");
+  const { reloginAccountId, requestRelogin, openRelogin, dismissRelogin, completeRelogin } =
+    useReloginPrompt();
   const [reloginDescription, setReloginDescription] = useState("");
   const [leftWidth, setLeftWidth] = useState(270);
   const [listWidth, setListWidth] = useState(840);
@@ -475,7 +477,7 @@ export default function MailClient({
         ) ?? "";
       if (res.status === 401) {
         if (data?.reauthRequired && resolvedAccountId) {
-          setReloginAccountId(resolvedAccountId);
+          requestRelogin(resolvedAccountId);
           setReloginDescription("");
         } else {
           const normalizedPrimary = primaryMessage.trim().toLowerCase();
@@ -502,7 +504,7 @@ export default function MailClient({
       // ignore
     }
     return withRequestPath(`Request failed (${res.status})`);
-  }, []);
+  }, [requestRelogin]);
 
   const {
     exceptionEntries,
@@ -1860,12 +1862,13 @@ export default function MailClient({
         return;
       }
       setReloginDescription("");
-      setReloginAccountId(targetAccount.id);
+      openRelogin(targetAccount.id);
     },
-    [accounts, activeAccountId, reportError]
+    [accounts, activeAccountId, openRelogin, reportError]
   );
   const handleReloginSuccess = useCallback(
     async (updatedAccount: Account) => {
+      completeRelogin(updatedAccount.id);
       setAccounts((prev) =>
         prev.map((account) =>
           account.id === updatedAccount.id
@@ -1898,7 +1901,15 @@ export default function MailClient({
         });
       }
     },
-    [activeAccountId, activeFolderId, pushNotice, setAccounts, setExceptionEntries, syncAccount]
+    [
+      activeAccountId,
+      activeFolderId,
+      completeRelogin,
+      pushNotice,
+      setAccounts,
+      setExceptionEntries,
+      syncAccount
+    ]
   );
   const calendarFirstDay: 0 | 1 = currentAccount?.settings?.calendar?.weekStartsOn === "sunday" ? 0 : 1;
   const accountSignatures = currentAccount?.settings?.signatures ?? [];
@@ -5745,7 +5756,7 @@ export default function MailClient({
         readErrorMessage={readErrorMessage}
         onOpenChange={(open) => {
           if (!open) {
-            setReloginAccountId("");
+            dismissRelogin();
             setReloginDescription("");
           }
         }}

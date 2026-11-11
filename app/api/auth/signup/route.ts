@@ -15,6 +15,7 @@ import { verifyImapCredentials } from "@/lib/mail/imapAuth";
 import { shouldStorePasswordInDb } from "@/lib/secret";
 import { accountIdFromEmail } from "@/lib/accountId";
 import { createRateLimiter, getRequestIp } from "@/lib/rateLimit";
+import { imapCredentialsCheckErrorResponse } from "@/app/api/_helpers/imapUpstreamError";
 import { randomUUID } from "crypto";
 
 // Signup is more expensive than login (DB writes + IMAP verify + invite
@@ -85,9 +86,9 @@ export async function POST(request: Request) {
     }
   };
 
-  const ok = await verifyImapCredentials(account, imapPassword, clientId);
-  if (!ok) {
-    return NextResponse.json({ ok: false, message: "Invalid IMAP credentials" }, { status: 401 });
+  const check = await verifyImapCredentials(account, imapPassword, clientId);
+  if (check !== "ok") {
+    return imapCredentialsCheckErrorResponse(check);
   }
 
   const userId = randomUUID();

@@ -62,6 +62,40 @@ export function isImapConnectFailure(error: unknown): boolean {
   );
 }
 
+// RFC 5530 codes for a command the server could not carry out; none of them
+// says anything about the credentials.
+const TEMPORARY_AUTH_RESPONSE_CODES = new Set(["UNAVAILABLE", "SERVERBUG", "INUSE", "LIMIT"]);
+
+/**
+ * imapflow sets `authenticationFailed` on every failed LOGIN/AUTHENTICATE,
+ * also when the server answers that it could not process the login. That is
+ * an outage: asking for a new password would not help, retrying later does.
+ */
+export function isTemporaryImapAuthFailure(error: unknown): boolean {
+  const candidate = error as ImapErrorLike | null | undefined;
+  return (
+    candidate?.authenticationFailed === true &&
+    typeof candidate.serverResponseCode === "string" &&
+    TEMPORARY_AUTH_RESPONSE_CODES.has(candidate.serverResponseCode)
+  );
+}
+
+/**
+ * Log text for a failed IMAP operation. imapflow's message for a rejected
+ * command is always "Command failed"; what the server said is in the reply.
+ */
+export function describeImapError(error: unknown): string {
+  const candidate = error as ImapErrorLike | null | undefined;
+  const message = candidate?.message ?? String(error);
+  const reply = [
+    candidate?.serverResponseCode ? `[${candidate.serverResponseCode}]` : "",
+    candidate?.responseText ?? ""
+  ]
+    .filter(Boolean)
+    .join(" ");
+  return reply ? `${message} (${reply})` : message;
+}
+
 export function getImapHttpError(error: unknown): ImapHttpError | null {
   const candidate = error as ImapErrorLike | null | undefined;
   const text = collectImapErrorText(error);
@@ -74,6 +108,8 @@ export function getImapHttpError(error: unknown): ImapHttpError | null {
       reauthRequired: true
     };
   }
+
+  if (isTemporaryImapAuthFailure(error)) return null;
 
   const authCommand =
     typeof candidate?.executedCommand === "string" &&
