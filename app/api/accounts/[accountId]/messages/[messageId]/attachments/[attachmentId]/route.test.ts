@@ -3,9 +3,16 @@ import { describe, expect, test } from "bun:test";
 import type { Account, Attachment, Folder, Message } from "@/lib/data";
 import { sealSession, type SessionData } from "@/lib/auth";
 import { dbModulePromise } from "@/lib/testDbHarness";
+import {
+  ATTACHMENT_EML,
+  ATTACHMENT_EML_INVOICE_TEXT,
+  BINARY_ATTACHMENT_EML,
+  BINARY_ATTACHMENT_EML_BYTES
+} from "@/lib/testEmlFixtures";
 
 const { saveFoldersForAccount, upsertAccount, upsertMessages } = await dbModulePromise;
 const { GET } = await import("./route");
+const { getAttachmentData, saveAttachmentData, saveMessageSource } = await import("@/lib/storage");
 
 function buildAccount(accountId: string): Account {
   return {
@@ -98,6 +105,83 @@ async function fetchPreviewShell(accountId: string, messageId: string, attachmen
   expect(response.headers.get("Content-Type")).toBe("text/html; charset=utf-8");
   return { path, html: await response.text() };
 }
+
+async function fetchAttachment(accountId: string, messageId: string, attachmentId: string, query = "") {
+  const path = `/api/accounts/${accountId}/messages/${messageId}/attachments/${attachmentId}`;
+  return GET(
+    new Request(`http://localhost${path}${query}`, { headers: { cookie: cookieFor(accountId) } }),
+    { params: Promise.resolve({ accountId, messageId, attachmentId }) }
+  );
+}
+
+describe("GET /api/accounts/[accountId]/messages/[messageId]/attachments/[attachmentId]", () => {
+  test("serves stored bytes with the attachment's content type and filename", async () => {
+    const attachmentId = "att-data-stored-0";
+    const { accountId, messageId } = await seedAttachments([
+      { id: attachmentId, filename: "report.pdf", contentType: "application/pdf", size: 6, inline: false }
+    ]);
+    const bytes = Buffer.from([0x25, 0x50, 0x44, 0x46, 0x00, 0xff]);
+    await saveAttachmentData(accountId, messageId, attachmentId, bytes);
+
+    const inline = await fetchAttachment(accountId, messageId, attachmentId);
+    expect(inline.status).toBe(200);
+    expect(inline.headers.get("Content-Type")).toBe("application/pdf");
+    expect(inline.headers.get("Content-Disposition")).toBe(
+      "inline; filename=\"report.pdf\"; filename*=UTF-8''report.pdf"
+    );
+    expect(Buffer.from(await inline.arrayBuffer()).equals(bytes)).toBe(true);
+
+    const download = await fetchAttachment(accountId, messageId, attachmentId, "?download=1");
+    expect(download.headers.get("Content-Disposition")).toStartWith("attachment;");
+  });
+
+  test("extracts the bytes from the cached raw source when no stored copy exists", async () => {
+    const attachmentId = "att-data-source-0";
+    const { accountId, messageId } = await seedAttachments([
+      { id: attachmentId, filename: "invoice.pdf", contentType: "application/pdf", size: 10, inline: false }
+    ]);
+    await saveMessageSource(accountId, messageId, ATTACHMENT_EML);
+
+    const response = await fetchAttachment(accountId, messageId, attachmentId);
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe(ATTACHMENT_EML_INVOICE_TEXT);
+    expect((await getAttachmentData(accountId, messageId, attachmentId))?.toString("utf8")).toBe(
+      ATTACHMENT_EML_INVOICE_TEXT
+    );
+  });
+
+  test("keeps the bytes of a binary-encoded part intact when extracting from the source", async () => {
+    const attachmentId = "att-data-binary-0";
+    const { accountId, messageId } = await seedAttachments([
+      {
+        id: attachmentId,
+        filename: "blob.bin",
+        contentType: "application/octet-stream",
+        size: BINARY_ATTACHMENT_EML_BYTES.length,
+        inline: false
+      }
+    ]);
+    await saveMessageSource(accountId, messageId, BINARY_ATTACHMENT_EML);
+
+    const response = await fetchAttachment(accountId, messageId, attachmentId);
+    expect(response.status).toBe(200);
+    expect(Buffer.from(await response.arrayBuffer()).equals(BINARY_ATTACHMENT_EML_BYTES)).toBe(true);
+  });
+
+  test("answers 404 when neither stored bytes nor a source exist", async () => {
+    const { accountId, messageId } = await seedAttachments([
+      { id: "att-data-none-0", filename: "missing.pdf", contentType: "application/pdf", size: 1, inline: false }
+    ]);
+
+    const noData = await fetchAttachment(accountId, messageId, "att-data-none-0");
+    expect(noData.status).toBe(404);
+    expect(await noData.json()).toEqual({ ok: false, message: "Attachment data not found" });
+
+    const unknown = await fetchAttachment(accountId, messageId, "att-data-unknown-9");
+    expect(unknown.status).toBe(404);
+    expect(await unknown.json()).toEqual({ ok: false, message: "Attachment not found" });
+  });
+});
 
 describe("GET /api/accounts/[accountId]/messages/[messageId]/attachments/[attachmentId]?preview=1", () => {
   test("frames the attachment in a shell titled after the file", async () => {

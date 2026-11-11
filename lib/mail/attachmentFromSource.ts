@@ -132,7 +132,7 @@ export function mergeAttachmentMetadataFromParsedAttachments<
 }
 
 export async function extractAttachmentBufferFromSource(
-  source: string,
+  source: string | Buffer,
   target: Pick<Attachment, "id" | "filename" | "contentType" | "cid">
 ) {
   const parsed = await simpleParser(source);
