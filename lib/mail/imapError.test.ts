@@ -1,5 +1,6 @@
 import { describe, expect, it } from "bun:test";
 import {
+  describeImapError,
   getImapHttpError,
   isImapConnectFailure,
   isTemporaryImapAuthFailure,
@@ -16,10 +17,6 @@ const unavailableLogin = {
   serverResponseCode: "UNAVAILABLE",
   authenticationFailed: true
 };
-const droppedLogin = Object.assign(new Error("Connection not available"), {
-  code: "NoConnection",
-  authenticationFailed: true
-});
 const rejectedLoginWithoutCode = {
   message: "Command failed",
   response: "2 NO Login failed.",
@@ -65,19 +62,14 @@ describe("getImapHttpError", () => {
     expect(getImapHttpError(unavailableLogin)).toBeNull();
   });
 
-  it("does not ask for new credentials when the connection dropped during the login", () => {
-    expect(getImapHttpError(droppedLogin)).toBeNull();
-  });
-
   it("maps a login the server rejected without a response code to 401", () => {
     expect(getImapHttpError(rejectedLoginWithoutCode)?.code).toBe("imap_auth_failed");
   });
 });
 
 describe("isTemporaryImapAuthFailure", () => {
-  it("recognizes logins the server could not process or never answered", () => {
+  it("recognizes a login the server could not process", () => {
     expect(isTemporaryImapAuthFailure(unavailableLogin)).toBe(true);
-    expect(isTemporaryImapAuthFailure(droppedLogin)).toBe(true);
   });
 
   it("does not cover rejected or unconfigured credentials", () => {
@@ -96,10 +88,23 @@ describe("isTemporaryImapAuthFailure", () => {
     ).toBe(false);
   });
 
-  it("ignores failures outside the login", () => {
+  it("ignores the same response code outside the login", () => {
     expect(
-      isTemporaryImapAuthFailure(Object.assign(new Error("gone"), { code: "NoConnection" }))
+      isTemporaryImapAuthFailure({ ...unavailableLogin, authenticationFailed: undefined })
     ).toBe(false);
+  });
+});
+
+describe("describeImapError", () => {
+  it("adds the server's reply to imapflow's generic message", () => {
+    expect(describeImapError(unavailableLogin)).toBe(
+      "Command failed ([UNAVAILABLE] Temporary authentication failure.)"
+    );
+  });
+
+  it("keeps the message of errors without a server reply", () => {
+    expect(describeImapError(new Error("Socket timeout"))).toBe("Socket timeout");
+    expect(describeImapError("boom")).toBe("boom");
   });
 });
 

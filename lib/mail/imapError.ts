@@ -6,7 +6,6 @@ type ImapErrorLike = {
   executedCommand?: string;
   serverResponseCode?: string;
   authenticationFailed?: boolean;
-  code?: string;
 };
 
 type ImapHttpError = {
@@ -69,22 +68,32 @@ const TEMPORARY_AUTH_RESPONSE_CODES = new Set(["UNAVAILABLE", "SERVERBUG", "INUS
 
 /**
  * imapflow sets `authenticationFailed` on every failed LOGIN/AUTHENTICATE,
- * also when the server could not process the login or the connection died
- * before it answered. Those are outages: asking for a new password would not
- * help, retrying later does.
+ * also when the server answers that it could not process the login. That is
+ * an outage: asking for a new password would not help, retrying later does.
  */
 export function isTemporaryImapAuthFailure(error: unknown): boolean {
   const candidate = error as ImapErrorLike | null | undefined;
-  if (candidate?.authenticationFailed !== true) return false;
-  if (
+  return (
+    candidate?.authenticationFailed === true &&
     typeof candidate.serverResponseCode === "string" &&
-    TEMPORARY_AUTH_RESPONSE_CODES.has(candidate.serverResponseCode.toUpperCase())
-  ) {
-    return true;
-  }
-  // No tagged reply but a transport code (NoConnection, ETIMEOUT, ...): the
-  // command was cut off, the server never judged the credentials.
-  return !candidate.responseStatus && typeof candidate.code === "string" && candidate.code !== "";
+    TEMPORARY_AUTH_RESPONSE_CODES.has(candidate.serverResponseCode)
+  );
+}
+
+/**
+ * Log text for a failed IMAP operation. imapflow's message for a rejected
+ * command is always "Command failed"; what the server said is in the reply.
+ */
+export function describeImapError(error: unknown): string {
+  const candidate = error as ImapErrorLike | null | undefined;
+  const message = candidate?.message ?? String(error);
+  const reply = [
+    candidate?.serverResponseCode ? `[${candidate.serverResponseCode}]` : "",
+    candidate?.responseText ?? ""
+  ]
+    .filter(Boolean)
+    .join(" ");
+  return reply ? `${message} (${reply})` : message;
 }
 
 export function getImapHttpError(error: unknown): ImapHttpError | null {

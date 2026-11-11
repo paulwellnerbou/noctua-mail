@@ -1,3 +1,5 @@
+import { describeImapError } from "./imapError";
+
 type LogLevel = "silent" | "error" | "warn" | "info" | "debug";
 
 const LEVELS: Record<LogLevel, number> = {
@@ -79,7 +81,7 @@ export async function logImapOp<T>(
     const ms = Date.now() - start;
     const suffix = meta ? ` ${meta}` : "";
     logger.warn?.(
-      `[imap] ${op}${suffix} ${ms}ms error=${(error as Error)?.message ?? String(error)}`
+      `[imap] ${op}${suffix} ${ms}ms error=${describeImapError(error)}`
     );
     throw error;
   }

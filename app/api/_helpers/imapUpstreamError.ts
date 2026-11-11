@@ -1,6 +1,10 @@
 import { NextResponse } from "next/server";
 import type { ImapCredentialsCheck } from "@/lib/mail/imapAuth";
-import { getImapHttpError, isImapConnectFailure } from "@/lib/mail/imapError";
+import {
+  describeImapError,
+  getImapHttpError,
+  isImapConnectFailure
+} from "@/lib/mail/imapError";
 import { getImapLogger } from "@/lib/mail/imapLogger";
 import { errorResponse } from "./response";
 
@@ -38,9 +42,7 @@ export function imapUpstreamErrorResponse(
   const logger = getImapLogger();
   if (logger !== false) {
     logger.warn?.(
-      `[imap] ${context.op} unavailable account=${context.accountId} error=${
-        (error as Error | undefined)?.message ?? String(error)
-      }`
+      `[imap] ${context.op} unavailable account=${context.accountId} error=${describeImapError(error)}`
     );
   }
   return errorResponse(MAIL_SERVER_UNREACHABLE_MESSAGE, 503);
