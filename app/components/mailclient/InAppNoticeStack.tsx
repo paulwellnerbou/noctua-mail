@@ -21,7 +21,7 @@ export type InAppNotice = {
   fullDetail?: string;
   messageId?: string;
   ids?: string[];
-  /** Account the linked messages belong to, when it may not be the active one. */
+  /** Account the notice is about; opening it goes there even without a linked message. */
   accountId?: string;
   actionLabel?: string;
   onAction?: () => void | Promise<void>;
@@ -114,7 +114,7 @@ export default function InAppNoticeStack({ className, style, state, actions }: I
     <div className={`inapp-notice-stack${className ? ` ${className}` : ""}`} style={style}>
       {inAppNotices.map((notice) => {
         const openable =
-          Boolean(notice.messageId || (notice.ids && notice.ids.length > 0)) ||
+          Boolean(notice.messageId || (notice.ids && notice.ids.length > 0) || notice.accountId) ||
           notice.type === "error";
         const tooltip =
           notice.fullDetail && notice.fullDetail !== notice.description

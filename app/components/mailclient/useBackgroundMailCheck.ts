@@ -1,13 +1,13 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useSyncedRef } from "@/lib/ui/latestRef";
 import {
-  checkBackgroundAccountMail,
+  createBackgroundMailChecker,
   type BackgroundMailAccount,
   type BackgroundMailFound
 } from "./backgroundMailCheck";
-import { BACKGROUND_MAIL_CHECK_INTERVAL_MS } from "./constants";
+import { BACKGROUND_MAIL_CHECK_TICK_MS } from "./constants";
 
 type ApiFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
@@ -29,53 +29,33 @@ export function useBackgroundMailCheck({
   apiFetch,
   onNewMail
 }: UseBackgroundMailCheckParams) {
-  const uidNextByAccountRef = useRef<Map<string, number>>(new Map());
-  const needsSignInRef = useRef<Set<string>>(new Set());
+  const [checker] = useState(createBackgroundMailChecker);
   const latestRef = useRef({ accounts, apiFetch, onNewMail });
   useSyncedRef(latestRef, { accounts, apiFetch, onNewMail });
 
   const accountKey = accounts.map((account) => account.id).join("|");
 
   useEffect(() => {
-    if (!enabled || !accountKey) return;
-    const uidNextByAccount = uidNextByAccountRef.current;
-    const needsSignIn = needsSignInRef.current;
-    // An account that was on screen in the meantime starts over: its mail was
-    // already seen there, so it must not be announced when it leaves again,
-    // and the user may have signed it in again.
-    const watchedIds = new Set(latestRef.current.accounts.map((account) => account.id));
-    for (const accountId of uidNextByAccount.keys()) {
-      if (!watchedIds.has(accountId)) uidNextByAccount.delete(accountId);
-    }
-    for (const accountId of needsSignIn) {
-      if (!watchedIds.has(accountId)) needsSignIn.delete(accountId);
-    }
+    if (!enabled) return;
+    checker.watch(latestRef.current.accounts.map((account) => account.id));
+    if (!accountKey) return;
 
     let disposed = false;
     let inFlight = false;
-    const checkAll = async () => {
+    const checkDueAccounts = async () => {
       if (inFlight) return;
       inFlight = true;
       try {
         for (const account of latestRef.current.accounts) {
           if (disposed) return;
-          if (needsSignIn.has(account.id)) continue;
           try {
-            const result = await checkBackgroundAccountMail(
-              account.id,
-              uidNextByAccount.get(account.id),
-              latestRef.current.apiFetch
-            );
-            // A result that arrives after the account set changed may belong
-            // to the account now on screen; the next run checks again anyway.
-            if (!result || disposed) continue;
-            if (result.status === "needs-sign-in") {
-              needsSignIn.add(account.id);
-              console.warn("[noctua] background mail check paused until sign-in", account.id);
-              continue;
-            }
-            uidNextByAccount.set(account.id, result.uidNext);
-            if (result.found) await latestRef.current.onNewMail(account, result.found);
+            const found = await checker.check(account, latestRef.current.apiFetch, Date.now());
+            if (!found) continue;
+            // Not awaited: delivery can wait on the browser's permission
+            // prompt, which must not hold up the other accounts.
+            latestRef.current.onNewMail(account, found).catch((err) => {
+              console.warn("[noctua] background mail notification failed", account.id, err);
+            });
           } catch (err) {
             // No toast: the failing account is not the one the user is looking at.
             console.warn("[noctua] background mail check failed", account.id, err);
@@ -86,11 +66,11 @@ export function useBackgroundMailCheck({
       }
     };
 
-    void checkAll();
-    const timer = window.setInterval(() => void checkAll(), BACKGROUND_MAIL_CHECK_INTERVAL_MS);
+    void checkDueAccounts();
+    const timer = window.setInterval(() => void checkDueAccounts(), BACKGROUND_MAIL_CHECK_TICK_MS);
     return () => {
       disposed = true;
       window.clearInterval(timer);
     };
-  }, [accountKey, enabled]);
+  }, [accountKey, checker, enabled]);
 }

@@ -23,4 +23,9 @@ export const SYNC_STATUS_RUNNING_POLL_INTERVAL_MS = 450;
 export const THREAD_CACHE_LIMIT = 50;
 export const CALENDAR_REMINDER_REFRESH_INTERVAL_MS = 60 * 1000;
 export const BUILD_VERSION_POLL_INTERVAL_MS = 60 * 1000;
-export const BACKGROUND_MAIL_CHECK_INTERVAL_MS = 2 * 60 * 1000;
+export const INBOX_POLL_DEFAULT_INTERVAL_MS = 5 * 60 * 1000;
+// Floor for polls nobody is watching (hidden tab, accounts not on screen):
+// the server's IMAP connection has idled out by then, so each is a new login.
+export const INBOX_POLL_UNATTENDED_MIN_INTERVAL_MS = 2 * 60 * 1000;
+export const BACKGROUND_MAIL_CHECK_TICK_MS = 60 * 1000;
+export const BACKGROUND_MAIL_SIGN_IN_RETRY_MS = 30 * 60 * 1000;

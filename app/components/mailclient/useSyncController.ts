@@ -60,7 +60,12 @@ import {
 import { applyFlagsToMessage } from "./utils/messageHelpers";
 import { prioritizeFolderIds, prioritizeFolders } from "./utils/folderHelpers";
 import { withCalendarInviteFlag } from "@/lib/messageFlags";
-import { SYNC_STATUS_POLL_INTERVAL_MS, SYNC_STATUS_RUNNING_POLL_INTERVAL_MS } from "./constants";
+import {
+  INBOX_POLL_DEFAULT_INTERVAL_MS,
+  INBOX_POLL_UNATTENDED_MIN_INTERVAL_MS,
+  SYNC_STATUS_POLL_INTERVAL_MS,
+  SYNC_STATUS_RUNNING_POLL_INTERVAL_MS
+} from "./constants";
 
 type ApiFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>;
 
@@ -1190,7 +1195,8 @@ export function useSyncController({
     };
 
     const streamMaxIdle = currentAccountSyncSettings?.maxIdleSessions ?? 3;
-    const streamPollInterval = currentAccountSyncSettings?.pollIntervalMs ?? 300000;
+    const streamPollInterval =
+      currentAccountSyncSettings?.pollIntervalMs ?? INBOX_POLL_DEFAULT_INTERVAL_MS;
 
     const stopStream = () => {
       if (streamSourceRef.current) {
@@ -1410,7 +1416,7 @@ export function useSyncController({
         startStream();
       } else {
         stopStream();
-        startPoll(Math.max(120000, streamPollInterval));
+        startPoll(Math.max(INBOX_POLL_UNATTENDED_MIN_INTERVAL_MS, streamPollInterval));
       }
     };
 

@@ -58,7 +58,7 @@ export type PlanNewMailNotificationsInput = {
   notifiedKeys: ReadonlySet<string>;
   /** True when the user has silenced the folder (e.g. Spam, Trash). */
   isNotificationSuppressedFolder: (folderId: string) => boolean;
-  /** The active account's own email; used to avoid alerting on messages we sent ourselves. */
+  /** The email of the account the mail arrived in; used to avoid alerting on messages we sent ourselves. */
   accountEmail?: string;
   /** Set when the mail belongs to an account other than the one on screen. */
   otherAccount?: { id: string; label: string };
