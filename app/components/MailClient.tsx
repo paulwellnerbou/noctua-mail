@@ -846,6 +846,15 @@ export default function MailClient({
     inboxMailboxPath,
     accountFolders,
     currentAccountEmail: accounts.find((a) => a.id === activeAccountId)?.email,
+    otherAccounts: accounts
+      .filter((account) => account.id !== activeAccountId)
+      .map((account) => ({
+        id: account.id,
+        email: account.email,
+        // Several accounts can share a display name; the address tells them apart.
+        label: account.email || account.name,
+        pollIntervalMs: account.settings?.sync?.pollIntervalMs
+      })),
     currentAccountSyncSettings: accounts.find((a) => a.id === activeAccountId)?.settings?.sync,
     apiFetch,
     readErrorMessage,
@@ -4060,8 +4069,18 @@ export default function MailClient({
       if (!payload?.type) return;
       if (payload.type === "noctua:notification-open") {
         const messageId = typeof payload.messageId === "string" ? payload.messageId : "";
-        if (!messageId) return;
         const targetAccountId = typeof payload.accountId === "string" ? payload.accountId.trim() : "";
+        if (!messageId) {
+          // Mail without a Message-ID cannot be jumped to, but its account can.
+          if (
+            targetAccountId &&
+            targetAccountId !== activeAccountId &&
+            accounts.some((account) => account.id === targetAccountId)
+          ) {
+            void switchAccount(targetAccountId);
+          }
+          return;
+        }
         if (targetAccountId) {
           pendingJumpAccountIdRef.current = targetAccountId;
         }
@@ -5025,9 +5044,15 @@ export default function MailClient({
   const handleNoticeOpen = (notice: InAppNotice) => {
     const jumpTarget = notice.messageId ?? notice.ids?.[0];
     if (jumpTarget) {
-      openMessageByExternalMessageId(jumpTarget, "in-app-notice");
+      openMessageByExternalMessageId(jumpTarget, "in-app-notice", notice.accountId);
     } else if (notice.type === "error") {
       setOpenBottomStatusPanel("exception");
+    } else if (
+      notice.accountId &&
+      notice.accountId !== activeAccountId &&
+      accounts.some((account) => account.id === notice.accountId)
+    ) {
+      void switchAccount(notice.accountId);
     } else {
       const inbox = inboxFolderRef.current;
       if (inbox) {

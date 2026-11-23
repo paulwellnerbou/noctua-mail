@@ -170,6 +170,10 @@ IMAP_CREDENTIALS_STORAGE=both  # Options: cookie | db | both (default: both)
 - **`db`** – Credentials only in encrypted database
 - **`both`** – Credentials in both cookie and encrypted database (recommended)
 
+New-mail notifications for accounts other than the one on screen need `db` or `both`: the
+server checks those mailboxes with the stored credentials. With `cookie` they only work
+for accounts signed in since the server last started.
+
 ```bash
 IMAP_SECRET_KEY=<32-byte-hex-key>  # Required for DB encryption
 ```

@@ -159,6 +159,47 @@ describe("planNewMailNotifications", () => {
     expect(result.nextLastNotifiedUid).toBe(14);
   });
 
+  test("names the other account in a single notification", () => {
+    const result = planNewMailNotifications({
+      items: [mkItem({ uid: 11, subject: "Hello", from: "Alice <alice@example.com>" })],
+      lastNotifiedUid: 10,
+      notifiedKeys: new Set(),
+      isNotificationSuppressedFolder: neverSuppress,
+      otherAccount: { id: "acc-other", label: "Work" }
+    });
+    expect(result.dispatch.kind).toBe("single");
+    if (result.dispatch.kind !== "single") return;
+    expect(result.dispatch.title).toBe("Hello");
+    expect(result.dispatch.body).toBe("Work · From: Alice <alice@example.com>");
+  });
+
+  test("names the other account in a batch and keeps its tag apart", () => {
+    const items = [
+      mkItem({ uid: 11, subject: "One", messageId: "<one@example.com>" }),
+      mkItem({ uid: 12, subject: "Two", messageId: "<two@example.com>" })
+    ];
+    const other = planNewMailNotifications({
+      items,
+      lastNotifiedUid: 10,
+      notifiedKeys: new Set(),
+      isNotificationSuppressedFolder: neverSuppress,
+      otherAccount: { id: "acc-other", label: "Work" }
+    });
+    const active = planNewMailNotifications({
+      items,
+      lastNotifiedUid: 10,
+      notifiedKeys: new Set(),
+      isNotificationSuppressedFolder: neverSuppress
+    });
+    expect(other.dispatch.kind).toBe("batch");
+    expect(active.dispatch.kind).toBe("batch");
+    if (other.dispatch.kind !== "batch" || active.dispatch.kind !== "batch") return;
+    expect(other.dispatch.title).toBe("2 new messages for Work");
+    expect(other.dispatch.tag).toBe("mail-batch-acc-other");
+    expect(active.dispatch.title).toBe("2 new messages");
+    expect(active.dispatch.tag).toBe("mail-batch");
+  });
+
   test("evicts oldest keys when the ring exceeds the cap", () => {
     const existing = new Set<string>();
     for (let i = 0; i < 199; i += 1) existing.add(`old${i}`);
