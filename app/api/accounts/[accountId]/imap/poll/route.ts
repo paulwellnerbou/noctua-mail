@@ -7,7 +7,7 @@ import {
 } from "@/lib/mail/imap/connectionPool";
 import {
   getAccountIdFromParams,
-  requireAccountContext,
+  requireOwnedAccountContext,
   type AccountRouteParams
 } from "@/app/api/_helpers/accountContext";
 import { imapUpstreamErrorResponse } from "@/app/api/_helpers/imapUpstreamError";
@@ -31,7 +31,10 @@ export async function GET(request: Request, { params }: AccountRouteParams) {
   const mailbox = searchParams.get("mailbox") ?? "INBOX";
   const sinceUidNextParam = searchParams.get("sinceUidNext");
   const sinceUidNext = sinceUidNextParam ? Number(sinceUidNextParam) : null;
-  const accountContext = await requireAccountContext(request, accountIdParam, {
+  const statusOnly = searchParams.get("statusOnly") === "1";
+  // The client also polls the user's other accounts for new-mail
+  // notifications, so the account need not be the session's active one.
+  const accountContext = await requireOwnedAccountContext(request, accountIdParam, {
     missingAccountMessage: "Missing accountId"
   });
   if (accountContext instanceof NextResponse) return accountContext;
@@ -49,6 +52,9 @@ export async function GET(request: Request, { params }: AccountRouteParams) {
         () => client.mailboxOpen(mailbox, { readOnly: true })
       );
       const uidNext = mailboxInfo?.uidNext ?? 0;
+      if (statusOnly) {
+        return NextResponse.json({ ok: true, uidNext, messages: [] });
+      }
       if (sinceUidNext !== null && !Number.isNaN(sinceUidNext) && uidNext <= sinceUidNext) {
         return NextResponse.json({ ok: true, uidNext, messages: [] });
       }

@@ -60,6 +60,8 @@ export type PlanNewMailNotificationsInput = {
   isNotificationSuppressedFolder: (folderId: string) => boolean;
   /** The active account's own email; used to avoid alerting on messages we sent ourselves. */
   accountEmail?: string;
+  /** Set when the mail belongs to an account other than the one on screen. */
+  otherAccount?: { id: string; label: string };
   /** Size at which to evict the oldest keys. */
   maxNotifiedKeys?: number;
   /** How many keys to evict once `maxNotifiedKeys` is exceeded. */
@@ -120,6 +122,7 @@ export function planNewMailNotifications(
     notifiedKeys,
     isNotificationSuppressedFolder,
     accountEmail,
+    otherAccount,
     maxNotifiedKeys = DEFAULT_MAX_NOTIFIED_KEYS,
     evictBatchSize = DEFAULT_EVICT_BATCH_SIZE
   } = input;
@@ -195,7 +198,8 @@ export function planNewMailNotifications(
   if (unique.length === 1) {
     const message = unique[0];
     const title = message.subject || "(no subject)";
-    const body = message.from ? `From: ${message.from}` : "New message received";
+    const sender = message.from ? `From: ${message.from}` : "New message received";
+    const body = otherAccount ? `${otherAccount.label} · ${sender}` : sender;
     return {
       dispatch: {
         kind: "single",
@@ -211,7 +215,9 @@ export function planNewMailNotifications(
     };
   }
 
-  const title = `${unique.length} new messages`;
+  const title = otherAccount
+    ? `${unique.length} new messages for ${otherAccount.label}`
+    : `${unique.length} new messages`;
   const body = unique
     .slice(0, 3)
     .map((item) => item.subject || "(no subject)")
@@ -224,7 +230,8 @@ export function planNewMailNotifications(
       kind: "batch",
       title,
       body,
-      tag: "mail-batch",
+      // Per account, so one account's batch does not replace another's.
+      tag: otherAccount ? `mail-batch-${otherAccount.id}` : "mail-batch",
       ids,
       items: unique
     },

@@ -21,6 +21,8 @@ export type InAppNotice = {
   fullDetail?: string;
   messageId?: string;
   ids?: string[];
+  /** Account the linked messages belong to, when it may not be the active one. */
+  accountId?: string;
   actionLabel?: string;
   onAction?: () => void | Promise<void>;
   expiresAt?: number | null;

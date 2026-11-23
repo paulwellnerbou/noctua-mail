@@ -19,6 +19,7 @@ import {
 } from "@/lib/syncPolicy";
 import { logSyncPolicyCall } from "@/lib/syncPolicyLogging";
 import { findInboxFolder } from "@/lib/specialFolders";
+import type { BackgroundMailAccount } from "./backgroundMailCheck";
 import { isRecentLocalDraftSave } from "./recentLocalDraftSaves";
 import {
   getResolvedRemoteMailboxFingerprint,
@@ -34,6 +35,7 @@ import {
   shouldSkipDeleteReconcile
 } from "./syncReconcileGuards";
 import { startRecomputeJob } from "./recomputeJobRunner";
+import { useBackgroundMailCheck } from "./useBackgroundMailCheck";
 import {
   detectSyncEscalation,
   normalizeSyncJobProgress
@@ -72,6 +74,29 @@ const MAIL_SERVER_UNREACHABLE_NOTICE = {
 // outage they would otherwise re-push the same warning on every attempt.
 const MAIL_SERVER_UNREACHABLE_NOTICE_THROTTLE_MS = 60_000;
 
+type NewMailNotificationTarget = {
+  accountId: string;
+  accountEmail?: string;
+  /** Set for an account other than the one on screen. */
+  otherAccountLabel?: string;
+  /**
+   * Highest uid the caller has already seen. Replaces the stored per-account
+   * mark, which the active account's stream advances with uids of any folder.
+   */
+  acknowledgedUid?: number;
+};
+
+function lastNotifiedUidStorageKey(accountId: string) {
+  return `noctua:lastNotifiedUid:${accountId}`;
+}
+
+function readStoredLastNotifiedUid(accountId: string): number | null {
+  const stored = localStorage.getItem(lastNotifiedUidStorageKey(accountId));
+  if (!stored) return null;
+  const value = Number(stored);
+  return Number.isNaN(value) ? null : value;
+}
+
 export type UseSyncControllerParams = {
   activeAccountId: string;
   activeFolderId: string;
@@ -81,6 +106,8 @@ export type UseSyncControllerParams = {
   inboxMailboxPath: string;
   accountFolders: Folder[];
   currentAccountEmail?: string;
+  /** The user's other accounts, checked for new mail in the background. */
+  otherAccounts: BackgroundMailAccount[];
   currentAccountSyncSettings?: {
     maxIdleSessions?: number;
     pollIntervalMs?: number;
@@ -98,6 +125,7 @@ export type UseSyncControllerParams = {
     description?: string;
     messageId?: string;
     ids?: string[];
+    accountId?: string;
     durationMs?: number;
   }) => void;
   showNotification: (
@@ -131,6 +159,7 @@ export function useSyncController({
   inboxMailboxPath,
   accountFolders,
   currentAccountEmail,
+  otherAccounts,
   currentAccountSyncSettings,
   apiFetch,
   readErrorMessage,
@@ -213,12 +242,9 @@ export function useSyncController({
 
   useEffect(() => {
     if (!activeAccountId) return;
-    const stored = localStorage.getItem(`noctua:lastNotifiedUid:${activeAccountId}`);
-    if (stored) {
-      const value = Number(stored);
-      if (!Number.isNaN(value)) {
-        lastNotifiedUidRef.current[activeAccountId] = value;
-      }
+    const stored = readStoredLastNotifiedUid(activeAccountId);
+    if (stored != null) {
+      lastNotifiedUidRef.current[activeAccountId] = stored;
     }
     hasCompletedInitialConsistencyCheckRef.current = false;
     autoRepairAttemptedFolderIdsRef.current = new Set();
@@ -907,6 +933,96 @@ export function useSyncController({
     });
   };
 
+  const notifyNewMail = async (
+    target: NewMailNotificationTarget,
+    items: IncomingMailItem[] | null | undefined
+  ) => {
+    if (!items || items.length === 0) return;
+    const { accountId } = target;
+    const storedUid =
+      lastNotifiedUidRef.current[accountId] ?? readStoredLastNotifiedUid(accountId);
+    const plan = planNewMailNotifications({
+      items,
+      lastNotifiedUid: target.acknowledgedUid ?? storedUid,
+      notifiedKeys: notifiedKeysRef.current,
+      isNotificationSuppressedFolder,
+      accountEmail: target.accountEmail,
+      otherAccount: target.otherAccountLabel
+        ? { id: accountId, label: target.otherAccountLabel }
+        : undefined
+    });
+
+    // Commit the dedup-ring changes before dispatching so a slow
+    // showNotification call can't race another batch into duplicating us.
+    for (const key of plan.keysToAdd) {
+      notifiedKeysRef.current.add(key);
+    }
+    for (const key of plan.keysToEvict) {
+      notifiedKeysRef.current.delete(key);
+    }
+    // Only ever raised: a caller-supplied `acknowledgedUid` can lie below it.
+    if (plan.nextLastNotifiedUid != null && plan.nextLastNotifiedUid > (storedUid ?? -1)) {
+      lastNotifiedUidRef.current[accountId] = plan.nextLastNotifiedUid;
+      localStorage.setItem(
+        lastNotifiedUidStorageKey(accountId),
+        String(plan.nextLastNotifiedUid)
+      );
+    }
+
+    const dispatch = plan.dispatch;
+    if (dispatch.kind === "single") {
+      console.info("[noctua] new mail", dispatch.item);
+      await showNotification(dispatch.title, dispatch.body, dispatch.tag, {
+        messageId: dispatch.messageId,
+        accountId
+      });
+      pushNotice({
+        type: "info",
+        icon: "mail",
+        title: dispatch.title,
+        description: dispatch.body,
+        messageId: dispatch.messageId ?? undefined,
+        accountId,
+        durationMs: 12000
+      });
+    } else if (dispatch.kind === "batch") {
+      console.info("[noctua] new mail batch", dispatch.items);
+      await showNotification(
+        dispatch.title,
+        dispatch.body,
+        dispatch.tag,
+        target.otherAccountLabel
+          ? { messageId: dispatch.ids[0] ?? null, accountId }
+          : { url: "/" }
+      );
+      pushNotice({
+        type: "info",
+        icon: "mail",
+        title: dispatch.title,
+        description: dispatch.body,
+        ids: dispatch.ids,
+        accountId,
+        durationMs: 12000
+      });
+    }
+  };
+
+  useBackgroundMailCheck({
+    accounts: otherAccounts,
+    enabled: authState === "ok",
+    apiFetch,
+    onNewMail: (account, found) =>
+      notifyNewMail(
+        {
+          accountId: account.id,
+          accountEmail: account.email,
+          otherAccountLabel: account.label,
+          acknowledgedUid: found.acknowledgedUid
+        },
+        found.items
+      )
+  });
+
   // Stream / poll effect
   useEffect(() => {
     if (authState !== "ok") return;
@@ -921,62 +1037,8 @@ export function useSyncController({
       }
     };
 
-    const notifyNewMessages = async (
-      items: IncomingMailItem[] | null | undefined
-    ) => {
-      if (!items || items.length === 0) return;
-      const plan = planNewMailNotifications({
-        items,
-        lastNotifiedUid: lastNotifiedUidRef.current[activeAccountId] ?? null,
-        notifiedKeys: notifiedKeysRef.current,
-        isNotificationSuppressedFolder,
-        accountEmail: currentAccountEmail
-      });
-
-      // Commit the dedup-ring changes before dispatching so a slow
-      // showNotification call can't race another batch into duplicating us.
-      for (const key of plan.keysToAdd) {
-        notifiedKeysRef.current.add(key);
-      }
-      for (const key of plan.keysToEvict) {
-        notifiedKeysRef.current.delete(key);
-      }
-      if (plan.nextLastNotifiedUid != null) {
-        lastNotifiedUidRef.current[activeAccountId] = plan.nextLastNotifiedUid;
-        localStorage.setItem(
-          `noctua:lastNotifiedUid:${activeAccountId}`,
-          String(plan.nextLastNotifiedUid)
-        );
-      }
-
-      const dispatch = plan.dispatch;
-      if (dispatch.kind === "single") {
-        console.info("[noctua] new mail", dispatch.item);
-        await showNotification(dispatch.title, dispatch.body, dispatch.tag, {
-          messageId: dispatch.messageId,
-          accountId: activeAccountId
-        });
-        pushNotice({
-          type: "info",
-          icon: "mail",
-          title: dispatch.title,
-          description: dispatch.body,
-          messageId: dispatch.messageId ?? undefined,
-          durationMs: 12000
-        });
-      } else if (dispatch.kind === "batch") {
-        console.info("[noctua] new mail batch", dispatch.items);
-        await showNotification(dispatch.title, dispatch.body, dispatch.tag, { url: "/" });
-        pushNotice({
-          type: "info",
-          icon: "mail",
-          title: dispatch.title,
-          description: dispatch.body,
-          ids: dispatch.ids,
-          durationMs: 12000
-        });
-      }
-    };
+    const notifyNewMessages = (items: IncomingMailItem[] | null | undefined) =>
+      notifyNewMail({ accountId: activeAccountId, accountEmail: currentAccountEmail }, items);
 
     const syncAndNotifyNewMessages = async (
       items:

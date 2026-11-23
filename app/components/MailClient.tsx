@@ -846,6 +846,13 @@ export default function MailClient({
     inboxMailboxPath,
     accountFolders,
     currentAccountEmail: accounts.find((a) => a.id === activeAccountId)?.email,
+    otherAccounts: accounts
+      .filter((account) => account.id !== activeAccountId)
+      .map((account) => ({
+        id: account.id,
+        email: account.email,
+        label: account.name || account.email
+      })),
     currentAccountSyncSettings: accounts.find((a) => a.id === activeAccountId)?.settings?.sync,
     apiFetch,
     readErrorMessage,
@@ -5025,7 +5032,7 @@ export default function MailClient({
   const handleNoticeOpen = (notice: InAppNotice) => {
     const jumpTarget = notice.messageId ?? notice.ids?.[0];
     if (jumpTarget) {
-      openMessageByExternalMessageId(jumpTarget, "in-app-notice");
+      openMessageByExternalMessageId(jumpTarget, "in-app-notice", notice.accountId);
     } else if (notice.type === "error") {
       setOpenBottomStatusPanel("exception");
     } else {
