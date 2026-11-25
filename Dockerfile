@@ -30,6 +30,9 @@ FROM base AS runner
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 
+# Pinned oven/bun tags are not republished for Debian security updates.
+RUN apt-get update && apt-get upgrade -y && rm -rf /var/lib/apt/lists/*
+
 # Create non-root user with fixed UID/GID for consistent permissions
 RUN groupadd -g 999 noctua && useradd -u 999 -g noctua -s /bin/bash noctua
 
