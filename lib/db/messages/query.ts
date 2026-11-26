@@ -916,12 +916,18 @@ function buildSqlEndsWithAny(valueSql: string, suffixes: readonly string[]) {
     .join(" OR ");
 }
 
-function buildMeaningfulAttachmentPredicateSql(attachmentAlias = "a") {
+// Mirrors isMeaningfulVisibleAttachment: an inline part only stays hidden when
+// the HTML body can render it (non-SVG image); inline PDFs etc. still count.
+function buildMeaningfulAttachmentPredicateSql(messageAlias = "m", attachmentAlias = "a") {
   const contentTypeSql = `lower(COALESCE(${attachmentAlias}.contentType, ''))`;
   const filenameSql = `lower(COALESCE(${attachmentAlias}.filename, ''))`;
   const calendarSql = `(${buildSqlContainsAny(contentTypeSql, CALENDAR_MIME_HINTS)} OR ${buildSqlEndsWithAny(filenameSql, CALENDAR_FILENAME_EXTENSIONS)})`;
   const signatureSql = `(${buildSqlContainsAny(contentTypeSql, CRYPTO_SIGNATURE_MIME_HINTS)} OR ${buildSqlEndsWithAny(filenameSql, CRYPTO_SIGNATURE_FILENAME_EXTENSIONS)})`;
-  return `${attachmentAlias}.inline = 0
+  const renderableInlineSql = `(${attachmentAlias}.inline = 1
+      AND trim(COALESCE(${messageAlias}.htmlBody, '')) <> ''
+      AND trim(${contentTypeSql}) LIKE 'image/%'
+      AND trim(${contentTypeSql}) <> 'image/svg+xml')`;
+  return `NOT ${renderableInlineSql}
     AND COALESCE(${attachmentAlias}.size, 0) >= ${MIN_VISIBLE_ATTACHMENT_SIZE_BYTES}
     AND NOT ${calendarSql}
     AND NOT ${signatureSql}`;
@@ -932,7 +938,7 @@ function buildMeaningfulAttachmentExistsSql(messageAlias = "m", attachmentAlias 
     SELECT 1
     FROM attachments ${attachmentAlias}
     WHERE ${attachmentAlias}.messageId = ${messageAlias}.id
-      AND ${buildMeaningfulAttachmentPredicateSql(attachmentAlias)}
+      AND ${buildMeaningfulAttachmentPredicateSql(messageAlias, attachmentAlias)}
   )`;
 }
 
