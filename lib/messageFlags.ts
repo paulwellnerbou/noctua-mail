@@ -78,14 +78,6 @@ export function isCryptographicSignatureAttachment(attachment: Attachment) {
   );
 }
 
-export function isMeaningfulNonInlineAttachment(attachment: Attachment) {
-  if (attachment.inline) return false;
-  if (isCalendarAttachment(attachment)) return false;
-  if (isCryptographicSignatureAttachment(attachment)) return false;
-  const size = Number.isFinite(attachment.size) ? Number(attachment.size) : 0;
-  return size >= MIN_VISIBLE_ATTACHMENT_SIZE_BYTES;
-}
-
 export function isRenderableInlineAttachment(attachment: Attachment, htmlBody?: string | null) {
   if (!attachment.inline) return false;
   if (!htmlBody?.trim()) return false;
