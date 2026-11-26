@@ -918,15 +918,16 @@ function buildSqlEndsWithAny(valueSql: string, suffixes: readonly string[]) {
 
 // Mirrors isMeaningfulVisibleAttachment: an inline part only stays hidden when
 // the HTML body can render it (non-SVG image); inline PDFs etc. still count.
+// htmlBody is checked last: reading it is the expensive part of the scan.
 function buildMeaningfulAttachmentPredicateSql(messageAlias = "m", attachmentAlias = "a") {
   const contentTypeSql = `lower(COALESCE(${attachmentAlias}.contentType, ''))`;
   const filenameSql = `lower(COALESCE(${attachmentAlias}.filename, ''))`;
   const calendarSql = `(${buildSqlContainsAny(contentTypeSql, CALENDAR_MIME_HINTS)} OR ${buildSqlEndsWithAny(filenameSql, CALENDAR_FILENAME_EXTENSIONS)})`;
   const signatureSql = `(${buildSqlContainsAny(contentTypeSql, CRYPTO_SIGNATURE_MIME_HINTS)} OR ${buildSqlEndsWithAny(filenameSql, CRYPTO_SIGNATURE_FILENAME_EXTENSIONS)})`;
   const renderableInlineSql = `(${attachmentAlias}.inline = 1
-      AND trim(COALESCE(${messageAlias}.htmlBody, '')) <> ''
       AND trim(${contentTypeSql}) LIKE 'image/%'
-      AND trim(${contentTypeSql}) <> 'image/svg+xml')`;
+      AND trim(${contentTypeSql}) <> 'image/svg+xml'
+      AND trim(COALESCE(${messageAlias}.htmlBody, '')) <> '')`;
   return `NOT ${renderableInlineSql}
     AND COALESCE(${attachmentAlias}.size, 0) >= ${MIN_VISIBLE_ATTACHMENT_SIZE_BYTES}
     AND NOT ${calendarSql}
