@@ -33,7 +33,7 @@ export default function CopyToAccountDialog({
   onOpenChange,
   onConfirm
 }: CopyToAccountDialogProps) {
-  const [selectedAccountId, setSelectedAccountId] = useState("");
+  const [pickedAccountId, setPickedAccountId] = useState<string | null>(null);
   const [folders, setFolders] = useState<Folder[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -41,14 +41,18 @@ export default function CopyToAccountDialog({
   const [collapsedFolders, setCollapsedFolders] = useState<Record<string, boolean>>({});
   const searchInputRef = useRef<HTMLInputElement>(null);
 
-  // Reset selection whenever the dialog is (re)opened.
+  // Derived, not stored: the parent can replace the account list while the
+  // dialog is open, and that must not move the destination off the user's pick.
+  const selectedAccountId =
+    accounts.find((account) => account.id === pickedAccountId)?.id ?? accounts[0]?.id ?? "";
+
   useEffect(() => {
     if (!open) return;
-    setSelectedAccountId(accounts[0]?.id ?? "");
+    setPickedAccountId(null);
     setQuery("");
     setCollapsedFolders({});
     setError(null);
-  }, [open, accounts]);
+  }, [open]);
 
   useEffect(() => {
     if (!open || !selectedAccountId) {
@@ -151,7 +155,7 @@ export default function CopyToAccountDialog({
                 type="button"
                 className={styles.recentRow}
                 aria-pressed={selected}
-                onClick={() => setSelectedAccountId(account.id)}
+                onClick={() => setPickedAccountId(account.id)}
                 style={selected ? { background: "var(--accent-a3)" } : undefined}
               >
                 <span className={styles.recentIcon} aria-hidden>
